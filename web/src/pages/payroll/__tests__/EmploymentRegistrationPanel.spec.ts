@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 
 const m = vi.hoisted(() => ({
   preview: vi.fn(),
@@ -18,6 +20,8 @@ const m = vi.hoisted(() => ({
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
   detectChanges: vi.fn(),
+  current: vi.fn(),
+  locale: 'cs',
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -25,6 +29,7 @@ vi.mock('@/api/payroll', () => ({
     detectEmploymentRegistrationChanges: m.detectChanges,
     previewEmploymentRegistration: m.preview,
     prepareEmploymentRegistration: m.prepare,
+    currentEmploymentRegistration: m.current,
     sendEmploymentRegistrationTransport: m.send,
     employmentRegistrationTransportStatus: m.status,
     pollEmploymentRegistrationTransportAttempt: m.poll,
@@ -57,7 +62,8 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
-    locale: { value: 'cs' },
+    te: (key: string) => key.startsWith('payroll.people.registration.a1.problem.'),
+    locale: { get value() { return m.locale } },
   }),
 }))
 
@@ -273,6 +279,11 @@ describe('EmploymentRegistrationPanel', () => {
     resetPayrollJmhzOptions()
     vi.clearAllMocks()
     localStorage.clear()
+    // Vývojová instalace: výběr testovacího prostředí je dostupný.
+    setActivePinia(createPinia())
+    useAuthStore().submissionTestEnvironmentAllowed = true
+    m.current.mockResolvedValue(null)
+    m.locale = 'cs'
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
     })
@@ -1927,5 +1938,143 @@ describe('EmploymentRegistrationPanel', () => {
       .toContain('czech_residence_hint')
     expect(wrapper.get('[data-test="a1-contact-hint"]').text())
       .toContain('contact_address_hint')
+  })
+
+  it('UI-23: po načtení ukáže připravenou přihlášku a místo přípravy nabídne frontu', async () => {
+    m.current.mockResolvedValue({
+      submission_id: 44,
+      agenda_code: 'PREZEC26',
+      status: 'ready',
+      created_at: '2026-09-20 10:00:00',
+      submitted_at: null,
+      sent: false,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(m.current).toHaveBeenCalledWith(5, 'production')
+    expect(wrapper.get('[data-test="registration-existing-ready"]').text()).toContain('"id":44')
+    expect(wrapper.get('[data-test="registration-open-queue"]').attributes('data-to'))
+      .toBe(JSON.stringify({ name: 'payroll-submissions-tab', params: { tab: 'queue' } }))
+    expect(wrapper.find('[data-test="registration-prepare"]').exists()).toBe(false)
+  })
+
+  it('UI-23: u odeslané přihlášky vysvětlí, že druhá se nepodává', async () => {
+    m.current.mockResolvedValue({
+      submission_id: 45,
+      agenda_code: 'REGZEC25',
+      status: 'accepted',
+      created_at: '2026-09-01 10:00:00',
+      submitted_at: '2026-09-01 11:00:00',
+      sent: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-existing-sent"]').text()).toContain('existing_sent')
+    expect(wrapper.find('[data-test="registration-existing-link"]').exists()).toBe(true)
+  })
+
+  it('UI-27: náhled a příprava jsou dvě tlačítka, příprava až po náhledu', async () => {
+    m.preview.mockResolvedValue({ ...preview, deadline: { ...deadline, due_on: '2999-01-01' } })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const prepare = wrapper.get('[data-test="registration-prepare"]')
+    expect(prepare.attributes('disabled')).toBeDefined()
+    expect(prepare.attributes('title')).toContain('prepare_needs_preview')
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepare).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="registration-prepare"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="registration-deadline-overdue"]').exists()).toBe(false)
+  })
+
+  it('UI-25: chybějící profil A1 nabídne jeho doplnění přímo na kartě', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_regzec_a1_profile_missing',
+      'Profil REGZEC A1 pro tento vztah není uložený.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-error"]').text()).toContain('Profil REGZEC A1')
+    await wrapper.get('[data-test="registration-error-open-a1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
+  })
+
+  it('UI-26: po uložení kmenových dat se profil A1 načte znovu', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    const loads = m.a1Profile.mock.calls.length
+
+    await wrapper.setProps({ masterDataVersion: 1 })
+    await flushPromises()
+
+    expect(m.a1Profile.mock.calls.length).toBe(loads + 1)
+  })
+
+  it('bod 5: v anglickém UI přeloží hlášku problému pole A1 podle klíče', async () => {
+    m.locale = 'en'
+    m.checkA1Profile.mockResolvedValue({
+      complete: false,
+      problems: [{
+        field: 'employment.position_name',
+        code: 'registration_regzec_a1_field_value_invalid',
+        message: 'Název pozice je delší, než ČSSZ přijme.',
+        message_key: 'too_long',
+        params: { max: 255, length: 300 },
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-check"]').trigger('click')
+    await flushPromises()
+
+    const text = wrapper.get('[data-test="registration-a1-problem-text-0"]').text()
+    expect(text).toContain('payroll.people.registration.a1.problem.too_long')
+    expect(text).toContain('"max":255')
+    expect(text).not.toContain('delší, než ČSSZ')
+  })
+
+  it('bod 5: v češtině zůstane úplná věta serveru', async () => {
+    m.checkA1Profile.mockResolvedValue({
+      complete: false,
+      problems: [{
+        field: 'employment.position_name',
+        code: 'registration_regzec_a1_field_value_invalid',
+        message: 'Název pozice je delší, než ČSSZ přijme.',
+        message_key: 'too_long',
+        params: { max: 255, length: 300 },
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-check"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-problem-text-0"]').text())
+      .toBe('Název pozice je delší, než ČSSZ přijme.')
+  })
+
+  it('UI-27: prošlou lhůtu označí červeným upozorněním', async () => {
+    m.preview.mockResolvedValue(preview)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-deadline-overdue"]').text()).toContain('deadline_overdue')
   })
 })

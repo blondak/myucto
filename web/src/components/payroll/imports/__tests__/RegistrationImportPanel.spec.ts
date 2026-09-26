@@ -221,3 +221,40 @@ describe('import JMHZ — souběžný vztah, druh vztahu, odhadnutý nástup, ne
     expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({ name: 'payroll-person', params: { id: 50 } })
   })
 })
+
+describe('import exportu ČSSZ — nabídka ukončení vztahu', () => {
+  const ended = record('cccccccccccccccc:1', {
+    document_type: 'CSSZ_EXPORT',
+    action_code: 0,
+    action_label: 'Export zaměstnanců ČSSZ',
+    period: null,
+    operation: 'terminate',
+    match: { status: 'matched', matched_by: 'id_ppv', employee_id: 51, employee_name: 'Syntetická osoba', employment_id: 8, employment_code: 'ZAM-1', candidates: [] },
+    termination_offer: { end_on: '2026-05-31', employment_code: 'ZAM-1', confirmed: false },
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.preview.mockResolvedValue({ ...preview([ended]), takeover: null })
+  })
+
+  it('zaškrtnuté „Ukončit vztah“ odejde v náhledu i při použití', async () => {
+    const wrapper = await mountWithPreview()
+    const checkbox = wrapper.get('[data-testid="registration-termination"]')
+    expect(checkbox.element.closest('label')?.textContent).toContain('payroll_imports.registration.termination.label')
+
+    await checkbox.setValue(true)
+    await vi.waitFor(() => expect(m.preview).toHaveBeenCalledTimes(2))
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(expect.objectContaining({ terminations: [ended.key] }))
+
+    m.apply.mockResolvedValue({
+      results: [], summary: { applied: 0, failed: 0, skipped: 0 }, opening_balances: { saved: 0, skipped: [] },
+      averages: { created: 0, approved: 0, skipped: [] }, takeover: null, change_checklist: { completed: 0, failed: [] },
+      outcome: 'complete', unresolved: [],
+    } satisfies RegistrationApplyResult)
+    await applyAll(wrapper)
+
+    expect(m.apply).toHaveBeenCalledWith(expect.objectContaining({ terminations: [ended.key] }))
+  })
+})

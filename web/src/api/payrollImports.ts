@@ -201,6 +201,16 @@ export interface RegistrationRecord {
   warnings: string[]
   blocker: string | null
   selectable: boolean
+  /**
+   * Export ČSSZ uvádí konec pojistného vztahu u vztahu, který evidence vede
+   * jako trvající. Ukončení se zapíše jen po výslovném potvrzení u věty
+   * (klíč věty v `terminations`).
+   */
+  termination_offer?: {
+    end_on: string
+    employment_code: string
+    confirmed: boolean
+  } | null
   /** Jen měsíční hlášení (`document_type: 'JMHZ'`). */
   period?: string | null
   form_id?: string | null
@@ -238,6 +248,8 @@ export interface RegistrationPreviewPayload {
   pairs?: RegistrationPair[]
   /** Zvolený druh vztahu u vět s `relation_type_options`. */
   relation_types?: RegistrationRelationChoice[]
+  /** Klíče vět, u kterých účetní potvrdila „Ukončit vztah" podle exportu ČSSZ. */
+  terminations?: string[]
 }
 
 export interface RegistrationUnresolvedForm {

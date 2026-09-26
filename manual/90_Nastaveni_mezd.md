@@ -300,8 +300,12 @@ vztahu; nový tvar navíc začátek pojistného vztahu a bližší určení čin
   upozorní, že pojištění mohlo začít dřív. Skutečný nástup pak ověřte podle
   smlouvy a případně ho opravte na kartě vztahu.
 - **Konec pojistného vztahu.** Nový vztah se k tomuto dni rovnou ukončí.
-  U vztahu, který už evidujete a který trvá, náhled jen upozorní; skončení
-  zapíšete na kartě vztahu nebo nahrajete odhlášení či hlášení.
+  U vztahu, který už evidujete a který trvá, nabídne věta zaškrtávátko
+  **Ukončit vztah k …**. Po zaškrtnutí se náhled přepočítá, u věty přibude
+  změna Skončení vztahu a při použití se vztah ukončí stejnou cestou jako na
+  kartě vztahu. Důvod skončení a další podklady pak doplňte na kartě vztahu
+  v části Skončení vztahu. Bez zaškrtnutí zůstane jen upozornění. Datum
+  v budoucnu nebo před nástupem ukončit nejde, náhled na něj upozorní.
 - **EČP.** Osoba bez rodného čísla se hledá podle EČP. Při založení se EČP
   nepřevezme, doplňte ho na kartě osoby.
 - U osoby, kterou už evidujete, import doplní chybějící OIČ a ID zaměstnání.

@@ -378,6 +378,8 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
     expect(savedRow('tax_residences')).toMatchObject({ residence: 'czech-resident' })
     expect(mocks.success).toHaveBeenCalled()
+    // UI-24: karta osoby po uložení přepočítá bannery chybějících údajů.
+    expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
   it('otevřená sekce s uzavřenou historií dál drží pravidlo o nové verzi', async () => {

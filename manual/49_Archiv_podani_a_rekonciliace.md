@@ -267,7 +267,7 @@ Postup:
    zavřít jej bez odeslání. Otevřená asistovaná relace neblokuje neúčinný datový
    test, ale do svého vypršení blokuje skutečné odeslání proti duplicitě.
 4. V detailu validního XML snapshotu vyber certifikát a klikni
-   **Otestovat v EPO**.
+   **Zkontrolovat na EPO**.
 5. MyÚčto vytvoří připojený podpis PKCS#7 v DER, odešle jej s `test=1` a
    zobrazí všechny zprávy EPO. Test kontroluje podpis, strukturu i věcná
    pravidla, ale daňové podání nevytvoří. Úspěšný test lze pro ostré podání

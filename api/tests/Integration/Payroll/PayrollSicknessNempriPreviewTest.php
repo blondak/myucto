@@ -35,6 +35,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     private ContainerInterface $container;
     private int $supplierId;
     private int $userId;
+    private int $officeId;
 
     protected function setUp(): void
     {
@@ -46,12 +47,26 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         $source = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
         $pdo->beginTransaction();
         $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
+        // Starý symbol na firmě se schválně liší: podání ho číst nesmí,
+        // identifikátory zaměstnavatele žijí v Mzdách (VS u účtárny vztahu,
+        // kód OSSZ v nastavení zaměstnavatele).
         $pdo->prepare(
             'UPDATE supplier
-                SET cssz_vsdp = "1234567890", cssz_ossz_code = 115,
+                SET cssz_vsdp = "9999999999", cssz_ossz_code = 999,
                     ic = "12345678", company_name = "Testovací zaměstnavatel s.r.o."
               WHERE id = ?'
         )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol, is_active)
+             VALUES (?, "NEM", "Syntetická účtárna", "1234567890", 1)',
+        )->execute([$this->supplierId]);
+        $this->officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, social_security_office_code)
+             VALUES (?, ?, "115")',
+        )->execute([$this->supplierId, $this->officeId]);
         $this->userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
     }
 
@@ -106,6 +121,9 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             SicknessDocumentKind::Nempri,
         );
         $xml = (string) $preview['xml'];
+        // Bod 6: symbol zaměstnavatele z účtárny vztahu, stejně jako registrace.
+        self::assertStringContainsString('1234567890', $xml);
+        self::assertStringNotContainsString('9999999999', $xml);
 
         self::assertStringContainsString('<druhDavky>OSE</druhDavky>', $xml);
         // Skutečný nástup, ne sjednaný.
@@ -373,10 +391,10 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         );
         $pdo->prepare(
             'INSERT INTO payroll_employments
-                (supplier_id, employee_id, code, relation_type, status,
+                (supplier_id, employee_id, office_id, code, relation_type, status,
                  start_date, actual_start_date, monthly_gross_minor)
-             VALUES (?, ?, ?, "employment", "active", "2025-10-01", "2025-10-06", 3000000)'
-        )->execute([$this->supplierId, $employeeId, 'NEMPRI-' . $employeeId]);
+             VALUES (?, ?, ?, ?, "employment", "active", "2025-10-01", "2025-10-06", 3000000)'
+        )->execute([$this->supplierId, $employeeId, $this->officeId, 'NEMPRI-' . $employeeId]);
         $employmentId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employment_terms

@@ -393,6 +393,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile/master-data$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+/current$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/a2-evidence-candidates$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::WRITE],

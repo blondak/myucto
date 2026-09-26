@@ -426,7 +426,7 @@ final readonly class OzuspojSubmissionService
         if ($digits === '') {
             throw new OzuspojException(
                 'ozuspoj_variable_symbol_missing',
-                'Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení → Firma a oznámení připravte znovu.',
+                'Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel u účtárny vztahu a oznámení připravte znovu.',
             );
         }
 

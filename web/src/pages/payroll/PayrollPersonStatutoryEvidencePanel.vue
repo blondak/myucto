@@ -93,6 +93,10 @@ const props = defineProps<{
   canWrite: boolean
 }>()
 
+// UI-24: po uložení musí nadřazená karta přepočítat bannery chybějících údajů,
+// jinak dál hlásí „Chybí: daňová rezidence" až do F5.
+const emit = defineEmits<{ saved: [] }>()
+
 const SECTIONS = STATUTORY_SECTIONS
 
 const { t } = useI18n()
@@ -671,6 +675,7 @@ async function save() {
     editing.value = false
     resetSectionToggles()
     toast.success(t('payroll.people.statutory_evidence.saved'))
+    emit('saved')
   } catch (exception) {
     // Server jmenuje konkrétní důvod (překryv, díra v řadě, chybějící doklad,
     // uzavřené období) — obecná hláška by ho jen zakryla.

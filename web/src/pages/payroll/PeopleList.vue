@@ -972,6 +972,8 @@ function profileSetupGaps(
   return gaps
 }
 
+const personDataVersion = ref(0)
+
 function updatePersonProfile(updated: PayrollPersonProfile) {
   const person = people.value.find(item => item.id === updated.employee_id)
   const detail = details.value[updated.employee_id]
@@ -1004,6 +1006,9 @@ function updatePersonProfile(updated: PayrollPersonProfile) {
  * další načtení seznamu. Chybová hláška by tvrdila, že se něco nepovedlo.
  */
 async function refreshDataGaps(personId: number) {
+  // UI-26: kmenová data osoby se změnila, registrační profil A1 u vztahů se
+  // má načíst znovu (občanství, rodné příjmení).
+  personDataVersion.value++
   let fresh: PayrollPerson
   try {
     fresh = await payrollApi.person(personId)
@@ -1695,6 +1700,7 @@ onMounted(async () => {
         <PayrollPersonStatutoryEvidencePanel
           :person-id="expandedId"
           :can-write="auth.canWrite('payroll.person.write')"
+          @saved="refreshDataGaps(expandedId)"
         />
       </div>
 
@@ -1811,6 +1817,7 @@ onMounted(async () => {
           :can-read-documents="auth.canRead('payroll.documents')"
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"
+          :person-data-version="personDataVersion"
           @updated="updateEmployment(expandedId, $event)"
           @deleted="removeEmploymentFromDetail(expandedId, $event)"
           @focus-statutory-evidence="focusPanel('statutory_evidence')"

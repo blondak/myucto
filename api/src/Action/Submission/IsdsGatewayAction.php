@@ -261,7 +261,7 @@ final class IsdsGatewayAction
 
         try {
             $saved = $this->registrations->save(
-                (string) ($body['environment'] ?? 'test'),
+                (string) ($body['environment'] ?? 'production'),
                 (string) ($body['ats_id'] ?? ''),
                 (string) ($body['label'] ?? ''),
                 (string) ($body['return_url'] ?? ''),
@@ -289,7 +289,7 @@ final class IsdsGatewayAction
             return $denied;
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $environment = (string) ($body['environment'] ?? 'test');
+        $environment = (string) ($body['environment'] ?? 'production');
         $active = (bool) ($body['active'] ?? false);
 
         try {
@@ -318,7 +318,7 @@ final class IsdsGatewayAction
         if (($denied = $this->operatorGuard($request, $response, AccessLevel::WRITE)) !== null) {
             return $denied;
         }
-        $environment = (string) ($args['environment'] ?? 'test');
+        $environment = (string) ($args['environment'] ?? 'production');
 
         try {
             $deleted = $this->registrations->delete($environment);
