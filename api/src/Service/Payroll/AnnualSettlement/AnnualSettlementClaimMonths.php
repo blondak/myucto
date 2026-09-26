@@ -27,7 +27,10 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
  *
  * Testuje se tedy PRVNÍ DEN měsíce — stejně jako to dělá měsíční větev
  * (EvidenceInterval::includesMonthStart). Nárok vzniklý 20. března se do března
- * nepočítá.
+ * nepočítá. Výjimky z druhé věty § 35c odst. 10 (měsíc narození, osvojení,
+ * převzetí do péče, zahájení studia) nese u dětí už interval nároku: eviduje
+ * se po celých měsících a proti období vyživování ho staví
+ * {@see \MyInvoice\Service\Payroll\IncomeTax\ChildCreditClaimWindow}.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Interval evidence je interval PODMÍNEK, ne trvání zaměstnání

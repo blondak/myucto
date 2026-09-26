@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Import\Jmhz;
 
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\IncomeTax\ChildCreditClaimWindow;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -93,12 +94,9 @@ final class JmhzChildClaims
                     $warnings[] = "Dítě {$label} nejde založit: {$e->getMessage()}";
                     continue;
                 }
-                if ($birthDate > $monthStart) {
-                    $warnings[] = "Dítě {$label} se narodilo v průběhu měsíce {$this->month($monthStart)}; "
-                        . 'nárok za měsíc narození evidence nevede, převezme se z hlášení za další měsíc.';
-                    $actions[] = $this->action($label, null, $dependantInput, null, 'create_dependant', null, null);
-                    continue;
-                }
+                // Dítě narozené v průběhu měsíce hlášení se zakládá i s nárokem
+                // za tento měsíc: měsíc narození do nároku patří (§ 35c odst. 10,
+                // {@see ChildCreditClaimWindow}).
             } else {
                 $matchedDependantIds[(int) $dependant['id']] = true;
                 if ($child['ztp_p'] && !(bool) $dependant['ztp_p']) {
@@ -106,7 +104,11 @@ final class JmhzChildClaims
                         . 'Opravte kartu dítěte a import zopakujte; nárok se zatím nepřebírá.';
                     continue;
                 }
-                if ((string) $dependant['existence_from'] > $monthStart) {
+                if (ChildCreditClaimWindow::earliestFrom(
+                    (string) $dependant['birth_date'],
+                    (string) $dependant['existence_from'],
+                    null,
+                ) > $monthStart) {
                     $warnings[] = "Dítě {$label} je vedené jako vyživované až od {$dependant['existence_from']}; "
                         . 'nárok za dřívější měsíc zapište ručně.';
                     continue;

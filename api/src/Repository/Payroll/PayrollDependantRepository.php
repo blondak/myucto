@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\IncomeTax\ChildCreditClaimWindow;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\PayrollDependantCreditPreview;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
@@ -89,6 +90,7 @@ final class PayrollDependantRepository
                     $employeeId,
                     $claim,
                     $relation,
+                    (string) $row['birth_date'],
                     $existenceFrom,
                     $existenceTo,
                     $effectiveOn,
@@ -443,8 +445,12 @@ final class PayrollDependantRepository
                         $claim['effective_to'] === null
                             ? null
                             : (string) $claim['effective_to'],
+                        $data['birth_date'],
                         $data['existence_from'],
                         $data['existence_to'],
+                        $claim['claim_reason'] === null
+                            ? null
+                            : (string) $claim['claim_reason'],
                     );
                     if ((bool) $claim['ztp_p'] && !$data['ztp_p']) {
                         throw new \InvalidArgumentException(
@@ -912,10 +918,12 @@ final class PayrollDependantRepository
         $this->assertWithinExistence(
             $data['effective_from'],
             $data['effective_to'],
+            (string) $dependant['birth_date'],
             (string) $dependant['existence_from'],
             $dependant['existence_to'] === null
                 ? null
                 : (string) $dependant['existence_to'],
+            $data['claim_reason'],
         );
 
         if ($data['evidence_status'] === 'verified'
@@ -1027,21 +1035,34 @@ final class PayrollDependantRepository
         }
     }
 
+    /**
+     * Období nároku proti období vyživování — pravidlo „na jehož počátku"
+     * a jeho výjimky drží {@see ChildCreditClaimWindow}.
+     */
     private function assertWithinExistence(
         string $from,
         ?string $to,
+        string $birthDate,
         string $existenceFrom,
         ?string $existenceTo,
+        ?string $claimReason,
     ): void {
-        if ($from < $existenceFrom) {
-            throw new \InvalidArgumentException(
-                'Nárok nemůže začít dříve, než je osoba vedena jako vyživovaná.',
-            );
+        $earliest = ChildCreditClaimWindow::earliestFrom($birthDate, $existenceFrom, $claimReason);
+        if ($from < $earliest) {
+            throw new \InvalidArgumentException(sprintf(
+                'Nárok může začít nejdříve %s. Vyživování začíná v průběhu měsíce'
+                . ' a ten patří do nároku jen v měsíci narození, osvojení, převzetí'
+                . ' do péče nebo zahájení studia (zvolte ho jako důvod nároku).',
+                $earliest,
+            ));
         }
-        if ($existenceTo !== null && ($to === null || $to > $existenceTo)) {
-            throw new \InvalidArgumentException(
-                'Nárok nemůže trvat déle, než je osoba vedena jako vyživovaná.',
-            );
+        $latest = ChildCreditClaimWindow::latestTo($existenceTo);
+        if ($latest !== null && ($to === null || $to > $latest)) {
+            throw new \InvalidArgumentException(sprintf(
+                'Nárok nemůže trvat déle než do konce měsíce, ve kterém vyživování'
+                . ' končí (nejpozději %s).',
+                $latest,
+            ));
         }
     }
 
@@ -1124,7 +1145,7 @@ final class PayrollDependantRepository
         int $dependantId,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, relation, ztp_p, existence_from, existence_to,
+            'SELECT id, relation, ztp_p, birth_date, existence_from, existence_to,
                     birth_number_hash, row_version
                FROM payroll_dependants
               WHERE supplier_id = ? AND employee_id = ? AND id = ?
@@ -1201,6 +1222,7 @@ final class PayrollDependantRepository
         int $employeeId,
         array $claim,
         string $relation,
+        string $birthDate,
         string $existenceFrom,
         ?string $existenceTo,
         string $effectiveOn,
@@ -1230,9 +1252,14 @@ final class PayrollDependantRepository
         if (!$this->hasSignedDeclaration($supplierId, $employeeId, $reference)) {
             $blockers[] = 'declaration_missing';
         }
-        if ($from < $existenceFrom
-            || ($existenceTo !== null && ($to === null || $to > $existenceTo))
-        ) {
+        if (!ChildCreditClaimWindow::contains(
+            $from,
+            $to,
+            $birthDate,
+            $existenceFrom,
+            $existenceTo,
+            $claim['claim_reason'] === null ? null : (string) $claim['claim_reason'],
+        )) {
             $blockers[] = 'outside_existence';
         }
         if ($claim['superseded_by_id'] !== null) {

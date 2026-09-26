@@ -43,6 +43,13 @@ final readonly class TaxChildClaim
         );
     }
 
+    /**
+     * Měsíc patří do nároku, když interval obsahuje jeho první den. Výjimky
+     * § 35c odst. 10 (měsíc narození, osvojení, převzetí do péče, zahájení
+     * studia) a celý měsíc konce vyživování už nese samotný interval — zapisuje
+     * se po celých měsících a proti období vyživování ho staví
+     * {@see ChildCreditClaimWindow}. Roční zúčtování měří totéž.
+     */
     public function isEffective(string $calculationDate): bool
     {
         return EvidenceInterval::includesMonthStart(
