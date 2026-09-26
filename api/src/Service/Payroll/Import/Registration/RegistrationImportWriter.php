@@ -178,6 +178,19 @@ final class RegistrationImportWriter
                     $userAgent,
                 ));
             }
+            if (is_string($steps['ecp'] ?? null) && $employeeId !== null) {
+                $this->optional('Evidenční číslo pojištěnce', $notes, $operations, 'ecp', fn () => $this->writePersonCard(
+                    $supplierId,
+                    $employeeId,
+                    $decisive,
+                    [],
+                    null,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                    (string) $steps['ecp'],
+                ));
+            }
             if (is_array($steps['health_insurer']) && $employeeId !== null) {
                 $this->optional('Zdravotní pojišťovna', $notes, $operations, 'health_insurer', fn () => $this->writeHealthInsurer(
                     $supplierId,
@@ -436,9 +449,23 @@ final class RegistrationImportWriter
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        ?string $ecp = null,
     ): void {
         $current = $this->profiles->get($supplierId, $employeeId)
             ?? throw new \DomainException('Osobní karta zaměstnance nebyla nalezena.');
+        $identifiers = [];
+        if ($ecp !== null) {
+            foreach ($current['identifiers'] as $existing) {
+                if (($existing['identifier_type'] ?? null) === 'ecp') {
+                    // Karta EČP už vede — import ho nepřepisuje.
+                    $ecp = null;
+                    break;
+                }
+            }
+            if ($ecp !== null) {
+                $identifiers[] = ['id' => null, 'identifier_type' => 'ecp', 'value' => $ecp];
+            }
+        }
         $rows = [];
         foreach ($addresses as $type => $address) {
             $rows = array_merge($rows, $this->addressRows(
@@ -464,7 +491,7 @@ final class RegistrationImportWriter
                 ];
             }
         }
-        if ($rows === [] && $identity === []) {
+        if ($rows === [] && $identity === [] && $identifiers === []) {
             return;
         }
 
@@ -479,7 +506,7 @@ final class RegistrationImportWriter
             'identity_history' => $identity,
             'addresses' => $rows,
             'contacts' => [],
-            'identifiers' => [],
+            'identifiers' => $identifiers,
             'accounts' => [],
         ];
         $this->profiles->save(

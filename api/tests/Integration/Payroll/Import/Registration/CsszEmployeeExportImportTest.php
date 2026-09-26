@@ -342,6 +342,56 @@ final class CsszEmployeeExportImportTest extends TestCase
         self::assertTrue($this->hasWarning($export, 'evidenční číslo pojištěnce (EČP)'));
     }
 
+    /** IMP-11: EČP cizince z exportu se zapíše na kartu osoby (dřív „doplňte ručně"). */
+    public function testForeignerInsuredPersonNumberIsWrittenToThePersonCard(): void
+    {
+        $files = [
+            $this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+                $this->employee(['RodneCislo' => null, 'EvidencniCisloPojistence' => '9005410005', 'PojistnyVztahOd' => '2026-02-01']),
+            ])),
+        ];
+        $export = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+
+        $result = $this->apply($files, [$export['key']])['results'][0];
+
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertContains('ecp', $result['operations']);
+        self::assertSame(1, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_identifiers WHERE supplier_id = ? AND employee_id = ? AND identifier_type = "ecp"',
+            [$this->supplierId, (int) $result['employee_id']],
+        ));
+    }
+
+    /**
+     * IMP-12: konec pojistného vztahu z exportu u vztahu, který evidence vede
+     * jako trvající, se nabídne k ukončení; zapíše se až po potvrzení.
+     */
+    public function testInsuranceEndOfRunningEmploymentIsOfferedAndEndsOnlyWhenConfirmed(): void
+    {
+        $a1 = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $this->birthNumber, 'start' => '2026-01-01']))];
+        $created = $this->apply($a1, [$this->imports->preview($this->supplierId, 'test', $a1)['records'][0]['key']])['results'][0];
+        $employmentId = (int) $created['employment_id'];
+        $files = [$this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+            $this->employee(['PojistnyVztahOd' => '2026-01-01', 'PojistnyVztahDo' => '2026-05-31']),
+        ]))];
+
+        $offer = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame('2026-05-31', $offer['termination_offer']['end_on'], $this->dump($offer));
+        self::assertFalse($offer['termination_offer']['confirmed']);
+        self::assertTrue($offer['selectable']);
+        $this->apply($files, [$offer['key']]);
+        self::assertNull($this->lookup->employment($this->supplierId, $employmentId)['end_date']);
+
+        $confirmed = $this->imports->apply(
+            $this->supplierId, 'test', $files, [$offer['key']], true, null, $this->userId, null,
+            'cssz-export-test', null, false, false, false, false, false, null, [$offer['key']],
+        )['results'][0];
+        self::assertSame('applied', $confirmed['status'], (string) $confirmed['message']);
+        self::assertContains('terminated', $confirmed['operations']);
+        $employment = $this->lookup->employment($this->supplierId, $employmentId);
+        self::assertSame(['2026-05-31', 'ended'], [$employment['end_date'], $employment['status']]);
+    }
+
     /**
      * Vztah jen z hlášení bez exportu: nástup je odhad z prvního hlášeného měsíce
      * a náhled i výsledek to říkají, aby ho účetní doplnila ze smlouvy.
