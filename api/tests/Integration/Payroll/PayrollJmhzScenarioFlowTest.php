@@ -8,6 +8,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -375,10 +376,139 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
     }
 
     /**
+     * „Jeden zaměstnanec nesmí zablokovat hlášení za ostatní."
+     *
+     * Tři zaměstnanci, jednomu chybí schválený průměrný výdělek. Účetní ho
+     * v testu hlášení odloží, řádné hlášení se dvěma formuláři projde XSD
+     * i katalogem kontrol a zmrazí se. Pojistná část je dál za všechny tři;
+     * nesoulad se součtem formulářů hlásí jen propustné kontroly. Po doplnění
+     * průměru se vztah pošle opravným hlášením jako chybějící formulář.
+     */
+    public function testBlockedEmployeeIsDeferredAndCompletedByCorrection(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $second = $this->hire('Běla Včasná', 'female', '1985-03-03');
+        $late = $this->hire('Cyril Opožděný', 'male', '1990-04-04', withAverage: false);
+        foreach ([$first, $second, $late] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'scenario-deferral');
+        self::assertSame([], $run['blockers'], 'Zaseknutí: výpočet mzdy. ' . CanonicalJson::encode($run['blockers']));
+        self::assertSame([], $run['warnings'], 'Zaseknutí: varování běhu. ' . CanonicalJson::encode($run['warnings']));
+        self::assertNotNull($run['approved']);
+        $revisionId = (int) $run['approved']->revision['id'];
+
+        $preparation = $this->prepareJmhz($revisionId, 'scenario-deferral');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        $preparationId = (int) $preparation['body']['id'];
+        $blocked = $this->dryRunJmhz($preparationId, $this->officeId);
+        self::assertSame(200, $blocked['status'], CanonicalJson::encode($blocked['body']));
+        self::assertSame('blocked', $blocked['body']['status']);
+        foreach ($blocked['body']['blockers'] as $blocker) {
+            self::assertTrue(
+                $blocker['deferrable']
+                    && (($blocker['entity_type'] === 'employment' && $blocker['entity_id'] === $late['employment_id'])
+                        || ($blocker['entity_type'] === 'person' && $blocker['entity_id'] === $late['employee_id'])),
+                'Blokovat smí jen vztah bez průměru: ' . CanonicalJson::encode($blocker),
+            );
+            self::assertNotSame('', $blocker['reason']);
+            self::assertNotSame('support', $blocker['remediation']['kind']);
+        }
+        self::assertContains(
+            'jmhz_average_hourly_earning_missing',
+            array_column($blocked['body']['blockers'], 'code'),
+        );
+
+        $deferred = $this->deferJmhzEmployment(
+            $preparationId,
+            $late['employment_id'],
+            $this->officeId,
+            'Průměr doplní mzdová účetní, vztah se pošle opravou.',
+        );
+        self::assertSame(201, $deferred['status'], CanonicalJson::encode($deferred['body']));
+        self::assertSame([$late['employment_id']], $deferred['body']['employment_ids']);
+        $replayed = $this->deferJmhzEmployment(
+            $preparationId,
+            $late['employment_id'],
+            $this->officeId,
+            'Průměr doplní mzdová účetní, vztah se pošle opravou.',
+        );
+        self::assertSame(200, $replayed['status'], 'Opakované odložení je idempotentní.');
+
+        $tested = $this->dryRunJmhz($preparationId, $this->officeId);
+        self::assertSame(
+            'dry_run_valid',
+            $tested['body']['status'],
+            'Zaseknutí: XSD nebo kontroly. ' . CanonicalJson::encode($tested['body']['controls'] ?? $tested['body']),
+        );
+        $xml = (string) preg_replace('/>\s+</', '><', (string) $tested['body']['xml']);
+        self::assertSame(2, substr_count($xml, '</formularOsoby>'));
+        self::assertSame([$late['employment_id']], $tested['body']['deferred']['employment_ids']);
+        self::assertContains(12, $tested['body']['deferred']['expected_warning_control_ids']);
+        self::assertSame(
+            ['jmhz_average_hourly_earning_missing'],
+            array_values(array_unique(array_column($tested['body']['deferred']['blockers'], 'code'))),
+        );
+
+        $frozen = $this->freezeJmhzSubmission($preparationId, $this->officeId);
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+        $regularId = (int) $frozen['body']['submission_id'];
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame(200, $listed['status']);
+        self::assertSame('omitted', $listed['body']['deferrals'][0]['state']);
+        self::assertSame($regularId, $listed['body']['deferrals'][0]['regular_submission_id']);
+        self::assertFalse($listed['body']['deferrals'][0]['can_revoke']);
+        self::assertSame(1, $listed['body']['open_count']);
+
+        $this->acceptJmhzSubmission($regularId, 'partially_accepted');
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame('to_complete', $listed['body']['deferrals'][0]['state']);
+        self::assertTrue($listed['body']['deferrals'][0]['can_complete']);
+
+        // Náprava: průměr se doplní a běh se opraví, protože průměr je
+        // zmrazený ve vstupu revize.
+        $this->createApprovedAverage($late['employment_id'], 3);
+        $corrected = $this->correctPayrollRun(
+            $run['approved']->run,
+            'scenario-deferral-fix',
+            'Doplněn průměrný výdělek odloženého vztahu.',
+        );
+        self::assertSame('approved', $corrected->run['status']);
+        $completed = $this->completeJmhzDeferral((int) $listed['body']['deferrals'][0]['id']);
+        self::assertSame(201, $completed['status'], CanonicalJson::encode($completed['body']));
+        self::assertSame('correction', $completed['body']['submission_kind']);
+        self::assertSame($regularId, $completed['body']['corrects_submission_id']);
+        $frozenReader = $this->container->get(JmhzFrozenPayloadReader::class);
+        self::assertInstanceOf(JmhzFrozenPayloadReader::class, $frozenReader);
+        $correction = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            $frozenReader->bytes($this->supplierId, 'test', (int) $completed['body']['submission_id']),
+        );
+        self::assertStringContainsString('<typPodani>O</typPodani>', $correction);
+        self::assertSame(1, substr_count($correction, '</formularOsoby>'));
+        self::assertStringContainsString('<typFormulare>R</typFormulare>', $correction);
+        self::assertStringContainsString(
+            '<form:idPpv>' . self::syntheticPpv($late['sequence']) . '</form:idPpv>',
+            $correction,
+        );
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $correction);
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame('completing', $listed['body']['deferrals'][0]['state']);
+        self::assertSame(
+            (int) $completed['body']['submission_id'],
+            $listed['body']['deferrals'][0]['correction_submission_id'],
+        );
+        // Dokud ČSSZ opravu nepřijme, povinnost trvá.
+        self::assertSame(1, $listed['body']['open_count']);
+    }
+
+    /**
      * Osoba s úplnou evidencí pro JMHZ, zveřejněnými směnami na pracovní dny
      * měsíce a schváleným průměrem za 3. čtvrtletí.
      *
-     * @return array{employee_id:int,employment_id:int,name:string,average_id:?int}
+     * @return array{employee_id:int,employment_id:int,name:string,average_id:?int,sequence:int}
      */
     private function hire(
         string $name,
@@ -392,6 +522,7 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         string $taxRegime = 'advance',
         string $socialDiscountStatus = 'not_claimed',
         string $healthTopUpResponsibility = 'employer_obstacle_verified',
+        bool $withAverage = true,
     ): array {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment(
@@ -418,9 +549,12 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         ]);
         $this->assignJmhzIdentity($person, self::syntheticOic($sequence), self::syntheticPpv($sequence));
         $this->publishShifts($person['employment_id'], self::workdays(self::PERIOD));
-        $average = $this->createApprovedAverage($person['employment_id'], 3);
+        $average = $withAverage ? $this->createApprovedAverage($person['employment_id'], 3) : null;
 
-        return $person + ['average_id' => (int) $average['id']];
+        return $person + [
+            'average_id' => $average === null ? null : (int) $average['id'],
+            'sequence' => $sequence,
+        ];
     }
 
     /**
