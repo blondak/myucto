@@ -99,15 +99,15 @@ final readonly class PayrollDiscountIntentRepository
                     terms.social_part_time_discount_reason,
                     terms.social_part_time_discount_evidence,
                     supplier.company_name AS employer_name,
-                    supplier.ic AS employer_business_id,
-                    supplier.cssz_vsdp AS employer_variable_symbol,
-                    supplier.cssz_ossz_code AS employer_ossz_code
+                    supplier.ic AS employer_business_id,'
+                    . PayrollEmployerIdentifierSql::SELECT . '
                FROM payroll_employments employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
                JOIN supplier
-                 ON supplier.id = employment.supplier_id
+                 ON supplier.id = employment.supplier_id'
+                . PayrollEmployerIdentifierSql::JOINS . '
           LEFT JOIN payroll_employment_terms terms
                  ON terms.supplier_id = employment.supplier_id
                 AND terms.employment_id = employment.id

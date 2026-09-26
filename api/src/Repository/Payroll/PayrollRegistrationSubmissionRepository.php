@@ -43,17 +43,12 @@ final class PayrollRegistrationSubmissionRepository
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    supplier.company_name,
-                    office.social_security_variable_symbol,
-                    settings.social_security_office_code
+                    supplier.company_name,'
+                    . PayrollEmployerIdentifierSql::SELECT . '
                FROM payroll_employments employment
                JOIN supplier
-                 ON supplier.id = employment.supplier_id
-               LEFT JOIN payroll_offices office
-                 ON office.supplier_id = employment.supplier_id
-                AND office.id = employment.office_id
-               LEFT JOIN payroll_employer_settings settings
-                 ON settings.supplier_id = employment.supplier_id
+                 ON supplier.id = employment.supplier_id'
+                . PayrollEmployerIdentifierSql::JOINS . '
               WHERE employment.supplier_id = ?
                 AND employment.id = ?'
         );
@@ -77,10 +72,10 @@ final class PayrollRegistrationSubmissionRepository
             'end_date' => $this->nullableString($row['end_date']),
             'employer_name' => (string) $row['company_name'],
             'employer_variable_symbol' => $this->nullableString(
-                $row['social_security_variable_symbol'],
+                $row['employer_variable_symbol'],
             ),
             'cssz_workplace_code' => $this->nullableString(
-                $row['social_security_office_code'],
+                $row['employer_ossz_code'],
             ),
             'is_first_employment' => $this->isFirstEmployment(
                 $supplierId,

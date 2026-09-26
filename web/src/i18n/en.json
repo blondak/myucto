@@ -11023,7 +11023,7 @@
       "sickness_receipt_outcome_invalid": "The submission outcome must be accepted, rejected or cancelled.",
       "sickness_submission_not_prepared": "The submission has not been prepared yet, so there is nothing to send. First choose Prepare on the case.",
       "sickness_supplier_missing": "The company for this benefit case was not found.",
-      "sickness_variable_symbol_missing": "The company is missing its ČSSZ variable symbol. Fill it in under Company settings and prepare the submission again.",
+      "sickness_variable_symbol_missing": "The payroll office of the employment is missing its ČSSZ variable symbol. Fill it in under Payroll settings, Employer, at the employment's office and prepare the submission again.",
       "zp_artifact_mismatch": "The stored file's fingerprint does not match the frozen data record. Try preparing the submission again.",
       "zp_bulk_notification_empty": "The bulk notification must contain at least one record. No record could be documented by the application for the selected period and insurer.",
       "zp_change_address_incomplete": "The address in the bulk notification record is incomplete.",

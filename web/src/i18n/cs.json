@@ -11023,7 +11023,7 @@
       "sickness_receipt_outcome_invalid": "Výsledek podání musí být přijato, zamítnuto nebo zrušeno.",
       "sickness_submission_not_prepared": "Podání ještě není připravené, takže není co odeslat. Nejdřív u případu zvolte Připravit.",
       "sickness_supplier_missing": "Firma případu dávky nebyla nalezena.",
-      "sickness_variable_symbol_missing": "Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení firmy a podání připravte znovu.",
+      "sickness_variable_symbol_missing": "Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd, Zaměstnavatel, u účtárny vztahu a podání připravte znovu.",
       "zp_artifact_mismatch": "Otisk uloženého souboru neodpovídá zmrazené datové větě. Zkuste přípravu podání zopakovat.",
       "zp_bulk_notification_empty": "Hromadné oznámení musí obsahovat alespoň jednu větu. Za zvolené období a pojišťovnu nevznikla žádná věta, kterou aplikace umí doložit.",
       "zp_change_address_incomplete": "Adresa ve větě hromadného oznámení není úplná.",

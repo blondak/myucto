@@ -45,8 +45,10 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $this->officeId = $this->createOffice('NEM', 'Syntetická účtárna dávek', '9990007777');
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
+        // Identifikátory zaměstnavatele pro ČSSZ žijí v Mzdách (VS u účtárny,
+        // kód OSSZ v nastavení zaměstnavatele), ne na firmě.
         $this->db->pdo()->prepare(
-            'UPDATE supplier SET cssz_vsdp = "1234567890", cssz_ossz_code = 115 WHERE id = ?',
+            'UPDATE payroll_employer_settings SET social_security_office_code = "115" WHERE supplier_id = ?',
         )->execute([$this->supplierId]);
     }
 

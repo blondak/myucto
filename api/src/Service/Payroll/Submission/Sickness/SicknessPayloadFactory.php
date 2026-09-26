@@ -232,7 +232,8 @@ final readonly class SicknessPayloadFactory
         if ($digits === '') {
             throw new SicknessException(
                 'sickness_variable_symbol_missing',
-                'Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení → Firma '
+                'Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. '
+                . 'Doplňte ho v Nastavení mezd → Zaměstnavatel u účtárny vztahu '
                 . 'a podání připravte znovu.',
             );
         }
