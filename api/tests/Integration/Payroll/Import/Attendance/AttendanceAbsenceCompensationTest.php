@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollQuickInputRepository;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
@@ -262,13 +263,74 @@ final class AttendanceAbsenceCompensationTest extends TestCase
     {
         $employmentId = $this->employment('NAH-9');
         $hours = $this->hours();
-        $hours['fund_hours'] = 184_000;
+        $hours['fund_hours'] = 192_000;
         $this->writtenBatch($employmentId, $hours);
 
         $row = $this->quickRow($employmentId);
 
         self::assertTrue($row['base_requires_entry']);
         self::assertSame('import_fund_mismatch', $row['base_proration_unsupported_reason']);
+    }
+
+    /**
+     * Fond z podkladů se svátkem v jinak pracovní den (6. 7. 2026): 176 + 8 = 184 h,
+     * stejně jako fond měsíčního hlášení. Je to týž rozvrh, krácení proto proběhne
+     * a počítá se z fondu kalendáře (bez svátku) jako u souhrnu bez svátku.
+     */
+    public function testQuickInputAcceptsImportedFundIncludingHoliday(): void
+    {
+        $employmentId = $this->employment('NAH-9B');
+        $hours = $this->hours();
+        $hours['fund_hours'] = 184_000;
+        $hours['holiday_hours'] = 8_000;
+        $this->writtenBatch($employmentId, $hours);
+
+        $row = $this->quickRow($employmentId);
+
+        self::assertFalse($row['base_requires_entry'], (string) ($row['base_proration_unsupported_reason'] ?? ''));
+        self::assertSame(2_994_900, $row['base_amount_minor']);
+        self::assertSame(10_560, $row['base_proration']['fund_minutes']);
+    }
+
+    /**
+     * Svátek u mzdy za hodiny: náhrada ve výši průměru (§ 115 odst. 3 ZP), 8 h × 250 Kč.
+     * Jen na výslovnou žádost volajícího a jen vztahu bez předpisu měsíční mzdy.
+     */
+    public function testHolidayCompensationOnlyWithoutMonthlyWageAndOnlyWhenAsked(): void
+    {
+        $hourly = $this->employment('NAH-SV1');
+        $monthly = $this->employment('NAH-SV2');
+        $this->approvedAverage($hourly);
+        $this->approvedAverage($monthly);
+        $this->monthlyWageRecurring($monthly);
+        $hours = ['worked_hours' => 168_000, 'fund_hours' => 184_000, 'holiday_hours' => 8_000];
+
+        $plain = $this->writtenBatch($hourly, $hours);
+        $this->materializer->materializeFromBatch($this->supplierId, $plain, $this->userId);
+        self::assertArrayNotHasKey('holiday_hours', $this->inputs($hourly), 'Bez žádosti volajícího se za svátek nic nepočítá.');
+
+        $this->materializer->materializeFromBatch($this->supplierId, $plain, $this->userId, holidayWithoutMonthlyWage: true);
+        $holiday = $this->inputs($hourly)['holiday_hours'] ?? null;
+        self::assertIsArray($holiday);
+        self::assertSame('NAHRADA_MZDY_SVATEK', $holiday['component_code']);
+        self::assertSame(200_000, (int) $holiday['amount_minor']);
+
+        $monthlyBatch = $this->writtenBatch($monthly, $hours);
+        $this->materializer->materializeFromBatch($this->supplierId, $monthlyBatch, $this->userId, holidayWithoutMonthlyWage: true);
+        self::assertArrayNotHasKey('holiday_hours', $this->inputs($monthly), 'Měsíční mzda se za svátek nekrátí, náhrada nevzniká.');
+    }
+
+    private function monthlyWageRecurring(int $employmentId): void
+    {
+        $this->service(PayrollComponentRepository::class)->ensureDefaults($this->supplierId);
+        $insert = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_recurring_components
+                (supplier_id, employment_id, component_id, calculation_kind, amount_minor, valid_from, allocation_rule, is_active, created_by)
+             SELECT ?, ?, id, 'fixed_amount', ?, '2026-01-01', 'calendar_days', 1, ?
+               FROM payroll_component_definitions WHERE supplier_id = ? AND component_kind = 'base_wage' ORDER BY id LIMIT 1",
+        );
+        $insert->execute([$this->supplierId, $employmentId, self::MONTHLY_GROSS, $this->userId, $this->supplierId]);
+        self::assertSame(1, $insert->rowCount(), 'Předpis měsíční mzdy se nezaložil.');
     }
 
     public function testQuickInputImportMonthWithoutAbsenceKeepsAgreedWage(): void

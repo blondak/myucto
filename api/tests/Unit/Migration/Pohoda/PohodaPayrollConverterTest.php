@@ -62,7 +62,7 @@ final class PohodaPayrollConverterTest extends TestCase
         self::assertSame('Účetní', $jana['Pracovní místo']);
         self::assertSame('nástup 1. 3. 2025', $jana['Nástup / ukončení']);
         self::assertSame(2000.0, $jana['O01 Odměna (Kč)']);
-        self::assertSame(1000.0, $jana['P01 Příplatek za přesčas (Kč)']);
+        self::assertSame(1000.0, $jana['Příplatek za práci přesčas (Kč)']);
         self::assertSame(4.0, $jana['Přesčas (h)']);
         self::assertSame(600.0, $jana['Obědy - srážka ze mzdy (Kč)']);
         self::assertSame(300.0, $jana['Srážka ze mzdy (Kč)']);
@@ -206,7 +206,7 @@ final class PohodaPayrollConverterTest extends TestCase
         $months = array_map($converter->month(...), $converter->periods(2026));
         $profile = PohodaPayrollConverter::profile($months);
         self::assertSame(PohodaPayrollConverter::PROFILE_NAME, $profile['name']);
-        self::assertEqualsCanonicalizing(['PAM_O01', 'PAM_P01', 'PAM_C01'], array_column($profile['components'], 'code'));
+        self::assertEqualsCanonicalizing(['PAM_O01', 'PRIPLATEK_PRESCAS', 'PAM_C01'], array_column($profile['components'], 'code'));
 
         foreach ($months as $month) {
             $file = PohodaPayrollConverter::workbook($month);

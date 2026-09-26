@@ -59,7 +59,17 @@ final class PayrollImportAbsenceCompensationMaterializer
         'vacation_hours' => 'zp-222-1',
         'doctor_hours' => 'zp-199-1+nv-590-2006',
         'obstacle_employer_hours' => 'zp-207-209',
+        'holiday_hours' => 'zp-115-3',
     ];
+
+    /**
+     * Svátek v jinak pracovní den (§ 115 odst. 3 ZP): zaměstnanci s měsíční mzdou se
+     * mzda nekrátí, ostatním (mzda za hodiny, úkol) náleží náhrada ve výši průměrného
+     * výdělku. Kdo má měsíční mzdu, souhrn neříká; volající proto náhradu za svátek
+     * zapíná výslovně a platí jen pro vztah bez předpisu základní měsíční mzdy.
+     */
+    private const HOLIDAY = ['holiday_hours' => 'NAHRADA_MZDY_SVATEK'];
+    private const HOLIDAY_PERCENT = 100;
 
     public const NOT_COMPUTED = [
         'sick_hours' => 'Náhradu mzdy při DPN nejde z měsíčního součtu hodin ověřit (okno prvních 14 dnů, redukce průměru, dny nemoci). Zadejte ji ručně podle rozhodnutí o DPN.',
@@ -97,6 +107,7 @@ final class PayrollImportAbsenceCompensationMaterializer
         int $importId,
         ?int $userId,
         ?ImportAbsenceCompensationRates $rates = null,
+        bool $holidayWithoutMonthlyWage = false,
     ): array {
         $rates ??= ImportAbsenceCompensationRates::defaults();
         $batch = $this->imports->batch($supplierId, $importId);
@@ -132,6 +143,7 @@ final class PayrollImportAbsenceCompensationMaterializer
                     $period,
                     $rates,
                     $userId,
+                    $holidayWithoutMonthlyWage,
                 ));
             } catch (PayrollInputConflictException|PayrollInputCancellationException|\InvalidArgumentException|\DomainException $e) {
                 $report['skipped'][] = [
@@ -184,6 +196,7 @@ final class PayrollImportAbsenceCompensationMaterializer
         string $period,
         ImportAbsenceCompensationRates $rates,
         ?int $userId,
+        bool $holidayWithoutMonthlyWage = false,
     ): array {
         $outcome = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'cancelled' => 0, 'skipped' => [], 'warnings' => []];
         $periodStart = $period . '-01';
@@ -207,7 +220,11 @@ final class PayrollImportAbsenceCompensationMaterializer
         $average = null;
         $averageLoaded = false;
         $employeeId = null;
-        foreach (self::COMPONENTS as $meaning => $code) {
+        $components = self::COMPONENTS;
+        if ($holidayWithoutMonthlyWage && !$this->hasMonthlyWage($supplierId, $employmentId, $periodStart)) {
+            $components += self::HOLIDAY;
+        }
+        foreach ($components as $meaning => $code) {
             $millihours = $values[$meaning] ?? 0;
             $externalId = self::externalId($period, $employmentId, $meaning);
             $existing = $this->existingInput($supplierId, $employmentId, $periodStart, $externalId);
@@ -246,7 +263,7 @@ final class PayrollImportAbsenceCompensationMaterializer
                 $outcome['warnings'][] = ['employment_id' => $employmentId, 'meaning' => $meaning, 'message' => self::DOCTOR_NOTICE];
             }
 
-            $percent = $rates->percentFor($meaning);
+            $percent = isset(self::HOLIDAY[$meaning]) ? self::HOLIDAY_PERCENT : $rates->percentFor($meaning);
             $amount = LeaveCompensationCalculator::calculateMinutes($average['average_hourly_minor'], $minutes, $percent);
             $componentId = $this->componentId($supplierId, $code, $periodStart);
             if ($existing !== null) {
@@ -331,6 +348,25 @@ final class PayrollImportAbsenceCompensationMaterializer
             'id' => PayrollTimeValue::int($snapshot['id'] ?? null, 'average_snapshot_id'),
             'average_hourly_minor' => $snapshot['average_hourly_minor'],
         ];
+    }
+
+    /** Má vztah v měsíci aktivní předpis základní měsíční mzdy (druh `base_wage`)? */
+    private function hasMonthlyWage(int $supplierId, int $employmentId, string $periodStart): bool
+    {
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $statement = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM payroll_recurring_components recurring
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
+              WHERE recurring.supplier_id = ? AND recurring.employment_id = ? AND recurring.is_active = 1
+                AND component.component_kind = 'base_wage'
+                AND recurring.valid_from <= ? AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+              LIMIT 1"
+        );
+        $statement->execute([$supplierId, $employmentId, $periodEnd, $periodStart]);
+
+        return $statement->fetchColumn() !== false;
     }
 
     /** @return array<string,mixed>|null */

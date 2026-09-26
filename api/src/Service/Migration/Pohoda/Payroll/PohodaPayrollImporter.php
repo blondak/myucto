@@ -13,6 +13,8 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
+use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
@@ -63,6 +65,7 @@ final class PohodaPayrollImporter
         private readonly PayrollPostingMapProposalService $postingMap,
         private readonly PayrollMigrationModuleSetup $moduleSetup,
         private readonly PohodaPayrollJmhzWriter $jmhz,
+        private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
     ) {}
 
     /**
@@ -313,6 +316,7 @@ final class PohodaPayrollImporter
 
             $protocol->begin(self::STEP_PROFILE);
             $profile = PohodaPayrollConverter::profile($months);
+            $obstacleRate = PohodaPayrollConverter::obstacleEmployerRate($months);
             $existing = array_values(array_filter(
                 $this->profiles->list($supplierId, AttendanceMeaning::SOURCE_SYSTEM),
                 static fn (array $p): bool => $p['name'] === $profile['name'],
@@ -370,6 +374,8 @@ final class PohodaPayrollImporter
 
             $protocol->begin(self::STEP_MONTHS);
             $done = $this->map->all($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH);
+            /** @var array<string,int> $compensationBatches měsíc, který počítá MyÚčto => dávka docházky */
+            $compensationBatches = [];
             $messages = 0;
             // Vynechané údaje osob stačí vypsat jednou, ne v každém měsíci.
             $omitted = [];
@@ -429,6 +435,9 @@ final class PohodaPayrollImporter
                     if ($approveTakenOver) {
                         $this->approveTakenOverBatch($supplierId, $userOrNull, $period, $done[$key], $protocol);
                     }
+                    if (self::countedByModule($period, $moduleStart)) {
+                        $compensationBatches[$period] = (int) $done[$key];
+                    }
                     continue;
                 }
                 try {
@@ -463,6 +472,9 @@ final class PohodaPayrollImporter
                         $this->approveTakenOverInputs($supplierId, $userOrNull, $period, (int) ($applied['inputs']['import_id'] ?? 0), $protocol);
                     }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
+                    if (self::countedByModule($period, $moduleStart)) {
+                        $compensationBatches[$period] = (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0);
+                    }
                     // Pracoviště a CZ-ISCO ještě v tomhle měsíci, dokud je jeho verze podmínek
                     // ta poslední; další verze si je pak opíší. Po všech měsících už by je
                     // dostala jen verze poslední a starší měsíce by zůstaly bez pracoviště.
@@ -493,6 +505,20 @@ final class PohodaPayrollImporter
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
                 $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $converter->exportedOn);
+                // Náhrady mzdy z hodin docházky až po osobách: stojí na průměrném výdělku,
+                // který zapisuje teprve tenhle krok.
+                // Souhrn měsíce nese dávku, která ho zapsala naposledy se změnou. Opakovaný
+                // převod se změněným exportem založí novou dávku, ale nezměněné souhrny
+                // zůstanou u dřívější; proto všechny dávky převodu za tentýž měsíc.
+                foreach ($compensationBatches as $period => $batchId) {
+                    $batches = [$batchId];
+                    foreach ($done as $doneKey => $doneBatch) {
+                        if (str_starts_with((string) $doneKey, $period . '|')) {
+                            $batches[] = (int) $doneBatch;
+                        }
+                    }
+                    $this->absenceCompensations($supplierId, $userOrNull, $period, array_values(array_unique($batches)), $obstacleRate, $approveTakenOver, $protocol);
+                }
                 $protocol->finish(self::STEP_PEOPLE);
             }
 
@@ -683,6 +709,74 @@ final class PohodaPayrollImporter
             implode('; ', $names),
             count($exceptions) > 5 ? '; …' : '',
         ), ['period' => $period]);
+    }
+
+    /**
+     * Náhrady mzdy za dovolenou, lékaře a překážky na straně zaměstnavatele v měsíci, který
+     * počítá MyÚčto. Sešit nese jen hodiny (náhradu v něm PAMICA nemá jako mzdovou složku),
+     * takže bez tohoto kroku by běh vyplatil jen krácenou základní mzdu. Počítá se stejně jako
+     * u importu docházky: hodiny × převzatý průměr × sazba, u překážek sazba, se kterou
+     * počítala PAMICA. Převzatý měsíc (před začátkem vedení mezd) náhrady nedostává, jeho
+     * hrubou mzdu nese PAMICA.
+     */
+    /** @param list<int> $batchIds */
+    private function absenceCompensations(int $supplierId, ?int $userId, string $period, array $batchIds, ?int $obstacleRate, bool $approve, ImportProtocol $protocol): void
+    {
+        $missingAverage = 0;
+        foreach ($batchIds as $batchId) {
+            if ($batchId <= 0) {
+                continue;
+            }
+            try {
+                $report = $this->absenceCompensations->materializeFromBatch(
+                    $supplierId,
+                    $batchId,
+                    $userId,
+                    $obstacleRate === null ? null : ImportAbsenceCompensationRates::fromMap([AttendanceRules::RATE_MEANING => $obstacleRate]),
+                    // Předpis měsíční mzdy dostane převod jen vztahu bez hodinové a úkolové
+                    // mzdy ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter::recurringWage()}),
+                    // takže vztah bez něj je ten, kterému PAMICA za svátek platila náhradu (`V02`).
+                    holidayWithoutMonthlyWage: true,
+                );
+            } catch (\InvalidArgumentException|\DomainException $e) {
+                $protocol->warn(self::STEP_PEOPLE, 'absence_compensation_failed',
+                    "{$period}: náhrady mzdy z hodin nepřítomnosti se nepodařilo spočítat - " . $e->getMessage(), ['period' => $period]);
+                continue;
+            }
+            $protocol->count(self::STEP_PEOPLE, 'absence_compensations', $report['created'] + $report['updated']);
+            foreach ($report['skipped'] as $skipped) {
+                if (str_starts_with($skipped['reason'], 'Chybí schválený průměrný výdělek')) {
+                    $missingAverage++;
+                }
+            }
+        }
+        if ($missingAverage > 0) {
+            $protocol->warn(self::STEP_PEOPLE, 'absence_compensation_without_average', sprintf(
+                '%s: u %d nepřítomností chybí průměrný výdělek, náhrada mzdy se nespočítala. Doplňte průměr '
+                . 'v Mzdy → Nepřítomnosti a náhradu zadejte v Mzdy → Vstupy.',
+                $period,
+                $missingAverage,
+            ), ['period' => $period]);
+        }
+        if (!$approve) {
+            return;
+        }
+        $statement = $this->db->pdo()->prepare(
+            "SELECT id FROM payroll_inputs
+              WHERE supplier_id = ? AND period_start = ? AND status = 'draft' AND source_kind = 'absence'
+                AND external_id LIKE ?"
+        );
+        $statement->execute([
+            $supplierId,
+            $period . '-01',
+            PayrollImportAbsenceCompensationMaterializer::EXTERNAL_ID_PREFIX . $period . ':%',
+        ]);
+        $ids = array_map('intval', $statement->fetchAll(\PDO::FETCH_COLUMN));
+        $approved = 0;
+        foreach (array_chunk($ids, PayrollInputRepository::APPROVE_BATCH_MAX) as $chunk) {
+            $approved += count($this->inputs->approveBatch($supplierId, $chunk, $userId)['approved']);
+        }
+        $protocol->count(self::STEP_PEOPLE, 'absence_compensations_approved', $approved);
     }
 
     private function approveTakenOverInputs(int $supplierId, ?int $userId, string $period, int $importId, ImportProtocol $protocol): void

@@ -196,9 +196,24 @@ a jen osobě, která stavy ještě nemá.
 Co převod doplní z odeslaných hlášení JMHZ a registrací, popisuje § 108.12.
 
 Klasifikace složek odpovídá katalogu PAMICA / POHODA Mzdy: časová a úkolová
-mzda, příplatky, odměny, proplacená dovolená a obědy (srážka ze mzdy).
+mzda, příplatky, odměny, proplacená dovolená, odstupné a obědy (srážka ze mzdy).
+Příplatek za přesčas, za práci v sobotu a neděli a za práci ve svátek jde na
+standardní složky, které mají v měsíčním hlášení vlastní kolonku.
 Základní mzdu počítá MyÚčto ze sjednané mzdy vztahu, náhrady z hodin
-a průměru; odstupné převod nepřebírá, srážky a exekuce mají vlastní krok (§ 108.3).
+a průměru; srážky a exekuce mají vlastní krok (§ 108.3).
+
+**Sjednaná měsíční mzda** je měsíční sazba složky základní mzdy v PAMICA, ne
+základní mzda vyplacená za měsíc (ta je krácená o dovolenou a překážky).
+Zvýšení mzdy v průběhu roku založí od měsíce změny novou verzi. Opakovaný
+převod opraví předpis měsíční mzdy, který zapsal dřívější převod; předpis
+upravený účetní nemění.
+
+**Měsíce, které počítá MyÚčto.** Za měsíce od začátku vedení mezd převod
+z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, překážky
+na straně zaměstnavatele (sazbou, kterou platila PAMICA) a za svátek u mzdy
+za hodiny nebo úkol. Svátek v jinak pracovní den u měsíční mzdy převod vede
+zvlášť, ne mezi odpracovanými hodinami. Náhradu mzdy při nemoci, placené volno
+a vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
 
 **Zařazení složek do JMHZ.** Plnění, které svou složku v číselníku má, jde na
 ni: zdanitelná část stravování na *Zdanitelná část stravování*, odměna za

@@ -18,7 +18,7 @@ use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
  * takže `S01a` / `S07` viděné na jedné instalaci nejsou kontrakt.
  *
  * Co import MyÚčta nepřebírá (základní mzdu počítá ze sjednané mzdy vztahu, náhrady
- * z hodin a průměru, odstupné a zákonné položky jinak), vrací význam `ignore` - takový
+ * z hodin a průměru a zákonné položky jinak), vrací význam `ignore` - takový
  * sloupec do sešitu pro import vůbec nejde.
  */
 final class PohodaPayrollCatalog
@@ -35,6 +35,16 @@ final class PohodaPayrollCatalog
 
     /** Odměna za kontejnery, tatáž složka jako ve vzoru GIRITON (druh `bonus`, JMHZ 10331). */
     public const CONTAINER_BONUS = 'ODMENA_KONTEJNERY';
+
+    /** Odstupné: složka výchozího číselníku (druh `severance`, bez pojistného). */
+    public const SEVERANCE = 'ODSTUPNE';
+
+    /** Zákonné příplatky katalogu PAMICA => složka výchozího číselníku a sloupec sešitu. */
+    private const STATUTORY_PREMIUMS = [
+        'P01' => ['PRIPLATEK_PRESCAS', 'Příplatek za práci přesčas (Kč)'],
+        'P03' => ['PRIPLATEK_SVATEK', 'Příplatek za práci ve svátek (Kč)'],
+        'P04' => ['PRIPLATEK_VIKEND', 'Příplatek za práci v sobotu a v neděli (Kč)'],
+    ];
 
     /**
      * Srážka za stravování; jediný druh dobrovolné srážky, který import docházky
@@ -90,6 +100,12 @@ final class PohodaPayrollCatalog
         if ($number === 'P07' || (str_starts_with($number, 'O') && preg_match('/nocni|\bnoc\b/', $normalized) === 1)) {
             return ['meaning' => 'component', 'kind' => 'premium', 'code' => self::NIGHT_PREMIUM, 'header' => 'Příplatek za noční práci (Kč)'];
         }
+        // Zákonné příplatky mají v hlášení vlastní kolonky (10333 přesčas, 10335 sobota
+        // a neděle, 10336 svátek). Obecná `PAM_P*` by je sečetla jen do 10332.
+        if (isset(self::STATUTORY_PREMIUMS[$number])) {
+            [$premiumCode, $premiumHeader] = self::STATUTORY_PREMIUMS[$number];
+            return ['meaning' => 'component', 'kind' => 'premium', 'code' => $premiumCode, 'header' => $premiumHeader];
+        }
         if (str_starts_with($number, 'P')) {
             return $component('premium');
         }
@@ -118,6 +134,11 @@ final class PohodaPayrollCatalog
         }
         if ($number === 'J11') {
             return $component('compensation');
+        }
+        // Odstupné má v MyÚčtu vlastní složku (bez pojistného, JMHZ jako odstupné). Měsíc,
+        // který počítá MyÚčto, ho bez ní nevyplatí; převzatý měsíc ho má v úhrnech PAMICA.
+        if ($number === 'D06' || str_contains($normalized, 'odstupn')) {
+            return ['meaning' => 'component', 'kind' => 'other', 'code' => self::SEVERANCE, 'header' => 'Odstupné (Kč)'];
         }
         if ($number === 'J03' && str_contains($normalized, 'obed')) {
             return ['meaning' => 'meal', 'kind' => null, 'code' => null, 'header' => self::MEAL_HEADER];

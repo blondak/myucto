@@ -8,7 +8,9 @@ use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRules;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
+use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -50,6 +52,8 @@ final class PohodaPayrollConverter
         ['Odpracováno (h)', 'worked_hours', 'hours'],
     ];
 
+    private const HOLIDAY_HEADER = 'Svátek (h)';
+
     /** @var array<string,array<string,array<string,mixed>>> tabulka => ID => řádek (číselníky, osoby, vztahy) */
     private array $byId = [];
     /** @var array<string,list<array<string,mixed>>> období `Y-m` => řádky MZ */
@@ -75,7 +79,7 @@ final class PohodaPayrollConverter
         $info = PohodaXml::packInfo($file);
         $self = new self(preg_replace('/\D/', '', $info['ico']) ?? '', self::exportDate($info['created'] ?? ''));
         $byId = ['sMZslozky', 'sMZneprit', 'sMZsrazky', 'sMzPoj', 'sSTR', 'PracMista', 'ZAM', 'ZAMpomer'];
-        $items = ['MZslozky', 'MZneprit', 'MZsrazky'];
+        $items = ['MZslozky', 'MZneprit', 'MZsrazky', 'MZdoch'];
         $byIdTables = array_fill_keys($byId, true);
         // Jeden průchod souborem pro všechny tabulky: každý průchod 50MB exportu stojí
         // sekundy a tabulek je dvanáct.
@@ -187,6 +191,8 @@ final class PohodaPayrollConverter
         /** @var array<string,array{code:string,name:string,inputs:int}> $unclassifiedDeductions */
         $unclassifiedDeductions = [];
         $totals = ['rows' => 0, 'gross_minor' => 0, 'net_minor' => 0, 'components_minor' => 0, 'meal_minor' => 0, 'deduction_minor' => 0, 'worked_millihours' => 0];
+        /** @var array<int,true> $obstacleRates procento průměru, se kterým PAMICA platila překážky na straně zaměstnavatele */
+        $obstacleRates = [];
         foreach ($this->mz[$period] ?? [] as $mz) {
             $mzId = PohodaXml::text($mz, 'ID');
             $person = $this->byId['ZAM'][PohodaXml::text($mz, 'RefZAM')] ?? null;
@@ -256,6 +262,12 @@ final class PohodaPayrollConverter
                 }
                 $meaning = $class['meaning'];
                 $absenceHours[$meaning][] = ['header' => $class['header'], 'hours' => PohodaXml::num($item, 'HodPrac')];
+                if ($meaning === AttendanceRules::RATE_MEANING) {
+                    $average = PohodaXml::num($mz, 'KcPrum') > 0 ? PohodaXml::num($mz, 'KcPrum') : PohodaXml::num($mz, 'KcPrumU');
+                    if ($average > 0 && PohodaXml::num($item, 'HodPrac') > 0) {
+                        $obstacleRates[(int) round(PohodaXml::num($item, 'KcNahr') / (PohodaXml::num($item, 'HodPrac') * $average) * 100)] = true;
+                    }
+                }
                 $absenceDated[$meaning] = ($absenceDated[$meaning] ?? true)
                     && PohodaPayrollCatalog::absenceNeedsDates($number, $name)
                     && PohodaPayrollPeople::absenceDates($item, $year) !== null;
@@ -298,6 +310,15 @@ final class PohodaPayrollConverter
             $fundDays = PohodaXml::num($mz, 'DnyFond2');
             $fund = $fundDays > 0 && $weekly > 0 && !$isDpp ? $fundDays * $weekly / 5 : PohodaXml::num($mz, 'HodFond');
             $worked = PohodaXml::num($mz, 'HodOdpra') + $overtime;
+            // PAMICA počítá svátek v jinak pracovní den do odpracovaných hodin (`HodOdpra`),
+            // v měsíčním hlášení ho ale vede mezi neodpracovanými hodinami s náhradou. Import
+            // MyÚčta ho proto dostane zvlášť (`holiday_hours`) a odpracováno je bez něj.
+            // Týká se jen měsíční mzdy (`M01`/`M09`): mzda za hodiny nebo úkol má za svátek
+            // náhradu (`V02` v `MZneprit`), ta už v sešitu je a `HodOdpra` ji neobsahuje.
+            $holiday = $isDpp || $monthlyWage === null || isset($absenceHours['holiday_hours'])
+                ? 0.0
+                : min($worked, $this->holidayHours($mz, $weekly));
+            $worked -= $holiday;
             $insurer = $this->byId['sMzPoj'][PohodaXml::text($mz, 'RefPoj')] ?? $this->byId['sMzPoj'][PohodaXml::text($person, 'RefPoj')] ?? [];
             $center = $this->byId['sSTR'][PohodaXml::text($relation, 'ResStr')] ?? [];
             $place = $this->byId['PracMista'][PohodaXml::text($relation, 'RelPracMist')] ?? [];
@@ -347,6 +368,10 @@ final class PohodaPayrollConverter
                     $row[$header] = round($value, 2);
                 }
             }
+            if (round($holiday, 2) > 0.0) {
+                $column(self::HOLIDAY_HEADER, 'holiday_hours', 'hours');
+                $row[self::HOLIDAY_HEADER] = round(($row[self::HOLIDAY_HEADER] ?? 0.0) + $holiday, 2);
+            }
             $rows[] = $row;
             $totals['rows']++;
             $totals['gross_minor'] += self::minor(PohodaXml::num($mz, 'KcHrubaM'));
@@ -360,8 +385,63 @@ final class PohodaPayrollConverter
 
         uasort($unclassifiedDeductions, static fn (array $a, array $b): int => [$b['inputs'], $a['code']] <=> [$a['inputs'], $b['code']]);
 
+        ksort($obstacleRates);
+
         return ['period' => $period, 'columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'omitted' => $omitted,
-            'unclassified_deductions' => $unclassifiedDeductions];
+            'unclassified_deductions' => $unclassifiedDeductions, 'obstacle_rates' => array_keys($obstacleRates)];
+    }
+
+    /**
+     * Hodiny svátků v jinak pracovní dny podle rozvrhu mzdy (`MZdoch.HodinN` je plán dne N),
+     * nejvýš za tolik svátků, kolik jich PAMICA vztahu započítala (`DnyStSv`). Bez rozvrhu
+     * počet svátků v pracovní dny × denní díl týdenního úvazku.
+     *
+     * @param array<string,mixed> $mz
+     */
+    private function holidayHours(array $mz, float $weekly): float
+    {
+        // `DnyStSv` počítá jen svátky za trvání vztahu; rozvrh `MZdoch` je celý měsíc.
+        if (PohodaXml::num($mz, 'DnyStSv') <= 0) {
+            return 0.0;
+        }
+        $year = (int) PohodaXml::text($mz, 'Rok');
+        $month = (int) PohodaXml::text($mz, 'RelMes');
+        $plan = $this->items['MZdoch'][PohodaXml::text($mz, 'ID')][0] ?? null;
+        if ($plan !== null) {
+            $hours = 0.0;
+            foreach (array_keys((new CzechHolidayCalendar())->forYear($year)) as $date) {
+                if ((int) substr($date, 5, 2) === $month) {
+                    $hours += PohodaXml::num($plan, 'Hodin' . (int) substr($date, 8, 2));
+                }
+            }
+            return $weekly > 0 ? min($hours, PohodaXml::num($mz, 'DnyStSv') * $weekly / 5) : $hours;
+        }
+
+        return $weekly > 0 ? PohodaXml::num($mz, 'DnyStSv') * $weekly / 5 : 0.0;
+    }
+
+    /**
+     * Sazba náhrady za překážky na straně zaměstnavatele, se kterou PAMICA v převáděných
+     * měsících opravdu počítala (náhrada / hodiny × průměr). Jen když je v celém převodu
+     * jediná a zákon ji připouští (§ 207 až § 209 ZP: 60 až 100 %); jinak `null` a platí
+     * výchozí sazba importu docházky.
+     *
+     * @param list<array{obstacle_rates?:list<int>}> $months
+     */
+    public static function obstacleEmployerRate(array $months): ?int
+    {
+        $rates = [];
+        foreach ($months as $month) {
+            foreach ($month['obstacle_rates'] ?? [] as $rate) {
+                $rates[$rate] = true;
+            }
+        }
+        if (count($rates) !== 1) {
+            return null;
+        }
+        $rate = (int) array_key_first($rates);
+
+        return $rate >= 60 && $rate <= 100 ? $rate : null;
     }
 
     /**
@@ -379,8 +459,13 @@ final class PohodaPayrollConverter
         }
         $rules = [];
         $components = [];
+        $obstacleRate = self::obstacleEmployerRate($months);
         foreach ($columns as $header => $column) {
-            $rules[] = ['sheet' => self::SHEET, 'header' => $header, 'meaning' => $column['meaning'], 'unit' => $column['unit'], 'component_code' => $column['code']];
+            $rule = ['sheet' => self::SHEET, 'header' => $header, 'meaning' => $column['meaning'], 'unit' => $column['unit'], 'component_code' => $column['code']];
+            if ($obstacleRate !== null && $column['meaning'] === AttendanceRules::RATE_MEANING) {
+                $rule['rate_percent'] = $obstacleRate;
+            }
+            $rules[] = $rule;
             if ($column['meaning'] === 'component' && $column['code'] !== null) {
                 $components[$column['code']] = [
                     'code' => $column['code'],
