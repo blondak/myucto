@@ -647,6 +647,20 @@ describe('EmploymentCard', () => {
     },
   )
 
+  it('při uložení podmínek už prohlášení plátce k srážkové dani neposílá', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    const checks = wrapper.get('[data-test="jmhz-ordinary-profile"]').findAll('input[type="checkbox"]')
+    await checks[3].setValue(true)
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload).toBeDefined()
+    expect(payload).not.toHaveProperty('other_withholding_eligibility')
+  })
+
   /**
    * Zvýšená sazba § 5a odst. 1 písm. b) a c) platí jen doloženému zařazení.
    * Na podklad se karta proto ptá teprve tehdy, když si kategorii někdo

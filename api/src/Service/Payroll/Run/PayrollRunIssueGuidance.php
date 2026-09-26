@@ -77,7 +77,7 @@ final class PayrollRunIssueGuidance
         'tax_credit_evidence_invalid|tax_credit_evidence_unverified|disability_credit_conflict' => ['Podklady pro osobní slevu na dani nejsou platné nebo si odporují. V zákonné evidenci opravte druh slevy, dobu nároku a příslušný doklad.', 'statutory'],
         'tax_child_evidence_invalid|tax_child_evidence_unverified|tax_child_order_conflict|tax_child_shared_household_unverified' => ['Daňové zvýhodnění na dítě není jednoznačně doložené. U vyživovaných osob ověřte nárok, společnou domácnost, pořadí dítěte a období uplatnění.', 'dependants'],
         'tax_component_exemption_evidence_missing|income_component_exemption_evidence_unverified' => ['Osvobození mzdového příjmu od daně není doložené. V měsíčních vstupech doplňte podklad osvobození; bez něj příjem nelze považovat za osvobozený.', 'inputs'],
-        'other_withholding_eligibility_unverified' => ['Není ověřena účast na nemocenském pojištění z odměny. V podmínkách pracovního vztahu ji potvrďte podle skutečného nároku; ovlivňuje použití srážkové daně.', 'employment'],
+        'other_withholding_eligibility_unverified' => ['Kontrola pochází ze starší revize výpočtu, kdy se srážková daň řídila ověřením účasti na nemocenském pojištění z odměny. Dnes ji výpočet určuje sám podle druhu vztahu a úhrnu příjmů od plátce; mzdový běh přepočítejte.', 'runs'],
         'relationship_tax_classification_conflict' => ['Daňové zařazení pracovního vztahu si odporuje s jeho druhem nebo účastí na pojištění. Na kartě vztahu opravte tyto údaje.', 'employment'],
         'net_pay_result_missing_or_unverified|insurance_or_tax_result_requires_manual_review' => ['Čistou mzdu zatím nelze použít, protože výpočet daně nebo pojistného nebyl dokončen. Nejprve opravte konkrétní kontroly zákonného výpočtu v tomto mzdovém běhu.', 'runs'],
         'claim_register_evidence_incomplete' => ['Evidence pohledávek není úplná. V agendě Exekuce doplňte všechny doručené pohledávky a potvrďte úplnost jejich evidence.', 'enforcement'],
@@ -151,7 +151,6 @@ final class PayrollRunIssueGuidance
             if ($target === 'employment') {
                 $query['panel'] = 'employment_terms';
                 if (in_array('part_time_discount_weekly_working_time_missing', $parts, true)) $query['field'] = 'weekly_hours';
-                elseif (in_array('other_withholding_eligibility_unverified', $parts, true)) $query['field'] = 'other_withholding_eligibility';
                 elseif (in_array('employer_rate_category_unverified', $parts, true)) $query['field'] = 'social_employer_rate_category';
                 elseif (array_intersect(['part_time_discount_unverified', 'part_time_discount_relationship_kind_unsupported', 'part_time_discount_may_select_only_one_relationship_per_person'], $parts) !== []) $query['field'] = 'social_part_time_discount_reason';
             }

@@ -387,7 +387,6 @@ function hydrate(employment: PayrollEmployment) {
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
     tax_regime: terms.tax_regime,
-    other_withholding_eligibility: terms.other_withholding_eligibility ?? 'unverified',
     foreign_legislation_country_code: terms.foreign_legislation_country_code,
     a1_certificate_until: terms.a1_certificate_until,
     social_employer_rate_category: terms.social_employer_rate_category ?? 'ordinary',
