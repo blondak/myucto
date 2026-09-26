@@ -81,6 +81,13 @@ final class PayrollObligationSubjectFormatter
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
         ], true)) {
+            // Oznámení za jednu osobu (nástup, skončení, rodičovská) vede
+            // předmět jako `employment:{id}` — poslední segment je id vztahu,
+            // ne kód pojišťovny. Dřív z něj vznikla „zdravotní pojišťovna 236".
+            if (self::employmentId($subjectReference) !== null) {
+                return null;
+            }
+
             return self::insurerLabel($subjectReference);
         }
         if (str_starts_with($subjectReference, 'payroll_run:')) {

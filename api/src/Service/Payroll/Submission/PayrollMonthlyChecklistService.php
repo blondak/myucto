@@ -545,7 +545,8 @@ final readonly class PayrollMonthlyChecklistService
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW => $this->isdsAgendaDescription(
                 'XML nebo PDF podle toho, co pojišťovna přijímá',
-                PayrollObligationSubjectFormatter::humanSubject($agendaCode, $subjectReference),
+                PayrollObligationSubjectFormatter::humanSubject($agendaCode, $subjectReference)
+                    ?? 'zdravotní pojišťovna zaměstnance',
                 '/payroll/submissions/health',
                 $transport,
             ),
