@@ -139,6 +139,10 @@ interface AccountFormRow {
   verified_on: string | null
   verified_by: number | null
   row_version: number
+  /** Nový účet: ověření se zapíše hned po uložení karty, bez druhého kroku. */
+  verify_on_save?: boolean
+  verify_source?: PayrollPersonAccountVerificationSource
+  verify_on?: string
 }
 
 interface ProfileForm {
@@ -461,17 +465,92 @@ const payoutAllocationOptions = computed<SelectOption<PayrollPayoutAllocationKin
   { value: 'percentage', label: t('payroll.people.profile.payout_rules.allocation_kind.percentage') },
   { value: 'fixed', label: t('payroll.people.profile.payout_rules.allocation_kind.fixed') },
 ])
-// Cílem smí být jen už uložený účet — `account:<id>` musí existovat v době
-// zápisu pravidla, nový řádek účtu id dostane teprve uložením karty.
-const payoutAccountOptions = computed<{ value: number; label: string; secondary?: string }[]>(() =>
-  form.accounts
-    .filter(account => account.id !== undefined && account.is_active)
+/*
+ * `account:<id>` musí existovat v době zápisu pravidla a nový řádek účtu id
+ * dostane teprve uložením karty. Jediný nový účet se proto nabízí pod
+ * zástupnou hodnotou a `save()` ji po uložení karty nahradí skutečným id —
+ * jinak by šlo účet a pravidlo zadat jen na dvě uložení.
+ */
+const NEW_ACCOUNT_ID = -1
+const pendingNewAccount = computed<AccountFormRow | null>(() => {
+  const fresh = form.accounts.filter(account => !account.id && !account.deleted && account.is_active)
+
+  return fresh.length === 1 ? fresh[0] : null
+})
+const payoutAccountOptions = computed<{ value: number; label: string; secondary?: string }[]>(() => [
+  ...form.accounts
+    .filter(account => account.id !== undefined && account.is_active && !account.deleted)
     .map(account => ({
       value: account.id as number,
       label: account.label || account.bank_account_masked,
       secondary: account.bank_account_masked,
     })),
-)
+  ...(pendingNewAccount.value === null
+    ? []
+    : [{
+        value: NEW_ACCOUNT_ID,
+        label: pendingNewAccount.value.label.trim() || t('payroll.people.profile.new_account_option'),
+        secondary: t('payroll.people.profile.new_account_option'),
+      }]),
+])
+
+/**
+ * Přepnutí způsobu výplaty dotáhne i to, co z něj plyne: podíl hotovosti
+ * a pravidlo „zbytek čisté mzdy". Dřív zůstala hotovost 100 % i pravidlo
+ * „Hotově" a karta s výplatou na účet vyplácela dál hotově.
+ */
+function onPayoutMethodChange(method: PayrollPayoutMethod | null) {
+  const accounts = form.accounts.filter(account => account.is_active && !account.deleted)
+  if (method === 'bank') {
+    form.cash_allocation_basis_points = 0
+    if (accounts.length === 1) accounts[0].allocation_basis_points = 10000
+    const single = payoutAccountOptions.value.length === 1 ? payoutAccountOptions.value[0].value : null
+    let hasBankRule = false
+    for (const row of payoutRuleRows.value) {
+      if (!row.is_active) continue
+      if (row.destination_kind === 'cash' && row.allocation_kind === 'remainder') {
+        row.destination_kind = 'bank'
+        row.bank_account_id = single
+      }
+      if (row.destination_kind === 'bank') hasBankRule = true
+    }
+    if (!hasBankRule && !hasActivePayoutRule.value) {
+      addPayoutRule()
+      const added = payoutRuleRows.value[payoutRuleRows.value.length - 1]
+      added.destination_kind = 'bank'
+      added.bank_account_id = single
+    }
+  } else if (method === 'cash') {
+    form.cash_allocation_basis_points = 10000
+    for (const account of accounts) account.allocation_basis_points = 0
+    for (const row of payoutRuleRows.value) {
+      if (row.is_active && row.destination_kind === 'bank' && row.allocation_kind === 'remainder') {
+        row.destination_kind = 'cash'
+        row.bank_account_id = null
+      }
+    }
+  }
+}
+
+/**
+ * Bankovní pravidla bez skutečného účtu se po uložení karty napojí: zástupná
+ * hodnota nového účtu na jeho nové id, nevybraný účet na jediný aktivní.
+ */
+function resolvePendingRuleAccounts(newAccountId: number | null) {
+  const saved = form.accounts.filter(account => account.id !== undefined && account.is_active)
+  const only = saved.length === 1 ? saved[0].id as number : null
+  for (const row of payoutRuleRows.value) {
+    if (row.destination_kind !== 'bank') continue
+    if (row.bank_account_id === NEW_ACCOUNT_ID) row.bank_account_id = newAccountId ?? only
+    else if (row.bank_account_id === null) row.bank_account_id = only
+  }
+}
+
+function percentToBasisPoints(event: Event): number {
+  const value = Number((event.target as HTMLInputElement).value)
+
+  return Number.isFinite(value) ? Math.round(value * 100) : 0
+}
 const hasActivePayoutRule = computed(() => payoutRuleRows.value.some(row => row.is_active))
 const payoutProposalSummary = computed(() => {
   const proposed = payoutProposal.value?.rules[0]
@@ -552,6 +631,24 @@ function hydratePayoutRules(response: PayrollPayoutRulesResponse) {
   payoutRuleRows.value = response.rules.map(toPayoutRuleRow)
 }
 
+/**
+ * Po ověření účtu se přenačte jen návrh a příznak ověření u uložených pravidel.
+ * Neuložené úpravy pravidel zůstanou, a hláška „nemá ověřený účet" nevisí dál.
+ */
+async function refreshPayoutRuleStatus() {
+  try {
+    const response = await payrollApi.personPayoutRules(props.personId)
+    payoutRules.value = response.rules
+    payoutProposal.value = response.proposal
+    for (const row of payoutRuleRows.value) {
+      const stored = response.rules.find(rule => rule.id === row.id)
+      if (stored) row.destination_verified = stored.destination_verified
+    }
+  } catch {
+    // Stav pravidel je doplněk; ověření samo proběhlo.
+  }
+}
+
 async function loadPayoutRules() {
   try {
     hydratePayoutRules(await payrollApi.personPayoutRules(props.personId))
@@ -577,6 +674,9 @@ function formatPercent(value: number): string {
 function payoutAccountLabel(row: PayoutRuleFormRow): string {
   if (row.bank_account_id === null) {
     return t('payroll.people.profile.payout_rules.account_missing')
+  }
+  if (row.bank_account_id === NEW_ACCOUNT_ID) {
+    return pendingNewAccount.value?.label.trim() || t('payroll.people.profile.new_account_option')
   }
   const account = form.accounts.find(item => item.id === row.bank_account_id)
 
@@ -624,7 +724,9 @@ function payoutRuleDestinationReference(row: PayoutRuleFormRow): string | null {
     return row.settlement_account_code.trim().toUpperCase() || null
   }
 
-  return row.bank_account_id === null ? null : `account:${row.bank_account_id}`
+  return row.bank_account_id === null || row.bank_account_id === NEW_ACCOUNT_ID
+    ? null
+    : `account:${row.bank_account_id}`
 }
 
 function payoutRulePayload(row: PayoutRuleFormRow, isActive: boolean): PayrollPayoutRulePayload {
@@ -1018,8 +1120,26 @@ async function save() {
   if (saving.value) return
   saving.value = true
   try {
+    const previousAccountIds = new Set(
+      form.accounts.filter(account => account.id !== undefined).map(account => account.id),
+    )
+    const pending = pendingNewAccount.value
+    const pendingVerification = pending?.verify_on_save
+      ? {
+          verification_source: pending.verify_source ?? 'employee_confirmation',
+          verified_on: pending.verify_on ?? todayIso(),
+        }
+      : null
     const saved = await payrollApi.savePersonProfile(props.personId, payload())
     hydrate(saved)
+    const created = saved.accounts.filter(
+      account => !previousAccountIds.has(account.id) && account.is_active,
+    )
+    const newAccount = created.length === 1 ? created[0] : null
+    resolvePendingRuleAccounts(newAccount?.id ?? null)
+    if (newAccount !== null && pendingVerification !== null) {
+      await verifySavedAccount(newAccount.id, newAccount.row_version, pendingVerification)
+    }
     // Odkrytá hodnota po zápisu nemusí platit, takže se zahodí a případně
     // načte znovu.
     revealed.value = null
@@ -1036,6 +1156,29 @@ async function save() {
   } finally {
     clearPlaintextInputs()
     saving.value = false
+  }
+}
+
+/** Ověření nového účtu zadané rovnou ve formuláři; chyba nezahazuje uloženou kartu. */
+async function verifySavedAccount(
+  accountId: number,
+  rowVersion: number,
+  verification: VerificationForm,
+): Promise<void> {
+  try {
+    const verified = await payrollApi.verifyPersonAccount(props.personId, accountId, {
+      ...verification,
+      row_version: rowVersion,
+    })
+    const account = form.accounts.find(item => item.id === accountId)
+    if (account) {
+      account.verification_source = verified.verification_source ?? verification.verification_source
+      account.verified_on = verified.verified_on ?? verification.verified_on
+      account.verified_by = verified.verified_by ?? null
+      account.row_version = verified.row_version
+    }
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.verification_failed')))
   }
 }
 
@@ -1057,6 +1200,7 @@ async function verifyAccount(account: AccountFormRow) {
     account.verified_by = saved.verified_by ?? null
     account.row_version = saved.row_version
     toast.success(t('payroll.people.profile.account_verified'))
+    await refreshPayoutRuleStatus()
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.people.profile.verification_failed')))
   } finally {
@@ -1573,9 +1717,9 @@ onMounted(load)
 
       <div v-else class="space-y-6">
         <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <label :class="labelClass">{{ t('payroll.people.profile.payout_method') }}<SearchableSelect v-model="form.payout_method" class="mt-1" :options="payoutOptions" :clearable="false" :disabled="!canWrite" accent="payroll" data-test="payout-method" /></label>
+          <label :class="labelClass">{{ t('payroll.people.profile.payout_method') }}<SearchableSelect v-model="form.payout_method" class="mt-1" :options="payoutOptions" :clearable="false" :disabled="!canWrite" accent="payroll" data-test="payout-method" @update:model-value="onPayoutMethodChange" /></label>
           <!-- U zápočtu se nic nevyplácí, takže není co rozdělovat. -->
-          <label v-if="!isPartnerSettlement" :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }} <RequiredMark /><input v-model.number="form.cash_allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass" data-test="cash-allocation"></label>
+          <label v-if="!isPartnerSettlement" :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }} <RequiredMark /><input :value="form.cash_allocation_basis_points / 100" required type="number" min="0" max="100" step="0.01" :disabled="!canWrite" :class="inputClass" data-test="cash-allocation" @input="form.cash_allocation_basis_points = percentToBasisPoints($event)"></label>
           <p v-else :class="labelClass">
             {{ t('payroll.people.profile.cash_allocation') }}
             <span class="mt-1 block font-normal text-neutral-500">{{ t('payroll.people.profile.cash_allocation_settlement') }}</span>
@@ -1610,7 +1754,7 @@ onMounted(load)
             >
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.account_label') }} <RequiredMark /><input v-model="row.label" required :disabled="!canWrite" :class="inputClass"></label>
-                <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }} <RequiredMark /><input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
+                <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }} <RequiredMark /><input :value="row.allocation_basis_points / 100" required type="number" min="0" max="100" step="0.01" :disabled="!canWrite" :class="inputClass" data-test="account-allocation" @input="row.allocation_basis_points = percentToBasisPoints($event)"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_from') }} <RequiredMark /><DateInput v-model="row.effective_from" required :disabled="!canWrite" :class="inputClass" /></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.effective_to') }}<DateInput v-model="row.effective_to" :disabled="!canWrite" :class="inputClass" /></label>
                 <div v-if="row.bank_account_masked">
@@ -1632,6 +1776,16 @@ onMounted(load)
                 <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="row.is_active" type="checkbox" :disabled="!canWrite" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.profile.active') }}</label>
               </div>
 
+              <div v-if="!row.id && canWrite && !row.deleted" class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3" data-test="new-account-verification">
+                <label class="flex items-center gap-2 text-sm text-neutral-700">
+                  <input v-model="row.verify_on_save" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="verify-on-save">
+                  {{ t('payroll.people.profile.verify_on_save') }}
+                </label>
+                <div v-if="row.verify_on_save" class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <label :class="labelClass">{{ t('payroll.people.profile.verification_source_label') }}<SearchableSelect :model-value="row.verify_source ?? 'employee_confirmation'" class="mt-1" :options="verificationSourceOptions" :clearable="false" accent="payroll" @update:model-value="row.verify_source = $event ?? 'employee_confirmation'" /></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.verified_on') }} <RequiredMark /><DateInput :model-value="row.verify_on ?? todayIso()" required :class="inputClass" @update:model-value="row.verify_on = $event" /></label>
+                </div>
+              </div>
               <div v-if="row.id" class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>

@@ -1770,6 +1770,10 @@ final class Routes
                 [PayrollRegistrationAction::class, 'prepare'],
             );
             $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/current',
+                [PayrollRegistrationAction::class, 'current'],
+            );
+            $g->get(
                 '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
                 [PayrollRegistrationAction::class, 'a1Profile'],
             );

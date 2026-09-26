@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -53,6 +54,17 @@ final readonly class PayrollRegistrationSubmissionService
     public const CHECKLIST_ITEM_KEY = 'social_jmhz_registration';
 
     private const CHANNEL = 'vrep_apep';
+
+    /**
+     * Základní interakce, které vztah PŘIHLAŠUJÍ (P1, A1). Po živé přihlášce
+     * se druhá nezakládá; P10 (nenastoupení) po přijaté P1 je naopak
+     * zamýšlený další krok, proto v seznamu není.
+     */
+    private const REGISTERING_INTERACTIONS = [
+        'limited_pre_registration',
+        'direct_full_registration',
+        'full_registration_after_p1',
+    ];
     private const SUBJECT_TYPE = 'employment';
 
     /**
@@ -284,6 +296,19 @@ final readonly class PayrollRegistrationSubmissionService
                 );
             }
             $sourceHash = $probe['source_hash'];
+            if ($eventId === null && in_array(
+                $probe['interaction']->interaction,
+                self::REGISTERING_INTERACTIONS,
+                true,
+            )) {
+                $this->assertNoOtherLiveBaseRegistration(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $probe['interaction']->documentType,
+                    $sourceHash,
+                );
+            }
             $keys = $this->idempotencyKeys(
                 $supplierId,
                 $environment,
@@ -1106,6 +1131,93 @@ final readonly class PayrollRegistrationSubmissionService
         }
 
         return null;
+    }
+
+    /**
+     * Živé základní podání (P1/A1) vztahu pro kartu po načtení: bez něj karta
+     * po obnovení stránky nabízela „Připravit podání" znovu, i když přihláška
+     * už čekala ve frontě nebo odešla.
+     *
+     * @return array{
+     *   submission_id:int,agenda_code:string,status:string,created_at:string,
+     *   submitted_at:?string,sent:bool
+     * }|null
+     */
+    public function currentRegistration(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?array {
+        $this->requireContext($supplierId, $employmentId);
+        $live = $this->registrations->liveBaseRegistration(
+            $supplierId,
+            $environment,
+            $employmentId,
+        );
+        if ($live === null) {
+            return null;
+        }
+
+        return [
+            'submission_id' => $live['submission_id'],
+            'agenda_code' => $live['agenda_code'],
+            'status' => $live['status'],
+            'created_at' => $live['created_at'],
+            'submitted_at' => $live['submitted_at'],
+            'sent' => !in_array(
+                $live['status'],
+                PayrollSubmissionStateMachine::PRE_SUBMISSION_STATUSES,
+                true,
+            ),
+        ];
+    }
+
+    /**
+     * Druhá přihláška téhož vztahu se nezakládá. Stejná data vedou na replay
+     * existujícího podání (stejný otisk zdroje); s JINÝMI daty se dřív pokus
+     * o druhé podání k téže povinnosti zastavil až na unikátním klíči
+     * `uq_payroll_submissions_regular` jako chyba 500, bez rady, co dál.
+     */
+    private function assertNoOtherLiveBaseRegistration(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $agendaCode,
+        string $sourceHash,
+    ): void {
+        $live = $this->registrations->liveBaseRegistration(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $agendaCode,
+        );
+        if ($live === null
+            || hash_equals($live['source_snapshot_hash'], $sourceHash)
+        ) {
+            return;
+        }
+        $number = (string) $live['submission_id'];
+        if (in_array(
+            $live['status'],
+            PayrollSubmissionStateMachine::PRE_SUBMISSION_STATUSES,
+            true,
+        )) {
+            throw new PayrollRegistrationXmlException(
+                'registration_already_prepared',
+                'Přihláška k tomuto pracovnímu vztahu už je připravená ve '
+                . 'frontě (podání č. ' . $number . '). Druhou se nezakládá. '
+                . 'Otevřete ji v Mzdy → Podání a hlášení → Fronta a odešlete; '
+                . 'pokud se mezitím změnily údaje, připravené podání tam '
+                . 'nejdřív zrušte a přihlášku připravte znovu.',
+            );
+        }
+        throw new PayrollRegistrationXmlException(
+            'registration_already_filed',
+            'Přihláška k tomuto pracovnímu vztahu už odešla na ČSSZ (podání č. '
+            . $number . ', stav ' . $live['status'] . '). Druhá přihláška se '
+            . 'nepodává: změnu údajů nahlaste změnovým hlášením, chybu v '
+            . 'odeslané přihlášce opravným hlášením.',
+        );
     }
 
     /**

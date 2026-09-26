@@ -248,6 +248,51 @@ describe('PayrollPersonProfilePanel', () => {
     })
   })
 
+  it('hotově → na účet: nový účet, pravidlo i ověření jedním uložením', async () => {
+    mocks.personProfile.mockResolvedValue({
+      ...profile(),
+      payout_method: 'cash',
+      cash_allocation_basis_points: 10000,
+      accounts: [],
+    })
+    mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse([
+      payoutRule({ destination_kind: 'cash', destination_reference: null, destination_verified: null }),
+    ]))
+    const created = { ...profile().accounts[0], id: 9, verification_source: null, verified_on: null, verified_by: null, row_version: 1 }
+    mocks.savePersonProfile.mockResolvedValue({ ...profile(), accounts: [created] })
+    mocks.verifyPersonAccount.mockResolvedValue({ ...created, verification_source: 'employee_confirmation', verified_on: '2026-09-26', row_version: 2 })
+    mocks.updatePersonPayoutRule.mockResolvedValue({ rule: { ...payoutRule(), destination_reference: 'account:9', row_version: 3 } })
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    const addAccount = wrapper.findAll('button').find(item =>
+      item.text().includes('payroll.people.profile.add_account'))
+    await addAccount!.trigger('click')
+    await wrapper.get('[data-test="bank-account-plaintext"]').setValue('1000000005/0100')
+    await wrapper.get('[data-test="verify-on-save"]').setValue(true)
+    const method = wrapper.findAllComponents({ name: 'SearchableSelect' })
+      .find(component => component.attributes('data-test') === 'payout-method')
+    method!.vm.$emit('update:modelValue', 'bank')
+    await flushPromises()
+
+    expect(wrapper.get<HTMLInputElement>('[data-test="cash-allocation"]').element.value).toBe('0')
+    expect(wrapper.get<HTMLInputElement>('[data-test="account-allocation"]').element.value).toBe('100')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.savePersonProfile).toHaveBeenCalledWith(17, expect.objectContaining({
+      payout_method: 'bank',
+      cash_allocation_basis_points: 0,
+    }))
+    expect(mocks.verifyPersonAccount).toHaveBeenCalledWith(17, 9, expect.objectContaining({ row_version: 1 }))
+    expect(mocks.updatePersonPayoutRule).toHaveBeenCalledWith(17, 11, expect.objectContaining({
+      destination_kind: 'bank',
+      destination_reference: 'account:9',
+    }))
+    expect(mocks.error).not.toHaveBeenCalled()
+  })
+
   it('zobrazuje pouze maskované citlivé hodnoty', async () => {
     const wrapper = await mountedPanel()
 

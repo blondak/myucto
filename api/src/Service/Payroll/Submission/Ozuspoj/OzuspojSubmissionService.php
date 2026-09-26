@@ -281,8 +281,10 @@ final readonly class OzuspojSubmissionService
             employeeFirstName: $this->requiredIdentity($identity, 'first_name'),
             employeeLastName: $this->requiredIdentity($identity, 'last_name'),
             employeeBirthDate: $this->requiredIdentity($identity, 'birth_date'),
-            employeeBirthNumber: $identity['identifiers']['birth_number']
-                ?? $identity['identifiers']['ecp'],
+            employeeBirthNumber: \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                $identity['identifiers']['birth_number']
+                    ?? $identity['identifiers']['ecp'],
+            ),
             productName: $this->software->productName,
             productVersion: $this->software->productVersion,
         );
@@ -424,7 +426,7 @@ final readonly class OzuspojSubmissionService
         if ($digits === '') {
             throw new OzuspojException(
                 'ozuspoj_variable_symbol_missing',
-                'Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení → Firma a oznámení připravte znovu.',
+                'Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel u účtárny vztahu a oznámení připravte znovu.',
             );
         }
 

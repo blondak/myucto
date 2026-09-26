@@ -56,6 +56,8 @@ const props = defineProps<{
   canWriteDocuments?: boolean
   // Období, od kterého firma vede mzdy v MyÚčtu (`payroll_module_state.start_period`).
   payrollStartPeriod?: string | null
+  /** Zvýší ho karta osoby po uložení kmenových dat osoby (UI-26). */
+  personDataVersion?: number
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
@@ -67,6 +69,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useToast()
 const busy = ref(false)
+// Uložený vztah přijde od rodiče jako nový objekt: profil A1 v registračním
+// panelu se pak načte znovu z aktuálních podmínek (CZ-ISCO, místo výkonu).
+const employmentVersion = ref(0)
+watch(() => props.employment, (current, previous) => {
+  if (current !== previous) employmentVersion.value++
+})
+const registrationMasterDataVersion = computed(
+  () => (props.personDataVersion ?? 0) + employmentVersion.value,
+)
 const transitionDate = ref(todayIso())
 /** Skončení vztahu — jediný zdroj důvodu pro odhlášku A2 a potvrzení pro ÚP. */
 const terminationOverview = ref<PayrollTerminationOverview | null>(null)
@@ -1863,6 +1874,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       :person-id="employment.employee_id"
       :can-write="canWrite"
       :a2-prefill="terminationOverview?.a2_prefill ?? null"
+      :master-data-version="registrationMasterDataVersion"
     />
 
     <EmploymentJmhzIdentityPanel

@@ -185,9 +185,11 @@ final readonly class SicknessPayloadFactory
             insuredFirstName: self::requiredIdentity($identity, 'first_name'),
             insuredLastName: self::requiredIdentity($identity, 'last_name'),
             insuredTitle: null,
-            insuredBirthNumber: $identity['identifiers']['birth_number']
-                ?? $identity['identifiers']['ecp']
-                ?? null,
+            insuredBirthNumber: \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                $identity['identifiers']['birth_number']
+                    ?? $identity['identifiers']['ecp']
+                    ?? null,
+            ),
             insuredBirthDate: self::nullableText(
                 $identity['identity']['birth_date'] ?? null,
             ),
@@ -232,7 +234,8 @@ final readonly class SicknessPayloadFactory
         if ($digits === '') {
             throw new SicknessException(
                 'sickness_variable_symbol_missing',
-                'Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení → Firma '
+                'Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. '
+                . 'Doplňte ho v Nastavení mezd → Zaměstnavatel u účtárny vztahu '
                 . 'a podání připravte znovu.',
             );
         }
@@ -288,7 +291,8 @@ final readonly class SicknessPayloadFactory
             );
         }
 
-        return $value;
+        // Karta osoby drží RČ jako RRMMDD/XXXX, schéma ČSSZ bere jen číslice.
+        return (string) \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission($value);
     }
 
     /** @return list<array{from:string,to:string}> */

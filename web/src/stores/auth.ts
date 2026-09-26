@@ -20,6 +20,9 @@ export const useAuthStore = defineStore('auth', () => {
   const permissionCatalogVersion = ref('')
   const permissionsLoading = ref(false)
   const license = ref<LicenseSummary | null>(null)
+  // Fail-closed: dokud server výslovně nepotvrdí vývojovou instalaci, podává se
+  // jen do produkce a výběr testovacího prostředí se nenabízí.
+  const submissionTestEnvironmentAllowed = ref(false)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
   const domainContext = ref<DomainContext | null>(null)
@@ -121,6 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
       permissions.value = data.permissions || {}
       permissionCatalogVersion.value = data.permission_catalog_version || ''
       license.value = data.license || null
+      submissionTestEnvironmentAllowed.value = data.submission_test_environment_allowed === true
       lockedSession.value = null
       profileHydrated.value = true
       domainContext.value = data.domain_context && domainContext.value
@@ -257,6 +261,7 @@ export const useAuthStore = defineStore('auth', () => {
     requireMfa,
     loading,
     license,
+    submissionTestEnvironmentAllowed,
     lockedSession,
     profileHydrated,
     domainContext,

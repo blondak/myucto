@@ -377,6 +377,24 @@ describe('PeopleList toolbar and shared employee creation', () => {
       .toContain('payroll.people.next_step.action.ready')
   })
 
+  it('UI-24: after saving the statutory evidence refreshes the data-gap banners', async () => {
+    m.person.mockResolvedValue({
+      ...person(1, 'Alfa Aktivní', true, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    const callsBefore = m.person.mock.calls.length
+
+    wrapper.findComponent({ name: 'PayrollPersonStatutoryEvidencePanel' }).vm.$emit('saved')
+    await flushPromises()
+
+    expect(m.person.mock.calls.length).toBe(callsBefore + 1)
+    expect(m.person).toHaveBeenLastCalledWith(1)
+  })
+
   it('opens the reading summary first and keeps advanced editors collapsed', async () => {
     m.person.mockResolvedValue({
       ...person(1, 'Alfa Aktivní', true, false),

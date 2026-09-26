@@ -2,6 +2,7 @@
 import { computed, ref, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ICONS } from '@/components/ui/buttonStyles'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 
 export type EnvironmentValue = 'production' | 'test'
 
@@ -22,6 +23,9 @@ const props = withDefaults(defineProps<{
 const model = defineModel<EnvironmentValue>({ default: 'production' })
 
 const { t } = useI18n()
+
+// Mimo vývojovou instalaci se přepínač vůbec nevykreslí a model drží produkci.
+const { testAllowed } = useSubmissionEnvironment(model)
 
 // Zámek = ostrá data, výstražný trojúhelník = testovací prostředí. Obě cesty
 // musí jít poznat i bez čtení popisku, protože záměna prostředí stála
@@ -108,6 +112,7 @@ async function onKeydown(event: KeyboardEvent): Promise<void> {
 
 <template>
   <div
+    v-if="testAllowed"
     role="radiogroup"
     :aria-label="ariaLabel ?? t('common.environmentSwitch.legend')"
     :aria-disabled="disabled || undefined"
@@ -145,4 +150,17 @@ async function onKeydown(event: KeyboardEvent): Promise<void> {
       <span>{{ option.label }}</span>
     </button>
   </div>
+  <span
+    v-else
+    class="inline-flex items-center rounded-lg border border-success-300 bg-success-50 font-medium whitespace-nowrap text-success-800"
+    :class="sizeClass"
+    :title="t('common.environmentSwitch.productionOnlyHint')"
+    data-test="environment-switch-production-only"
+    data-environment="production"
+  >
+    <svg class="shrink-0" :class="iconClass" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" />
+    </svg>
+    <span>{{ productionLabel ?? t('common.environmentSwitch.production') }}</span>
+  </span>
 </template>

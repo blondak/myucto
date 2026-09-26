@@ -5,6 +5,8 @@ const m = vi.hoisted(() => ({
   submissionQueue: vi.fn(),
   dispatchSubmissionBatch: vi.fn(),
   detectPayrollChangesForCompany: vi.fn(),
+  submissionDetail: vi.fn(),
+  downloadSubmissionArtifact: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -13,6 +15,8 @@ vi.mock('@/api/payroll', () => ({
     submissionQueue: m.submissionQueue,
     dispatchSubmissionBatch: m.dispatchSubmissionBatch,
     detectPayrollChangesForCompany: m.detectPayrollChangesForCompany,
+    submissionDetail: m.submissionDetail,
+    downloadSubmissionArtifact: m.downloadSubmissionArtifact,
   },
 }))
 
@@ -93,7 +97,14 @@ function queueResponse(items: Record<string, unknown>[]): Record<string, unknown
 function mountPanel() {
   return mount(PayrollSubmissionQueuePanel, {
     props: { environment: 'test' },
-    global: { stubs: { EnvironmentSwitch: true, PaginationBar: true, EmptyState: true } },
+    global: {
+      stubs: {
+        EnvironmentSwitch: true,
+        PaginationBar: true,
+        EmptyState: true,
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+      },
+    },
   })
 }
 
@@ -106,6 +117,31 @@ describe('PayrollSubmissionQueuePanel', () => {
       results: [{ ok: true, submission_id: 1, dispatched: true, message: 'hotovo' }],
       summary: { requested: 1, sent: 1, failed: 0 },
     })
+  })
+
+  it('jméno vede na kartu zaměstnance a řádek ukáže soubory podání ke stažení', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({ submission_id: 5, subject_employee_id: 42 }),
+    ]))
+    const artifact = { id: 9, artifact_kind: 'request_xml', mime_type: 'application/xml', byte_size: 1200 }
+    m.submissionDetail.mockResolvedValue({
+      submission: { id: 5 },
+      artifacts: [artifact],
+      issues: [],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="queue-subject-link"]')
+    expect(link.text()).toContain('Testovací Zaměstnanec')
+    expect(link.attributes('data-to')).toContain('"person":"42"')
+
+    await wrapper.get('[data-test="queue-detail-toggle"]').trigger('click')
+    await flushPromises()
+    expect(m.submissionDetail).toHaveBeenCalledWith(5)
+    await wrapper.get('[data-test="queue-artifact-download"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(5, artifact)
   })
 
   /**

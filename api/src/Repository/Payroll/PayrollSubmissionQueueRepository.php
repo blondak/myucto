@@ -477,7 +477,7 @@ final class PayrollSubmissionQueueRepository
      * dohledává dotazem.
      *
      * @param list<int> $employmentIds
-     * @return array<int,string> `employment_id` → jméno
+     * @return array<int,array{full_name:string,employee_id:int}> `employment_id` → osoba
      */
     public function employmentNames(int $supplierId, array $employmentIds): array
     {
@@ -490,7 +490,7 @@ final class PayrollSubmissionQueueRepository
         }
         $placeholders = implode(', ', array_fill(0, count($employmentIds), '?'));
         $statement = $this->db->pdo()->prepare(
-            'SELECT employment.id, employee.full_name
+            'SELECT employment.id, employee.id AS employee_id, employee.full_name
                FROM payroll_employments employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -507,7 +507,10 @@ final class PayrollSubmissionQueueRepository
             }
             $name = trim((string) $row['full_name']);
             if ($name !== '') {
-                $names[(int) $row['id']] = $name;
+                $names[(int) $row['id']] = [
+                    'full_name' => $name,
+                    'employee_id' => (int) $row['employee_id'],
+                ];
             }
         }
 

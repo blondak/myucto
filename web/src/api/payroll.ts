@@ -3048,6 +3048,8 @@ export interface PayrollSubmissionQueueItem {
   subject_reference: string
   /** Jméno zaměstnance / účtárna / pojišťovna; `null`, když se ověřit nedá. */
   subject_label: string | null
+  /** Osoba, které se podání týká (vztah → zaměstnanec); proklik na kartu. */
+  subject_employee_id?: number | null
   period_start: string
   period_end: string
   obligation_kind: string
@@ -4279,6 +4281,16 @@ export interface PayrollRegistrationMissingItem {
 /** `full` = plná registrace A1 před nástupem místo výchozího P1. */
 export type PayrollRegistrationMode = 'auto' | 'full'
 
+export interface PayrollRegistrationCurrent {
+  submission_id: number
+  agenda_code: string
+  status: string
+  created_at: string
+  submitted_at: string | null
+  /** Podání už opustilo frontu (odesláno, zpracováno nebo přijato). */
+  sent: boolean
+}
+
 export interface PayrollRegistrationSubmission {
   submission_id: number
   obligation_id: number
@@ -4402,6 +4414,9 @@ export interface PayrollRegistrationA1Problem {
   field: string | null
   code: string
   message: string
+  /** Jazykově nezávislý tvar hlášky (missing, too_long, digits, country, date, status_*). */
+  message_key?: string | null
+  params?: Record<string, string | number>
 }
 
 export interface PayrollRegistrationA1Profile extends PayrollRegistrationA1ProfilePayload {
@@ -8147,6 +8162,14 @@ export const payrollApi = {
       },
     },
   ).then(response => response.data),
+  /** Živá přihláška vztahu (P1/A1) po načtení karty; `null` = žádná není. */
+  currentEmploymentRegistration: (
+    employmentId: number,
+    environment: 'test' | 'production' = 'production',
+  ) => api.get<{ submission: PayrollRegistrationCurrent | null }>(
+    `/payroll/submissions/registration/${employmentId}/current`,
+    { params: { environment } },
+  ).then(response => response.data.submission),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'production',

@@ -1102,7 +1102,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → SubmissionEnvironment → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -1111,7 +1111,10 @@ final class Bootstrap
         // všech 14 (i s jejich stromy závislostí) na KAŽDÝ request — naměřeno +7,2 ms
         // a +79 načtených tříd, i když request skončil na 401 hned v první vrstvě.
         // Pořadí zůstává beze změny; líné je jen vytvoření instance.
-        $app->addBodyParsingMiddleware();                            // innermost
+        // Politika prostředí podání potřebuje argumenty trefené routy i rozparsované
+        // tělo, proto jako jediná sedí UVNITŘ routingu a parsování.
+        $app->add(\MyInvoice\Middleware\SubmissionEnvironmentMiddleware::class);
+        $app->addBodyParsingMiddleware();
         $app->addRoutingMiddleware();
         $app->add(WebAuthnBodyLimitMiddleware::class);               // limit raw WebAuthn credential před JSON parsingem
         $app->add(CsrfMiddleware::class);                            // potřebuje session z Auth (bearer skip)

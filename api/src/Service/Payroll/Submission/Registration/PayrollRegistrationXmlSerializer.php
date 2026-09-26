@@ -77,12 +77,8 @@ final class PayrollRegistrationXmlSerializer
         if ($payload->interaction->documentType === 'REGZEC25'
             && $payload->interaction->actionCode === 1
         ) {
-            $a1 = $payload->identity->regzecA1;
-            PayrollRegistrationBusinessMatrix::requireActionVariant(
-                1,
-                $a1?->employment['activity_code'] ?? null,
-                $a1?->employment['relationship_detail_code'] ?? null,
-                $a1 !== null,
+            PayrollRegistrationBusinessMatrix::requireA1Variant(
+                $payload->identity->regzecA1,
             );
         }
         $eventData = $payload->eventSnapshot['data'] ?? null;

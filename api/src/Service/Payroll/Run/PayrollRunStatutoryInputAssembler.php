@@ -423,17 +423,17 @@ final class PayrollRunStatutoryInputAssembler
             $this->assertTermLegislationMatches($jurisdiction, $jurisdictionRow, $employments, $personReference);
         }
 
+        /*
+         * Slevu pracujícího důchodce (§ 7d zákona č. 589/1992 Sb.) uplatňuje
+         * zaměstnanec u zaměstnavatele sám; bez záznamu tedy není uplatněná.
+         * Aplikace nevede údaj „pobírá starobní důchod", takže nevyplněná
+         * evidence nesmí posílat každého zaměstnance do ručního posouzení.
+         * Stejné pravidlo drží editor evidence
+         * ({@see PayrollPersonStatutoryEvidenceRepository::blockers()}).
+         */
         $discountRow = $this->object(
             $socialEvidence['working_pensioner_discount'] ?? null,
-        );
-        if ($discountRow === null) {
-            $this->issue(
-                'social_insurance',
-                'working_pensioner_discount_evidence_missing',
-                $personReference,
-            );
-            return null;
-        }
+        ) ?? ['status' => SocialDiscountEvidence::NotClaimed->value];
         $discount = $this->enum(
             SocialDiscountEvidence::class,
             $discountRow['status'] ?? null,

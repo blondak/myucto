@@ -50,7 +50,13 @@ final class PayrollRegistrationReportableProfileBuilder
         }
         foreach (['birth_number', 'ecp', 'vcp'] as $field) {
             if (array_key_exists($field, $identifiers)) {
-                $values["identifiers.{$field}"] = $this->text($identifiers[$field]);
+                // Snímek podání drží RČ číslicemi, živá karta s lomítkem;
+                // bez sjednocení by vznikla falešná změna rodného čísla.
+                $values["identifiers.{$field}"] = $field === 'birth_number'
+                    ? \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                        $this->text($identifiers[$field]),
+                    )
+                    : $this->text($identifiers[$field]);
             }
         }
         if ($a1Profile !== null) {

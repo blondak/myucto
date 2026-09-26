@@ -10,6 +10,8 @@ import {
   type XmlzamResponsePreview,
 } from '@/api/payrollEnforcement'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import type { SubmissionEnvironment as EnvironmentValue } from '@/composables/useSubmissionEnvironment'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -17,7 +19,7 @@ import { useAuthStore } from '@/stores/auth'
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
-const environment = ref('production')
+const environment = ref<EnvironmentValue>('production')
 const candidates = ref<XmlzamCandidate[]>([])
 const requestDetail = ref<XmlzamRequestDetail | null>(null)
 const cases = ref<EnforcementCaseSummary[]>([])
@@ -224,13 +226,17 @@ watch(selectedCaseId, resetResponse)
           <h2 class="font-semibold text-neutral-900">1. {{ t('payroll.enforcement_cooperation.source_title') }}</h2>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement_cooperation.source_hint') }}</p>
         </div>
-        <label class="text-xs font-medium text-neutral-600">
+        <div class="text-xs font-medium text-neutral-600">
           {{ t('payroll.enforcement_cooperation.environment') }}
-          <select v-model="environment" :disabled="busy" class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-            <option value="production">{{ t('payroll.enforcement_cooperation.production') }}</option>
-            <option value="test">{{ t('payroll.enforcement_cooperation.test') }}</option>
-          </select>
-        </label>
+          <div class="mt-1">
+            <EnvironmentSwitch
+              v-model="environment"
+              :disabled="busy"
+              :production-label="t('payroll.enforcement_cooperation.production')"
+              :test-label="t('payroll.enforcement_cooperation.test')"
+            />
+          </div>
+        </div>
       </div>
       <p v-if="!canWrite" class="mt-3 rounded-md bg-warning-50 p-3 text-sm text-warning-700">{{ t('payroll.enforcement_cooperation.read_only') }}</p>
       <div v-if="candidates.length" class="mt-4 grid gap-3 lg:grid-cols-2">

@@ -35,7 +35,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         );
 
         $this->expectCode(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             static fn () => $resolver->resolve(
                 self::snapshot('CZ', 'REGZEC25'),
                 [
@@ -90,12 +90,12 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             actualStartOn: '2026-08-05',
         );
         $this->expectCode(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             static fn () => (new PayrollRegistrationXmlSerializer())
                 ->serialize($payload),
         );
         $this->expectCode(
-            'registration_regzec_a1_activity_missing',
+            'registration_regzec_a1_profile_missing',
             static fn () => (new PayrollRegistrationXmlValidator(
                 new PayrollRegistrationSchemaCatalog(),
             ))->validate($payload, '<REGZEC/>'),

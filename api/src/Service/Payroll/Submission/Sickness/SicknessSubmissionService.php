@@ -499,13 +499,17 @@ final readonly class SicknessSubmissionService
             return new NempriPerson(
                 $first,
                 $last,
+                // Evidence vyživovaných osob drží RČ jako RRMMDD/XXXX,
+                // NEMPRI (`rodneCislo`) bere jen číslice.
                 is_string($ciphertext) && $ciphertext !== ''
-                    ? $this->sensitiveData->reveal(
-                        $ciphertext,
-                        PayrollSensitiveField::PERSONAL_IDENTIFIER,
-                        $supplierId,
-                        $dependantId,
-                        PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
+                    ? \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                        $this->sensitiveData->reveal(
+                            $ciphertext,
+                            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                            $supplierId,
+                            $dependantId,
+                            PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
+                        ),
                     )
                     : null,
                 $this->nullableText($dependant['birth_date'] ?? null),

@@ -8,6 +8,8 @@ Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a 
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
+**Prostředí podání.** Podání ČSSZ, zdravotním pojišťovnám i datovou schránkou jdou vždy do ostrého provozu úřadu; výchozí volba je všude **Ostrý provoz**. Výběr testovacího prostředí se nabízí jen ve vývojové instalaci (v `cfg.php` `app.env = development`), jinde se místo přepínače zobrazí jen štítek ostrého provozu a server požadavek na test odmítne. Zvolený test je na obrazovce zvýrazněný varovnou barvou. Výjimkou je daňové podání na EPO: akce **Zkontrolovat na EPO** pošle výkaz jen ke kontrole chyb a je dostupná vždy.
+
 ## 85.3 Měsíční přehled — co následuje
 
 Záložka **Měsíční přehled** (a tentýž panel pod uzavřeným mzdovým během) skládá
@@ -520,6 +522,15 @@ Podejte ho bez zbytečného odkladu. Částečné přihlášení PREZEC P1 jde p
 od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registraci.
 Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
 1. 1. 2026; dřívější datum ohlásí kontrola profilu.
+
+**Náhled, příprava a stav přihlášky.** V části **Registrace vztahu na ČSSZ**
+jsou dvě samostatná tlačítka: **Zjistit, co se podá** ukáže náhled a lhůtu,
+**Připravit podání** je aktivní až po náhledu a teprve ono zakládá úřední
+podání. Uplynulou lhůtu náhled označí červeným upozorněním. Když už k vztahu
+existuje přihláška, karta to ukáže hned po otevření: připravenou nabídne
+tlačítkem **Otevřít ve frontě** místo nové přípravy, u odeslané nebo přijaté
+napíše její číslo a stav. Druhou přihlášku téhož vztahu aplikace nezaloží ani
+po změně údajů; změny se hlásí změnovým hlášením A3, chyby opravou A4.
 
 **Přihlášení před nástupem.** Zaměstnance je nutné přihlásit před nástupem,
 nejdřív osm dnů předem (§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.).

@@ -379,6 +379,15 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(wrapper.find('[data-test="health-notifications-empty"]').exists()).toBe(false)
   })
 
+  it('sdílené období ze záložky použije a jeho změnu pošle zpátky', async () => {
+    const wrapper = mount(PayrollHealthNotificationPanel, { props: { period: '2026-10' } })
+    await flushPromises()
+
+    expect(m.duties.mock.calls[0]?.[0]).toBe('2026-10')
+    await wrapper.find('[data-test="health-notifications-period"]').setValue('2026-11')
+    expect(wrapper.emitted('update:period')?.at(-1)).toEqual(['2026-11'])
+  })
+
   it('při selhání dalšího načtení nevynuluje už zobrazená data', async () => {
     const wrapper = mount(PayrollHealthNotificationPanel)
     await flushPromises()

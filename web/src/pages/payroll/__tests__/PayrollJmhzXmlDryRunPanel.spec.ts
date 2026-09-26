@@ -549,8 +549,9 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await wrapper.get('[data-test="jmhz-defer-confirm"]').trigger('click')
     await flushPromises()
 
+    // Odklad jde do prostředí panelu (výchozí produkce), ne natvrdo do testu.
     expect(m.defer).toHaveBeenCalledWith({
-      environment: 'test',
+      environment: 'production',
       preparationId: 77,
       employmentId: 12,
       officeId: 4,

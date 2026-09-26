@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 
 const m = vi.hoisted(() => ({
   get: vi.fn(),
@@ -86,6 +88,8 @@ async function openPanel(wrapper: ReturnType<typeof mountPanel>) {
 describe('EmploymentJmhzIdentityPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
+    useAuthStore().submissionTestEnvironmentAllowed = true
     m.get.mockResolvedValue(missing)
     m.save.mockResolvedValue({
       person_external_identifier: { created: true },

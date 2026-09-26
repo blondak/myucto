@@ -29,6 +29,7 @@ import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
+import { localPayrollPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -42,6 +43,18 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+/*
+ * Záložka zdravotního pojištění má JEDNO období pro povinnosti, přehled
+ * o platbě i hlášení pojišťovnám. Oznámení běží v osmidenních lhůtách od
+ * události, proto se otevírá na dnešním měsíci; `?period=RRRR-MM` z karty
+ * osoby má přednost.
+ */
+const routedHealthPeriod = route.query.period
+const healthPeriod = ref(
+  typeof routedHealthPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedHealthPeriod)
+    ? routedHealthPeriod
+    : localPayrollPeriod(),
+)
 /*
  * „Co mám tenhle měsíc udělat" je ta úplně první otázka, se kterou účetní na
  * stránku přichází — proto je Měsíční přehled výchozí záložka. Dřív tu byl
@@ -417,8 +430,12 @@ onMounted(loadInboxBadge)
       nezávisí, proto stojí mimo společný skeleton.
     -->
     <template v-else-if="activeTab === 'health'">
-      <PayrollHealthNotificationPanel />
-      <PayrollSubmissionOverviewPanel v-model:environment="environment" mode="health" />
+      <PayrollHealthNotificationPanel v-model:period="healthPeriod" />
+      <PayrollSubmissionOverviewPanel
+        v-model:environment="environment"
+        v-model:period="healthPeriod"
+        mode="health"
+      />
     </template>
 
     <div v-else-if="loading" class="space-y-4">

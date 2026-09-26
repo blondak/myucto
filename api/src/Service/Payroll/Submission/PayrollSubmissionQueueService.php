@@ -136,6 +136,10 @@ final class PayrollSubmissionQueueService
                 'blocked_reason' => $blockedReason,
             ];
             $item['subject_label'] = $this->subjectLabel($item, $names);
+            $subjectEmploymentId = self::employmentIdIn((string) $item['subject_reference']);
+            $item['subject_employee_id'] = $subjectEmploymentId === null
+                ? null
+                : ($names[$subjectEmploymentId]['employee_id'] ?? null);
             $item['blocking_issue_count'] = $issueCounts[$submissionId] ?? 0;
             $decorated[] = $item;
         }
@@ -496,14 +500,14 @@ final class PayrollSubmissionQueueService
 
     /**
      * @param array<string,mixed> $row
-     * @param array<int,string> $employmentNames
+     * @param array<int,array{full_name:string,employee_id:int}> $employmentNames
      */
     private function subjectLabel(array $row, array $employmentNames): ?string
     {
         $reference = (string) $row['subject_reference'];
         $employmentId = self::employmentIdIn($reference);
         if ($employmentId !== null && isset($employmentNames[$employmentId])) {
-            return $employmentNames[$employmentId];
+            return $employmentNames[$employmentId]['full_name'];
         }
 
         // Zbytek (účtárna, pojišťovna) umí sdílený formátovač; kde nezná
@@ -516,8 +520,10 @@ final class PayrollSubmissionQueueService
 
     private static function employmentIdIn(string $subjectReference): ?int
     {
+        // Registrace, OZUSPOJ a dávky nemocenského vedou vztah jako
+        // `payroll_employment:{id}`, ELDP a ZP jako `employment:{id}`.
         if (preg_match(
-            '/^employment:([1-9][0-9]*)$/D',
+            '/^(?:payroll_)?employment:([1-9][0-9]*)$/D',
             $subjectReference,
             $matches,
         ) !== 1) {

@@ -187,6 +187,8 @@ export interface MeResponse extends AuthSessionContract {
   permission_catalog_version: string
   license?: LicenseSummary
   domain_context?: DomainContext | null
+  /** Smí se podávat do testovacího prostředí úřadů? Jen ve vývojové instalaci. */
+  submission_test_environment_allowed?: boolean
 }
 
 export interface DomainLoginStart {

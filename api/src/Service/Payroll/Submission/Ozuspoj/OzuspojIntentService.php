@@ -276,7 +276,7 @@ final readonly class OzuspojIntentService
         if ($code < 100 || $code > 999) {
             throw new OzuspojException(
                 'ozuspoj_ossz_code_missing',
-                'Firma nemá vyplněný kód místně příslušné OSSZ. Doplňte ho v Nastavení → Firma a oznámení podejte znovu.',
+                'Zaměstnavatel nemá vyplněný kód místně příslušné OSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel a oznámení podejte znovu.',
             );
         }
 
