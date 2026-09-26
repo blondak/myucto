@@ -126,11 +126,15 @@ final class PayrollPersonStatutoryEvidenceRepository
      * `timeline` říká, jestli řada musí pokrývat čas beze zbytku
      * (`contiguous`, výchozí), nebo jestli je díra legitimní stav (`sparse`).
      *
+     * `granularity` říká, jestli se účinnost zadává po celých měsících
+     * (`month`, výchozí), nebo po dnech (`day`), viz `assertTimeline()`.
+     *
      * @var array<string, array{
      *     section:string,
      *     collection:string,
      *     kind:'interval'|'month',
      *     timeline?:'contiguous'|'sparse',
+     *     granularity?:'month'|'day',
      *     fields:list<string>
      * }>
      */
@@ -151,6 +155,8 @@ final class PayrollPersonStatutoryEvidenceRepository
         'social_discount_claims',
         'health_coverages',
         'health_month_evidence',
+        'health_minimum_reductions',
+        'health_other_employer_bases',
     ];
 
     private const EDITABLE = [
@@ -224,6 +230,50 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'top_up_responsibility_evidence_reference',
                 'selected_top_up_employer_reference',
                 'selected_top_up_employer_evidence_reference',
+            ],
+        ],
+        /*
+         * Výjimky z minimálního vyměřovacího základu zdravotního pojištění
+         * (§ 3 odst. 8 a 9 zákona č. 592/1992 Sb.).
+         *
+         * Do téhle sekce dřív nevedla žádná zapisovací cesta: výpočet (tabulku
+         * čte HealthMinimumResolver přes snímek běhu) výjimky znal, ale zadat je
+         * nešlo. Státnímu pojištěnci, držiteli ZTP/P nebo OSVČ platící zálohy
+         * z minima proto mzda tiše dorovnávala pojistné do minima, které
+         * nedluží.
+         *
+         * Řada je `sparse` (výjimka je stav, který většina lidí nemá) a dělí se
+         * podle důvodu; překryv téhož důvodu odmítá validátor. Účinnost jde
+         * zadat po DNECH: § 3 odst. 9 písm. c) snižuje minimum poměrně podle
+         * kalendářních dnů, kdy se osoba stala státním pojištěncem nebo
+         * držitelem průkazu ZTP či ZTP/P, a HealthMinimumResolver po dnech
+         * počítá. Celoměsíční důvody (OSVČ, pěstoun: § 3 odst. 8 „po celé
+         * rozhodné období") hlídá resolver, ne zápis.
+         */
+        'health_minimum_reductions' => [
+            'section' => 'health',
+            'collection' => 'minimum_reductions',
+            'kind' => 'interval',
+            'timeline' => 'sparse',
+            'granularity' => 'day',
+            'fields' => ['reason', 'evidence_reference'],
+        ],
+        /*
+         * Vyměřovací základ u jiného zaměstnavatele za měsíc (§ 3 odst. 10:
+         * minimum se posuzuje z úhrnu základů a doplatek jde přes zvoleného
+         * zaměstnavatele). Měsíční evidence se na tyhle řádky odkazuje volbou
+         * plátce doplatku, takže se validují v jednom plánu s ní.
+         */
+        'health_other_employer_bases' => [
+            'section' => 'health',
+            'collection' => 'other_employer_bases',
+            'kind' => 'month',
+            'fields' => [
+                'employer_reference',
+                'assessment_base_minor_units',
+                'employment_from',
+                'employment_to',
+                'evidence_reference',
             ],
         ],
     ];
@@ -392,9 +442,8 @@ final class PayrollPersonStatutoryEvidenceRepository
             // a odejít ho otevřít jinam. Dotaz je stejně tak jako tak jeden.
             'frozen_runs' => $this->frozenRuns($supplierId, $frozenThrough),
             'sections' => $sections,
-            // Volba plátce doplatku minima se odkazuje na vyměřovací základ
-            // u jiného zaměstnavatele. Ten se tady needituje, ale bez jeho
-            // seznamu by uživatel v UI vybíral referenci naslepo.
+            // Starší klienti četli základy u jiného zaměstnavatele odsud,
+            // dokud nebyly editovatelnou sekcí (`health_other_employer_bases`).
             'other_employer_bases' => $this->rows(
                 sprintf(
                     'SELECT %s FROM %s WHERE supplier_id = ? AND employee_id = ?
@@ -436,7 +485,8 @@ final class PayrollPersonStatutoryEvidenceRepository
      * 4. Účinnost se zadává po celých měsících. Čtecí cesta totiž vyhodnocuje
      *    evidenci k prvnímu dni měsíce (daně) nebo přes celý kalendářní měsíc
      *    (pojistné), takže změna uprostřed měsíce by se buď ztratila, nebo by
-     *    ve snímku vyrobila dvě současně platné verze.
+     *    ve snímku vyrobila dvě současně platné verze. Výjimkou jsou výjimky
+     *    z minima zdravotního pojištění, které se čtou po dnech (viz EDITABLE).
      *
      * @param array<string,mixed> $payload
      * @return array<string,mixed>
@@ -484,11 +534,11 @@ final class PayrollPersonStatutoryEvidenceRepository
                         $key,
                         $plans[$key],
                         ($spec['timeline'] ?? 'contiguous') === 'contiguous',
+                        ($spec['granularity'] ?? 'month') === 'month',
                     );
                 }
             }
             $this->assertPlannedEvidenceIsValid(
-                $supplierId,
                 $employeeId,
                 $plans,
                 $effectiveOn,
@@ -841,13 +891,18 @@ final class PayrollPersonStatutoryEvidenceRepository
      * zmrazeném období), by jinak nešlo obejít a stránka by se stala
      * nepoužitelnou právě pro data, kvůli kterým vznikla.
      *
-     * Zarovnání na celé měsíce platí pro každou řadu; navazování jen pro tu,
-     * která musí pokrývat čas beze zbytku (`$contiguous`).
+     * Zarovnání na celé měsíce platí pro řadu zadávanou po měsících
+     * (`$monthAligned`); navazování jen pro tu, která musí pokrývat čas beze
+     * zbytku (`$contiguous`).
      *
      * @param list<array<string,mixed>> $plan
      */
-    private function assertTimeline(string $key, array $plan, bool $contiguous): void
-    {
+    private function assertTimeline(
+        string $key,
+        array $plan,
+        bool $contiguous,
+        bool $monthAligned = true,
+    ): void {
         $rows = $plan;
         usort(
             $rows,
@@ -858,7 +913,7 @@ final class PayrollPersonStatutoryEvidenceRepository
         foreach ($rows as $row) {
             $from = (string) $row['effective_from'];
             $to = $row['effective_to'] === null ? null : (string) $row['effective_to'];
-            if ($row['touched'] === true) {
+            if ($row['touched'] === true && $monthAligned) {
                 $this->assertMonthAligned($key, $from, $to);
             }
             if (!$contiguous) {
@@ -934,13 +989,14 @@ final class PayrollPersonStatutoryEvidenceRepository
      * každému začátku účinnosti — každý plánovaný řádek tak projde svou
      * typovou kontrolou aspoň jednou. Kolekce, do kterých editor nepíše, jdou
      * do kontroly prázdné: jinak by rozbitý řádek jiné agendy (třeba nároku na
-     * dítě) blokoval opravu prohlášení k dani. Výjimkou jsou základy u jiného
-     * zaměstnavatele — na ty se měsíční evidence přímo odkazuje.
+     * dítě) blokoval opravu prohlášení k dani. Základy u jiného zaměstnavatele,
+     * na které se měsíční evidence odkazuje, jsou editovatelná sekce, takže
+     * jdou do kontroly v PLÁNOVANÉ podobě. Volba plátce doplatku tak může
+     * ukazovat na základ zapsaný týmž uložením.
      *
      * @param array<string,list<array<string,mixed>>> $plans
      */
     private function assertPlannedEvidenceIsValid(
-        int $supplierId,
         int $employeeId,
         array $plans,
         string $effectiveOn,
@@ -950,14 +1006,7 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'coverages' => [],
                 'minimum_reductions' => [],
                 'month_evidence' => [],
-                'other_employer_bases' => $this->rows(
-                    sprintf(
-                        'SELECT %s FROM %s WHERE supplier_id = ? AND employee_id = ?',
-                        self::COLLECTIONS['health']['other_employer_bases']['columns'],
-                        self::COLLECTIONS['health']['other_employer_bases']['table'],
-                    ),
-                    [$supplierId, $employeeId],
-                ),
+                'other_employer_bases' => [],
             ],
             'income_tax' => [
                 'declarations' => [],
@@ -1248,6 +1297,12 @@ final class PayrollPersonStatutoryEvidenceRepository
                 $blockers[] = 'health_insurer_evidence_unverified';
             }
         }
+        foreach ($snapshot['health']['minimum_reductions'] ?? [] as $reduction) {
+            if (is_array($reduction) && ($reduction['reason'] ?? null) === 'unverified') {
+                $blockers[] = 'health_minimum_reduction_unverified';
+                break;
+            }
+        }
 
         return $blockers;
     }
@@ -1385,6 +1440,11 @@ final class PayrollPersonStatutoryEvidenceRepository
                 continue;
             }
             $value = $row[$field] ?? null;
+            // Celé číslo (vyměřovací základ v haléřích) přichází z editoru
+            // i od serverových volajících, kteří posílají zpět řádky editorView.
+            if (is_int($value)) {
+                $value = (string) $value;
+            }
             if ($value !== null && !is_string($value)) {
                 throw new InvalidArgumentException(sprintf(
                     'Pole „%s“ v %d. záznamu evidence „%s“ musí být text nebo null.',

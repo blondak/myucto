@@ -172,6 +172,34 @@ function validatorRejection(
       return 'Doklad k volbě zaměstnavatele vyžaduje zvoleného zaměstnavatele.'
     }
   }
+  if (section === 'health_minimum_reductions') {
+    const reason = value('reason')
+    if (reason === null || ![
+      'state_insured', 'ztp_or_ztp_p', 'pension_age_without_pension',
+      'sickness_care_or_quarantine', 'osvc_minimum_advance', 'foster_reward_only', 'unverified',
+    ].includes(reason)) {
+      return 'Pole reason musí být z číselníku.'
+    }
+    if (reason === 'unverified' && value('evidence_reference') !== null) {
+      return 'Neověřená evidence redukce minima nesmí nést důkaz.'
+    }
+  }
+  if (section === 'health_other_employer_bases') {
+    const reference = value('employer_reference')
+    if (reference === null || !canonical.test(reference)) {
+      return 'Pole employer_reference musí být kanonická reference.'
+    }
+    const base = value('assessment_base_minor_units')
+    if (base === null || !/^\d+$/.test(base)) {
+      return 'Pole assessment_base_minor_units musí být celé číslo.'
+    }
+    const from = value('employment_from')
+    const to = value('employment_to')
+    if (from === null) return 'Pole employment_from musí být datum.'
+    if (to !== null && to < from) {
+      return 'Konec vztahu u jiného zaměstnavatele předchází jeho začátku.'
+    }
+  }
 
   return null
 }
@@ -190,6 +218,8 @@ function emptyEvidence(overrides: Partial<PayrollStatutoryEvidence> = {}): Payro
       social_discount_claims: [],
       health_coverages: [],
       health_month_evidence: [],
+      health_minimum_reductions: [],
+      health_other_employer_bases: [],
     },
     other_employer_bases: [],
     blockers: [
@@ -223,6 +253,8 @@ function filledEvidence(): PayrollStatutoryEvidence {
       social_discount_claims: [],
       health_coverages: [],
       health_month_evidence: [],
+      health_minimum_reductions: [],
+      health_other_employer_bases: [],
     },
   })
 }
@@ -240,6 +272,12 @@ async function startEditing(canWrite = true) {
   const wrapper = await mounted(canWrite)
   await wrapper.get('[data-test="start-statutory-evidence"]').trigger('click')
   return wrapper
+}
+
+/** Panel se otevírá k aktuálnímu měsíci; měsíční řádky mu musí odpovídat. */
+function currentMonthStart(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
 }
 
 /** Poslední tělo poslané na server; test si z něj vezme jeden řádek sekce. */
@@ -381,6 +419,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       'social_discount_claims',
       'health_coverages',
       'health_month_evidence',
+      'health_minimum_reductions',
     ]) {
       await wrapper.get(`[data-test="add-${section}"]`).trigger('click')
     }
@@ -906,5 +945,154 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     await mounted()
 
     expect(mocks.employerSettings).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Výjimky z minima ZP (§ 3 odst. 8 a 9 z. 592/1992) dřív na kartě osoby
+   * vůbec nebyly, mzda pak dorovnávala pojistné do minima, které se nedluží.
+   */
+  it('výjimku z minima zdravotního pojištění jde zadat s přesným dnem, důvodem a dokladem', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-health_minimum_reductions"]').trigger('click')
+
+    const reasons = wrapper.get('[data-test="health_minimum_reductions-0-reason"]')
+      .findAll('option').map(option => option.attributes('value'))
+    expect(reasons).toContain('state_insured')
+    expect(reasons).toContain('ztp_or_ztp_p')
+    expect(reasons).toContain('osvc_minimum_advance')
+
+    await wrapper.get('[data-test="health_minimum_reductions-0-reason"]').setValue('ztp_or_ztp_p')
+    // Výjimka začíná uprostřed měsíce. Minimum se krátí po dnech, takže to
+    // formulář nesmí hlásit jako chybu „jen celé měsíce".
+    await wrapper.get('[data-test="health_minimum_reductions-0-effective_from"]').setValue('2026-08-10')
+    await flushPromises()
+    expect(wrapper.find('[data-test="issues-health_minimum_reductions-0"]').exists()).toBe(false)
+    expect(
+      wrapper.get('[data-test="health_minimum_reductions-0-evidence_reference-reason"]')
+        .findAll('option').map(option => option.attributes('value')),
+    ).toEqual(['', 'minimum:ztp-card', 'custom'])
+    await wrapper.get('[data-test="health_minimum_reductions-0-evidence_reference-reason"]')
+      .setValue('minimum:ztp-card')
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    const row = savedRow('health_minimum_reductions')
+    expect(row).toMatchObject({
+      reason: 'ztp_or_ztp_p',
+      evidence_reference: 'minimum:ztp-card',
+      effective_from: '2026-08-10',
+      effective_to: null,
+    })
+    expect(validatorRejection('health_minimum_reductions', row)).toBeNull()
+  })
+
+  it('bez výjimky z minima nehlásí chybějící údaj a sekce zůstane sbalená', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="current-health_minimum_reductions"]').text())
+      .toContain('payroll.people.statutory_evidence.current_no_exemption')
+    expect(wrapper.get('[data-test="history-health_minimum_reductions"]').attributes('open'))
+      .toBeUndefined()
+    // Nápověda vysvětluje, které výjimky existují a co výpočet odvodí sám.
+    expect(wrapper.get('[data-test="section-health_minimum_reductions"]').text())
+      .toContain('payroll.people.statutory_evidence.section_hint.health_minimum_reductions')
+  })
+
+  it('neověřenou výjimku ukáže jako blokující stav', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      blockers: ['health_minimum_reduction_unverified'],
+      sections: {
+        ...emptyEvidence().sections,
+        health_minimum_reductions: [{
+          id: 3, row_version: 1, reason: 'unverified', evidence_reference: null,
+          evidence_note: null, effective_from: '2026-08-01', effective_to: null,
+        }],
+      },
+    }))
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="statutory-evidence-blockers"]').text())
+      .toContain('payroll.people.statutory_evidence.blocker.health_minimum_reduction_unverified')
+    expect(wrapper.get('[data-test="history-health_minimum_reductions"]').attributes('open'))
+      .toBeDefined()
+  })
+
+  it('základ u jiného zaměstnavatele zadá v korunách, uloží v haléřích a hned ho nabídne jako plátce doplatku', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-health_other_employer_bases"]').trigger('click')
+
+    const issues = wrapper.get('[data-test="issues-health_other_employer_bases-0"]').text()
+    expect(issues).toContain('payroll.people.statutory_evidence.issue.reference_required')
+    expect(issues).toContain('payroll.people.statutory_evidence.issue.amount_required')
+
+    await wrapper.get('[data-test="health_other_employer_bases-0-employer_reference"]')
+      .setValue('zamestnavatel:firma-b')
+    await wrapper.get('[data-test="health_other_employer_bases-0-assessment_base_minor_units"]')
+      .setValue('15 000,50')
+    expect(wrapper.find('[data-test="issues-health_other_employer_bases-0"]').exists()).toBe(false)
+
+    // Volba plátce doplatku vidí základ zapsaný ve stejné úpravě.
+    await wrapper.get('[data-test="add-health_month_evidence"]').trigger('click')
+    const employers = wrapper.get('[data-test="health_month_evidence-0-selected_top_up_employer_reference"]')
+      .findAll('option').map(option => option.attributes('value'))
+    expect(employers).toContain('zamestnavatel:firma-b')
+    await wrapper.get('[data-test="health_month_evidence-0-selected_top_up_employer_reference"]')
+      .setValue('zamestnavatel:firma-b')
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    const base = savedRow('health_other_employer_bases')
+    expect(base).toMatchObject({
+      employer_reference: 'zamestnavatel:firma-b',
+      assessment_base_minor_units: '1500050',
+      period_start: currentMonthStart(),
+      employment_from: currentMonthStart(),
+    })
+    expect(validatorRejection('health_other_employer_bases', base)).toBeNull()
+    expect(savedRow('health_month_evidence')).toMatchObject({
+      selected_top_up_employer_reference: 'zamestnavatel:firma-b',
+    })
+  })
+
+  it('neplatnou částku pojmenuje a uložení zablokuje, místo tiché nuly', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-health_other_employer_bases"]').trigger('click')
+    await wrapper.get('[data-test="health_other_employer_bases-0-employer_reference"]')
+      .setValue('zamestnavatel:firma-b')
+    await wrapper.get('[data-test="health_other_employer_bases-0-assessment_base_minor_units"]')
+      .setValue('15,000,5')
+
+    expect(wrapper.get('[data-test="issues-health_other_employer_bases-0"]').text())
+      .toContain('payroll.people.statutory_evidence.issue.amount_invalid')
+    // Rozepsaný text zůstane, ať je vidět, co opravit.
+    expect(
+      (wrapper.get('[data-test="health_other_employer_bases-0-assessment_base_minor_units"]')
+        .element as HTMLInputElement).value,
+    ).toBe('15,000,5')
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.saveStatutoryEvidence).not.toHaveBeenCalled()
+  })
+
+  it('uložený základ ukáže v přehledu s částkou', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      sections: {
+        ...emptyEvidence().sections,
+        health_other_employer_bases: [{
+          id: 4, row_version: 1, period_start: currentMonthStart(),
+          employer_reference: 'zamestnavatel:firma-b', assessment_base_minor_units: 1_500_000,
+          employment_from: '2026-01-01', employment_to: null, evidence_reference: null,
+          evidence_note: null,
+        }],
+      },
+    }))
+    const wrapper = await mounted()
+
+    const current = wrapper.get('[data-test="current-health_other_employer_bases"]').text()
+    expect(current).toContain('zamestnavatel:firma-b')
+    expect(current).toMatch(/15\s000/)
   })
 })

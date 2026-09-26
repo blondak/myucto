@@ -11,7 +11,7 @@ import {
 } from '@/api/payroll'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import { useAuthStore } from '@/stores/auth'
@@ -21,7 +21,9 @@ import {
   currentRow,
   currentRows,
   CUSTOM_REASON,
+  crownsToMinorUnits,
   defaultRow,
+  minorUnitsToCrowns,
   evidenceDetailFields,
   primaryFields,
   reasonLabelKey,
@@ -158,8 +160,12 @@ const correctableRuns = computed<PayrollStatutoryEvidenceFrozenRun[]>(() =>
       : auth.canWrite('payroll.review'))),
 )
 
-/** Reference na základy u jiného zaměstnavatele — volba plátce doplatku minima. */
-const otherEmployerBases = computed(() => evidence.value?.other_employer_bases ?? [])
+/**
+ * Reference na základy u jiného zaměstnavatele pro volbu plátce doplatku minima.
+ * Bere se z rozepsané sekce, ne z uloženého stavu: základ i volba plátce jdou
+ * zapsat jedním uložením a server je validuje spolu.
+ */
+const otherEmployerBases = computed(() => drafts.value.health_other_employer_bases ?? [])
 
 /**
  * Zvolit lze jen zaměstnavatele, který má za TENTÝŽ měsíc doložený vyměřovací
@@ -252,8 +258,19 @@ function summaryLabel(section: StatutorySectionSpec): string {
   const rows = effectiveRows(section)
   if (rows.length === 0) {
     return t(section.optional === true
-      ? 'payroll.people.statutory_evidence.current_none_claimed'
+      ? `payroll.people.statutory_evidence.${section.emptyKey ?? 'current_none_claimed'}`
       : 'payroll.people.statutory_evidence.current_missing')
+  }
+  if (section.summaryRaw === true) {
+    return rows
+      .map((row) => {
+        const reference = statutoryText(row, section.summaryKey)
+        const base = statutoryText(row, 'assessment_base_minor_units')
+        return /^\d+$/.test(base)
+          ? `${reference} (${formatMoneyMinor(Number(base))})`
+          : reference
+      })
+      .join(', ')
   }
   return rows
     .map(row => t(
@@ -261,6 +278,25 @@ function summaryLabel(section: StatutorySectionSpec): string {
       + statutoryText(row, section.summaryKey),
     ))
     .join(', ')
+}
+
+/**
+ * Rozepsaný text částky. Pole ukazuje koruny, řádek nese haléře. Bez
+ * vlastního textu by se neplatný vstup („12,3,4") při překreslení ztratil
+ * a uživatel by neviděl, co opravit.
+ */
+const moneyDrafts = reactive(new WeakMap<PayrollStatutoryEvidenceRow, Record<string, string>>())
+
+function moneyText(row: PayrollStatutoryEvidenceRow, key: string): string {
+  return moneyDrafts.get(row)?.[key] ?? minorUnitsToCrowns(statutoryText(row, key))
+}
+
+function onMoneyInput(row: PayrollStatutoryEvidenceRow, key: string, event: Event) {
+  const typed = (event.target as HTMLInputElement).value
+  moneyDrafts.set(row, { ...(moneyDrafts.get(row) ?? {}), [key]: typed })
+  // Neplatný vstup se do řádku propíše tak, jak je; formulář ho nahlásí
+  // (`amount_invalid`) a uložení zablokuje; tichá nula by lhala.
+  row[key] = typed.trim() === '' ? null : (crownsToMinorUnits(typed) ?? typed)
 }
 
 /** Doplněk přehledu — u zdravotního pojištění pojišťovna, jinak nic. */
@@ -879,6 +915,30 @@ onMounted(() => {
                           :value="reference"
                         >{{ reference }}</option>
                       </select>
+
+                      <input
+                        v-else-if="field.kind === 'reference'"
+                        :value="fieldValue(row, field.key)"
+                        type="text"
+                        :disabled="!editing || saving || isFrozen(section, row)"
+                        :placeholder="t('payroll.people.statutory_evidence.employer_reference_placeholder')"
+                        :data-test="`${section.key}-${index}-${field.key}`"
+                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                        @input="onInput(section, row, field.key, $event)"
+                      >
+
+                      <span v-else-if="field.kind === 'money'" class="mt-1 flex items-center gap-1">
+                        <input
+                          :value="moneyText(row, field.key)"
+                          type="text"
+                          inputmode="decimal"
+                          :disabled="!editing || saving"
+                          :data-test="`${section.key}-${index}-${field.key}`"
+                          class="w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-right text-sm tabular-nums disabled:bg-neutral-100"
+                          @input="onMoneyInput(row, field.key, $event)"
+                        >
+                        <span class="shrink-0 text-neutral-500">{{ t('payroll.people.statutory_evidence.currency_czk') }}</span>
+                      </span>
 
                       <DateInput
                         v-else-if="field.kind === 'date'"

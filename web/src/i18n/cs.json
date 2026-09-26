@@ -2793,6 +2793,10 @@
         },
         "health_minimum_days": "Minimum se krátí na {applicable} kalendářních dnů ({excluded} dnů se nezapočítává); plné měsíční minimum je {statutory}.",
         "health_other_employers": "U jiných zaměstnavatelů je doložen základ {other}, dohromady tedy {combined} — proto se minimum posuzuje ze součtu.",
+        "health_top_up_why": "Proč: zdravotní pojistné zaměstnance se odvádí nejméně z minimální mzdy (§ 3 odst. 6 a 10 zákona č. 592/1992 Sb.). Platí to i pro jednatele nebo člena orgánu s nízkou odměnou a bez prohlášení. Některé mzdové programy u nich doplatek nepočítají, zákon ho přesto ukládá. Doplatek odpadá jen u výjimky: státní pojištěnec (např. poživatel důchodu, student, rodič na rodičovské), držitel průkazu ZTP nebo ZTP/P, důchodový věk bez nároku na důchod, OSVČ platící zálohy alespoň z minima, jen odměna pěstouna; při souběhu zaměstnání se základy sčítají.",
+        "health_top_up_exemption_link": "Zadat výjimku z minima",
+        "health_minimum_reductions_title": "Minimum snižují výjimky",
+        "health_minimum_reduction_line": "{reason}: od {from} do {to}",
         "insurer_split_title": "Rozpad podle zdravotních pojišťoven",
         "insurer_split_hint": "Odvádí se každé pojišťovně zvlášť; tento rozpad je za celou firmu a měsíc. Jedna osoba patří v měsíci právě jedné pojišťovně.",
         "insurer": "Pojišťovna",
@@ -5131,7 +5135,14 @@
           "health_insured_card": "Průkaz pojištěnce",
           "minimum_employer_obstacle": "Překážka v práci na straně zaměstnavatele",
           "minimum_unpaid_leave_agreement": "Dohoda o neplaceném volnu",
-          "minimum_other_employer_confirmation": "Potvrzení jiného zaměstnavatele o vyměřovacím základu"
+          "minimum_other_employer_confirmation": "Potvrzení jiného zaměstnavatele o vyměřovacím základu",
+          "minimum_state_insured_confirmation": "Potvrzení o státním pojištěnci (studium, úřad práce, rodičovský příspěvek…)",
+          "minimum_pension_award_decision": "Rozhodnutí o přiznání důchodu",
+          "minimum_ztp_card": "Průkaz ZTP nebo ZTP/P",
+          "minimum_pension_age_declaration": "Prohlášení o dosažení důchodového věku bez nároku na důchod",
+          "minimum_osvc_advance_confirmation": "Potvrzení pojišťovny o zálohách OSVČ alespoň z minima",
+          "minimum_foster_reward_decision": "Rozhodnutí o odměně pěstouna",
+          "minimum_sickness_certificate": "Potvrzení o pracovní neschopnosti, karanténě nebo ošetřování"
         },
         "issue": {
           "period_required": "Doplňte, od kdy záznam platí.",
@@ -5147,10 +5158,19 @@
           "employer_unknown": "Zvolený zaměstnavatel nemá za tento měsíc doložený vyměřovací základ — nejdřív ho doplňte.",
           "a1_valid_until_required": "Doložený A1 musí platit alespoň do {day}. Doplňte datum platnosti, nebo přepněte A1 na „Netýká se“.",
           "a1_valid_until_too_early": "A1 musí platit alespoň do {day} — k dřívějšímu dni ho výpočet neuzná.",
-          "multiple_open_rows": "Otevřený zůstat může jen jeden záznam. Staršímu doplňte „Platí do“ (poslední den měsíce)."
+          "multiple_open_rows": "Otevřený zůstat může jen jeden záznam. Staršímu doplňte „Platí do“ (poslední den měsíce).",
+          "employment_from_required": "Doplňte, odkdy zaměstnání u jiného zaměstnavatele trvá.",
+          "employment_to_before_from": "Konec zaměstnání u jiného zaměstnavatele předchází jeho začátku.",
+          "reference_required": "Doplňte „{label}“. Podle tohoto označení se zaměstnavatel vybírá jako plátce doplatku.",
+          "amount_required": "Doplňte „{label}“ v korunách.",
+          "amount_invalid": "„{label}“ musí být nezáporná částka v korunách, nejvýše na haléře (např. 15000 nebo 15000,50)."
         },
         "title": "Zákonná evidence osoby",
-        "subtitle": "Prohlášení k dani, daňová rezidence, slevy na dani, příslušnost k sociálnímu a zdravotnímu pojištění a sleva pracujícího důchodce.",
+        "subtitle": "Prohlášení k dani, daňová rezidence, slevy na dani, příslušnost k sociálnímu a zdravotnímu pojištění, sleva pracujícího důchodce a výjimky z minima zdravotního pojištění.",
+        "employer_reference_placeholder": "např. zamestnavatel:firma-b",
+        "currency_czk": "Kč",
+        "current_no_exemption": "Bez výjimky",
+        "current_no_other_employer": "Bez jiného zaměstnavatele",
         "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
         "blockers_title": "K tomuto měsíci chybí:",
         "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",
@@ -5197,6 +5217,7 @@
           "health_coverage_evidence_missing": "příslušnost ke zdravotnímu pojištění",
           "health_jurisdiction_evidence_unverified": "příslušnost ke zdravotnímu pojištění je vedená jako neověřená",
           "health_insurer_evidence_unverified": "zdravotní pojišťovna je vedená jako neověřená",
+          "health_minimum_reduction_unverified": "výjimka z minima zdravotního pojištění je vedená jako neověřená, vyberte důvod nebo záznam odeberte",
           "statutory_evidence_snapshot_missing_or_mismatched": "evidence je vnitřně rozporná — zkontrolujte, zda se období nepřekrývají"
         },
         "section": {
@@ -5206,7 +5227,9 @@
           "social_jurisdictions": "Příslušnost k sociálnímu pojištění",
           "social_discount_claims": "Sleva pracujícího důchodce",
           "health_coverages": "Příslušnost ke zdravotnímu pojištění",
-          "health_month_evidence": "Měsíční evidence zdravotního minima"
+          "health_month_evidence": "Měsíční evidence zdravotního minima",
+          "health_minimum_reductions": "Výjimky z minima zdravotního pojištění",
+          "health_other_employer_bases": "Vyměřovací základ u jiného zaměstnavatele"
         },
         "section_hint": {
           "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
@@ -5215,7 +5238,9 @@
           "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je nutná země; odkaz na podklad je nepovinný.",
           "social_discount_claims": "Sleva na pojistném u zaměstnance pobírajícího starobní důchod. Neuplatňuje-li se, zvolte „neuplatňuje se“.",
           "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
-          "health_month_evidence": "Nevyplněno znamená, že dopočet do minimálního vyměřovacího základu hradí zaměstnanec — tak to určuje zákon. Záznam zakládejte jen pro výjimku: překážku na straně zaměstnavatele nebo volbu zaměstnavatele při souběhu."
+          "health_month_evidence": "Nevyplněno znamená, že dopočet do minimálního vyměřovacího základu hradí zaměstnanec — tak to určuje zákon. Záznam zakládejte jen pro výjimku: překážku na straně zaměstnavatele nebo volbu zaměstnavatele při souběhu.",
+          "health_minimum_reductions": "Na koho se minimální vyměřovací základ nevztahuje (§ 3 odst. 8 zákona č. 592/1992 Sb.): státní pojištěnec (poživatel důchodu, student, rodič na rodičovské…), držitel průkazu ZTP nebo ZTP/P, kdo dosáhl důchodového věku bez nároku na důchod, OSVČ platící zálohy alespoň z minima a kdo je jen příjemcem odměny pěstouna. Začne-li výjimka během měsíce, minimum se sníží poměrně podle dnů, proto se zadává s přesným datem. Doloženou slevu pracujícího důchodce, slevu na dani pro ZTP/P, nemoc, karanténu, ošetřování, mateřskou a rodičovskou výpočet započte sám, tady je zadávat nemusíte.",
+          "health_other_employer_bases": "Při souběhu zaměstnání se minimum posuzuje z úhrnu vyměřovacích základů u všech zaměstnavatelů. Zadejte základ, který zaměstnanec za měsíc měl u jiného zaměstnavatele; kdo z nich doplatek odvádí, určíte v měsíční evidenci zdravotního minima."
         },
         "field": {
           "status": "Stav",
@@ -5237,7 +5262,12 @@
           "top_up_responsibility": "Doplatek do minima hradí",
           "top_up_responsibility_evidence_reference": "Odkaz k doplatku (volitelné)",
           "selected_top_up_employer_reference": "Zvolený zaměstnavatel",
-          "selected_top_up_employer_evidence_reference": "Odkaz k volbě zaměstnavatele (volitelné)"
+          "selected_top_up_employer_evidence_reference": "Odkaz k volbě zaměstnavatele (volitelné)",
+          "reason": "Důvod výjimky",
+          "employer_reference": "Označení zaměstnavatele",
+          "assessment_base_minor_units": "Vyměřovací základ za měsíc",
+          "employment_from": "Zaměstnán od",
+          "employment_to": "Zaměstnán do"
         },
         "option": {
           "status": {
@@ -5280,6 +5310,15 @@
           "top_up_responsibility": {
             "employee": "Zaměstnanec",
             "employer_obstacle_verified": "Zaměstnavatel (překážka doložena)",
+            "unverified": "Neověřeno"
+          },
+          "reason": {
+            "state_insured": "Státní pojištěnec",
+            "ztp_or_ztp_p": "Držitel průkazu ZTP nebo ZTP/P",
+            "pension_age_without_pension": "Důchodový věk bez nároku na důchod",
+            "osvc_minimum_advance": "OSVČ platí zálohy alespoň z minima",
+            "foster_reward_only": "Jen odměna pěstouna",
+            "sickness_care_or_quarantine": "Nemoc, karanténa nebo ošetřování",
             "unverified": "Neověřeno"
           }
         },

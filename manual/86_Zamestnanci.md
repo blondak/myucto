@@ -233,7 +233,10 @@ skutečnosti, ze kterých vychází zákonný výpočet:
 - **sleva pro pracujícího poplatníka v důchodu**;
 - **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
 - **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
-  minimálního vyměřovacího základu.
+  minimálního vyměřovacího základu;
+- **výjimky z minima zdravotního pojištění** (nepovinné);
+- **vyměřovací základ u jiného zaměstnavatele** při souběhu zaměstnání
+  (nepovinné).
 
 Chybí-li kterýkoli z prvních pěti údajů, mzdový běh zákonný výpočet této osoby
 nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje počet
@@ -256,6 +259,70 @@ Sb.). Za dny peněžité pomoci v mateřství a rodičovské dovolené platí po
 stát (§ 7 odst. 1 písm. d) zákona č. 48/1997 Sb.), takže se minimum za ně
 nepoužije; trvá-li to celý měsíc, doplatek nevzniká vůbec. Neplacené volno ani
 neomluvená absence minimum nesnižují a doplatek za ně hradí zaměstnanec.
+Otcovská poporodní péče minimum také nesnižuje: zákon ji mezi důvody snížení
+v § 3 odst. 8 a 9 zákona č. 592/1992 Sb. nejmenuje a za jejího příjemce stát
+pojistné neplatí.
+
+#### Výjimky z minima zdravotního pojištění
+
+Na některé osoby se minimální vyměřovací základ nevztahuje vůbec (§ 3 odst. 8
+zákona č. 592/1992 Sb.). Doplatek do minima za ně nevzniká, a proto je potřeba
+výjimku zaevidovat v sekci **Výjimky z minima zdravotního pojištění**:
+
+| Důvod výjimky | Kdy platí |
+|---|---|
+| Státní pojištěnec | za osobu platí pojistné i stát, např. poživatel důchodu, student, příjemce rodičovského příspěvku, uchazeč o zaměstnání, osoba pečující o závislou osobu |
+| Držitel průkazu ZTP nebo ZTP/P | osoba s těžkým tělesným, smyslovým nebo mentálním postižením s průkazem |
+| Důchodový věk bez nároku na důchod | dosáhla důchodového věku, ale nesplňuje další podmínky pro přiznání starobního důchodu |
+| OSVČ platí zálohy alespoň z minima | vedle zaměstnání je OSVČ a odvádí zálohy aspoň z minimálního vyměřovacího základu pro OSVČ; jen za celý měsíc |
+| Jen odměna pěstouna | osoba je pouze příjemcem odměny pěstouna; jen za celý měsíc |
+| Nemoc, karanténa nebo ošetřování | jen pro případ, kdy nepřítomnost není vedená v aplikaci |
+
+U každé výjimky se zadává důvod, **Platí od** a případně **Platí do** a nepovinně
+odkaz na doklad (rozhodnutí o důchodu, průkaz ZTP/P, potvrzení pojišťovny…)
+s poznámkou. Na rozdíl od ostatní zákonné evidence se výjimka zadává **s přesným
+dnem**: začne-li nebo skončí-li během měsíce, minimum se poměrně sníží podle
+kalendářních dnů (§ 3 odst. 9 písm. c)). Výjimky OSVČ a pěstouna musí trvat
+celý měsíc, jinak výpočet ohlásí nález k posouzení. Každý důvod je samostatná
+řada, takže například ZTP/P a státní pojištěnec mohou platit současně; překryv
+téhož důvodu se odmítne už při uložení. Důvod **Neověřeno** jde uložit jako
+rozpracovaný stav, zůstane ale vidět jako chybějící údaj a výpočet osobu pošle
+do ručního posouzení.
+
+Některé výjimky výpočet odvodí sám a zadávat je není potřeba:
+
+- **doložená sleva pracujícího důchodce** (§ 7d zákona č. 589/1992 Sb.) náleží
+  jen poživateli starobního důchodu, a za poživatele důchodu platí pojistné
+  i stát, takže se na něj minimum nevztahuje;
+- **doložená sleva na dani pro držitele ZTP/P** dokládá průkaz ZTP/P;
+- nemoc, karanténa, ošetřování, mateřská a rodičovská ze schválených
+  nepřítomností (viz výše).
+
+Sleva na invaliditu se za výjimku nepovažuje, protože se přiznává i tomu, komu
+nárok na invalidní důchod nevznikl. Poživatele invalidního důchodu zadejte jako
+státního pojištěnce ručně.
+
+#### Vyměřovací základ u jiného zaměstnavatele
+
+Má-li zaměstnanec souběžně zaměstnání u jiného zaměstnavatele, posuzuje se
+minimum z **úhrnu** vyměřovacích základů (§ 3 odst. 10 zákona č. 592/1992 Sb.).
+V sekci **Vyměřovací základ u jiného zaměstnavatele** se za daný měsíc zadá
+označení zaměstnavatele (písmena bez diakritiky, číslice a `.`, `:`, `/`, `_`,
+`-`, např. `zamestnavatel:firma-b`), jeho vyměřovací základ v korunách a od kdy
+(případně do kdy) tam zaměstnání trvá. Kdo z obou zaměstnavatelů doplatek
+odvádí, určuje volba **Zvolený zaměstnavatel** v měsíční evidenci zdravotního
+minima; nabídka obsahuje zaměstnavatele zapsané za týž měsíc, i ty, které
+přidáte ve stejné úpravě.
+
+#### Doplatek u jednatele s nízkou odměnou
+
+Minimum platí pro každého zaměstnance, tedy i pro jednatele nebo člena orgánu
+s odměnou pod minimální mzdou a bez podepsaného prohlášení. Některé mzdové
+programy doplatek u orgánů společnosti nepočítají; MyÚčto ho počítá, protože ho
+zákon ukládá. Rozklad pojistného u mzdového běhu u doplatku vysvětlí, proč
+vznikl, a tlačítkem **Zadat výjimku z minima** otevře kartu osoby přímo v této
+sekci. Pokud se na jednatele výjimka vztahuje (je například poživatelem
+důchodu), zaevidujte ji a běh přepočítejte.
 
 Ověřené hodnoty (český nebo zahraniční režim, ověřená pojišťovna, platný A1)
 jsou rozhodnutím uživatele. **Odkaz na podklad je všude volitelný**: lze zvolit
@@ -278,7 +345,8 @@ stát ze seznamu; odkaz k režimu zůstává nepovinný. Stát i zdravotní poji
 vybírají ze seznamu, nepíšou se. Chybí-li něco, co server nepřijme, napíše to
 evidence rovnou u záznamu i s tím, co s tím udělat.
 
-Evidence se zadává **po celých měsících** a záznamy jedné řady musí na sebe
+Evidence se zadává **po celých měsících** (kromě výjimek z minima zdravotního
+pojištění, viz výše) a záznamy jedné řady musí na sebe
 navazovat den po dni — čtecí cesta vyhodnocuje evidenci k prvnímu dni měsíce,
 takže změna uprostřed měsíce by se buď ztratila, nebo by pro daný měsíc vznikly
 dvě současně platné verze. Díra v řadě se odmítne už při uložení; jinak by se

@@ -1,11 +1,58 @@
 import { describe, expect, it } from 'vitest'
 import {
+  crownsToMinorUnits,
   currentRow,
   defaultRow,
   evidenceDetailFields,
+  minorUnitsToCrowns,
   primaryFields,
+  rowIssues,
   STATUTORY_SECTIONS,
 } from '@/pages/payroll/statutoryEvidenceForm'
+
+describe('statutoryEvidenceForm money fields', () => {
+  it('převede koruny na haléře bez chyb plovoucí čárky', () => {
+    expect(crownsToMinorUnits('15000')).toBe('1500000')
+    expect(crownsToMinorUnits('15 000,50')).toBe('1500050')
+    expect(crownsToMinorUnits('180.98')).toBe('18098')
+    expect(crownsToMinorUnits('0,1')).toBe('10')
+    expect(crownsToMinorUnits('')).toBeNull()
+    expect(crownsToMinorUnits('-5')).toBeNull()
+    expect(crownsToMinorUnits('1,234,5')).toBeNull()
+    expect(crownsToMinorUnits('12.345')).toBeNull()
+  })
+
+  it('haléře ukáže v korunách', () => {
+    expect(minorUnitsToCrowns('1500000')).toBe('15000')
+    expect(minorUnitsToCrowns('1500050')).toBe('15000.50')
+    expect(minorUnitsToCrowns('')).toBe('')
+  })
+})
+
+describe('statutoryEvidenceForm health minimum exceptions', () => {
+  const reductions = STATUTORY_SECTIONS.find(item => item.key === 'health_minimum_reductions')!
+  const context = { effectiveOn: '2026-08-31', defaultInsurerCode: null, employerReferences: [] }
+
+  it('výjimka z minima smí začít i skončit uprostřed měsíce', () => {
+    const issues = rowIssues(reductions, {
+      reason: 'ztp_or_ztp_p',
+      effective_from: '2026-08-10',
+      effective_to: '2026-09-15',
+    }, context)
+
+    expect(issues).toEqual([])
+  })
+
+  it('konec před začátkem hlídá dál', () => {
+    const issues = rowIssues(reductions, {
+      reason: 'state_insured',
+      effective_from: '2026-08-10',
+      effective_to: '2026-08-01',
+    }, context)
+
+    expect(issues.map(issue => issue.key)).toEqual(['effective_to_before_from'])
+  })
+})
 
 describe('statutoryEvidenceForm defaults', () => {
   it('does not claim that a new employee signed the tax declaration', () => {

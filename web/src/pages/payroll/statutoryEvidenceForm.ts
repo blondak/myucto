@@ -30,6 +30,10 @@ export type StatutoryFieldKind =
   | 'document'
   | 'insurer'
   | 'employer'
+  /** Vlastní kanonické označení (reference zaměstnavatele). */
+  | 'reference'
+  /** Částka v haléřích; formulář ji zadává a ukazuje v korunách. */
+  | 'money'
 
 export interface StatutoryFieldSpec {
   key: string
@@ -71,6 +75,19 @@ export interface StatutorySectionSpec {
    * rozhoduje `summaryKey` (u většiny sekcí je to totéž pole).
    */
   verificationKey?: string
+  /**
+   * Účinnost se zadává po dnech, ne po celých měsících. Platí pro výjimky
+   * z minima zdravotního pojištění: § 3 odst. 9 písm. c) zákona č. 592/1992 Sb.
+   * snižuje minimum poměrně podle kalendářních dnů a server je po dnech čte.
+   */
+  dayPrecision?: boolean
+  /**
+   * Hodnota `summaryKey` je volný text (reference), ne výčet; přehled ji
+   * ukáže, jak je, místo překladu.
+   */
+  summaryRaw?: boolean
+  /** Klíč překladu přehledu nepovinné sekce bez záznamu; výchozí „Žádná sleva". */
+  emptyKey?: string
   fields: readonly StatutoryFieldSpec[]
 }
 
@@ -258,6 +275,57 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
       },
     ],
   },
+  {
+    // Výjimky z minimálního vyměřovacího základu ZP (§ 3 odst. 8 a 9
+    // z. 592/1992). Většina lidí žádnou nemá, proto je sekce nepovinná; každý
+    // důvod je vlastní řada, takže ZTP/P a státní pojištěnec běží souběžně.
+    key: 'health_minimum_reductions',
+    kind: 'interval',
+    summaryKey: 'reason',
+    scopeKey: 'reason',
+    optional: true,
+    dayPrecision: true,
+    emptyKey: 'current_no_exemption',
+    fields: [
+      {
+        key: 'reason',
+        kind: 'enum',
+        options: [
+          'state_insured',
+          'ztp_or_ztp_p',
+          'pension_age_without_pension',
+          'osvc_minimum_advance',
+          'foster_reward_only',
+          'sickness_care_or_quarantine',
+          'unverified',
+        ],
+      },
+      {
+        key: 'evidence_reference',
+        kind: 'evidence',
+        visible: row => text(row, 'reason') !== 'unverified',
+      },
+    ],
+  },
+  {
+    // Vyměřovací základ u jiného zaměstnavatele za měsíc (§ 3 odst. 10):
+    // minimum se posuzuje z úhrnu základů, doplatek jde přes zvoleného
+    // zaměstnavatele. Na tyhle řádky se odkazuje měsíční evidence minima.
+    key: 'health_other_employer_bases',
+    kind: 'month',
+    summaryKey: 'employer_reference',
+    scopeKey: 'employer_reference',
+    optional: true,
+    summaryRaw: true,
+    emptyKey: 'current_no_other_employer',
+    fields: [
+      { key: 'employer_reference', kind: 'reference' },
+      { key: 'assessment_base_minor_units', kind: 'money' },
+      { key: 'employment_from', kind: 'date' },
+      { key: 'employment_to', kind: 'date' },
+      { key: 'evidence_reference', kind: 'evidence' },
+    ],
+  },
 ] as const
 
 /**
@@ -308,6 +376,28 @@ export const EVIDENCE_REASONS: Readonly<Record<string, readonly string[]>> = {
   'health_month_evidence.selected_top_up_employer_evidence_reference': [
     'minimum:other-employer-confirmation',
   ],
+  'health_minimum_reductions.evidence_reference': [
+    'minimum:state-insured-confirmation',
+    'minimum:pension-award-decision',
+    'minimum:ztp-card',
+    'minimum:pension-age-declaration',
+    'minimum:osvc-advance-confirmation',
+    'minimum:foster-reward-decision',
+    'minimum:sickness-certificate',
+  ],
+  'health_other_employer_bases.evidence_reference': [
+    'minimum:other-employer-confirmation',
+  ],
+}
+
+/** Které doklady dávají smysl u kterého důvodu výjimky z minima. */
+const MINIMUM_REDUCTION_REASONS: Readonly<Record<string, readonly string[]>> = {
+  state_insured: ['minimum:state-insured-confirmation', 'minimum:pension-award-decision'],
+  ztp_or_ztp_p: ['minimum:ztp-card'],
+  pension_age_without_pension: ['minimum:pension-age-declaration'],
+  osvc_minimum_advance: ['minimum:osvc-advance-confirmation'],
+  foster_reward_only: ['minimum:foster-reward-decision'],
+  sickness_care_or_quarantine: ['minimum:sickness-certificate'],
 }
 
 /** Volba „jiné" v nabídce důvodů — odemkne volný text. */
@@ -343,6 +433,10 @@ export function reasonOptions(
       ? 'residence:foreign-'
       : 'residence:cz-'
     return all.filter(reason => reason.startsWith(prefix))
+  }
+  if (section === 'health_minimum_reductions' && field === 'evidence_reference') {
+    const allowed = MINIMUM_REDUCTION_REASONS[text(row, 'reason')] ?? []
+    return all.filter(reason => allowed.includes(reason))
   }
   return all
 }
@@ -547,6 +641,16 @@ const DEFAULT_VALUES: Readonly<
     selected_top_up_employer_reference: null,
     selected_top_up_employer_evidence_reference: null,
   },
+  // Nejčastější výjimka: státní pojištěnec (poživatel důchodu, student,
+  // rodičovská…). Uživatel důvod jen přepne, když jde o jiný.
+  health_minimum_reductions: { reason: 'state_insured', evidence_reference: null },
+  health_other_employer_bases: {
+    employer_reference: null,
+    assessment_base_minor_units: null,
+    employment_from: null,
+    employment_to: null,
+    evidence_reference: null,
+  },
 }
 
 export function defaultRow(
@@ -565,8 +669,31 @@ export function defaultRow(
   if (section.key === 'health_coverages') {
     row.insurer_code = context.defaultInsurerCode
   }
+  if (section.key === 'health_other_employer_bases') {
+    row.employment_from = monthStart
+  }
   normalizeRow(section, row)
   return row
+}
+
+/** Haléře → text pro pole v korunách („15000", „15000.5"). */
+export function minorUnitsToCrowns(value: string): string {
+  if (!/^\d+$/.test(value)) return ''
+  const minor = Number(value)
+  return Number.isInteger(minor / 100) ? String(minor / 100) : (minor / 100).toFixed(2)
+}
+
+/**
+ * Koruny z pole → haléře, jak je chce server (nezáporné celé číslo). Čárka
+ * i tečka jako desetinný oddělovač; mezery (oddělovač tisíců) se ignorují.
+ * Neplatný vstup vrací `null`, formulář pak nahlásí chybu, ne tichou nulu.
+ */
+export function crownsToMinorUnits(input: string): string | null {
+  const normalized = input.replace(/\s/g, '').replace(',', '.')
+  if (normalized === '') return null
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null
+  const [whole = '0', fraction = ''] = normalized.split('.')
+  return String(Number(whole) * 100 + Number(fraction.padEnd(2, '0')))
 }
 
 export function monthEndOf(iso: string): string {
@@ -588,17 +715,27 @@ export function rowIssues(
 ): StatutoryIssue[] {
   const issues: StatutoryIssue[] = []
   const from = section.kind === 'month' ? text(row, 'period_start') : text(row, 'effective_from')
+  const monthAligned = section.dayPrecision !== true
   if (from === '') {
     issues.push({ key: 'period_required' })
-  } else if (!from.endsWith('-01')) {
+  } else if (monthAligned && !from.endsWith('-01')) {
     issues.push({ key: 'period_month_start', params: { day: `${from.slice(0, 7)}-01` } })
   }
   if (section.kind === 'interval') {
     const to = text(row, 'effective_to')
     if (to !== '' && from !== '' && to < from) {
       issues.push({ key: 'effective_to_before_from' })
-    } else if (to !== '' && to !== monthEndOf(to)) {
+    } else if (monthAligned && to !== '' && to !== monthEndOf(to)) {
       issues.push({ key: 'effective_to_month_end', params: { day: monthEndOf(to) } })
+    }
+  }
+  if (section.key === 'health_other_employer_bases') {
+    const employmentFrom = text(row, 'employment_from')
+    const employmentTo = text(row, 'employment_to')
+    if (employmentFrom === '') {
+      issues.push({ key: 'employment_from_required' })
+    } else if (employmentTo !== '' && employmentTo < employmentFrom) {
+      issues.push({ key: 'employment_to_before_from' })
     }
   }
 
@@ -623,6 +760,16 @@ export function rowIssues(
       if (value !== '' && !CANONICAL_REFERENCE.test(value)) {
         issues.push({ key: 'reference_invalid', params: { label } })
       }
+    }
+    if (field.kind === 'reference') {
+      if (value === '') issues.push({ key: 'reference_required', params: { label } })
+      else if (!CANONICAL_REFERENCE.test(value)) {
+        issues.push({ key: 'reference_invalid', params: { label } })
+      }
+    }
+    if (field.kind === 'money') {
+      if (value === '') issues.push({ key: 'amount_required', params: { label } })
+      else if (!/^\d+$/.test(value)) issues.push({ key: 'amount_invalid', params: { label } })
     }
     if (field.kind === 'employer' && value !== ''
       && !context.employerReferences.includes(value)

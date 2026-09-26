@@ -697,8 +697,9 @@ export interface PayrollOpeningImportPayload {
 
 /**
  * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, slevy na dani
- * podle § 35ba, sociální a zdravotní příslušnost, sleva pracujícího důchodce
- * a měsíční evidence zdravotního minima.
+ * podle § 35ba, sociální a zdravotní příslušnost, sleva pracujícího důchodce,
+ * měsíční evidence zdravotního minima, výjimky z minima a vyměřovací základy
+ * u jiného zaměstnavatele.
  *
  * Řádky jsou časové řady, takže se posílají a vrací jako celé kolekce; server
  * si z cílového stavu spočítá rozdíl. Hodnoty jsou úmyslně `string | null` —
@@ -723,6 +724,8 @@ export type PayrollStatutoryEvidenceSection =
   | 'social_discount_claims'
   | 'health_coverages'
   | 'health_month_evidence'
+  | 'health_minimum_reductions'
+  | 'health_other_employer_bases'
 
 export interface PayrollStatutoryEvidence {
   employee_id: number
