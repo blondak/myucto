@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { averageEarningsTarget } from './payrollRemediation'
 import { useI18n } from 'vue-i18n'
@@ -32,6 +32,13 @@ import DateInput from '@/components/ui/DateInput.vue'
 const props = defineProps<{
   employment: PayrollEmployment
   canWrite: boolean
+  /**
+   * Způsob skončení odvozený ze záznamu „Skončení vztahu" na kartě. Je-li
+   * zadaný, potvrzení pro Úřad práce ho převezme a volba se zamkne — server
+   * jiný údaj stejně odmítne.
+   */
+  terminationReasonKind?: PayrollTerminationReasonKind | null
+  employeeStatedReason?: string | null
 }>()
 
 const { t } = useI18n()
@@ -227,8 +234,8 @@ function resetEvidence(): void {
   pensionCategoryAssessmentComplete.value = false
   correctionReason.value = ''
   terminationAssessmentComplete.value = false
-  terminationReasonKind.value = 'none'
-  employeeStatedReason.value = ''
+  terminationReasonKind.value = props.terminationReasonKind ?? 'none'
+  employeeStatedReason.value = props.terminationReasonKind ? (props.employeeStatedReason ?? '') : ''
   pensionInsurancePeriods.value = []
   averageCorrectionReason.value = ''
   requestedPurpose.value = ''
@@ -394,6 +401,13 @@ async function download(document: PayrollDocument): Promise<void> {
     downloadingId.value = null
   }
 }
+
+const reasonFromRecord = computed(() => Boolean(props.terminationReasonKind))
+watch(() => [props.terminationReasonKind, props.employeeStatedReason] as const, ([kind, stated]) => {
+  if (!kind) return
+  terminationReasonKind.value = kind
+  employeeStatedReason.value = stated ?? ''
+})
 
 onMounted(() => void load())
 </script>
@@ -704,13 +718,17 @@ onMounted(() => void load())
               class="mt-1"
               :options="terminationReasonOptions"
               :clearable="false"
+              :disabled="reasonFromRecord"
               accent="payroll"
               :aria-label="t('payroll.people.exit_documents.termination_reason')"
             />
+            <p v-if="reasonFromRecord" class="mt-1 text-xs text-neutral-500" data-test="termination-reason-from-record">
+              {{ t('payroll.people.exit_documents.termination_reason_from_record') }}
+            </p>
           </div>
           <label v-if="statedReasonRequired" class="block text-xs text-neutral-600">
             {{ t('payroll.people.exit_documents.employee_stated_reason') }}
-            <textarea v-model="employeeStatedReason" rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea>
+            <textarea v-model="employeeStatedReason" rows="2" :disabled="reasonFromRecord" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea>
           </label>
 
           <div>

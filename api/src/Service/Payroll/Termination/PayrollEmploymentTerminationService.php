@@ -935,7 +935,7 @@ final class PayrollEmploymentTerminationService
         if (!in_array($employment['status'], ['ended', 'archived'], true) || $employment['end_date'] === null) {
             throw new \DomainException(
                 'Skončení lze vyplnit až u ukončeného vztahu. Nejdřív vztah ukončete'
-                . ' na jeho kartě (Ukončit vztah) s datem skončení.',
+                . ' na jeho kartě akcí Ukončit s datem skončení.',
             );
         }
 

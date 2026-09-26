@@ -899,6 +899,51 @@ describe('EmploymentRegistrationPanel', () => {
     }))
   })
 
+  /**
+   * Důvod skončení se zadává jednou na kartě vztahu; odhláška A2 si ho odsud
+   * předvyplní i s čistým průměrem a odstupným (DIS přijme odstupné jen
+   * u důvodu 4 nebo 5).
+   */
+  it('prefills the A2 unemployment data from the termination record', async () => {
+    const wrapper = mount(EmploymentRegistrationPanel, {
+      props: {
+        employmentId: 5,
+        personId: 9,
+        canWrite: true,
+        a2Prefill: {
+          ended_by_death: false,
+          unemployment: {
+            mode: 'provided',
+            employment_type: '1',
+            termination_reason: '4',
+            average_net_earnings: '28150',
+            entitlement: true,
+            settlement_kind: 'golden_handshake',
+            settlement_amount: '130440',
+          },
+        },
+      },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+
+    await wrapper.get('[data-test="registration-a2-prefill-button"]').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="registration-a2-termination-reason"]').element as HTMLInputElement).value).toBe('4')
+    expect((wrapper.get('[data-test="registration-a2-settlement-kind"]').element as HTMLSelectElement).value).toBe('golden_handshake')
+    expect((wrapper.get('[data-test="registration-a2-settlement-amount"]').element as HTMLInputElement).value).toBe('130440')
+  })
+
+  it('keeps the A2 prefill disabled without a termination record', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+
+    expect((wrapper.get('[data-test="registration-a2-prefill-button"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('exposes guided fields for every REGZEC interaction A2 through A8', async () => {
     const wrapper = mountPanel()
     await flushPromises()

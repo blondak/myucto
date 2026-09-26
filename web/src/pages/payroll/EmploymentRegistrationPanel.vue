@@ -22,6 +22,7 @@ import {
   type PayrollRegistrationChangeProposal,
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollJmhzMunicipalityOption,
+  type PayrollTerminationA2Prefill,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -40,6 +41,8 @@ const props = defineProps<{
   employmentId: number
   personId?: number
   canWrite: boolean
+  /** Podklady A2 odvozené ze záznamu „Skončení vztahu" na kartě vztahu. */
+  a2Prefill?: PayrollTerminationA2Prefill | null
 }>()
 
 const { t } = useI18n()
@@ -1238,6 +1241,39 @@ function deltaPayload(): Record<string, unknown> {
     }
   }
   return { [deltaField.value]: deltaValue.value.trim() }
+}
+
+/**
+ * Předvyplnění odhlášky A2 ze záznamu o skončení na kartě vztahu. Důvod
+ * skončení se tak zadává jen jednou; schválení A2 jiný kód stejně odmítne.
+ * Doby důchodového pojištění a „vyplaceno v plné výši" zůstávají na účetní.
+ */
+async function applyA2Prefill(): Promise<void> {
+  const prefill = props.a2Prefill
+  if (!prefill) return
+  // Příznak úmrtí se posílá jen u varianty A2-OST; jinde musí zůstat prázdný,
+  // proto se předvyplní jen kladná hodnota.
+  if (prefill.ended_by_death) endedByDeath.value = 'yes'
+  const unemployment = prefill.unemployment
+  if (unemployment === null) {
+    unemploymentMode.value = 'omit'
+    return
+  }
+  unemploymentMode.value = 'provided'
+  employmentType.value = unemployment.employment_type
+  // Změna druhu zaměstnání přes watch přepíná druh plnění — až po něm.
+  await nextTick()
+  terminationReason.value = unemployment.termination_reason
+  if (unemployment.average_net_earnings !== null) averageNetEarnings.value = unemployment.average_net_earnings
+  if (unemployment.entitlement === undefined) {
+    entitlement.value = 'omit'
+    return
+  }
+  entitlement.value = unemployment.entitlement ? 'yes' : 'no'
+  if (unemployment.entitlement && unemployment.settlement_kind && unemployment.settlement_amount) {
+    settlementAmountKind.value = unemployment.settlement_kind
+    settlementAmount.value = unemployment.settlement_amount
+  }
 }
 
 function a2Payload(): Pick<PayrollRegistrationEventInput, 'ended_by_death' | 'unemployment'> {
@@ -3359,6 +3395,22 @@ async function copyXml(): Promise<void> {
           <p class="rounded-md border border-primary-200 bg-primary-50 p-3 text-xs text-primary-800">
             {{ t('payroll.people.registration.event.a2_hint') }}
           </p>
+          <div class="flex flex-wrap items-center gap-2" data-test="registration-a2-prefill">
+            <button
+              type="button"
+              :class="btnOutline('primary')"
+              class="whitespace-nowrap"
+              :disabled="!a2Prefill"
+              data-test="registration-a2-prefill-button"
+              @click="applyA2Prefill"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.copy" /></svg>
+              {{ t('payroll.people.termination.a2_prefill') }}
+            </button>
+            <span class="text-xs text-neutral-500">
+              {{ a2Prefill ? t('payroll.people.termination.a2_prefill_hint') : t('payroll.people.termination.a2_prefill_missing') }}
+            </span>
+          </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.ended_by_death') }}
@@ -3423,7 +3475,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label v-if="employmentType !== 'omit'" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.termination_reason') }}
-              <input v-model="terminationReason" inputmode="numeric" maxlength="3" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+              <input v-model="terminationReason" inputmode="numeric" maxlength="3" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-termination-reason" />
             </label>
             <label v-if="employmentType !== 'omit' && settlementNeeded" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.entitlement') }}
@@ -3442,7 +3494,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label v-if="entitlement === 'yes'" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.settlement_kind') }}
-              <select v-model="settlementAmountKind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900">
+              <select v-model="settlementAmountKind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-settlement-kind">
                 <template v-if="employmentType === '1'">
                   <option value="replacement">{{ t('payroll.people.registration.event.settlement.replacement') }}</option>
                   <option value="golden_handshake">{{ t('payroll.people.registration.event.settlement.golden_handshake') }}</option>
@@ -3455,7 +3507,7 @@ async function copyXml(): Promise<void> {
             </label>
             <label v-if="entitlement === 'yes'" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.settlement_amount') }}
-              <input v-model="settlementAmount" inputmode="numeric" maxlength="10" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
+              <input v-model="settlementAmount" inputmode="numeric" maxlength="10" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-settlement-amount" />
             </label>
           </div>
         </div>

@@ -540,6 +540,13 @@ nezakládá, protože jej podle pravidel JMHZ sestavuje ČSSZ z měsíčního hl
 Potvrzení o zdanitelných příjmech termín nemá záměrně: § 38j odst. 3 zákona
 o daních z příjmů počítá lhůtu od žádosti zaměstnance, a tu aplikace neeviduje.
 
+Přihlášky a odhlášky se odškrtnou samy až podle **stavu podání**: splněné jsou,
+když podání odešlo (nebo bylo přijato) v ostrém prostředí. Připravené, ale
+neodeslané hlášení ani podání do testovacího prostředí položku nesplní — lhůta
+dál běží a přehled termínů ji dál připomíná. Odhláška z ČSSZ se odškrtne
+odesláním odhlášky REGZEC A2 (u nenastoupení A8), odhláška u zdravotní
+pojišťovny odesláním oznámení o ukončení.
+
 Termíny u položek checklistu se neodvozují ode dne události, ale z pravidel,
 která už aplikace používá jinde, takže se s nimi nemohou rozejít. U několika
 lhůt aplikace přiznává, že je nemá doložené z ověřeného zdroje — u prohlášení
@@ -591,3 +598,100 @@ Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
 posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují
 jednou nenápadnou větou pod souhrnem. Agenda, na kterou uživatel nemá
 oprávnění, se nenabízí ani nezapočítává.
+
+## 86.13 Skončení vztahu
+
+Po ukončení vztahu (akce **Ukončit** s datem skončení) se na kartě vztahu objeví
+sekce **Skončení vztahu**. Je to jediné místo, kde se zadává, jak a proč vztah
+skončil. Odsud se:
+
+- předvyplní odhláška **REGZEC A2** (důvod ukončení pro Úřad práce, čistý
+  průměrný výdělek, odstupné) tlačítkem **Předvyplnit ze skončení vztahu**,
+- převezme způsob skončení do **potvrzení zaměstnavatele pro Úřad práce**
+  (§ 313 odst. 2 zákoníku práce) — ve formuláři potvrzení je volba zamčená,
+- založí proplacení nevyčerpané dovolené a odstupné jako vstupy posledního běhu.
+
+Schválení odhlášky A2 i vydání potvrzení odmítne údaj, který záznamu odporuje.
+Dokud záznam neexistuje, obě místa se vyplňují ručně jako dřív.
+
+### 86.13.1 Způsob a důvod skončení
+
+Vyberte **Způsob skončení** (výpověď zaměstnavatele, dohoda, výpověď
+zaměstnance, okamžité zrušení, zkušební doba, uplynutí doby určité, úmrtí, …)
+a u výpovědi zaměstnavatele, dohody a okamžitého zrušení i **Zákonný důvod**.
+Nabídka důvodů odpovídá zvolenému způsobu. U dohody vyberte důvod, o který se
+opírá: dohoda z organizačních nebo zdravotních důvodů zakládá odstupné stejně
+jako výpověď a v odhlášce A2 jde jako důvod 4 nebo 5, protože jen u nich ČSSZ
+přijme údaj o odstupném. Dohoda bez důvodu jde jako důvod 2.
+
+Pod formulářem se po uložení ukáže, jaký kód důvodu uvede odhláška A2 a jaký
+způsob skončení tiskne potvrzení pro Úřad práce.
+
+### 86.13.2 Nevyčerpaná a přečerpaná dovolená
+
+Sekce ukazuje zůstatek knihy dovolené za rok skončení a náhradu ve výši
+průměrného výdělku (§ 222 odst. 2 a 3 zákoníku práce). Průměr je schválený
+průměr za čtvrtletí, do kterého spadá den skončení.
+
+- **Proplatit nevyčerpanou dovolenou** založí schválený vstup složky
+  **Náhrada mzdy za dovolenou** za měsíc skončení a do knihy dovolené zapíše
+  položku proplacení, takže zůstatek klesne na nulu. V měsíčním hlášení JMHZ
+  se náhrada objeví v náhradách za dovolenou.
+- **Srazit přečerpanou dovolenou** založí záporný vstup téže složky (§ 147
+  odst. 1 písm. e) zákoníku práce). Zkontrolujte, že výplata po srážce
+  neklesne pod nezabavitelnou částku; zbytek je nutné vymáhat jinak. Po úmrtí
+  zaměstnance se přečerpaná dovolená nesráží (§ 328 odst. 2).
+- **Vzít vyrovnání dovolené zpět** (v nabídce „…") založí opravný vstup ve
+  stejném měsíci a položku proplacení v knize stornuje.
+
+Proplácí se jen zůstatek roku skončení. Zbyla-li nevyčerpaná dovolená
+z předchozího roku a nebyla převedena, sekce na to upozorní; převeďte ji v knize
+dovolené. Chybí-li schválený průměr nebo nárok za rok skončení, sekce řekne co
+chybí a nabídne proklik do **Absence a průměry**.
+
+### 86.13.3 Odstupné
+
+U výpovědi nebo dohody z organizačních důvodů navrhne sekce odstupné podle
+§ 67 odst. 1 zákoníku práce: jednonásobek průměrného měsíčního výdělku při
+trvání pracovního poměru kratším než rok, dvojnásobek při trvání od roku do
+dvou let a trojnásobek od dvou let. Do trvání se započte předchozí pracovní
+poměr u téhož zaměstnavatele, skončil-li nejvýše šest měsíců před vznikem
+nového (§ 67 odst. 2). Zaškrtnutím konta pracovní doby podle § 86 odst. 4 se
+odstupné zvýší o trojnásobek. U dosažení nejvyšší přípustné expozice (§ 52
+písm. e)) je odstupné dvanáctinásobek.
+
+Vyšší násobek podle kolektivní smlouvy nebo vnitřního předpisu zadejte do pole
+**Násobek odstupného podle kolektivní smlouvy** i s tím, o co se opírá. Nižší
+než zákonný násobek aplikace nepřijme.
+
+**Založit odstupné do posledního běhu** založí schválený vstup složky
+**Odstupné** za měsíc skončení. Složka nemá výchozí zařazení do měsíčního
+hlášení JMHZ; dokud ho v **Mzdové složky** nedoplníte, sekce na to upozorní
+a hlášení za poslední měsíc se nesestaví.
+
+U výpovědi nebo dohody pro dlouhodobou zdravotní nezpůsobilost z pracovního
+úrazu nebo nemoci z povolání náleží jednorázová náhrada dvanáctinásobku
+průměrného měsíčního výdělku podle § 271ca zákoníku práce. Sekce ji spočítá,
+ale jako vstup ji nezakládá — založte ji ručně na složce, jejíž zařazení
+určíte, a v odhlášce A2 ji uveďte jako jednorázovou náhradu.
+
+### 86.13.4 Úmrtí zaměstnance
+
+Je-li způsobem skončení **Úmrtí zaměstnance**, sekce vede osoby blízké podle
+§ 328 zákoníku práce. Mzdová práva do výše trojnásobku průměrného měsíčního
+výdělku přecházejí postupně na manžela nebo partnera, děti a rodiče, žili-li
+se zaměstnancem v době smrti ve společné domácnosti. Zapište jméno, vztah,
+společnou domácnost a účet pro výplatu; sekce označí, kdo nárok nabývá
+(první skupina v pořadí, uvnitř skupiny rovným dílem) a jaký je jeho podíl na
+limitu. Zbytek nároků, a všechny, není-li oprávněná osoba, je předmětem
+dědictví.
+
+Zdanění výplaty pozůstalým aplikace sama neurčuje — zákon o daních z příjmů
+výplatu nároků přešlých podle § 328 zákoníku práce výslovně neupravuje. Než
+výplatu provedete, zapište do pole **Daňové posouzení výplaty pozůstalým**, jak
+ji zdaníte a z jakého podkladu, a potvrďte ho.
+
+Běží-li u zaměstnance exekuce, insolvence nebo dohody o srážkách, sekce na ně
+upozorní s proklikem. Ukončete je v příslušné agendě; aplikace je sama
+nezastavuje. Odhláška A2 se u úmrtí předvyplní s příznakem skončení úmrtím
+a bez podkladů pro Úřad práce.

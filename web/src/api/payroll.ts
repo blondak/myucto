@@ -5466,6 +5466,177 @@ export interface PayrollPensionInsurancePeriod {
   to: string
 }
 
+/* ── Skončení pracovního vztahu (jediný zdroj důvodu skončení) ─────────── */
+
+export type PayrollTerminationMethod =
+  | 'employer_notice'
+  | 'agreement'
+  | 'employee_notice'
+  | 'employer_immediate'
+  | 'employee_immediate'
+  | 'probation_employer'
+  | 'probation_employee'
+  | 'fixed_term_expiry'
+  | 'death'
+  | 'foreigner_permit'
+  | 'other'
+
+export type PayrollTerminationGround =
+  | 'none'
+  | 'organizational'
+  | 'health_long_term'
+  | 'health_work_injury'
+  | 'max_exposure'
+  | 'requirements_unmet'
+  | 'breach_gross'
+  | 'breach_serious'
+  | 'breach_minor_repeated'
+  | 'sickness_regime'
+  | 'criminal_conviction'
+  | 'health_no_transfer'
+  | 'wage_not_paid'
+
+export type PayrollTerminationSurvivorRelationship = 'spouse_partner' | 'child' | 'parent'
+
+export interface PayrollTerminationIssue {
+  code: string
+  severity: 'blocker' | 'warning' | 'info'
+  params: Record<string, string | number | null>
+}
+
+export interface PayrollTerminationRecord {
+  id: number
+  employment_id: number
+  termination_method: PayrollTerminationMethod
+  legal_ground: PayrollTerminationGround
+  employee_stated_reason: string | null
+  severance_multiple_override: number | null
+  severance_override_reason: string | null
+  working_time_account_applies: boolean
+  death_tax_assessment: string | null
+  death_tax_assessed_by: number | null
+  death_tax_assessed_at: string | null
+  row_version: number
+  updated_at: string
+}
+
+export interface PayrollTerminationInputRef {
+  id: number
+  period_start: string
+  amount_minor: number
+  quantity_milliunits: number | null
+  status: string
+}
+
+export interface PayrollTerminationSurvivor {
+  id: number
+  full_name: string
+  relationship: PayrollTerminationSurvivorRelationship
+  shared_household: boolean
+  bank_account: string | null
+  note: string | null
+  entitled: boolean
+  share_basis_points: number
+  limit_share_minor: number
+}
+
+export interface PayrollTerminationA2Prefill {
+  ended_by_death: boolean
+  unemployment: null | {
+    mode: 'provided'
+    employment_type: '1'
+    termination_reason: string
+    average_net_earnings: string | null
+    entitlement?: boolean
+    settlement_kind?: 'golden_handshake' | 'replacement'
+    settlement_amount?: string
+  }
+}
+
+export interface PayrollTerminationOverview {
+  employment: {
+    id: number
+    employee_id: number
+    relation_type: string
+    status: string
+    start_date: string
+    end_date: string
+  }
+  termination: PayrollTerminationRecord | null
+  derived: null | {
+    regzec_reason_code: string
+    unemployment_office_kind: PayrollTerminationReasonKind
+    ended_by_death: boolean
+    settlement_reportable: boolean
+    severance_basis: 'organizational' | 'max_exposure' | null
+    work_injury_compensation: boolean
+    stated_reason_allowed: boolean
+  }
+  average: {
+    year: number
+    quarter: number
+    snapshot_id: number | null
+    hourly_minor: number | null
+    monthly_gross_minor: number | null
+    monthly_net_minor: number | null
+  }
+  leave_settlement: {
+    year: number
+    state: 'nothing' | 'blocked' | 'payout' | 'overdraft' | 'not_recoverable' | 'settled'
+    settlement?: 'payout' | 'overdraft'
+    minutes: number
+    balance_minutes: number
+    average_hourly_minor: number | null
+    amount_minor: number
+    input: PayrollTerminationInputRef | null
+  }
+  severance: {
+    state: 'not_applicable' | 'reason_missing' | 'blocked' | 'ready' | 'created'
+    kind: 'severance' | 'work_injury_compensation' | null
+    statutory_multiple: number
+    multiple: number
+    rule: string
+    tenure_start: string | null
+    counted_previous: Array<{ start: string, end: string }>
+    monthly_average_minor: number | null
+    amount_minor: number
+    input: PayrollTerminationInputRef | null
+    override_reason?: string | null
+  }
+  death: null | {
+    limit_minor: number | null
+    entitled_group: PayrollTerminationSurvivorRelationship | null
+    survivors: PayrollTerminationSurvivor[]
+    active_deductions: { enforcement_cases: number, deduction_agreements: number }
+    tax_assessment: string | null
+    tax_assessed_at: string | null
+  }
+  a2_prefill: PayrollTerminationA2Prefill | null
+  issues: PayrollTerminationIssue[]
+  options: {
+    methods: PayrollTerminationMethod[]
+    allowed_grounds: Record<PayrollTerminationMethod, PayrollTerminationGround[]>
+  }
+}
+
+export interface PayrollTerminationPayload {
+  termination_method: PayrollTerminationMethod
+  legal_ground: PayrollTerminationGround
+  employee_stated_reason: string | null
+  severance_multiple_override: number | null
+  severance_override_reason: string | null
+  working_time_account_applies: boolean
+  row_version?: number
+}
+
+export interface PayrollTerminationSurvivorPayload {
+  full_name: string
+  relationship: PayrollTerminationSurvivorRelationship
+  shared_household: boolean
+  bank_account: string | null
+  note: string | null
+}
+
 /** Oddelene potvrzeni podle § 313 odst. 2 zakoniku prace. */
 export interface PayrollAverageEarningsCertificateEvidence {
   termination_assessment_complete: boolean
@@ -7984,6 +8155,41 @@ export const payrollApi = {
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(
       `/payroll/employments/${employmentId}/documents/exit`,
+    ).then(response => response.data),
+  employmentTermination: (employmentId: number) =>
+    api.get<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination`,
+    ).then(response => response.data),
+  saveEmploymentTermination: (employmentId: number, payload: PayrollTerminationPayload) =>
+    api.put<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination`,
+      payload,
+    ).then(response => response.data),
+  settleTerminationLeave: (employmentId: number) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/leave-settlement`,
+    ).then(response => response.data),
+  reverseTerminationLeave: (employmentId: number) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/leave-settlement/reverse`,
+    ).then(response => response.data),
+  createTerminationSeverance: (employmentId: number) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/severance-input`,
+    ).then(response => response.data),
+  addTerminationSurvivor: (employmentId: number, payload: PayrollTerminationSurvivorPayload) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/survivors`,
+      payload,
+    ).then(response => response.data),
+  removeTerminationSurvivor: (employmentId: number, survivorId: number) =>
+    api.delete<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/survivors/${survivorId}`,
+    ).then(response => response.data),
+  assessTerminationDeathTax: (employmentId: number, assessment: string, rowVersion: number) =>
+    api.post<PayrollTerminationOverview>(
+      `/payroll/employments/${employmentId}/termination/death-tax-assessment`,
+      { assessment, row_version: rowVersion },
     ).then(response => response.data),
   generateEmploymentCertificate: (
     employmentId: number,
