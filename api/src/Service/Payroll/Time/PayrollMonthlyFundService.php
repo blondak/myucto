@@ -41,6 +41,23 @@ final class PayrollMonthlyFundService
      */
     public function minutes(int $supplierId, int $employmentId, string $period): ?int
     {
+        return $this->compute($supplierId, $employmentId, $period)['fund'] ?? null;
+    }
+
+    /**
+     * Minuty, které by týdenní vzor kalendáře naplánoval na svátky v jinak pracovní
+     * dny. Fond {@see minutes()} je nemá (svátek se neodpracovává), fond pracovní doby
+     * v měsíčním hlášení (10259/10260) a v podkladech jiných programů ano.
+     * `null` = vztah nemá pro období pracovní kalendář.
+     */
+    public function holidayMinutes(int $supplierId, int $employmentId, string $period): ?int
+    {
+        return $this->compute($supplierId, $employmentId, $period)['holidays'] ?? null;
+    }
+
+    /** @return array{fund:int,holidays:int}|null */
+    private function compute(int $supplierId, int $employmentId, string $period): ?array
+    {
         $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $period . '-01');
         if ($start === false || $start->format('Y-m') !== $period) {
             throw new \InvalidArgumentException('period musí být ve formátu YYYY-MM.');
@@ -54,6 +71,7 @@ final class PayrollMonthlyFundService
         }
 
         $combined = [];
+        $holidays = [];
         foreach ($versions as $version) {
             $calendarId = PayrollTimeValue::int($version['id'] ?? null, 'calendar_id');
             $month = $this->fund->month(
@@ -74,10 +92,13 @@ final class PayrollMonthlyFundService
                     $day['planned_minutes'] ?? null,
                     'planned_minutes',
                 );
+                $holidays[$date] = ($day['is_holiday'] ?? false) === true
+                    ? max(0, (int) ($version['week_pattern'][(int) $day['weekday']] ?? 0))
+                    : 0;
             }
         }
 
-        return array_sum($combined);
+        return ['fund' => array_sum($combined), 'holidays' => array_sum($holidays)];
     }
 
     /** @return list<array{id:int,valid_from:string,valid_to:?string,week_pattern:array<int,int>}> */

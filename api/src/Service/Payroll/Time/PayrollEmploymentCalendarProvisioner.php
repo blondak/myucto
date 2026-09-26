@@ -142,6 +142,13 @@ final class PayrollEmploymentCalendarProvisioner
         if (abs($importedMillihours * 60 - $calendarMinutes * 1000) < 1000) {
             return null;
         }
+        // Podklady jiných programů (PAMICA, docházkové systémy) vedou fond i se svátky
+        // v jinak pracovní dny, stejně jako fond měsíčního hlášení (10259/10260). Takový
+        // fond je týž rozvrh, ne jiný úvazek.
+        $holidayMinutes = $this->monthlyFund->holidayMinutes($supplierId, $employmentId, self::period($periodStart)) ?? 0;
+        if ($holidayMinutes > 0 && abs($importedMillihours * 60 - ($calendarMinutes + $holidayMinutes) * 1000) < 1000) {
+            return null;
+        }
 
         return [
             'code' => self::ISSUE_FUND_MISMATCH,
