@@ -19,10 +19,12 @@ namespace MyInvoice\Service\Accounting\Payroll;
  * srážkový základ omylem uplatní sleva, což zákon nedovoluje.
  *
  * ── Kdy se použije ──────────────────────────────────────────────────────────────────
- *   § 6/4  DPP od JEDNOHO zaměstnavatele BEZ podepsaného prohlášení k dani, jejíž
+ *   § 6/4 a) DPP od JEDNOHO zaměstnavatele BEZ podepsaného prohlášení k dani, jejíž
  *          úhrn za měsíc NEDOSÁHNE rozhodné částky pro účast na nemocenském
  *          pojištění (§ 7a z. č. 187/2006 Sb.; 2025 11 500 Kč, 2026 12 000 Kč).
  *          Tatáž rozhodná částka řídí i odvody SP+ZP z DPP — pod ní se neodvádí.
+ *          Písmeno b) (ostatní příjmy pod rozhodnou částkou, jakýkoli vztah) tahle
+ *          třída nepočítá, jen na něj upozorní — viz {@see self::letterBNotice()}.
  *   § 7/6  autorský honorář do 10 000 Kč měsíčně od jednoho plátce.
  *   § 36   příjmy nerezidentů (sazba se řídí smlouvou o zamezení dvojího zdanění;
  *          tu systém nezná, proto se bere zákonná sazba a hlásí se to).
@@ -38,24 +40,56 @@ final class WithholdingTaxCalculator
     public const REASON_NON_RESIDENT = 'non_resident';
 
     /**
-     * Důvod srážky plynoucí ze samotného typu pracovněprávního vztahu, nebo `null`,
-     * když se z tohohle titulu srážková daň neuplatní vůbec.
+     * Důvod srážky, který tahle zjednodušená rekapitulace umí spočítat, nebo `null`.
      *
-     * ── Proč to je pojmenované pravidlo, a ne podmínka v jednom volajícím ───────────
-     * Výčet `payroll_employees.employment_type` roste (1156 hpp/dpp/dpc, 1302
-     * statutory_body) a jediná hodnota, která srážku zakládá, je DPP. Odměna člena
-     * statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP ze smlouvy o výkonu
-     * funkce — NE příjem z dohody o provedení práce — a daní se VŽDY zálohou, i když
-     * je nízká; § 6 odst. 4 na ni nedopadá. Kdyby byla podmínka psaná negací
-     * („všechno kromě pracovního poměru je dohoda"), spadl by výkon funkce pod limitem
-     * do srážky a poplatník by přišel o slevy i o roční zúčtování.
-     *
-     * Proto whitelist s jednou položkou: nový typ vztahu se do srážkového režimu
-     * nedostane, dokud ho sem někdo vědomě nedopíše.
+     * Počítá jen písmeno a) § 6 odst. 4 ZDP (DPP). Písmeno b) — příjmy v úhrnné
+     * výši nedosahující u téhož plátce za měsíc rozhodné částky — dopadá na
+     * JAKÝKOLI druh vztahu, tedy i na pracovní poměr, DPČ a odměnu jednatele.
+     * Tahle cesta ho ale nepočítá: srážka tam jde vedle pojistného, jehož
+     * povinnost se řídí sjednanou částkou, a tu rekapitulace z jedné hrubé částky
+     * za měsíc nezná. Místo tiše špatné zálohy proto na takový měsíc upozorní
+     * {@see self::letterBNotice()}; výpočet dělá modul Mzdy.
      */
     public static function reasonForEmploymentType(string $employmentType): ?string
     {
         return $employmentType === 'dpp' ? self::REASON_DPP : null;
+    }
+
+    /**
+     * Upozornění, že měsíc spadá pod § 6 odst. 4 písm. b) ZDP a zjednodušená
+     * rekapitulace jeho srážkovou daň nespočítá; `null`, když se ho to netýká.
+     *
+     * Týká se jen znění § 6 odst. 4 od 1. 1. 2025 („nedosahující“, hranice ostrá),
+     * které je ověřené. Ročníky se starším zněním nesou v konstantách
+     * `dpp_withholding_limit_inclusive = true` a zůstávají beze změny.
+     *
+     * @param array<string,mixed> $c roční daňové konstanty
+     */
+    public static function letterBNotice(
+        string $employmentType,
+        float $amount,
+        array $c,
+        bool $taxDeclarationSigned,
+    ): ?string {
+        if ($employmentType === 'dpp' || $taxDeclarationSigned || $amount <= 0) {
+            return null;
+        }
+        if (($c['dpp_withholding_limit_inclusive'] ?? true) !== false) {
+            return null;
+        }
+        $threshold = (float) ($c['sickness_participation_threshold'] ?? 0);
+        if ($threshold <= 0 || $amount >= $threshold) {
+            return null;
+        }
+
+        return sprintf(
+            'Hrubý příjem %s Kč nedosahuje rozhodné částky %s Kč a zaměstnanec nepodepsal '
+                . 'prohlášení k dani. Podle § 6 odst. 4 písm. b) ZDP se z něj sráží srážková '
+                . 'daň 15 %% (samostatný základ), ne záloha — týká se každého druhu vztahu. '
+                . 'Zjednodušená rekapitulace tuhle srážku nepočítá; spočítejte měsíc v modulu Mzdy.',
+            number_format($amount, 2, ',', ' '),
+            number_format($threshold, 0, ',', ' '),
+        );
     }
 
     /**

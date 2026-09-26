@@ -133,6 +133,16 @@ final class PayrollPostingService
         // §15a se uplatní jen se známým ročním základem KONKRÉTNÍHO zaměstnance;
         // nad rekapitulací za všechny by strop srazil pojistné celé firmě.
         $breakdown = PayrollCalculator::compute($gross, $constants, $credits, $ytdSocialBase);
+        $warnings = self::replacementWarnings($replaces, $gross);
+        $letterB = $employee === null ? null : WithholdingTaxCalculator::letterBNotice(
+            (string) ($employee['employment_type'] ?? 'hpp'),
+            $gross,
+            $constants,
+            (bool) ($employee['tax_declaration_signed'] ?? 0),
+        );
+        if ($letterB !== null) {
+            $warnings[] = $letterB;
+        }
 
         return [
             'year'            => $year,
@@ -148,7 +158,7 @@ final class PayrollPostingService
             'accounts'        => $accounts->toMap(),
             'lines'           => PayrollCalculator::lines($breakdown, $taxpayerType, $settlementAccount, $accounts),
             'replaces_gross' => $replaces,
-            'warnings'        => self::replacementWarnings($replaces, $gross),
+            'warnings'        => $warnings,
         ];
     }
 
@@ -375,10 +385,10 @@ final class PayrollPostingService
      * Vrací `null`, když se srážka neuplatní (jiný typ vztahu, podepsané prohlášení,
      * překročený limit) — v tom případě platí běžný zálohový režim.
      *
-     * O tom, které typy vztahu srážku vůbec zakládají, rozhoduje
-     * {@see WithholdingTaxCalculator::reasonForEmploymentType()} — whitelist, ne negace,
-     * aby do srážkového režimu nemohl spadnout nový typ vztahu (výkon funkce podle
-     * § 59 ZOK se daní vždy zálohou, § 6 odst. 4 na něj nedopadá).
+     * Spočítat tu jde jen písmeno a) (DPP), viz
+     * {@see WithholdingTaxCalculator::reasonForEmploymentType()}. Písmeno b) dopadá
+     * na každý druh vztahu včetně výkonu funkce podle § 59 ZOK, rekapitulace ho ale
+     * nepočítá a jen na něj upozorní ({@see WithholdingTaxCalculator::letterBNotice()}).
      *
      * @param array<string,mixed> $employee karta zaměstnance
      * @param array<string,mixed> $constants roční daňové konstanty
