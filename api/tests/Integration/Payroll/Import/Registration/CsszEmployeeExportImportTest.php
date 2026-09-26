@@ -262,6 +262,95 @@ final class CsszEmployeeExportImportTest extends TestCase
     }
 
     /**
+     * Export od 15. 10. 2026 nese začátek pojistného vztahu: je to nástup a osoba
+     * se založí i bez měsíčních hlášení. Konec pojistného vztahu nový vztah
+     * rovnou ukončí.
+     */
+    public function testExportFrom2026OctoberCarriesStartAndEnd(): void
+    {
+        $files = [$this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+            $this->employee(['PojistnyVztahOd' => '2019-05-01', 'PojistnyVztahDo' => '2025-11-30']),
+        ]))];
+
+        $export = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame('create_person', $export['operation'], $this->dump($export));
+        self::assertNull($export['blocker'], $this->dump($export));
+        self::assertSame('2019-05-01', $export['employment']['start_on']);
+        self::assertSame('2025-11-30', $export['employment']['end_on']);
+        self::assertTrue($this->hasWarning($export, 'začátek pojistného vztahu podle exportu'));
+
+        $result = $this->apply($files, [$export['key']])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertContains('terminated', $result['operations']);
+        $employment = $this->lookup->employment($this->supplierId, (int) $result['employment_id']);
+        self::assertSame(['2019-05-01', '2025-11-30', 'ended'], [$employment['start_date'], $employment['end_date'], $employment['status']]);
+    }
+
+    /** Nástup z exportu má přednost před odhadem z prvního hlášeného měsíce dávky. */
+    public function testExportStartWinsOverFirstReportedMonth(): void
+    {
+        $files = [
+            $this->file('jmhz-01.xml', $this->report(1)),
+            $this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([$this->employee(['PojistnyVztahOd' => '2021-09-01'])])),
+        ];
+
+        $export = $this->byType($this->imports->preview($this->supplierId, 'test', $files)['records'])['CSSZ_EXPORT'][0];
+
+        self::assertSame('2021-09-01', $export['employment']['start_on'], $this->dump($export));
+        self::assertFalse($this->hasWarning($export, 'první den nejstaršího'));
+    }
+
+    /** U zaměstnání malého rozsahu a DPP není začátek pojištění nástupem (pokyny k 10223). */
+    public function testSmallScaleInsuranceStartIsNotTakenAsStart(): void
+    {
+        $files = [
+            $this->file('jmhz-03.xml', $this->report(3, '2026-03-16')),
+            $this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+                $this->employee(['PojistnyVztahOd' => '2026-03-01', 'ZMR' => 'A']),
+            ])),
+        ];
+
+        $export = $this->byType($this->imports->preview($this->supplierId, 'test', $files)['records'])['CSSZ_EXPORT'][0];
+
+        self::assertSame('2026-03-16', $export['employment']['start_on'], $this->dump($export));
+        self::assertTrue($this->hasWarning($export, 'nemusí být den nástupu'));
+    }
+
+    /** Cizinec bez rodného čísla: export nese EČP a osoba se podle něj hledá i zakládá. */
+    public function testForeignerIsIdentifiedByInsuredPersonNumber(): void
+    {
+        $files = [
+            $this->file('zamestnanci.xml', RegistrationXmlFixtures::csszExport([
+                $this->employee(['RodneCislo' => null, 'EvidencniCisloPojistence' => '9005410005', 'PojistnyVztahOd' => '2026-02-01']),
+            ])),
+        ];
+
+        $export = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+
+        self::assertSame('create_person', $export['operation'], $this->dump($export));
+        self::assertSame('900541/****', $export['person']['birth_number_masked']);
+        self::assertTrue($this->hasWarning($export, 'evidenční číslo pojištěnce (EČP)'));
+    }
+
+    /**
+     * Vztah jen z hlášení bez exportu: nástup je odhad z prvního hlášeného měsíce
+     * a náhled i výsledek to říkají, aby ho účetní doplnila ze smlouvy.
+     */
+    public function testStartEstimatedFromFirstReportIsFlagged(): void
+    {
+        $files = [$this->file('jmhz-01.xml', $this->report(1))];
+
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        $derived = $this->byType($preview['records'])['JMHZ_DERIVED'][0];
+
+        self::assertTrue($derived['employment']['start_estimated'], $this->dump($derived));
+        self::assertTrue($this->hasWarning($derived, 'Doplňte skutečný nástup ze smlouvy'));
+        $result = array_column($this->apply($files, [$derived['key']])['results'], null, 'key')[$derived['key']];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertTrue($result['start_estimated']);
+    }
+
+    /**
      * @param array<string,string|null> $overrides
      * @return array<string,string|null>
      */

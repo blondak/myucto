@@ -55,6 +55,7 @@ final class RegistrationImportVocabulary
     /** Stav převzatého měsíce z hlášení (`takeover.months[].status`). */
     public const TAKEOVER_STATUSES = [
         JmhzTakeoverPlanner::STATUS_READY,
+        JmhzTakeoverPlanner::STATUS_PARTIAL,
         JmhzTakeoverPlanner::STATUS_BLOCKED,
         JmhzTakeoverPlanner::STATUS_COMPUTED,
     ];

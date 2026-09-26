@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Import\Registration;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
@@ -248,6 +249,109 @@ final class JmhzReportFixtures
         }
 
         return $xml;
+    }
+
+    /**
+     * Formulář vztahu s daným ID PPV přepíše na dohodu bez účasti na pojištění
+     * tak, jak ji hlásí cizí programy: ELDP bez kódu s nula dny, nulový
+     * vyměřovací základ, příjem z nepojištěné činnosti (10476), „missingová"
+     * týdenní doba 99 (10261) a bez druhu činnosti v identifikaci.
+     */
+    public static function uninsuredAgreement(string $xml, string $idPpv, int $income): string
+    {
+        return self::editForm($xml, $idPpv, static function (\DOMXPath $xpath, \DOMElement $body): void {
+            $f = JmhzSchemaCatalog::NS_FORM;
+            foreach ($xpath->query('f:identifikace/f:druhCinnosti', $body) ?: [] as $node) {
+                $node->parentNode?->removeChild($node);
+            }
+            $base = $xpath->query('f:pojisteni/f:vymerovaciZaklad', $body)?->item(0);
+            if ($base instanceof \DOMElement) {
+                while ($base->firstChild !== null) {
+                    $base->removeChild($base->firstChild);
+                }
+                $base->appendChild($base->ownerDocument->createElementNS($f, 'form:castkaOdvodPojistneho', '0'));
+                $base->appendChild($base->ownerDocument->createElementNS($f, 'form:prijemNepojistenaCinnost', '__INCOME__'));
+            }
+            $list = $xpath->query('f:pojisteni/f:eldpSeznam', $body)?->item(0);
+            if ($list instanceof \DOMElement) {
+                while ($list->firstChild !== null) {
+                    $list->removeChild($list->firstChild);
+                }
+                $eldp = $list->appendChild($list->ownerDocument->createElementNS($f, 'form:eldp'));
+                $eldp->appendChild($list->ownerDocument->createElementNS($f, 'form:pocetDnu', '0'));
+            }
+            foreach ($xpath->query('f:vykonavanaPozice/f:fondPracovniDoby/f:stanovenaTydenniDoba', $body) ?: [] as $node) {
+                $node->textContent = '99';
+            }
+        }, ['__INCOME__' => (string) $income]);
+    }
+
+    /**
+     * Formulář pracujícího důchodce: ELDP se za něj nehlásí (MPSV) — seznam má
+     * jen povinnou sekci bez kódu s nula dny —, vyměřovací základ a pojistné ano.
+     */
+    public static function withoutEldp(string $xml, string $idPpv): string
+    {
+        return self::editForm($xml, $idPpv, static function (\DOMXPath $xpath, \DOMElement $body): void {
+            $list = $xpath->query('f:pojisteni/f:eldpSeznam', $body)?->item(0);
+            if ($list instanceof \DOMElement) {
+                while ($list->firstChild !== null) {
+                    $list->removeChild($list->firstChild);
+                }
+                $eldp = $list->appendChild($list->ownerDocument->createElementNS(JmhzSchemaCatalog::NS_FORM, 'form:eldp'));
+                $eldp->appendChild($list->ownerDocument->createElementNS(JmhzSchemaCatalog::NS_FORM, 'form:pocetDnu', '0'));
+            }
+        });
+    }
+
+    /**
+     * ELDP s kódem, nulou dnů a vyloučenými dny jen v podpoložkách (bez úhrnu
+     * 10357) — tak hlásí cizí programy měsíc celý v dávkách.
+     */
+    public static function eldpOnBenefits(string $xml, string $idPpv, int $benefitDays): string
+    {
+        return self::editForm($xml, $idPpv, static function (\DOMXPath $xpath, \DOMElement $body): void {
+            $f = JmhzSchemaCatalog::NS_FORM;
+            foreach ($xpath->query('f:pojisteni/f:eldpSeznam/f:eldp', $body) ?: [] as $eldp) {
+                if (!$eldp instanceof \DOMElement) {
+                    continue;
+                }
+                foreach ($xpath->query('f:pocetDnu', $eldp) ?: [] as $node) {
+                    $node->textContent = '0';
+                }
+                foreach ($xpath->query('f:vymerovaciZaklad|f:vylouceneDny|f:odecitaneDny', $eldp) ?: [] as $node) {
+                    $node->parentNode?->removeChild($node);
+                }
+                $excluded = $eldp->appendChild($eldp->ownerDocument->createElementNS($f, 'form:vylouceneDny'));
+                foreach (['vyloucenePar18' => '__DAYS__', 'omluvenaNepritomnost' => '0', 'pracovniNeschopnost' => '0', 'vyplaceniDavek' => '__DAYS__'] as $name => $value) {
+                    $excluded->appendChild($eldp->ownerDocument->createElementNS($f, 'form:' . $name, $value));
+                }
+            }
+            foreach ($xpath->query('f:pojisteni/f:vymerovaciZaklad/f:castkaOdvodPojistneho', $body) ?: [] as $node) {
+                $node->textContent = '0';
+            }
+        }, ['__DAYS__' => (string) $benefitDays]);
+    }
+
+    /**
+     * @param callable(\DOMXPath,\DOMElement):void $edit
+     * @param array<string,string> $replace
+     */
+    private static function editForm(string $xml, string $idPpv, callable $edit, array $replace = []): string
+    {
+        $document = new \DOMDocument();
+        $document->preserveWhiteSpace = false;
+        $document->loadXML($xml);
+        $xpath = new \DOMXPath($document);
+        $xpath->registerNamespace('f', JmhzSchemaCatalog::NS_FORM);
+        $identification = $xpath->query("//f:identifikace[f:idPpv='{$idPpv}']")?->item(0);
+        $body = $identification?->parentNode;
+        if (!$body instanceof \DOMElement) {
+            throw new \LogicException("Formulář s ID PPV {$idPpv} v hlášení není.");
+        }
+        $edit($xpath, $body);
+
+        return strtr((string) $document->saveXML(), $replace);
     }
 
     /** Syntetický UUIDv7 (jen tvar); `index` 0 je GUID podání, jinak vztah. */

@@ -84,7 +84,14 @@ final class RegistrationXmlReaderTest extends TestCase
                 'IdZamestnani' => '2000000000101',
                 'OIC' => $oic,
             ],
-            ['OIC' => RegistrationXmlFixtures::oic(8), 'Prijmeni' => 'Zkušební', 'Jmeno' => 'Petr', 'KodDruhuCinnosti' => 't'],
+            [
+                'EvidencniCisloPojistence' => '9005410005',
+                'OIC' => RegistrationXmlFixtures::oic(8),
+                'Prijmeni' => 'Zkušební',
+                'Jmeno' => 'Petr',
+                'KodDruhuCinnosti' => 't',
+                'PojistnyVztahDo' => '2026-06-30',
+            ],
         ]));
 
         self::assertSame(RegistrationRecord::CSSZ_EXPORT, $read['document_type']);
@@ -105,10 +112,14 @@ final class RegistrationXmlReaderTest extends TestCase
         self::assertNull($record->startOn);
         self::assertSame('2026-09-20', $record->decisiveDate());
 
+        self::assertNull($record->insuranceFrom, 'Dosavadní tvar exportu začátek pojistného vztahu nenese.');
+
         $second = $read['records'][1];
         self::assertNull($second->birthNumber);
+        self::assertSame('9005410005', $second->insuredPersonNumber);
         self::assertSame('T', $second->activityCode);
         self::assertSame('dpp', $second->relationType());
+        self::assertSame('2026-06-30', $second->insuranceTo);
 
         $started = $record->withDerivedStart([
             'on' => '2026-01-01',
@@ -122,20 +133,72 @@ final class RegistrationXmlReaderTest extends TestCase
         self::assertNull($record->startOn);
     }
 
+    /**
+     * Tvar od 15. 10. 2026: začátek pojistného vztahu, bližší určení činnosti
+     * a EČP místo rodného čísla u cizince.
+     */
+    public function testCsszEmployeeExportFrom2026October(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::csszExport([
+            [
+                'RodneCislo' => RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1),
+                'PojistnyVztahOd' => '2025-03-01',
+                'KodBlizsihoUrceniCinnosti' => '1',
+                'NazevBlizsihoUrceniCinnosti' => 'Žádné',
+                'IdZamestnani' => '2000000000101',
+            ],
+            [
+                'EvidencniCisloPojistence' => '9005410005',
+                'PojistnyVztahOd' => '2024-02-01',
+                'PojistnyVztahDo' => '2026-07-31',
+                'KodDruhuCinnosti' => '2',
+                'IdZamestnani' => '2000000000102',
+            ],
+        ]));
+
+        [$first, $second] = $read['records'];
+        self::assertSame('2025-03-01', $first->insuranceFrom);
+        self::assertNull($first->insuranceTo);
+        self::assertSame('1', $first->relationshipDetailCode);
+        self::assertNull($first->startOn, 'Začátek pojištění není sám o sobě nástup; rozhoduje planner.');
+        self::assertTrue($first->insuranceStartIsEmploymentStart());
+        self::assertNull($second->birthNumber);
+        self::assertSame('9005410005', $second->insuredPersonNumber);
+        self::assertSame(['2024-02-01', '2026-07-31'], [$second->insuranceFrom, $second->insuranceTo]);
+    }
+
+    /** Zaměstnání malého rozsahu a DPP: začátek pojištění nástupem být nemusí. */
+    public function testInsuranceStartOfSmallScaleAndDppIsNotEmploymentStart(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::csszExport([
+            ['RodneCislo' => RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1), 'PojistnyVztahOd' => '2025-03-01', 'ZMR' => 'A'],
+            ['RodneCislo' => RegistrationXmlFixtures::birthNumber('1991-02-16', 'male', 2), 'PojistnyVztahOd' => '2025-04-01', 'KodDruhuCinnosti' => 'T'],
+        ]));
+
+        self::assertFalse($read['records'][0]->insuranceStartIsEmploymentStart());
+        self::assertFalse($read['records'][1]->insuranceStartIsEmploymentStart());
+    }
+
     /** @return iterable<string,array{list<array<string,string|null>>,string}> */
     public static function rejectedExports(): iterable
     {
-        yield 'krátké OIČ' => [[['OIC' => '123456789']], 'neplatný OIČ'];
-        yield 'ZMR mimo A/N' => [[['OIC' => RegistrationXmlFixtures::oic(7), 'ZMR' => 'X']], 'ZMR'];
-        yield 'VS s písmeny' => [[['OIC' => RegistrationXmlFixtures::oic(7), 'VariabilniSymbol' => '12AB']], 'variabilní symbol'];
-        yield 'bez identifikátoru' => [[['Jmeno' => 'Jana', 'Prijmeni' => 'Testovací']], 'rodné číslo, OIČ ani ID PPV'];
+        $rc = RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1);
+        yield 'krátké OIČ' => [[['RodneCislo' => $rc, 'OIC' => '123456789']], 'neplatný OIČ'];
+        yield 'ZMR mimo A/N' => [[['RodneCislo' => $rc, 'ZMR' => 'X']], 'neodpovídá schématu MPSV'];
+        yield 'VS s písmeny' => [[['RodneCislo' => $rc, 'VariabilniSymbol' => '12AB']], 'variabilní symbol'];
+        yield 'bez rodného čísla i EČP' => [[['OIC' => RegistrationXmlFixtures::oic(7)]], 'neodpovídá schématu MPSV'];
+        yield 'neznámý element' => [[['RodneCislo' => $rc, 'Poznamka' => 'x']], 'neodpovídá schématu MPSV'];
+        yield 'nový tvar bez začátku pojištění u další věty' => [
+            [['RodneCislo' => $rc, 'PojistnyVztahOd' => '2025-01-01'], ['RodneCislo' => $rc]],
+            'tvar od 15. 10. 2026',
+        ];
     }
 
     /** @param list<array<string,string|null>> $employees */
     #[DataProvider('rejectedExports')]
     public function testInvalidExportIsRejectedAsWhole(array $employees, string $reason): void
     {
-        $valid = ['OIC' => RegistrationXmlFixtures::oic(9), 'IdZamestnani' => '2000000000109'];
+        $valid = ['RodneCislo' => RegistrationXmlFixtures::birthNumber('1985-03-04', 'male', 3), 'OIC' => RegistrationXmlFixtures::oic(9), 'IdZamestnani' => '2000000000109'];
 
         $this->expectException(RegistrationImportFileException::class);
         $this->expectExceptionMessage($reason);

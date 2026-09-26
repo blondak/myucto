@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Import\Registration;
 
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatch;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatchItem;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzEmploymentHistory;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzPayrollTakeover;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportReader;
@@ -166,6 +167,125 @@ final class JmhzEmploymentHistoryTest extends TestCase
         self::assertSame(31, $primary->facts->insuranceDays);
         self::assertTrue($primary->facts->pensionParticipation);
         self::assertSame(168 * 60, $primary->facts->workedMinutes);
+    }
+
+    /**
+     * DPP bez účasti na pojištění, jak ji hlásí cizí program: bez druhu činnosti
+     * a bez kódu ELDP. Dřív z ní nešlo určit druh vztahu a věta se zablokovala.
+     */
+    public function testUninsuredAgreementIsDerivedAsDppWithDpcChoiceUnderSmallScaleLimit(): void
+    {
+        $small = $this->batchFromXml([
+            JmhzReportFixtures::uninsuredAgreement($this->report(1, [$this->a(), $this->concurrent()]), self::PPV_B, 3_960),
+            JmhzReportFixtures::uninsuredAgreement($this->report(2, [$this->a(), $this->concurrent()]), self::PPV_B, 3_960),
+        ]);
+        $history = $small->history();
+        $form = $history->latest('ppv:' . self::PPV_B)?->form;
+        self::assertNotNull($form);
+        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0], $form->eldp);
+        self::assertSame(3_960, $form->uninsuredIncome);
+        self::assertNull($form->workload(), 'Týdenní doba 99 je „neuvedeno", ne 99 hodin.');
+        self::assertNull($history->activityCode('ppv:' . self::PPV_B));
+        self::assertSame(
+            ['relation_type' => 'dpp', 'options' => ['dpp', 'dpc'], 'max_income' => 3_960],
+            $history->uninsuredAgreement('ppv:' . self::PPV_B),
+        );
+        self::assertNull($history->uninsuredAgreement('ppv:' . self::PPV_A), 'Účastný pracovní poměr dohodou není.');
+
+        $derived = JmhzDerivedRegistrations::build($small, $history, [])['records'];
+        $byPpv = array_column(array_map(static fn ($r): array => ['ppv' => $r->employmentIdentifier, 'r' => $r], $derived), 'r', 'ppv');
+        self::assertSame('dpp', $byPpv[self::PPV_B]->relationType());
+        self::assertSame(['dpp', 'dpc'], $byPpv[self::PPV_B]->relationTypeOptions);
+        self::assertSame('employment', $byPpv[self::PPV_A]->relationType());
+
+        $large = $this->batchFromXml([
+            JmhzReportFixtures::uninsuredAgreement($this->report(1, [$this->a(), $this->concurrent()]), self::PPV_B, 8_000),
+        ])->history();
+        self::assertSame(['dpp'], $large->uninsuredAgreement('ppv:' . self::PPV_B)['options'] ?? null,
+            'Neúčastný příjem nad hranicí malého rozsahu má jen DPP.');
+    }
+
+    /**
+     * Účast na důchodovém pojištění = kód ELDP nebo vyměřovací základ, ne počet dnů.
+     * Dřív byl měsíc celý v dávkách (kód, nula dnů) „bez účasti" a pracující
+     * důchodce bez ELDP s pojistným konfliktem.
+     */
+    public function testPensionParticipationFollowsEldpCodeOrAssessmentBase(): void
+    {
+        $batch = $this->batchFromXml([
+            JmhzReportFixtures::eldpOnBenefits(
+                JmhzReportFixtures::withoutEldp($this->report(3, [$this->a(), $this->b(['insurance_from' => '2026-03-10'])]), self::PPV_B),
+                self::PPV_A,
+                31,
+            ),
+            JmhzReportFixtures::uninsuredAgreement($this->report(4, [$this->a(), $this->concurrent()]), self::PPV_B, 3_960),
+        ]);
+        $byPpv = [];
+        foreach ($batch->effective() as $item) {
+            $byPpv[$item->period() . '|' . $item->form->employmentIdentifier] = $item;
+        }
+
+        $row = static fn (int $id): array => ['id' => $id, 'start_date' => '2026-01-01', 'actual_start_date' => null, 'end_date' => null, 'relation_type' => 'employment'];
+        $facts = static fn (JmhzBatchItem $item, int $id): array => [
+            JmhzPayrollTakeover::totals($item, [$item], 3, $row($id), '1')->facts->pensionParticipation,
+            JmhzPayrollTakeover::totals($item, [$item], 3, $row($id), '1')->facts->insuranceDays,
+            JmhzPayrollTakeover::totals($item, [$item], 3, $row($id), '1')->facts->excludedDays,
+        ];
+
+        $benefits = $byPpv['2026-03|' . self::PPV_A];
+        self::assertSame(['code' => '1++', 'insurance_days' => 0, 'excluded_days' => 31], $benefits->form->eldp,
+            'Vyloučené dny jen v podpoložkách (bez úhrnu 10357) se sečtou.');
+        self::assertSame([true, 0, 31], $facts($benefits, 1), 'Měsíc v dávkách s kódem ELDP je doba účasti.');
+
+        $pensioner = $byPpv['2026-03|' . self::PPV_B];
+        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0], $pensioner->form->eldp);
+        self::assertSame([true, 22, 0], $facts($pensioner, 2), 'Důchodce bez ELDP s pojistným: dny účasti = trvání pojištění 10.–31. 3.');
+
+        $agreement = $byPpv['2026-04|' . self::PPV_B];
+        self::assertSame([false, 0, 0], $facts($agreement, 2));
+        self::assertSame([false, 0], JmhzPayrollTakeover::pensionInsurance($agreement));
+    }
+
+    /** Nástup z exportu zaměstnanců ČSSZ má přednost před odhadem z prvního hlášeného měsíce. */
+    public function testDeclaredStartFromCsszExportReplacesEstimate(): void
+    {
+        $batch = $this->batch([[2026, 1, [$this->a()]]]);
+        self::assertTrue($batch->history()->start('ppv:' . self::PPV_A)['needs_check'] ?? false);
+
+        $batch->declareStart('ppv:' . self::PPV_A, '2019-05-01');
+        self::assertSame(
+            ['on' => '2019-05-01', 'source' => JmhzEmploymentHistory::START_CSSZ_EXPORT, 'period' => '2026-01', 'needs_check' => false],
+            $batch->history()->start('ppv:' . self::PPV_A),
+        );
+    }
+
+    /** @param list<array<string,mixed>> $people */
+    private function report(int $month, array $people): string
+    {
+        return JmhzReportFixtures::report($people, 2026, $month, ['guid_seed' => $month]);
+    }
+
+    /** DPP téže osoby jako `a()` vedle pracovního poměru (souběh). */
+    private function concurrent(): array
+    {
+        return $this->b(['primary' => false, 'oic' => RegistrationXmlFixtures::oic(7), 'wage' => 3_960, 'taxable' => 3_960, 'social_base' => 0]);
+    }
+
+    /** @param list<string> $xmls */
+    private function batchFromXml(array $xmls): JmhzBatch
+    {
+        $reader = new JmhzReportReader();
+        $items = [];
+        foreach ($xmls as $index => $xml) {
+            $file = $reader->read($xml);
+            self::assertFalse($file->lenient, implode(' ', $file->warnings));
+            $sha = hash('sha256', $xml);
+            foreach ($file->forms as $form) {
+                $items[] = new JmhzBatchItem(substr($sha, 0, 16) . ':' . $form->position, $file, $form, "jmhz-{$index}.xml", $sha, $index);
+            }
+        }
+
+        return JmhzBatch::build($items, []);
     }
 
     /** @param array<string,mixed> $o */

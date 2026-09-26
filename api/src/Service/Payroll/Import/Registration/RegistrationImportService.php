@@ -62,10 +62,16 @@ final class RegistrationImportService
     ) {}
 
     /** @return array<string,mixed> */
-    public function preview(int $supplierId, string $environment, mixed $files, mixed $pairs = null): array
-    {
+    public function preview(
+        int $supplierId,
+        string $environment,
+        mixed $files,
+        mixed $pairs = null,
+        mixed $relationTypes = null,
+    ): array {
         $this->environment($environment);
         $pairMap = $this->pairs($pairs);
+        $relationTypeMap = $this->relationTypes($relationTypes);
         $read = $this->read($supplierId, $files);
         $records = [];
         $registrationPlans = [];
@@ -76,6 +82,7 @@ final class RegistrationImportService
                 $item['record'],
                 $item['file'],
                 $item['sha256'],
+                $relationTypeMap[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] ?? null,
             );
             $registrationPlans[] = $plan;
             // Odvozená věta vztahu, který evidence už vede beze změny, by náhled
@@ -121,8 +128,15 @@ final class RegistrationImportService
      *   opening_balances:array{saved:int,skipped:list<array<string,mixed>>},
      *   averages:array{created:int,approved:int,skipped:list<array<string,mixed>>},
      *   takeover:?array<string,mixed>,
-     *   change_checklist:array{completed:int,failed:list<array{employment_id:int,item_key:string,message:string}>}
+     *   change_checklist:array{completed:int,failed:list<array{employment_id:int,item_key:string,message:string}>},
+     *   outcome:string,
+     *   unresolved:list<array{key:string,file:string,period:string,label:string,reason:string}>
      * }
+     *
+     * `outcome` je `incomplete`, když některá věta selhala nebo když v dávce zůstal
+     * platný formulář hlášení bez pracovního vztahu či zablokovaný (`unresolved`).
+     * Zapsané věty zůstávají zapsané — výsledek ale nesmí vypadat jako hotový
+     * import, když z dávky část nepřešla.
      */
     public function apply(
         int $supplierId,
@@ -140,8 +154,10 @@ final class RegistrationImportService
         bool $autoApproveChanges = false,
         bool $autoApproveAverages = false,
         bool $applyTakeover = false,
+        mixed $relationTypes = null,
     ): array {
         $this->environment($environment);
+        $relationTypeMap = $this->relationTypes($relationTypes);
         if (!$evidenceConfirmed) {
             throw new \InvalidArgumentException(
                 'Potvrďte, že soubory odpovídají podáním přijatým ČSSZ. Import podle nich zapisuje '
@@ -200,7 +216,7 @@ final class RegistrationImportService
             }
         }
         foreach ($ordered as $item) {
-            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent);
+            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent, $relationTypeMap);
             $results[(string) $result['key']] = $result;
         }
 
@@ -224,6 +240,12 @@ final class RegistrationImportService
             if ($plan['operation'] === 'pair_required') {
                 $results[$key] = $this->result($key, 'skipped', 'Formulář není spárovaný s pracovním vztahem. '
                     . 'Vyberte vztah, ke kterému patří, a použití zopakujte.', $plan);
+                continue;
+            }
+            if ($plan['operation'] === 'create_employment') {
+                $results[$key] = $this->result($key, 'skipped', 'Formulář patří dalšímu pracovnímu vztahu osoby, '
+                    . 'který v evidenci zatím není. Vyberte spolu s ním i větu „Vztah doložený měsíčními hlášeními '
+                    . 'JMHZ“ (nebo export zaměstnanců), která vztah založí, a použití zopakujte.', $plan);
                 continue;
             }
             if (!$plan['selectable']) {
@@ -277,6 +299,9 @@ final class RegistrationImportService
                 $averages = $this->averagePlanner->apply($supplierId, $fresh, $userId, $autoApproveAverages);
             }
         }
+        $unresolved = $batch->items() === []
+            ? []
+            : self::unresolvedForms($this->planJmhz($supplierId, $environment, $batch, $pairMap));
 
         return [
             'results' => $list,
@@ -285,7 +310,42 @@ final class RegistrationImportService
             'averages' => $averages,
             'takeover' => $takeover,
             'change_checklist' => $checklist,
+            'outcome' => $summary['failed'] === 0 && $unresolved === [] ? 'complete' : 'incomplete',
+            'unresolved' => $unresolved,
         ];
+    }
+
+    /**
+     * Formuláře, které po zápisu v evidenci nemají kam patřit: platný formulář
+     * bez pracovního vztahu (čeká na ruční přiřazení nebo na vztah, který
+     * nevznikl) a formulář zablokovaný (konflikt, rozporné identifikátory).
+     * Nahrazené a stornované formuláře sem nepatří — z nich se nepřebírá nic.
+     *
+     * @param array<string,array<string,mixed>> $plans
+     * @return list<array{key:string,file:string,period:string,label:string,reason:string}>
+     */
+    private static function unresolvedForms(array $plans): array
+    {
+        $unresolved = [];
+        foreach ($plans as $key => $plan) {
+            $blocked = $plan['blocker'] !== null;
+            if (!$blocked && !($plan['_effective'] === true && $plan['_employment_id'] === null)) {
+                continue;
+            }
+            $unresolved[] = [
+                'key' => (string) $key,
+                'file' => (string) $plan['file'],
+                'period' => (string) $plan['period'],
+                'label' => (string) ($plan['person']['full_name'] ?? ''),
+                'reason' => $blocked
+                    ? (string) $plan['blocker']
+                    : ($plan['operation'] === 'create_employment'
+                        ? 'Pracovní vztah formuláře v evidenci není — nezaložila ho žádná věta dávky.'
+                        : 'Formulář není spárovaný s pracovním vztahem.'),
+            ];
+        }
+
+        return $unresolved;
     }
 
     /**
@@ -302,8 +362,16 @@ final class RegistrationImportService
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        array $relationTypeMap = [],
     ): array {
-        $plan = $this->planner->plan($supplierId, $environment, $item['record'], $item['file'], $item['sha256']);
+        $plan = $this->planner->plan(
+            $supplierId,
+            $environment,
+            $item['record'],
+            $item['file'],
+            $item['sha256'],
+            $relationTypeMap[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] ?? null,
+        );
         $key = (string) $plan['key'];
         if ($plan['blocker'] !== null) {
             return $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
@@ -312,7 +380,9 @@ final class RegistrationImportService
             return $this->result($key, 'skipped', 'Věta nemá co zapsat — evidence už odpovídá.', $plan);
         }
         try {
-            return ['key' => $key] + $this->writer->apply($supplierId, $environment, $plan, $officeId, $userId, $ip, $userAgent);
+            return ['key' => $key]
+                + $this->writer->apply($supplierId, $environment, $plan, $officeId, $userId, $ip, $userAgent)
+                + ['start_estimated' => $plan['employment']['start_estimated'] === true];
         } catch (LicensePayrollLimitExceeded) {
             return $this->result($key, 'failed', 'Dalšího aktivního zaměstnance lze přidat až po '
                 . 'rozšíření mzdového doplňku.', $plan);
@@ -483,10 +553,13 @@ final class RegistrationImportService
         $batch = JmhzBatch::build($jmhzItems, $stornos);
         foreach ($records as $index => $item) {
             $record = $item['record'];
-            if ($record->isCsszExport() && $record->startOn === null && $record->employmentIdentifier !== null) {
-                $start = CsszExportStartResolver::resolve($batch, $record->employmentIdentifier);
+            if ($record->isCsszExport() && $record->startOn === null) {
+                $start = CsszExportStartResolver::forExport($record, $batch);
                 if ($start !== null) {
                     $records[$index]['record'] = $record->withDerivedStart($start);
+                    if ($start['source'] === CsszExportStartResolver::SOURCE_EXPORT && $record->employmentIdentifier !== null) {
+                        $batch->declareStart('ppv:' . $record->employmentIdentifier, $start['on']);
+                    }
                 }
             }
         }
@@ -572,9 +645,16 @@ final class RegistrationImportService
     private function hintExportPairing(array &$jmhzPlans, array $registrationPlans): void
     {
         $created = [];
+        $blocked = [];
         foreach ($registrationPlans as $plan) {
             /** @var RegistrationRecord $record */
             $record = $plan['_record'];
+            if ($record->isJmhzDerived() && $plan['blocker'] !== null) {
+                $relation = JmhzReportForm::relationKeyOf($record->employmentIdentifier, $record->lastName, $record->firstName, $record->birthDate);
+                if ($relation !== null) {
+                    $blocked[$relation] = (string) $plan['blocker'];
+                }
+            }
             if (($record->isCsszExport() || ($record->isJmhzDerived() && $record->actionCode === 1))
                 && $plan['selectable']
                 && in_array($plan['operation'], ['create_person', 'create_employment'], true)
@@ -601,6 +681,9 @@ final class RegistrationImportService
                 $jmhzPlans[$key]['warnings'][] = 'Pracovní vztah založí ' . $created[$relation]['source'] . ' ('
                     . $created[$relation]['name'] . '). Vyberte ji spolu s formulářem — při zápisu se formulář '
                     . 'spáruje sám.';
+            }
+            if ($plan['operation'] === 'create_employment' && $relation !== null && isset($blocked[$relation])) {
+                $jmhzPlans[$key]['warnings'][] = 'Věta, která by vztah založila, je zablokovaná: ' . $blocked[$relation];
             }
         }
     }
@@ -657,6 +740,36 @@ final class RegistrationImportService
                 throw new \InvalidArgumentException('Formulář je v ručním párování uvedený dvakrát.');
             }
             $result[$key] = $employmentId;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Druh vztahu zvolený účetní u věty, která nabízí víc možností
+     * (`relation_type_options`): `[{key, relation_type}]`. Volbu mimo nabídnuté
+     * druhy planner ignoruje.
+     *
+     * @return array<string,string>
+     */
+    private function relationTypes(mixed $choices): array
+    {
+        if ($choices === null) {
+            return [];
+        }
+        if (!is_array($choices) || !array_is_list($choices)) {
+            throw new \InvalidArgumentException('Volba druhu vztahu musí být seznam dvojic {key, relation_type}.');
+        }
+        $result = [];
+        foreach ($choices as $choice) {
+            $key = is_array($choice) ? ($choice['key'] ?? null) : null;
+            $type = is_array($choice) ? ($choice['relation_type'] ?? null) : null;
+            if (!is_string($key) || preg_match(self::KEY_PATTERN, $key) !== 1
+                || !is_string($type) || !in_array($type, RegistrationImportVocabulary::RELATION_TYPES, true)
+            ) {
+                throw new \InvalidArgumentException('Volba druhu vztahu obsahuje neplatný klíč věty nebo druh vztahu.');
+            }
+            $result[$key] = $type;
         }
 
         return $result;

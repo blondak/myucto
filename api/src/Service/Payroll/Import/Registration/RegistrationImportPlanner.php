@@ -48,11 +48,16 @@ final class RegistrationImportPlanner
         RegistrationRecord $record,
         string $fileName,
         string $fileSha256,
+        ?string $relationTypeChoice = null,
     ): array {
         [$birthNumber, $ecp] = $this->birthNumber($record);
         $birthDate = $record->birthDate
             ?? ($birthNumber === null ? null : CzechBirthNumber::birthDate($birthNumber));
         $relationType = $record->documentType === 'PREZEC26' ? 'employment' : $record->relationType();
+        // Volba účetní platí jen mezi druhy, které věta sama nabízí.
+        if ($relationTypeChoice !== null && in_array($relationTypeChoice, $record->relationTypeOptions, true)) {
+            $relationType = $relationTypeChoice;
+        }
 
         $plan = [
             'key' => self::key($fileSha256, $record->position),
@@ -80,6 +85,8 @@ final class RegistrationImportPlanner
                 'end_on' => $record->endOn,
                 'activity_code' => $record->activityCode,
                 'relation_type' => $relationType,
+                'relation_type_options' => $record->relationTypeOptions,
+                'start_estimated' => $record->startEstimated,
                 'position_name' => $record->positionName,
                 'has_id_ppv' => $record->employmentIdentifier !== null,
             ],
@@ -115,12 +122,20 @@ final class RegistrationImportPlanner
                 'identifiers' => ['person' => null, 'employment' => null],
             ],
         ];
-        if ($ecp !== null) {
+        if ($record->insuredPersonNumber !== null && $record->birthNumber === null) {
+            $plan['warnings'][] = 'Věta nese místo rodného čísla evidenční číslo pojištěnce (EČP) — osoba '
+                . 'nejspíš rodné číslo nemá (cizinec). Osoba se hledá podle EČP.';
+        } elseif ($ecp !== null) {
             $plan['warnings'][] = 'Číslo pojištěnce ve větě není platné rodné číslo, osoba se hledá '
                 . 'jako evidenční číslo pojištěnce (EČP).';
         }
         foreach ($record->notes as $note) {
             $plan['warnings'][] = $note;
+        }
+        if ($record->isCsszExport() && $record->insuranceFrom !== null && !$record->insuranceStartIsEmploymentStart()) {
+            $plan['warnings'][] = "Export uvádí začátek pojištění {$record->insuranceFrom}. U zaměstnání malého "
+                . 'rozsahu a DPP to nemusí být den nástupu (pojištění vzniká jen v měsících s rozhodným příjmem), '
+                . 'nástup se proto z exportu nebere.';
         }
 
         $supported = match ($record->documentType) {
@@ -154,7 +169,7 @@ final class RegistrationImportPlanner
         }
         $employeeId = $person['employee_id'];
         if ($employeeId === null) {
-            return $this->planWithoutPerson($plan, $record, $relationType, $birthNumber, $birthDate);
+            return $this->planWithoutPerson($plan, $record, $relationType, $birthNumber, $birthDate, $ecp);
         }
 
         $plan['_employee_id'] = $employeeId;
@@ -210,8 +225,9 @@ final class RegistrationImportPlanner
         ?string $relationType,
         ?string $birthNumber,
         ?string $birthDate,
+        ?string $ecp = null,
     ): array {
-        $creates = ($record->documentType === 'REGZEC25' && $record->actionCode === 1)
+        $creates =($record->documentType === 'REGZEC25' && $record->actionCode === 1)
             || ($record->documentType === 'PREZEC26' && $record->actionCode === 9)
             || ($record->isJmhzDerived() && $record->actionCode === 1)
             || $record->isCsszExport();
@@ -273,7 +289,9 @@ final class RegistrationImportPlanner
         $this->change($plan, 'start_on', 'Nástup', null, $start);
         $this->change($plan, 'health_insurer_code', 'Zdravotní pojišťovna', null, $insurer);
         if ($birthNumber === null) {
-            $plan['warnings'][] = 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
+            $plan['warnings'][] = $ecp !== null
+                ? 'Evidenční číslo pojištěnce (EČP) se z věty nepřevezme — doplňte ho na kartě osoby.'
+                : 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
         }
 
         $facts = $this->identityFacts($record);
@@ -293,13 +311,16 @@ final class RegistrationImportPlanner
                 $this->change($plan, 'status', 'Stav vztahu', null, 'active');
             }
         }
+        if ($record->isCsszExport()) {
+            $this->exportInsuranceEnd($plan, $record, null);
+        }
         $plan['_steps']['identifiers'] = [
             'person' => $record->personIdentifier,
             'employment' => $record->employmentIdentifier,
         ];
         $this->educationInfo($plan, $record, null);
 
-        return $this->finish($plan, null);
+        return $this->finish($plan, $plan['blocker']);
     }
 
     /**
@@ -381,6 +402,7 @@ final class RegistrationImportPlanner
                     $this->change($plan, 'status', 'Stav vztahu', null, 'active');
                 }
             }
+            $this->exportInsuranceEnd($plan, $record, $row);
         }
 
         if (($record->isJmhzDerived() || $record->isCsszExport()) && $row !== null) {
@@ -1084,11 +1106,62 @@ final class RegistrationImportPlanner
         }
     }
 
+    /**
+     * Konec pojistného vztahu z exportu ČSSZ (`PojistnyVztahDo`). Nový vztah se
+     * k němu rovnou ukončí; u vztahu, který evidence už vede, import skončení
+     * nezapisuje (může ho doložit odhlášení nebo hlášení) a jen upozorní.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed>|null $row
+     */
+    private function exportInsuranceEnd(array &$plan, RegistrationRecord $record, ?array $row): void
+    {
+        $end = $record->insuranceTo;
+        if ($end === null) {
+            return;
+        }
+        if (!$record->insuranceEndIsEmploymentEnd()) {
+            $plan['warnings'][] = "Export uvádí konec pojištění {$end}. U zaměstnání malého rozsahu a DPP to "
+                . 'nemusí být skončení vztahu (pojištění trvá jen v měsících s rozhodným příjmem), import ho '
+                . 'proto nezapisuje.';
+
+            return;
+        }
+        if ($row !== null) {
+            if ($row['end_date'] === null && in_array($row['status'], self::OPEN_STATUSES, true)) {
+                $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} v evidenci "
+                    . 'trvá. Skončení zapište na kartě vztahu, nebo nahrajte odhlášení či hlášení za poslední měsíc.';
+            } elseif ($row['end_date'] !== null && $row['end_date'] !== $end) {
+                $plan['warnings'][] = "Export uvádí konec pojistného vztahu {$end}, vztah {$row['code']} je v evidenci "
+                    . "ukončený k {$row['end_date']}. Zkontrolujte, které datum platí.";
+            }
+
+            return;
+        }
+        $start = $plan['employment']['start_on'];
+        if (is_string($start) && $end < $start) {
+            $plan['blocker'] = "Konec pojistného vztahu {$end} v exportu předchází nástupu {$start}. Zkontrolujte soubor.";
+
+            return;
+        }
+        if ($end > date('Y-m-d') || !is_string($plan['_steps']['activate_on'])) {
+            return;
+        }
+        $plan['_steps']['terminate'] = ['target' => 'ended', 'on' => $end];
+        $plan['employment']['end_on'] = $end;
+        $this->change($plan, 'end_date', 'Skončení vztahu', null, $end);
+    }
+
     /** @param array<string,mixed> $plan */
     private function derivedStartWarnings(array &$plan, RegistrationRecord $record): void
     {
         $start = $record->derivedStart;
         if (!$record->isCsszExport() || $start === null) {
+            return;
+        }
+        if ($start['source'] === CsszExportStartResolver::SOURCE_EXPORT) {
+            $plan['warnings'][] = "Nástup {$start['on']} je začátek pojistného vztahu podle exportu ČSSZ.";
+
             return;
         }
         if ($start['source'] === CsszExportStartResolver::SOURCE_START_DATE) {
@@ -1136,7 +1209,7 @@ final class RegistrationImportPlanner
     private function birthNumber(RegistrationRecord $record): array
     {
         if ($record->birthNumber === null) {
-            return [null, null];
+            return [null, $record->insuredPersonNumber];
         }
         try {
             return [CzechBirthNumber::normalize($record->birthNumber), null];

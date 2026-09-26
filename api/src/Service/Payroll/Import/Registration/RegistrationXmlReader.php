@@ -23,8 +23,12 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlExce
  * zčásti — napůl přečtená věta by do evidence zapsala napůl pravdu.
  *
  * Umí i „Export zaměstnanců" z ePortálu ČSSZ (kořen `ExportZamestnancu` bez
- * jmenného prostoru). Ten schéma nemá, takže se tvar hodnot kontroluje ručně
- * ({@see validateExport()}) se stejným pravidlem: vadná věta odmítne celý soubor.
+ * jmenného prostoru) v obou tvarech, pro které MPSV zveřejnilo XSD: dosavadním
+ * a tvaru od 15. 10. 2026 s povinným začátkem pojistného vztahu
+ * ({@see CsszEmployeeExportSchemaCatalog}). Soubor se validuje proti tvaru,
+ * kterému odpovídá, a navíc se ručně kontroluje tvar převzatých hodnot, které
+ * schéma pouští jako libovolný text ({@see validateExport()}). Vadná věta
+ * odmítne celý soubor.
  */
 final class RegistrationXmlReader
 {
@@ -34,6 +38,8 @@ final class RegistrationXmlReader
     /** Element věty exportu => [vzor hodnoty po normalizaci, název do chybové hlášky]. */
     private const EXPORT_FORMATS = [
         'RodneCislo' => ['/^[0-9]{9,10}$/D', 'rodné číslo'],
+        'EvidencniCisloPojistence' => ['/^[0-9]{9,10}$/D', 'evidenční číslo pojištěnce (EČP)'],
+        'KodBlizsihoUrceniCinnosti' => ['/^[0-9A-Z]{1,2}$/D', 'kód bližšího určení činnosti'],
         'OIC' => ['/^[0-9]{10}$/D', 'OIČ'],
         'IdZamestnani' => ['/^[0-9]{1,22}$/D', 'ID PPV (IdZamestnani)'],
         'KodDruhuCinnosti' => ['/^[0-9A-Z]{1,2}$/D', 'kód druhu činnosti'],
@@ -45,6 +51,7 @@ final class RegistrationXmlReader
 
     public function __construct(
         private readonly PayrollRegistrationSchemaCatalog $schemas,
+        private readonly CsszEmployeeExportSchemaCatalog $exportSchemas = new CsszEmployeeExportSchemaCatalog(),
     ) {}
 
     /**
@@ -138,9 +145,10 @@ final class RegistrationXmlReader
     }
 
     /**
-     * Export zaměstnanců z ePortálu ČSSZ nemá zveřejněné schéma, takže se
-     * kontroluje ručně: tvar každé převzaté hodnoty a aspoň jeden identifikátor
-     * osoby. Jediná vadná věta odmítne celý soubor, stejně jako u XSD.
+     * Export zaměstnanců z ePortálu ČSSZ: nejdřív XSD tvaru, kterému soubor
+     * odpovídá (tvar od 15. 10. 2026 se pozná podle `PojistnyVztahOd`), pak
+     * tvar hodnot, které schéma pouští jako libovolný text (OIČ, ID PPV, kód
+     * činnosti, VS). Jediná vadná věta odmítne celý soubor.
      */
     private function validateExport(DOMDocument $document): void
     {
@@ -150,6 +158,16 @@ final class RegistrationXmlReader
             throw new RegistrationImportFileException(
                 'Export zaměstnanců ČSSZ nemá seznam zaměstnanců (element Zamestnanci). '
                 . 'Nahrajte soubor přesně tak, jak ho stáhl ePortál ČSSZ.',
+            );
+        }
+        $schema = $this->exportSchemas->schemaFor(
+            self::exportVersion($list),
+        );
+        libxml_clear_errors();
+        if (!$document->schemaValidate($schema['path'])) {
+            throw new RegistrationImportFileException(
+                "Soubor neodpovídá schématu MPSV ({$schema['label']})" . $this->libxmlDetail()
+                . '. Nahrajte soubor přesně tak, jak ho stáhl ePortál ČSSZ; nepřebírá se ani zčásti.',
             );
         }
         $generated = $this->plainText($root, 'DatumGenerovani');
@@ -183,6 +201,7 @@ final class RegistrationXmlReader
                 }
             }
             if ($this->plainText($employee, 'RodneCislo') === null
+                && $this->plainText($employee, 'EvidencniCisloPojistence') === null
                 && $this->plainText($employee, 'OIC') === null
                 && $this->plainText($employee, 'IdZamestnani') === null
             ) {
@@ -223,12 +242,32 @@ final class RegistrationXmlReader
                 lastName: $value('Prijmeni'),
                 employmentIdentifier: $value('IdZamestnani'),
                 activityCode: $value('KodDruhuCinnosti'),
+                relationshipDetailCode: $value('KodBlizsihoUrceniCinnosti'),
                 smallScale: $value('ZMR') === 'A',
                 employerVariableSymbol: $value('VariabilniSymbol'),
+                insuredPersonNumber: $value('EvidencniCisloPojistence'),
+                insuranceFrom: $this->date($value('PojistnyVztahOd')),
+                insuranceTo: $this->date($value('PojistnyVztahDo')),
             );
         }
 
         return $records;
+    }
+
+    /** Tvar exportu: od 15. 10. 2026 nese každá věta začátek pojistného vztahu. */
+    private static function exportVersion(DOMElement $list): string
+    {
+        foreach ($list->childNodes as $employee) {
+            if ($employee instanceof DOMElement && $employee->localName === 'Zamestnanec') {
+                foreach ($employee->childNodes as $child) {
+                    if ($child instanceof DOMElement && $child->localName === 'PojistnyVztahOd') {
+                        return CsszEmployeeExportSchemaCatalog::VERSION_2026_10;
+                    }
+                }
+            }
+        }
+
+        return CsszEmployeeExportSchemaCatalog::VERSION_LEGACY;
     }
 
     private function exportValue(string $element, ?string $value): ?string

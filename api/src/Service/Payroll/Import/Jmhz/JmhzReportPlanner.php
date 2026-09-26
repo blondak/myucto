@@ -28,6 +28,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  *     trval,
  *  3. ručně — účetní vybere vztah (`pairs` v požadavku) a OIČ s ID PPV se
  *     zapíšou jako ověřený opis (`verified_manual_import`).
+ * Vztah, který už má v evidenci JINÉ ID PPV, je jiný vztah: nenabízí se jako
+ * kandidát a ruční přiřazení k němu se odmítne. Když známá osoba (OIČ) žádný
+ * jiný vztah nemá, formulář dokládá další, souběžný vztah (operace
+ * `create_employment`) — založí ho odvozená věta registrace a formulář se pak
+ * spáruje podle ID PPV sám.
  * Když údaje ukazují na různé osoby nebo ruční volba odporuje automatickému
  * párování, formulář se zablokuje: zapsat cizí osobě identifikátory ČSSZ je
  * horší než nechat účetní jeden formulář dodělat ručně.
@@ -95,6 +100,11 @@ final class JmhzReportPlanner
             return $this->finish($plan, $match['blocker']);
         }
         $row = $match['employment'];
+        if ($row === null && ($match['new_employment'] ?? false) === true) {
+            $plan['operation'] = 'create_employment';
+
+            return $this->finish($plan, null);
+        }
         if ($row === null) {
             $plan['operation'] = 'pair_required';
             $this->importedPreview($plan, $item, $batch);
@@ -169,6 +179,8 @@ final class JmhzReportPlanner
                 'end_on' => null,
                 'activity_code' => $form->activityCode,
                 'relation_type' => null,
+                'relation_type_options' => [],
+                'start_estimated' => false,
                 'position_name' => null,
                 'has_id_ppv' => $form->employmentIdentifier !== null,
             ],
@@ -203,7 +215,7 @@ final class JmhzReportPlanner
     }
 
     /**
-     * @return array{public:array<string,mixed>,employment:?array<string,mixed>,warnings:list<string>,blocker:?string}
+     * @return array{public:array<string,mixed>,employment:?array<string,mixed>,warnings:list<string>,blocker:?string,new_employment?:bool}
      */
     private function match(int $supplierId, string $environment, JmhzBatchItem $item, ?int $pairEmploymentId): array
     {
@@ -227,6 +239,7 @@ final class JmhzReportPlanner
         $auto = null;
         $matchedBy = null;
         $candidates = [];
+        $newEmployee = null;
         $result = static fn (?string $blocker) => [
             'public' => [],
             'employment' => null,
@@ -244,13 +257,15 @@ final class JmhzReportPlanner
             $matchedBy = 'id_ppv';
         } elseif (count($oicEmployees) === 1) {
             // Formulář s ID PPV, které evidence nezná, patří jinému vztahu osoby
-            // (souběh) než vztah, který už ID PPV má — ten mu nepatří.
-            $rows = array_values(array_filter(
+            // (souběh) než vztah, který už ID PPV má — ten mu nepatří a nenabízí
+            // se ani k ručnímu přiřazení.
+            $own = $this->withoutForeignIdPpv(
                 $this->lookup->employments($supplierId, $oicEmployees[0]),
-                fn (array $row): bool => $this->activeIn($row, $item->file)
-                    && ($form->employmentIdentifier === null
-                        || $this->registrations->activeExternalId($supplierId, (int) $row['id'], $environment, 'id_ppv') === null),
-            ));
+                $supplierId,
+                $environment,
+                $form,
+            );
+            $rows = array_values(array_filter($own, fn (array $row): bool => $this->activeIn($row, $item->file)));
             if (count($rows) === 1) {
                 $auto = $rows[0];
                 $matchedBy = 'oic';
@@ -259,15 +274,18 @@ final class JmhzReportPlanner
                         . 'a z hlášení se doplní.';
                 }
             } else {
-                $candidates = $this->employmentCandidates(
-                    $rows !== [] ? $rows : $this->lookup->employments($supplierId, $oicEmployees[0]),
-                    $supplierId,
-                );
+                $candidates = $this->employmentCandidates($rows !== [] ? $rows : $own, $supplierId);
+                // Známá osoba, ale žádný její vztah bez ID PPV: formulář dokládá
+                // další vztah téže osoby (souběh, typicky dohoda vedle pracovního
+                // poměru). Ten založí věta odvozená z hlášení.
+                if ($candidates === [] && $form->employmentIdentifier !== null) {
+                    $newEmployee = $oicEmployees[0];
+                }
             }
         } elseif (count($oicEmployees) > 1) {
             foreach ($oicEmployees as $employeeId) {
                 $candidates = [...$candidates, ...$this->employmentCandidates(
-                    $this->lookup->employments($supplierId, $employeeId),
+                    $this->withoutForeignIdPpv($this->lookup->employments($supplierId, $employeeId), $supplierId, $environment, $form),
                     $supplierId,
                 )];
             }
@@ -319,12 +337,38 @@ final class JmhzReportPlanner
             if ($auto === null && $oicEmployees !== [] && !in_array((int) $pair['employee_id'], $oicEmployees, true)) {
                 return ['public' => []] + $result('OIČ ve formuláři patří v evidenci jiné osobě než vybraný vztah.');
             }
+            // Vztah s jiným ID PPV je jiný vztah: převzaté měsíce by se zapsaly
+            // k němu a přepsaly jeho vlastní (souběžná DPP by přepsala pracovní poměr).
+            if ($auto === null && $this->foreignIdPpv($supplierId, (int) $pair['id'], $environment, $form)) {
+                return ['public' => []] + $result(
+                    'Vybraný vztah ' . $pair['code'] . ' má v evidenci jiné ID PPV než formulář, takže jde o jiný '
+                    . 'pracovní vztah. Formulář patří dalšímu vztahu osoby — ten založí věta „Vztah doložený '
+                    . 'měsíčními hlášeními JMHZ“, nebo ho založte ručně a formulář přiřaďte k němu.',
+                );
+            }
             if ($auto === null) {
                 $auto = $pair;
                 $matchedBy = 'manual';
             }
         }
 
+        if ($auto === null && $newEmployee !== null) {
+            return [
+                'public' => [
+                    'status' => 'new',
+                    'employee_id' => $newEmployee,
+                    'employee_name' => $this->lookup->employeeName($supplierId, $newEmployee),
+                    'candidates' => [],
+                ],
+                'employment' => null,
+                'new_employment' => true,
+                'warnings' => [...$warnings, 'Osoba je v evidenci, ale žádný její pracovní vztah nemá ID PPV z formuláře '
+                    . '(jiné vztahy mají vlastní ID PPV). Formulář dokládá další, souběžný vztah téže osoby — založí ho '
+                    . 'věta „Vztah doložený měsíčními hlášeními JMHZ“; vyberte ji spolu s formulářem. K existujícímu '
+                    . 'vztahu formulář přiřadit nejde.'],
+                'blocker' => null,
+            ];
+        }
         if ($auto === null) {
             return [
                 'public' => [
@@ -816,6 +860,43 @@ final class JmhzReportPlanner
         return $result;
     }
 
+    /**
+     * Vztahy, ke kterým formulář s ID PPV může patřit: bez aktivního ID PPV
+     * v evidenci. Vztah s JINÝM ID PPV je jiný vztah (ID PPV, které evidence
+     * zná, by formulář spárovalo samo).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withoutForeignIdPpv(array $rows, int $supplierId, string $environment, JmhzReportForm $form): array
+    {
+        if ($form->employmentIdentifier === null) {
+            return $rows;
+        }
+
+        return array_values(array_filter(
+            $rows,
+            fn (array $row): bool => !$this->foreignIdPpv($supplierId, (int) $row['id'], $environment, $form),
+        ));
+    }
+
+    private function foreignIdPpv(int $supplierId, int $employmentId, string $environment, JmhzReportForm $form): bool
+    {
+        if ($form->employmentIdentifier === null) {
+            return false;
+        }
+        try {
+            return $this->identities->activeEmploymentExternalIdMatches(
+                $supplierId,
+                $employmentId,
+                $environment,
+                $form->employmentIdentifier,
+            ) === false;
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
+    }
+
     /** @param array<string,mixed> $row */
     private function activeIn(array $row, JmhzReportFile $file): bool
     {
@@ -856,7 +937,7 @@ final class JmhzReportPlanner
         $plan['blocker'] = $blocker;
         $plan['warnings'] = array_values(array_unique($plan['warnings']));
         $plan['selectable'] = $blocker === null
-            && in_array($plan['operation'], ['update', 'assign_identifiers', 'pair_required'], true);
+            && in_array($plan['operation'], ['update', 'assign_identifiers', 'pair_required', 'create_employment'], true);
 
         return $plan;
     }
