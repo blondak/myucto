@@ -223,6 +223,64 @@ final readonly class PayrollSicknessCaseRepository
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /**
+     * Případ, který vznikl z dané absence.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findByAbsence(
+        int $supplierId,
+        string $environment,
+        int $absenceId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND absence_id = ?
+              ORDER BY id
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $absenceId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Otevřený případ téhož druhu, který končí den před `$nextDay`. Neschopnost
+     * zapsaná po měsících je JEDNA sociální událost; navazující absence proto
+     * prodlužuje tentýž případ, dokud z něj nikdo nepodal hlášení o skončení.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function contiguousOpenCase(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $benefitKind,
+        string $nextDay,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND benefit_kind = ?
+                AND status IN ("draft", "prepared", "submitted", "rejected")
+                AND hzupn_submission_id IS NULL
+                AND incapacity_to = DATE_SUB(?, INTERVAL 1 DAY)
+              ORDER BY incapacity_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $benefitKind, $nextDay]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
     /** @param array<string,mixed> $data */
     public function insert(
         int $supplierId,
