@@ -130,9 +130,17 @@ final class PohodaPayrollPostingMap implements PayrollLegacyPostingSource
      */
     public static function read(string $file, ?int $year = null): self
     {
-        $catalog = self::readPredkontace($file);
-        $accountNames = self::readAccountNames($file);
-        $splitCostCenters = self::readSplitCostCenters($file, $year);
+        // Číselníky a rozúčtování jedním průchodem souborem, řádky zaúčtování druhým.
+        $catalog = [];
+        $accountNames = [];
+        $splitCostCenters = [];
+        foreach (PohodaXml::scan($file, ['pPK', 'pOS', 'MZzauctRoz']) as $table => $row) {
+            match ($table) {
+                'pPK' => self::addPredkontace($catalog, $row),
+                'pOS' => self::addAccountName($accountNames, $row),
+                default => self::addSplitCostCenters($splitCostCenters, $row, $year),
+            };
+        }
 
         /** @var array<string,array<string,mixed>> $buckets */
         $buckets = [];
@@ -294,64 +302,54 @@ final class PohodaPayrollPostingMap implements PayrollLegacyPostingSource
     /**
      * Číselník předkontací podle IDS; jedno IDS může mít víc položek.
      *
-     * @return array<string,list<array{text:string,umd:string,ud:string}>>
+     * @param array<string,list<array{text:string,umd:string,ud:string}>> $catalog MĚNÍ SE
+     * @param array<string,mixed> $row řádek `pPK`
      */
-    private static function readPredkontace(string $file): array
+    private static function addPredkontace(array &$catalog, array $row): void
     {
-        $catalog = [];
-        foreach (PohodaXml::records($file, 'pPK') as $row) {
-            $ids = PohodaXml::text($row, 'IDS');
-            if ($ids === '') {
-                continue;
-            }
-            $catalog[$ids][] = [
-                'text' => PohodaXml::text($row, 'SText'),
-                'umd' => PohodaXml::text($row, 'UMD'),
-                'ud' => PohodaXml::text($row, 'UD'),
-            ];
+        $ids = PohodaXml::text($row, 'IDS');
+        if ($ids === '') {
+            return;
         }
-
-        return $catalog;
+        $catalog[$ids][] = [
+            'text' => PohodaXml::text($row, 'SText'),
+            'umd' => PohodaXml::text($row, 'UMD'),
+            'ud' => PohodaXml::text($row, 'UD'),
+        ];
     }
 
-    /** @return array<string,string> původní účet => jeho název */
-    private static function readAccountNames(string $file): array
+    /**
+     * @param array<string,string> $names MĚNÍ SE: původní účet => jeho název
+     * @param array<string,mixed> $row řádek `pOS`
+     */
+    private static function addAccountName(array &$names, array $row): void
     {
-        $names = [];
-        foreach (PohodaXml::records($file, 'pOS') as $row) {
-            $code = PohodaXml::text($row, 'Ucet');
-            if ($code !== '') {
-                $names[$code] = PohodaXml::text($row, 'Nazev');
-            }
+        $code = PohodaXml::text($row, 'Ucet');
+        if ($code !== '') {
+            $names[$code] = PohodaXml::text($row, 'Nazev');
         }
-
-        return $names;
     }
 
     /**
      * Střediska z rozúčtování, podle id řádku `MZzauct`.
      *
-     * @return array<string,array<string,true>>
+     * @param array<string,array<string,true>> $out MĚNÍ SE
+     * @param array<string,mixed> $row řádek `MZzauctRoz`
      */
-    private static function readSplitCostCenters(string $file, ?int $year): array
+    private static function addSplitCostCenters(array &$out, array $row, ?int $year): void
     {
-        $out = [];
-        foreach (PohodaXml::records($file, 'MZzauctRoz') as $row) {
-            if ($year !== null && (int) PohodaXml::text($row, 'Rok') !== $year) {
-                continue;
-            }
-            $parent = PohodaXml::text($row, 'RefMZzauct');
-            if ($parent === '') {
-                continue;
-            }
-            foreach (['ResStrPomer', 'ResStrSl', 'ResStrClen'] as $field) {
-                $centre = PohodaXml::text($row, $field);
-                if ($centre !== '') {
-                    $out[$parent][$centre] = true;
-                }
+        if ($year !== null && (int) PohodaXml::text($row, 'Rok') !== $year) {
+            return;
+        }
+        $parent = PohodaXml::text($row, 'RefMZzauct');
+        if ($parent === '') {
+            return;
+        }
+        foreach (['ResStrPomer', 'ResStrSl', 'ResStrClen'] as $field) {
+            $centre = PohodaXml::text($row, $field);
+            if ($centre !== '') {
+                $out[$parent][$centre] = true;
             }
         }
-
-        return $out;
     }
 }

@@ -46,10 +46,17 @@ final class PohodaPayrollJmhzReports
      */
     public static function read(string $file, int $year, JmhzReportReader $reader = new JmhzReportReader()): array
     {
+        // Hlavičky hlášení a doručenky jedním průchodem, formuláře (velké, se všemi daty
+        // podání) druhým - jen hlášení převáděného roku.
         $headers = [];
-        foreach (PohodaXml::records($file, 'MH') as $row) {
-            if ((int) PohodaXml::text($row, 'Rok') === $year) {
-                $headers[PohodaXml::text($row, 'ID')] = $row;
+        $deliveries = [];
+        foreach (PohodaXml::scan($file, ['MH', 'DataBoxSent']) as $table => $row) {
+            if ($table === 'MH') {
+                if ((int) PohodaXml::text($row, 'Rok') === $year) {
+                    $headers[PohodaXml::text($row, 'ID')] = $row;
+                }
+            } elseif (PohodaXml::text($row, 'RelAgID') === self::DATA_BOX_AGENDA_MONTHLY) {
+                $deliveries[PohodaXml::text($row, 'RefID')] = self::columns($row, []);
             }
         }
         if ($headers === []) {
@@ -60,12 +67,6 @@ final class PohodaPayrollJmhzReports
             $parent = PohodaXml::text($row, 'RefAg');
             if (isset($headers[$parent])) {
                 $items[$parent][] = $row;
-            }
-        }
-        $deliveries = [];
-        foreach (PohodaXml::records($file, 'DataBoxSent') as $row) {
-            if (PohodaXml::text($row, 'RelAgID') === self::DATA_BOX_AGENDA_MONTHLY) {
-                $deliveries[PohodaXml::text($row, 'RefID')] = self::columns($row, []);
             }
         }
 
@@ -192,18 +193,22 @@ final class PohodaPayrollJmhzReports
     public static function registrations(string $file): array
     {
         $out = [];
-        foreach (['RegZAM' => 'RegZAMitems', 'PredRegZAM' => 'PredRegZAMitems'] as $headerTable => $itemTable) {
-            $headers = [];
-            foreach (PohodaXml::records($file, $headerTable) as $row) {
-                $headers[PohodaXml::text($row, 'ID')] = $row;
+        $tables = ['RegZAM' => 'RegZAMitems', 'PredRegZAM' => 'PredRegZAMitems'];
+        // Registrace i předregistrace s větami jedním průchodem souborem.
+        $rows = [];
+        foreach (PohodaXml::scan($file, [...array_keys($tables), ...array_values($tables)]) as $table => $row) {
+            if (isset($tables[$table])) {
+                $rows[$table][PohodaXml::text($row, 'ID')] = $row;
+            } else {
+                $rows[$table][PohodaXml::text($row, 'RefAg')][] = $row;
             }
+        }
+        foreach ($tables as $headerTable => $itemTable) {
+            $headers = $rows[$headerTable] ?? [];
             if ($headers === []) {
                 continue;
             }
-            $items = [];
-            foreach (PohodaXml::records($file, $itemTable) as $row) {
-                $items[PohodaXml::text($row, 'RefAg')][] = $row;
-            }
+            $items = $rows[$itemTable] ?? [];
             foreach ($headers as $id => $row) {
                 $sentences = [];
                 foreach ($items[$id] ?? [] as $item) {
