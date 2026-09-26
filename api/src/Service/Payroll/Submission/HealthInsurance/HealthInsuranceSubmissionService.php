@@ -493,7 +493,7 @@ final readonly class HealthInsuranceSubmissionService
                 'zp-prehled-%s-%s-revize-%d.%s',
                 $source['overview']->period,
                 $insurerCode,
-                $revisionId,
+                $source['overview']->revisionNo,
                 $extension,
             ),
             'sha256' => hash('sha256', $bytes),

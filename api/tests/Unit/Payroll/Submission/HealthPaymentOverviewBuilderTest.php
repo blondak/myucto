@@ -40,7 +40,7 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
             'total_contribution_minor_units'
         ]);
         self::assertSame(
-            'zp-prehled-2026-06-111-revize-53.json',
+            'zp-prehled-2026-06-111-revize-2.json',
             $overviews[0]->filename(),
         );
         self::assertSame(

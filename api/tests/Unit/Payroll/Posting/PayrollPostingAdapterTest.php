@@ -97,6 +97,10 @@ final class PayrollPostingAdapterTest extends TestCase
                     $meta['entry_date'] === '2026-07-01'
                     && $meta['document_date'] === '2026-06-30'
                     && $meta['posted_by'] === 9
+                    // Číslo dokladu a popis nesou číslo revize v běhu (2),
+                    // ne ID řádku revize (77).
+                    && $meta['document_no'] === 'MZ-202606-R2'
+                    && $meta['description'] === 'Mzdový předpis 06/2026 — revize 2'
                     && !str_contains((string) $meta['description'], 'employee')
                 ),
             )
