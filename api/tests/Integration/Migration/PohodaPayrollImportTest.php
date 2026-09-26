@@ -625,6 +625,30 @@ final class PohodaPayrollImportTest extends TestCase
         );
     }
 
+    /**
+     * Převzaté měsíce nezakládají dohodu o srážkách za každý měsíc: na kartě jich
+     * bylo tolik, kolik převedených měsíců. Měsíce, které MyÚčto počítá, je dál mají.
+     */
+    public function testTakenOverMonthsDoNotCreateMonthlyDeductionAgreements(): void
+    {
+        $attendanceAgreements = fn (int $supplierId): int => $this->scalar(
+            "SELECT COUNT(*) FROM payroll_deduction_agreements WHERE supplier_id = ? AND agreement_reference LIKE 'attendance:%'",
+            [$supplierId],
+        );
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+
+        $counted = $this->payrollSupplier();
+        $this->importer->run($counted, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertGreaterThan(0, $attendanceAgreements($counted), 'Syntetický export musí nést srážku ze mzdy.');
+
+        $takenOver = $this->payrollSupplier();
+        $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2026-03-01' WHERE supplier_id = ?")
+            ->execute([$takenOver]);
+        $protocol = $this->importer->run($takenOver, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $attendanceAgreements($takenOver), $this->explain($protocol));
+    }
+
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */
     private function payrollSupplier(): int
     {

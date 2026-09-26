@@ -114,6 +114,32 @@ final class PohodaPayrollDeductionsTest extends TestCase
         self::assertSame(1, $result['protected_amount_inputs']);
     }
 
+    /**
+     * Převzaté měsíce (před začátkem vedení mezd) import docházky dohodami o srážkách
+     * nenese. Srážka se pak zapíše JEDNOU s platností, ne jako dohoda za každý měsíc;
+     * srážka jen ve mzdách (bez karty) končí posledním měsícem, kdy se strhla.
+     */
+    public function testTakenOverMonthsGiveOneAgreementWithValidityInsteadOfMonthlyOnes(): void
+    {
+        $result = PohodaPayrollDeductions::read($this->write(), 2026, '2026-09');
+        $byReference = array_column($result['deductions'], null, 'reference');
+
+        $fromSheet = $byReference['pamica:zamsrazky:5'];
+        self::assertFalse($fromSheet['carried_by_attendance'], 'Převzatý měsíc dohodu z docházky nemá.');
+
+        $monthly = self::single(array_values(array_filter(
+            $result['deductions'],
+            static fn (array $row): bool => str_starts_with((string) $row['reference'], 'pamica:mzsrazky:'),
+        )), 'S07');
+        self::assertFalse($monthly['carried_by_attendance']);
+        $last = end($monthly['periods']);
+        self::assertSame((new \DateTimeImmutable($last . '-01'))->format('Y-m-t'), $monthly['valid_to']);
+
+        // Měsíce od začátku vedení mezd nese dál import docházky.
+        $counted = PohodaPayrollDeductions::read($this->write(), 2026, '2026-01');
+        self::assertTrue(array_column($counted['deductions'], null, 'reference')['pamica:zamsrazky:5']['carried_by_attendance']);
+    }
+
     /** @param list<array<string,mixed>> $rows */
     private static function single(array $rows, string $code): array
     {

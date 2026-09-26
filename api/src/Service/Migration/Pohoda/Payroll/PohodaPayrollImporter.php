@@ -130,6 +130,15 @@ final class PohodaPayrollImporter
         )];
     }
 
+    /**
+     * Počítá měsíc MyÚčto (leží od začátku vedení mezd dál)? Bez začátku se nic
+     * za převzaté nepovažuje, jako dřív.
+     */
+    private static function countedByModule(string $period, ?string $moduleStart): bool
+    {
+        return $moduleStart === null || $moduleStart === '' || $period >= substr($moduleStart, 0, 7);
+    }
+
     /** Věta o rozpracovaných měsících exportu pro kontrolu před převodem i protokol. */
     private static function openPeriodsMessage(array $open, ?string $exportedOn): string
     {
@@ -282,6 +291,9 @@ final class PohodaPayrollImporter
                     $protocol->warn(self::STEP_PREFLIGHT, $stale['code'], $stale['message']);
                 }
             }
+            // Začátek vedení mezd v MyÚčtu (po případném nastavení převodem): měsíce
+            // před ním jsou převzaté a nepočítá je žádný běh.
+            $moduleStart = $this->sickness->startPeriod($supplierId);
             // Jen uzavřené měsíce. Rozpracovaný měsíc (export uprostřed září nese
             // září i říjen s několika výstupními mzdami) by se jinak převzal jako
             // hotový a MyÚčto by ho už nespočítalo.
@@ -435,9 +447,15 @@ final class PohodaPayrollImporter
                             }
                         }
                     }
+                    // Dohody o srážkách po měsících zakládá import jen za měsíce, které
+                    // MyÚčto počítá. Měsíc zpracovaný předchozím programem je převzatý:
+                    // žádný běh ho nepočítá a dohoda „za 3/2026" na kartě jen překáží
+                    // (dřív jich tam bylo tolik, kolik převedených měsíců). Trvalou
+                    // srážku pro další měsíce zapíše jednou krok srážek.
                     $applied = $this->attendance->apply(
                         $supplierId, $period, [$workbook], null, [], true, true, $userOrNull, null, true, $profileId,
-                        false, true, true, $approveTakenOver, false, true,
+                        false, true, true, $approveTakenOver, false,
+                        self::countedByModule($period, $moduleStart),
                     );
                     $skipped = count($applied['skipped'] ?? []);
                     if ($approveTakenOver) {
@@ -498,7 +516,7 @@ final class PohodaPayrollImporter
                 if ($progress !== null) {
                     $progress(self::STEP_DEDUCTIONS, 0, 1);
                 }
-                $this->deductions->write($supplierId, $userOrNull, PohodaPayrollDeductions::read($file, $year), $year,
+                $this->deductions->write($supplierId, $userOrNull, PohodaPayrollDeductions::read($file, $year, $moduleStart), $year,
                     $protocol, self::STEP_DEDUCTIONS, $runId);
                 $protocol->finish(self::STEP_DEDUCTIONS);
             }

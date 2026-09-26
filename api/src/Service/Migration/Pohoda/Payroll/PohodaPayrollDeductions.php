@@ -61,9 +61,11 @@ final class PohodaPayrollDeductions
      * Vrací i to, co se zapsat nedá (`target` = `null`), aby to protokol mohl vypsat -
      * tiché zahození srážky je horší než řádek k ručnímu dořešení.
      *
+     * @param ?string $moduleStart začátek vedení mezd v MyÚčtu (`YYYY-MM`): dobrovolnou
+     *        srážku nese import docházky jen v měsících od něj, dřívější měsíce jsou převzaté
      * @return array{deductions:list<array<string,mixed>>,protected_amount_inputs:int}
      */
-    public static function read(string $file, int $year): array
+    public static function read(string $file, int $year, ?string $moduleStart = null): array
     {
         $byId = [];
         /** @var array<string,array{person:string,period:string}> $payslips mzda => osoba a období */
@@ -162,6 +164,8 @@ final class PohodaPayrollDeductions
                 PohodaXml::num($row, 'KcSrazeno') + $monthly['withheld'],
                 array_keys($monthly['periods']),
                 $firstPeriod,
+                $moduleStart,
+                false,
             );
         }
         foreach ($orphans as $key => $entry) {
@@ -180,6 +184,8 @@ final class PohodaPayrollDeductions
                 $entry['withheld'],
                 array_keys($entry['periods']),
                 $firstPeriod,
+                $moduleStart,
+                true,
             );
         }
         usort($records, static function (array $a, array $b): int {
@@ -217,6 +223,8 @@ final class PohodaPayrollDeductions
         float $withheld,
         array $periods,
         ?string $firstPeriod,
+        ?string $moduleStart = null,
+        bool $payslipOnly = false,
     ): array {
         sort($periods);
         $class = self::classify($catalog);
@@ -225,6 +233,19 @@ final class PohodaPayrollDeductions
         $validFrom = self::realDate(PohodaXml::date($row, 'DatOd'))
             ?? ($periods !== [] ? $periods[0] . '-01' : ($firstPeriod === null ? null : $firstPeriod . '-01'));
         $statutory = $class['target'] === 'enforcement' || $class['target'] === 'insolvency';
+        $start = $moduleStart === null || $moduleStart === '' ? null : substr($moduleStart, 0, 7);
+        // Měsíce, ve kterých srážku nese import docházky (dohoda za měsíc). Bez
+        // začátku vedení mezd všechny, jinak jen měsíce, které MyÚčto počítá.
+        $attendancePeriods = $start === null
+            ? $periods
+            : array_values(array_filter($periods, static fn (string $p): bool => $p >= $start));
+        $validTo = self::realDate(PohodaXml::date($row, 'DatDo'));
+        if ($validTo === null && $payslipOnly && $start !== null && $periods !== [] && $class['target'] === 'voluntary') {
+            // Srážka jen ve mzdách, bez trvalé srážky na kartě: po posledním měsíci,
+            // ve kterém ji předchozí program strhl, pokračovat nemá čím. Jedna dohoda
+            // s platností přes převzaté měsíce místo jedné za každý měsíc.
+            $validTo = (new \DateTimeImmutable(end($periods) . '-01'))->format('Y-m-t');
+        }
 
         return [
             'person_key' => $personId,
@@ -236,7 +257,7 @@ final class PohodaPayrollDeductions
             'name' => $class['name'],
             'title' => self::limited(trim($class['code'] . ' ' . $class['name']) ?: 'Srážka z PAMICA', 190),
             'valid_from' => $validFrom,
-            'valid_to' => self::realDate(PohodaXml::date($row, 'DatDo')),
+            'valid_to' => $validTo,
             // Pořadí exekuce: `DatPoradi` je den, kterým PAMICA pořadí určuje, a MyÚčto
             // z něj odvozuje `priority_date` (§ 280 odst. 3 o. s. ř.). `Poradi` je jen
             // pořadové číslo srážky na kartě, do exekučního pořadí nevstupuje.
@@ -267,7 +288,7 @@ final class PohodaPayrollDeductions
              * srážka, která se v převedených měsících nesrážela, v sešitech není a bez
              * záznamu tady by se ztratila.
              */
-            'carried_by_attendance' => $class['target'] === 'voluntary' && $periods !== []
+            'carried_by_attendance' => $class['target'] === 'voluntary' && $attendancePeriods !== []
                 && PohodaPayrollCatalog::deduction($class['code'])['meaning'] !== 'ignore',
             'recipient' => self::recipient($row),
             'periods' => $periods,

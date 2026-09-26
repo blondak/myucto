@@ -299,6 +299,30 @@ describe('PayrollQuickInputs', () => {
     expect(manual.text()).toContain('Chybí kalendář.')
   })
 
+  it('uloží měsíční podklady celého měsíce, ne jen zobrazenou stránku', async () => {
+    const all = [
+      fixture({ employment_id: 12 }),
+      fixture({ employment_id: 13, employee_id: 9, full_name: 'Syntetická osoba 2' }),
+      fixture({ employment_id: 14, employee_id: 10, full_name: 'Syntetická osoba 3' }),
+    ]
+    m.load.mockImplementation(async (period: string, page?: { limit?: number, offset?: number }) => {
+      const limit = page?.limit ?? 25
+      const offset = page?.offset ?? 0
+      // Stránka obrazovky má jen jeden řádek, celý měsíc tři.
+      const size = limit === 25 ? 1 : limit
+      return { period, items: all.slice(offset, offset + size), total: all.length }
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledTimes(1)
+    expect(m.save.mock.calls[0][0].rows.map((row: { employment_id: number }) => row.employment_id))
+      .toEqual([12, 13, 14])
+  })
+
   it('keeps partner dependent income amount-only as well', async () => {
     m.load.mockImplementation(async period => ({
       period,

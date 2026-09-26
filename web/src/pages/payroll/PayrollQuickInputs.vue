@@ -1372,13 +1372,38 @@ function componentPayload(row: UiRow): Pick<
   return Object.keys(components).length === 0 ? {} : { components }
 }
 
+/**
+ * Řádky ostatních stránek téhož zúžení, jak je server právě spočítal.
+ *
+ * „Uložit měsíční podklady" slibuje celý měsíc (souhrn pod tabulkou mluví
+ * o všech vztazích včetně dalších stránek), jenže ukládalo jen zobrazenou
+ * stránku a rozepsané řádky. U firmy s osmi stránkami to bylo osm uložení
+ * a přelistování. Nepřečtené stránky se proto dotáhnou těsně před uložením
+ * (se stejným zúžením a hledáním) a jdou s ním.
+ */
+async function otherPageRows(requestedPeriod: string): Promise<UiRow[]> {
+  if (total.value <= rows.value.length) return []
+  const onPage = new Set(rows.value.map(row => row.employment_id))
+  const collected: UiRow[] = []
+  for (let from = 0; from < total.value; from += FULL_MONTH_PAGE) {
+    const month = await payrollApi.quickInputs(
+      requestedPeriod,
+      { limit: FULL_MONTH_PAGE, offset: from },
+      focusEmploymentId.value ?? undefined,
+      appliedSearch.value || undefined,
+    )
+    for (const row of month.items) {
+      if (!onPage.has(row.employment_id)) collected.push(applyPending(row))
+    }
+    if (month.items.length === 0) break
+  }
+  return collected
+}
+/** Strop jedné stránky seznamu na serveru (PayrollQuickInputRepository::LIST_MAX_LIMIT). */
+const FULL_MONTH_PAGE = 200
+
 async function save(): Promise<void> {
   if (loadedPeriod.value !== period.value || rows.value.length === 0) {
-    return
-  }
-  const batch = savableRows.value
-  if (batch.length === 0) {
-    toast.error(t('payroll.quick_inputs.validation_failed'))
     return
   }
   const requestedPeriod = period.value
@@ -1387,6 +1412,27 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   fieldErrors.value = {}
+  let batch: UiRow[]
+  try {
+    const others = await otherPageRows(requestedPeriod)
+    const onPage = new Set(rows.value.map(row => row.employment_id))
+    const pendingIds = new Set(pendingElsewhere.value.map(row => row.employment_id))
+    batch = [
+      ...savableRows.value,
+      ...others.filter(row => !onPage.has(row.employment_id) && !pendingIds.has(row.employment_id)
+        && !rowInvalid(row)),
+    ]
+  } catch (error) {
+    saving.value = false
+    saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
+    toast.error(saveError.value)
+    return
+  }
+  if (batch.length === 0) {
+    saving.value = false
+    toast.error(t('payroll.quick_inputs.validation_failed'))
+    return
+  }
   try {
     // Server bere nejvýše 500 vztahů na požadavek. U větší firmy se dávka
     // rozdělí, ale zůstává to JEDNO uložení z pohledu uživatele — ne dvacet
