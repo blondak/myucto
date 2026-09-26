@@ -447,6 +447,36 @@ final class SocialInsuranceMonthCalculator
             $decisions,
             $employee->cappedAssessmentBaseMinorUnits,
         );
+        $contributions = $this->relationshipEmployeeContributions(
+            $ruleset,
+            $allocations,
+            $participates
+                && $input->workingPensionerDiscount === SocialDiscountEvidence::Verified,
+        );
+        $before = 0;
+        $discount = 0;
+        $contributing = 0;
+        foreach ($contributions as $relationshipId => $contribution) {
+            $before = $this->add($before, $contribution['before']);
+            $discount = $this->add($discount, $contribution['discount']);
+            if ($allocations[$relationshipId] > 0) {
+                $contributing++;
+            }
+        }
+        /*
+         * Jediný vztah se základem dává po vztazích totéž co výpočet za osobu
+         * (stejný základ, stejná sazba, jedno zaokrouhlení). Kdyby ne, rozešla
+         * by se dvě cesty k témuž číslu a v měsíčním hlášení by kontrola 118
+         * ČSSZ napočítala jiné pojistné než výplatní páska.
+         */
+        if ($contributing <= 1
+            && ($before !== $employee->employeeContributionBeforeDiscountMinorUnits
+                || $discount !== $employee->workingPensionerDiscountMinorUnits)
+        ) {
+            throw new LogicException(
+                'Single-relationship employee contribution must match the person calculator.',
+            );
+        }
 
         return new SocialPersonMonthResult(
             $input->personId,
@@ -457,19 +487,91 @@ final class SocialInsuranceMonthCalculator
             $input->yearToDateAssessmentBaseBeforeMonthMinorUnits,
             $participatingBase,
             $employee->cappedAssessmentBaseMinorUnits,
-            $employee->employeeContributionBeforeDiscountMinorUnits,
-            $employee->workingPensionerDiscountMinorUnits,
-            $employee->employeeContributionMinorUnits,
-            $employee->contributionStep,
-            $employee->discountStep,
+            $before,
+            $discount,
+            $before - $discount,
+            // Víc vztahů se základem se počítá víc kroky; ty nese každý vztah
+            // sám, jeden krok za osobu by částku nedal.
+            $contributing <= 1 ? $employee->contributionStep : null,
+            $contributing <= 1 ? $employee->discountStep : null,
             $this->relationshipResults(
                 $facts,
                 $decisions,
                 $allocations,
                 $this->partTimeDiscountOutcomes($ruleset, $facts),
+                $contributions,
             ),
             [],
         );
+    }
+
+    /**
+     * Pojistné zaměstnance a sleva pracujícího důchodce PO VZTAZÍCH.
+     *
+     * Měsíční hlášení vykazuje pojistné zaměstnance na formuláři každého
+     * vztahu (10370) a kontrola 118 ČSSZ (nepropustná) chce na něm přesně
+     * 7,1 % z vyměřovacího základu toho formuláře (10477), zaokrouhleno na
+     * celé koruny nahoru. Pojistná část pak vykazuje úhrn (10028), který
+     * kontrola 12 poměřuje se součtem 10370 přes formuláře, a pokyny MPSV
+     * k 10028 zaokrouhlují „v každém jednotlivém případě". Sleva pracujícího
+     * důchodce se podle pokynů k 10487 stanovuje a zaokrouhluje „u každého
+     * zaměstnance (a každého jeho zaměstnání, má-li jich u zaměstnavatele více)
+     * samostatně".
+     *
+     * Jedno zaokrouhlení z úhrnu vztahů by u osoby se dvěma účastnými vztahy
+     * dalo o korunu méně, než kolik formuláře musí vykázat, a hlášení by pak
+     * neprošlo buď kontrolou 118, nebo kontrolou 12. Proto se počítá po
+     * vztazích z jejich podílu základu po ročním maximu a osoba je součet.
+     *
+     * @param array<string,int> $allocations
+     * @return array<string,array{before:int,discount:int,contribution_step:?CalculationStep,discount_step:?CalculationStep}>
+     */
+    private function relationshipEmployeeContributions(
+        PayrollRulesetVersion $ruleset,
+        array $allocations,
+        bool $workingPensionerDiscount,
+    ): array {
+        $contributions = [];
+        foreach ($allocations as $relationshipId => $base) {
+            if ($base <= 0) {
+                $contributions[$relationshipId] = [
+                    'before' => 0,
+                    'discount' => 0,
+                    'contribution_step' => null,
+                    'discount_step' => null,
+                ];
+                continue;
+            }
+            $contributionStep = CalculationStep::calculate(
+                'monthly-employee-social-insurance-relationship',
+                $base,
+                $this->rateParameter($ruleset, 'employee.rate.ordinary'),
+                RoundingMode::Ceil,
+            );
+            $before = PayrollRounding::ceilToCzk($contributionStep->outputMinorUnits);
+            $discountStep = null;
+            $discount = 0;
+            if ($workingPensionerDiscount) {
+                $discountStep = CalculationStep::calculate(
+                    'monthly-working-pensioner-social-discount-relationship',
+                    $base,
+                    $this->rateParameter($ruleset, 'employee.discount.working_pensioner'),
+                    RoundingMode::Ceil,
+                );
+                $discount = min(
+                    $before,
+                    PayrollRounding::ceilToCzk($discountStep->outputMinorUnits),
+                );
+            }
+            $contributions[$relationshipId] = [
+                'before' => $before,
+                'discount' => $discount,
+                'contribution_step' => $contributionStep,
+                'discount_step' => $discountStep,
+            ];
+        }
+
+        return $contributions;
     }
 
     /**
@@ -713,7 +815,25 @@ final class SocialInsuranceMonthCalculator
             $manual ? null : 0,
             null,
             null,
-            $this->relationshipResults($facts, $decisions, []),
+            $this->relationshipResults(
+                $facts,
+                $decisions,
+                [],
+                [],
+                $manual ? null : array_fill_keys(
+                    array_map(
+                        static fn (SocialRelationshipFacts $fact): string =>
+                            $fact->relationship->relationshipId,
+                        $facts,
+                    ),
+                    [
+                        'before' => 0,
+                        'discount' => 0,
+                        'contribution_step' => null,
+                        'discount_step' => null,
+                    ],
+                ),
+            ),
             $manual ? [$reason] : [],
         );
     }
@@ -772,6 +892,7 @@ final class SocialInsuranceMonthCalculator
      * @param array<string, SocialParticipationDecision> $decisions
      * @param array<string,int> $allocations
      * @param array<string,SocialPartTimeDiscountOutcome> $discountOutcomes
+     * @param array<string,array{before:int,discount:int,contribution_step:?CalculationStep,discount_step:?CalculationStep}> $contributions
      * @return list<SocialRelationshipResult>
      */
     private function relationshipResults(
@@ -779,14 +900,17 @@ final class SocialInsuranceMonthCalculator
         array $decisions,
         array $allocations,
         array $discountOutcomes = [],
+        ?array $contributions = null,
     ): array {
         return array_map(
             static function (SocialRelationshipFacts $fact) use (
                 $decisions,
                 $allocations,
                 $discountOutcomes,
+                $contributions,
             ): SocialRelationshipResult {
                 $relationship = $fact->relationship;
+                $contribution = $contributions[$relationship->relationshipId] ?? null;
 
                 return new SocialRelationshipResult(
                     $relationship->relationshipId,
@@ -806,6 +930,10 @@ final class SocialInsuranceMonthCalculator
                     $relationship->partTimeEmployerDiscountReason,
                     $discountOutcomes[$relationship->relationshipId] ?? null,
                     $relationship->agreedWeeklyWorkingMillihours,
+                    $contribution['before'] ?? null,
+                    $contribution === null ? null : $contribution['discount'],
+                    $contribution['contribution_step'] ?? null,
+                    $contribution['discount_step'] ?? null,
                 );
             },
             $facts,

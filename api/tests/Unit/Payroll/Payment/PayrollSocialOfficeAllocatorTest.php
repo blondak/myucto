@@ -189,6 +189,34 @@ final class PayrollSocialOfficeAllocatorTest extends TestCase
         );
     }
 
+    /**
+     * Výsledek s pojistným po vztazích (souběh účastných vztahů): každá
+     * účtárna dostane přesně pojistné svých vztahů, ne poměrný podíl z úhrnu
+     * osoby. Jinak by kontrola 12 ČSSZ (pojistné za zaměstnance = součet 10370
+     * formulářů registrace) nesouhlasila o zaokrouhlení.
+     */
+    public function testAssignsRelationshipContributionsToTheirOffices(): void
+    {
+        // 7,1 % ze 101 Kč = 7,171 → 8 Kč; z 9 999 Kč = 709,929 → 710 Kč.
+        $people = $this->people([[7, 71_800, [[1, 10_100], [2, 999_900]]]]);
+        $people[0]['relationships'][0]['result_snapshot'] += [
+            'employee_contribution_before_discount_minor_units' => 800,
+            'working_pensioner_discount_minor_units' => 0,
+        ];
+        $people[0]['relationships'][1]['result_snapshot'] += [
+            'employee_contribution_before_discount_minor_units' => 71_000,
+            'working_pensioner_discount_minor_units' => 0,
+        ];
+        $result = (new PayrollSocialOfficeAllocator())->allocate(
+            $this->input([[1, 7, 4], [2, 7, 5]]),
+            $people,
+            $this->root(71_800, 0),
+        );
+
+        // Poměrem základů by vyšlo 7 a 711 Kč.
+        self::assertSame([800, 71_000], array_column($result, 'employee_minor'));
+    }
+
     public function testRejectsEmploymentWithoutOffice(): void
     {
         $this->expectException(\DomainException::class);

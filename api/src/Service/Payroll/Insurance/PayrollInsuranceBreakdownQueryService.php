@@ -172,6 +172,10 @@ final class PayrollInsuranceBreakdownQueryService
         $contribution = self::optionalNonNegativeInt($result, 'employee_contribution_minor_units');
         $status = (string) ($person['result_status'] ?? 'manual_review');
 
+        $relationshipSteps = self::relationshipEmployeeSteps(array_map(
+            static fn (mixed $row): mixed => is_array($row) ? ($row['result_snapshot'] ?? null) : null,
+            is_array($person['relationships'] ?? null) ? array_values($person['relationships']) : [],
+        ));
         if ($status === 'calculated') {
             $this->assertEmployeeSocialReconciles(
                 $capped,
@@ -180,6 +184,7 @@ final class PayrollInsuranceBreakdownQueryService
                 $discountStep,
                 $discount,
                 $contribution,
+                $relationshipSteps,
             );
         }
 
@@ -220,6 +225,9 @@ final class PayrollInsuranceBreakdownQueryService
                 'discount_step' => $discountStep,
                 'working_pensioner_discount_minor' => $discount,
                 'contribution_minor' => $contribution,
+                // Souběh účastných vztahů: pojistné se zaokrouhluje po
+                // vztazích a krok výpočtu nese každý vztah zvlášť.
+                'relationships' => $contributionStep === null ? $relationshipSteps : [],
             ],
             /*
              * Pojistné zaměstnavatele NENÍ osobní veličina: § 5a odst. 1 zákona
@@ -963,6 +971,7 @@ final class PayrollInsuranceBreakdownQueryService
      *
      * @param array<string,mixed>|null $contributionStep
      * @param array<string,mixed>|null $discountStep
+     * @param list<array{relationship_id:string,capped_assessment_base_minor_units:int,before_discount_minor:int,working_pensioner_discount_minor:int,contribution_step:?array<string,mixed>,discount_step:?array<string,mixed>}> $relationshipSteps
      */
     private function assertEmployeeSocialReconciles(
         int $cappedBase,
@@ -971,6 +980,7 @@ final class PayrollInsuranceBreakdownQueryService
         ?array $discountStep,
         ?int $discount,
         ?int $contribution,
+        array $relationshipSteps = [],
     ): void {
         if ($beforeDiscount === null || $discount === null || $contribution === null) {
             throw new \DomainException(
@@ -981,6 +991,53 @@ final class PayrollInsuranceBreakdownQueryService
             throw new \DomainException(
                 'Rozklad sociálního pojištění nedává uloženou částku pojistného zaměstnance.',
             );
+        }
+        if ($contributionStep === null && $beforeDiscount !== 0 && $relationshipSteps !== []) {
+            /*
+             * Souběh účastných vztahů: pojistné osoby je součet pojistného
+             * vztahů a každý vztah nese vlastní krok (7,1 % z jeho základu,
+             * nahoru). Rozklad musí dát uloženou částku i tady.
+             */
+            $sumBefore = 0;
+            $sumDiscount = 0;
+            $sumBase = 0;
+            foreach ($relationshipSteps as $relationship) {
+                $sumBefore += $relationship['before_discount_minor'];
+                $sumDiscount += $relationship['working_pensioner_discount_minor'];
+                $sumBase += $relationship['capped_assessment_base_minor_units'];
+                if ($relationship['contribution_step'] === null) {
+                    if ($relationship['before_discount_minor'] !== 0) {
+                        throw new \DomainException(
+                            'Sociální pojistné vztahu bez mezikroku výpočtu nesmí být nenulové.',
+                        );
+                    }
+                    continue;
+                }
+                self::assertStepRoundsTo(
+                    $relationship['contribution_step'],
+                    $relationship['capped_assessment_base_minor_units'],
+                    $relationship['before_discount_minor'],
+                    'sociálního',
+                );
+                if ($relationship['discount_step'] !== null) {
+                    self::assertStepInput(
+                        $relationship['discount_step'],
+                        $relationship['capped_assessment_base_minor_units'],
+                        'slevy pro pracujícího důchodce',
+                    );
+                } elseif ($relationship['working_pensioner_discount_minor'] !== 0) {
+                    throw new \DomainException(
+                        'Sleva pro pracujícího důchodce bez mezikroku výpočtu nesmí být nenulová.',
+                    );
+                }
+            }
+            if ($sumBefore !== $beforeDiscount || $sumDiscount !== $discount || $sumBase !== $cappedBase) {
+                throw new \DomainException(
+                    'Pojistné vztahů nedává uloženou částku pojistného zaměstnance.',
+                );
+            }
+
+            return;
         }
         if ($contributionStep === null) {
             if ($beforeDiscount !== 0) {
@@ -1202,6 +1259,52 @@ final class PayrollInsuranceBreakdownQueryService
     /**
      * @return array<string,mixed>|null
      */
+    /**
+     * Pojistné zaměstnance po vztazích, jak ho zapsal výpočet (souběh účastných
+     * vztahů). Výsledek zmrazený dřív, než se po vztazích počítalo, je nenese
+     * a vrátí se prázdný seznam.
+     *
+     * @return list<array{relationship_id:string,capped_assessment_base_minor_units:int,before_discount_minor:int,working_pensioner_discount_minor:int,contribution_step:?array<string,mixed>,discount_step:?array<string,mixed>}>
+     */
+    private static function relationshipEmployeeSteps(mixed $relationships): array
+    {
+        if (!is_array($relationships) || !array_is_list($relationships)) {
+            return [];
+        }
+        $rows = [];
+        foreach ($relationships as $index => $row) {
+            $relationship = self::object($row, "social.relationships.{$index}");
+            if (!is_int($relationship['employee_contribution_before_discount_minor_units'] ?? null)) {
+                return [];
+            }
+            $rows[] = [
+                'relationship_id' => (string) ($relationship['relationship_id'] ?? ''),
+                'capped_assessment_base_minor_units' => self::nonNegativeInt(
+                    $relationship,
+                    'capped_assessment_base_minor_units',
+                ),
+                'before_discount_minor' => self::nonNegativeInt(
+                    $relationship,
+                    'employee_contribution_before_discount_minor_units',
+                ),
+                'working_pensioner_discount_minor' => self::nonNegativeInt(
+                    $relationship,
+                    'working_pensioner_discount_minor_units',
+                ),
+                'contribution_step' => self::step(
+                    $relationship['employee_contribution_step'] ?? null,
+                    "social.relationships.{$index}.employee_contribution_step",
+                ),
+                'discount_step' => self::step(
+                    $relationship['employee_discount_step'] ?? null,
+                    "social.relationships.{$index}.employee_discount_step",
+                ),
+            ];
+        }
+
+        return $rows;
+    }
+
     private static function step(mixed $value, string $field): ?array
     {
         if ($value === null) {

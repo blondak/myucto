@@ -1690,16 +1690,23 @@ final class JmhzScenario1XmlSerializer
         }
         $node->appendChild($list);
 
-        // Pojistné je výsledek za OSOBU a nese ho nejvýš jeden její formulář
-        // (JmhzScenario1DocumentResolver::socialContributionEmployment()), jinak
-        // by kontrola 12 napočítala 10370 dvakrát. Dokument bez příznaku vznikl
-        // v době, kdy měla osoba vždy jen jeden formulář.
+        // Výsledek s pojistným po vztazích: každý účastný vztah nese své
+        // pojistné na svém formuláři (`social_contributions`), kontrola 12 pak
+        // sčítá 10370 přes formuláře. Starší dokument nese pojistné za OSOBU
+        // v souhrnu a vykazuje ho nejvýš jeden její formulář
+        // (JmhzScenario1DocumentResolver::socialContributionEmployment()).
+        // Dokument bez příznaku vznikl v době, kdy měla osoba vždy jen jeden
+        // formulář.
         $reportsSocial = ($employment['reports_social_contributions'] ?? true) === true;
+        $ownContributions = $this->object($employment['social_contributions'] ?? null);
         foreach ([
             'form:pojisteniZamestnanec' => ['employee_social_czk', '10370'],
             'form:pojisteniZamestnavatel' => ['employer_social_czk', '10481'],
         ] as $element => [$key, $attributeId]) {
-            if (!$reportsSocial || !is_int($summary[$key] ?? null) || $amount === null) {
+            $value = $ownContributions !== []
+                ? ($ownContributions[$key] ?? null)
+                : ($summary[$key] ?? null);
+            if (!$reportsSocial || !is_int($value) || $amount === null) {
                 continue;
             }
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
@@ -1708,7 +1715,7 @@ final class JmhzScenario1XmlSerializer
                 $wrapper,
                 JmhzSchemaCatalog::NS_FORM,
                 'form:socialniPojisteni',
-                (string) $this->int($summary[$key] ?? null, $attributeId),
+                (string) $this->int($value, $attributeId),
             );
             $node->appendChild($wrapper);
         }

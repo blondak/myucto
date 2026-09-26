@@ -6704,7 +6704,7 @@
           "jmhz_scenario1_tax_credit_breakdown_unavailable": "Rozpad uplatněných slev na dani zatím neumíme vykázat.",
           "jmhz_scenario1_deductions_unsupported": "Srážky ze mzdy zatím tento profil nepodporuje.",
           "jmhz_scenario1_withholding_tax_unsupported": "Srážkovou daň zatím tento profil nepodporuje.",
-          "jmhz_scenario1_concurrent_participation_unsupported": "Zaměstnanec má v měsíci víc souběžných vztahů účastných na sociálním pojištění. Pojistné je vypočtené za osobu a rozpočítat ho mezi víc účastných vztahů aplikace zatím neumí. Hlášení za tento měsíc podejte ručně přes ePortál ČSSZ.",
+          "jmhz_scenario1_concurrent_participation_unsupported": "Zaměstnanec má v měsíci víc souběžných vztahů účastných na sociálním pojištění a výsledek mzdového běhu byl spočítaný dřív, než se pojistné počítalo po vztazích. Otevřete Mzdy → Mzdové běhy, u běhu měsíce zvolte „Otevřít opravu“, mzdy spočítejte znovu, novou revizi schvalte a hlášení připravte znovu.",
           "jmhz_employee_social_discount_relationship_unresolved": "Slevu na pojistném pracujícího důchodce nelze přiřadit pracovnímu vztahu: vztah, který nese pojistné osoby, není účastný na pojištění nebo má jiný vyměřovací základ, než ze kterého je sleva vypočtená. Zkontrolujte v Mzdy → Mzdové běhy účast vztahů na pojištění.",
           "jmhz_employee_social_discount_exclusive": "U jednoho pracovního vztahu se sbíhá sleva pracujícího důchodce se sezónní slevou na pojistném. Obě současně uplatnit nelze; opravte jednu z nich.",
           "jmhz_scenario1_annual_fields_unsupported": "Roční atributy zatím tento profil nepodporuje.",

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\SocialInsurance;
 
 use JsonSerializable;
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
 
 final readonly class SocialRelationshipResult implements JsonSerializable
 {
@@ -32,6 +33,10 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public ?SocialPartTimeDiscountReason $partTimeEmployerDiscountReason = null,
         public ?SocialPartTimeDiscountOutcome $partTimeEmployerDiscountOutcome = null,
         public ?int $agreedWeeklyWorkingMillihours = null,
+        public ?int $employeeContributionBeforeDiscountMinorUnits = null,
+        public ?int $workingPensionerDiscountMinorUnits = null,
+        public ?CalculationStep $employeeContributionStep = null,
+        public ?CalculationStep $employeeDiscountStep = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -72,6 +77,23 @@ final readonly class SocialRelationshipResult implements JsonSerializable
              * ČSSZ odhalí až na protokolu.
              */
             'agreed_weekly_working_millihours' => $this->agreedWeeklyWorkingMillihours,
+            /*
+             * Pojistné zaměstnance a sleva pracujícího důchodce TOHOTO vztahu.
+             * Měsíční hlášení je vykazuje po formulářích (10370, 10491) a
+             * kontrola 118 ČSSZ chce na každém formuláři 7,1 % z jeho 10477
+             * zaokrouhleno nahoru, takže se zaokrouhlují po vztazích a pojistné
+             * osoby je jejich součet. `null` = výsledek osoby není vypočtený.
+             */
+            'employee_contribution_before_discount_minor_units' =>
+                $this->employeeContributionBeforeDiscountMinorUnits,
+            'working_pensioner_discount_minor_units' => $this->workingPensionerDiscountMinorUnits,
+            'employee_contribution_minor_units' =>
+                $this->employeeContributionBeforeDiscountMinorUnits === null
+                    ? null
+                    : $this->employeeContributionBeforeDiscountMinorUnits
+                        - ($this->workingPensionerDiscountMinorUnits ?? 0),
+            'employee_contribution_step' => $this->employeeContributionStep?->jsonSerialize(),
+            'employee_discount_step' => $this->employeeDiscountStep?->jsonSerialize(),
         ];
     }
 }
