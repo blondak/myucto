@@ -306,6 +306,17 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'script'  => 'backfill-oss-rates.php',
         ],
         [
+            // Ostatní globální seedy z migrací (svátky, katalog klíčových slov nákladů,
+            // příjemci podání, značky převodů) — stejný důvod jako u sazeb výše.
+            // Náhled běží v transakci, která se vždy vrátí, viz GlobalSeedRestorer.
+            'name'    => 'global-seeds',
+            'reason'  => 'chybějících řádků globálních číselníků',
+            'count'   => static fn (): int => (int) array_sum(
+                (new \MyInvoice\Service\System\GlobalSeedRestorer($db, \MyInvoice\Bootstrap::rootDir() . '/db/migrations'))->pending()
+            ),
+            'script'  => 'restore-global-seeds.php',
+        ],
+        [
             // Koncovka karty u pohybů importovaných před migrací 1799 — rozhoduje PHP
             // (CardNumberMask), ne SQL, viz CardLast4Backfill.
             'name'    => 'card-last4',
@@ -390,103 +401,7 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
  */
 function splitSqlStatements(string $sql): array
 {
-    $stmts = [];
-    $current = '';
-    $delim = ';';
-    $len = strlen($sql);
-    $inSingle = false;
-    $inLineComment = false;
-    $inBlockComment = false;
-    $atLineStart = true;
-
-    for ($i = 0; $i < $len; $i++) {
-        // DELIMITER directive — pouze na začátku řádku, mimo string/komentář
-        if ($atLineStart && !$inSingle && !$inLineComment && !$inBlockComment) {
-            $j = $i;
-            while ($j < $len && ($sql[$j] === ' ' || $sql[$j] === "\t")) $j++;
-            if ($j + 10 <= $len && strcasecmp(substr($sql, $j, 10), 'DELIMITER ') === 0) {
-                $eol = strpos($sql, "\n", $j + 10);
-                if ($eol === false) $eol = $len;
-                $newDelim = trim(substr($sql, $j + 10, $eol - ($j + 10)));
-                if ($newDelim !== '') {
-                    if (trim($current) !== '') {
-                        $stmts[] = $current;
-                        $current = '';
-                    }
-                    $delim = $newDelim;
-                }
-                $i = $eol; // hlavní cyklus posune na další řádek
-                $atLineStart = true;
-                continue;
-            }
-        }
-        $atLineStart = false;
-
-        $ch  = $sql[$i];
-        $nxt = ($i + 1 < $len) ? $sql[$i + 1] : '';
-
-        if ($inLineComment) {
-            $current .= $ch;
-            if ($ch === "\n") { $inLineComment = false; $atLineStart = true; }
-            continue;
-        }
-        if ($inBlockComment) {
-            $current .= $ch;
-            if ($ch === '*' && $nxt === '/') {
-                $current .= '/';
-                $i++;
-                $inBlockComment = false;
-            }
-            continue;
-        }
-        if ($inSingle) {
-            $current .= $ch;
-            if ($ch === '\\' && $nxt !== '') {
-                $current .= $nxt;
-                $i++;
-                continue;
-            }
-            if ($ch === "'") $inSingle = false;
-            continue;
-        }
-
-        if ($ch === '-' && $nxt === '-') {
-            $current .= '--';
-            $i++;
-            $inLineComment = true;
-            continue;
-        }
-        if ($ch === '/' && $nxt === '*') {
-            $current .= '/*';
-            $i++;
-            $inBlockComment = true;
-            continue;
-        }
-        if ($ch === "'") {
-            $inSingle = true;
-            $current .= $ch;
-            continue;
-        }
-        if ($ch === "\n") {
-            $current .= $ch;
-            $atLineStart = true;
-            continue;
-        }
-
-        // Match aktuální delimiter (může být multi-char, např. `//`)
-        $dlen = strlen($delim);
-        if ($dlen > 0 && substr_compare($sql, $delim, $i, $dlen) === 0) {
-            if (trim($current) !== '') $stmts[] = $current;
-            $current = '';
-            $i += $dlen - 1;
-            continue;
-        }
-        $current .= $ch;
-    }
-
-    if (trim($current) !== '') $stmts[] = $current;
-
-    return $stmts;
+    return \MyInvoice\Infrastructure\Database\SqlStatementSplitter::split($sql);
 }
 
 /**

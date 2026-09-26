@@ -26155,6 +26155,12 @@
         "actual_label": "Pending migrations",
         "expected_label": "Expected"
       },
+      "global_codebooks": {
+        "label": "Global code lists",
+        "impact": "An empty global code list (public holidays, rates, statements, filing recipients…) is not restored by migrations. Deadlines, statements or filings are then computed without it or fail.",
+        "fix": "Run php api/bin/restore-global-seeds.php --apply (Windows cmd\\restore-global-seeds.ps1). The script adds the missing rows from the migration seeds and deletes nothing.",
+        "actual_label": "Empty code lists"
+      },
       "schema_integrity": {
         "label": "Database structure",
         "impact": "The database differs from the structure the migrations create. A missing table, column or index causes errors on save; a missing trigger or audit history silently switches off data protection.",
