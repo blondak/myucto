@@ -421,6 +421,16 @@ const allSelectableSelected = computed(() =>
   selectableItems.value.length > 0
   && selectableItems.value.every(item => selectedEmploymentIds.value.includes(item.employment.id)),
 )
+/*
+ * Svátky v jinak pracovní dny z náhledu souhrnu. Účetní je nezadává — server
+ * je při schválení přičte k 10275 a 10276 — dialog je jen ukáže, aby nebylo
+ * záhadou, proč v hlášení neodpracované hodiny jsou.
+ */
+const approvalHolidayHours = computed<string | null>(() => {
+  const millihours = approvalItem.value?.jmhz_work_summary.preview?.holiday_millihours
+  if (typeof millihours !== 'number' || millihours <= 0) return null
+  return String(millihours / 1000)
+})
 const approvalConditionalComplete = computed(() =>
   approvalUnworkedOccurred.value !== null
   && approvalObstaclesOccurred.value !== null
@@ -2902,6 +2912,13 @@ onMounted(() => {
         </div>
         <p class="text-sm text-neutral-600">
           {{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}
+        </p>
+        <p
+          v-if="approvalHolidayHours !== null"
+          data-test="jmhz-holiday-hours"
+          class="rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 text-sm text-neutral-700"
+        >
+          {{ t('payroll.time.jmhz.holiday_hours_hint', { hours: approvalHolidayHours }) }}
         </p>
         <fieldset class="space-y-2 rounded-lg border border-neutral-200 p-3">
           <legend class="px-1 text-sm font-medium text-neutral-700">

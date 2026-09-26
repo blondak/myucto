@@ -109,12 +109,13 @@ final class AttendanceTimeApprovalTest extends TestCase
 
         $revision = $this->time->jmhzWorkSummaryRevision($this->supplierId, $employmentId, self::JULY);
         self::assertNotNull($revision);
-        self::assertSame('jmhz-work-month.v6', $revision['derivation_version']);
+        self::assertSame('jmhz-work-month.v8', $revision['derivation_version']);
         self::assertNull($revision['worked_days'], 'Dny podklady nenesou a nedopočítávají se.');
         self::assertSame(160_500, $revision['worked_millihours']);
-        // 10259 z fondu bez svátků, 10260 z rozvrhu kalendáře, kde svátek
-        // 6. 7. zůstává plánovaným dnem — stejně jako u souhrnu ze směn.
-        self::assertSame(176_000, $revision['standard_fund_millihours']);
+        // 10259 i 10260 počítají svátek 6. 7. jako pracovní den (pokyny MPSV
+        // k 10259: „včetně svátků v jinak pracovní dny") — stejně jako u
+        // souhrnu ze směn.
+        self::assertSame(184_000, $revision['standard_fund_millihours']);
         self::assertSame(184_000, $revision['agreed_fund_millihours']);
         self::assertSame(4_000, $revision['weekly_work_centihours']);
         self::assertSame(31, $revision['evidence_days']);

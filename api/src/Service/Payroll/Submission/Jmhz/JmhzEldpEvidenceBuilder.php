@@ -111,6 +111,9 @@ final class JmhzEldpEvidenceBuilder
         // zaměstnavatel neplatí, a proto do 10276 nevstupují.
         'employee_obstacle_paid_millihours',
         'employer_obstacle_millihours',
+        // Svátek v jinak pracovní den: mzda se nekrátí nebo náleží náhrada
+        // (pokyny MPSV k 10276). Nese ho až souhrn v7/v8.
+        'holiday_millihours',
     ];
 
     /**
@@ -767,7 +770,14 @@ final class JmhzEldpEvidenceBuilder
                 'Interakce IN08 pracovního souhrnu neodpovídá evidovaným překážkám v práci.',
             );
         }
+        // Svátek v jinak pracovní den je neodpracovaná hodina i bez evidované
+        // nepřítomnosti, takže měsíc se svátkem prochází stejnou kontrolou
+        // úhrnů jako měsíc s nepřítomností.
+        $holidayHours = self::carriesHolidays($summaryVersion)
+            && is_int($values['holiday_millihours'] ?? null)
+            && $values['holiday_millihours'] > 0;
         if ($absences !== []
+            || $holidayHours
             || (self::fromImportSummary($summaryVersion) && ($interactions['IN07'] ?? null) === true)
         ) {
             $this->assertAbsenceSliceWorkSummary(
@@ -808,6 +818,9 @@ final class JmhzEldpEvidenceBuilder
                 self::UNWORKED_FIELDS,
                 self::V3_UNWORKED_FIELDS,
                 ['compensatory_time_off_millihours'],
+                self::carriesHolidays($summaryVersion)
+                    ? PayrollJmhzWorkMonthSummaryBuilder::holidayFields()
+                    : [],
             );
         }
 
@@ -840,7 +853,10 @@ final class JmhzEldpEvidenceBuilder
         string $summaryVersion,
     ): void {
         $supported = self::absenceWorkSummaryFields($summaryVersion);
-        $documented = array_fill_keys(PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields(), true);
+        $documented = array_fill_keys([
+            ...PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields(),
+            ...PayrollJmhzWorkMonthSummaryBuilder::holidayFields(),
+        ], true);
         foreach ($absences as $absence) {
             foreach ($supported[(string) ($absence['absence_type'] ?? '')] ?? [] as $field) {
                 $documented[$field] = true;
@@ -1007,10 +1023,24 @@ final class JmhzEldpEvidenceBuilder
         );
     }
 
-    /** Bere souhrn odpracovanou dobu ze souhrnu importu docházky (v6)? */
+    /** Bere souhrn odpracovanou dobu ze souhrnu importu docházky (v6, v8)? */
     private static function fromImportSummary(string $summaryVersion): bool
     {
-        return $summaryVersion === PayrollJmhzWorkMonthSummaryBuilder::IMPORT_SUMMARY_DERIVATION_VERSION;
+        return in_array(
+            $summaryVersion,
+            PayrollJmhzWorkMonthSummaryBuilder::IMPORT_SUMMARY_VERSIONS,
+            true,
+        );
+    }
+
+    /** Nese souhrn hodiny svátků v jinak pracovní dny (od v7)? */
+    private static function carriesHolidays(string $summaryVersion): bool
+    {
+        return in_array(
+            $summaryVersion,
+            PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAYS,
+            true,
+        );
     }
 
     /**
@@ -1191,6 +1221,11 @@ final class JmhzEldpEvidenceBuilder
         }
         if (self::fromImportSummary($summaryVersion)) {
             foreach (PayrollJmhzWorkMonthSummaryBuilder::importDateFreeSummaryFields() as $field) {
+                $filled[$field] = true;
+            }
+        }
+        if (self::carriesHolidays($summaryVersion)) {
+            foreach (PayrollJmhzWorkMonthSummaryBuilder::holidayFields() as $field) {
                 $filled[$field] = true;
             }
         }

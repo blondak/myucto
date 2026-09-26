@@ -13,7 +13,7 @@ use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month.v5';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v7';
 
     /**
      * Souhrn měsíce, který bere odpracovanou dobu ze souhrnu importu docházky
@@ -22,9 +22,41 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * Vlastní verze proto, že zdrojový snapshot nese `import_summary` místo
      * `time_entries` a počet odpracovaných dnů (10267) smí zůstat NEUVEDENÝ:
      * podklady ho nenesou a dopočítat ho dělením hodin by bylo vymyšlené číslo.
-     * Hodinové bloky nese stejné jako v5.
+     * Hodinové bloky nese stejné jako souhrn z intervalů téže generace
+     * (v6 jako v5, v8 jako v7).
      */
-    public const IMPORT_SUMMARY_DERIVATION_VERSION = 'jmhz-work-month.v6';
+    public const IMPORT_SUMMARY_DERIVATION_VERSION = 'jmhz-work-month.v8';
+
+    /** Všechny verze souhrnu ze souhrnu importu docházky. */
+    public const IMPORT_SUMMARY_VERSIONS = ['jmhz-work-month.v6', 'jmhz-work-month.v8'];
+
+    /**
+     * Neodpracované hodiny svátků v jinak pracovní dny.
+     *
+     * Pokyny MPSV k vyplnění MH 1.4.13 je zahrnují do celkového počtu
+     * neodpracovaných hodin 10275 („dovolenou, svátky v jinak pracovní dny
+     * (zahrnují se i neodpracované hodiny, kdy se měsíční mzda … nekrátí)")
+     * i do hodin s náhradou či nekrácením mzdy 10276. Sjednaný fond 10260
+     * svátky také obsahuje, takže bez nich neplatí 10268 + 10275 = 10260.
+     *
+     * Hodiny nezadává účetní, odvozují se z pracovního kalendáře vztahu:
+     * svátek v den, na který rozvrh plánuje práci, mimo nepřítomnost (dovolená
+     * svátek nečerpá, § 219 ZP) a bez odpracované doby. Svátek uvnitř nemoci
+     * nese hodinový blok nemoci; uvnitř nepřítomnosti bez příjmu se mzda za
+     * svátek neposkytuje, takže do 10276 nepatří a souhrn ho neodvozuje.
+     * Nese je až v7 (a v8 z importu): přidat klíč do starší verze by změnilo
+     * obsahový otisk už zmrazených souhrnů.
+     */
+    private const HOLIDAY_FIELDS = ['holiday_millihours'];
+
+    /** Verze souhrnu, které nesou {@see HOLIDAY_FIELDS}. */
+    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8'];
+
+    /** @return list<string> */
+    public static function holidayFields(): array
+    {
+        return self::HOLIDAY_FIELDS;
+    }
 
     /**
      * Verze s potvrzenými podmíněnými bloky 10275–10280 a 10471/10472.
@@ -39,6 +71,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v4',
         'jmhz-work-month.v5',
         'jmhz-work-month.v6',
+        'jmhz-work-month.v7',
+        'jmhz-work-month.v8',
     ];
 
     /** Provenience souhrnu potvrzeného hromadným schválením dávky importu. */
@@ -55,9 +89,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * lékaře je placená překážka na straně zaměstnance (§ 199 ZP), stejně jako
      * ji aplikace vede u evidované nepřítomnosti.
      *
-     * Svátek (`holiday_hours`) mezi neodpracované hodiny nepatří: fond
-     * pracovního kalendáře ho už nezahrnuje. Služební cesta a práce z domova
-     * jsou odpracovaná doba.
+     * Svátek (`holiday_hours`) má vlastní blok {@see HOLIDAY_FIELDS} a do
+     * úhrnů 10275/10276 se přičítá až při potvrzení, stejně jako svátek
+     * odvozený z kalendáře. Služební cesta a práce z domova jsou odpracovaná
+     * doba.
      */
     public const IMPORT_DATE_FREE_BLOCKS = [
         'vacation_hours' => 'vacation',
@@ -137,6 +172,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v4',
         'jmhz-work-month.v5',
         'jmhz-work-month.v6',
+        'jmhz-work-month.v7',
+        'jmhz-work-month.v8',
     ];
 
     /**
@@ -152,7 +189,12 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const COMPENSATORY_TIME_OFF_FIELDS = ['compensatory_time_off_millihours'];
 
     /** Verze souhrnu, které nesou {@see COMPENSATORY_TIME_OFF_FIELDS}. */
-    public const VERSIONS_WITH_COMPENSATORY_TIME_OFF = ['jmhz-work-month.v5', 'jmhz-work-month.v6'];
+    public const VERSIONS_WITH_COMPENSATORY_TIME_OFF = [
+        'jmhz-work-month.v5',
+        'jmhz-work-month.v6',
+        'jmhz-work-month.v7',
+        'jmhz-work-month.v8',
+    ];
 
     /** @return list<string> */
     public static function compensatoryTimeOffFields(): array
@@ -183,13 +225,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     /**
      * Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}.
      *
-     * v4 a v5 mají dny vždy vyplněné; v6 (souhrn z importu) je smí mít
-     * NEUVEDENÉ, protože podklady docházky dny nenesou.
+     * v4, v5 a v7 mají dny vždy vyplněné; v6 a v8 (souhrn z importu) je smí
+     * mít NEUVEDENÉ, protože podklady docházky dny nenesou.
      */
     public const VERSIONS_WITH_WORKED_BREAKDOWN = [
         'jmhz-work-month.v4',
         'jmhz-work-month.v5',
         'jmhz-work-month.v6',
+        'jmhz-work-month.v7',
+        'jmhz-work-month.v8',
     ];
 
     /** @return list<string> */
@@ -231,17 +275,29 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * Prázdné pole navíc odcházelo na server a vracelo se jako
      * „standard_fund_hours musí být nezáporné desetinné číslo".
      *
-     * Počítá se ze zákonné týdenní doby rozvržené na pondělí až pátek, se
-     * svátky, které {@see PayrollCalendarFundService} zná. Není to fond
-     * TOHOTO zaměstnance (ten je 10260) — je to doba stanovená pro profesi,
-     * tedy plný úvazek v daném měsíci.
+     * Počítá se ze zákonné týdenní doby rozvržené na pondělí až pátek. Svátky
+     * v jinak pracovní dny se do fondu ZAPOČÍTÁVAJÍ: pokyny MPSV k 10259
+     * chtějí „celkový počet hodin za pracovní dny (včetně svátky v jinak
+     * pracovní dny)", resp. „8 hodin za každý pracovní den včetně svátků
+     * připadajících na jinak pracovní den". Přijatá hlášení jiného systému
+     * mají v dubnu se dvěma svátky 176 hodin, ne 160. Stejně se počítá
+     * sjednaný fond 10260 z rozvrhu vztahu. Není to fond TOHOTO zaměstnance
+     * (ten je 10260) — je to doba stanovená pro profesi, tedy plný úvazek
+     * v daném měsíci.
      */
     private function standardFundSuggestion(string $periodStart): string
     {
-        $weekPattern = array_fill_keys([1, 2, 3, 4, 5], (int) (self::STATUTORY_WEEKLY_MINUTES / 5));
-        $month = $this->fund->month(substr($periodStart, 0, 7), $weekPattern);
+        $daily = (int) (self::STATUTORY_WEEKLY_MINUTES / 5);
+        $month = $this->fund->month(
+            substr($periodStart, 0, 7),
+            array_fill_keys([1, 2, 3, 4, 5], $daily),
+        );
+        $minutes = 0;
+        foreach ($month['days'] as $day) {
+            $minutes += $day['weekday'] <= 5 ? $daily : 0;
+        }
 
-        return self::minutesSuggestion($month['fund_minutes']);
+        return (string) self::minutesSuggestion($minutes);
     }
 
     /** @return array<string,mixed> */
@@ -309,6 +365,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 self::agreementFundMinutes($employment, $period, $periodEnd, $calendars, $worked),
             default => self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo),
         };
+        $holidayMinutes = !self::requiresShiftCalendar($employment['relation_type'])
+            || self::isAgreement($employment['relation_type'])
+                ? 0
+                : $this->holidayMinutes($calendars, $evidenceFrom, $evidenceTo, $entries, $absences, $periodStart);
         $employmentIssues = self::employmentIssues($employment);
         $absenceIssues = self::absenceIssues($absences);
         $source = [
@@ -352,6 +412,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $entryIssues,
                 $absenceIssues,
             ),
+            // Svátky v jinak pracovní dny; do 10275 a 10276 se přičtou při
+            // potvrzení, ne v dialogu (viz HOLIDAY_FIELDS). `null` = svátek
+            // nejde vyjádřit v celých tisícinách hodiny a souhrn nejde potvrdit.
+            'holiday_millihours' => self::minutesToMillihours($holidayMinutes),
             'requires_unworked_hours_followup' => $absences !== [],
             /*
              * Druhy nepřítomnosti, které v měsíci opravdu jsou.
@@ -469,6 +533,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $sourceIssues,
                 self::absenceIssues($absences),
             ),
+            // Placené hodiny svátku z podkladů docházky („Svátek (h)").
+            'holiday_millihours' => is_int($values['holiday_hours'] ?? null) && $values['holiday_hours'] > 0
+                ? $values['holiday_hours']
+                : 0,
             'requires_unworked_hours_followup' => $absences !== []
                 || $conditional['unworked_hours_occurred'] !== false,
             'absence_types' => self::absenceTypes($absences),
@@ -976,7 +1044,28 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $conditionalValues,
             $values['agreed_fund_millihours'],
         );
+        /*
+         * Svátky v jinak pracovní dny (HOLIDAY_FIELDS) nezadává účetní, jsou
+         * odvozené z kalendáře (resp. z podkladů importu) a zamčené hashem
+         * zdroje. Do úhrnů 10275 a 10276 se přičtou až tady, takže dialog
+         * i hromadné schválení posílají neodpracované hodiny jen za
+         * nepřítomnosti a měsíc jen se svátkem se schválí stejně jako dřív —
+         * interakce IN07 vznikne sama.
+         */
+        $holiday = $preview['holiday_millihours'] ?? 0;
+        if (!is_int($holiday) || $holiday < 0) {
+            throw new \InvalidArgumentException(
+                'Hodiny svátků v jinak pracovní dny nejde vyjádřit v celých tisícinách hodiny.',
+            );
+        }
         $values += $conditionalValues;
+        $values['holiday_millihours'] = $holiday > 0 ? $holiday : null;
+        if ($holiday > 0) {
+            $values['unworked_total_millihours'] = ($values['unworked_total_millihours'] ?? 0) + $holiday;
+            $values['unworked_paid_millihours'] = ($values['unworked_paid_millihours'] ?? 0) + $holiday;
+            $unworkedHoursOccurred = true;
+            self::assertScaledMaximum($values['unworked_total_millihours'], 99999999, 'unworked_total_hours');
+        }
         $note = $input['confirmation_note'] ?? '';
         if (!is_string($note) || mb_strlen(trim($note)) > 500) {
             throw new \InvalidArgumentException(
@@ -1041,6 +1130,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                     ? 'explicit_confirmation'
                     : 'not_applicable_by_IN07',
             ),
+            // Svátky se nepotvrzují v dialogu; jsou odvozené a přičtené
+            // k úhrnům 10275 a 10276 (viz HOLIDAY_FIELDS).
+            'holidays' => $holiday > 0
+                ? ($importSource ? 'import_summary_added_to_10275_10276' : 'work_calendar_added_to_10275_10276')
+                : 'none',
             'suggestions' => $preview['suggestions'],
             'source_contains_absences' =>
                 (bool) ($preview['requires_unworked_hours_followup'] ?? false),
@@ -1411,6 +1505,97 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $minutes += $planned;
         }
         return [$minutes, $issues];
+    }
+
+    /**
+     * Minuty svátků v jinak pracovní dny, které zaměstnanec neodpracoval
+     * a za které se mzda nekrátí nebo náleží náhrada (viz HOLIDAY_FIELDS).
+     *
+     * Rozsah i plán dne jsou tytéž jako u sjednaného fondu 10260
+     * ({@see agreedFundMinutes()}): interval vztahu v měsíci a týdenní vzor
+     * kalendáře. Svátek je státní svátek podle {@see CzechHolidayCalendar}
+     * nebo den kalendáře výslovně označený jako svátek; den kalendáře
+     * označený jinak svátkem není. Den se vynechá, když na něj připadá
+     * odpracovaná doba nebo nepřítomnost jiná než dovolená — dovolená
+     * svátek nečerpá (§ 219 odst. 1 ZP), nemoc ho nese ve svém bloku
+     * a nepřítomnost bez příjmu náhradu za svátek nedává.
+     *
+     * @param list<array<string,mixed>> $calendars
+     * @param list<array<string,mixed>> $entries
+     * @param list<array<string,mixed>> $absences
+     */
+    private function holidayMinutes(
+        array $calendars,
+        ?\DateTimeImmutable $from,
+        ?\DateTimeImmutable $to,
+        array $entries,
+        array $absences,
+        string $periodStart,
+    ): int {
+        if ($from === null || $to === null) {
+            return 0;
+        }
+        $publicHolidays = [];
+        foreach ($this->fund->month(substr($periodStart, 0, 7), [])['days'] as $day) {
+            if ($day['is_holiday'] === true) {
+                $publicHolidays[$day['date']] = true;
+            }
+        }
+        $workedDates = [];
+        foreach ($entries as $entry) {
+            if (!in_array($entry['category'] ?? null, ['regular', 'overtime'], true)) {
+                continue;
+            }
+            $start = (new \DateTimeImmutable((string) $entry['starts_at_utc'], new \DateTimeZone('UTC')))
+                ->setTimezone(new \DateTimeZone((string) $entry['timezone_name']));
+            $workedDates[$start->format('Y-m-d')] = true;
+        }
+        $minutes = 0;
+        for ($date = $from; $date <= $to; $date = $date->modify('+1 day')) {
+            $iso = $date->format('Y-m-d');
+            if (isset($workedDates[$iso])) {
+                continue;
+            }
+            $matching = array_values(array_filter(
+                $calendars,
+                static fn (array $calendar): bool => $calendar['valid_from'] <= $iso
+                    && ($calendar['valid_to'] === null || $calendar['valid_to'] >= $iso),
+            ));
+            if (count($matching) !== 1) {
+                continue;
+            }
+            $override = null;
+            foreach ($matching[0]['days'] as $day) {
+                if ($day['day_date'] === $iso) {
+                    $override = $day;
+                }
+            }
+            $isHoliday = is_array($override)
+                ? $override['day_kind'] === 'holiday'
+                : isset($publicHolidays[$iso]);
+            if (!$isHoliday) {
+                continue;
+            }
+            foreach ($absences as $absence) {
+                if (($absence['absence_type'] ?? null) !== 'vacation'
+                    && (string) $absence['date_from'] <= $iso
+                    && (string) $absence['date_to'] >= $iso
+                ) {
+                    continue 2;
+                }
+            }
+            $weekday = $date->format('N');
+            $minutes += (int) ($matching[0]['week_pattern'][$weekday]
+                ?? $matching[0]['week_pattern'][(int) $weekday]
+                ?? 0);
+        }
+
+        return $minutes;
+    }
+
+    private static function minutesToMillihours(int $minutes): ?int
+    {
+        return ($minutes * 1000) % 60 === 0 ? intdiv($minutes * 1000, 60) : null;
     }
 
     private static function period(string $periodStart): \DateTimeImmutable

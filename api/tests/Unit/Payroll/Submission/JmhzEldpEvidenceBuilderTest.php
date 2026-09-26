@@ -889,6 +889,86 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * Svátek v jinak pracovní den (souhrn v7) je neodpracovaná placená hodina
+     * i bez evidované nepřítomnosti: úhrny 10275/10276 ho nesou, interakce
+     * IN07 je aktivní a ELDP řez to přijme jako běžný měsíc.
+     */
+    public function testHolidayHoursPassWithoutAbsenceOnVersionSeven(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->holidaySource(8_000, 8_000, 8_000);
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['excluded_days_total']);
+    }
+
+    /** Úhrn, který svátek nenese, nebo ho nenese mezi placenými, neprojde. */
+    public function testHolidayHoursMustBeCarriedByBothTotals(): void
+    {
+        foreach ([[8_000, 0, 8_000], [8_000, 8_000, null], [16_000, 8_000, 8_000]] as [$holiday, $total, $paid]) {
+            try {
+                (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(
+                    7,
+                    101,
+                    $this->holidaySource($holiday, $total, $paid),
+                );
+                self::fail('Úhrny bez svátku musely řez zastavit.');
+            } catch (JmhzEldpEvidenceException $exception) {
+                self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
+            }
+        }
+    }
+
+    /** Starší souhrn svátky nezná, klíč v něm tedy nesmí nic tvrdit. */
+    public function testHolidayHoursAreIgnoredOnOlderWorkSummary(): void
+    {
+        $source = $this->holidaySource(8_000, 8_000, 8_000, 'jmhz-work-month.v5');
+
+        try {
+            (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+            self::fail('Souhrn v5 nemá svátky a úhrny bez nepřítomnosti musí být prázdné.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_work_summary_mismatch', $exception->validationCode);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function holidaySource(
+        int $holiday,
+        int $total,
+        ?int $paid,
+        string $version = 'jmhz-work-month.v7',
+    ): array {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $summary = &$input['people'][0]['employments'][0]['time_month']['jmhz_work_summary'];
+        $summary['derivation_version'] = $version;
+        $summary['interactions'] = ['IN07' => true, 'IN08' => false];
+        $summary['values'] += [
+            'maternity_millihours' => null,
+            'paternity_millihours' => null,
+            'parental_millihours' => null,
+            'unpaid_leave_millihours' => null,
+            'unexcused_millihours' => null,
+            'compensatory_time_off_millihours' => null,
+            'holiday_millihours' => $holiday,
+        ];
+        $summary['values']['unworked_total_millihours'] = $total;
+        $summary['values']['unworked_paid_millihours'] = $paid;
+        unset($summary);
+
+        return $this->withInput($source, $input);
+    }
+
+    /**
      * @param array<string,int> $extraValues
      * @return array<string,mixed>
      */

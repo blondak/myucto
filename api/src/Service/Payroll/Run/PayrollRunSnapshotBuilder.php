@@ -1768,6 +1768,16 @@ final class PayrollRunSnapshotBuilder
                         PayrollJmhzWorkMonthSummaryBuilder::compensatoryTimeOffFields(),
                     );
                 }
+                if (in_array(
+                    $derivationVersion,
+                    PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAYS,
+                    true,
+                )) {
+                    $conditionalFields = array_merge(
+                        $conditionalFields,
+                        PayrollJmhzWorkMonthSummaryBuilder::holidayFields(),
+                    );
+                }
                 foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }

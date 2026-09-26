@@ -78,11 +78,40 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $xml = $this->submission('vacation');
 
         self::assertSame(1, substr_count($xml, '</formularOsoby>'));
-        // Dovolená jde do 10279 a zároveň do placených neodpracovaných 10276.
-        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
-        self::assertStringContainsString('<form:hodinyNeodpracNahrada>16.000</form:hodinyNeodpracNahrada>', $xml);
+        // Dovolená jde do 10279 a zároveň do placených neodpracovaných 10276;
+        // k ní svátek 6. 7. (pokyny MPSV k 10275/10276), takže 16 + 8 hodin.
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>24.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>24.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracDovol>16.000</form:hodinyNeodpracDovol>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem>', $xml);
+        // 10268 + 10275 = 10260: 160 odpracovaných + 24 neodpracovaných = 184.
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:pocet>160.000</form:pocet>', $xml);
+    }
+
+    /**
+     * Měsíc bez nepřítomnosti se svátkem v jinak pracovní den (6. 7. 2026).
+     * Pokyny MPSV: stanovený fond 10259 svátky zahrnuje (23 pracovních dnů
+     * = 184 hodin) a jejich neodpracované hodiny patří do 10275 i do 10276,
+     * takže platí 10268 + 10275 = 10260. Hromadné i ruční schválení pošle
+     * neodpracované hodiny prázdné, svátek doplní souhrn sám.
+     */
+    public function testHolidayOnWorkdayIsReportedAsPaidUnworkedHours(): void
+    {
+        $person = $this->hire('Olga Svátek', 'female', '1986-02-14');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('holiday');
+
+        self::assertStringContainsString('<form:stanovenyFond>184.000</form:stanovenyFond>', $xml);
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:pocet>176.000</form:pocet>', $xml);
+        self::assertStringContainsString(
+            '<form:neodpracovaneHodiny><form:hodinyNeodpracCelkem>8.000</form:hodinyNeodpracCelkem>'
+                . '<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada></form:neodpracovaneHodiny>',
+            $xml,
+        );
     }
 
     /**
@@ -201,9 +230,9 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
 
         self::assertSame(1, substr_count($xml, '</formularOsoby>'));
         // Náhradní volno: jen úhrn 10275, bez placených 10276 (§ 114 odst. 1 ZP),
-        // celý den je vyloučeným dnem § 18 odst. 7.
-        self::assertStringContainsString('<form:hodinyNeodpracCelkem>8.000</form:hodinyNeodpracCelkem>', $xml);
-        self::assertStringNotContainsString('<form:hodinyNeodpracNahrada>', $xml);
+        // celý den je vyloučeným dnem § 18 odst. 7. Svátek 6. 7. je v obou.
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:omluvenaNepritomnost>1</form:omluvenaNepritomnost>', $xml);
     }
 

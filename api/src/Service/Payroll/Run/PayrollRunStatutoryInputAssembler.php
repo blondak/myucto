@@ -887,8 +887,12 @@ final class PayrollRunStatutoryInputAssembler
         if ($worked === null || $paidUnworked === null) {
             return null;
         }
+        // Svátky v jinak pracovní dny přičítá souhrn od v7 do 10276 kvůli
+        // hlášení (pokyny MPSV). Pro § 7a se nezapočítávaly dřív a neodečtené
+        // by změnily nárok na slevu bez zákonného důvodu, jen verzí souhrnu.
+        $holiday = $this->nonNegativeInt($values['holiday_millihours'] ?? 0) ?? 0;
 
-        return $worked + $paidUnworked;
+        return $worked + $paidUnworked - $holiday;
     }
 
     /** Sjednaná týdenní pracovní doba v tisícinách hodiny (§ 7a odst. 2). */

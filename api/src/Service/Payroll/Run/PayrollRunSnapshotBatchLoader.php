@@ -89,6 +89,7 @@ final class PayrollRunSnapshotBatchLoader
                     summary.unpaid_leave_millihours,
                     summary.unexcused_millihours,
                     summary.compensatory_time_off_millihours,
+                    summary.holiday_millihours,
                     summary.confirmation_note,
                     summary.provenance_json,
                     summary.summary_sha256,
