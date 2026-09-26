@@ -91,6 +91,12 @@ final class PayrollEmploymentDeletionRepository
             'message' => 'K pracovnímu vztahu je vydaný výstupní doklad. '
                 . 'Ten je neměnný, takže vztah smazat nelze.',
         ],
+        'wage_statement' => [
+            'tables' => ['payroll_wage_statement_revisions'],
+            'code' => 'payroll_employment_has_wage_statement',
+            'message' => 'K pracovnímu vztahu je vydaný mzdový výměr. '
+                . 'Ten je neměnný, takže vztah smazat nelze.',
+        ],
         'input' => [
             'tables' => ['payroll_inputs'],
             'code' => 'payroll_employment_has_inputs',

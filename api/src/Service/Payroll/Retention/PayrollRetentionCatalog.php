@@ -427,6 +427,7 @@ final class PayrollRetentionCatalog
                 'payroll_registration_identity_snapshots',
                 'payroll_employment_exit_revisions',
                 'payroll_identity_resolution_tasks',
+                'payroll_wage_statement_revisions',
             ],
             'employment_tables' => [],
             'note' => 'Vlastní kategorie, ne přílepek k evidenci pracovní doby: § 96 věta '

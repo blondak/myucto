@@ -419,6 +419,96 @@ class PayrollDocumentService
         ]);
     }
 
+    /**
+     * Mzdový výměr (§ 136 ZP) ukotvený k neměnné revizi výměru (migrace 1927).
+     * Stejná mechanika jako u výstupních dokumentů: tatáž revize a verze
+     * šablony vrátí existující dokument, novější revize ho nahradí.
+     *
+     * @return array<string,mixed>
+     */
+    public function archiveWageStatementPdf(
+        int $supplierId,
+        int $wageStatementRevisionId,
+        int $employeeId,
+        PayrollArtifact $artifact,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        if ($artifact->kind !== PayrollDocumentKind::WageStatement) {
+            throw new \InvalidArgumentException('Archiv mzdového výměru nepodporuje zadaný druh dokumentu.');
+        }
+        if ($idempotencyKey === '' || strlen($idempotencyKey) > 200) {
+            throw new \InvalidArgumentException('Payroll document idempotency key is invalid.');
+        }
+        $idempotencyKeyHash = hash('sha256', $idempotencyKey);
+        $existing = $this->documents->findByIdempotency($supplierId, $idempotencyKeyHash);
+        if ($existing !== null) {
+            if (($existing['wage_statement_revision_id'] ?? null) !== $wageStatementRevisionId
+                || $existing['employee_id'] !== $employeeId
+                || $existing['document_kind'] !== $artifact->kind->value
+                || $existing['source_snapshot_hash'] !== $artifact->sourceSnapshotHash
+            ) {
+                throw new \RuntimeException('Payroll document idempotency key was reused for another request.');
+            }
+            return $existing;
+        }
+        $revision = $this->documents->approvedWageStatementRevision($supplierId, $wageStatementRevisionId)
+            ?? throw new \RuntimeException('Mzdový výměr vyžaduje schválenou revizi.');
+        if ((int) $revision['employee_id'] !== $employeeId
+            || !hash_equals((string) $revision['snapshot_hash'], $artifact->sourceSnapshotHash)
+        ) {
+            throw new \RuntimeException('Mzdový výměr neodpovídá schválené revizi.');
+        }
+        $latest = $this->documents->latestForWageStatement($supplierId, (int) $revision['employment_id']);
+        $supersedesDocumentId = null;
+        $documentRevisionNo = 1;
+        if ($latest !== null) {
+            if ((int) $latest['wage_statement_revision_id'] === $wageStatementRevisionId) {
+                if ($latest['template_version'] === $artifact->templateVersion
+                    && $latest['renderer_version'] === $artifact->rendererVersion
+                ) {
+                    return $latest;
+                }
+            } elseif ((int) $latest['wage_statement_revision_no'] >= (int) $revision['revision_no']) {
+                throw new \RuntimeException('Mzdový výměr nelze nahradit starší revizí.');
+            }
+            $supersedesDocumentId = (int) $latest['id'];
+            $documentRevisionNo = (int) $latest['document_revision_no'] + 1;
+        }
+        $stored = $this->storage->store(
+            $supplierId,
+            $artifact->bytes,
+            $storageScope,
+            $employeeId,
+            $actorUserId,
+        );
+        return $this->documents->insertOrGet([
+            'supplier_id' => $supplierId,
+            'run_id' => null,
+            'revision_id' => null,
+            'annual_revision_id' => null,
+            'employment_exit_revision_id' => null,
+            'wage_statement_revision_id' => $wageStatementRevisionId,
+            'employee_id' => $employeeId,
+            'document_kind' => $artifact->kind->value,
+            'document_revision_no' => $documentRevisionNo,
+            'supersedes_document_id' => $supersedesDocumentId,
+            'source_snapshot_hash' => $artifact->sourceSnapshotHash,
+            'revision_snapshot_hash' => $revision['snapshot_hash'],
+            'template_version' => $artifact->templateVersion,
+            'renderer_version' => $artifact->rendererVersion,
+            'file_sha256' => $stored['file_sha256'],
+            'size_bytes' => $stored['size_bytes'],
+            'mime_type' => $artifact->mimeType,
+            'storage_key' => $stored['storage_key'],
+            'suggested_filename' => $artifact->suggestedFilename,
+            'manifest_json' => null,
+            'idempotency_key_hash' => $idempotencyKeyHash,
+            'created_by' => $actorUserId,
+        ]);
+    }
+
     /** @return array<string,mixed> */
     public function generateMonthlyBundle(
         int $supplierId,

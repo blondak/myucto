@@ -3896,7 +3896,8 @@
         "average_earnings_certificate": "Unemployment office certificate",
         "average_earnings_statement": "Average earnings certificate",
         "annual_settlement_result": "Annual tax settlement",
-        "monthly_bundle": "Monthly ZIP bundle"
+        "monthly_bundle": "Monthly ZIP bundle",
+        "wage_statement": "Wage statement"
       },
       "payslip_delivery": {
         "run": "Send payslips: {office}",
@@ -5868,6 +5869,35 @@
         "a2_prefill": "Prefill from termination",
         "a2_prefill_hint": "Fills in the termination reason, net average and severance from the Termination record. Check the pension insurance periods.",
         "a2_prefill_missing": "Fill in how the employment ended in the Termination section first."
+      },
+      "wage_statement": {
+        "title": "Wage statement",
+        "subtitle": "Written wage statement under Section 136 of the Labour Code: agreed wage, method of remuneration, pay date and place of payment. Issue it at the start and whenever the wage changes.",
+        "generate": "Issue wage statement",
+        "effective_from": "Valid from",
+        "effective_from_hint": "Date from which the statement applies. Wage and components are read from the employment terms valid on that day.",
+        "effective_from_required": "Enter the date from which the statement applies.",
+        "payment_place": "Place and method of payment",
+        "payment_place_hint": "Prefilled from the employee's payout rules; adjust if the wage is paid differently.",
+        "payment_place_required": "Enter the place and method of wage payment.",
+        "note": "Note on the statement (optional)",
+        "sources_hint": "The pay date is taken from the employer's payroll policy. With unchanged inputs the already issued statement is returned; a wage change creates a new version.",
+        "empty": "No wage statement has been issued yet.",
+        "valid_from": "valid from {date}",
+        "version": "version {version}",
+        "created": "The wage statement has been issued.",
+        "create_failed": "Failed to issue the wage statement.",
+        "load_failed": "Failed to load wage statements.",
+        "download_failed": "Failed to download the wage statement.",
+        "open_settings": "Open employer settings",
+        "readiness": {
+          "wage_missing": "The employment has no agreed wage",
+          "payday_missing": "The employer's payroll policy has no pay date",
+          "employer_missing": "Employer details for payroll documents are missing",
+          "relation_unsupported": "No wage statement is issued for this type of relationship",
+          "employment_closed": "The employment has ended",
+          "unknown": "The wage statement cannot be issued right now"
+        }
       },
       "exit_documents": {
         "title": "Employment exit documents",
@@ -27502,7 +27532,8 @@
         "average_earnings_certificate": "Certificate for the labour office",
         "average_earnings_statement": "Certificate of average earnings",
         "annual_settlement_result": "Annual advance settlement",
-        "monthly_bundle": "Monthly document bundle"
+        "monthly_bundle": "Monthly document bundle",
+        "wage_statement": "Wage statement"
       }
     }
   },

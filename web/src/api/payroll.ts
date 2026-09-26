@@ -5099,6 +5099,7 @@ export type PayrollDocumentKind =
   | 'average_earnings_statement'
   | 'annual_settlement_result'
   | 'monthly_bundle'
+  | 'wage_statement'
 
 export type PayrollTaxCertificateKind = Extract<
   PayrollDocumentKind,
@@ -5841,6 +5842,33 @@ export interface PayrollEmploymentExitDocumentList {
     }
   }
   items: PayrollDocument[]
+}
+
+/** Mzdový výměr § 136 ZP: připravenost a předvyplnění formuláře. */
+export interface PayrollWageStatementReadiness {
+  available: boolean
+  readiness_code: string | null
+  message: string | null
+  effective_from: string | null
+  payment_place: string
+}
+
+export interface PayrollWageStatementDocument extends PayrollDocument {
+  effective_from?: string
+  wage_statement_revision_id?: number | null
+  wage_statement_revision_no?: number
+}
+
+export interface PayrollWageStatementList {
+  employment_id: number
+  readiness: PayrollWageStatementReadiness
+  items: PayrollWageStatementDocument[]
+}
+
+export interface PayrollWageStatementPayload {
+  effective_from: string
+  payment_place: string
+  note: string | null
 }
 
 export type PayrollTerminationReasonKind =
@@ -8742,6 +8770,20 @@ export const payrollApi = {
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(
       `/payroll/employments/${employmentId}/documents/exit`,
+    ).then(response => response.data),
+  wageStatements: (employmentId: number) =>
+    api.get<PayrollWageStatementList>(
+      `/payroll/employments/${employmentId}/documents/wage-statement`,
+    ).then(response => response.data),
+  generateWageStatement: (
+    employmentId: number,
+    payload: PayrollWageStatementPayload,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollWageStatementDocument>(
+      `/payroll/employments/${employmentId}/documents/wage-statement`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
   employmentTermination: (employmentId: number) =>
     api.get<PayrollTerminationOverview>(

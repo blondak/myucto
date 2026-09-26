@@ -266,6 +266,7 @@ final class PayrollEmployeeDeletionRepository
         'payroll_jmhz_ordinary_evidence_snapshots',
         'payroll_jmhz_ordinary_evidence_idempotency_claims',
         'payroll_employment_exit_revisions',
+        'payroll_wage_statement_revisions',
         'payroll_employment_external_ids',
         'payroll_identity_resolution_tasks',
         'payroll_registration_a1_profiles',

@@ -3896,7 +3896,8 @@
         "average_earnings_certificate": "Potvrzení pro Úřad práce",
         "average_earnings_statement": "Potvrzení o průměrném výdělku",
         "annual_settlement_result": "Roční zúčtování záloh",
-        "monthly_bundle": "Měsíční balíček ZIP"
+        "monthly_bundle": "Měsíční balíček ZIP",
+        "wage_statement": "Mzdový výměr"
       },
       "payslip_delivery": {
         "run": "Rozeslat pásky: {office}",
@@ -5868,6 +5869,35 @@
         "a2_prefill": "Předvyplnit ze skončení vztahu",
         "a2_prefill_hint": "Doplní důvod ukončení, čistý průměr a odstupné ze záznamu Skončení vztahu. Doby důchodového pojištění zkontrolujte.",
         "a2_prefill_missing": "Nejdřív vyplňte způsob skončení v části Skončení vztahu."
+      },
+      "wage_statement": {
+        "title": "Mzdový výměr",
+        "subtitle": "Písemný výměr podle § 136 zákoníku práce: sjednaná mzda, způsob odměňování, termín a místo výplaty. Vydejte ho při nástupu a při každé změně mzdy.",
+        "generate": "Vydat mzdový výměr",
+        "effective_from": "Platí od",
+        "effective_from_hint": "Den, od kterého výměr platí. Mzda a složky se načtou z podmínek vztahu platných k tomuto dni.",
+        "effective_from_required": "Vyplňte, od kterého dne výměr platí.",
+        "payment_place": "Místo a způsob výplaty",
+        "payment_place_hint": "Předvyplněno podle pravidel výplaty zaměstnance; upravte, pokud se mzda vyplácí jinak.",
+        "payment_place_required": "Vyplňte místo a způsob výplaty mzdy.",
+        "note": "Poznámka na výměru (nepovinné)",
+        "sources_hint": "Termín výplaty se převezme z mzdové politiky zaměstnavatele. Beze změny podkladů se vrátí už vydaný výměr; změna mzdy vytvoří novou verzi.",
+        "empty": "Mzdový výměr zatím nebyl vydán.",
+        "valid_from": "platí od {date}",
+        "version": "verze {version}",
+        "created": "Mzdový výměr byl vydán.",
+        "create_failed": "Mzdový výměr se nepodařilo vydat.",
+        "load_failed": "Mzdové výměry se nepodařilo načíst.",
+        "download_failed": "Mzdový výměr se nepodařilo stáhnout.",
+        "open_settings": "Otevřít nastavení zaměstnavatele",
+        "readiness": {
+          "wage_missing": "Vztah nemá sjednanou mzdu",
+          "payday_missing": "Chybí termín výplaty v mzdové politice zaměstnavatele",
+          "employer_missing": "Chybí údaje zaměstnavatele pro mzdové dokumenty",
+          "relation_unsupported": "Mzdový výměr se u tohoto druhu vztahu nevydává",
+          "employment_closed": "Vztah už netrvá",
+          "unknown": "Mzdový výměr teď nelze vydat"
+        }
       },
       "exit_documents": {
         "title": "Dokumenty při skončení vztahu",
@@ -27502,7 +27532,8 @@
         "average_earnings_certificate": "Potvrzení pro úřad práce",
         "average_earnings_statement": "Potvrzení o průměrném výdělku",
         "annual_settlement_result": "Roční zúčtování záloh",
-        "monthly_bundle": "Měsíční balíček dokumentů"
+        "monthly_bundle": "Měsíční balíček dokumentů",
+        "wage_statement": "Mzdový výměr"
       }
     }
   },

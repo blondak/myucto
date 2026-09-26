@@ -32,6 +32,7 @@ import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentDeferredIncomePanel from './EmploymentDeferredIncomePanel.vue'
 import EmploymentSurchargePolicyPanel from './EmploymentSurchargePolicyPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
+import EmploymentWageStatementPanel from './EmploymentWageStatementPanel.vue'
 import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
 import EmploymentTerminationPanel from './EmploymentTerminationPanel.vue'
@@ -1894,6 +1895,12 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
     <EmploymentSurchargePolicyPanel
       :employment-id="employment.id"
       :can-write="canWrite"
+    />
+
+    <EmploymentWageStatementPanel
+      v-if="canReadDocuments && (employment.relation_type === 'employment' || employment.relation_type === 'small_scale_employment')"
+      :employment-id="employment.id"
+      :can-write="canWriteDocuments === true"
     />
 
     <EmploymentDeferredIncomePanel
