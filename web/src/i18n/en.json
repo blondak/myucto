@@ -25662,6 +25662,7 @@
       "lines": "lines",
       "bank_accounts": "bank accounts",
       "created_from_documents": "partners from documents",
+      "related_marked": "partners marked as related parties",
       "registers": "cash registers",
       "statements": "statements",
       "transactions": "transactions",
