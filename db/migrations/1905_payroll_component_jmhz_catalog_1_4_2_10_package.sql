@@ -1,4 +1,4 @@
--- MyÚčto.cz — zařazení mzdových složek do JMHZ přechází na balík specifikace
+-- MyÚčto.cz: zařazení mzdových složek do JMHZ přechází na balík specifikace
 -- s katalogem kontrol 1.4.2.10.
 --
 -- Katalog kontrol je součástí identity balíku specifikace, takže nový katalog
