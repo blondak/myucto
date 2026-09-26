@@ -157,6 +157,16 @@ ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila př
 uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
 účinnosti nebo aktivního stavu ověření automaticky zneplatní.
 
+**Jedno Uložit pro celou kartu.** Sekce karty (běžné údaje, zákonná evidence,
+úplná osobní evidence, vyživované osoby, pobytová oprávnění, podmínky pracovních
+vztahů a profil REGZEC A1) nemají vlastní tlačítko Uložit. Jakmile v kterékoli
+z nich něco změníš, objeví se dole na kartě lišta **Neuložené změny**, která
+vyjmenuje rozepsané sekce, a tlačítko **Uložit vše** je uloží postupně. Když
+uložení některé sekce neprojde, lišta se u ní zastaví, sekce ukáže důvod
+a zbylé rozepsané sekce zůstanou neuložené, nic se neztratí. **Zahodit změny**
+vrátí všechny sekce do uloženého stavu. Zavření karty, přepnutí na jinou osobu,
+sbalení úplné osobní evidence i odchod ze stránky se na neuložené změny zeptají.
+
 ### 86.8.1 Vyživované osoby a daňové zvýhodnění na dítě
 
 Ve sbalené části **Úplná osobní evidence a historie** je pod osobním profilem
@@ -389,6 +399,14 @@ zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit. Sekce s
 pracujícího důchodce je nepovinná: bez záznamu se sleva neuplatňuje a výpočet ani
 podání to nezastaví. Záznam je potřeba jen u zaměstnance, který slevu uplatnil.
 
+Chybí-li osobě zákonná evidence, nabídne sekce tlačítko **Doplnit běžné údaje
+(rezident ČR)**. Otevře hromadné doplnění výchozí evidence zúžené na tuto osobu:
+náhled ukáže, které záznamy doplní a od kterého měsíce (od měsíce nástupu, nejdřív
+po období uzavřeném schválenou mzdou), a osobu s cizím prvkem nebo bez
+zdravotní pojišťovny vyloučí i s důvodem. Pět ručních záznamů tak nahradí jedno
+potvrzení. Prohlášení poplatníka k dani se tím jako podepsané nezapíše, to
+zadej v sekci ručně.
+
 Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
 ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto
 nezobrazují a objeví se až po přepnutí na cizí režim — tehdy si evidence vyžádá
@@ -419,7 +437,7 @@ jen tam, kde ho server přijme a kde na to máš oprávnění; do historie běhu
 zapíše důvod „Oprava zákonné evidence osoby". Panel nad historií vždy ukazuje,
 do kterého dne je historie uzavřená schválenou mzdou.
 
-Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné oprávnění
+Na kartě osoby se sekce ukládá společnou lištou **Uložit vše** dole na kartě. Čtení stačí obecné oprávnění
 pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
 evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
 
@@ -513,6 +531,12 @@ Z přerušeného vztahu se lze vrátit do aktivního stavu nebo jej ukončit.
 Plánovaný či předregistrovaný vztah lze samostatně označit jako **Nenastoupil**
 a potom archivovat. U každé akce zvolíš datum účinnosti. Přeskočení povinného
 kroku nebo návrat ze skončeného vztahu aplikace odmítne.
+
+**Potvrdit nástup** u nového zaměstnance, který před nástupem u této firmy žádnou
+mzdu neměl a nemá uložený počáteční stav, se zeptá a zároveň zapíše nulový
+počáteční stav za rok nástupu. Bez něj by osoba vypadla ze zákonného výpočtu.
+Zaměstnanec převzatý z jiného programu (nástup před začátkem mezd v aplikaci) má
+skutečné úhrny a doplňuje je v tabulce **Počáteční stavy**.
 
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
@@ -712,6 +736,13 @@ neodeslané hlášení ani podání do testovacího prostředí položku nespln�
 dál běží a přehled termínů ji dál připomíná. Odhláška z ČSSZ se odškrtne
 odesláním odhlášky REGZEC A2 (u nenastoupení A8), odhláška u zdravotní
 pojišťovny odesláním oznámení o ukončení.
+
+Nesplněná registrace, změna nebo odhláška u zdravotní pojišťovny má tlačítko
+**Připravit oznámení ZP**. Vede na stránku oznámení zdravotním pojišťovnám
+s obdobím události (nástup, skončení nebo termín změny) a pojišťovnou
+zaměstnance; stránka povinnosti za období synchronizuje a hromadné oznámení
+(HOZ) rovnou sestaví. Nic se tím neodesílá, odeslání zůstává na tlačítku u
+sestaveného oznámení.
 
 Termíny u položek checklistu se neodvozují ode dne události, ale z pravidel,
 která už aplikace používá jinde, takže se s nimi nemohou rozejít. U několika
