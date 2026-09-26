@@ -24,6 +24,28 @@ return [
         'document_extensions' => ['csv', 'docx', 'eml', 'html', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
     ],
     /*
+     * Všechny veřejné stránky dokumentace JMHZ na vývojářském portálu MPSV.
+     * Na stránce Aktuality MPSV hlásí změny kontrol v DIS, nasazení nových
+     * verzí DIS, odstávky a požadavky na dodavatele mzdových systémů; katalog
+     * kontrol a pokyny k vyplnění jsou samostatné stránky se záznamy.
+     *
+     * Samostatný zdroj, ne rozšíření `mpsv-jmhz-documentation`: klíče jeho
+     * dokumentů ve stavu monitoru se tak nezmění. Přílohy se tu nestahují,
+     * hlídá se jen název a odkaz, takže nová příloha hlavní dokumentace se
+     * ohlásí u obou zdrojů.
+     */
+    'mpsv-jmhz-pages' => [
+        'label' => 'Vývojářský portál MPSV - stránky JMHZ (aktuality, pokyny, katalog kontrol)',
+        'index_url' => 'https://developers.mpsv.cz/api/apidata',
+        'index_format' => 'mpsv_api_pages',
+        'api_slug' => 'jednotne-mesicni-hlaseni-zamestnavatelu',
+        'documentation_titles' => '*',
+        'news_titles' => ['Aktuality'],
+        'document_hosts' => ['developers.mpsv.cz'],
+        'document_path_prefixes' => ['/assets/documents/'],
+        'document_extensions' => ['csv', 'docx', 'eml', 'html', 'pdf', 'png', 'pptx', 'txt', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
+    /*
      * Provozní oznámení ČSSZ. Sem chodí vady katalogu kontrol, výpadky, posuny
      * lhůt i nové povinnosti — 28. 8. 2026 tu ČSSZ oznámila nedostatek ve
      * vyhodnocování kontrol 164, 270, 290, 291 a 333 a hromadný přepočet stavů
