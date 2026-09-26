@@ -183,7 +183,17 @@ final class GarnishmentCalculator
         }
 
         $claims = $this->activeClaims($input->claims);
-        $agreements = $this->bridgedAgreements($input);
+        // Zahájené insolvenční řízení (§ 109 odst. 1 písm. d) IZ): dohodou
+        // založené právo na výplatu srážek ze mzdy uplatnit nelze, takže
+        // dohoda o pořadí s exekucemi vůbec nesoutěží.
+        $insolvencyCommenced = $input->insolvency->mode->depositsEnforcementDeductions();
+        $agreements = $insolvencyCommenced ? [] : $this->bridgedAgreements($input);
+        if ($insolvencyCommenced) {
+            $roundingTrace[] = [
+                'step' => 'insolvency_commenced_deposit',
+                'deposited_claims' => count($claims),
+            ];
+        }
         // Pravidlo čtyř exekucí se počítá z EVIDENCE, ne z pohledávek, na které
         // v tomhle měsíci zbyl zůstatek — viz orderedEnforcementCount().
         // Dohody se do počtu nezapočítávají: § 279 odst. 4 o. s. ř. mluví
@@ -238,7 +248,7 @@ final class GarnishmentCalculator
             $withheld,
             $income - $withheld,
             $fourRule,
-            false,
+            $insolvencyCommenced,
             $allocations,
             [],
             $roundingTrace,
@@ -330,8 +340,8 @@ final class GarnishmentCalculator
      * nedostanou. Dohoda bez dne doručení se nepřemosťuje a dostane jen zbytek
      * po exekucích, přesně jako do 8/2026 (nález E-03).
      *
-     * Vrací 0, kdykoli výsledek není uzavřený nebo běží oddlužení. U oddlužení
-     * to není opatrnost, ale zákon: § 109 odst. 1 písm. d) IZ říká, že po
+     * Vrací 0, kdykoli výsledek není uzavřený nebo běží insolvence (zahájené
+     * řízení i oddlužení). To není opatrnost, ale zákon: § 109 odst. 1 písm. d) IZ říká, že po
      * zahájení insolvenčního řízení „nelze uplatnit dohodou věřitele
      * a dlužníka založené právo na výplatu srážek ze mzdy nebo jiných příjmů,
      * s nimiž se při výkonu rozhodnutí nakládá jako se mzdou nebo platem"
@@ -1154,7 +1164,12 @@ final class GarnishmentCalculator
             if (!$input->insolvency->decisionVerified) {
                 $issues[] = 'insolvency_decision_not_verified';
             }
-            if (!$input->insolvency->recipientVerified) {
+            // Příjemce se ověřuje jen tam, kam se platí. Při pouhém zahájení
+            // řízení se sražené částky deponují a nikam neodcházejí, takže
+            // není čí účet ověřovat — vyžadovat ho by běh zastavilo zbytečně.
+            if ($input->insolvency->mode->redirectsPaymentToAdministrator()
+                && !$input->insolvency->recipientVerified
+            ) {
                 $issues[] = 'insolvency_recipient_not_verified';
             }
             if ($input->insolvency->mode->redirectsPaymentToAdministrator()
@@ -1169,9 +1184,6 @@ final class GarnishmentCalculator
             }
             foreach ($this->concurrentEnforcementIssues($activeClaims, $input) as $issue) {
                 $issues[] = $issue;
-            }
-            if ($input->insolvency->mode === InsolvencyMode::AlertOnly) {
-                $issues[] = 'insolvency_alert_cannot_redirect_payment';
             }
         } elseif ($input->insolvency->courtDeterminedAmountMinorUnits !== null) {
             $issues[] = 'court_determined_amount_without_insolvency';
@@ -1215,9 +1227,11 @@ final class GarnishmentCalculator
      * Od schválení oddlužení tedy exekuce nedostane nic a nemá se ani co
      * deponovat: celá zabavitelná část patří insolvenčnímu správci. Právě
      * proto se tahle úleva váže na režimy, ve kterých už výrok soudu existuje
-     * ({@see InsolvencyMode::redirectsPaymentToAdministrator()}). Pouhé
-     * upozornění na zahájené řízení zůstává fail-closed: tam se podle R 4/2020
-     * sráží a DEPONUJE, a deponaci mzdové jádro neumí.
+     * ({@see InsolvencyMode::redirectsPaymentToAdministrator()}). Při pouhém
+     * zahájení řízení se podle R 4/2020 sráží v rozsahu dosavadních exekucí
+     * a celá částka se DEPONUJE ({@see InsolvencyMode::depositsEnforcementDeductions()});
+     * souběh tam není důvod k ručnímu posouzení, protože se nikomu nic
+     * nevyplácí a depozitum uvolní až rozhodnutí.
      *
      * Starší exekuce se tím neruší, jen se nevykonává — v rejstříku zůstává
      * evidovaná (v agendě případů stav

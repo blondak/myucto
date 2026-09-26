@@ -3210,10 +3210,15 @@ final class PayrollEnforcementRepository implements
                 $allocation->totalMinorUnits,
                 "{$idempotencyKey}:withheld:{$allocation->claimId}",
             );
-            if (PayrollTimeValue::string(
-                $claim['status'] ?? null,
-                'status',
-            ) !== EnforcementCaseStatus::Remit->value) {
+            // Zahájené insolvenční řízení deponuje VŠE, i u případu, který
+            // jinak odesílá (§ 109 odst. 1 písm. c) IZ, R 4/2020) — viz
+            // InsolvencyMode::depositsEnforcementDeductions().
+            if ($insolvency->mode->depositsEnforcementDeductions()
+                || PayrollTimeValue::string(
+                    $claim['status'] ?? null,
+                    'status',
+                ) !== EnforcementCaseStatus::Remit->value
+            ) {
                 $this->insertLedger(
                     $supplierId,
                     PayrollTimeValue::int($claim['case_id'] ?? null, 'case_id'),

@@ -45,4 +45,32 @@ enum InsolvencyMode: string
         return $this === self::ApprovedStandard
             || $this === self::CourtDeterminedAmount;
     }
+
+    /**
+     * Zahájené insolvenční řízení, o oddlužení ještě nerozhodnuto: exekuční
+     * srážky se SRÁŽEJÍ a DEPONUJÍ, nikomu se nevyplácejí.
+     *
+     * § 109 odst. 1 písm. c) IZ: exekuci, která by postihovala majetek
+     * dlužníka, „lze nařídit nebo zahájit, nelze jej však provést". Provedením
+     * je až výplata oprávněnému, ne srážka — rozsudek NS 29 Cdo 5295/2016
+     * (R 4/2020): plátce mzdy „provádí srážky ze mzdy povinného dále, ale
+     * nevyplácí je oprávněnému, dokud tyto účinky nepominou". Rozsah srážky se
+     * proto řídí dosavadními exekucemi (přednostní a nepřednostní pohledávky
+     * podle § 279 a 280 o. s. ř.), jen se celá částka deponuje.
+     *
+     * § 109 odst. 1 písm. d) IZ navíc zakazuje uplatnit dohodou založené právo
+     * na výplatu srážek, takže dobrovolné dohody se v tomhle režimu nesrážejí.
+     *
+     * Co se s depozitem stane dál, rozhoduje konec účinků: schválí-li soud
+     * oddlužení nebo prohlásí konkurs, patří do majetkové podstaty a plátce ho
+     * VYDÁ insolvenčnímu správci; skončí-li řízení jinak, uvolní se oprávněnému
+     * (existující uvolnění depozita rozhodnutím).
+     *
+     * Zdroj: https://www.zakonyprolidi.cz/cs/2006-182#p109,
+     * https://sbirka.nsoud.cz/sbirka/5858/.
+     */
+    public function depositsEnforcementDeductions(): bool
+    {
+        return $this === self::AlertOnly;
+    }
 }

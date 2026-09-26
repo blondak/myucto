@@ -8138,12 +8138,12 @@
       "mode": "Režim oddlužení",
       "mode_none": "Oddlužení se tento měsíc neuplatní",
       "mode_standard": "Schválené standardní oddlužení",
-      "mode_alert": "Pouze upozornění — ruční posouzení",
+      "mode_alert": "Zahájené insolvenční řízení — srážet a deponovat",
       "mode_court": "Soudem určená jiná výše měsíčních splátek",
       "impact": {
         "none": "Bez insolvenční srážky. Již schválený pokyn tímto režimem nezrušíte; použijte výslovné zrušení.",
         "approved_standard": "Aplikace vytvoří neměnný platební pokyn, vypočte standardní srážku a po schválení mzdy připraví skutečný závazek. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají.",
-        "alert_only": "Režim zůstává fail-closed: uloží upozornění, ale částku automaticky nevypočte ani neodešle.",
+        "alert_only": "Insolvenční řízení je zahájené, o oddlužení ještě nerozhodnuto (§ 109 odst. 1 IZ). Exekuční srážky se dál počítají v dosavadním rozsahu, ale celá sražená částka zůstane v depozitu — oprávněným se nic neodešle a dohody o srážkách se nesrážejí. Po schválení oddlužení nebo prohlášení konkursu depozit vydáte insolvenčnímu správci v detailu exekučního případu.",
         "court_determined_amount": "Aplikace vytvoří neměnný platební pokyn a srazí částku určenou soudem, nejvýše však zákonnou zabavitelnou část. Evidované nepřednostní exekuce se po dobu oddlužení nevykonávají."
       },
       "employment": "Účinný pracovní vztah",
@@ -8486,12 +8486,12 @@
         "protected_override_verified": "Určená nezabavitelná částka je ověřená",
         "insolvency_mode": "Insolvenční režim",
         "insolvency_none": "Oddlužení se tento měsíc neuplatní",
-        "insolvency_alert": "Pouze evidovat upozornění",
+        "insolvency_alert": "Zahájené řízení — srážet a deponovat",
         "insolvency_standard": "Schválené oddlužení — srážet a deponovat",
         "insolvency_court": "Soudem určená jiná výše měsíčních splátek",
         "insolvency_impact": {
           "none": "Bez insolvenční výjimky. Výpočet se řídí běžnými podklady zaměstnance.",
-          "alert_only": "Upozornění se pouze eviduje. Výpočet vyžádá ruční kontrolu a žádnou insolvenční částku automaticky neodešle.",
+          "alert_only": "Srážky podle dosavadních exekucí se provedou a zůstanou v depozitu (§ 109 odst. 1 písm. c) IZ). Dohody o srážkách se nesrážejí. Stačí ověřit vyhlášku o zahájení řízení; příjemce se neověřuje, nic se neodesílá.",
           "approved_standard": "Srážka se vypočte podle režimu oddlužení, ale zatím zůstane v depozitu. Úhradu insolvenčnímu správci je nutné provést a doložit ručně.",
           "court_determined_amount": "Srazí se měsíční splátka určená soudem, nejvýše však zákonná zabavitelná část. Úhradu insolvenčnímu správci je nutné provést a doložit ručně."
         },

@@ -174,6 +174,57 @@ trait EnforcementRunFixtureTrait
         ];
     }
 
+    /**
+     * Revize projde kontrolou a schválí se — teprve schválení zapíše exekuční
+     * ledger (sraženo / deponováno).
+     *
+     * @param array{run_id:int,row_version:int} $run
+     */
+    private function approveEnforcementRun(array $run): int
+    {
+        $key = bin2hex(random_bytes(4));
+        $reviewed = $this->runs->review(
+            $this->supplierId,
+            $run['run_id'],
+            $run['row_version'],
+            "review-enforcement-run-{$key}",
+            $this->actorId,
+        );
+        $approved = $this->runs->approve(
+            $this->supplierId,
+            $run['run_id'],
+            (int) $reviewed->run['row_version'],
+            "approve-enforcement-run-{$key}",
+            $this->actorId,
+        );
+
+        return (int) $approved->run['row_version'];
+    }
+
+    /** @return list<array{entry_kind:string,claim_id:?int,amount_minor_units:int}> */
+    private function enforcementLedger(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ledger.entry_kind, ledger.claim_id, ledger.amount_minor_units
+               FROM payroll_enforcement_ledger ledger
+               JOIN payroll_enforcement_month_results result
+                 ON result.supplier_id = ledger.supplier_id
+                AND result.id = ledger.month_result_id
+              WHERE ledger.supplier_id = ? AND result.employee_id = ?
+              ORDER BY ledger.id'
+        );
+        $stmt->execute([$this->supplierId, $this->employeeId]);
+
+        return array_map(
+            static fn (array $row): array => [
+                'entry_kind' => (string) $row['entry_kind'],
+                'claim_id' => $row['claim_id'] === null ? null : (int) $row['claim_id'],
+                'amount_minor_units' => (int) $row['amount_minor_units'],
+            ],
+            $stmt->fetchAll(\PDO::FETCH_ASSOC),
+        );
+    }
+
     private function seedRunCase(
         string $status = 'withhold_and_hold',
         string $caseKind = 'enforcement',
@@ -369,6 +420,22 @@ trait EnforcementRunFixtureTrait
                      "2026-01-01", "2026-01-01", ?, 1)'
         )->execute([$this->supplierId, $this->employeeId, $grossMinor]);
         $this->employmentId = (int) $pdo->lastInsertId();
+        // Účtárna s registrací ČSSZ — bez ní běh neschválíš
+        // (`employment_without_office`).
+        $pdo->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol, is_active)
+             VALUES (?, "SYN", "Syntetická účtárna", "1234567890", 1)'
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", "1234567890", "synthetic:enforcement-run")'
+        )->execute([$this->supplierId, $officeId]);
+        $pdo->prepare('UPDATE payroll_employments SET office_id = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$officeId, $this->supplierId, $this->employmentId]);
         $pdo->prepare(
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, effective_from, planned_start_on,

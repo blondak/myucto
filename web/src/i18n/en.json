@@ -8138,12 +8138,12 @@
       "mode": "Debt-relief mode",
       "mode_none": "Debt relief does not apply this month",
       "mode_standard": "Approved standard debt relief",
-      "mode_alert": "Alert only — manual review",
+      "mode_alert": "Insolvency proceedings commenced — withhold and hold",
       "mode_court": "Court-determined monthly instalment",
       "impact": {
         "none": "No debt-relief deduction. This mode does not cancel an approved instruction; use explicit cancellation.",
         "approved_standard": "The application creates an immutable payment instruction, calculates the standard deduction and prepares a real liability after payroll approval. Recorded non-priority enforcements are not carried out while debt relief runs.",
-        "alert_only": "This mode stays fail-closed: it records an alert but does not calculate or remit an amount automatically.",
+        "alert_only": "Insolvency proceedings have commenced and debt relief has not been decided yet (Section 109(1) of the Insolvency Act). Enforcement deductions keep being calculated in their existing scope, but the whole withheld amount stays on deposit — nothing is remitted to creditors and deduction agreements are not withheld. Once debt relief is approved or bankruptcy is declared, hand the deposit over to the insolvency administrator in the enforcement case detail.",
         "court_determined_amount": "The application creates an immutable payment instruction and withholds the court-determined amount, capped by the statutory attachable part. Recorded non-priority enforcements are not carried out while debt relief runs."
       },
       "employment": "Effective employment",
@@ -8486,12 +8486,12 @@
         "protected_override_verified": "The protected amount is verified",
         "insolvency_mode": "Insolvency mode",
         "insolvency_none": "Debt relief does not apply this month",
-        "insolvency_alert": "Record an alert only",
+        "insolvency_alert": "Proceedings commenced — withhold and hold",
         "insolvency_standard": "Approved debt relief — withhold and hold",
         "insolvency_court": "Court-determined monthly instalment",
         "insolvency_impact": {
           "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
-          "alert_only": "The alert is recorded only. Payroll requires manual review and does not automatically remit an insolvency amount.",
+          "alert_only": "Deductions under the existing enforcements are made and kept on deposit (Section 109(1)(c) of the Insolvency Act). Deduction agreements are not withheld. Only the notice of commencement needs to be verified; no recipient is checked because nothing is remitted.",
           "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
           "court_determined_amount": "The court-determined monthly instalment is withheld, capped by the statutory attachable part. Payment to the insolvency administrator must be made and documented manually."
         },
