@@ -275,6 +275,7 @@ final class BankStatementAction
                 (int) ($user['id'] ?? 0),
                 $resolved['currency_id'],
                 $reconciliationConfirmations,
+                $parsed,
             );
         } catch (StatementReconciliationException $e) {
             return Json::error(
