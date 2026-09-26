@@ -2037,7 +2037,13 @@
       "annex_one": "Příloha č. 1 — počet zaměstnanců k 1. prosinci",
       "annex_one_empty": "Žádný vztah nemá vyplněnou obec místa výkonu práce, příloha č. 1 by zůstala prázdná.",
       "privacy_hint": "Podklad neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
-      "validation_failed": "Stažené XML neprošlo kontrolou proti schématu — podatelna EPO ho v tomhle stavu odmítne. Soubor je uložený, ale před podáním doplňte, co chybí."
+      "validation_failed": "Stažené XML neprošlo kontrolou proti schématu — podatelna EPO ho v tomhle stavu odmítne. Soubor je uložený, ale před podáním doplňte, co chybí.",
+      "takeover": {
+        "blockers_title": "Vyúčtování zatím nejde sestavit",
+        "download_blocked": "Za některé převzaté měsíce chybí úhrny z předchozího programu. Nejdřív je doplňte.",
+        "badge": "převzato",
+        "badge_hint": "Měsíc před začátkem vedení mezd v MyÚčtu; úhrny jsou z počátečních stavů převzatých z předchozího programu."
+      }
     },
     "payments": {
       "title": "Mzdové příkazy a úhrady",

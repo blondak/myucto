@@ -5031,6 +5031,8 @@ export type PayrollTaxStatementForm = 'dpzvd6' | 'dpsvd2'
 export interface PayrollDependentActivityMonth {
   month: number
   headcount: number
+  /** Úhrny měsíce jsou z počátečních stavů převzatých z předchozího programu. */
+  taken_over?: boolean
   advance_due: number
   advance_withheld: number
   prescribed: number
@@ -5056,7 +5058,7 @@ export interface PayrollDependentActivityStatement {
   year: number
   variant: PayrollTaxStatementVariant
   months: PayrollDependentActivityMonth[]
-  total: Omit<PayrollDependentActivityMonth, 'month' | 'headcount'>
+  total: Omit<PayrollDependentActivityMonth, 'month' | 'headcount' | 'taken_over'>
   annual_overpayment_total: number
   annual_bonus_top_up_total: number
   overpayment_payouts: { month: number; amount: number }[]
@@ -5064,11 +5066,15 @@ export interface PayrollDependentActivityStatement {
   /** Nenulový počet = povinná příloha č. 2, kterou aplikace neumí naplnit. */
   non_resident_count: number
   warnings: string[]
+  /** Proč XML nejde sestavit (chybějící převzaté měsíce); prázdné = lze. */
+  blockers?: string[]
+  taken_over_months?: number[]
 }
 
 /** Část I. vyúčtování srážkové daně — částky v HALÉŘÍCH (schéma má 2 des. místa). */
 export interface PayrollWithholdingTaxMonth {
   month: number
+  taken_over?: boolean
   tax_due_minor: number
   tax_withheld_minor: number
   due_with_return_minor: number
@@ -5087,10 +5093,12 @@ export interface PayrollWithholdingTaxStatement {
   /** 772 = příjmy fyzických osob, 771 = právnických. */
   income_kind: string
   months: PayrollWithholdingTaxMonth[]
-  total: Omit<PayrollWithholdingTaxMonth, 'month'>
+  total: Omit<PayrollWithholdingTaxMonth, 'month' | 'taken_over'>
   /** Ř. 5 části II. = odvedeno − mělo být sraženo. Záporná = zbývá doplatit. */
   balance_minor: number
   warnings: string[]
+  blockers?: string[]
+  taken_over_months?: number[]
 }
 
 export interface PayrollTaxStatementPreview {

@@ -71,6 +71,15 @@ const warnings = computed(() => {
   return [...new Set(all)]
 })
 
+/**
+ * Překážky jsou tvrdší než varování: server XML nesestaví, protože by
+ * vykázalo nižší úhrn, než jaký se srazil (typicky chybí převzatý měsíc).
+ */
+const blockers = computed(() => {
+  const all = [...(dpz.value?.blockers ?? []), ...(dps.value?.blockers ?? [])]
+  return [...new Set(all)]
+})
+
 const formatter = computed(() => new Intl.NumberFormat(locale.value, {
   style: 'currency', currency: 'CZK', minimumFractionDigits: 0, maximumFractionDigits: 0,
 }))
@@ -94,10 +103,10 @@ const actions = computed<ActionItem[]>(() => [
     tier: 'primary',
     variant: 'primary',
     show: canExport.value,
-    disabled: dpz.value === null || downloading.value !== null,
+    disabled: dpz.value === null || blockers.value.length > 0 || downloading.value !== null,
     disabledReason: dpz.value === null
       ? t('payroll.tax_statement.download_blocked')
-      : undefined,
+      : blockers.value.length > 0 ? t('payroll.tax_statement.takeover.download_blocked') : undefined,
     loading: downloading.value === 'dpzvd6',
     run: () => void download('dpzvd6'),
   },
@@ -108,10 +117,10 @@ const actions = computed<ActionItem[]>(() => [
     tier: 'secondary',
     variant: 'neutral',
     show: canExport.value,
-    disabled: dps.value === null || downloading.value !== null,
+    disabled: dps.value === null || blockers.value.length > 0 || downloading.value !== null,
     disabledReason: dps.value === null
       ? t('payroll.tax_statement.download_blocked')
-      : undefined,
+      : blockers.value.length > 0 ? t('payroll.tax_statement.takeover.download_blocked') : undefined,
     loading: downloading.value === 'dpsvd2',
     run: () => void download('dpsvd2'),
   },
@@ -297,6 +306,16 @@ onMounted(load)
       >
         {{ validationIssue }}
       </p>
+      <div
+        v-if="blockers.length"
+        class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-800"
+        data-test="tax-statement-blockers"
+      >
+        <p class="font-semibold">{{ t('payroll.tax_statement.takeover.blockers_title') }}</p>
+        <ul class="mt-1 space-y-1">
+          <li v-for="blocker in blockers" :key="blocker">{{ blocker }}</li>
+        </ul>
+      </div>
       <ul
         v-if="warnings.length"
         class="mt-4 space-y-1 rounded-lg bg-warning-50 p-3 text-sm text-warning-800"
@@ -342,7 +361,17 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="row in dpz.months" :key="row.month" class="border-b border-neutral-100">
-              <td class="px-2 py-2 text-neutral-700">{{ row.month }}</td>
+              <td class="px-2 py-2 text-neutral-700">
+                <span class="inline-flex flex-wrap items-center gap-1">
+                  {{ row.month }}
+                  <span
+                    v-if="row.taken_over"
+                    class="whitespace-nowrap rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600"
+                    :title="t('payroll.tax_statement.takeover.badge_hint')"
+                    data-test="tax-statement-taken-over"
+                  >{{ t('payroll.tax_statement.takeover.badge') }}</span>
+                </span>
+              </td>
               <td class="px-2 py-2 text-right text-neutral-700">{{ row.headcount }}</td>
               <td class="px-2 py-2 text-right text-neutral-700">{{ czk(row.advance_due) }}</td>
               <td class="px-2 py-2 text-right text-neutral-700">{{ czk(row.annual_overpayment) }}</td>

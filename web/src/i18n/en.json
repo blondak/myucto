@@ -2037,7 +2037,13 @@
       "annex_one": "Annex 1 - headcount as of 1 December",
       "annex_one_empty": "No employment has a place-of-work municipality filled in, so annex 1 would be empty.",
       "privacy_hint": "The data contains no names, personal identifiers or per-employee detail.",
-      "validation_failed": "The downloaded XML failed schema validation — the EPO filing desk will reject it as it stands. The file is saved, but fill in what is missing before filing."
+      "validation_failed": "The downloaded XML failed schema validation — the EPO filing desk will reject it as it stands. The file is saved, but fill in what is missing before filing.",
+      "takeover": {
+        "blockers_title": "The statement cannot be built yet",
+        "download_blocked": "Totals from the previous payroll program are missing for some taken-over months. Fill them in first.",
+        "badge": "taken over",
+        "badge_hint": "A month before payroll started in MyÚčto; totals come from the opening balances taken over from the previous program."
+      }
     },
     "payments": {
       "title": "Payroll payment orders and settlement",

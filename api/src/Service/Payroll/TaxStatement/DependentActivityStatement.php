@@ -55,6 +55,8 @@ final readonly class DependentActivityStatement
      * @param int $annualBonusTopUpTotal `uhrndopl` — úhrn doplatků na daňovém bonusu
      *        z ročního zúčtování za nejbližší předchozí období.
      * @param list<string> $warnings
+     * @param list<string> $blockers Proč se tiskopis sestavit nesmí; XML se nevydá.
+     * @param list<int> $takenOverMonths Měsíce s úhrny z převzatých počátečních stavů.
      */
     public function __construct(
         public int $year,
@@ -67,6 +69,8 @@ final readonly class DependentActivityStatement
         public int $annualBonusTopUpTotal,
         public int $nonResidentCount,
         public array $warnings = [],
+        public array $blockers = [],
+        public array $takenOverMonths = [],
     ) {
         if (!in_array($variant, self::TYPY, true)) {
             throw new \InvalidArgumentException(
@@ -102,8 +106,11 @@ final readonly class DependentActivityStatement
     {
         $months = [];
         foreach ($this->months as $month => $row) {
-            $months[] = ['month' => $month, 'headcount' => $this->headcounts[$month] ?? 0]
-                + $row->toSummary();
+            $months[] = [
+                'month' => $month,
+                'headcount' => $this->headcounts[$month] ?? 0,
+                'taken_over' => in_array($month, $this->takenOverMonths, true),
+            ] + $row->toSummary();
         }
 
         return [
@@ -126,6 +133,8 @@ final readonly class DependentActivityStatement
             ),
             'non_resident_count' => $this->nonResidentCount,
             'warnings' => $this->warnings,
+            'blockers' => $this->blockers,
+            'taken_over_months' => $this->takenOverMonths,
         ];
     }
 }

@@ -23,6 +23,12 @@ final readonly class TaxStatementBasis
      *        nerezident. Nenulová hodnota znamená povinnou přílohu č. 2, kterou
      *        aplikace neumí naplnit — viz {@see TaxStatementCalculator}.
      * @param list<string> $warnings
+     * @param list<string> $blockers Důvody, proč tiskopis vzniknout NESMÍ — typicky
+     *        převzatý měsíc, ve kterém trval vztah, ale počáteční stav za něj chybí.
+     *        Náhled je ukáže, XML se nesestaví.
+     * @param list<int> $monthsBeforeStart Měsíce roku před začátkem vedení mezd
+     *        v MyÚčtu. Za ty se neschvaluje běh — jejich podklad jsou převzaté
+     *        počáteční stavy, takže výzva „schvalte běh" by u nich nedávala smysl.
      */
     public function __construct(
         public int $year,
@@ -30,6 +36,8 @@ final readonly class TaxStatementBasis
         public array $workplaces,
         public int $nonResidentCount,
         public array $warnings = [],
+        public array $blockers = [],
+        public array $monthsBeforeStart = [],
     ) {
         if (count($months) !== 12) {
             throw new \LogicException('Podklad vyúčtování musí mít dvanáct měsíců.');
@@ -46,11 +54,24 @@ final readonly class TaxStatementBasis
     public function hasApprovedRun(): bool
     {
         foreach ($this->months as $month) {
-            if ($month->hasApprovedRun) {
+            if ($month->hasSource()) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** @return list<int> měsíce, jejichž úhrny jsou z převzatých počátečních stavů */
+    public function takenOverMonths(): array
+    {
+        $months = [];
+        foreach ($this->months as $month) {
+            if ($month->takenOver) {
+                $months[] = $month->month;
+            }
+        }
+
+        return $months;
     }
 }

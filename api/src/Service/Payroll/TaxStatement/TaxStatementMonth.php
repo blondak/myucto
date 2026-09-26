@@ -30,6 +30,9 @@ final readonly class TaxStatementMonth
      * @param int $remittedWithholdingMinor Skutečně odvedeno na srážkové dani.
      * @param bool $hasApprovedRun Měl měsíc vůbec schválený mzdový běh? Měsíc bez
      *        běhu není měsíc s nulami — do tiskopisu prostě nepatří žádný řádek.
+     * @param bool $takenOver Měsíc předchází začátku vedení mezd v MyÚčtu a jeho
+     *        úhrny jsou z počátečních stavů (předchozí mzdový program). Do
+     *        tiskopisu patří stejně jako měsíc se schváleným během.
      */
     public function __construct(
         public int $month,
@@ -42,6 +45,7 @@ final readonly class TaxStatementMonth
         public int $remittedAdvanceMinor,
         public int $remittedWithholdingMinor,
         public bool $hasApprovedRun,
+        public bool $takenOver = false,
     ) {
         if ($month < 1 || $month > 12) {
             throw new \InvalidArgumentException('Měsíc vyúčtování musí být 1 až 12.');
@@ -67,6 +71,12 @@ final readonly class TaxStatementMonth
                 . 'spárování plateb finančnímu úřadu.',
             );
         }
+    }
+
+    /** Má měsíc podklad — vlastní schválený běh, nebo převzatý počáteční stav? */
+    public function hasSource(): bool
+    {
+        return $this->hasApprovedRun || $this->takenOver;
     }
 
     /** Doplatek na bonusu je součástí téhož sloupce jako měsíční bonusy. */
