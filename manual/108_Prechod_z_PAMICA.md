@@ -70,7 +70,13 @@ ZIPu vypíše počty řádků po tabulkách, kolik podání se přečetlo a kter
 s daty export vědomě nebere (protokoly změn, odeslané e-maily, nastavení oken).
 
 V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců.
-Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO. Nahraný soubor
+Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO.
+
+Po nahrání server export na pozadí rozbalí a přečte; průvodce mezitím ukazuje,
+na kterém kroku je. Když se náhled nepodaří načíst (výpadek spojení, chyba
+serveru), průvodce to oznámí a nabídne **Zkusit znovu**. Nahraný export na
+serveru zůstává a znovu se nenahrává. Tlačítkem **Nahrát jiný export** začnete
+od prvního kroku. Nahraný soubor
 aplikace po 7 dnech bez práce s převodem sama smaže, po úspěšném ostrém
 převodu hned.
 

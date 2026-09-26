@@ -7,7 +7,7 @@ import { useMigrationWizard } from '@/composables/useMigrationWizard'
 import { useAuthStore } from '@/stores/auth'
 import type { PermissionKey } from '@/security/permissions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
@@ -82,9 +82,11 @@ const toolDownloading = ref<string | null>(null)
 
 const {
   currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
-  uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
-  canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
+  uploadPercent, processing, processingProgress, processingSlow, loadError, deletingRun, jobRunning, jobSucceeded, percent,
+  canGoTo, goTo, onFile, doUpload, resetUpload, retryUpload, abandonUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
 } = useMigrationWizard<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>({
+  // Chyba načtení náhledu má na stránce vlastní blok se „Zkusit znovu".
+  inlineLoadError: true,
   api: pohodaApi,
   tokenKey: () => TOKEN_KEY.value,
   isReady: isPohodaUploadReady,
@@ -99,6 +101,11 @@ const {
 })
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: tt(`step${number}`) })))
+// Průběh zpracování exportu na serveru v procentech; bez počtu kroků jen pulzující pruh.
+const processingPercent = computed(() => {
+  const progress = processingProgress.value
+  return progress && progress.total > 0 ? Math.min(100, Math.round(progress.processed / progress.total * 100)) : null
+})
 const payrollWizard = computed(() => kind.value === 'payroll')
 // Přehled nahraný před podporou mezd příznaky nemá: to byla vždy agenda účetnictví.
 function agendaHas(agenda: { has_accounting?: boolean; has_payroll?: boolean }): boolean {
@@ -410,10 +417,34 @@ const actions = computed<ActionItem[]>(() => {
           </div>
           <div class="h-2 overflow-hidden rounded-full bg-primary-100">
             <div class="h-full bg-primary-500 transition-all duration-300"
-              :class="processing ? 'w-1/3 animate-pulse' : ''"
-              :style="processing ? undefined : { width: (uploadPercent ?? 0) + '%' }"></div>
+              :class="processing && processingPercent === null ? 'w-1/3 animate-pulse' : ''"
+              :style="processing ? (processingPercent === null ? undefined : { width: processingPercent + '%' }) : { width: (uploadPercent ?? 0) + '%' }"></div>
           </div>
+          <p v-if="processing && processingProgress?.step" class="text-xs text-primary-700" data-testid="pohoda-progress-step">
+            {{ processingProgress.total > 0 ? tt('processing_progress', { step: processingProgress.step, processed: processingProgress.processed, total: processingProgress.total }) : processingProgress.step }}
+          </p>
           <p class="text-xs text-neutral-500">{{ processing ? tt('processing_hint') : tt('uploading_hint') }}</p>
+          <div v-if="processing && processingSlow" class="flex flex-wrap items-center gap-2 border-t border-primary-200 pt-2" data-testid="pohoda-progress-slow">
+            <p class="basis-full text-xs text-warning-700">{{ tt('processing_slow') }}</p>
+            <button type="button" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" @click="retryUpload">
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ tt('preview_reload') }}
+            </button>
+          </div>
+        </div>
+        <div v-if="loadError && !processing" class="mt-4 max-w-xl space-y-2 rounded-md border border-danger-500/40 bg-danger-50 px-3 py-3" role="alert" data-testid="pohoda-load-error">
+          <div class="text-sm font-medium text-danger-600">{{ tt('preview_failed_title') }}</div>
+          <p class="text-sm text-danger-600">{{ loadError.message }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" :class="[btnFilled('primary'), 'whitespace-nowrap']" :disabled="busy" data-testid="pohoda-load-retry" @click="retryUpload">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ tt('preview_retry') }}
+            </button>
+            <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="busy" data-testid="pohoda-load-abandon" @click="abandonUpload">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+              {{ tt('preview_other_file') }}
+            </button>
+          </div>
         </div>
       </template>
 

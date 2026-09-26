@@ -90,6 +90,10 @@ export interface PohodaUploadPending {
   received: number
   job_id: number | null
   error: string | null
+  /** Průběh jobu, který export zpracovává nebo dopočítává náhled. */
+  progress?: { step: string; processed: number; total: number } | null
+  /** Export na serveru zůstal a přípravu náhledu jde zopakovat. */
+  retryable?: boolean
 }
 
 export function isPohodaUploadReady(upload: PohodaUpload | PohodaUploadPending): upload is PohodaUpload {
@@ -156,7 +160,8 @@ export interface PohodaToolFile {
 export const POHODA_BASE = '/admin/imports/pohoda'
 
 export const pohodaApi = {
-  ...createMigrationApi<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>(POHODA_BASE),
+  // Náhled exportu server jen čte z meta.json (přehled počítá job na pozadí), odpověď je hned.
+  ...createMigrationApi<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>(POHODA_BASE, { showTimeout: 60_000 }),
   // Nástroj se liší podle programu: POHODA exportuje účetní agendu přes XML rozhraní,
   // PAMICA se čte přímo z mzdového datového souboru.
   toolFiles: (system: PohodaSystem = 'pohoda'): Promise<{ files: PohodaToolFile[] }> =>

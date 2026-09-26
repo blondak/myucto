@@ -70,9 +70,19 @@ final class PohodaPayrollConverter
         }
         $info = PohodaXml::packInfo($file);
         $self = new self(preg_replace('/\D/', '', $info['ico']) ?? '');
-        foreach (['sMZslozky', 'sMZneprit', 'sMZsrazky', 'sMzPoj', 'sSTR', 'PracMista', 'ZAM', 'ZAMpomer'] as $table) {
-            foreach (PohodaXml::records($file, $table) as $row) {
+        $byId = ['sMZslozky', 'sMZneprit', 'sMZsrazky', 'sMzPoj', 'sSTR', 'PracMista', 'ZAM', 'ZAMpomer'];
+        $items = ['MZslozky', 'MZneprit', 'MZsrazky'];
+        $byIdTables = array_fill_keys($byId, true);
+        // Jeden průchod souborem pro všechny tabulky: každý průchod 50MB exportu stojí
+        // sekundy a tabulek je dvanáct.
+        foreach (PohodaXml::scan($file, [...$byId, 'MZ', ...$items]) as $table => $row) {
+            if (isset($byIdTables[$table])) {
                 $self->byId[$table][PohodaXml::text($row, 'ID')] = $row;
+            } elseif ($table === 'MZ') {
+                $period = sprintf('%04d-%02d', (int) PohodaXml::text($row, 'Rok'), (int) PohodaXml::text($row, 'RelMes'));
+                $self->mz[$period][] = $row;
+            } else {
+                $self->items[$table][PohodaXml::text($row, 'RefAg')][] = $row;
             }
         }
         foreach ($self->byId['ZAMpomer'] ?? [] as $relation) {
@@ -83,16 +93,7 @@ final class PohodaPayrollConverter
             $number = strtoupper(PohodaXml::text($row, 'Cislo'));
             $self->numberUse[$number] = ($self->numberUse[$number] ?? 0) + 1;
         }
-        foreach (PohodaXml::records($file, 'MZ') as $row) {
-            $period = sprintf('%04d-%02d', (int) PohodaXml::text($row, 'Rok'), (int) PohodaXml::text($row, 'RelMes'));
-            $self->mz[$period][] = $row;
-        }
         ksort($self->mz);
-        foreach (['MZslozky', 'MZneprit', 'MZsrazky'] as $table) {
-            foreach (PohodaXml::records($file, $table) as $row) {
-                $self->items[$table][PohodaXml::text($row, 'RefAg')][] = $row;
-            }
-        }
         return $self;
     }
 

@@ -62,6 +62,15 @@ final class PohodaImportJobService extends AbstractImportJobService
         'done' => 'Dokončuji',
     ];
 
+    /**
+     * Dopočítání přehledu rozbaleného exportu do `meta.json` (přehled mezd, pozdější roky
+     * deníku). Spouští ho náhled průvodce u exportu nahraného dřív, než přehled tyhle
+     * údaje nesl ({@see \MyInvoice\Action\Admin\Import\PohodaMigrationAction::metaHasFacts()}).
+     * Nic nepřevádí a nebere zámek firmy, jen zámek exportu.
+     */
+    public const MODE_DESCRIBE = 'describe';
+    private const DESCRIBE_STEP = 'Připravuji náhled exportu';
+
     public function __construct(
         ImportJobRepository $jobs,
         PohodaImportRepository $runs,
@@ -70,6 +79,64 @@ final class PohodaImportJobService extends AbstractImportJobService
         private readonly PohodaPayrollImporter $payroll,
     ) {
         parent::__construct($jobs, $runs, $logger);
+    }
+
+    /** @param array<string,mixed> $job řádek import_jobs */
+    public static function isDescribeJob(array $job): bool
+    {
+        return is_array($job['params'] ?? null) && ($job['params']['mode'] ?? null) === self::MODE_DESCRIBE;
+    }
+
+    public function run(int $jobId): void
+    {
+        $job = $this->jobs->findById($jobId);
+        if ($job !== null && self::isDescribeJob($job)) {
+            if ($this->jobs->markRunning($jobId)) {
+                $this->describe($jobId, $job, (int) $job['supplier_id']);
+            }
+            return;
+        }
+        parent::run($jobId);
+    }
+
+    /**
+     * Přehled agend znovu z rozbalených dat; údaje nahrání (token, jméno, otisk, kdo a kdy)
+     * v `meta.json` zůstávají. Chyba nechá export i původní přehled beze změny.
+     *
+     * @param array<string,mixed> $job
+     */
+    private function describe(int $jobId, array $job, int $supplierId): void
+    {
+        $token = (string) ($job['params']['token'] ?? '');
+        $lock = null;
+        try {
+            $lock = PohodaUploads::acquireJobLock($supplierId, $token);
+            if ($lock === null) {
+                $this->jobs->markFailed($jobId, static::PREPARE_BUSY);
+                return;
+            }
+            $meta = PohodaUploads::meta($supplierId, $token);
+            $this->jobs->updateProgress($jobId, ['total_items' => 0, 'processed' => 0, 'current_step' => self::DESCRIBE_STEP]);
+            $agendas = PohodaExport::overview(PohodaUploads::exportDir($supplierId, $token),
+                function (string $agenda, int $index, int $total) use ($jobId): void {
+                    $this->jobs->updateProgress($jobId, ['total_items' => $total, 'processed' => $index,
+                        'current_step' => self::DESCRIBE_STEP . ' - agenda ' . $agenda]);
+                });
+            if ($agendas === []) {
+                throw new PohodaException('no_agenda', 'Rozbalený export neobsahuje žádnou agendu. Nahrajte export znovu.');
+            }
+            $meta['agendas'] = $agendas;
+            PohodaUploads::writeMeta($supplierId, $token, $meta);
+            $this->jobs->updateProgress($jobId, ['total_items' => count($agendas), 'processed' => count($agendas), 'current_step' => 'Hotovo']);
+            $this->jobs->appendLog($jobId, 'Náhled exportu z POHODY připraven (' . count($agendas) . ' agend).');
+            $this->jobs->markCompleted($jobId);
+        } catch (\Throwable $e) {
+            $this->jobs->markFailed($jobId, $this->failureMessage($e, sprintf('náhled exportu %s firmy %d selhal', $token, $supplierId), static::PREPARE_FAILED));
+        } finally {
+            if ($lock !== null) {
+                PohodaUploads::releaseJobLock($lock);
+            }
+        }
     }
 
     protected function uploads(): ChunkedUploadStore

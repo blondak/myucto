@@ -78,11 +78,14 @@ final class PohodaImporter
     /**
      * Kontrola před převodem - nic nezapisuje. Chyba převod zastaví, upozornění ne.
      * `$skipYears` = roky po roce agendy, které se nepřevádějí ({@see PohodaContext::$skippedYears}).
+     * `$laterYears` = pozdější roky agendy z přehledu v `meta.json` (náhled průvodce); bez
+     * nich se spočítají průchodem celým deníkem.
      *
      * @param list<int> $skipYears
+     * @param list<int>|null $laterYears
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    public function preflight(int $supplierId, PohodaExport $export, array $skipYears = []): array
+    public function preflight(int $supplierId, PohodaExport $export, array $skipYears = [], ?array $laterYears = null): array
     {
         $out = [];
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
@@ -113,10 +116,10 @@ final class PohodaImporter
         }
         // Agenda POHODY vede i doklady po konci roku - jejich zápisy jdou do období podle
         // skutečného data, takže do rozjetého účetnictví se nesmí přimíchat ani tam.
-        $allLaterYears = ChartJournalImporter::laterYears($export);
+        $allLaterYears = $laterYears !== null ? array_map('intval', $laterYears) : ChartJournalImporter::laterYears($export);
         $laterYears = array_values(array_diff($allLaterYears, $skipYears));
         $skipped = array_values(array_intersect($allLaterYears, $skipYears));
-        $journalMapped = $this->map->all($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY) !== [];
+        $journalMapped = $this->map->hasAny($supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
         foreach (array_merge([$export->year], $laterYears) as $year) {
             $period = $this->periods->findByYear($supplierId, $year);
             if ($period === null) {

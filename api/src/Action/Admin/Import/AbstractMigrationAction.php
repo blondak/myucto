@@ -316,6 +316,7 @@ abstract class AbstractMigrationAction
         $status = (string) ($state['status'] ?? ChunkedUploadStore::STATUS_UPLOADING);
         $jobId = isset($state['job_id']) ? (int) $state['job_id'] : null;
         $error = isset($state['error']) ? (string) $state['error'] : null;
+        $job = null;
         if ($status === ChunkedUploadStore::STATUS_PROCESSING || $status === ChunkedUploadStore::STATUS_READY) {
             $job = $jobId !== null ? $this->jobs->find($jobId, $supplierId) : null;
             if ($job === null || in_array($job['status'], ['failed', 'cancelled', 'completed', 'completed_with_warnings'], true)) {
@@ -332,7 +333,23 @@ abstract class AbstractMigrationAction
             'size' => (int) ($state['size'] ?? 0),
             'received' => $status === ChunkedUploadStore::STATUS_UPLOADING ? $this->uploads()->partSize($supplierId, $token) : (int) ($state['received'] ?? 0),
             'job_id' => $jobId,
+            'progress' => $status === ChunkedUploadStore::STATUS_PROCESSING && $job !== null ? self::jobProgress($job) : null,
             'error' => $status === ChunkedUploadStore::STATUS_FAILED ? $error : null,
+        ];
+    }
+
+    /**
+     * Průběh jobu pro průvodce, který čeká na zpracování souboru: krok a kolik z kolika.
+     *
+     * @param array<string,mixed> $job řádek import_jobs
+     * @return array{step:string,processed:int,total:int}
+     */
+    protected static function jobProgress(array $job): array
+    {
+        return [
+            'step' => (string) ($job['current_step'] ?? ''),
+            'processed' => (int) ($job['processed'] ?? 0),
+            'total' => (int) ($job['total_items'] ?? 0),
         ];
     }
 

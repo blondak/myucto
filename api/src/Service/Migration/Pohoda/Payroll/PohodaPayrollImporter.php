@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
+use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
@@ -65,18 +66,24 @@ final class PohodaPayrollImporter
     ) {}
 
     /**
-     * Co by převod udělal s nastavením mezd (nic nezapisuje); `null`, když export mzdy nemá.
+     * Přehled souboru mezd, ze kterého vychází kontrola před převodem ({@see PohodaExport::payrollSummary()}).
+     * Počítá ho job nahrání do `meta.json`; tady jen pro volajícího, který ho po ruce nemá.
      *
-     * @return array<string,mixed>|null {@see PayrollMigrationModuleSetup::plan()}
+     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string}
      */
-    private function moduleSetupPlan(int $supplierId, string $file): ?array
+    public static function summary(string $file, int $year): array
     {
-        try {
-            $last = self::lastPeriod(PohodaPayrollConverter::read($file));
-        } catch (PohodaException) {
-            return null;
+        if (!is_file($file)) {
+            throw new PohodaException('payroll_missing', 'Export neobsahuje mzdy (91_mzdy.xml).');
         }
-        return $last === null ? null : $this->moduleSetup->plan($supplierId, $last);
+        return PohodaExport::payrollSummary($file, $year);
+    }
+
+    /** Přehled z `meta.json` je úplný (nahraný před přidáním `last_overall` ho nemá). */
+    public static function summaryComplete(mixed $summary): bool
+    {
+        return is_array($summary) && array_key_exists('last_overall', $summary)
+            && isset($summary['employees'], $summary['months']) && array_key_exists('first', $summary) && array_key_exists('last', $summary);
     }
 
     /** Poslední měsíc zpracovaných mezd v exportu (všechny roky), nebo `null`. */
@@ -96,18 +103,33 @@ final class PohodaPayrollImporter
     /**
      * Kontrola před převodem mezd - nic nezapisuje.
      *
+     * S přehledem souboru (`$summary` z `meta.json`, {@see summary()}) soubor mezd vůbec
+     * nečte a stojí jen pár dotazů do databáze - tak ji volá náhled průvodce. Bez něj
+     * přehled spočítá jedním průchodem souborem (převod na pozadí).
+     *
+     * @param array<string,mixed>|null $summary
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    public function preflight(int $supplierId, string $file, int $year): array
+    public function preflight(int $supplierId, string $file, int $year, ?array $summary = null): array
     {
         $out = [];
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
             $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
         };
+        $readError = null;
+        if (!self::summaryComplete($summary)) {
+            try {
+                $summary = self::summary($file, $year);
+            } catch (PohodaException $e) {
+                $summary = null;
+                $readError = $e;
+            }
+        }
         $pdo = $this->db->pdo();
         // Chybějící nastavení mezd převod doplní sám ({@see PayrollMigrationModuleSetup});
         // chybou zůstává jen to, co doplnit nejde (licence).
-        $plan = $this->moduleSetupPlan($supplierId, $file);
+        $last = $summary['last_overall'] ?? null;
+        $plan = $last === null ? null : $this->moduleSetup->plan($supplierId, (string) $last);
         $willSetUp = ($plan['outcome'] ?? null) === PayrollMigrationModuleSetup::OUTCOME_READY;
         $stmt = $pdo->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
@@ -139,17 +161,14 @@ final class PohodaPayrollImporter
                 }
             }
         }
-        try {
-            $converter = PohodaPayrollConverter::read($file);
-            $periods = $converter->periods($year);
-            if ($periods === []) {
-                $add('error', 'payroll_no_months', "Export neobsahuje zpracované mzdy za rok {$year}.");
-            } else {
-                $add('info', 'payroll_summary', sprintf('Mzdy za %d měsíců (%s až %s), zaměstnanců v exportu %d.',
-                    count($periods), $periods[0], $periods[count($periods) - 1], $converter->employees()), ['months' => count($periods)]);
-            }
-        } catch (PohodaException $e) {
-            $add('error', $e->errorCode, $e->getMessage());
+        if ($readError !== null) {
+            $add('error', $readError->errorCode, $readError->getMessage());
+        } elseif ((int) ($summary['months'] ?? 0) === 0) {
+            $add('error', 'payroll_no_months', "Export neobsahuje zpracované mzdy za rok {$year}.");
+        } else {
+            $months = (int) $summary['months'];
+            $add('info', 'payroll_summary', sprintf('Mzdy za %d měsíců (%s až %s), zaměstnanců v exportu %d.',
+                $months, (string) $summary['first'], (string) $summary['last'], (int) $summary['employees']), ['months' => $months]);
         }
         return $out;
     }

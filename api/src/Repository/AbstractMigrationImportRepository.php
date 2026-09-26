@@ -72,6 +72,14 @@ abstract class AbstractMigrationImportRepository
         return $id === false ? null : (int) $id;
     }
 
+    /** Mapa převodu má aspoň jeden záznam daného druhu (bez načtení celé mapy). */
+    public function hasAny(int $supplierId, string $kind): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM ' . $this->mapTable() . ' WHERE supplier_id = ? AND kind = ? LIMIT 1');
+        $stmt->execute([$supplierId, $kind]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return array<string,int> klíč zdroje => target_id */
     public function all(int $supplierId, string $kind): array
     {

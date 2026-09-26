@@ -12,15 +12,33 @@ export interface MigrationWizardRun {
   status: string
 }
 
+/** Průběh jobu, který soubor na pozadí zpracovává (krok a kolik z kolika). */
+export interface MigrationWizardProgress {
+  step: string
+  processed: number
+  total: number
+}
+
 /** Soubor, který se ještě nahrává nebo ho server na pozadí zpracovává. */
 export interface MigrationWizardPending {
   status: 'uploading' | 'processing' | 'failed'
   error: string | null
+  progress?: MigrationWizardProgress | null
+  /** Soubor na serveru zůstal a zpracování jde zopakovat (jinak se nahrává znovu). */
+  retryable?: boolean
 }
+
+/** Náhled nahraného souboru se nepodařilo načíst; soubor na serveru zůstává. */
+export interface MigrationWizardLoadError {
+  message: string
+}
+
+/** Po této době čekání průvodce nabídne načtení znovu (zpracování bývá hotové do minuty). */
+export const MIGRATION_SLOW_AFTER_MS = 90_000
 
 export interface MigrationWizardApi<TUpload, TPending, TRun, TStart> {
   uploadChunked: (file: File, onProgress?: ChunkedUploadProgress, onStarted?: (token: string) => void) => Promise<{ token: string; job_id: number | null }>
-  show: (token: string) => Promise<TUpload | TPending>
+  show: (token: string, options?: { retry?: boolean }) => Promise<TUpload | TPending>
   start: (token: string, params: TStart) => Promise<{ job_id: number; status: string; mode: string }>
   runs: () => Promise<{ items: TRun[] }>
   run: (id: number) => Promise<TRun>
@@ -43,6 +61,8 @@ export interface MigrationWizardOptions<TUpload extends { token: string }, TPend
   onReady?: (upload: TUpload) => void
   /** Průvodce začíná znovu od nahrání. */
   onReset?: () => void
+  /** Stránka ukazuje chybu načtení náhledu ve vlastním bloku (`loadError`); jinak jde upozorněním. */
+  inlineLoadError?: boolean
   /** Přehled běhů, které tenhle průvodce ukazuje. */
   filterRuns?: (runs: TRun[]) => TRun[]
 }
@@ -76,9 +96,15 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
   // Nahrávání po částech (procenta) a následné zpracování souboru serverem na pozadí.
   const uploadPercent = ref<number | null>(null)
   const processing = ref(false)
+  // Průběh zpracování na serveru a chyba načtení náhledu (s možností zkusit znovu).
+  const processingProgress = ref<MigrationWizardProgress | null>(null)
+  const processingSlow = ref(false)
+  const loadError = ref<MigrationWizardLoadError | null>(null)
   const deletingRun = ref<number | null>(null)
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
+  // Každé čekání na náhled má pořadí; starší smyčka (před „Zkusit znovu") skončí.
+  let waitGeneration = 0
 
   function readToken(): string | null {
     try { return sessionStorage.getItem(options.tokenKey()) } catch { return null }
@@ -139,12 +165,35 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
     }
   }
 
-  /** Polluje stav nahraného souboru, dokud ho server nerozbalí a nenačte (nebo nenahlásí chybu). */
-  async function waitForUpload(token: string): Promise<void> {
+  /**
+   * Polluje stav nahraného souboru, dokud ho server nerozbalí a nenačte (nebo nenahlásí chybu).
+   * Chyba požadavku (timeout, 500) ani chyba, kterou jde zopakovat, token nezahodí: soubor
+   * na serveru zůstává a průvodce nabídne „Zkusit znovu" ({@link retryUpload}).
+   */
+  async function waitForUpload(token: string, retry = false): Promise<void> {
     processing.value = true
+    processingProgress.value = null
+    processingSlow.value = false
+    loadError.value = null
+    const started = Date.now()
+    let first = true
+    const generation = ++waitGeneration
+    const fail = (message: string): void => {
+      loadError.value = { message }
+      // Stránka bez vlastního bloku chyby ji dostane aspoň jako upozornění.
+      if (!options.inlineLoadError) toast.error(message)
+    }
     try {
-      while (!disposed) {
-        const result = await api.show(token)
+      while (!disposed && generation === waitGeneration) {
+        let result: TUpload | TPending
+        try {
+          result = await api.show(token, first && retry ? { retry: true } : undefined)
+        } catch (error: any) {
+          if (generation === waitGeneration) fail(errorMessage(error, text('preview_failed')))
+          return
+        }
+        first = false
+        if (generation !== waitGeneration) return
         if (options.isReady(result)) {
           upload.value = result
           options.onReady?.(result)
@@ -154,17 +203,49 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
           currentStep.value = 2
           return
         }
+        if (result.status === 'failed' && result.retryable) {
+          fail(result.error || text('preview_failed'))
+          return
+        }
         if (result.status !== 'processing') {
           // 'uploading' po obnovení stránky: soubor v prohlížeči už není, nahrávání nejde dokončit.
           writeToken(null)
           toast.error(result.status === 'failed' ? (result.error || text('upload_failed')) : text('upload_interrupted'))
           return
         }
+        processingProgress.value = result.progress ?? null
+        processingSlow.value = Date.now() - started >= MIGRATION_SLOW_AFTER_MS
         await new Promise<void>(resolve => { pollTimer = setTimeout(resolve, 2000) })
       }
     } finally {
-      processing.value = false
+      if (generation === waitGeneration) processing.value = false
     }
+  }
+
+  /** Znovu načte náhled nahraného souboru (po chybě nebo dlouhém čekání). */
+  async function retryUpload(): Promise<void> {
+    const token = upload.value?.token ?? readToken()
+    if (!token) {
+      loadError.value = null
+      return
+    }
+    busy.value = true
+    try {
+      await waitForUpload(token, true)
+    } finally {
+      busy.value = false
+    }
+  }
+
+  /** Zahodí nahraný soubor z průvodce a vrátí ho na nahrání. */
+  function abandonUpload(): void {
+    // Čekání na náhled, které ještě běží, skončí při dalším dotazu.
+    waitGeneration++
+    processing.value = false
+    processingProgress.value = null
+    processingSlow.value = false
+    loadError.value = null
+    resetUpload()
   }
 
   function resetUpload(): void {
@@ -302,7 +383,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
 
   return {
     currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
-    uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
-    canGoTo, goTo, onFile, doUpload, resetUpload, start, cancel, showRun, deleteRun, loadRuns, errorMessage, writeToken,
+    uploadPercent, processing, processingProgress, processingSlow, loadError, deletingRun, jobRunning, jobSucceeded, percent,
+    canGoTo, goTo, onFile, doUpload, resetUpload, retryUpload, abandonUpload, start, cancel, showRun, deleteRun, loadRuns, errorMessage, writeToken,
   }
 }
