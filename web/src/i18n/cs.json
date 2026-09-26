@@ -5377,6 +5377,7 @@
           "tax_residence_evidence_unverified": "daňová rezidence je vedená jako neověřená",
           "social_jurisdiction_evidence_missing": "příslušnost k sociálnímu pojištění",
           "social_jurisdiction_evidence_unverified": "příslušnost k sociálnímu pojištění je vedená jako neověřená",
+          "social_a1_expired": "doklad A1 končí dřív než cizí příslušnost v tomto měsíci — doplňte platnost nového A1, nebo od dalšího dne zapište českou příslušnost",
           "working_pensioner_discount_evidence_missing": "sleva pro pracujícího poplatníka v důchodu",
           "working_pensioner_discount_evidence_unverified": "sleva pro pracujícího poplatníka v důchodu je vedená jako neověřená",
           "health_coverage_evidence_missing": "příslušnost ke zdravotnímu pojištění",

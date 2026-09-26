@@ -5377,6 +5377,7 @@
           "tax_residence_evidence_unverified": "the tax residence is recorded as unverified",
           "social_jurisdiction_evidence_missing": "social insurance jurisdiction",
           "social_jurisdiction_evidence_unverified": "the social insurance jurisdiction is recorded as unverified",
+          "social_a1_expired": "the A1 certificate ends before the foreign jurisdiction in this month — enter the validity of a new A1, or record Czech jurisdiction from the following day",
           "working_pensioner_discount_evidence_missing": "discount for a working old-age pensioner",
           "working_pensioner_discount_evidence_unverified": "the discount for a working old-age pensioner is recorded as unverified",
           "health_coverage_evidence_missing": "health insurance jurisdiction",

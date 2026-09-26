@@ -95,6 +95,46 @@ final class PayrollPersonStatutoryEvidenceValidatorTest extends TestCase
         $this->validator->normalize(42, '2026-06-30', $raw);
     }
 
+    /**
+     * A1 končí 15. 6., snímek je k 30. 6. Dřív to validátor odmítl výjimkou,
+     * která shodila snímek mzdového běhu celé firmy; posouzení celého měsíce
+     * je teď kód `social_a1_expired` u dotčené osoby ve výpočtu.
+     */
+    public function testA1EndingInsideTheMonthIsAcceptedAsEvidence(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['social']['jurisdictions'][0] = [
+            ...$raw['social']['jurisdictions'][0],
+            'jurisdiction' => 'foreign_regime_verified',
+            'foreign_country_code' => 'DE',
+            'jurisdiction_evidence_reference' => 'document:foreign-regime',
+            'a1_status' => 'verified',
+            'a1_certificate_reference' => 'document:a1',
+            'a1_valid_until' => '2026-06-15',
+        ];
+
+        $snapshot = $this->validator->normalize(42, '2026-06-30', $raw);
+
+        self::assertSame('2026-06-15', $snapshot['social']['jurisdiction']['a1_valid_until']);
+    }
+
+    public function testRejectsA1ExpiredBeforeTheJurisdictionStarts(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['social']['jurisdictions'][0] = [
+            ...$raw['social']['jurisdictions'][0],
+            'jurisdiction' => 'foreign_regime_verified',
+            'foreign_country_code' => 'DE',
+            'jurisdiction_evidence_reference' => 'document:foreign-regime',
+            'a1_status' => 'verified',
+            'a1_certificate_reference' => 'document:a1',
+            'a1_valid_until' => '2025-12-31',
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->validator->normalize(42, '2026-06-30', $raw);
+    }
+
     public function testRejectsHealthInsurerOutsideTheCodebook(): void
     {
         $raw = $this->completeRaw();

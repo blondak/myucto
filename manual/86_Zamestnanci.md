@@ -252,7 +252,12 @@ skutečnosti, ze kterých vychází zákonný výpočet:
   [§ 86.8.4](#8684-prohlaseni-k-dani-ma-jedine-misto);
 - **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
 - **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
-  režimu;
+  režimu. Podle ní se počítá pojistné. A1 musí platit po celou dobu zahraniční
+  příslušnosti v měsíci; končí-li dřív, mzda dotčené osoby se zastaví, dokud
+  nedoplníte platnost nového A1, nebo nezapíšete od dalšího dne českou
+  příslušnost. Účast „zahraniční", stát cizích předpisů a platnost A1
+  v podmínkách vztahu jí musí odpovídat, jinak výpočet ohlásí rozpor;
+
 - **sleva pro pracujícího poplatníka v důchodu**;
 - **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
 - **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do

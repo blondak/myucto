@@ -198,10 +198,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             'social' => [
                 'jurisdiction' => $this->single(
                     array_map(
-                        fn (array $row): array => $this->socialJurisdiction(
-                            $row,
-                            $effectiveOn,
-                        ),
+                        fn (array $row): array => $this->socialJurisdiction($row),
                         $effectiveJurisdictions,
                     ),
                     'Sociální jurisdikce',
@@ -604,7 +601,7 @@ final class PayrollPersonStatutoryEvidenceValidator
     /** @param array<string,mixed> $row
      *  @return array<string,mixed>
      */
-    private function socialJurisdiction(array $row, string $effectiveOn): array
+    private function socialJurisdiction(array $row): array
     {
         $jurisdiction = $this->enum(
             $row,
@@ -635,9 +632,18 @@ final class PayrollPersonStatutoryEvidenceValidator
         );
         $a1Reference = $this->nullableCanonical($row, 'a1_certificate_reference');
         $a1Until = $this->nullableDateValue($row, 'a1_valid_until');
-        if ($a1Status === 'verified' && ($a1Until === null || $a1Until < $effectiveOn)) {
+        /*
+         * A1 musí platit aspoň od začátku věty příslušnosti. Dřív se musel
+         * krýt s datem snímku (u běhu poslední den měsíce), takže A1 končící
+         * uprostřed měsíce shodil snímek celé firmy výjimkou. Zda A1 pokryje
+         * celý počítaný měsíc, posuzuje výpočet po osobách
+         * (PayrollRunStatutoryInputAssembler, kód `social_a1_expired`).
+         */
+        if ($a1Status === 'verified'
+            && ($a1Until === null || $a1Until < $this->dateValue($row, 'effective_from'))
+        ) {
             throw new InvalidArgumentException(
-                'Ověřený A1 musí platit k datu snímku.',
+                'Ověřený A1 musí platit nejpozději od začátku období příslušnosti.',
             );
         }
         if ($a1Status !== 'verified' && ($a1Reference !== null || $a1Until !== null)) {

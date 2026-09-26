@@ -8,6 +8,7 @@ use MyInvoice\Action\Payroll\PayrollDeferredIncomeAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Response;
@@ -87,6 +88,43 @@ final class PayrollJmhzSpecialCasesFlowTest extends TestCase
                 . '<form:stanovenaTydenniDoba>99.00</form:stanovenaTydenniDoba></form:fondPracovniDoby>',
             $xml,
         );
+    }
+
+    /**
+     * Prokurista (P), člen družstva (O), likvidátor (R) a společník (K) jdou
+     * stejným scénářem 3 (`cinnostKS`) jako jednatel; ELDP nese jejich druh
+     * činnosti. Dřív příprava podporovala jen S/1.
+     *
+     * @return iterable<string,array{string}>
+     */
+    public static function corporateBodyActivities(): iterable
+    {
+        yield 'prokurista' => ['P'];
+        yield 'člen družstva' => ['O'];
+        yield 'likvidátor' => ['R'];
+        yield 'společník' => ['K'];
+    }
+
+    #[DataProvider('corporateBodyActivities')]
+    public function testCorporateBodyActivityReachesScenarioThreeSubmission(string $activity): void
+    {
+        $person = $this->hire(
+            'Radka Orgánová',
+            'female',
+            '1978-08-18',
+            activityCode: $activity,
+            employmentType: 'statutory_body',
+            relationType: 'statutory_body',
+            taxpayerType: 'managing_partner',
+        );
+        $this->approveMonth($person['employment_id'], []);
+        $this->pay($person, 2_500_000);
+
+        $xml = $this->submission('corporate-body-' . $activity);
+
+        self::assertStringContainsString('<form:cinnostKS ', $xml);
+        self::assertStringContainsString("<form:kod>{$activity}++</form:kod>", $xml);
+        self::assertStringContainsString('<form:stanovenyFond>0.000</form:stanovenyFond>', $xml);
     }
 
     /**
