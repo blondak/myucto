@@ -254,6 +254,25 @@ automat nepřepíše. Při uložení znovu ověří otisk podkladů; mezitím zm
 vyžadují obnovení přehledu. Uložená revize uchová použitou politiku, smluvní
 podmínky, schválenou docházku i výpočetní stopu.
 
+U vztahu, který čeká na **Doplnit**, řádek vyjmenuje, co chybí. Když jde
+o jinou schválenou absenci než dovolenou (nemoc, OČR, mateřská, neplacené volno
+a podobně), ukáže řádek každou takovou absenci s druhem a obdobím a nad seznamem
+se objeví oddíl **Posouzení jiných absencí**. Tam rozhodneš jednou za druh
+absence, jestli se do odpracované doby pro dovolenou **Započítat**, nebo
+**Nezapočítat** (§ 216 odst. 2 a § 348 odst. 1 zákoníku práce); u každého druhu
+je stručná nápověda. Pracovní neschopnost a karanténa se při započtení omezí na
+20násobek týdenní pracovní doby za rok, pracovní úraz nebo nemoc z povolání
+spočítej ručně v části **Ruční výpočet a opravy**. Po rozhodnutí se vztahy
+označí jako připravené, vybereš je a spustíš výpočet; rozhodnutí se zapíše do
+zdůvodnění nároku. Štítek **Doplnit** je proklik: vede na posouzení absencí,
+u ostatních chybějících údajů na kartu pracovního vztahu.
+
+U firmy převedené z jiného mzdového programu se absence z měsíců před prvním
+mzdovým obdobím v MyÚčtu neposuzují znovu, posoudil je předchozí program.
+Vztah, kterému převod zapsal zůstatek dovolené roku, má štítek **Převzato**: zůstatek už obsahuje roční nárok po krácení
+a čerpání, takže se nárok toho roku znovu nepočítá. Od dalšího roku počítá
+nárok MyÚčto.
+
 Náhrada při DPN se počítá z publikovaných směn v prvních 14 kalendářních dnech.
 **Svátek uvnitř tohoto okna se proplácí i tehdy, když na něj není publikovaná
 směna** — aplikace pro něj dopočítá směnu podle rozvrhu. Je-li směna na svátek

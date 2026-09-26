@@ -1013,6 +1013,56 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  it('řekne, kterou absenci posoudit, hromadně ji rozhodne a převzatý zůstatek znovu nepočítá', async () => {
+    const base = {
+      employee_name: 'Syntetická osoba', relation_type: 'employment', period_from: '2026-01-01', period_to: '2026-09-26',
+      weekly_minutes: 2400, entitlement_weeks: 4, allowance_source: 'company_policy', continuous_calendar_days: 269,
+      worked_equivalent_minutes: 60000, input_version: 'b'.repeat(64),
+    }
+    m.leaveEntitlementCandidates.mockResolvedValue({
+      items: [
+        { ...base, employment_id: 12, employee_id: 5, employment_code: 'SYNTH-HPP', ready: false,
+          blockers: ['absence_legal_assessment_required'],
+          assessment_absences: [{ id: 91, row_version: 1, absence_type: 'ocr', date_from: '2026-07-06', date_to: '2026-07-08' }],
+          predecessor_absences: 2, takeover: null },
+        { ...base, employment_id: 13, employee_id: 6, employment_code: 'SYNTH-DPC', ready: false, blockers: [],
+          takeover: { minutes: 5460, effective_date: '2026-01-01', reason: 'Převzato z PAMICA: zůstatek' },
+          assessment_absences: [], predecessor_absences: 0 },
+      ],
+      total: 2, limit: 25, offset: 0,
+    })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-leave"]').trigger('click')
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="leave-candidate-12"]')
+    expect(row.get('[data-test="leave-candidate-assessment-absences"]').text()).toContain('payroll_absence.types.ocr')
+    expect(row.text()).toContain('payroll_absence.leave.predecessor_absences')
+    expect(row.find('[data-test="leave-candidate-fix-12"]').exists()).toBe(true)
+    const checkbox = row.get('input[type="checkbox"]').element as HTMLInputElement
+    expect(checkbox.disabled).toBe(true)
+
+    const takeover = wrapper.get('[data-test="leave-candidate-13"]')
+    expect(takeover.get('[data-test="leave-candidate-takeover"]').text()).toContain('payroll_absence.leave.takeover_summary')
+    expect((takeover.get('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+
+    expect(wrapper.get('[data-test="leave-assessment-ocr"]').text()).toContain('payroll_absence.leave.assessment.hint_by_type.other')
+    await wrapper.get('[data-test="leave-assessment-exclude-ocr"]').trigger('click')
+    expect((wrapper.get('[data-test="leave-candidate-12"] input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(false)
+
+    await wrapper.get('[data-test="leave-candidate-12"] input[type="checkbox"]').setValue(true)
+    const calculate = wrapper.findAll('[data-test="automatic-leave-entitlements"] button')
+      .find(button => button.text().includes('payroll_absence.leave.calculate_selected'))!
+    await calculate.trigger('click')
+    await flushPromises()
+    expect(m.createAutomaticEntitlements).toHaveBeenCalledWith(expect.objectContaining({
+      items: [{ employment_id: 12, input_version: 'b'.repeat(64) }],
+      absence_decisions: { ocr: 'exclude' },
+    }))
+    wrapper.unmount()
+  })
+
   it('uses a rolling year range instead of freezing form controls at 2026', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()

@@ -304,7 +304,7 @@ describe('PayrollHealthNotificationPanel', () => {
     const badge = wrapper.get('[data-test="health-notification-deadline"]')
     expect(badge.text()).toContain('payroll.health_notifications.deadline.predecessor')
     expect(badge.classes()).not.toContain('bg-danger-50')
-    expect(wrapper.get('[data-test="health-notifications-summary-predecessor"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="health-notifications-summary-predecessor"]').exists()).toBe(true)
   })
 
   /**

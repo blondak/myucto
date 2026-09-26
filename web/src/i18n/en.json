@@ -26471,6 +26471,29 @@
       "automatic_summary": "Week {hours} · allowance {weeks} weeks · qualifying {worked}",
       "ready": "Ready",
       "needs_attention": "Complete",
+      "open_assessment": "Go to the absence assessment",
+      "open_employment": "Open the employment card and complete the inputs",
+      "takeover": "Taken over",
+      "takeover_summary": "The previous program set this year's entitlement; the migration brought a balance of {hours} h (effective {date}). It is not calculated again so the entitlement is not counted twice.",
+      "predecessor_absences": "Absences from before payroll started in MyÚčto ({count}) were assessed by the previous program.",
+      "assessment": {
+        "title": "Assessment of other absences (§ 216(2) and § 348(1) of the Labour Code)",
+        "intro": "The relationships below have an approved absence other than leave in this year. Only some absences count as worked time for the leave entitlement. Decide once per absence type; the decision applies to all relationships on the page and is recorded in the entitlement rationale.",
+        "count": "{people} relationships, {absences} absences",
+        "include": "Count",
+        "exclude": "Do not count",
+        "decided_include": "count",
+        "decided_exclude": "do not count",
+        "after": "After the decision the affected relationships become ready; select them and press Calculate selected. Calculate an exception for one person (such as a work injury) under Manual calculation and adjustments.",
+        "hint_by_type": {
+          "dpn": "Sick leave counts up to 20 times the weekly working time per year; the automatic calculation applies the limit. A work injury or occupational disease counts in full, calculate it manually.",
+          "quarantine": "Quarantine is treated like sick leave: it counts up to 20 times the weekly working time per year.",
+          "ppm": "Maternity leave counts as work for leave purposes, so usually Count.",
+          "parental": "Parental leave counts only for a father during the period the mother could take maternity leave; otherwise Do not count.",
+          "unpaid_leave": "Unpaid leave at the employee's request is not work, so usually Do not count.",
+          "other": "Assess under § 216(2) and § 348(1) of the Labour Code whether the time counts as work for leave purposes."
+        }
+      },
       "manual_tools": "Manual calculation and adjustments",
       "manual_tools_hint": "Use only for exceptions that cannot be derived safely from stored evidence.",
       "blockers": {

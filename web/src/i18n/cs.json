@@ -26471,6 +26471,29 @@
       "automatic_summary": "Týden {hours} · výměra {weeks} týdnů · započteno {worked}",
       "ready": "Připraveno",
       "needs_attention": "Doplnit",
+      "open_assessment": "Přejít na posouzení absencí",
+      "open_employment": "Otevřít kartu pracovního vztahu a doplnit podklady",
+      "takeover": "Převzato",
+      "takeover_summary": "Nárok roku určil předchozí program; převodem přišel zůstatek {hours} h (účinnost {date}). Znovu se nepočítá, aby se nárok nezapočetl dvakrát.",
+      "predecessor_absences": "Absence z doby před začátkem vedení mezd v MyÚčtu ({count}) posoudil předchozí program.",
+      "assessment": {
+        "title": "Posouzení jiných absencí (§ 216 odst. 2 a § 348 odst. 1 ZP)",
+        "intro": "U vztahů níže je v roce schválená absence jiná než dovolená. Pro nárok na dovolenou se jako odpracovaná doba počítají jen některé. Rozhodněte jednou za každý druh absence; rozhodnutí platí pro všechny vztahy na stránce a zapíše se do zdůvodnění nároku.",
+        "count": "{people} vztahů, {absences} absencí",
+        "include": "Započítat",
+        "exclude": "Nezapočítat",
+        "decided_include": "započítat",
+        "decided_exclude": "nezapočítat",
+        "after": "Po rozhodnutí se dotčené vztahy označí jako připravené; vyberte je a stiskněte Spočítat vybrané. Výjimku pro jednoho člověka (třeba pracovní úraz) spočítejte v části Ruční výpočet a opravy.",
+        "hint_by_type": {
+          "dpn": "Pracovní neschopnost se započítá nejvýše do 20násobku týdenní pracovní doby za rok; automat limit hlídá. Pracovní úraz a nemoc z povolání se započítávají celé, spočítejte je ručně.",
+          "quarantine": "Karanténa se posuzuje jako pracovní neschopnost: započítá se nejvýše do 20násobku týdenní pracovní doby za rok.",
+          "ppm": "Mateřská dovolená se pro dovolenou posuzuje jako výkon práce, obvykle tedy Započítat.",
+          "parental": "Rodičovská dovolená se započítává jen u otce po dobu, kdy by matka mohla čerpat mateřskou; jinak Nezapočítat.",
+          "unpaid_leave": "Neplacené volno na žádost zaměstnance výkonem práce není, obvykle tedy Nezapočítat.",
+          "other": "Posuďte podle § 216 odst. 2 a § 348 odst. 1 zákoníku práce, jestli se doba pro dovolenou považuje za výkon práce."
+        }
+      },
       "manual_tools": "Ruční výpočet a opravy",
       "manual_tools_hint": "Použijte jen pro výjimky, které nelze bezpečně odvodit z uložených podkladů.",
       "blockers": {
