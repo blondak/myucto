@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -36,6 +37,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         private PayrollObligationService $obligations,
         private ClockInterface $clock,
         private JmhzDeadlinePolicy $deadlines,
+        private JmhzDeferralRepository $deferrals,
     ) {}
 
     /** @return array<string,mixed> */
@@ -68,11 +70,14 @@ final readonly class JmhzContentCorrectionSubmissionService
         $effectiveOfficeId = $officeId ?? $obligationOfficeId;
 
         $rows = [];
+        // I příprava s nálezem na jiném vztahu stačí: oprava posuzuje jen
+        // vybrané formuláře, pojistnou část a souhrn (viz context()).
         foreach ($this->preparations->listSourceReadyForCorrection(
             $supplierId,
             $environment,
             $runId,
             $obligation['period_start'],
+            false,
         ) as $preparation) {
             try {
                 [, $document] = $this->context(
@@ -114,7 +119,6 @@ final readonly class JmhzContentCorrectionSubmissionService
             $preparationId,
             $officeId,
         );
-        unset($resolution);
         $set = $this->effective->resolve(
             $supplierId,
             $environment,
@@ -156,6 +160,12 @@ final readonly class JmhzContentCorrectionSubmissionService
             'submission_guid' => $identity->submissionGuid,
             'document_sha256' => $document->sha256(),
             'forms' => $rows,
+            // Vztahy, které se teď opravit nedají: jejich nález opravu
+            // nezastaví, jen se do ní nevyberou.
+            'blocked_forms' => array_map(
+                static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                $resolution->excludedBlockers,
+            ),
         ];
     }
 
@@ -219,6 +229,7 @@ final readonly class JmhzContentCorrectionSubmissionService
                 $regularSubmissionId,
                 $preparationId,
                 $officeId,
+                $selection,
             );
             $set = $this->effective->resolve(
                 $supplierId,
@@ -339,6 +350,28 @@ final readonly class JmhzContentCorrectionSubmissionService
                 $validated['row_version'],
                 'ready',
             );
+            // Odložený vztah, jehož formulář tahle oprava doplňuje, se tím
+            // vyřizuje. Vazba drží, KTERÁ oprava to byla; zda ji ČSSZ přijala,
+            // se čte ze stavu toho podání.
+            $selectedEmploymentIds = [];
+            foreach ($selection as $externalId) {
+                $selectedEmploymentIds[] = $current[$externalId]['employment_id'];
+            }
+            foreach ($this->deferrals->bindingsForRegular(
+                $supplierId,
+                $environment,
+                $regularSubmissionId,
+                true,
+            ) as $binding) {
+                if (in_array($binding['employment_id'], $selectedEmploymentIds, true)) {
+                    $this->deferrals->completeBinding(
+                        $supplierId,
+                        $binding['binding_id'],
+                        $environment,
+                        $submission['id'],
+                    );
+                }
+            }
 
             return [
                 'submission_id' => $submission['id'],
@@ -359,13 +392,17 @@ final readonly class JmhzContentCorrectionSubmissionService
         });
     }
 
-    /** @return array{JmhzScenario1Resolution,JmhzScenario1NormalizedDocument,JmhzFrozenSubmissionIdentity,array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}>} */
+    /**
+     * @param list<string> $selection vybrané vztahy (ID PPV); prázdné = výpis kandidátů
+     * @return array{JmhzScenario1Resolution,JmhzScenario1NormalizedDocument,JmhzFrozenSubmissionIdentity,array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}>}
+     */
     private function context(
         int $supplierId,
         string $environment,
         int $regularSubmissionId,
         int $preparationId,
         ?int $officeId,
+        array $selection = [],
     ): array {
         if ($supplierId <= 0 || $regularSubmissionId <= 0 || $preparationId <= 0
             || !in_array($environment, ['test', 'production'], true)
@@ -373,24 +410,68 @@ final readonly class JmhzContentCorrectionSubmissionService
             throw new \InvalidArgumentException('Rozsah obsahové opravy JMHZ není platný.');
         }
         $this->regularRoot($supplierId, $environment, $regularSubmissionId);
-        $resolution = $this->documents->resolve($supplierId, $environment, $preparationId, $officeId);
+        $obligationOfficeId = $this->obligationOfficeId($supplierId, $environment, $regularSubmissionId);
+        $officeId ??= $obligationOfficeId;
+        $resolution = $this->documents->resolveForCorrection(
+            $supplierId,
+            $environment,
+            $preparationId,
+            $officeId,
+            $selection,
+        );
         if ($resolution->status() !== 'resolved') {
             throw new JmhzXmlException(
                 'jmhz_content_correction_preparation_blocked',
-                'Aktuální příprava JMHZ není úplná: '
-                    . JmhzBlockerExplainer::describe($resolution->blockers),
+                'Opravu nelze sestavit — nález leží na vybraném vztahu nebo v pojistné části '
+                    . 'a souhrnu: ' . JmhzBlockerExplainer::describe($resolution->blockers),
             );
         }
         $document = $resolution->requireResolvedDocument();
         $identity = $this->frozen->identity($supplierId, $environment, $regularSubmissionId);
         $header = is_array($document->payload['header'] ?? null) ? $document->payload['header'] : [];
-        if (($header['variable_symbol'] ?? null) !== $identity->variableSymbol
-            || ($header['year'] ?? null) !== $identity->year
+        if (($header['year'] ?? null) !== $identity->year
             || ($header['month'] ?? null) !== $identity->month
         ) {
             throw new JmhzXmlException(
                 'jmhz_content_correction_scope_mismatch',
-                'Aktuální příprava patří jiné registraci nebo jinému období.',
+                sprintf(
+                    'Aktuální příprava je za období %s, opravované řádné hlášení za %02d/%04d.',
+                    is_int($header['month'] ?? null) && is_int($header['year'] ?? null)
+                        ? sprintf('%02d/%04d', $header['month'], $header['year'])
+                        : 'neznámé',
+                    $identity->month,
+                    $identity->year,
+                ),
+            );
+        }
+        $scope = is_array($document->payload['scope'] ?? null) ? $document->payload['scope'] : [];
+        if ($obligationOfficeId !== null
+            && is_int($scope['office_id'] ?? null)
+            && $scope['office_id'] !== $obligationOfficeId
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_content_correction_scope_mismatch',
+                'Aktuální příprava patří jiné mzdové účtárně (registraci u OSSZ) než'
+                    . ' opravované řádné hlášení.',
+            );
+        }
+        /*
+         * Hlavička opravy se bere ze ZMRAZENÉHO řádného hlášení. ČSSZ páruje
+         * opravu s původním podáním přes GUID a variabilní symbol (kontrola 22:
+         * „idPodani je již použito s jiným variabilním symbolem"). Když se VS
+         * účtárny mezitím změnil (oprava překlepu, nová registrace), nesmí se
+         * do opravy propsat nový — oprava by se k řádnému hlášení nepřiřadila.
+         * Registrace je tatáž, to hlídá kontrola účtárny výš.
+         */
+        if (($header['variable_symbol'] ?? null) !== $identity->variableSymbol) {
+            $payload = $document->payload;
+            $payload['header']['variable_symbol'] = $identity->variableSymbol;
+            $document = new JmhzScenario1NormalizedDocument($payload);
+            $resolution = new JmhzScenario1Resolution(
+                $document,
+                [],
+                $resolution->excludedBlockers,
+                $resolution->exclusion,
             );
         }
         $lastCorrectionOn = $this->deadlines->lastCorrectionOn(sprintf(
@@ -406,6 +487,30 @@ final readonly class JmhzContentCorrectionSubmissionService
         }
 
         return [$resolution, $document, $identity, self::currentForms($document)];
+    }
+
+    /**
+     * Mzdová účtárna, za jejíž registraci se řádné hlášení podalo (z předmětu
+     * povinnosti). Jednoúčtárenský běh ji v předmětu nenese.
+     */
+    private function obligationOfficeId(int $supplierId, string $environment, int $regularSubmissionId): ?int
+    {
+        $obligation = $this->repository->findObligationOfSubmission(
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+        );
+        if ($obligation === null
+            || preg_match(
+                '/^payroll_run:[1-9][0-9]*(?::office:([1-9][0-9]*))?$/D',
+                $obligation['subject_reference'],
+                $matches,
+            ) !== 1
+        ) {
+            return null;
+        }
+
+        return isset($matches[1]) ? (int) $matches[1] : null;
     }
 
     /**

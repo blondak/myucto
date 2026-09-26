@@ -54,6 +54,7 @@ final readonly class JmhzScenario1XmlDryRunService
                 'preparation_id' => $preparationId,
                 'office_id' => $officeId,
                 'blockers' => $blockers,
+                'deferred' => self::deferred($resolution, null),
                 'official_submission' => $this->officialSubmission(),
             ];
             if (in_array(
@@ -121,6 +122,7 @@ final readonly class JmhzScenario1XmlDryRunService
             'preparation_id' => $preparationId,
             'office_id' => $officeId,
             'blockers' => [],
+            'deferred' => self::deferred($resolution, $controls),
             'controls' => $controls->toArray(),
             'deadline' => $this->deadline($document),
             'xml' => $result['xml'],
@@ -131,6 +133,55 @@ final readonly class JmhzScenario1XmlDryRunService
                 'note' => 'GUIDy náhledu se pro ostré podání nepoužijí; to si vyžádá vlastní a zmrazí je.',
             ],
             'official_submission' => $this->officialSubmission(),
+        ];
+    }
+
+    /**
+     * Propustné kontroly, které porovnávají pojistnou část se SOUČTEM
+     * podaných formulářů. Pojistná část nese pojistné a slevu za všechny
+     * zaměstnance včetně odložených (jinak by se sleva po splatnosti už
+     * uplatnit nedala), takže při odložení se musí rozejít — a ČSSZ to tak
+     * výslovně připouští. Varování z nich jsou očekávaná, ne chyba.
+     */
+    public const DEFERRAL_EXPECTED_CONTROL_IDS = [1, 7, 9, 12, 142, 207, 209, 213, 227, 269, 297, 298];
+
+    /**
+     * Vynechané formuláře hlášení: kdo, proč a která varování kontrol to
+     * vysvětluje.
+     *
+     * @return array<string,mixed>|null
+     */
+    private static function deferred(
+        JmhzScenario1Resolution $resolution,
+        ?JmhzControlEvaluationReport $controls,
+    ): ?array {
+        if ($resolution->exclusion === null || $resolution->exclusion->isEmpty()) {
+            return null;
+        }
+        $provenance = $resolution->candidate?->payload['provenance'] ?? null;
+        $exclusion = is_array($provenance) ? ($provenance['form_exclusion'] ?? null) : null;
+        $expected = [];
+        foreach ($controls?->warnings() ?? [] as $finding) {
+            if (in_array($finding->controlId, self::DEFERRAL_EXPECTED_CONTROL_IDS, true)) {
+                $expected[$finding->controlId] = true;
+            }
+        }
+        $expected = array_keys($expected);
+        sort($expected, SORT_NUMERIC);
+
+        return [
+            'purpose' => $resolution->exclusion->purpose,
+            'deferral_ids' => $resolution->exclusion->deferralIds,
+            'employment_ids' => is_array($exclusion) ? ($exclusion['employment_ids'] ?? []) : [],
+            'employee_ids' => is_array($exclusion) ? ($exclusion['employee_ids'] ?? []) : [],
+            'summary_excluded_employee_ids' => is_array($exclusion)
+                ? ($exclusion['summary_excluded_employee_ids'] ?? [])
+                : [],
+            'blockers' => array_map(
+                static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                $resolution->excludedBlockers,
+            ),
+            'expected_warning_control_ids' => $expected,
         ];
     }
 

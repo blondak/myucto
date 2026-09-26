@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -49,6 +50,7 @@ final readonly class JmhzSubmissionBridgeService
         private ClockInterface $clock,
         private PayrollObligationService $obligations,
         private JmhzDeadlinePolicy $deadlines,
+        private JmhzDeferralRepository $deferrals,
     ) {}
 
     /**
@@ -242,6 +244,20 @@ final readonly class JmhzSubmissionBridgeService
                 $validated['row_version'],
                 'ready',
             );
+            // Odložené vztahy se k řádnému hlášení váží v TÉŽE transakci jako
+            // jeho zmrazení: formulář, který hlášení vynechalo, musí mít dohledatelnou
+            // povinnost doplnit ho opravou. Bez vazby by odložení vypadalo jako
+            // vyřízené, jakmile se revize změní.
+            if ($resolution->exclusion?->purpose === JmhzFormExclusion::PURPOSE_DEFERRAL) {
+                foreach ($resolution->exclusion->deferralIds as $deferralId) {
+                    $this->deferrals->insertBinding(
+                        $supplierId,
+                        $deferralId,
+                        $environment,
+                        $submission['id'],
+                    );
+                }
+            }
 
             return [
                 'submission_id' => $submission['id'],

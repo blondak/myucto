@@ -62,6 +62,8 @@ final class JmhzScenario1DocumentResolver
 
     private ?JmhzControlParameterCatalog $controlParameters = null;
 
+    private ?JmhzScenario1XmlSerializer $probeSerializer = null;
+
     private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
         '10286',
         '10328',
@@ -779,6 +781,365 @@ final class JmhzScenario1DocumentResolver
         ]);
 
         return new JmhzScenario1Resolution($candidate, $blockers);
+    }
+
+    /**
+     * Rozhodnutí pro podání: {@see self::resolve()} a k tomu vady formulářů,
+     * které pozná až serializér, jako nálezy na konkrétním vztahu.
+     *
+     * Serializér dřív tyhle vady (přesčas nad odpracovanými hodinami, bonus
+     * bez prohlášení, rozpad mzdy bez mzdy …) hlásil výjimkou až při sestavení
+     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho — vztah
+     * nešlo odložit ani se na něj prokliknout.
+     *
+     * @param array<int,string> $testVariableSymbols
+     */
+    public function resolveForSubmission(
+        JmhzVerifiedPreparationSnapshot $preparation,
+        ?JmhzPvpojPreview $pvpoj,
+        ?string $pvpojFailureCode = null,
+        ?int $officeId = null,
+        array $testVariableSymbols = [],
+    ): JmhzScenario1Resolution {
+        return $this->withFormProbe($this->resolve(
+            $preparation,
+            $pvpoj,
+            $pvpojFailureCode,
+            $officeId,
+            $testVariableSymbols,
+        ));
+    }
+
+    private function withFormProbe(JmhzScenario1Resolution $resolution): JmhzScenario1Resolution
+    {
+        if ($resolution->candidate === null) {
+            return $resolution;
+        }
+        $found = $this->formProbeBlockers($resolution->candidate, $resolution->blockers);
+        if ($found === []) {
+            return $resolution;
+        }
+
+        return new JmhzScenario1Resolution(
+            $resolution->candidate,
+            $this->normalizeBlockers([...$resolution->blockers, ...$found]),
+            $resolution->excludedBlockers,
+            $resolution->exclusion,
+        );
+    }
+
+    /**
+     * Hlášení bez formulářů vynechaných vztahů.
+     *
+     * Formulář vynechaného vztahu se nepodává, pojistná část a souhrn ale
+     * zůstávají za všechny zaměstnance (viz {@see JmhzFormExclusion}). Proto:
+     *
+     *  - přehled o výši pojistného (PVPOJ) je dál celý podíl účtárny,
+     *  - souhrn daní zahrne i vynechané osoby, pokud mají zálohu na daň
+     *    spočtenou; kde spočtená není, zůstanou mimo a eviduje se to
+     *    v `provenance.form_exclusion.summary_excluded_employee_ids`,
+     *  - nálezy vynechaných vztahů sestavení neblokují, ale vrací se
+     *    v `excludedBlockers`, aby je UI ukázalo jako nesplněnou povinnost.
+     *
+     * Vynechává se vždy CELÁ osoba v rámci registrace. Pojistné osoby
+     * (10370, 10481) i souhrnná data zaměstnance nese jediný formulář;
+     * vynechat jeden ze souběžných vztahů by změnilo, co vykazují ostatní
+     * formuláře téže osoby. Odložení to hlídá už při založení, tady je to
+     * pojistka (`jmhz_deferral_concurrent_incomplete`); výběr obsahové opravy
+     * se na celou osobu rozšíří sám.
+     *
+     * @param array<int,string> $testVariableSymbols
+     */
+    public function resolveExcluding(
+        JmhzVerifiedPreparationSnapshot $preparation,
+        ?JmhzPvpojPreview $pvpoj,
+        ?string $pvpojFailureCode,
+        ?int $officeId,
+        array $testVariableSymbols,
+        JmhzFormExclusion $exclusion,
+    ): JmhzScenario1Resolution {
+        $full = $this->resolveForSubmission(
+            $preparation,
+            $pvpoj,
+            $pvpojFailureCode,
+            $officeId,
+            $testVariableSymbols,
+        );
+        if ($full->candidate === null || $exclusion->isEmpty()) {
+            return $full;
+        }
+
+        $officePeople = $this->officePeople(
+            $this->rows($preparation->payload['people'] ?? null),
+            $officeId,
+        );
+        /** @var array<int,list<int>> $employmentsByEmployee */
+        $employmentsByEmployee = [];
+        $officeEmploymentIds = [];
+        foreach ($officePeople as $person) {
+            $employeeId = $person['employee_id'] ?? null;
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                $employmentId = $employment['employment_id'] ?? null;
+                if (!is_int($employmentId)) {
+                    continue;
+                }
+                $officeEmploymentIds[$employmentId] = true;
+                if (is_int($employeeId)) {
+                    $employmentsByEmployee[$employeeId][] = $employmentId;
+                }
+            }
+        }
+        $excluded = [];
+        foreach ($exclusion->employmentIds as $employmentId) {
+            if (isset($officeEmploymentIds[$employmentId])) {
+                $excluded[$employmentId] = true;
+            }
+        }
+        if ($excluded === []) {
+            return $full;
+        }
+
+        $guards = [];
+        $excludedEmployees = [];
+        foreach ($employmentsByEmployee as $employeeId => $employmentIds) {
+            $touched = array_filter(
+                $employmentIds,
+                static fn (int $id): bool => isset($excluded[$id]),
+            );
+            if ($touched === []) {
+                continue;
+            }
+            if (count($touched) !== count($employmentIds)) {
+                if ($exclusion->purpose === JmhzFormExclusion::PURPOSE_CORRECTION_SCOPE) {
+                    foreach ($employmentIds as $employmentId) {
+                        $excluded[$employmentId] = true;
+                    }
+                } else {
+                    $guards[] = $this->blocker(
+                        'jmhz_deferral_concurrent_incomplete',
+                        'person',
+                        $employeeId,
+                        ['10370', '10481', '10495'],
+                    );
+                }
+            }
+            $excludedEmployees[$employeeId] = true;
+        }
+        if (count($excluded) >= count($officeEmploymentIds)) {
+            $guards[] = $this->blocker(
+                'jmhz_deferral_no_form_left',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10015', '10488'],
+            );
+        }
+
+        $partial = $this->resolveForSubmission(
+            $this->withoutEmployments($preparation, $excluded, $excludedEmployees),
+            $pvpoj,
+            $pvpojFailureCode,
+            $officeId,
+            $testVariableSymbols,
+        );
+        if ($partial->candidate === null) {
+            return $partial;
+        }
+
+        $excludedBlockers = array_values(array_filter(
+            $full->blockers,
+            static fn (JmhzScenario1Blocker $blocker): bool
+                => $blocker->entityId !== null
+                && (($blocker->entityType === 'employment'
+                        && isset($excluded[$blocker->entityId]))
+                    || (in_array($blocker->entityType, ['person', 'employee'], true)
+                        && isset($excludedEmployees[$blocker->entityId]))),
+        ));
+
+        $payload = $partial->candidate->payload;
+        $keptPeople = $this->rows($payload['people'] ?? null);
+        $summaryPeople = $keptPeople;
+        $summaryExcluded = [];
+        foreach ($this->rows($full->candidate->payload['people'] ?? null) as $person) {
+            $employeeId = $person['employee_id'] ?? null;
+            if (!is_int($employeeId) || !isset($excludedEmployees[$employeeId])) {
+                continue;
+            }
+            $advance = $this->object(
+                $this->object($person['summary'] ?? null)['advance_tax_czk'] ?? null,
+            );
+            if (is_int($advance['after_credits'] ?? null) && is_int($advance['bonus'] ?? null)) {
+                $summaryPeople[] = $person;
+            } else {
+                $summaryExcluded[] = $employeeId;
+            }
+        }
+        if ($summaryExcluded !== []
+            && $exclusion->purpose === JmhzFormExclusion::PURPOSE_CORRECTION_SCOPE
+        ) {
+            foreach ($summaryExcluded as $employeeId) {
+                $guards[] = $this->blocker(
+                    'jmhz_excluded_summary_unavailable',
+                    'person',
+                    $employeeId,
+                    ['10034', '10035'],
+                );
+            }
+        }
+        $employer = $this->object($payload['employer'] ?? null);
+        $employer['summary_totals'] = $this->employerTaxTotals($summaryPeople);
+        $payload['employer'] = $employer;
+        $excludedIds = array_keys($excluded);
+        sort($excludedIds, SORT_NUMERIC);
+        $excludedEmployeeIds = array_keys($excludedEmployees);
+        sort($excludedEmployeeIds, SORT_NUMERIC);
+        sort($summaryExcluded, SORT_NUMERIC);
+        $provenance = $this->object($payload['provenance'] ?? null);
+        $provenance['form_exclusion'] = [
+            'purpose' => $exclusion->purpose,
+            'employment_ids' => $excludedIds,
+            'employee_ids' => $excludedEmployeeIds,
+            'deferral_ids' => $exclusion->deferralIds,
+            'summary_excluded_employee_ids' => $summaryExcluded,
+        ];
+        $payload['provenance'] = $provenance;
+
+        return new JmhzScenario1Resolution(
+            new JmhzScenario1NormalizedDocument($payload),
+            $this->normalizeBlockers([...$partial->blockers, ...$guards]),
+            $this->normalizeBlockers($excludedBlockers),
+            $exclusion,
+        );
+    }
+
+    /**
+     * Příprava bez vynechaných vztahů — vstup pro sestavení zbytku hlášení.
+     *
+     * Nálezy připravenosti vynechaných vztahů a osob odejdou s nimi. Když tím
+     * zmizí všechny, příprava je pro zbytek hlášení úplná; jinak by resolver
+     * přidal souhrnný nález „zdroje nejsou úplné", na kterém už nic není.
+     *
+     * @param array<int,true> $excluded
+     * @param array<int,true> $excludedEmployees
+     */
+    private function withoutEmployments(
+        JmhzVerifiedPreparationSnapshot $preparation,
+        array $excluded,
+        array $excludedEmployees,
+    ): JmhzVerifiedPreparationSnapshot {
+        $payload = $preparation->payload;
+        $people = [];
+        foreach ($this->rows($payload['people'] ?? null) as $person) {
+            $employments = array_values(array_filter(
+                $this->rows($person['employments'] ?? null),
+                static fn (array $employment): bool
+                    => !is_int($employment['employment_id'] ?? null)
+                    || !isset($excluded[$employment['employment_id']]),
+            ));
+            if ($employments === []) {
+                continue;
+            }
+            $person['employments'] = $employments;
+            $people[] = $person;
+        }
+        $payload['people'] = $people;
+        $issues = $this->rows($payload['readiness_issues'] ?? null);
+        $remaining = array_values(array_filter(
+            $issues,
+            static function (array $issue) use ($excluded, $excludedEmployees): bool {
+                $entityType = $issue['entity_type'] ?? null;
+                $entityId = $issue['entity_id'] ?? null;
+                if (!is_int($entityId)) {
+                    return true;
+                }
+
+                return match ($entityType) {
+                    'employment' => !isset($excluded[$entityId]),
+                    'person', 'employee' => !isset($excludedEmployees[$entityId]),
+                    default => true,
+                };
+            },
+        ));
+        $payload['readiness_issues'] = $remaining;
+        $readiness = $preparation->readiness;
+        if ($issues !== [] && $remaining === []) {
+            $readiness['status'] = 'source_ready';
+        }
+
+        return new JmhzVerifiedPreparationSnapshot(
+            $preparation->id,
+            $preparation->supplierId,
+            $preparation->environment,
+            $preparation->runId,
+            $preparation->sourceRevisionId,
+            $preparation->revisionNo,
+            $preparation->periodStart,
+            $preparation->periodEnd,
+            $preparation->scenarioKey,
+            $preparation->builderVersion,
+            $preparation->sourceManifestSha256,
+            $preparation->readinessSha256,
+            $preparation->snapshotFingerprint,
+            $preparation->manifest,
+            $readiness,
+            $payload,
+        );
+    }
+
+    /**
+     * Vady formuláře, které zná až serializér, jako nálezy NA VZTAHU.
+     *
+     * Serializér dřív tyhle vady (přesčas nad odpracovanými hodinami, bonus
+     * bez prohlášení, rozpad mzdy bez mzdy …) hlásil výjimkou až při sestavení
+     * XML. Hlášení tím spadlo jako celek a účetní nevěděla, u koho — nešlo
+     * vztah ani odložit, ani se na něj prokliknout. Zkusí se proto sestavit
+     * každý formulář zvlášť a vada se vrátí jako nález s `employment_id`.
+     *
+     * Vztahy, které už mají nález z resolveru, se nezkouší: jejich formulář
+     * by jen opakoval tutéž příčinu jiným kódem.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return list<JmhzScenario1Blocker>
+     */
+    private function formProbeBlockers(
+        JmhzScenario1NormalizedDocument $candidate,
+        array $blockers,
+    ): array {
+        $blockedEmployments = [];
+        $blockedEmployees = [];
+        foreach ($blockers as $blocker) {
+            if ($blocker->entityId === null) {
+                continue;
+            }
+            if ($blocker->entityType === 'employment') {
+                $blockedEmployments[$blocker->entityId] = true;
+            } elseif (in_array($blocker->entityType, ['person', 'employee'], true)) {
+                $blockedEmployees[$blocker->entityId] = true;
+            }
+        }
+        $found = [];
+        foreach ($this->probeSerializer()->probeForms($candidate) as $failure) {
+            if (($failure['employment_id'] !== null
+                    && isset($blockedEmployments[$failure['employment_id']]))
+                || ($failure['employee_id'] !== null
+                    && isset($blockedEmployees[$failure['employee_id']]))
+            ) {
+                continue;
+            }
+            $found[] = new JmhzScenario1Blocker(
+                $failure['code'],
+                $failure['employment_id'] !== null ? 'employment' : 'person',
+                $failure['employment_id'] ?? $failure['employee_id'],
+                $failure['attribute_ids'],
+                $failure['message'],
+            );
+        }
+
+        return $found;
+    }
+
+    private function probeSerializer(): JmhzScenario1XmlSerializer
+    {
+        return $this->probeSerializer ??= new JmhzScenario1XmlSerializer();
     }
 
     /**

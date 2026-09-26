@@ -120,6 +120,7 @@ use MyInvoice\Action\Payroll\PayrollInputsExportAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
+use MyInvoice\Action\Payroll\PayrollJmhzDeferralAction;
 use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
@@ -1666,6 +1667,23 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
                 PayrollJmhzSubmissionFreezeAction::class,
+            );
+            // Odložení vztahu z řádného hlášení a jeho doplnění opravou.
+            $g->get(
+                '/submissions/jmhz-deferrals',
+                [PayrollJmhzDeferralAction::class, 'list'],
+            );
+            $g->post(
+                '/submissions/jmhz-deferrals',
+                [PayrollJmhzDeferralAction::class, 'create'],
+            );
+            $g->post(
+                '/submissions/jmhz-deferrals/{id:[0-9]+}/revoke',
+                [PayrollJmhzDeferralAction::class, 'revoke'],
+            );
+            $g->post(
+                '/submissions/jmhz-deferrals/{id:[0-9]+}/complete',
+                [PayrollJmhzDeferralAction::class, 'complete'],
             );
             // Evidenční list důchodového pojištění. Vlastní zákonná povinnost
             // s vlastní lhůtou; `prepare` končí ve stavu `prepared`, odeslání

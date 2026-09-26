@@ -241,6 +241,7 @@ final class JmhzPreparationSnapshotRepository
         string $environment,
         int $runId,
         string $periodStart,
+        bool $sourceReadyOnly = true,
     ): array {
         if ($supplierId <= 0 || $runId <= 0
             || !in_array($environment, ['test', 'production'], true)
@@ -260,9 +261,9 @@ final class JmhzPreparationSnapshotRepository
               WHERE snapshot.supplier_id = ?
                 AND snapshot.environment = ?
                 AND snapshot.run_id = ?
-                AND snapshot.period_start = ?
-                AND snapshot.readiness_status = \'source_ready\'
-              ORDER BY revision.revision_no DESC, snapshot.id DESC',
+                AND snapshot.period_start = ?'
+                . ($sourceReadyOnly ? ' AND snapshot.readiness_status = \'source_ready\'' : '')
+                . ' ORDER BY revision.revision_no DESC, snapshot.id DESC',
         );
         $statement->execute([$supplierId, $environment, $runId, $periodStart]);
 

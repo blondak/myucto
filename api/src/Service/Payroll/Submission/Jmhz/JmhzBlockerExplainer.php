@@ -148,6 +148,12 @@ final class JmhzBlockerExplainer
          * zaměstnavatele (10481) se od kontroly 315 počítá samo a nález
          * nevyvolá; zbývá výsledek běhu, typicky mzdová složka s haléři.
          */
+        'jmhz_deferral_concurrent_incomplete' => 'Z hlášení je odložený jen jeden ze souběžných '
+            . 'pracovních vztahů osoby. Pojistné osoby a souhrnná data zaměstnance nese jediný '
+            . 'formulář, takže vynechání jednoho vztahu by změnilo, co vykazují ostatní.',
+        'jmhz_deferral_no_form_left' => 'Odložením by v hlášení za registraci nezůstal žádný formulář.',
+        'jmhz_excluded_summary_unavailable' => 'Souhrn daní opravného hlášení nelze sestavit, protože '
+            . 'u osoby bez opravovaného formuláře chybí spočtená záloha na daň.',
         'jmhz_scenario1_whole_czk_required' => 'Částka, která se do měsíčního hlášení '
             . 'vykazuje v celých korunách, vyšla ve výsledku mzdového běhu s haléři. '
             . 'Hlášení přijímá jen celá čísla a oficiální podklady ČSSZ a MPSV způsob '
@@ -238,6 +244,12 @@ final class JmhzBlockerExplainer
         'jmhz_employee_social_discount_exclusive' => 'Opravte buď potvrzení sezónní slevy v Mzdová podání → JMHZ, '
             . 'nebo slevu pracujícího důchodce v zákonné evidenci osoby (Mzdy → Zaměstnanci).',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
+        'jmhz_deferral_concurrent_incomplete' => 'Odložte z hlášení všechny vztahy osoby v této '
+            . 'registraci, nebo odložení zrušte.',
+        'jmhz_deferral_no_form_left' => 'Zrušte odložení alespoň u jednoho vztahu, nebo hlášení '
+            . 'podejte až po doplnění dat.',
+        'jmhz_excluded_summary_unavailable' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte výpočet '
+            . 'zálohy na daň u dotčené osoby, nebo ji zahrňte do opravy.',
         'jmhz_scenario1_whole_czk_required' => 'Mzda, plat, odměna z dohody i náhrada mzdy se podle '
             . '§ 142 odst. 2 a § 144 zákoníku práce zaokrouhlují na celé koruny směrem nahoru. '
             . 'Otevřete Mzdy → Mzdové běhy, u dotčených osob upravte haléřovou částku mzdové složky '
@@ -272,10 +284,8 @@ final class JmhzBlockerExplainer
         $descriptions = [];
         foreach ($groups as $group) {
             $blocker = $group['blocker'];
-            $reason = self::REASONS[$blocker->code]
-                ?? 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
-            $action = self::ACTIONS[$blocker->code]
-                ?? self::fallbackAction($blocker->entityType);
+            $reason = self::reason($blocker->code, $blocker->message);
+            $action = self::action($blocker->code, $blocker->entityType);
             $fields = in_array($blocker->code, self::FIELD_LISTING_CODES, true)
                 ? self::fields(array_keys($group['attributes']))
                 : '';
@@ -297,10 +307,30 @@ final class JmhzBlockerExplainer
      */
     public static function guidance(string $code): string
     {
-        $reason = self::REASONS[$code] ?? 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
-        $action = self::ACTIONS[$code] ?? self::fallbackAction('');
+        return self::reason($code) . ' ' . self::action($code);
+    }
 
-        return $reason . ' ' . $action;
+    /**
+     * Důvod nálezu. Konkrétní věta zdroje (např. serializéru formuláře) má
+     * přednost před obecnou „chybí zákonný údaj" — obecná věta nic neřekne.
+     */
+    public static function reason(string $code, ?string $message = null): string
+    {
+        $reason = self::REASONS[$code] ?? null;
+        if ($reason !== null) {
+            return $reason;
+        }
+        if ($message !== null && trim($message) !== '') {
+            return trim($message);
+        }
+
+        return 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
+    }
+
+    /** Krok nápravy; bez konkrétního se odvodí z druhu dotčeného záznamu. */
+    public static function action(string $code, string $entityType = ''): string
+    {
+        return self::ACTIONS[$code] ?? self::fallbackAction($entityType);
     }
 
     private static function fallbackAction(string $entityType): string

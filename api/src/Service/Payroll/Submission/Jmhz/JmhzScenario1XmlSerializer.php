@@ -131,6 +131,52 @@ final class JmhzScenario1XmlSerializer
         return rtrim($xml, "\r\n");
     }
 
+    /**
+     * Zkusí sestavit každý formulář zvlášť a vrátí vady s vazbou na vztah.
+     *
+     * Používá ji resolver: vadu, kterou pozná až serializér, tak převede na
+     * nález u konkrétního pracovního vztahu — dá se na něj prokliknout
+     * a vztah se dá odložit z řádného hlášení. Celé XML by spadlo na první
+     * vadě a neřeklo by, u koho.
+     *
+     * @return list<array{
+     *   employment_id:?int,employee_id:?int,code:string,message:string,
+     *   attribute_ids:list<string>
+     * }>
+     */
+    public function probeForms(JmhzScenario1NormalizedDocument $document): array
+    {
+        $failures = [];
+        foreach ($this->rows($document->payload['people'] ?? null) as $person) {
+            $summary = $this->object($person['summary'] ?? null);
+            $employeeId = is_int($person['employee_id'] ?? null)
+                ? $person['employee_id']
+                : null;
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                $employmentId = is_int($employment['employment_id'] ?? null)
+                    ? $employment['employment_id']
+                    : null;
+                try {
+                    $this->bool($employment['primary'] ?? null, '10495');
+                    $this->formBody(new DOMDocument('1.0', 'UTF-8'), $summary, $employment);
+                } catch (JmhzXmlException $exception) {
+                    preg_match_all('/\b(1\d{4})\b/', $exception->getMessage(), $matches);
+                    $attributes = array_values(array_unique($matches[1]));
+                    sort($attributes, SORT_STRING);
+                    $failures[] = [
+                        'employment_id' => $employmentId,
+                        'employee_id' => $employeeId,
+                        'code' => $exception->validationCode,
+                        'message' => $exception->getMessage(),
+                        'attribute_ids' => $attributes,
+                    ];
+                }
+            }
+        }
+
+        return $failures;
+    }
+
     public function serializeCorrection(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,

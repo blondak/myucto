@@ -359,6 +359,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/jmhz-preparation/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-xml-dry-run/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-freeze/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-deferrals$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/jmhz-deferrals$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/jmhz-deferrals/[0-9]+/(?:revoke|complete)$#', 'payroll.submissions', AccessLevel::WRITE],
         // Evidenční list důchodového pojištění je podání jako každé jiné:
         // náhled READ, příprava WRITE. Odeslání tudy nevede.
         ['GET', '#^/api/payroll/submissions/eldp$#', 'payroll.submissions', AccessLevel::READ],
