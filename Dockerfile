@@ -83,6 +83,7 @@ RUN { \
         echo 'expose_php = Off'; \
         echo 'opcache.enable = 1'; \
         echo 'opcache.memory_consumption = 128'; \
+        echo 'opcache.interned_strings_buffer = 16'; \
         echo 'opcache.max_accelerated_files = 20000'; \
         echo 'opcache.validate_timestamps = 0'; \
         echo 'opcache.enable_cli = 1'; \
