@@ -1940,7 +1940,7 @@ final readonly class HealthInsuranceSubmissionService
             }
         }
 
-        return new HealthNotificationChange(
+        $change = new HealthNotificationChange(
             changeCode: $code,
             changedOn: $duty->reportedChangeOn(),
             insuranceNumber: $firstRegistrationNumber !== null
@@ -1952,6 +1952,27 @@ final readonly class HealthInsuranceSubmissionService
             firstName: $firstName,
             lastName: $lastName,
         );
+        // Věta se validuje hned tady, kde je znám zaměstnanec: stejná vada
+        // zjištěná až při serializaci celého oznámení neřekne, u koho je.
+        try {
+            $change->assertValid($this->codes);
+        } catch (HealthNotificationException $exception) {
+            throw new HealthNotificationException(
+                $exception->errorCode,
+                sprintf(
+                    '%s %s (id %d, změna %s ke dni %s): %s Opravte údaj na kartě osoby v Mzdy → Osoby (/payroll/people?person=%d), oddíl Identita a adresy.',
+                    $firstName,
+                    $lastName,
+                    $duty->employeeId,
+                    $code,
+                    $duty->occurredOn,
+                    $exception->getMessage(),
+                    $duty->employeeId,
+                ),
+            );
+        }
+
+        return $change;
     }
 
     /**
@@ -2031,7 +2052,11 @@ final readonly class HealthInsuranceSubmissionService
                 );
             }
             if ($stored['identifier_type'] === 'birth_number') {
-                return $plaintext;
+                // Karta osoby ukládá RČ v kanonickém tvaru RRMMDD/XXXX;
+                // `cisloPojistence` jsou jen číslice (stejně jako u PREZEC).
+                // Znovu se tu nevaliduje: tvar pak hlídá věta sama a hlásí
+                // ho i se jménem zaměstnance.
+                return (string) preg_replace('/\D/', '', $plaintext);
             }
             $ecp ??= $plaintext;
         }

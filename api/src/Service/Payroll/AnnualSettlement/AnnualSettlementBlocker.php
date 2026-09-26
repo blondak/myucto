@@ -132,18 +132,11 @@ enum AnnualSettlementBlocker: string
     case TaxYearNotFinished = 'tax_year_not_finished';
 
     /**
-     * Prohlášení k dani je podepsané, ale v evidenci nároků na slevy chybí
-     * řádek slevy na poplatníka podle § 35ba odst. 1 písm. a).
-     *
-     * Podepsané prohlášení a nárok na slevu jsou v modulu dvě různé tabulky.
-     * Když druhá chybí, roční zúčtování by proběhlo BEZ slevy na poplatníka —
-     * spočítalo by roční daň o 30 840 Kč vyšší, než jaká poplatníkovi náleží,
-     * a vykázalo nedoplatek nebo „vše sedí" tam, kde měl vyjít přeplatek. Sleva
-     * na poplatníka není volitelná: náleží každému poplatníkovi, který u plátce
-     * podepsal prohlášení, takže její nepřítomnost v evidenci není „nemá na ni
-     * nárok", ale „chybí evidence".
-     *
-     * Účetní ji doplní v kartě zaměstnance, v evidenci nároků na slevy.
+     * Dřívější překážka „prohlášení podepsané, ale chybí řádek slevy na
+     * poplatníka". Už se NEVYDÁVÁ: sleva na poplatníka se odvozuje přímo
+     * z podepsaného prohlášení ({@see \MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement}),
+     * takže mezera, kterou hlídala, nemůže vzniknout. Hodnota zůstává, aby
+     * šel přečíst dřív uložený výsledek posouzení.
      */
     case TaxpayerCreditEvidenceMissing = 'taxpayer_credit_evidence_missing';
 

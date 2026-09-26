@@ -220,7 +220,14 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         self::assertSame('taxpayer', $claims[0]['credit_kind']);
 
         $withCredit = $this->monthlyIncomeTax($claims);
-        $withoutCredit = $this->monthlyIncomeTax([]);
+        $withoutCredit = $this->monthlyIncomeTax([], TaxDeclarationStatus::NotSigned);
+        // Řádek nároku je u podepsaného prohlášení nadbytečný: slevu nese
+        // samo prohlášení (UI-14), výsledek je bez řádku stejný.
+        $derivedCredit = $this->monthlyIncomeTax([]);
+        self::assertSame(
+            $withCredit->advanceTax?->taxAfterCreditsMinorUnits,
+            $derivedCredit->advanceTax?->taxAfterCreditsMinorUnits,
+        );
 
         self::assertSame([], $withCredit->issues);
         self::assertSame(TaxCalculationStatus::Calculated, $withCredit->status);
@@ -236,6 +243,40 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
             $withoutCredit->advanceTax->taxAfterCreditsMinorUnits
                 - self::TAXPAYER_CREDIT_MINOR_UNITS,
             $withCredit->advanceTax->taxAfterCreditsMinorUnits,
+        );
+    }
+
+    /**
+     * UI-14: podepsané prohlášení bez řádku slevy. Editor musí slevu na
+     * poplatníka ukázat jako odvozenou z prohlášení — tatáž SSOT, podle které
+     * ji počítá mzda — a evidenci hlásit jako úplnou právem, ne náhodou.
+     */
+    public function testSignedDeclarationAloneShowsDerivedTaxpayerCredit(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['tax_credit_claims'] = [];
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        $evidence = $this->json($response)['evidence'];
+        self::assertSame([], $evidence['sections']['tax_credit_claims']);
+        self::assertSame([], $evidence['blockers']);
+        self::assertSame(['taxpayer_credit' => true], $evidence['derived']);
+    }
+
+    public function testUnsignedDeclarationDerivesNoTaxpayerCredit(): void
+    {
+        $payload = $this->completeEvidence();
+        $payload['sections']['tax_declarations'][0]['status'] = 'not-signed';
+        $payload['sections']['tax_declarations'][0]['evidence_reference']
+            = 'declaration:38k-not-signed';
+        $payload['sections']['tax_credit_claims'] = [];
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        self::assertSame(
+            ['taxpayer_credit' => false],
+            $this->json($response)['evidence']['derived'],
         );
     }
 

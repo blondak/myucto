@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Calculation\MonthlyEmployeeSocialInsuranceCalculat
 use MyInvoice\Service\Payroll\Calculation\MonthlyEmployeeSocialInsuranceInput;
 use MyInvoice\Service\Payroll\Calculation\MonthlyHealthInsuranceCalculator;
 use MyInvoice\Service\Payroll\Calculation\MonthlyHealthInsuranceInput;
+use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
@@ -367,7 +368,6 @@ final class AverageEarningsMonthlyConverter
                     . 'nemá ověřené — potvrzení vystavte mimo aplikaci.',
             );
         }
-        $taxpayerCredit = false;
         $credits = $incomeTax['credit_claims'] ?? [];
         if (is_array($credits)) {
             foreach ($credits as $credit) {
@@ -381,7 +381,6 @@ final class AverageEarningsMonthlyConverter
                     );
                 }
                 if (($credit['credit_kind'] ?? null) === 'taxpayer') {
-                    $taxpayerCredit = true;
                     continue;
                 }
                 throw new EmploymentExitReadinessException(
@@ -411,7 +410,9 @@ final class AverageEarningsMonthlyConverter
 
         return [
             'signed_declaration' => $signed,
-            'taxpayer_credit' => $signed && $taxpayerCredit,
+            // Sleva na poplatníka plyne z podepsaného prohlášení, stejně jako
+            // v měsíčním výpočtu zálohy ({@see TaxpayerCreditEntitlement}).
+            'taxpayer_credit' => TaxpayerCreditEntitlement::fromDeclarationStatus($status),
             'working_pensioner_discount' => $discountActive,
         ];
     }

@@ -1265,6 +1265,60 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
     }
 
+    /**
+     * UI-18: karta osoby ukládá RČ v kanonickém tvaru RRMMDD/XXXX. HOZ ho
+     * dřív poslal do `cisloPojistence` i s lomítkem a sestavení padlo na 422
+     * „Číslo pojištěnce musí mít devět nebo deset číslic" — bez jména.
+     */
+    public function testBirthNumberStoredWithSlashBecomesDigitsOnlyInsuranceNumber(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($pdo, $this->employeeId, 'birth_number', '905222/4321');
+
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertStringContainsString(
+            '<cisloPojistence>9052224321</cisloPojistence>',
+            $artifact['bytes'],
+        );
+    }
+
+    /** Vadné číslo pojištěnce jmenuje zaměstnance a kartu, kde ho opravit. */
+    public function testInvalidInsuranceNumberNamesThePersonAndWhereToFixIt(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($pdo, $this->employeeId, 'ecp', '12345');
+
+        try {
+            $this->service->prepareBulkNotification(
+                $this->supplierId,
+                'production',
+                '2026-03',
+                '111',
+            );
+            self::fail('Pětimístné číslo pojištěnce nesmí projít.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_insurance_number_invalid', $e->errorCode);
+            self::assertStringContainsString('Jana Nováková', $e->getMessage());
+            self::assertStringContainsString(
+                '/payroll/people?person=' . $this->employeeId,
+                $e->getMessage(),
+            );
+        }
+    }
+
     public function testBulkNotificationFailsClosedWithoutInsuranceNumber(): void
     {
         $this->db->pdo()->prepare(

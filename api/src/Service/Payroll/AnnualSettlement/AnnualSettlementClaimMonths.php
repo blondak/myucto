@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\AnnualSettlement;
 
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 
 /**
  * Převod evidovaných intervalů nároku na POČET MĚSÍCŮ v roce.
@@ -70,16 +71,22 @@ final class AnnualSettlementClaimMonths
     /**
      * @param list<array<string,mixed>> $rows řádky payroll_person_tax_credit_claims
      * @param bool $declarationSigned je u tohoto plátce za rozhodné období
-     *        podepsané prohlášení k dani (§ 38k odst. 4)? Rozhoduje o tom, jestli
-     *        chybějící řádek slevy na poplatníka je legitimní stav, nebo mezera
-     *        v evidenci — viz {@see AnnualSettlementBlocker::TaxpayerCreditEvidenceMissing}.
+     *        podepsané prohlášení k dani (§ 38k odst. 4)? Podpis je uplatněním
+     *        slevy na poplatníka — viz {@see TaxpayerCreditEntitlement}.
+     * @param list<array<string,mixed>> $declarationRows řádky
+     *        payroll_person_tax_declarations; z nich se berou měsíce slevy na
+     *        poplatníka, když ji řádek nároku zvlášť nenese
      * @return array{
      *   credits:list<AnnualSettlementCreditMonths>,
      *   blockers:list<AnnualSettlementBlocker>
      * }
      */
-    public function credits(array $rows, int $taxYear, bool $declarationSigned): array
-    {
+    public function credits(
+        array $rows,
+        int $taxYear,
+        bool $declarationSigned,
+        array $declarationRows,
+    ): array {
         $months = [];
         $blockers = [];
         foreach ($rows as $row) {
@@ -116,22 +123,18 @@ final class AnnualSettlementClaimMonths
             $blockers[] = AnnualSettlementBlocker::CreditEvidenceUnverified;
         }
 
-        // Jediné místo v modulu, které umělo skončit „nula slev, žádná
-        // překážka". Prohlášení k dani a nárok na slevu jsou dvě různé tabulky
-        // a dvě různé obrazovky, takže zaměstnanec s podepsaným prohlášením a
-        // bez řádku nároku by dostal roční zúčtování bez slevy na poplatníka —
-        // tedy o roční částku slevy vyšší daň, než jaká mu náleží, a modul by
-        // to vykázal jako „vše sedí". Chybějící řádek při podepsaném prohlášení
-        // proto NENÍ nula, ale mezera v evidenci.
-        //
-        // Rozlišení legitimního případu je právě podepsané prohlášení: bez něj
-        // plátce podle § 38h odst. 5 ke slevám nepřihlíží vůbec a zúčtování
-        // stejně padá na DeclarationNotSigned / DeclarationUnverified. Naopak
-        // sleva na poplatníka podle § 35ba odst. 1 písm. a) náleží každému
-        // poplatníkovi, který prohlášení podepsal — „nemá na ni nárok" tu žádný
-        // legitimní tvar nemá.
-        if ($declarationSigned && ($months[TaxCreditKind::Taxpayer->value] ?? []) === []) {
-            $blockers[] = AnnualSettlementBlocker::TaxpayerCreditEvidenceMissing;
+        // Sleva na poplatníka podle § 35ba odst. 1 písm. a) náleží každému
+        // poplatníkovi, který prohlášení podepsal — „nemá na ni nárok" tu
+        // žádný legitimní tvar nemá. Dřív tady chybějící řádek nároku při
+        // podepsaném prohlášení vracel překážku, zatímco měsíční výpočet slevu
+        // tiše vynechal; obě větve teď odvozují slevu z prohlášení stejně
+        // ({@see TaxpayerCreditEntitlement}). Bez podpisu plátce ke slevám
+        // nepřihlíží (§ 38h odst. 5) a zúčtování padá na DeclarationNotSigned
+        // / DeclarationUnverified, takže se tu nic neodvozuje.
+        if ($declarationSigned) {
+            foreach (TaxpayerCreditEntitlement::signedMonths($declarationRows, $taxYear) as $month) {
+                $months[TaxCreditKind::Taxpayer->value][$month] = true;
+            }
         }
 
         $credits = [];

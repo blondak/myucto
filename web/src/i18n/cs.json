@@ -5375,6 +5375,7 @@
         "row_frozen": "Uzavřeno schválenou mzdou",
         "current_missing": "Nezadáno",
         "current_none_claimed": "Žádná sleva",
+        "derived_taxpayer_credit": "Sleva na poplatníka (z podepsaného prohlášení)",
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
         "history": "Historie a záznamy — zatím žádný | Historie a záznamy (1) | Historie a záznamy ({count}) | Historie a záznamy ({count})",

@@ -533,6 +533,17 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       .toBeUndefined()
   })
 
+  it('podepsané prohlášení ukáže slevu na poplatníka i bez řádku nároku (UI-14)', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      derived: { taxpayer_credit: true },
+    }))
+    const wrapper = await mounted()
+
+    const current = wrapper.get('[data-test="current-tax_credit_claims"]').text()
+    expect(current).toContain('payroll.people.statutory_evidence.derived_taxpayer_credit')
+    expect(current).not.toContain('payroll.people.statutory_evidence.current_none_claimed')
+  })
+
   it('pojišťovnu vezme přednostně z historie osoby, ne z nastavení zaměstnavatele', async () => {
     mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
       sections: {

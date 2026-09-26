@@ -5375,6 +5375,7 @@
         "row_frozen": "Closed by approved payroll",
         "current_missing": "Not recorded",
         "current_none_claimed": "No credit",
+        "derived_taxpayer_credit": "Basic taxpayer credit (from the signed declaration)",
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
         "history": "History and records — none yet | History and records (1) | History and records ({count}) | History and records ({count})",
