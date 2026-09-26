@@ -334,6 +334,32 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         self::assertStringContainsString(' place="2"', $xml);
     }
 
+    /**
+     * Chybějící místo narození vracela ČSSZ cizímu programu už u ONZ; u nás
+     * na něj přišla až výjimka při přípravě. Kontrola profilu ho musí hlásit
+     * i s cestou na kartu osoby.
+     */
+    public function testMissingBirthDataIsReportedByTheProfileCheck(): void
+    {
+        $identity = self::identity();
+        $identity['birth_place'] = null;
+        $identity['birth_surname'] = ' ';
+
+        $problems = array_column(
+            (new PayrollRegistrationA1SnapshotBuilder())->problems(
+                self::source('1', '1'),
+                $identity,
+                self::scope(),
+            ),
+            'message',
+            'field',
+        );
+
+        self::assertArrayHasKey('identity.birth_place', $problems);
+        self::assertArrayHasKey('identity.birth_surname', $problems);
+        self::assertStringStartsWith('Místo narození', $problems['identity.birth_place']);
+    }
+
     private static function serialize(
         \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1Snapshot $a1,
     ): string {

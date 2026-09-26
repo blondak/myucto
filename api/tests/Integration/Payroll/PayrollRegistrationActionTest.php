@@ -2445,6 +2445,52 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
     }
 
+    /**
+     * Předkontrola chyb ČSSZ 603/604: další vztah téže osoby se stejným
+     * druhem činnosti a ZMR, který se časově překrývá. Varování, ne zákaz.
+     */
+    public function testOverlappingSameActivityEmploymentIsWarnedBeforeFiling(): void
+    {
+        $this->startExistingEmployment('2026-02-15', '1', '1', null, false);
+        $other = $this->insertAdditionalEmployment('reg-overlap');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-01-01", actual_start_date = "2026-01-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $other]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, office_id, effective_from,
+                 planned_start_on, actual_start_on, activity_code,
+                 jmhz_relationship_detail_code)
+             VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01", "1", "1")',
+        )->execute([$this->supplierId, $other, $this->officeId]);
+
+        $view = $this->json(($this->action)->a1Profile(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+
+        self::assertCount(1, $view['warnings'] ?? []);
+        self::assertSame('registration_overlap_same_activity', $view['warnings'][0]['code']);
+        self::assertSame($other, $view['warnings'][0]['employment_id']);
+        self::assertStringContainsString('603', $view['warnings'][0]['message']);
+
+        // Jiný druh činnosti u druhého vztahu = navazující PPV bez kolize.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET activity_code = "2"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $other]);
+        $clean = $this->json(($this->action)->a1Profile(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        self::assertSame([], $clean['warnings']);
+    }
+
     private function startExistingEmployment(
         string $startOn,
         string $activity,
