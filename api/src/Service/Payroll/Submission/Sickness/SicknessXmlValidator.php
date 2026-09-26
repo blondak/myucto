@@ -285,8 +285,8 @@ final readonly class SicknessXmlValidator
      *
      * Hlídá se jen to, bez čeho ČSSZ větu odmítne nebo nespáruje: akce,
      * den, od kterého se žádá, dítě nebo ošetřovaná osoba a u otcovské důvod.
-     * Prohlášení zaměstnance (společná domácnost, osamělost …) povinná nejsou —
-     * neučiněné prohlášení se do věty nedostane a ČSSZ si ho vyžádá sama.
+     * Prohlášení zaměstnance (společná domácnost, osamělost …) podání
+     * neblokují — nevyplněné se podle zásad NEMPRI uvádí jako „NE“.
      */
     private function application(NempriXmlPayload $payload): void
     {

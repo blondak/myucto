@@ -15,9 +15,9 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * s výjimkou nemocenského PŘIJÍMAT a neprodleně PŘEDÁVAT územní správě. Údaje
  * o dítěti, o ošetřované osobě, o důvodu péče nebo otcovské proto opisuje
  * z žádosti, kterou mu zaměstnanec předal. Prohlášení, které zaměstnanec
- * neučinil, zůstává `null` a do věty se nedostane; ČSSZ si ho pak vyžádá
- * sama. Zásady NEMPRI pro takové prohlášení počítají s odpovědí „NE“, ne
- * s tím, že podání neodejde.
+ * nevyplnil, neblokuje podání: zásady NEMPRI pro ně počítají s odpovědí „NE“
+ * (viz {@see SicknessPayloadFactory::application()}). `null` znamená, že se
+ * prvek do věty nevypíše vůbec.
  *
  * ## Akce u ošetřovného
  *

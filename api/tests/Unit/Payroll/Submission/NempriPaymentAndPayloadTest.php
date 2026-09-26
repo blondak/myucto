@@ -132,6 +132,23 @@ final class NempriPaymentAndPayloadTest extends TestCase
         self::assertTrue($application->actionEnd);
     }
 
+    /**
+     * Zásady NEMPRI: prohlášení, které zaměstnanec v žádosti nevyplnil,
+     * zaměstnavatel uvede jako „NE“ — žádost kvůli němu nezadrží.
+     */
+    public function testUndeclaredCareStatementsAreSentAsNo(): void
+    {
+        $factory = new SicknessPayloadFactory();
+
+        $care = $factory->application($this->row(), null, SicknessBenefitKind::Ose);
+        self::assertFalse($care->sharedHousehold);
+        self::assertFalse($care->loneCaregiver);
+        self::assertFalse($care->caredPersonally);
+
+        $paternity = $factory->application($this->row(), null, SicknessBenefitKind::Opp);
+        self::assertNull($paternity->sharedHousehold);
+    }
+
     /** @return array<string,mixed> */
     private function row(): array
     {

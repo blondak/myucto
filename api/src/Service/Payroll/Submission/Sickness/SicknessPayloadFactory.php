@@ -78,7 +78,7 @@ final readonly class SicknessPayloadFactory
             contactWorkerPhone: self::nullableText($row['contact_worker_phone'] ?? null),
             contactWorkerEmail: self::nullableText($row['contact_worker_email'] ?? null),
             application: $kind->hasApplication()
-                ? $this->application($row, $person)
+                ? $this->application($row, $person, $kind)
                 : null,
             decisivePeriod: $decisivePeriod,
             paymentConnection: $paymentConnection,
@@ -91,11 +91,26 @@ final readonly class SicknessPayloadFactory
      * Dny práce (`seznamPraceVeDnech`) jsou tytéž intervaly, které u nemocenského
      * jdou do HZUPN — dny, kdy zaměstnanec v období dávky přesto pracoval.
      *
+     * ## Neučiněné prohlášení je „NE“
+     *
+     * Zásady NEMPRI ukládají zaměstnavateli žádost předat, i když v ní
+     * zaměstnanec některé prohlášení nevyplnil — a takové prohlášení uvést
+     * jako „NE“. U ošetřovného se proto prohlášení o společné domácnosti,
+     * osamělosti, péči o dítě do 16 let, nároku jiné osoby na PPM a osobní
+     * péči posílají vždy; nevyplněné jako `false`. Přesně tak je nesou
+     * přijatá podání jiných mzdových programů.
+     *
      * @param array<string,mixed> $row
      */
-    public function application(array $row, ?NempriPerson $person): NempriBenefitApplication
-    {
+    public function application(
+        array $row,
+        ?NempriPerson $person,
+        ?SicknessBenefitKind $kind = null,
+    ): NempriBenefitApplication {
         $order = $row['child_order'] ?? null;
+        $declared = static fn (string $key): ?bool => $kind === SicknessBenefitKind::Ose
+            ? (self::nullableBool($row[$key] ?? null) ?? false)
+            : self::nullableBool($row[$key] ?? null);
 
         return new NempriBenefitApplication(
             actionStart: (bool) ($row['action_start'] ?? true),
@@ -111,13 +126,13 @@ final readonly class SicknessPayloadFactory
             careReason: self::nullableText($row['care_reason'] ?? null),
             schoolName: self::nullableText($row['school_name'] ?? null),
             schoolBusinessId: self::nullableText($row['school_business_id'] ?? null),
-            sharedHousehold: self::nullableBool($row['shared_household'] ?? null),
-            loneCaregiver: self::nullableBool($row['lone_caregiver'] ?? null),
-            childUnder16: self::nullableBool($row['child_under_16'] ?? null),
-            otherMaternityClaim: self::nullableBool($row['other_maternity_claim'] ?? null),
+            sharedHousehold: $declared('shared_household'),
+            loneCaregiver: $declared('lone_caregiver'),
+            childUnder16: $declared('child_under_16'),
+            otherMaternityClaim: $declared('other_maternity_claim'),
             otherParentalClaim: self::nullableBool($row['other_parental_claim'] ?? null),
             otherPersonS57: self::nullableBool($row['other_person_s57'] ?? null),
-            caredPersonally: self::nullableBool($row['cared_personally'] ?? null),
+            caredPersonally: $declared('cared_personally'),
             careDays: self::periods($row['care_days'] ?? null),
             relationshipCode: self::code($row['relationship_code'] ?? null),
             alternation: self::nullableBool($row['alternation'] ?? null),
