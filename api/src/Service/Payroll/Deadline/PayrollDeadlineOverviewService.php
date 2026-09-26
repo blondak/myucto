@@ -1035,6 +1035,16 @@ final readonly class PayrollDeadlineOverviewService
             $incapacityTo = $row['incapacity_to'] === null
                 ? null
                 : (string) $row['incapacity_to'];
+            // Neschopnost do 14 dnů celou kryje náhrada mzdy (§ 26 odst. 1
+            // zák. č. 187/2006 Sb.) — dávka z ní neplyne, NEMPRI ani HZUPN
+            // se nepodávají a hlídač by strašil lhůtou, která neexistuje.
+            try {
+                if (!$this->sicknessDeadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo)) {
+                    continue;
+                }
+            } catch (SicknessException) {
+                continue;
+            }
             $documents = [
                 'nempri' => [
                     'agenda' => 'NEMPRI',

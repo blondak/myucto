@@ -152,7 +152,9 @@ final class PayrollDeadlineOverviewTest extends TestCase
      */
     public function testSicknessCaseDeadlinesFollowReturnToWorkAndOnlySicknessHasHzupn(): void
     {
-        $this->sicknessCase('NEM', '2026-08-01', '2026-08-12', '2026-08-19');
+        // Neschopnost 1. až 18. 8. přesáhla 14 dnů — do 14 dnů by dávka
+        // nevznikla a hlídač by k ní lhůty neukázal (§ 26 odst. 1 zák. č. 187/2006 Sb.).
+        $this->sicknessCase('NEM', '2026-08-01', '2026-08-18', '2026-08-19');
         $this->sicknessCase('OSE', '2026-08-03', '2026-08-05', null);
 
         $overview = $this->service->overview($this->supplierId, 'production');
@@ -167,7 +169,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
         ksort($byKey);
 
         self::assertSame(['NEM:HZUPN', 'NEM:NEMPRI', 'OSE:NEMPRI'], array_keys($byKey));
-        // Nástup ve středu 19. 8. — lhůta HZUPN tentýž den, ne 12. 8.
+        // Nástup ve středu 19. 8. — lhůta HZUPN tentýž den, ne 18. 8.
         self::assertSame('2026-08-19', $byKey['NEM:HZUPN']['due_on']);
         self::assertSame('/payroll/submissions/sickness', $byKey['NEM:HZUPN']['path']);
     }

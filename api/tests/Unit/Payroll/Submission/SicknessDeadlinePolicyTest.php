@@ -48,6 +48,22 @@ final class SicknessDeadlinePolicyTest extends TestCase
     }
 
     /**
+     * § 26 odst. 1 zák. č. 187/2006 Sb.: nemocenské až od 15. dne. Neschopnost
+     * 1. až 14. 8. celou kryje náhrada mzdy, NEMPRI nevzniká; 15. den už ano.
+     * Převzaté dny téže neschopnosti se do trvání počítají, ostatní dávky
+     * (ošetřovné) čekací dobu nemají.
+     */
+    public function testNempriIsRequiredOnlyWhenIncapacityExceedsFourteenDays(): void
+    {
+        self::assertFalse($this->policy->nempriRequired(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-14'));
+        self::assertTrue($this->policy->nempriRequired(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-15'));
+        self::assertTrue($this->policy->nempriRequired(SicknessBenefitKind::Nem, '2026-08-01', null));
+        self::assertTrue($this->policy->nempriRequired(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-10', 5));
+        self::assertFalse($this->policy->nempriRequired(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-10', 4));
+        self::assertTrue($this->policy->nempriRequired(SicknessBenefitKind::Ose, '2026-08-01', '2026-08-03'));
+    }
+
+    /**
      * Padne-li 15. den na státní svátek podle zák. č. 245/2000 Sb., posouvá se
      * termín stejně jako o víkendu. Neschopnost od 20. 6. 2026 → 15. den je
      * sobota 4. 7. 2026, 5. 7. je neděle a zároveň svátek Cyrila a Metoděje,

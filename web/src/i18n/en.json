@@ -10961,6 +10961,7 @@
       "sickness_event_outside_protection_period": "The insured event began after the protection period following the end of employment (section 15 of Act No. 187/2006 Coll.). No entitlement arose from this employment.",
       "sickness_protection_period_excluded": "No protection period follows from this employment (agreement to complete a job, small-scope employment or a student during holidays). No entitlement arose after the employment ended.",
       "hzupn_not_for_benefit_kind": "The notice of ending incapacity for work is only filed for sickness benefit.",
+      "nempri_within_wage_compensation_window": "The incapacity for work or quarantine did not exceed 14 calendar days. It is fully covered by wage compensation (section 192 of the Labour Code) and sickness benefit is only paid from day 15 (section 26(1) of Act No. 187/2006 Coll.), so nothing is sent to the Czech Social Security Administration. If the incapacity lasted longer, correct its end date in the case.",
       "hzupn_return_before_incapacity": "The day of return to work cannot precede the start of the incapacity for work.",
       "dlo_employer_consent_invalid": "The employer's decision on long-term care must be consent or refusal.",
       "dlo_employer_consent_missing": "Select whether the employer consented to the long-term care or refused it.",

@@ -368,6 +368,15 @@ final readonly class SicknessSubmissionService
         );
 
         if ($document === SicknessDocumentKind::Nempri) {
+            if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo)) {
+                throw new SicknessException(
+                    'nempri_within_wage_compensation_window',
+                    'Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji '
+                    . 'kryje náhrada mzdy (§ 192 zákoníku práce), nemocenské náleží až od '
+                    . '15. dne (§ 26 odst. 1 zák. č. 187/2006 Sb.), takže se ČSSZ nic '
+                    . 'nepředává. Trvá-li neschopnost déle, opravte v případu den skončení.',
+                );
+            }
             // Událost po skončení vztahu jen v ochranné lhůtě (§ 15); mimo ni
             // nárok z tohoto vztahu nevznikl a zaměstnavatel nic nepředává.
             $this->caseService->assertEventCovered($kind, $incapacityFrom, $context, $row);

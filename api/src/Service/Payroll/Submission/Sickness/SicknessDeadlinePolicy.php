@@ -89,6 +89,44 @@ final class SicknessDeadlinePolicy
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /**
+     * Vzniká z události vůbec nárok na dávku, a tedy povinnost NEMPRI?
+     *
+     * U nemocenského ne vždy: podpůrčí doba začíná 15. kalendářním dnem trvání
+     * neschopnosti nebo karantény (§ 26 odst. 1 zák. č. 187/2006 Sb.) a podklady
+     * se zasílají až „po uplynutí prvních 14 dnů" (§ 97 odst. 2 věta druhá).
+     * Kratší neschopnost pokryje celou náhrada mzdy podle § 192 ZP, dávka z ní
+     * neplyne a ČSSZ zaměstnavatel nic nepředává. Případ vzniká až tehdy, když
+     * neschopnost 14. den přesáhne, klidně až prodloužením.
+     *
+     * Neznámý konec znamená „ještě trvá" — povinnost může vzniknout. Délka okna
+     * je tatáž hodnota jako okno náhrady mzdy ({@see AbsenceRuleset::sicknessWindowCalendarDays()}).
+     * `$carriedCalendarDays` jsou dny téže neschopnosti před `$incapacityFrom`
+     * (převzatá z jiného mzdového programu), které se do trvání počítají.
+     */
+    public function nempriRequired(
+        SicknessBenefitKind $kind,
+        string $incapacityFrom,
+        ?string $incapacityTo,
+        int $carriedCalendarDays = 0,
+    ): bool {
+        if ($kind !== SicknessBenefitKind::Nem || $incapacityTo === null) {
+            return true;
+        }
+        $from = $this->exactDate(
+            $incapacityFrom,
+            'Den vzniku sociální události musí být datum ve tvaru RRRR-MM-DD.',
+        );
+        $to = $this->exactDate(
+            $incapacityTo,
+            'Den skončení sociální události musí být datum ve tvaru RRRR-MM-DD.',
+        );
+        $duration = (int) $from->diff($to)->format('%r%a') + 1 + max(0, $carriedCalendarDays);
+
+        return $duration > AbsenceRuleset::forDate($this->rulesets, $incapacityFrom)
+            ->sicknessWindowCalendarDays();
+    }
+
+    /**
      * Lhůta oznámení NEMPRI.
      *
      * @param string      $incapacityFrom      Den vzniku sociální události
