@@ -40,7 +40,10 @@ final class PayrollEmploymentDeletionRepository
      * podle které se dá jednat. Z téhle jediné definice se staví jak rozhodnutí,
      * tak podmínka mazání — nemůžou se tedy rozejít.
      *
-     * @var array<string,array{tables:list<string>,code:string,message:string}>
+     * Volitelné `where` zúží tabulku na řádky, které opravdu blokují (`{t}` =
+     * alias tabulky v dotazu).
+     *
+     * @var array<string,array{tables:list<string>,where?:string,code:string,message:string}>
      */
     private const BLOCKERS = [
         'registration' => [
@@ -115,7 +118,32 @@ final class PayrollEmploymentDeletionRepository
             'message' => 'K pracovnímu vztahu jsou zaevidované příspěvky na spoření na stáří '
                 . 'z rizikové práce. Jde o peníze, takže vztah smazat nelze.',
         ],
+        // Případ dávky blokuje jen tehdy, když z něj vzniklo podání (NEMPRI nebo
+        // HZUPN) nebo ho někdo vedl jako podaný jiným kanálem. Rozpracovaný
+        // případ je lešení a maže se se vztahem (viz RESTRICT_SCAFFOLD).
+        'sickness' => [
+            'tables' => ['payroll_sickness_cases'],
+            'where' => self::SICKNESS_SUBMITTED,
+            'code' => 'payroll_employment_has_sickness_submission',
+            'message' => 'Z případu dávky nemocenského pojištění k tomuto vztahu už bylo '
+                . 'připravené nebo odeslané podání ČSSZ (NEMPRI nebo HZUPN). Podání nejde vzít '
+                . 'zpět smazáním vztahu — zkontrolujte případ v Podání → Dávky nemocenského '
+                . 'pojištění a použijte Označit nenástup nebo Ukončit.',
+        ],
     ];
+
+    /**
+     * Případ dávky, o kterém už ví ČSSZ: má navázané podání, nebo stav, který
+     * odpovídá podání mimo aplikaci. Protějšek {@see self::SICKNESS_DRAFT}.
+     */
+    private const SICKNESS_SUBMITTED = "({t}.nempri_submission_id IS NOT NULL"
+        . " OR {t}.hzupn_submission_id IS NOT NULL"
+        . " OR {t}.status NOT IN ('draft', 'cancelled'))";
+
+    /** Rozpracovaný nebo zrušený případ bez jakéhokoli podání. */
+    private const SICKNESS_DRAFT = "({t}.nempri_submission_id IS NULL"
+        . " AND {t}.hzupn_submission_id IS NULL"
+        . " AND {t}.status IN ('draft', 'cancelled'))";
 
     /**
      * Vlastní lešení vztahu — zmizí spolu s ním. Klíč se propisuje do potvrzovacího
@@ -142,19 +170,32 @@ final class PayrollEmploymentDeletionRepository
             'payroll_leave_entitlement_snapshots',
             'payroll_average_earning_snapshots',
         ],
+        'sickness' => ['payroll_sickness_cases'],
+    ];
+
+    /**
+     * Zúžení skupin z {@see self::CASCADE} na řádky, které se opravdu smažou.
+     *
+     * @var array<string,string>
+     */
+    private const CASCADE_WHERE = [
+        'sickness' => self::SICKNESS_DRAFT,
     ];
 
     /**
      * Lešení, které má FK RESTRICT — databáze ho sama nekaskáduje, musíme ho smazat
      * ručně. Dimenze jsou účetní zatřídění a pravidelné složky stálý předpis; ani
-     * jedno není pohyb. Zbytek lešení odklidí ON DELETE CASCADE, což zároveň korektně
-     * obejde append-only triggery na vnucích (FK kaskáda triggery nespouští).
+     * jedno není pohyb. Rozpracovaný případ dávky je příprava podání, které nikdy
+     * neodešlo; musí zmizet PŘED vztahem, protože na něj i na jeho absenci ukazuje
+     * cizím klíčem RESTRICT. Zbytek lešení odklidí ON DELETE CASCADE, což zároveň
+     * korektně obejde append-only triggery na vnucích (FK kaskáda triggery nespouští).
      *
-     * @var list<string>
+     * @var array<string,string|null> tabulka => zúžení na mazané řádky
      */
     private const RESTRICT_SCAFFOLD = [
-        'payroll_employment_dimensions',
-        'payroll_recurring_components',
+        'payroll_employment_dimensions' => null,
+        'payroll_recurring_components' => null,
+        'payroll_sickness_cases' => self::SICKNESS_DRAFT,
     ];
 
     public function __construct(
@@ -273,9 +314,11 @@ final class PayrollEmploymentDeletionRepository
             );
         }
 
-        foreach (self::RESTRICT_SCAFFOLD as $table) {
+        foreach (self::RESTRICT_SCAFFOLD as $table => $where) {
+            $filter = $where === null ? '' : ' AND ' . str_replace('{t}', 'scaffold', $where);
             $stmt = $this->db->pdo()->prepare(
-                "DELETE FROM {$table} WHERE supplier_id = ? AND employment_id = ?"
+                "DELETE scaffold FROM {$table} scaffold"
+                . " WHERE scaffold.supplier_id = ? AND scaffold.employment_id = ?{$filter}"
             );
             $stmt->execute([$supplierId, $employmentId]);
         }
@@ -327,7 +370,7 @@ final class PayrollEmploymentDeletionRepository
     {
         $branches = [];
         foreach (self::BLOCKERS as $alias => $blocker) {
-            $branches[] = 'WHEN ' . self::existsExpression($blocker['tables'])
+            $branches[] = 'WHEN ' . self::existsExpression($blocker['tables'], $blocker['where'] ?? null)
                 . " THEN '{$alias}'";
         }
         $sql = 'SELECT employment.id, employment.code, CASE '
@@ -387,10 +430,12 @@ final class PayrollEmploymentDeletionRepository
     {
         $columns = [];
         foreach (self::BLOCKERS as $alias => $blocker) {
-            $columns[] = self::countExpression($blocker['tables']) . " AS blocker_{$alias}";
+            $columns[] = self::countExpression($blocker['tables'], $blocker['where'] ?? null)
+                . " AS blocker_{$alias}";
         }
         foreach (self::CASCADE as $alias => $tables) {
-            $columns[] = self::countExpression($tables) . " AS cascade_{$alias}";
+            $columns[] = self::countExpression($tables, self::CASCADE_WHERE[$alias] ?? null)
+                . " AS cascade_{$alias}";
         }
 
         return 'SELECT ' . implode(",\n       ", $columns)
@@ -405,23 +450,26 @@ final class PayrollEmploymentDeletionRepository
      */
     private static function guardedDeleteSql(): string
     {
+        // Lešení z RESTRICT_SCAFFOLD je v tu chvíli už smazané, takže jakýkoli jeho
+        // zbylý řádek (i nový rozpracovaný případ ze souběhu) znamená konflikt.
         $tables = [];
         foreach (self::BLOCKERS as $blocker) {
             foreach ($blocker['tables'] as $table) {
-                $tables[] = $table;
+                $tables[] = [$table, $blocker['where'] ?? null];
             }
         }
-        foreach (self::RESTRICT_SCAFFOLD as $table) {
-            $tables[] = $table;
+        foreach (array_keys(self::RESTRICT_SCAFFOLD) as $table) {
+            $tables[] = [$table, null];
         }
 
         $joins = [];
         $conditions = [];
-        foreach ($tables as $index => $table) {
+        foreach ($tables as $index => [$table, $where]) {
             $alias = "guard{$index}";
             $joins[] = "  LEFT JOIN {$table} {$alias}"
                 . "\n         ON {$alias}.supplier_id = employment.supplier_id"
-                . "\n        AND {$alias}.employment_id = employment.id";
+                . "\n        AND {$alias}.employment_id = employment.id"
+                . ($where === null ? '' : "\n        AND " . str_replace('{t}', $alias, $where));
             $conditions[] = "   AND {$alias}.id IS NULL";
         }
 
@@ -434,28 +482,32 @@ final class PayrollEmploymentDeletionRepository
     }
 
     /** @param list<string> $tables */
-    private static function existsExpression(array $tables): string
+    private static function existsExpression(array $tables, ?string $where = null): string
     {
         $parts = [];
         foreach ($tables as $index => $table) {
             $alias = 'e' . $index . '_' . substr(md5($table), 0, 6);
             $parts[] = "EXISTS (SELECT 1 FROM {$table} {$alias}"
                 . " WHERE {$alias}.supplier_id = employment.supplier_id"
-                . " AND {$alias}.employment_id = employment.id)";
+                . " AND {$alias}.employment_id = employment.id"
+                . ($where === null ? '' : ' AND ' . str_replace('{t}', $alias, $where))
+                . ')';
         }
 
         return '(' . implode(' OR ', $parts) . ')';
     }
 
     /** @param list<string> $tables */
-    private static function countExpression(array $tables): string
+    private static function countExpression(array $tables, ?string $where = null): string
     {
         $parts = [];
         foreach ($tables as $index => $table) {
             $alias = 'c' . $index . '_' . substr(md5($table), 0, 6);
             $parts[] = "(SELECT COUNT(*) FROM {$table} {$alias}"
                 . " WHERE {$alias}.supplier_id = employment.supplier_id"
-                . " AND {$alias}.employment_id = employment.id)";
+                . " AND {$alias}.employment_id = employment.id"
+                . ($where === null ? '' : ' AND ' . str_replace('{t}', $alias, $where))
+                . ')';
         }
 
         return implode(' + ', $parts);

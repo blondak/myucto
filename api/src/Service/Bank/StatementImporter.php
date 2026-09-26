@@ -46,9 +46,11 @@ final class StatementImporter
      *               parsed_transactions:int, skipped_duplicates:int, superseded_notices:int,
      *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
      */
-    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = []): array
+    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null): array
     {
-        $parsed = $this->parser->parse($content);
+        // Volající, který výpis už rozparsoval kvůli hlavičce, ho předá - soubor se
+        // nečte podruhé.
+        $parsed ??= $this->parser->parse($content);
         $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
         $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
         if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
@@ -340,11 +342,17 @@ final class StatementImporter
             'INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
              SELECT ?, ?, ?, bs.supplier_id, bs.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?'
         ) : null;
-        $findAlias = $deferProcessing ? $pdo->prepare(
-            'SELECT bti.bank_transaction_id FROM bank_transaction_imports bti
-             JOIN bank_statements bs ON bs.id = bti.statement_id
-             WHERE bti.import_fingerprint = ? AND bs.supplier_id = ?'
-        ) : null;
+
+        // Evidované pohyby a převzaté otisky pro všechny kandidáty souboru se načtou
+        // předem po dávkách, ne dotazem na každý řádek a kandidáta. Co tahle smyčka sama
+        // založí nebo propojí, se do map doplňuje, takže pozdější řádky souboru to vidí
+        // stejně, jako by se ptaly databáze.
+        $allCandidates = array_values(array_unique(array_merge(...array_map(
+            static fn (array $identity): array => $identity['candidates'],
+            array_values($identities),
+        ) ?: [[]])));
+        $storedIds = $this->storedFingerprints($pdo, $allCandidates, $statementSupplierId);
+        $aliasMap = $deferProcessing ? $this->aliasFingerprints($pdo, $allCandidates, $statementSupplierId) : [];
 
         $matched = 0;
         $inserted = 0;
@@ -354,12 +362,11 @@ final class StatementImporter
             ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $portableFingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
             $duplicateId = $crossSource[$index] ?? false;
-            if ($duplicateId === false && $findAlias !== null) {
+            if ($duplicateId === false && $deferProcessing) {
                 $aliasIds = [];
                 foreach ($candidates as $candidate) {
-                    $findAlias->execute([$candidate, $statementSupplierId]);
-                    foreach ($findAlias->fetchAll(PDO::FETCH_COLUMN) as $aliasId) {
-                        $aliasIds[(int) $aliasId] = true;
+                    foreach ($aliasMap[$candidate] ?? [] as $aliasId => $_) {
+                        $aliasIds[$aliasId] = true;
                     }
                 }
                 if (count($aliasIds) > 1) throw new StatementReconciliationException();
@@ -367,13 +374,12 @@ final class StatementImporter
             }
             if ($duplicateId !== false) {
                 $processingIds[] = (int) $duplicateId;
-                $linkImport?->execute([$statementId, $duplicateId, $fingerprint, $duplicateId]);
+                $this->linkImport($linkImport, $aliasMap, $statementId, (int) $duplicateId, $fingerprint);
                 $skipped++;
                 continue;
             }
             foreach ($candidates as $candidate) {
-                $findDuplicateTx->execute([$candidate, $statementSupplierId, $statementSupplierId]);
-                $duplicateId = $findDuplicateTx->fetchColumn();
+                $duplicateId = $storedIds[$candidate] ?? false;
                 if ($duplicateId !== false) {
                     if ($deferProcessing) $processingIds[] = (int) $duplicateId;
                     $alreadyStored = true;
@@ -381,7 +387,7 @@ final class StatementImporter
                 }
             }
             if ($alreadyStored) {
-                $linkImport?->execute([$statementId, $duplicateId, $fingerprint, $duplicateId]);
+                $this->linkImport($linkImport, $aliasMap, $statementId, (int) $duplicateId, $fingerprint);
                 $skipped++;
                 continue;
             }
@@ -399,6 +405,7 @@ final class StatementImporter
                     $findDuplicateTx->execute([$fingerprint, $statementSupplierId, $statementSupplierId]);
                     $concurrentId = $findDuplicateTx->fetchColumn();
                     if ($concurrentId === false) throw $e;
+                    $storedIds[$fingerprint] = (int) $concurrentId;
                     if ($deferProcessing) {
                         $processingIds[] = (int) $concurrentId;
                     }
@@ -408,6 +415,7 @@ final class StatementImporter
                 throw $e;
             }
             $txId = (int) $pdo->lastInsertId();
+            $storedIds[$fingerprint] = $txId;
             if ($deferProcessing) $processingIds[] = $txId;
             $inserted++;
 
@@ -460,6 +468,65 @@ final class StatementImporter
             'superseded_notices'  => $processed['superseded'],
             'warnings'            => $warnings,
         ];
+    }
+
+    /**
+     * Pohyby firmy (výpisu bez firmy) evidované pod některým z otisků. Otisk je
+     * v `bank_transactions` jedinečný, na otisk tedy nejvýš jeden pohyb.
+     *
+     * @param list<string> $fingerprints
+     * @return array<string,int> otisk => id pohybu
+     */
+    private function storedFingerprints(PDO $pdo, array $fingerprints, ?int $supplierId): array
+    {
+        $out = [];
+        foreach (array_chunk($fingerprints, 500) as $chunk) {
+            $stmt = $pdo->prepare(
+                'SELECT bt.import_fingerprint, bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+                  WHERE bt.import_fingerprint IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')
+                    AND (bs.supplier_id = ? OR (bs.supplier_id IS NULL AND ? IS NULL))'
+            );
+            $stmt->execute([...$chunk, $supplierId, $supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$fingerprint, $id]) {
+                $out[(string) $fingerprint] ??= (int) $id;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Pohyby, na které dřívější importy firmy otisk už převedly (`bank_transaction_imports`).
+     *
+     * @param list<string> $fingerprints
+     * @return array<string,array<int,true>> otisk => id pohybů
+     */
+    private function aliasFingerprints(PDO $pdo, array $fingerprints, ?int $supplierId): array
+    {
+        $out = [];
+        foreach (array_chunk($fingerprints, 500) as $chunk) {
+            $stmt = $pdo->prepare(
+                'SELECT bti.import_fingerprint, bti.bank_transaction_id FROM bank_transaction_imports bti
+                   JOIN bank_statements bs ON bs.id = bti.statement_id
+                  WHERE bti.import_fingerprint IN (' . implode(',', array_fill(0, count($chunk), '?')) . ') AND bs.supplier_id = ?'
+            );
+            $stmt->execute([...$chunk, $supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$fingerprint, $id]) {
+                $out[(string) $fingerprint][(int) $id] = true;
+            }
+        }
+        return $out;
+    }
+
+    /** @param array<string,array<int,true>> $aliasMap MĚNÍ SE */
+    private function linkImport(?\PDOStatement $linkImport, array &$aliasMap, int $statementId, int $transactionId, string $fingerprint): void
+    {
+        if ($linkImport === null) {
+            return;
+        }
+        $linkImport->execute([$statementId, $transactionId, $fingerprint, $transactionId]);
+        if ($linkImport->rowCount() > 0) {
+            $aliasMap[$fingerprint][$transactionId] = true;
+        }
     }
 
     /** @return array{matched:int,superseded:int} */

@@ -256,7 +256,42 @@ U vás případ ukončíte volbou **Ukončit u nás (skončil poměr)**. Jde to 
 skončení všech pracovních vztahů zaměstnance, schválení jeho poslední mzdy,
 vystavení oznámení a jen tehdy, když případ nemá nevydané depozitum.
 
-### 88.9.6 Paušální náhrada plátce mzdy v účetnictví
+Vyplácí-li se povinnému odstupné, oznámení a vyúčtování zahrnují i srážky
+z odstupného (viz 88.9.6). Pokračující exekuce, dohody o srážkách a insolvenci
+uvedete i v zápočtovém listu (kapitola 86.13.5), aby v nich další plátce mzdy
+pokračoval.
+
+### 88.9.6 Srážky z odstupného
+
+Odstupné je pro srážky jiný příjem než mzda. Podle § 299 odst. 4 o. s. ř. se
+dělí na tolik částí, kolika násobkům průměrného měsíčního výdělku odpovídá,
+a každá část se posuzuje jako mzda za jeden měsíc doby, po kterou se odstupné
+poskytuje. Z každého násobku se proto odečte vlastní nezabavitelná částka
+a srážka se počítá zvlášť. Z celku jako z jedné mzdy by se srazilo víc, než
+zákon dovoluje.
+
+Počet násobků zadáváte při zakládání odstupného v sekci **Skončení vztahu** na
+kartě vztahu (pole **Počet násobků průměru pro srážky**, viz kapitola 86.13.3).
+Předvyplní se z návrhu podle § 67 zákoníku práce; měňte ho jen u jinak
+sjednaného odstupného. Mzdový běh za měsíc skončení pak ve výsledku srážek ukazuje
+mzdu a jednotlivé násobky odstupného zvlášť. Paušální náhradu nákladů si plátce
+ponechá jen jednou, ze mzdy — z násobků odstupného mu nepatří (§ 301 odst. 2
+o. s. ř.). Čisté odstupné nese svůj díl zálohy na daň, pojistné z něj neplyne.
+
+Nastoupí-li povinný v době, po kterou se odstupné poskytuje, k jinému plátci
+nebo mu vznikne jiný příjem (důchod, podpora), sčítají se násobky za tyto
+měsíce s tím příjmem (§ 299 odst. 4 věta druhá o. s. ř.). Vyplňte v sekci
+**Skončení vztahu** pole **Jiný příjem povinného od**. Pokud nezabavitelnou
+částku za tyto měsíce započítává nový plátce, potvrďte to podle jeho oznámení
+nebo podle soudu zaškrtnutím **Nezabavitelnou částku za tyto měsíce započítává
+nový plátce**. Bez potvrzení výpočet srážek z odstupného zastaví a běh na to
+upozorní, protože druhý příjem aplikace nezná.
+
+Chybí-li u založeného odstupného počet násobků, výpočet srážek se zastaví
+k ručnímu posouzení a sekce **Skončení vztahu** řekne, kde počet doplnit
+(množství u vstupu odstupného v **Mzdové vstupy**).
+
+### 88.9.7 Paušální náhrada plátce mzdy v účetnictví
 
 Plátce mzdy si ze sražené částky ponechá paušální náhradu nákladů (§ 270
 odst. 2 o. s. ř.) a oprávněnému pošle jen zbytek. Mzdový předpis proto sraženou

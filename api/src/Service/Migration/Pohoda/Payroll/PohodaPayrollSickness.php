@@ -81,29 +81,36 @@ final class PohodaPayrollSickness
     {
         $boundary = self::periodStart($startPeriod);
         $byId = [];
-        foreach (self::TABLES as $table) {
-            foreach (PohodaXml::records($file, $table) as $row) {
-                $byId[$table][PohodaXml::text($row, 'ID')] = $row;
+        /** @var array<string,array{person:string,relation:string,period:string}> $payslips */
+        $payslips = [];
+        $benefitClaims = 0;
+        // Číselníky, karty, mzdy a podání dávek jedním průchodem souborem, řádky ke mzdám
+        // (náhrady, dávky, nepřítomnosti) druhým - potřebují už znát mzdy roku.
+        foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'NEMPRIpol']) as $table => $row) {
+            if ($table === 'NEMPRIpol') {
+                if ((int) PohodaXml::text($row, 'RokMZ') === $year) {
+                    $benefitClaims++;
+                }
+                continue;
             }
+            if ($table !== 'MZ') {
+                $byId[$table][PohodaXml::text($row, 'ID')] = $row;
+                continue;
+            }
+            $month = (int) PohodaXml::text($row, 'RelMes');
+            if ((int) PohodaXml::text($row, 'Rok') !== $year || $month < 1 || $month > 12) {
+                continue;
+            }
+            $payslips[PohodaXml::text($row, 'ID')] = [
+                'person' => PohodaXml::text($row, 'RefZAM'),
+                'relation' => PohodaXml::text($row, 'RefPomer'),
+                'period' => sprintf('%04d-%02d', $year, $month),
+            ];
         }
         $relationCount = [];
         foreach ($byId['ZAMpomer'] ?? [] as $relation) {
             $person = PohodaXml::text($relation, 'RefZAM');
             $relationCount[$person] = ($relationCount[$person] ?? 0) + 1;
-        }
-
-        /** @var array<string,array{person:string,relation:string,period:string}> $payslips */
-        $payslips = [];
-        foreach (PohodaXml::records($file, 'MZ') as $mz) {
-            $month = (int) PohodaXml::text($mz, 'RelMes');
-            if ((int) PohodaXml::text($mz, 'Rok') !== $year || $month < 1 || $month > 12) {
-                continue;
-            }
-            $payslips[PohodaXml::text($mz, 'ID')] = [
-                'person' => PohodaXml::text($mz, 'RefZAM'),
-                'relation' => PohodaXml::text($mz, 'RefPomer'),
-                'period' => sprintf('%04d-%02d', $year, $month),
-            ];
         }
 
         /*
@@ -112,41 +119,29 @@ final class PohodaPayrollSickness
          * kopie `zalMZnahr`. Proudové čtení pak jen nevrátí nic a krok pokračuje dál.
          */
         $compensations = [];
-        foreach (PohodaXml::records($file, 'MZnahr') as $row) {
-            $payslip = $payslips[PohodaXml::text($row, 'RefAg')] ?? null;
-            if ($payslip === null) {
-                continue;
-            }
-            $compensations[] = [
-                'relation' => $payslip['relation'],
-                'from' => self::realDate(PohodaXml::date($row, 'DatZac')),
-                'to' => self::realDate(PohodaXml::date($row, 'DatKon')),
-                'minor' => self::minor(PohodaXml::num($row, 'Kc')),
-                'id' => PohodaXml::text($row, 'ID'),
-            ];
-        }
-
         // Dávky nemocenského se nepřevádějí (vyplácí je ČSSZ), jen se počítají do protokolu.
         $benefitRows = 0;
-        foreach (PohodaXml::records($file, 'MZdavky') as $row) {
-            if (($payslips[PohodaXml::text($row, 'RefAg')] ?? null) !== null) {
-                $benefitRows++;
-            }
-        }
-        $benefitClaims = 0;
-        foreach (PohodaXml::records($file, 'NEMPRIpol') as $row) {
-            if ((int) PohodaXml::text($row, 'RokMZ') === $year) {
-                $benefitClaims++;
-            }
-        }
-
         /** @var array<string,list<array<string,mixed>>> $groups vztah|druh => nepřítomnosti */
         $groups = [];
         /** @var array<string,int> $unclassified nemocenská složka, kterou evidence nezná */
         $unclassified = [];
-        foreach (PohodaXml::records($file, 'MZneprit') as $row) {
+        foreach (PohodaXml::scan($file, ['MZnahr', 'MZdavky', 'MZneprit']) as $table => $row) {
             $payslip = $payslips[PohodaXml::text($row, 'RefAg')] ?? null;
             if ($payslip === null) {
+                continue;
+            }
+            if ($table === 'MZnahr') {
+                $compensations[] = [
+                    'relation' => $payslip['relation'],
+                    'from' => self::realDate(PohodaXml::date($row, 'DatZac')),
+                    'to' => self::realDate(PohodaXml::date($row, 'DatKon')),
+                    'minor' => self::minor(PohodaXml::num($row, 'Kc')),
+                    'id' => PohodaXml::text($row, 'ID'),
+                ];
+                continue;
+            }
+            if ($table === 'MZdavky') {
+                $benefitRows++;
                 continue;
             }
             $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];

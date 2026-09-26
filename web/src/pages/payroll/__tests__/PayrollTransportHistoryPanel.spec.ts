@@ -386,6 +386,62 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.sendJmhzTransport).not.toHaveBeenCalled()
   })
 
+  it('hlášení v dílčích balících po přerušeném odeslání doposílá jen přes VREP a ukáže průběh', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [
+        attempt({ id: 5, submission_id: 92, attempt_no: 2, status: 'failed', sent_at: null, package_ordinal: 2, package_count: 2 }),
+        attempt({ id: 4, submission_id: 92, attempt_no: 1, package_ordinal: 1, package_count: 2 }),
+      ],
+      ready_submissions: [{
+        submission_id: 92,
+        agenda_code: 'JMHZ',
+        submission_kind: 'regular',
+        submission_status: 'submitted',
+        corrects_submission_id: null,
+        period_start: '2026-07-01',
+        period_end: '2026-07-31',
+        created_at: '2026-08-26 07:00:00',
+        outbox_id: null,
+        outbox_dispatch_state: null,
+        outbox_acceptance_state: null,
+        outbox_external_message_id: null,
+        package_count: 2,
+        packages_sent: 1,
+      }],
+    })
+    m.sendJmhzTransport.mockRejectedValueOnce(new Error('VREP nedostupné'))
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    const packages = wrapper.get('[data-test="transport-ready-packages-92"]').text()
+    expect(packages).toContain('payroll.submissions.transport.ready.packages.progress')
+    expect(packages).toContain('payroll.submissions.transport.ready.packages.interrupted')
+    expect(wrapper.find('[data-test="transport-ready-isds-92"]').exists()).toBe(false)
+    const send = wrapper.get('[data-test="transport-ready-vrep-92"]')
+    expect(send.text()).toBe('payroll.submissions.transport.ready.packages.send_remaining')
+    expect(wrapper.get('[data-test="transport-attempt-package-4"]').text())
+      .toContain('payroll.submissions.transport.attempt_package')
+    expect(wrapper.get('[data-test="transport-attempt-package-5"]').text()).toContain('2')
+
+    await send.trigger('click')
+    await flushPromises()
+    await confirmProductionSend()
+
+    expect(m.sendJmhzTransport).toHaveBeenCalledWith(92, '1234567890', 'production', expect.any(String))
+    // Část balíků mohla odejít, než odeslání spadlo: průběh se načte znovu.
+    expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('VREP nedostupné')
+  })
+
+  it('nerozdělené podání průběh balíků neukazuje', async () => {
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test^="transport-ready-packages-"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-attempt-package-1"]').exists()).toBe(false)
+  })
+
   it('převzetí neoznačí jako přijaté a uzavření u něj vůbec nenabídne', async () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()

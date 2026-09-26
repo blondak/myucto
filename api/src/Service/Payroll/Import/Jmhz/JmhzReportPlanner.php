@@ -44,6 +44,9 @@ final class JmhzReportPlanner
     private const OPEN_STATUSES = ['planned', 'preregistered', 'active', 'suspended'];
     private const DEAD_STATUSES = ['archived', 'no_show'];
 
+    /** @var array<string,mixed>|null načtené údaje evidence během {@see batch()} */
+    private ?array $memo = null;
+
     public function __construct(
         private readonly RegistrationImportLookup $lookup,
         private readonly JmhzReportLookup $jmhzLookup,
@@ -115,7 +118,7 @@ final class JmhzReportPlanner
         $employeeId = (int) $row['employee_id'];
         $plan['_employee_id'] = $employeeId;
         $plan['_employment_id'] = (int) $row['id'];
-        $plan['person']['full_name'] = $this->lookup->employeeName($supplierId, $employeeId) ?? $plan['person']['full_name'];
+        $plan['person']['full_name'] = $this->employeeName($supplierId, $employeeId) ?? $plan['person']['full_name'];
         $plan['employment']['start_on'] = $row['actual_start_date'] ?? $row['start_date'];
         $plan['employment']['end_on'] = $row['end_date'];
         $plan['employment']['relation_type'] = $row['relation_type'];
@@ -225,14 +228,14 @@ final class JmhzReportPlanner
         if ($form->personIdentifier !== null) {
             $hash = $this->hash($form->personIdentifier, PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER, $supplierId);
             if ($hash !== null) {
-                $oicEmployees = $this->lookup->employeesByPersonExternalIdHash($supplierId, $environment, $hash);
+                $oicEmployees = $this->remember("oic:{$supplierId}:{$environment}:{$hash}", fn () => $this->lookup->employeesByPersonExternalIdHash($supplierId, $environment, $hash));
             }
         }
         $hit = null;
         if ($form->employmentIdentifier !== null) {
             $hash = $this->hash($form->employmentIdentifier, PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER, $supplierId);
             if ($hash !== null) {
-                $hit = $this->registrations->employmentByExternalIdValueHash($supplierId, $environment, 'id_ppv', $hash);
+                $hit = $this->remember("id_ppv:{$supplierId}:{$environment}:{$hash}", fn () => $this->registrations->employmentByExternalIdValueHash($supplierId, $environment, 'id_ppv', $hash));
             }
         }
 
@@ -253,14 +256,14 @@ final class JmhzReportPlanner
                     . 'nebo překlep — vyjasněte to ručně a import zopakujte.',
                 );
             }
-            $auto = $this->lookup->employment($supplierId, (int) $hit['employment_id']);
+            $auto = $this->employment($supplierId, (int) $hit['employment_id']);
             $matchedBy = 'id_ppv';
         } elseif (count($oicEmployees) === 1) {
             // Formulář s ID PPV, které evidence nezná, patří jinému vztahu osoby
             // (souběh) než vztah, který už ID PPV má — ten mu nepatří a nenabízí
             // se ani k ručnímu přiřazení.
             $own = $this->withoutForeignIdPpv(
-                $this->lookup->employments($supplierId, $oicEmployees[0]),
+                $this->employments($supplierId, $oicEmployees[0]),
                 $supplierId,
                 $environment,
                 $form,
@@ -285,21 +288,24 @@ final class JmhzReportPlanner
         } elseif (count($oicEmployees) > 1) {
             foreach ($oicEmployees as $employeeId) {
                 $candidates = [...$candidates, ...$this->employmentCandidates(
-                    $this->withoutForeignIdPpv($this->lookup->employments($supplierId, $employeeId), $supplierId, $environment, $form),
+                    $this->withoutForeignIdPpv($this->employments($supplierId, $employeeId), $supplierId, $environment, $form),
                     $supplierId,
                 )];
             }
         } elseif ($form->lastName !== null && $form->firstName !== null && $form->birthDate !== null) {
-            $named = $this->lookup->employeesByNameAndBirthDate(
-                $supplierId,
-                $form->firstName,
-                $form->lastName,
-                $form->birthDate,
+            $named = $this->remember(
+                'named:' . $supplierId . ':' . json_encode([$form->firstName, $form->lastName, $form->birthDate]),
+                fn () => $this->lookup->employeesByNameAndBirthDate(
+                    $supplierId,
+                    (string) $form->firstName,
+                    (string) $form->lastName,
+                    (string) $form->birthDate,
+                ),
             );
             $active = [];
             foreach ($named as $employeeId) {
                 $active = [...$active, ...array_values(array_filter(
-                    $this->lookup->employments($supplierId, $employeeId),
+                    $this->employments($supplierId, $employeeId),
                     fn (array $row): bool => $this->activeIn($row, $item->file),
                 ))];
             }
@@ -317,7 +323,7 @@ final class JmhzReportPlanner
         }
 
         if ($pairEmploymentId !== null) {
-            $pair = $this->lookup->employment($supplierId, $pairEmploymentId);
+            $pair = $this->employment($supplierId, $pairEmploymentId);
             if ($pair === null) {
                 return ['public' => []] + $result('Vybraný pracovní vztah v téhle firmě neexistuje.');
             }
@@ -357,7 +363,7 @@ final class JmhzReportPlanner
                 'public' => [
                     'status' => 'new',
                     'employee_id' => $newEmployee,
-                    'employee_name' => $this->lookup->employeeName($supplierId, $newEmployee),
+                    'employee_name' => $this->employeeName($supplierId, $newEmployee),
                     'candidates' => [],
                 ],
                 'employment' => null,
@@ -386,7 +392,7 @@ final class JmhzReportPlanner
                 'status' => 'matched',
                 'matched_by' => $matchedBy,
                 'employee_id' => (int) $auto['employee_id'],
-                'employee_name' => $this->lookup->employeeName($supplierId, (int) $auto['employee_id']),
+                'employee_name' => $this->employeeName($supplierId, (int) $auto['employee_id']),
                 'employment_id' => (int) $auto['id'],
                 'employment_code' => $auto['code'],
                 'candidates' => [],
@@ -412,35 +418,39 @@ final class JmhzReportPlanner
         $person = $this->identifierPlan(
             $plan,
             'Osobní identifikační číslo (OIČ)',
-            fn (): ?bool => $this->identities->activePersonExternalIdMatches(
-                $supplierId,
-                $employeeId,
-                $environment,
-                (string) $form->personIdentifier,
+            fn (): ?bool => $this->remember(
+                "oic-match:{$supplierId}:{$employeeId}:{$environment}:" . $form->personIdentifier,
+                fn (): ?bool => $this->identities->activePersonExternalIdMatches(
+                    $supplierId,
+                    $employeeId,
+                    $environment,
+                    (string) $form->personIdentifier,
+                ),
             ),
-            fn (): ?string => $this->registrations->activePersonExternalId(
-                $supplierId,
-                $employeeId,
-                $environment,
-                'ik_mpsv',
-            )['source_kind'] ?? null,
+            fn (): ?string => $this->remember(
+                "oic-source:{$supplierId}:{$employeeId}:{$environment}",
+                fn (): ?string => $this->registrations->activePersonExternalId(
+                    $supplierId,
+                    $employeeId,
+                    $environment,
+                    'ik_mpsv',
+                )['source_kind'] ?? null,
+            ),
             (string) $form->personIdentifier,
         );
         $employment = $this->identifierPlan(
             $plan,
             'Identifikátor pracovního vztahu (ID PPV)',
-            fn (): ?bool => $this->identities->activeEmploymentExternalIdMatches(
-                $supplierId,
-                $employmentId,
-                $environment,
-                (string) $form->employmentIdentifier,
+            fn (): ?bool => $this->employmentIdMatches($supplierId, $employmentId, $environment, (string) $form->employmentIdentifier),
+            fn (): ?string => $this->remember(
+                "ppv-source:{$supplierId}:{$employmentId}:{$environment}",
+                fn (): ?string => $this->registrations->activeExternalId(
+                    $supplierId,
+                    $employmentId,
+                    $environment,
+                    'id_ppv',
+                )['source_kind'] ?? null,
             ),
-            fn (): ?string => $this->registrations->activeExternalId(
-                $supplierId,
-                $employmentId,
-                $environment,
-                'id_ppv',
-            )['source_kind'] ?? null,
             (string) $form->employmentIdentifier,
         );
         $plan['_steps']['identifiers'] = ['person' => $person, 'employment' => $employment];
@@ -504,7 +514,7 @@ final class JmhzReportPlanner
             return;
         }
         $monthStart = $item->file->periodStart();
-        $versions = $this->jmhzLookup->termVersions($supplierId, (int) $row['id']);
+        $versions = $this->remember("terms:{$supplierId}:{$row['id']}", fn () => $this->jmhzLookup->termVersions($supplierId, (int) $row['id']));
         $covering = JmhzEvidenceTimeline::covering($versions, $monthStart);
         if ($covering === null) {
             if (in_array($row['status'], self::OPEN_STATUSES, true)) {
@@ -632,7 +642,13 @@ final class JmhzReportPlanner
         if (!$form->hasSummary && $claimed === null) {
             return;
         }
-        $view = $this->statutory->editorView($supplierId, $employeeId, $monthStart);
+        // Řádky sekcí ani hranice zámku na měsíci nezávisí, formuláře osoby
+        // za další měsíce je v jednom plánování sdílejí.
+        $view = $this->remember("statutory:{$supplierId}:{$employeeId}", function () use ($supplierId, $employeeId, $monthStart): ?array {
+            $view = $this->statutory->editorView($supplierId, $employeeId, $monthStart);
+
+            return $view === null ? null : ['sections' => $view['sections'], 'frozen_through' => $view['frozen_through'] ?? null];
+        });
         if ($view === null) {
             return;
         }
@@ -852,7 +868,7 @@ final class JmhzReportPlanner
             $result[] = [
                 'employee_id' => (int) $row['employee_id'],
                 'employment_id' => (int) $row['id'],
-                'label' => ($this->lookup->employeeName($supplierId, (int) $row['employee_id']) ?? ('Osoba #' . $row['employee_id']))
+                'label' => ($this->employeeName($supplierId, (int) $row['employee_id']) ?? ('Osoba #' . $row['employee_id']))
                     . ' · ' . $row['code'] . ' · ' . $row['relation_type'] . ' · od ' . ($row['start_date'] ?? '—'),
             ];
         }
@@ -886,15 +902,92 @@ final class JmhzReportPlanner
             return false;
         }
         try {
-            return $this->identities->activeEmploymentExternalIdMatches(
-                $supplierId,
-                $employmentId,
-                $environment,
-                $form->employmentIdentifier,
-            ) === false;
+            return $this->employmentIdMatches($supplierId, $employmentId, $environment, $form->employmentIdentifier) === false;
         } catch (\InvalidArgumentException) {
             return false;
         }
+    }
+
+    private function employmentIdMatches(int $supplierId, int $employmentId, string $environment, string $value): ?bool
+    {
+        return $this->remember(
+            "ppv-match:{$supplierId}:{$employmentId}:{$environment}:{$value}",
+            fn (): ?bool => $this->identities->activeEmploymentExternalIdMatches($supplierId, $employmentId, $environment, $value),
+        );
+    }
+
+    /** @return array<string,mixed>|null */
+    private function employment(int $supplierId, int $employmentId): ?array
+    {
+        return $this->remember(
+            "employment:{$supplierId}:{$employmentId}",
+            fn (): ?array => $this->lookup->employment($supplierId, $employmentId),
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function employments(int $supplierId, int $employeeId): array
+    {
+        return $this->remember(
+            "employments:{$supplierId}:{$employeeId}",
+            fn (): array => $this->lookup->employments($supplierId, $employeeId),
+        );
+    }
+
+    private function employeeName(int $supplierId, int $employeeId): ?string
+    {
+        return $this->remember(
+            "name:{$supplierId}:{$employeeId}",
+            fn (): ?string => $this->lookup->employeeName($supplierId, $employeeId),
+        );
+    }
+
+    /**
+     * Plány celé dávky nad jedním, během plánování neměnným stavem evidence.
+     * Údaje evidence (vztahy, identifikátory, podmínky) se uvnitř načtou jednou
+     * a formuláře téže osoby je sdílejí; po návratu se zapomenou, takže plán
+     * po zápisu vidí aktuální stav. Uvnitř se nesmí nic zapisovat.
+     *
+     * @template T
+     * @param callable():T $plan
+     * @return T
+     */
+    public function batch(callable $plan): mixed
+    {
+        if ($this->memo !== null) {
+            return $plan();
+        }
+        $this->memo = [];
+        try {
+            return $plan();
+        } finally {
+            $this->memo = null;
+        }
+    }
+
+    /** Uvnitř {@see batch()} po zápisu do evidence: další plán načte evidenci znovu. */
+    public function forget(): void
+    {
+        if ($this->memo !== null) {
+            $this->memo = [];
+        }
+    }
+
+    /**
+     * @template T
+     * @param callable():T $load
+     * @return T
+     */
+    private function remember(string $key, callable $load): mixed
+    {
+        if ($this->memo === null) {
+            return $load();
+        }
+        if (!array_key_exists($key, $this->memo)) {
+            $this->memo[$key] = $load();
+        }
+
+        return $this->memo[$key];
     }
 
     /** @param array<string,mixed> $row */

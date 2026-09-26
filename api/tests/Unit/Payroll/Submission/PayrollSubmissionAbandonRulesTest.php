@@ -165,9 +165,11 @@ final class PayrollSubmissionAbandonRulesTest extends TestCase
      */
     public function testQueueSqlKnowsTheSameExceptions(): void
     {
-        $sql = file_get_contents(
-            dirname(__DIR__, 4) . '/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
+        $method = new \ReflectionMethod(
+            \MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::class,
+            'blockingAttemptSql',
         );
+        $sql = $method->invoke(null, 'attempt');
         self::assertIsString($sql);
 
         self::assertStringContainsString(

@@ -4612,7 +4612,8 @@
           "dimensions": "žádná dimenze | 1 přiřazená dimenze | {count} přiřazené dimenze | {count} přiřazených dimenzí",
           "components": "žádná pravidelná složka | 1 pravidelná složka mzdy | {count} pravidelné složky mzdy | {count} pravidelných složek mzdy",
           "time": "žádný záznam docházky | 1 záznam docházky a kalendáře | {count} záznamy docházky a kalendáře | {count} záznamů docházky a kalendáře",
-          "absences": "žádná absence | 1 záznam absence a dovolené | {count} záznamy absencí a dovolené | {count} záznamů absencí a dovolené"
+          "absences": "žádná absence | 1 záznam absence a dovolené | {count} záznamy absencí a dovolené | {count} záznamů absencí a dovolené",
+          "sickness": "žádný případ dávky | 1 nepodaný případ dávky nemocenského pojištění | {count} nepodané případy dávek nemocenského pojištění | {count} nepodaných případů dávek nemocenského pojištění"
         },
         "person_cascade": {
           "employments": "žádný pracovní vztah | 1 pracovní vztah | {count} pracovní vztahy | {count} pracovních vztahů",
@@ -5843,7 +5844,6 @@
           "leave": "Kniha dovolené",
           "enforcement": "Exekuce a insolvence",
           "deductions": "Dohody o srážkách",
-          "components": "Mzdové složky",
           "inputs": "Mzdové vstupy"
         },
         "issues": {
@@ -5859,9 +5859,7 @@
           "work_injury_compensation_manual": "Jednorázovou náhradu podle § 271ca ZP aplikace do běhu nezakládá — chybí jí mzdová složka s ověřeným zařazením. Založte ji ručně a v odhlášce A2 uveďte jako jednorázovou náhradu.",
           "work_injury_compensation_ready": "Jednorázovou náhradu podle § 271ca ZP založte níže tlačítkem Založit náhradu — uveďte, kdo ji vyplácí (zaměstnavatel, nebo přímo pojišťovna) a kdy.",
           "severance_garnishment_multiple_missing": "U založeného odstupného chybí počet násobků průměru, ze kterých se počítají srážky (§ 299 odst. 4 o. s. ř.). Doplňte ho jako množství u vstupu odstupného v Mzdových vstupech.",
-          "severance_input_differs": "Založené odstupné ({input_amount_minor}) se liší od současného návrhu. Opravte vstup v Mzdových vstupech.",
-          "severance_jmhz_mapping_missing": "Složka {component_code} nemá zařazení do měsíčního hlášení JMHZ. Bez něj se hlášení za poslední měsíc nesestaví — zařaďte ji v Mzdové složky.",
-          "death_no_entitled_survivor": "Není zapsaná žádná osoba blízká ze společné domácnosti. Mzdová práva se pak stávají předmětem dědictví — vyplácejte až podle rozhodnutí o dědictví.",
+          "severance_input_differs": "Založené odstupné ({input_amount_minor}) se liší od současného návrhu. Opravte vstup v Mzdových vstupech.",          "death_no_entitled_survivor": "Není zapsaná žádná osoba blízká ze společné domácnosti. Mzdová práva se pak stávají předmětem dědictví — vyplácejte až podle rozhodnutí o dědictví.",
           "death_tax_assessment_missing": "Chybí daňové posouzení výplaty pozůstalým. Zapište ho níže, než výplatu provedete.",
           "death_enforcement_active": "Zaměstnanec má {count} živé exekuce nebo insolvence. Po úmrtí je ukončete a informujte plátce, soud nebo správce v Exekuce a insolvence.",
           "death_deduction_agreements_active": "Zaměstnanec má {count} aktivní dohody o srážkách. Pohledávky zaměstnavatele smrtí zanikají (§ 328 odst. 2 ZP) — ukončete je v Dohody o srážkách."
@@ -6802,7 +6800,7 @@
         },
         "ready": {
           "title": "Připravená podání čekají na odeslání",
-          "description": "Tato přesná podání už jsou zmrazená, ale zatím nemají žádný pokus o odeslání. Odešlete je přímo odsud podle jejich čísla — aplikace nebude hledat jiné podání za stejné období.",
+          "description": "Tato přesná podání už jsou zmrazená, ale zatím neodešla (u hlášení v dílčích balících neodešly všechny balíky). Odešlete je přímo odsud podle jejich čísla — aplikace nebude hledat jiné podání za stejné období.",
           "submission": "Podání č. {id}",
           "corrects": "navazuje na podání č. {id}",
           "kind": {
@@ -6831,8 +6829,15 @@
           },
           "continue_isds": "Přihlásit se a odeslat",
           "gateway_start_failed": "Zpráva je bezpečně uložená v odchozí frontě, ale přihlášení do ISDS se nepodařilo zahájit. Otevřete odchozí podání a zkuste přihlášení znovu.",
-          "dispatch_failed": "Připravené podání se nepodařilo předat k odeslání."
+          "dispatch_failed": "Připravené podání se nepodařilo předat k odeslání.",
+          "packages": {
+            "progress": "Hlášení má víc než 1500 formulářů a odesílá se v {count} dílčích balících. Odesláno {sent} z {count}.",
+            "interrupted": "Odeslání se přerušilo. Tlačítko odešle jen balíky, které ještě neodešly; odeslané se znovu neposílají. Protokoly jednotlivých balíků sledujte níže v historii.",
+            "send_remaining": "Doposlat zbývající balíky",
+            "vrep_only": "Hlášení rozdělené do dílčích balíků se odesílá jen přes VREP; datovou schránkou ho poslat nejde."
+          }
         },
+        "attempt_package": "Balík {ordinal} z {count}",
         "status": {
           "prepared": "Připraveno k odeslání",
           "sent": "Odesláno",
@@ -7561,6 +7566,9 @@
           "xsd_versions": "Formát hlášení: uložená verze {old}, aktuální verze {current}.",
           "control_versions": "Kontrolní pravidla: uložená verze {old}, aktuální verze {current}."
         }
+      },
+      "subject": {
+        "open_person": "Karta zaměstnance"
       },
       "queue": {
         "title": "K odeslání",
@@ -10315,7 +10323,7 @@
       },
       "packages": {
         "title": "Hlášení má víc než 1500 formulářů a dělí se do dílčích balíků ({count}).",
-        "hint": "Všechny balíky nesou stejné číslo podání a datum vyplnění; souhrn a pojistnou část nese první. Zmrazení a odeslání dílčích balíků aplikace zatím neumí, podejte je ručně přes ePortál ČSSZ.",
+        "hint": "Všechny balíky nesou stejné číslo podání a datum vyplnění; souhrn a pojistnou část nese první. Při zmrazení se hlášení uloží po balících a v Mzdová podání → Stav odeslání ho odešlete přes VREP: balíky odejdou postupně od prvního a u každého uvidíte jeho protokol. Když se odeslání přeruší, tlačítko doposílá jen neodeslané balíky.",
         "package": "Balík {ordinal}",
         "valid": "prošel kontrolami",
         "invalid": "nepropustné nálezy: {count}",
@@ -10893,7 +10901,7 @@
         "jmhz_xml_employee_social_discount_zero": "Sleva na pojistném zaměstnance je označená jako uplatněná, ale její částka je nulová. Zkontrolujte výpočet slevy nebo její potvrzení u zaměstnance.",
         "jmhz_xml_employer_rate_category_unknown": "Bez sazbové kategorie zaměstnavatele nelze vyměřovací základ rozdělit podle § 5a odst. 1 zákona o pojistném na sociální zabezpečení. Doplňte sazbovou kategorii zaměstnavatele v nastavení mzdové účtárny.",
         "jmhz_xml_exempt_income_exceeds_total": "Osvobozené příjmy nesmí být vyšší než celkový zúčtovaný příjem. Zkontrolujte mzdové složky v mzdovém běhu.",
-        "jmhz_xml_form_limit_exceeded": "Jeden datový balík podání nese nejvýš 1500 formulářů. Test hlášení větší podání rozdělí do dílčích balíků, zmrazení a odeslání balíků ale aplikace zatím neumí; podejte je ručně přes ePortál ČSSZ.",
+        "jmhz_xml_form_limit_exceeded": "Jeden datový balík podání nese nejvýš 1500 formulářů. Řádné hlášení aplikace nad tento počet sama rozdělí do dílčích balíků; opravné nebo stornovací podání takového rozsahu se do jednoho balíku nevejde. Opravte méně pracovních vztahů najednou a zbytek pošlete dalším opravným podáním.",
         "jmhz_xml_identity_name_incomplete": "Zaměstnanec se hlásí jménem, protože mu ČSSZ zatím nepřidělila OIČ ani ID PPV, a k tomu chybí příjmení, jméno, datum narození, datum nástupu nebo druh činnosti.",
         "jmhz_xml_no_valid_form": "Podání JMHZ musí obsahovat alespoň jednu platnou součást, ale po zpracování žádná nezůstala. Zkontrolujte pracovní vztahy zařazené do tohoto hlášení.",
         "jmhz_xml_not_byte_stable": "Opakovaná serializace téhož podání JMHZ nevrátila shodné bajty; jde o technickou chybu, kterou musí posoudit podpora.",
@@ -10906,7 +10914,7 @@
         "jmhz_xml_scenario_3_profile_unsupported": "Pracovní vztah s druhem činnosti K až S podporuje jen statutární profil S s bližším určením 1; jiná kombinace vyžaduje individuální zpracování a podání přes ePortál ČSSZ.",
         "jmhz_xml_scenario_unsupported": "Součást podání nepatří do scénáře JMHZ, který aplikace umí automaticky sestavit. Hlášení za tento vztah podejte ručně přes ePortál ČSSZ.",
         "jmhz_xml_serialization_failed": "XML podání JMHZ se nepodařilo vytvořit kvůli technické chybě. Zkuste to znovu, a pokud problém přetrvá, obraťte se na podporu.",
-        "jmhz_xml_split_submission_unsupported": "Podání rozdělené do víc datových balíků sestavuje jen test hlášení; zmrazení a odeslání dílčích balíků aplikace zatím neumí. Podejte je ručně přes ePortál ČSSZ.",
+        "jmhz_xml_split_submission_unsupported": "Pořadí datového balíku nesedí na počet balíků hlášení. Hlášení nad 1500 formulářů se dělí do dílčích balíků při zmrazení; spusťte test hlášení a zmrazte hlášení znovu z přípravy.",
         "jmhz_xml_submission_type_unsupported": "Zdrojový dokument pro sestavení XML musí být úplná řádná příprava; jiný typ dokumentu nelze serializovat. Připravte řádné hlášení znovu.",
         "jmhz_xml_surcharge_total_missing": "Rozpad příplatků nelze vykázat bez celkové částky příplatků (pole 10332). Zkontrolujte mzdové složky příplatků v mzdovém běhu.",
         "jmhz_xml_temporary_assignment_user_invalid": "Uživatel dočasného přidělení není vyplněný správně (IČO musí mít osm číslic). Opravte ho na kartě pracovního vztahu.",

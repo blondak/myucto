@@ -156,6 +156,54 @@ final class PayrollSubmissionOverviewActionTest extends TestCase
         );
     }
 
+    /**
+     * Registrace, OZUSPOJ a dávky nemocenského mají předmět
+     * `payroll_employment:{id}`. Přehled podání u nich dřív ukázal „—";
+     * teď jméno osoby a id pro proklik na její kartu, stejně jako fronta.
+     * Vztah cizí firmy se nesmí přeložit na jméno.
+     */
+    public function testEmploymentSubjectShowsPersonNameAndLink(): void
+    {
+        [$employeeId, $employmentId] = $this->employment($this->supplierId, 'Syntetický Zaměstnanec');
+        [, $foreignEmploymentId] = $this->employment($this->otherSupplierId, 'Cizí Osoba');
+        $this->obligation(
+            $this->supplierId,
+            'REGZEC',
+            'payroll_employment:' . $employmentId,
+            'overview-employment',
+            '2026-08-01',
+            '2026-08-31',
+        );
+        $this->obligation(
+            $this->supplierId,
+            'REGZEC',
+            'payroll_employment:' . $foreignEmploymentId,
+            'overview-foreign-employment',
+            '2026-08-01',
+            '2026-08-31',
+        );
+
+        $response = ($this->action)(
+            $this->request()->withQueryParams([
+                'environment' => 'production',
+                'period' => '2026-08',
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $bySubject = [];
+        foreach ($this->json($response)['items'] as $item) {
+            $bySubject[$item['subject_reference']] = $item;
+        }
+        $own = $bySubject['payroll_employment:' . $employmentId];
+        self::assertSame('Syntetický Zaměstnanec', $own['subject_label']);
+        self::assertSame($employeeId, $own['subject_employee_id']);
+        $foreign = $bySubject['payroll_employment:' . $foreignEmploymentId];
+        self::assertNull($foreign['subject_label']);
+        self::assertNull($foreign['subject_employee_id']);
+    }
+
     public function testRejectsBearerAndInvalidFilters(): void
     {
         $bearer = ($this->action)(
@@ -216,6 +264,28 @@ final class PayrollSubmissionOverviewActionTest extends TestCase
             $idempotencyKey,
             environment: 'production',
         );
+    }
+
+    /** @return array{int,int} [employee_id, employment_id] */
+    private function employment(int $supplierId, string $name): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, "employee", "hpp", 0, 0, 0, NULL, 0, 1)'
+        )->execute([$supplierId, $name]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, monthly_gross_minor)
+             VALUES (?, ?, "SYN-1", "employment", "active", "2026-01-01", 4000000)'
+        )->execute([$supplierId, $employeeId]);
+
+        return [$employeeId, (int) $pdo->lastInsertId()];
     }
 
     private function request(
