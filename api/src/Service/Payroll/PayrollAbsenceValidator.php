@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
@@ -55,8 +56,16 @@ final class PayrollAbsenceValidator
 
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
-    /** @param array<string,mixed> $body @return array<string,mixed> */
-    public function absence(array $body): array
+    /**
+     * `$takeover` = nepřítomnost převzatá ze zpracovaných mezd předchozího
+     * programu. Náhradu za ni už obsahuje převzatá mzda a zdroj druh překážky
+     * nenese, takže se u ní druh nevyžaduje; bez druhu se ale v MyÚčtu nikdy
+     * nematerializuje náhrada ({@see \MyInvoice\Action\Payroll\PayrollAbsenceAction::decision()}).
+     *
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    public function absence(array $body, bool $takeover = false): array
     {
         $employmentId = $this->positiveInt($body, 'employment_id');
         $type = trim((string) ($body['absence_type'] ?? ''));
@@ -77,10 +86,19 @@ final class PayrollAbsenceValidator
         } catch (\Throwable) {
             throw new \InvalidArgumentException('Časové pásmo není platné.');
         }
+        [$obstacleKind, $obstacleRate, $obstacleRateReason] = $takeover
+            && PayrollObstacleKind::isObstacleType($type)
+            && self::blank($body['obstacle_kind'] ?? null)
+            ? [null, null, null]
+            : $this->obstacle($type, $body);
         $policy = match ($type) {
             'dpn', 'quarantine' => 'dpn',
             'vacation' => 'average_100',
-            'employee_obstacle', 'employer_obstacle' => 'statutory_manual_review',
+            'employee_obstacle', 'employer_obstacle' => match (true) {
+                $obstacleKind === null => 'statutory_manual_review',
+                $obstacleRate === PayrollObstacleKind::FULL_RATE_BASIS_POINTS => 'average_100',
+                default => 'average_custom',
+            },
             // Náhradní volno: za dobu jeho čerpání mzda nepřísluší
             // (§ 114 odst. 1 zákoníku práce) — přesčas se už zaplatil mzdou,
             // volnem se nahrazuje jen příplatek. Proto `none`, ne přehlédnutí.
@@ -166,14 +184,91 @@ final class PayrollAbsenceValidator
             // Sazba náhrady při DPN je zákonná a mění se — bere se z rulesetu,
             // ať absence a výpočet náhrady nikdy nepracují s jiným číslem.
             // 10 000 bp u ostatních politik je definice „average_100", ne sazba.
-            'compensation_rate_basis_points' => match ($policy) {
-                'none' => null,
-                'dpn' => AbsenceRuleset::forDate($this->rulesets, $from)
+            'compensation_rate_basis_points' => match (true) {
+                $policy === 'none' => null,
+                $policy === 'dpn' => AbsenceRuleset::forDate($this->rulesets, $from)
                     ->compensationRateBasisPoints(),
+                $obstacleRate !== null => $obstacleRate,
                 default => 10_000,
             },
+            'obstacle_kind' => $obstacleKind?->value,
+            'compensation_rate_reason' => $obstacleRateReason,
             'average_snapshot_id' => $averageId,
         ];
+    }
+
+    /**
+     * Druh placené překážky a sazba její náhrady.
+     *
+     * Sazba se bere z tabulky druhu ({@see PayrollObstacleKind}). Účetní ji smí
+     * přepsat jen v mezích zákona a jen s důvodem: sazba, kterou by šlo změnit
+     * bez vysvětlení, by za rok nešla obhájit. Druh je povinný — bez něj není
+     * jasné, jestli a v jaké výši náhrada přísluší, a do které kolonky
+     * měsíčního hlášení patří.
+     *
+     * @param array<string,mixed> $body
+     * @return array{0:?PayrollObstacleKind,1:?int,2:?string}
+     */
+    private function obstacle(string $type, array $body): array
+    {
+        $rawKind = $body['obstacle_kind'] ?? null;
+        $rawRate = $body['compensation_rate_basis_points'] ?? null;
+        $rawReason = $body['compensation_rate_reason'] ?? null;
+        if (!PayrollObstacleKind::isObstacleType($type)) {
+            if (!self::blank($rawKind) || !self::blank($rawRate) || !self::blank($rawReason)) {
+                throw new \InvalidArgumentException(
+                    'Druh překážky a sazba náhrady se vyplňují jen u placené překážky v práci.',
+                );
+            }
+
+            return [null, null, null];
+        }
+        $kind = is_string($rawKind) ? PayrollObstacleKind::tryFrom(trim($rawKind)) : null;
+        if ($kind === null) {
+            throw new \InvalidArgumentException(
+                'Vyberte druh překážky — podle něj se určí, jaká náhrada mzdy přísluší.',
+            );
+        }
+        if ($kind->absenceType() !== $type) {
+            throw new \InvalidArgumentException($type === PayrollObstacleKind::EMPLOYER_SIDE_TYPE
+                ? 'Vybraný druh je překážkou na straně zaměstnance, ne zaměstnavatele.'
+                : 'Vybraný druh je překážkou na straně zaměstnavatele, ne zaměstnance.');
+        }
+        $reason = $this->nullableText($rawReason, 500);
+        [$minimum, $maximum] = $kind->rateBounds();
+        if (self::blank($rawRate)) {
+            $rate = $kind->defaultRateBasisPoints();
+        } else {
+            $rate = filter_var($rawRate, FILTER_VALIDATE_INT);
+            if ($rate === false || $rate < $minimum || $rate > $maximum) {
+                throw new \InvalidArgumentException($minimum === $maximum
+                    ? sprintf('Náhrada za tuto překážku je ze zákona %s %% průměrného výdělku.', self::percent($minimum))
+                    : sprintf(
+                        'Sazba náhrady za tuto překážku musí být %s až %s %% průměrného výdělku.',
+                        self::percent($minimum),
+                        self::percent($maximum),
+                    ));
+            }
+        }
+        if ($reason === null && ($rate !== $kind->defaultRateBasisPoints() || $kind->requiresReason())) {
+            throw new \InvalidArgumentException($kind === PayrollObstacleKind::PartialUnemployment
+                ? 'U částečné nezaměstnanosti uveďte dohodu s odborovou organizací nebo vnitřní předpis, '
+                    . 'který výši náhrady stanoví (§ 209 odst. 2 ZP). Bez něj jde o jinou překážku '
+                    . 'se 100 % průměru (§ 208 ZP).'
+                : ($kind === PayrollObstacleKind::OtherPaidEmployee
+                    ? 'U jiné placené překážky uveďte, co ji zakládá (vnitřní předpis, kolektivní smlouva, '
+                        . 'zvláštní zákon).'
+                    : 'Sazba se liší od tabulkové — uveďte důvod (například vnitřní předpis nebo dohodu).'));
+        }
+
+        return [$kind, $rate, $reason];
+    }
+
+    private static function percent(int $basisPoints): string
+    {
+        return $basisPoints % 100 === 0
+            ? (string) intdiv($basisPoints, 100)
+            : str_replace('.', ',', rtrim(rtrim(number_format($basisPoints / 100, 2, '.', ''), '0'), '.'));
     }
 
     /**

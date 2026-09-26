@@ -123,7 +123,7 @@ final class PayrollTakeoverAbsenceWriter
                 $body['childbirth_date'] = $absence['childbirth'];
             }
             try {
-                $created = $this->absences->create($supplierId, $this->absenceValidator->absence($body), $userId);
+                $created = $this->absences->create($supplierId, $this->absenceValidator->absence($body, takeover: true), $userId);
             } catch (PayrollAbsenceOverlapException) {
                 // Týž den už nepřítomnost má (jiný druh z téže mzdy): druhý zápis se vynechá.
                 $overlaps++;

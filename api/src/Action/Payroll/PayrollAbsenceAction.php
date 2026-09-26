@@ -29,6 +29,8 @@ use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
 use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
+use MyInvoice\Service\Payroll\Absence\PayrollObstacleInputMaterializer;
+use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
@@ -65,6 +67,7 @@ final class PayrollAbsenceAction
         private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
         private readonly IpMatcher $ipMatcher,
         private readonly AverageEarningBatchService $averageBatch,
+        private readonly PayrollObstacleInputMaterializer $obstacleInputs,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -187,6 +190,22 @@ final class PayrollAbsenceAction
                         . 'Absence zůstává uložená, nic se neztratí.',
                     );
                 }
+                /*
+                 * Placená překážka se bez druhu neschválí: jen druh říká, jaká
+                 * náhrada přísluší a do které kolonky hlášení patří. Překážky
+                 * zapsané před zavedením druhu (migrace 1927) se proto musí
+                 * zapsat znovu — jinak by se schválením mzda zkrátila a náhrada
+                 * nevznikla, přesně ta chyba, kterou druh odstraňuje.
+                 */
+                if ($decision === 'approved'
+                    && PayrollObstacleKind::isObstacleType($absence['absence_type'])
+                    && $absence['obstacle_kind'] === null
+                ) {
+                    throw new \InvalidArgumentException(
+                        'U překážky v práci chybí druh (lékař, svatba, prostoj…), podle kterého se '
+                        . 'určí náhrada mzdy. Nepřítomnost zrušte a zapište znovu s vybraným druhem.',
+                    );
+                }
                 if ($decision === 'approved' && $absence['absence_type'] === 'vacation') {
                     // § 219 odst. 1 ZP — svátek uvnitř dovolené se nečerpá.
                     $segments = $this->absences->publishedShiftSegments(
@@ -263,6 +282,15 @@ final class PayrollAbsenceAction
                         $this->userId($request),
                     );
                 }
+                // § 199, § 207 až § 209 ZP — krácení mzdy dobu překážky ze
+                // mzdy vyjme (titul PaidObstacle), tohle je náhrada za ni.
+                if ($decision === 'approved' && PayrollObstacleKind::isObstacleType($absence['absence_type'])) {
+                    $calculation = $this->obstacleInputs->materialize(
+                        $supplierId,
+                        $absence,
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -326,6 +354,15 @@ final class PayrollAbsenceAction
                     && $before['status'] === 'approved'
                 ) {
                     $this->sicknessInputs->reverseForAbsence(
+                        $supplierId,
+                        $id,
+                        $this->userId($request),
+                    );
+                }
+                if (PayrollObstacleKind::isObstacleType($before['absence_type'])
+                    && $before['status'] === 'approved'
+                ) {
+                    $this->obstacleInputs->reverseForAbsence(
                         $supplierId,
                         $id,
                         $this->userId($request),
