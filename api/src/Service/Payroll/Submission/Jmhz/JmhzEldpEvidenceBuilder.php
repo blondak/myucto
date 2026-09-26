@@ -187,6 +187,16 @@ final class JmhzEldpEvidenceBuilder
         [$employeeId, $entry] = $this->findEmployment($input, $employmentId);
         $employment = $this->object($entry['employment'] ?? null, 'employment');
         $term = $this->object($entry['term'] ?? null, 'term');
+        if (self::deferredIncomeType($entry, $employment, $periodStart) !== null) {
+            return $this->deferredConfirmation(
+                $result,
+                $employeeId,
+                $employmentId,
+                $term,
+                $periodStart,
+                $periodEnd,
+            );
+        }
         $employmentFrom = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
         if (!is_string($employmentFrom)) {
             $this->invalid('jmhz_eldp_interval_outside_employment', 'Pracovní vztah nemá zmrazené datum nástupu.');
@@ -303,6 +313,26 @@ final class JmhzEldpEvidenceBuilder
         $relationshipDetailCode = $term['jmhz_relationship_detail_code'] ?? null;
         $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
         $selectorRelationshipDetailCode = is_string($relationshipDetailCode) ? $relationshipDetailCode : null;
+        $deferredType = self::deferredIncomeType($entry, $employment, $periodStart);
+        if ($deferredType !== null) {
+            return $this->buildDeferred(
+                $supplierId,
+                $runId,
+                $revisionId,
+                $revision,
+                $employeeId,
+                $employmentId,
+                $periodStart,
+                $periodEnd,
+                $result,
+                $term,
+                $relationType,
+                $activityCode,
+                $selectorRelationshipDetailCode,
+                $deferredType,
+                $confirmation,
+            );
+        }
         $selection = ($this->scenarioSelector ??= JmhzScenarioSelectorResolver::load())
             ->resolve($activityCode, $selectorRelationshipDetailCode);
         if (!$selection['supported']) {
@@ -596,6 +626,199 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return false;
+    }
+
+    /**
+     * Typ odloženého příjmu (JMHZ 10548), je-li vztah skončený před
+     * vykazovaným měsícem a účetní odložený příjem potvrdila; jinak `null`.
+     *
+     * @param array<string,mixed> $entry
+     * @param array<string,mixed> $employment
+     */
+    private static function deferredIncomeType(array $entry, array $employment, string $periodStart): ?string
+    {
+        $deferred = $entry['deferred_income'] ?? null;
+        $type = is_array($deferred) ? ($deferred['deferred_type'] ?? null) : null;
+        $endDate = $employment['end_date'] ?? null;
+        if (!is_string($type) || !is_string($endDate) || $endDate >= $periodStart) {
+            return null;
+        }
+
+        return $type;
+    }
+
+    /**
+     * Potvrzení ELDP pro odložený příjem typu 1 (pravidla podání JMHZ,
+     * kap. 6 bod 1): za měsíc zúčtování 0 dnů pojištění, kód ELDP vztahu
+     * s „P" na druhé pozici (dodatečné zúčtování příjmů po skončení výdělečné
+     * činnosti, kontrola 338), platnost od–do přes měsíc zúčtování
+     * a vyměřovací základ zúčtovaného příjmu.
+     *
+     * @param array<string,mixed> $result
+     * @param array<string,mixed> $term
+     * @return array<string,mixed>
+     */
+    private function deferredConfirmation(
+        array $result,
+        int $employeeId,
+        int $employmentId,
+        array $term,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $activityCode = $term['activity_code'] ?? null;
+        if (!is_string($activityCode)) {
+            $this->invalid('jmhz_eldp_ordinary_activity_unsupported', 'Pracovní vztah nemá zmrazený druh činnosti pro ELDP.');
+        }
+        $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
+        $base = $this->nonNegativeInt(
+            $relationship['assessment_base_minor_units'] ?? null,
+            'assessment_base_minor_units',
+        );
+        if ($base % 100 !== 0) {
+            $this->invalid('jmhz_eldp_assessment_base_not_whole_czk', 'Vyměřovací základ ELDP musí být celé Kč v rozsahu XSD.');
+        }
+
+        return [
+            'insurance_from' => null,
+            'insurance_to' => null,
+            'valid_from' => $periodStart,
+            'valid_to' => $periodEnd,
+            'insurance_days' => 0,
+            'code' => $activityCode . 'P+',
+            'assessment_base_czk' => intdiv($base, 100),
+            'in03_active' => false,
+            'in04_active' => false,
+            'confirmation_note' => '',
+        ];
+    }
+
+    /**
+     * ELDP řez odloženého příjmu. Pracovní souhrn ani interval pojištění
+     * nemá (vztah v měsíci netrvá), zbytek zmrazeného snímku je stejný jako
+     * u běžného řezu, aby ho resolver hlášení četl jednou cestou.
+     *
+     * @param array<string,mixed> $revision
+     * @param array<string,mixed> $result
+     * @param array<string,mixed> $term
+     * @param array<string,mixed> $confirmation
+     */
+    private function buildDeferred(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        array $revision,
+        int $employeeId,
+        int $employmentId,
+        string $periodStart,
+        string $periodEnd,
+        array $result,
+        array $term,
+        string $relationType,
+        string $activityCode,
+        ?string $relationshipDetailCode,
+        string $deferredType,
+        array $confirmation,
+    ): JmhzEldpEvidenceSnapshot {
+        if ($deferredType !== '1') {
+            $this->invalid(
+                'jmhz_deferred_income_type_unsupported',
+                'Aplikace zpracuje sama jen odložený příjem typu 1.',
+            );
+        }
+        $selection = ($this->scenarioSelector ??= JmhzScenarioSelectorResolver::load())
+            ->resolve($activityCode, $relationshipDetailCode, 'scenario_8');
+        if (!$selection['supported'] || !is_array($selection['evidence'] ?? null)) {
+            $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného scénáře.');
+        }
+        $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
+        if (!$this->participationMode($relationType, $relationship, $employmentId)) {
+            $this->invalid(
+                'jmhz_eldp_social_relationship_unsupported',
+                'Odložený příjem vztahu, který nezakládá účast na pojištění, se automaticky nevykazuje.',
+            );
+        }
+        $base = $this->nonNegativeInt($relationship['assessment_base_minor_units'] ?? null, 'assessment_base_minor_units');
+        $code = $confirmation['code'] ?? null;
+        if ($code !== $activityCode . 'P+'
+            || ($confirmation['valid_from'] ?? null) !== $periodStart
+            || ($confirmation['valid_to'] ?? null) !== $periodEnd
+            || ($confirmation['insurance_days'] ?? null) !== 0
+            || ($confirmation['assessment_base_czk'] ?? null) !== intdiv($base, 100)
+            || $base % 100 !== 0
+        ) {
+            $this->invalid('jmhz_eldp_deferred_section_invalid', 'ELDP odloženého příjmu neodpovídá zmrazenému výsledku.');
+        }
+        $entryMetadata = $this->codebook()->requireValue('kod_eldp', $code);
+        $spec = $this->specManifest();
+        $codebook = $this->findCodebook($spec['payload'], 'kod_eldp');
+        $year = (int) substr($periodStart, 0, 4);
+        $month = (int) substr($periodStart, 5, 2);
+
+        return new JmhzEldpEvidenceSnapshot([
+            'schema_reference' => JmhzEldpEvidenceSnapshot::SCHEMA_REFERENCE,
+            'builder_version' => self::BUILDER_VERSION,
+            'scope' => [
+                'supplier_id' => $supplierId,
+                'run_id' => $runId,
+                'source_revision_id' => $revisionId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'period_start' => $periodStart,
+                'scenario_key' => 'scenario_8',
+            ],
+            'specification' => [
+                'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+                'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
+                'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+                'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+                'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
+                'eldp_codebook_content_sha256' => $codebook['content_hash'],
+                'eldp_code_row_sha256' => $entryMetadata['row_hash'] ?? null,
+            ],
+            'source_revision' => [
+                'input_snapshot_hash' => $revision['input_snapshot_hash'],
+                'result_snapshot_hash' => $revision['result_snapshot_hash'],
+                'ruleset_manifest_hash' => $revision['ruleset_manifest_hash'],
+            ],
+            'source_evidence' => [
+                'term_id' => $term['id'] ?? null,
+                'term_row_version' => $term['row_version'] ?? null,
+                'work_summary_id' => null,
+                'work_summary_sha256' => null,
+                'social_relationship' => $relationship,
+                'scenario_resolution' => $selection['evidence'],
+                'attribute_ids' => self::ATTRIBUTE_IDS,
+            ],
+            'insurance_interval' => null,
+            // Odložený příjem vykazuje ELDP po obdobích (10537/10538). Typ 1
+            // nese jediné období, měsíc zúčtování.
+            'deferred_income' => [
+                'type' => $deferredType,
+                'periods' => [['month' => $month, 'year' => $year]],
+            ],
+            'eldp_sections' => [[
+                'ordinal' => 1,
+                'code' => $code,
+                'valid_from' => $periodStart,
+                'valid_to' => $periodEnd,
+                'insurance_days' => 0,
+                'assessment_base_czk' => intdiv($base, 100),
+                'excluded_days' => null,
+                'excluded_days_total' => null,
+                'excluded_days_provenance' => [],
+                'section18_days' => null,
+                'section18_days_total' => null,
+                'section18_days_provenance' => [],
+                'deducted_days_total' => null,
+            ]],
+            'confirmation' => [
+                'in03_active' => false,
+                'in04_active' => false,
+                'note' => '',
+            ],
+        ]);
     }
 
     /**

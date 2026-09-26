@@ -1085,6 +1085,8 @@ const FOCUSABLE_PANELS = [
    * si `revealField()` otevře sám.
    */
   'jmhz_identity',
+  // Odložený příjem po skončení vztahu, taky na kartě pracovního vztahu.
+  'deferred_income',
 ] as const
 
 /** Sekce, které umí otevřít `PayrollPersonProfilePanel.focusSection()`. */
@@ -1112,7 +1114,7 @@ async function focusPanel(panel: string) {
   delete query.panel
   delete query.field
   await router.replace({ query })
-  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration'].includes(panel)) {
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income'].includes(panel)) {
     await nextTick()
     const cards = employmentCards.value
     const target = Number.isInteger(employmentId) && employmentId > 0

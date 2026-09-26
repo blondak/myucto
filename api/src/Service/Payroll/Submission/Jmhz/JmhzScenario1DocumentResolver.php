@@ -143,7 +143,7 @@ final class JmhzScenario1DocumentResolver
                 || !array_is_list($scenarioSet)
                 || $scenarioSet === []
                 || array_values(array_unique($scenarioSet)) !== $scenarioSet
-                || array_diff($scenarioSet, ['scenario_1', 'scenario_3']) !== []
+                || array_diff($scenarioSet, ['scenario_1', 'scenario_3', 'scenario_8']) !== []
             ) {
                 return new JmhzScenario1Resolution(null, [
                     $this->blocker(
@@ -153,7 +153,9 @@ final class JmhzScenario1DocumentResolver
                     ),
                 ]);
             }
-            $scope['scenario_key'] = count($scenarioSet) === 1
+            // Odložený příjem (scénář 8) je jen jiný druh formuláře téhož
+            // řádného podání, dokument zůstává běžného profilu.
+            $scope['scenario_key'] = count($scenarioSet) === 1 && $scenarioSet[0] !== 'scenario_8'
                 ? $scenarioSet[0]
                 : 'scenario_1';
         } elseif (($scope['scenario_key'] ?? null) !== 'scenario_1') {
@@ -340,13 +342,22 @@ final class JmhzScenario1DocumentResolver
                 $employeeId,
                 $blockers,
             );
-            $socialEmploymentId = $this->socialContributionEmployment(
+            $relationshipContributions = $this->relationshipContributions(
                 $employments,
                 $social,
-                $payslip,
                 $employeeId,
                 $blockers,
             );
+            $socialEmploymentId = $relationshipContributions === null
+                ? $this->socialContributionEmployment(
+                    $employments,
+                    $social,
+                    $payslip,
+                    $employeeId,
+                    $blockers,
+                )
+                : null;
+            $relationshipEmployerSocialCzk = null;
             $declarationSigned = null;
 
             $normalizedEmployments = [];
@@ -457,17 +468,51 @@ final class JmhzScenario1DocumentResolver
                 // (viz JmhzEldpEvidenceBuilder).
                 $personFacts = $this->object($identity['identity'] ?? null);
                 $average = $this->object($employment['average_earning'] ?? null);
-                // Pojistné osoby (10370, 10481) nese nejvýš jeden formulář;
-                // viz socialContributionEmployment().
+                $socialBase = $this->socialBase(
+                    $employment['insurance'] ?? null,
+                    $employmentId,
+                    $blockers,
+                );
+                /*
+                 * Výsledek s pojistným po vztazích: každý účastný vztah vykazuje
+                 * své pojistné (10370, 10481) na svém formuláři, viz
+                 * relationshipContributions(). Starší výsledek pojistné po
+                 * vztazích nenese a pojistné osoby pak nese nejvýš jeden
+                 * formulář, viz socialContributionEmployment().
+                 */
+                $ownContribution = $relationshipContributions !== null && is_int($employmentId)
+                    ? ($relationshipContributions[$employmentId] ?? null)
+                    : null;
                 $reportsSocial = count($employments) === 1
-                    || ($employmentId !== null && $employmentId === $socialEmploymentId);
+                    || ($ownContribution !== null && $ownContribution['participates'])
+                    || ($relationshipContributions === null
+                        && $employmentId !== null
+                        && $employmentId === $socialEmploymentId);
+                $socialContributions = null;
+                if ($ownContribution !== null && $reportsSocial) {
+                    $employerSocial = $this->relationshipEmployerSocialCzk(
+                        $socialBase,
+                        $preparation->periodStart,
+                    );
+                    $socialContributions = [
+                        'employee_social_czk' => $this->wholeCzk(
+                            $ownContribution['before_minor'],
+                            '10370',
+                            'employment',
+                            $employmentId,
+                            $blockers,
+                        ),
+                        'employer_social_czk' => $employerSocial,
+                    ];
+                    if (is_int($employerSocial)) {
+                        $relationshipEmployerSocialCzk = ($relationshipEmployerSocialCzk ?? 0)
+                            + $employerSocial;
+                    }
+                }
                 $normalizedEmployments[] = [
                     'employment_id' => $employmentId,
-                    'social_base' => $this->socialBase(
-                        $employment['insurance'] ?? null,
-                        $employmentId,
-                        $blockers,
-                    ),
+                    'social_base' => $socialBase,
+                    'social_contributions' => $socialContributions,
                     'part_time_discount' => $this->partTimeDiscount(
                         $employment['insurance'] ?? null,
                         $employment['scenario_resolution'] ?? null,
@@ -487,6 +532,7 @@ final class JmhzScenario1DocumentResolver
                         is_int($employmentId) ? ($ordinaryEvidence[$employmentId] ?? null) : null,
                         $employmentId,
                         $blockers,
+                        $ownContribution === null ? null : $ownContribution['discount_minor'],
                     ),
                     'identity' => [
                         'person_external_identifier' => $personIdentifier['value'] ?? null,
@@ -501,6 +547,11 @@ final class JmhzScenario1DocumentResolver
                     ],
                     'selector' => $employment['scenario_resolution'] ?? null,
                     'term' => $employment['term'] ?? null,
+                    'risk_work' => $this->riskWork(
+                        $employment['term'] ?? null,
+                        $employmentId,
+                        $blockers,
+                    ),
                     // Doklad, že se nevyplněné „ano/ne" vyložilo jako „ne".
                     // Bez něj serializér nic nedomýšlí (viz
                     // JmhzScenario1XmlSerializer::tristate()).
@@ -590,14 +641,18 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
-                    'employer_social_czk' => $this->employerSocialCzk(
-                        $social,
-                        $payslip,
-                        $normalizedEmployments,
-                        $preparation->periodStart,
-                        $employeeId,
-                        $blockers,
-                    ),
+                    // S pojistným po vztazích nese 10481 každý formulář sám;
+                    // tady je jen úhrn osoby pro přehled.
+                    'employer_social_czk' => $relationshipContributions !== null
+                        ? ($relationshipEmployerSocialCzk ?? 0)
+                        : $this->employerSocialCzk(
+                            $social,
+                            $payslip,
+                            $normalizedEmployments,
+                            $preparation->periodStart,
+                            $employeeId,
+                            $blockers,
+                        ),
                     'deductions_recorded' => $personEvidence === []
                         ? null
                         : ($personEvidence['attribute_values']['10116'] ?? null),
@@ -1539,6 +1594,161 @@ final class JmhzScenario1DocumentResolver
     }
 
     /**
+     * Pojistné zaměstnance a sleva pracujícího důchodce PO VZTAZÍCH, jak je
+     * zapsal sociální výpočet ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator}).
+     *
+     * Souběh dvou účastných vztahů téže osoby u téhož zaměstnavatele: měsíční
+     * hlášení vykazuje pojistné zaměstnance (10370) a jeho vyměřovací základ
+     * (10477) na formuláři KAŽDÉHO vztahu. Kontrola 118 chce na každém
+     * formuláři 7,1 % z jeho 10477 zaokrouhleno nahoru a kontrola 12 součet
+     * 10370 rovný úhrnu 10028 pojistné části. Výpočet proto zaokrouhluje po
+     * vztazích a pojistné osoby je jejich součet; tady se to jen ověří
+     * a přiřadí formulářům. Nic se nedělí odhadem.
+     *
+     * `null` = výsledek pojistné po vztazích nenese (revize zmrazená dřív).
+     * Pak platí původní cesta přes {@see socialContributionEmployment()}.
+     * Součet, který nesedí na výsledek osoby, je nález, ne tichý návrat.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @param array<string,mixed> $social
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<int,array{before_minor:int,discount_minor:int,participates:bool}>|null
+     */
+    private function relationshipContributions(
+        array $employments,
+        array $social,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?array {
+        $result = [];
+        $before = 0;
+        $discount = 0;
+        foreach ($employments as $employment) {
+            $employmentId = $employment['employment_id'] ?? null;
+            $insurance = $this->object($employment['insurance'] ?? null);
+            $ownBefore = $insurance['employee_contribution_before_discount_minor_units'] ?? null;
+            $ownDiscount = $insurance['working_pensioner_discount_minor_units'] ?? null;
+            if (!is_int($employmentId) || !is_int($ownBefore) || !is_int($ownDiscount)) {
+                return null;
+            }
+            $participation = $this->object($insurance['participation'] ?? null);
+            $result[$employmentId] = [
+                'before_minor' => $ownBefore,
+                'discount_minor' => $ownDiscount,
+                'participates' => ($participation['status'] ?? null) === 'participates',
+            ];
+            $before += $ownBefore;
+            $discount += $ownDiscount;
+        }
+        if ($result === []) {
+            return null;
+        }
+        $personBefore = $social['employee_contribution_before_discount_minor_units']
+            ?? $social['employee_contribution_minor_units']
+            ?? null;
+        $personDiscount = $social['working_pensioner_discount_minor_units'] ?? 0;
+        if ($personBefore !== $before || $personDiscount !== $discount) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_social_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10370', '10491'],
+            );
+
+            return null;
+        }
+        foreach ($result as $employmentId => $row) {
+            if (!$row['participates'] && ($row['before_minor'] !== 0 || $row['discount_minor'] !== 0)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_social_result_not_calculated',
+                    'employment',
+                    $employmentId,
+                    ['10370', '10491'],
+                );
+
+                return null;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Riziková práce, práce zdravotnického záchranáře a člena jednotky HZS
+     * podniku (JMHZ 10273/10274, interakce IN29).
+     *
+     * Zdrojem je sazbová kategorie vztahu podle § 5a odst. 1 ZPSZ, tatáž,
+     * podle které se vyměřovací základ vykazuje pod 10479 (písm. b) nebo 10480
+     * (písm. c). Kategorizace rizika 10274 z ní plyne: písm. c) = 1 (práce
+     * zařazená do kategorie 4), písm. b) = 6 (záchranář) nebo 7 (HZS podniku)
+     * podle volby na kartě vztahu. Hodiny 10273 jsou odpracované hodiny vztahu
+     * (10268), protože zařazení platí pro celý vztah; kontrola 57 hlídá, že je
+     * nepřekročí.
+     *
+     * `null` = běžná sazba, blok se nevykazuje.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array{categorization_codes:list<string>}|null
+     */
+    private function riskWork(mixed $term, ?int $employmentId, array &$blockers): ?array
+    {
+        $values = $this->object($term);
+        $category = $values['social_employer_rate_category']
+            ?? (($values['risky_work'] ?? false) === true ? 'risk_employment' : 'ordinary');
+        if ($category === 'risk_employment') {
+            return ['categorization_codes' => ['1']];
+        }
+        if ($category !== 'rescue_and_company_fire_service') {
+            return null;
+        }
+        $code = $values['jmhz_risk_categorization_code'] ?? null;
+        if (!in_array($code, ['6', '7'], true)) {
+            $blockers[] = $this->blocker(
+                'jmhz_risk_categorization_missing',
+                'employment',
+                $employmentId,
+                ['10274'],
+            );
+
+            return null;
+        }
+
+        return ['categorization_codes' => [$code]];
+    }
+
+    /**
+     * Pojistné zaměstnavatele (10481) JEDNOHO formuláře tak, jak ho počítá
+     * kontrola 315: vyměřovací základ formuláře (10477) sazbou jeho písmene
+     * § 5a odst. 1, zaokrouhleno nahoru. Pokyny MPSV k 10481: částka, kterou
+     * by zaměstnavatel platil, „jako kdyby dotčený zaměstnanec byl jediným
+     * zaměstnancem zaměstnavatele".
+     *
+     * `null` = základ nebo písmeno chybí; neznámé písmeno už blokuje
+     * `jmhz_employer_rate_category_unverified`.
+     *
+     * @param array<string,mixed>|null $socialBase
+     */
+    private function relationshipEmployerSocialCzk(?array $socialBase, string $periodStart): ?int
+    {
+        $base = $socialBase['assessment_base_czk'] ?? null;
+        $letter = $socialBase['paragraph5_letter'] ?? null;
+        if ($base === 0) {
+            return 0;
+        }
+        if (is_int($base) && $base > 0 && is_string($letter)
+            && isset(JmhzControlParameterCatalog::EMPLOYER_SOCIAL_RATE_BY_PARAGRAPH5_LETTER[$letter])
+        ) {
+            return $this->controlParameters()->employerSocialInsuranceCzk(
+                $base,
+                $letter,
+                $periodStart,
+            );
+        }
+
+        return null;
+    }
+
+    /**
      * Pojistné zaměstnance na formuláři (10370) PŘED slevou pracujícího
      * důchodce.
      *
@@ -1618,9 +1828,40 @@ final class JmhzScenario1DocumentResolver
         ?array $evidence,
         ?int $employmentId,
         array &$blockers,
+        ?int $relationshipDiscountMinor = null,
     ): ?array {
         if ($social === []) {
             return null;
+        }
+        if ($relationshipDiscountMinor !== null) {
+            /*
+             * Sleva po vztazích (souběh účastných vztahů): výpočet ji
+             * stanovil a zaokrouhlil u každého zaměstnání samostatně, jak
+             * chtějí pokyny MPSV k 10487, takže se jen opíše na formulář
+             * svého vztahu.
+             */
+            if ($relationshipDiscountMinor === 0 || !$reportsSocial) {
+                return null;
+            }
+            $attributes = $this->object($evidence['attribute_values'] ?? null);
+            if (($attributes['10546'] ?? null) === true) {
+                $blockers[] = $this->blocker(
+                    'jmhz_employee_social_discount_exclusive',
+                    'employment',
+                    $employmentId,
+                    ['10490', '10546'],
+                );
+                return null;
+            }
+            $amount = $this->wholeCzk(
+                $relationshipDiscountMinor,
+                '10491',
+                'employment',
+                $employmentId,
+                $blockers,
+            );
+
+            return $amount === null ? null : ['amount_czk' => $amount];
         }
         $discount = $social['working_pensioner_discount_minor_units'] ?? 0;
         if (!is_int($discount) || $discount < 0) {

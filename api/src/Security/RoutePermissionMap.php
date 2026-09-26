@@ -223,6 +223,10 @@ final class RoutePermissionMap
         // PayrollEmploymentAgendaSummaryAction filtruje po jedné vlastním právem.
         ['GET', '#^/api/payroll/employments/[0-9]+/agenda-summary$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Odložený příjem (JMHZ scénář 8): čtení jako karta vztahu, zápis jako
+        // podmínky vztahu.
+        ['GET', '#^/api/payroll/employments/[0-9]+/deferred-income$#', 'payroll', AccessLevel::READ],
+        ['*', '#^/api/payroll/employments/[0-9]+/deferred-income/[0-9]{4}-[0-9]{2}$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],

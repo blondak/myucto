@@ -1,0 +1,101 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import type { PayrollDeferredIncome } from '@/api/payrollDeferredIncome'
+
+const m = vi.hoisted(() => ({
+  list: vi.fn(),
+  save: vi.fn(),
+  remove: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+}))
+
+vi.mock('@/api/payrollDeferredIncome', () => ({
+  payrollDeferredIncomeApi: { list: m.list, save: m.save, remove: m.remove },
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ success: m.success, error: m.error }),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key,
+    locale: { value: 'cs' },
+  }),
+}))
+
+import EmploymentDeferredIncomePanel from '@/pages/payroll/EmploymentDeferredIncomePanel.vue'
+
+function item(overrides: Partial<PayrollDeferredIncome> = {}): PayrollDeferredIncome {
+  return {
+    id: 5,
+    employment_id: 12,
+    period_start: '2026-07-01',
+    deferred_type: '1',
+    note: null,
+    row_version: 1,
+    updated_at: '2026-07-20 10:00:00',
+    ...overrides,
+  }
+}
+
+function mountPanel(canWrite = true) {
+  return mount(EmploymentDeferredIncomePanel, {
+    props: { employmentId: 12, endDate: '2026-06-30', canWrite },
+  })
+}
+
+describe('EmploymentDeferredIncomePanel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.list.mockResolvedValue({ items: [], supported_types: ['1'] })
+  })
+
+  it('potvrdí odložený příjem za měsíc zúčtování po skončení vztahu', async () => {
+    m.save.mockResolvedValue(item({ note: 'Doplatek odměny' }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="deferred-income-empty"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="deferred-income-add"]').trigger('click')
+    expect((wrapper.find('[data-test="deferred-income-period"]').element as HTMLInputElement).value).toBe('2026-07')
+    expect(wrapper.findAll('[data-test="deferred-income-type"] option').map(option => option.attributes('value')))
+      .toEqual(['1'])
+    await wrapper.find('[data-test="deferred-income-note"]').setValue('Doplatek odměny')
+    await wrapper.find('[data-test="deferred-income-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledWith(12, '2026-07', { deferred_type: '1', note: 'Doplatek odměny' })
+    expect(wrapper.findAll('[data-test="deferred-income-item"]')).toHaveLength(1)
+    expect(m.success).toHaveBeenCalled()
+  })
+
+  it('neuloží měsíc, ve kterém vztah ještě trval', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-test="deferred-income-add"]').trigger('click')
+    await wrapper.find('[data-test="deferred-income-period"]').setValue('2026-06')
+    await wrapper.find('[data-test="deferred-income-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.save).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="deferred-income-invalid"]').text()).toContain('2026-07')
+  })
+
+  it('zruší potvrzení a bez práva zápisu nenabízí úpravy', async () => {
+    m.list.mockResolvedValue({ items: [item()], supported_types: ['1'] })
+    m.remove.mockResolvedValue(true)
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('[data-test="deferred-income-remove"]').trigger('click')
+    await flushPromises()
+    expect(m.remove).toHaveBeenCalledWith(12, '2026-07')
+    expect(wrapper.findAll('[data-test="deferred-income-item"]')).toHaveLength(0)
+
+    const readOnly = mountPanel(false)
+    await flushPromises()
+    expect(readOnly.find('[data-test="deferred-income-add"]').exists()).toBe(false)
+    expect(readOnly.find('[data-test="deferred-income-remove"]').exists()).toBe(false)
+  })
+})

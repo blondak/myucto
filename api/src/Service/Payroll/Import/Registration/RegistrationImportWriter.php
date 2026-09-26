@@ -377,6 +377,9 @@ final class RegistrationImportWriter
             'social_employer_rate_category_evidence', 'social_part_time_discount_reason',
             'social_part_time_discount_evidence', 'social_part_time_discount_notified_on',
             'is_primary',
+            'jmhz_assignment_user_kind', 'jmhz_assignment_user_ico',
+            'jmhz_assignment_user_country_code', 'jmhz_assignment_user_foreign_id',
+            'jmhz_assignment_user_name', 'jmhz_risk_categorization_code',
         ];
         $body = [];
         foreach ($keys as $key) {

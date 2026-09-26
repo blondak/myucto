@@ -312,6 +312,15 @@ export interface PayrollEmploymentTerms {
   jmhz_apz_instrument_code: string | null
   jmhz_functional_benefits_status: PayrollVerifiedTriState
   jmhz_temporary_assignment_status: PayrollVerifiedTriState
+  /**
+   * Uživatel dočasného přidělení (agentura práce, § 43a ZP) pro JMHZ 10252,
+   * resp. 10492–10494: buď IČO, nebo zahraniční osoba. Jen u přidělení „ano".
+   */
+  jmhz_assignment_user_kind?: PayrollAssignmentUserKind | null
+  jmhz_assignment_user_ico?: string | null
+  jmhz_assignment_user_country_code?: string | null
+  jmhz_assignment_user_foreign_id?: string | null
+  jmhz_assignment_user_name?: string | null
   jmhz_orchard_discount_eligible?: boolean
   jmhz_specific_legal_fact_applies?: boolean
   jmhz_ozp_employment_support_applies?: boolean
@@ -333,6 +342,11 @@ export interface PayrollEmploymentTerms {
   risky_work: boolean
   social_employer_rate_category: PayrollSocialEmployerRateCategory
   social_employer_rate_category_evidence: string | null
+  /**
+   * Kategorizace rizika JMHZ 10274 u písm. b) § 5a odst. 1: 6 = zdravotnický
+   * záchranář, 7 = člen jednotky HZS podniku. U písm. c) je kód vždy 1.
+   */
+  jmhz_risk_categorization_code?: PayrollRiskCategorizationCode | null
   social_part_time_discount_reason: PayrollSocialPartTimeDiscountReason
   social_part_time_discount_evidence: string | null
   social_part_time_discount_notified_on: string | null
@@ -342,6 +356,9 @@ export interface PayrollEmploymentTerms {
   row_version: number
   created_at: string
 }
+
+export type PayrollAssignmentUserKind = 'ico' | 'foreign'
+export type PayrollRiskCategorizationCode = '6' | '7'
 
 export interface PayrollEmploymentChecklistItem {
   id: number

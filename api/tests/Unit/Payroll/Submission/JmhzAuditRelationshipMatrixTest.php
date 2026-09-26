@@ -776,6 +776,125 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         );
     }
 
+    /**
+     * Souběh dvou účastných pracovních poměrů téže osoby s pojistným po
+     * vztazích: každý formulář nese svůj 10477, 10370 a 10481 a kontroly
+     * 12 (součet 10370 = 10028) a 118 (10370 = 7,1 % z 10477 nahoru) projdou.
+     */
+    public function testConcurrentParticipatingEmploymentsReportContributionsPerRelationship(): void
+    {
+        $payload = $this->concurrentParticipatingPayload();
+        $resolution = $this->resolutionFor($payload);
+        self::assertSame([], $this->blockerCodes($resolution));
+
+        $xml = (string) preg_replace('/>\s+</', '><', (new JmhzScenario1XmlValidator())->dryRun(
+            $resolution,
+            $this->concurrentEnvelope(),
+        )['xml']);
+
+        self::assertSame(2, substr_count($xml, '<form:pojisteniZamestnanec>'));
+        self::assertStringContainsString('<form:pojisteniZamestnanec><form:socialniPojisteni>71</form:socialniPojisteni>', $xml);
+        self::assertStringContainsString('<form:pojisteniZamestnanec><form:socialniPojisteni>569</form:socialniPojisteni>', $xml);
+        self::assertStringContainsString('<form:pojisteniZamestnavatel><form:socialniPojisteni>248</form:socialniPojisteni>', $xml);
+        self::assertStringContainsString('<form:pojisteniZamestnavatel><form:socialniPojisteni>1985</form:socialniPojisteni>', $xml);
+
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $failed = array_values(array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool =>
+                in_array($finding->controlId, [12, 118, 315, 248], true)
+                && $finding->outcome === JmhzControlOutcome::Failed,
+        ));
+        self::assertSame([], $failed);
+    }
+
+    public function testRelationshipContributionsThatDoNotSumToPersonBlock(): void
+    {
+        $payload = $this->concurrentParticipatingPayload();
+        $payload['people'][0]['employments'][1]['insurance']['employee_contribution_before_discount_minor_units'] = 56_800;
+
+        self::assertContains(
+            'jmhz_scenario1_social_result_not_calculated',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function concurrentParticipatingPayload(): array
+    {
+        $payload = $this->concurrentPayload();
+        $person = &$payload['people'][0];
+        $social = &$person['person_summary']['statutory']['social_insurance'];
+        // 1 000 Kč + 8 001 Kč; 7,1 % po vztazích 71 + 569 = 640 Kč,
+        // 24,8 % po vztazích 248 + 1 985, z úhrnu 9 001 Kč 2 233 Kč.
+        $social['capped_assessment_base_minor_units'] = 900_100;
+        $social['employee_contribution_before_discount_minor_units'] = 64_000;
+        $social['working_pensioner_discount_minor_units'] = 0;
+        $social['employee_contribution_minor_units'] = 64_000;
+        $social['employer_contribution_minor_units'] = 223_300;
+        unset($social);
+        $person['employments'][0]['insurance'] += [
+            'employee_contribution_before_discount_minor_units' => 7_100,
+            'working_pensioner_discount_minor_units' => 0,
+        ];
+        $second = &$person['employments'][1];
+        $second['employment']['relation_type'] = 'employment';
+        $second['term']['activity_code'] = '1';
+        $second['term']['jmhz_relationship_detail_code'] = '1';
+        $second['scenario_resolution'] = [
+            'scenario_key' => 'scenario_1',
+            'activity_code' => '1',
+            'relationship_detail_code' => '1',
+        ];
+        $second['eldp']['eldp_sections'] = [[
+            'ordinal' => 1,
+            'code' => '1++',
+            'valid_from' => '2026-07-01',
+            'valid_to' => '2026-07-31',
+            'insurance_days' => 31,
+            'assessment_base_czk' => 8_001,
+            'excluded_days' => null,
+            'deducted_days' => null,
+        ]];
+        $second['work_month']['jmhz_work_summary']['values']['evidence_days'] = 31;
+        $second['work_month']['jmhz_work_summary']['values']['weekly_work_centihours'] = 1_000;
+        $second['earnings_by_attribute_minor'] = [
+            '10328' => 800_100, '10329' => 800_100, '10330' => 0, '10331' => 0,
+        ];
+        $second['insurance'] = [
+            'relationship_id' => 'employment:102',
+            'kind' => 'employment',
+            'participation' => [
+                'relationship_id' => 'employment:102',
+                'status' => 'participates',
+                'participation_income_minor_units' => 800_100,
+            ],
+            'assessment_base_minor_units' => 800_100,
+            'capped_assessment_base_minor_units' => 800_100,
+            'employer_rate_category' => 'ordinary',
+            'employee_contribution_before_discount_minor_units' => 56_900,
+            'working_pensioner_discount_minor_units' => 0,
+        ];
+        unset($second);
+        $person['person_summary']['totals']['jmhz_amount_minor'] = 900_100;
+        $tax = &$person['person_summary']['statutory']['income_tax'];
+        $tax['relationships'][1]['kind'] = 'employment';
+        $tax['relationships'][1]['taxable_base_minor_units'] = 800_100;
+        $tax['advance_tax']['taxable_income_minor_units'] = 900_100;
+        $tax['advance_tax']['rounded_tax_base_minor_units'] = 910_000;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 136_500;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 136_500;
+        unset($tax);
+        $net = &$person['person_summary']['statutory']['net_pay'];
+        $net['net_before_deductions_minor_units'] = 695_100;
+        $net['net_payable_minor_units'] = 695_100;
+        unset($net, $person);
+
+        return $payload;
+    }
+
     public function testConcurrentEmploymentsNeedExactlyOnePrimary(): void
     {
         $payload = $this->concurrentPayload();

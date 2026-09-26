@@ -262,8 +262,77 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         self::assertSame(100_000, $result->cappedAssessmentBaseMinorUnits);
         self::assertSame(80_000, $result->people[0]->relationships[0]->cappedAssessmentBaseMinorUnits);
         self::assertSame(20_000, $result->people[0]->relationships[1]->cappedAssessmentBaseMinorUnits);
-        self::assertSame(7_100, $result->employeeContributionMinorUnits);
+        // Pojistné zaměstnance po vztazích (kontrola 118 JMHZ): 7,1 % z 800 Kč
+        // = 56,80 → 57 Kč, z 200 Kč = 14,20 → 15 Kč; osoba 72 Kč.
+        self::assertSame(5_700, $result->people[0]->relationships[0]->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(1_500, $result->people[0]->relationships[1]->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(7_200, $result->employeeContributionMinorUnits);
         self::assertSame(24_800, $result->employerContributionMinorUnits);
+    }
+
+    /**
+     * Souběh dvou účastných vztahů: měsíční hlášení vykazuje 10370 na
+     * formuláři každého vztahu a kontrola 118 ČSSZ chce 7,1 % z jeho 10477
+     * zaokrouhleno nahoru. Pojistné osoby je proto součet pojistného vztahů,
+     * ne jedno zaokrouhlení z úhrnu. Stejně tak sleva pracujícího
+     * důchodce (pokyny MPSV k 10487: u každého zaměstnání samostatně).
+     */
+    public function testConcurrentParticipatingRelationshipsRoundEmployeeContributionPerRelationship(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [
+                    $this->relationship('hpp', SocialEmploymentKind::Employment, 4_000_100, 4_000_100),
+                    $this->relationship('dpc', SocialEmploymentKind::Dpc, 500_100, 500_100),
+                ],
+                0,
+                workingPensioner: SocialDiscountEvidence::Verified,
+            ),
+        ]);
+
+        $person = $result->people[0];
+        self::assertSame(SocialCalculationStatus::Calculated, $person->status);
+        [$dpc, $hpp] = $person->relationships;
+        self::assertSame('hpp', $hpp->relationshipId);
+        // 7,1 % z 40 001 Kč = 2 840,071 → 2 841; z 5 001 Kč = 355,071 → 356.
+        self::assertSame(284_100, $hpp->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(35_600, $dpc->employeeContributionBeforeDiscountMinorUnits);
+        // 6,5 % z 40 001 Kč = 2 600,065 → 2 601; z 5 001 Kč = 325,065 → 326.
+        self::assertSame(260_100, $hpp->workingPensionerDiscountMinorUnits);
+        self::assertSame(32_600, $dpc->workingPensionerDiscountMinorUnits);
+        self::assertSame(319_700, $person->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(292_700, $person->workingPensionerDiscountMinorUnits);
+        self::assertSame(27_000, $person->employeeContributionMinorUnits);
+        self::assertNull($person->contributionStep);
+        self::assertSame(4_000_100, $hpp->employeeContributionStep?->inputMinorUnits);
+        self::assertSame(27_000, $result->employeeContributionMinorUnits);
+        $json = $hpp->jsonSerialize();
+        self::assertSame(284_100, $json['employee_contribution_before_discount_minor_units']);
+        self::assertSame(24_000, $json['employee_contribution_minor_units']);
+    }
+
+    public function testSingleContributingRelationshipKeepsPersonCalculation(): void
+    {
+        $result = $this->calculate([
+            $this->person(
+                'person-1',
+                [
+                    $this->relationship('hpp', SocialEmploymentKind::Employment, 4_000_100, 4_000_100),
+                    $this->relationship('dpp', SocialEmploymentKind::Dpp, 300_000, 300_000),
+                ],
+                0,
+            ),
+        ]);
+
+        $person = $result->people[0];
+        [$dpp, $hpp] = $person->relationships;
+        self::assertSame('hpp', $hpp->relationshipId);
+        self::assertSame(284_100, $person->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(284_100, $hpp->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(0, $dpp->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(0, $dpp->workingPensionerDiscountMinorUnits);
+        self::assertNotNull($person->contributionStep);
     }
 
     public function testAnnualMaximumWithMultipleRelationshipsRequiresExplicitAllocationOrder(): void

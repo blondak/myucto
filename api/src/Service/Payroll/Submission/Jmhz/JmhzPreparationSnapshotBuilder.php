@@ -217,10 +217,17 @@ final class JmhzPreparationSnapshotBuilder
                 $scenarioResolution = null;
                 $scenarioKey = null;
                 $defaultInterpretations = [];
+                $deferredType = self::deferredIncomeType($entry, $employment, $periodStart);
                 if (!is_array($term) || array_is_list($term)) {
                     $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
                 } else {
                     $defaultInterpretations = $this->inspectTerm($term, $employmentId, $issues);
+                    /*
+                     * Odložený příjem (scénář 8) se vybírá ručně: podle druhu
+                     * činnosti by vztah spadl do běžného formuláře, jenže ten
+                     * za měsíc po skončení vztahu podat nejde (kontrola 348,
+                     * PPV mimo vykazované období).
+                     */
                     $selection = $this->scenarioSelector()->resolve(
                         is_string($term['activity_code'] ?? null)
                             ? $term['activity_code']
@@ -228,7 +235,11 @@ final class JmhzPreparationSnapshotBuilder
                         is_string($term['jmhz_relationship_detail_code'] ?? null)
                             ? $term['jmhz_relationship_detail_code']
                             : null,
+                        $deferredType === null ? null : 'scenario_8',
                     );
+                    if ($deferredType === '1' && $selection['supported']) {
+                        $selection['preparation_supported'] = true;
+                    }
                     if (!$selection['supported']) {
                         $issueCode = $selection['issue_code'];
                         if (!is_string($issueCode)) {
@@ -261,7 +272,11 @@ final class JmhzPreparationSnapshotBuilder
                         }
                     }
                 }
-                $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
+                // Formulář odloženého příjmu nemá průběh zaměstnání: vztah
+                // v měsíci netrvá a pracovní doba neexistuje.
+                if ($deferredType === null) {
+                    $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
+                }
                 $averageEarning = ($scenarioKey === null
                     || $this->scenarioRequiresAttribute($scenarioKey, '10345'))
                         ? $this->inspectAverageEarning(
@@ -1264,13 +1279,16 @@ final class JmhzPreparationSnapshotBuilder
         }
         $sections = $this->rows($payload['eldp_sections'] ?? null, 'eldp.sections');
         $revisionId = $this->positiveInt($revision['id'] ?? null, 'revision.id');
+        // Odložený příjem (scénář 8) nemá pracovní souhrn: vztah v měsíci
+        // netrvá. Místo toho musí zmrazený řez nést období odloženého příjmu.
+        $deferred = $scenarioKey === 'scenario_8';
         if (($payload['schema_reference'] ?? null) !== JmhzEldpEvidenceSnapshot::SCHEMA_REFERENCE
             || ($scope['supplier_id'] ?? null) !== $supplierId
             || ($scope['source_revision_id'] ?? null) !== $revisionId
             || ($scope['employee_id'] ?? null) !== $employeeId
             || ($scope['employment_id'] ?? null) !== $employmentId
             || ($scope['period_start'] ?? null) !== $periodStart
-            || !in_array($scenarioKey, ['scenario_1', 'scenario_3'], true)
+            || !in_array($scenarioKey, ['scenario_1', 'scenario_3', 'scenario_8'], true)
             || ($scenarioKey === 'scenario_3'
                 && ($scenarioResolution['scenario_key'] ?? null) !== $scenarioKey)
             || ($sourceRevision['input_snapshot_hash'] ?? null) !== ($revision['input_snapshot_hash'] ?? null)
@@ -1279,9 +1297,11 @@ final class JmhzPreparationSnapshotBuilder
             || !is_array($term) || array_is_list($term)
             || ($sourceEvidence['term_id'] ?? null) !== ($term['id'] ?? null)
             || ($sourceEvidence['term_row_version'] ?? null) !== ($term['row_version'] ?? null)
-            || !is_array($workSummary) || array_is_list($workSummary)
-            || ($sourceEvidence['work_summary_id'] ?? null) !== ($workSummary['id'] ?? null)
-            || ($sourceEvidence['work_summary_sha256'] ?? null) !== ($workSummary['summary_sha256'] ?? null)
+            || (!$deferred
+                && (!is_array($workSummary) || array_is_list($workSummary)
+                    || ($sourceEvidence['work_summary_id'] ?? null) !== ($workSummary['id'] ?? null)
+                    || ($sourceEvidence['work_summary_sha256'] ?? null) !== ($workSummary['summary_sha256'] ?? null)))
+            || ($deferred && !is_array($payload['deferred_income'] ?? null))
             || count($sections) !== 1
             || !is_int($eldp['id'] ?? null)
             || !is_string($eldp['source_manifest_sha256'] ?? null)
@@ -1289,6 +1309,25 @@ final class JmhzPreparationSnapshotBuilder
         ) {
             $this->invalid('jmhz_eldp_evidence_mismatch', 'Evidence ELDP neodpovídá zmrazenému pracovnímu vztahu.');
         }
+    }
+
+    /**
+     * Potvrzený typ odloženého příjmu (JMHZ 10548) vztahu skončeného před
+     * vykazovaným měsícem, jinak `null`.
+     *
+     * @param array<string,mixed> $entry
+     * @param array<string,mixed> $employment
+     */
+    private static function deferredIncomeType(array $entry, array $employment, string $periodStart): ?string
+    {
+        $deferred = $entry['deferred_income'] ?? null;
+        $type = is_array($deferred) ? ($deferred['deferred_type'] ?? null) : null;
+        $endDate = $employment['end_date'] ?? null;
+        if (!is_string($type) || !is_string($endDate) || $endDate >= $periodStart) {
+            return null;
+        }
+
+        return $type;
     }
 
     /** @return list<string> */
@@ -1461,11 +1500,26 @@ final class JmhzPreparationSnapshotBuilder
         ) {
             $issues[] = $this->issue('jmhz_apz_instrument_missing', 'employment', $employmentId, ['10233']);
         }
-        if (($term['jmhz_temporary_assignment_status'] ?? null) === 'yes') {
-            $issues[] = $this->issue('jmhz_temporary_assignment_unsupported', 'employment', $employmentId, ['10252', '10457', '10492', '10493', '10494']);
+        /*
+         * Dočasné přidělení (10251 = ANO) potřebuje identifikaci uživatele,
+         * jinak ho kontrola 103 ČSSZ odmítne. Uživatel se vyplňuje na kartě
+         * pracovního vztahu; termín zmrazený dřív, než ho vztah nesl, ho nemá.
+         */
+        if (($term['jmhz_temporary_assignment_status'] ?? null) === 'yes'
+            && !in_array($term['jmhz_assignment_user_kind'] ?? null, ['ico', 'foreign'], true)
+        ) {
+            $issues[] = $this->issue('jmhz_temporary_assignment_user_missing', 'employment', $employmentId, ['10252', '10492', '10493', '10494']);
         }
-        if (($term['risky_work'] ?? null) === true) {
-            $issues[] = $this->issue('jmhz_risky_work_unsupported', 'employment', $employmentId, ['10273', '10274']);
+        /*
+         * Riziková práce a záchranáři/HZS podniku (§ 5a odst. 1 písm. b, c):
+         * hodiny 10273 jsou odpracované hodiny vztahu a kód 10274 plyne ze
+         * sazbové kategorie: u písm. c) je to vždy 1 (kategorie 4), u písm. b)
+         * musí účetní vybrat 6 nebo 7.
+         */
+        if (($term['social_employer_rate_category'] ?? null) === 'rescue_and_company_fire_service'
+            && !in_array($term['jmhz_risk_categorization_code'] ?? null, ['6', '7'], true)
+        ) {
+            $issues[] = $this->issue('jmhz_risk_categorization_missing', 'employment', $employmentId, ['10274']);
         }
 
         return $defaultInterpretations;

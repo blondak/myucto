@@ -144,6 +144,9 @@ final class PayrollSocialOfficeAllocator
         $seenEmployments = [];
         foreach ($people as $person) {
             $personWeights = $zeroByOffice;
+            $relationshipBefore = $zeroByOffice;
+            $relationshipDiscount = $zeroByOffice;
+            $relationshipAmountsKnown = true;
             foreach ($this->relationships($person, $categories !== []) as $relationship) {
                 $employmentId = $relationship['employment_id'];
                 if (isset($seenEmployments[$employmentId])) {
@@ -163,6 +166,20 @@ final class PayrollSocialOfficeAllocator
                     $personWeights[$officeId],
                     $base,
                 );
+                if ($relationship['employee_before_discount'] === null
+                    || $relationship['employee_discount'] === null
+                ) {
+                    $relationshipAmountsKnown = false;
+                } else {
+                    $relationshipBefore[$officeId] = $this->add(
+                        $relationshipBefore[$officeId],
+                        $relationship['employee_before_discount'],
+                    );
+                    $relationshipDiscount[$officeId] = $this->add(
+                        $relationshipDiscount[$officeId],
+                        $relationship['employee_discount'],
+                    );
+                }
                 $weightByOffice[$officeId] = $this->add(
                     $weightByOffice[$officeId],
                     $base,
@@ -195,11 +212,17 @@ final class PayrollSocialOfficeAllocator
                 }
             }
             /*
-             * Pojistné zaměstnance je § 8 odst. 1 spočítané NA OSOBU (jedno
-             * zaokrouhlení z úhrnu jejích vztahů), takže rozpad na účtárny musí
-             * proběhnout uvnitř osoby. Člověk se dvěma vztahy ve dvou účtárnách
-             * je vzácný, ale legitimní — a tichý přesun celé částky pod jednu
-             * registraci by druhé účtárně chyběl v přehledu.
+             * Rozpad na účtárny musí proběhnout uvnitř osoby. Člověk se dvěma
+             * vztahy ve dvou účtárnách je vzácný, ale legitimní — a tichý
+             * přesun celé částky pod jednu registraci by druhé účtárně chyběl
+             * v přehledu.
+             *
+             * Výsledek nese pojistné i slevu po vztazích (zaokrouhlené po
+             * vztazích, jak je vykazují formuláře JMHZ). Pak každá účtárna
+             * dostane přesně pojistné svých vztahů a kontrola 12 ČSSZ
+             * (pojistné za zaměstnance = součet 10370 formulářů registrace)
+             * sedí i u osoby rozdělené mezi dvě registrace. Výsledek zmrazený
+             * dřív se dělí jako dosud poměrem základů.
              */
             $personResult = $this->object(
                 $person['result_snapshot'] ?? null,
@@ -223,14 +246,23 @@ final class PayrollSocialOfficeAllocator
                     'Sleva osoby sociálního pojištění neodpovídá jejímu odvodu.',
                 );
             }
-            foreach ($this->distribute($employeeBefore, $personWeights) as $officeId => $share) {
+            $exact = $relationshipAmountsKnown
+                && array_sum($relationshipBefore) === $employeeBefore
+                && array_sum($relationshipDiscount) === $personDiscount;
+            $beforeShares = $exact
+                ? $relationshipBefore
+                : $this->distribute($employeeBefore, $personWeights);
+            foreach ($beforeShares as $officeId => $share) {
                 $employeeBeforeByOffice[$officeId] = $this->add(
                     $employeeBeforeByOffice[$officeId],
                     $share,
                 );
             }
             if ($personDiscount > 0) {
-                foreach ($this->distribute($personDiscount, $personWeights) as $officeId => $share) {
+                $discountShares = $exact
+                    ? $relationshipDiscount
+                    : $this->distribute($personDiscount, $personWeights);
+                foreach ($discountShares as $officeId => $share) {
                     $employeeDiscountByOffice[$officeId] = $this->add(
                         $employeeDiscountByOffice[$officeId],
                         $share,
@@ -459,7 +491,9 @@ final class PayrollSocialOfficeAllocator
      *   employment_id:int,
      *   capped_assessment_base_minor_units:int,
      *   employer_rate_category:?string,
-     *   part_time_discount_claimed:bool
+     *   part_time_discount_claimed:bool,
+     *   employee_before_discount:?int,
+     *   employee_discount:?int
      * }>
      */
     private function relationships(array $person, bool $requireCategory): array
@@ -504,6 +538,22 @@ final class PayrollSocialOfficeAllocator
                     ? (string) $category
                     : null,
                 'part_time_discount_claimed' => $claimed,
+                'employee_before_discount' => is_int(
+                    $snapshot['employee_contribution_before_discount_minor_units'] ?? null,
+                )
+                    ? $this->nonNegativeInt(
+                        $snapshot['employee_contribution_before_discount_minor_units'],
+                        'pojistné zaměstnance vztahu',
+                    )
+                    : null,
+                'employee_discount' => is_int(
+                    $snapshot['working_pensioner_discount_minor_units'] ?? null,
+                )
+                    ? $this->nonNegativeInt(
+                        $snapshot['working_pensioner_discount_minor_units'],
+                        'sleva zaměstnance vztahu',
+                    )
+                    : null,
             ];
         }
 

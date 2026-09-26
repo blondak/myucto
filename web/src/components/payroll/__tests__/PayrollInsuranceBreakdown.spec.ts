@@ -261,6 +261,57 @@ describe('PayrollInsuranceBreakdown', () => {
     expect(wrapper.text()).not.toContain('regular-employment')
   })
 
+  /**
+   * Souběh účastných vztahů: pojistné se zaokrouhluje po vztazích (JMHZ
+   * kontrola 118), krok osoby neexistuje. Rozklad musí ukázat kroky vztahů,
+   * ne tvrdit, že revize mezikrok neuchovala.
+   */
+  it('shows the per-relationship steps of concurrent participating relationships', async () => {
+    const payload = fixture()
+    if (!payload.social.available) throw new Error('fixture')
+    const step = (input: number, output: number) => ({
+      label: 'monthly-employee-social-insurance-relationship',
+      input_minor_units: input,
+      rate: { decimal: '0.071', numerator: 71, denominator: 1000, scale: 3 },
+      unrounded_numerator: input * 71,
+      unrounded_denominator: 1000,
+      rounding_mode: 'ceil',
+      output_minor_units: output,
+    })
+    payload.social.employee = {
+      contribution_step: null,
+      before_discount_minor: 319_700,
+      discount_step: null,
+      working_pensioner_discount_minor: 0,
+      contribution_minor: 319_700,
+      relationships: [
+        {
+          relationship_id: 'employment:101',
+          capped_assessment_base_minor_units: 4_000_100,
+          before_discount_minor: 284_100,
+          working_pensioner_discount_minor: 0,
+          contribution_step: step(4_000_100, 284_008),
+          discount_step: null,
+        },
+        {
+          relationship_id: 'employment:102',
+          capped_assessment_base_minor_units: 500_100,
+          before_discount_minor: 35_600,
+          working_pensioner_discount_minor: 0,
+          contribution_step: step(500_100, 35_508),
+          discount_step: null,
+        },
+      ],
+    }
+    const wrapper = await mountWith(payload)
+
+    expect(wrapper.find('[data-testid="social-employee-step"]').exists()).toBe(false)
+    const steps = wrapper.get('[data-testid="social-employee-relationship-steps"]').text()
+    expect(steps).toContain('payroll.runs.insurance.employee_per_relationship')
+    expect(steps.match(/payroll\.runs\.insurance\.step_sentence/g)).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('payroll.runs.insurance.step_not_recorded')
+  })
+
   it('shows that the annual maximum capped the social base', async () => {
     const payload = fixture()
     if (!payload.social.available) throw new Error('fixture')

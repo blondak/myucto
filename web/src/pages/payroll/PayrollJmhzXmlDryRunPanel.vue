@@ -301,10 +301,12 @@ function blockerTarget(
           : { person: String(entityId) }
     return { name: 'payroll-people', query: { ...scope, panel: 'employment_terms', field: 'is_primary' } }
   }
-  if (['effective_term_missing', 'jmhz_scenario_activity_code_missing', 'jmhz_employer_part_time_discount_reason_missing', 'jmhz_employer_part_time_discount_working_time_missing'].includes(blocker.code)) {
+  if (['effective_term_missing', 'jmhz_scenario_activity_code_missing', 'jmhz_employer_part_time_discount_reason_missing', 'jmhz_employer_part_time_discount_working_time_missing', 'jmhz_temporary_assignment_user_missing', 'jmhz_risk_categorization_missing'].includes(blocker.code)) {
     const field = blocker.code === 'jmhz_scenario_activity_code_missing' ? 'activity_code'
       : blocker.code === 'jmhz_employer_part_time_discount_reason_missing' ? 'social_part_time_discount_reason'
-        : blocker.code === 'jmhz_employer_part_time_discount_working_time_missing' ? 'weekly_hours' : undefined
+        : blocker.code === 'jmhz_employer_part_time_discount_working_time_missing' ? 'weekly_hours'
+          : blocker.code === 'jmhz_temporary_assignment_user_missing' ? 'jmhz_assignment_user_kind'
+            : blocker.code === 'jmhz_risk_categorization_missing' ? 'jmhz_risk_categorization_code' : undefined
     return { name: 'payroll-people', query: { ...(entityId === null ? {} : { employment: String(entityId) }), panel: 'employment_terms', ...(field ? { field } : {}) } }
   }
   if ([

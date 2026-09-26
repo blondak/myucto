@@ -60,7 +60,8 @@ final class PayrollRunIssueGuidance
         'employment_dates_invalid|relationship_kind_or_dates_invalid' => ['Datum začátku nebo konce pracovního vztahu není platné. Na kartě vztahu opravte jeho časovou platnost.', 'employment'],
         'relationship_kind_missing|relationship_kind_unsupported|relationship_mapping_failed' => ['Druh pracovního vztahu není zadaný nebo jej výpočet neumí zpracovat. Zkontrolujte druh vztahu; je-li správný, požádejte správce o doplnění podpory tohoto druhu.', 'employment'],
         'participation_override_unsupported|tax_regime_override_unsupported' => ['Ruční přepsání účasti na pojištění nebo daňového režimu není podpořené. Na kartě vztahu zkontrolujte podmínky a použijte doloženou zákonnou evidenci místo ručního přepsání.', 'employment'],
-        'post_termination_income_attribution_unverified|income_month_attribution_unverified' => ['U příjmu po skončení vztahu není ověřeno období, do kterého patří. V měsíčních vstupech doplňte původní období příjmu a ověřte jeho přiřazení.', 'inputs'],
+        'post_termination_income_attribution_unverified' => ['Příjem je zúčtovaný až po skončení pracovního vztahu. Jde-li o doplatek po skončení zaměstnání, potvrďte na kartě vztahu v části Odložený příjem tento měsíc zúčtování. Jiný odložený příjem podejte opravným hlášením na ePortálu ČSSZ.', 'deferred_income'],
+        'income_month_attribution_unverified' => ['U příjmu po skončení vztahu není ověřeno období, do kterého patří. V měsíčních vstupech doplňte původní období příjmu a ověřte jeho přiřazení.', 'inputs'],
         'health_coverage_evidence_missing|health_coverage_evidence_invalid|health_coverage_evidence_conflict' => ['Chybí platné zdravotní pojištění nebo se jeho období překrývají. V zákonné evidenci opravte intervaly pojištění tak, aby jednoznačně pokrývaly měsíc mzdy.', 'statutory'],
         'health_insurer_evidence_unverified|health_insurer_snapshot_unverified' => ['Není ověřena zdravotní pojišťovna zaměstnance. V zákonné evidenci potvrďte pojišťovnu a její platnost pro měsíc mzdy.', 'statutory'],
         'health_jurisdiction_evidence_unverified|health_insurance_jurisdiction_unverified' => ['Není ověřeno, ve kterém státě je zaměstnanec zdravotně pojištěn. V zákonné evidenci doplňte příslušnost k pojištění a doložte ji.', 'statutory'],
@@ -146,7 +147,7 @@ final class PayrollRunIssueGuidance
             $query = [];
             if ($employeeId !== null) $query['person'] = $employeeId;
             if ($employmentId !== null) $query['employment'] = $employmentId;
-            if ($target !== 'employment') $query['panel'] = $target === 'dependants' ? 'dependants' : 'statutory_evidence';
+            if ($target !== 'employment') $query['panel'] = in_array($target, ['dependants', 'deferred_income'], true) ? $target : 'statutory_evidence';
             if ($target === 'employment') {
                 $query['panel'] = 'employment_terms';
                 if (in_array('part_time_discount_weekly_working_time_missing', $parts, true)) $query['field'] = 'weekly_hours';

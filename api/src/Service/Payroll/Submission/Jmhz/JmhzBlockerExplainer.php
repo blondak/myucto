@@ -82,14 +82,20 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_order_unsupported' => 'Pořadí vyživovaného dítěte je mimo číselník měsíčního hlášení.',
         'jmhz_scenario1_withholding_tax_unsupported' => 'Srážková daň není pro tento profil JMHZ připravená.',
         /*
-         * Souběh vztahů sám o sobě podání neblokuje (HPP + dohoda pod
-         * rozhodným příjmem se vykáže). Výsledek sociálního pojištění je ale
-         * jen za osobu, takže ho jde přiřadit jen jedinému účastnému vztahu.
+         * Souběh účastných vztahů výpočet počítá po vztazích a hlášení ho
+         * vykáže. Nález zbývá jen u revize spočítané dřív, jejíž výsledek
+         * nese pojistné jen za osobu, a ten se odhadem dělit nesmí.
          */
         'jmhz_scenario1_concurrent_participation_unsupported' => 'Zaměstnanec má v měsíci víc souběžných pracovních '
-            . 'vztahů účastných na sociálním pojištění (nebo pojistné bez účastného vztahu). Pojistné je vypočtené '
-            . 'za osobu a každý formulář hlášení ho musí nést za svůj vztah; rozpočítat ho mezi víc účastných '
-            . 'vztahů aplikace zatím neumí a odhadem ho dělit nesmí.',
+            . 'vztahů účastných na sociálním pojištění (nebo pojistné bez účastného vztahu) a výsledek mzdového '
+            . 'běhu byl spočítaný dřív, než se pojistné počítalo po vztazích. Nese pojistné jen za osobu, a to se '
+            . 'na formuláře vztahů odhadem dělit nesmí.',
+        'jmhz_temporary_assignment_user_missing' => 'Zaměstnanec je dočasně přidělen k uživateli '
+            . '(agentura práce), ale u pracovního vztahu chybí identifikace uživatele. Hlášení ji '
+            . 'u přidělení vyžaduje (kontrola 103 ČSSZ).',
+        'jmhz_risk_categorization_missing' => 'Vztah je zařazený jako zdravotnický záchranář nebo člen '
+            . 'jednotky HZS podniku (§ 5a odst. 1 písm. b) ZPSZ), ale chybí, o který z obou případů '
+            . 'jde. Hlášení ho vykazuje jako kategorizaci rizika (6 nebo 7).',
         'jmhz_scenario1_annual_fields_unsupported' => 'Chybí povinné roční údaje JMHZ.',
         'jmhz_annual_evidence_source_missing' => 'Chybí zmrazená roční evidence zaměstnance pro předchozí zdaňovací období.',
         'jmhz_annual_request_source_missing' => 'Není doloženo, zda zaměstnanec požádal o roční zúčtování.',
@@ -235,10 +241,15 @@ final class JmhzBlockerExplainer
         'jmhz_preparation_not_ready' => 'Otevřete test JMHZ a postupně doplňte zvýrazněné skupiny údajů.',
         'jmhz_primary_employment_unresolved' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu '
             . 'označte právě jeden vztah osoby jako hlavní; ostatní souběžné vztahy nechte jako vedlejší.',
-        'jmhz_scenario1_concurrent_participation_unsupported' => 'Hlášení za tento měsíc podejte ručně '
-            . 'přes ePortál ČSSZ, pojistné rozepište po vztazích podle mzdových listů a součet musí sedět '
-            . 's přehledem o výši pojistného. Zkontrolujte také v Mzdy → Mzdové běhy, zda je účast na '
-            . 'pojištění u vztahů vyhodnocená správně.',
+        'jmhz_scenario1_concurrent_participation_unsupported' => 'Otevřete Mzdy → Mzdové běhy, u běhu '
+            . 'tohoto měsíce zvolte „Otevřít opravu" a mzdy spočítejte znovu, výpočet pojistné rozdělí '
+            . 'po vztazích. Novou revizi schvalte a hlášení připravte znovu.',
+        'jmhz_temporary_assignment_user_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního '
+            . 'vztahu v části Evidence pro ČSSZ u dočasného přidělení vyplňte IČO uživatele, nebo u '
+            . 'zahraniční osoby stát, registrační číslo a název; uložte a přepočítejte mzdový běh.',
+        'jmhz_risk_categorization_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu '
+            . 'v části Výjimečné situace vyberte u „Kategorizace rizika pro JMHZ" práci zdravotnického '
+            . 'záchranáře, nebo člena jednotky HZS podniku; uložte a přepočítejte mzdový běh.',
         'jmhz_employee_social_discount_relationship_unresolved' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte '
             . 'účast pracovních vztahů na sociálním pojištění; nesedí-li, hlášení za tento měsíc podejte ručně '
             . 'přes ePortál ČSSZ.',

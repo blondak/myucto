@@ -489,6 +489,17 @@ kroku nebo návrat ze skončeného vztahu aplikace odmítne.
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
 
+**Odložený příjem po skončení.** Doplatek zúčtovaný v měsíci po skončení
+pracovního poměru (typicky odměna) potvrďte na kartě skončeného vztahu v části
+**Odložený příjem po skončení vztahu**: zvolte měsíc zúčtování a druh
+*Příjem po skončení zaměstnání (1)*. Mzdový běh pak příjem přijme, pojistné
+vypočte za měsíc zúčtování a měsíční hlášení JMHZ ho vykáže samostatným
+formulářem Odložený příjem s ELDP za tento měsíc (0 dnů, kód s „P“ na druhé
+pozici). Bez potvrzení běh příjem po skončení odmítne a z kontroly vás pošle
+přímo sem. Ostatní druhy odloženého příjmu (například doplatek za dřívější
+měsíce trvajícího vztahu) a odložený příjem z dohod podejte opravným hlášením
+na ePortálu ČSSZ.
+
 Oznamovací povinnosti vůči zdravotní pojišťovně se odvozují od **skutečného**
 nástupu, je-li vyplněný; teprve když není, použije se plánovaný. Vztah označený
 jako **Nenastoupil** ani archivovaný vztah už žádnou oznamovací povinnost
@@ -580,14 +591,30 @@ takto označit jako ověřené. Budoucí personální změnu lze naplánovat pod
 posledního připnutého snapshotu, ale mzdový snapshot ji pro JMHZ označí jako
 neověřenou, pokud vykazované období přesahuje jeho ověřené pokrytí. Taková data
 nesmějí projít budoucí readiness bránou ani se odeslat bez novějšího snapshotu.
-Při dočasném přidělení
-**Ano** je navíc nutné doplnit identitu alespoň jednoho uživatele; samotný
-příznak nestačí k přípravě podání.
+Při dočasném přidělení **Ano** (agentura práce) se karta zeptá na uživatele,
+ke kterému je zaměstnanec přidělen: buď **česká firma nebo podnikatel** s IČO
+(osm číslic s platnou kontrolní číslicí), nebo **zahraniční osoba** se státem,
+osmimístným registračním číslem a názvem. Hlášení uživatele vykazuje u každého
+měsíce přidělení; bez něj ho příprava hlášení zastaví s odkazem zpět na kartu
+vztahu. Přidělení k nepodnikající fyzické osobě (identifikace rodným číslem)
+aplikace nevykazuje, takové hlášení podejte přes ePortál ČSSZ.
+
+Sazbová kategorie § 5a odst. 1 ve skupině výjimečných situací se promítá i do
+měsíčního hlášení jako riziková práce. U **rizikového zaměstnání** hlášení
+vykáže kategorizaci rizika 1 (práce kategorie 4) a hodiny rizikové práce rovné
+odpracovaným hodinám vztahu. U kategorie **zdravotnický záchranář nebo hasič
+podniku** vyberte pole **Kategorizace rizika pro JMHZ**: práce zdravotnického
+záchranáře, nebo práce člena jednotky HZS podniku. Dokud volba chybí, příprava
+hlášení se zastaví a odkáže na toto pole.
 
 Jedna osoba může mít souběžně například HPP a DPP nebo samostatný pracovní poměr
 a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah označen
 jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
-identitu.
+identitu. Když je v měsíci účastných na sociálním pojištění víc vztahů téže
+osoby, počítá se pojistné zaměstnance i sleva pracujícího důchodce u každého
+vztahu zvlášť a zaokrouhluje se po vztazích. Tak je vykazuje i měsíční hlášení
+na formuláři každého vztahu a pojistné za zaměstnance v přehledu je jejich
+součet. Rozklad pojistného na kartě osoby ukáže výpočet každého vztahu.
 
 ### 86.11.1 OIČ / IK MPSV a ID PPV pro JMHZ
 
