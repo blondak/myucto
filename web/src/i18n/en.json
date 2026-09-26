@@ -5691,7 +5691,8 @@
         },
         "end_hint": "After ending, the card scrolls to the Termination panel. There you enter the manner and reason of termination (notice, agreement, § 52), severance pay, leave compensation and the data for the labour office confirmation.",
         "delete_title": "Delete employment",
-        "delete_confirm": "Delete employment"
+        "delete_confirm": "Delete employment",
+        "preregistered_next": "The employment is pre-registered. The PREZEC registration has not been created yet — prepare it in the ČSSZ Registration panel with Prepare; only then does it appear in the submission queue."
       },
       "insurance_mode": {
         "automatic": "Automatic from rules",

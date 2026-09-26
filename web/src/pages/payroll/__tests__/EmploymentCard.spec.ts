@@ -88,7 +88,7 @@ vi.mock('@/pages/payroll/EmploymentDeferredIncomePanel.vue', () => ({
   default: { template: '<div data-test="deferred-income" />' },
 }))
 
-const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMocks,
@@ -884,6 +884,26 @@ describe('EmploymentCard', () => {
     expect(payrollApi.deleteEmployment).toHaveBeenCalledWith(10, 1)
     expect(wrapper.emitted('deleted')).toEqual([[10]])
     confirm.mockRestore()
+    wrapper.unmount()
+  })
+
+  /* PREZEC osoby C se neobjevil ve frontě: předregistrace podání nezakládá. */
+  it('po předregistraci řekne, že PREZEC se připraví v panelu registrace, a sjede na něj', async () => {
+    const planned = employment()
+    planned.status = 'planned'
+    planned.allowed_transitions = ['preregistered']
+    vi.mocked(payrollApi.transitionEmployment).mockReset().mockResolvedValue({ ...planned, status: 'preregistered' })
+    const wrapper = await mountCard(planned, {
+      props: { employment: planned, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-transition-preregistered"]').trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledTimes(1)
+    expect(toastMocks.info).toHaveBeenCalledWith('payroll.people.card_confirm.preregistered_next')
+    expect(vi.mocked(revealField).mock.calls.some(([selector]) => selector === '[data-test="employment-registration"]')).toBe(true)
     wrapper.unmount()
   })
 

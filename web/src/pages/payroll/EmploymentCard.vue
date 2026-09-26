@@ -956,6 +956,14 @@ async function transition(target: PayrollEmploymentStatus) {
       await nextTick()
       void focusSection('termination')
     }
+    // Předregistrace mění jen stav vztahu. Přihláška PREZEC vznikne až
+    // tlačítkem Připravit v panelu Registrace ČSSZ — bez tohohle upozornění
+    // ji uživatel hledal ve frontě podání, kde ještě nebyla.
+    if (target === 'preregistered') {
+      toast.info(t('payroll.people.card_confirm.preregistered_next'))
+      await nextTick()
+      void focusSection('registration')
+    }
   } catch (error) {
     // Server jmenuje překážku („ukončení nesmí předcházet nástupu", „období je
     // už zúčtované"). Obecné „nepovedlo se" ji zakrylo a uživatel neměl podle

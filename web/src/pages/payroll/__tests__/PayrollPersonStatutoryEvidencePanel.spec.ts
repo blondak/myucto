@@ -1140,6 +1140,18 @@ describe('PayrollPersonStatutoryEvidencePanel — výchozí záznamy jedním pot
     expect(dialog.props('effectiveOn')).toBe('2020-03-01')
   })
 
+  /* Q8-48: u budoucího nástupu hlásila evidence k dnešku chybějící údaje. */
+  it('u budoucího nástupu vyhodnocuje evidenci k datu nástupu', async () => {
+    const future = new Date()
+    future.setMonth(future.getMonth() + 3)
+    const start = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-15`
+    mount(PayrollPersonStatutoryEvidencePanel, {
+      props: { personId: 17, canWrite: true, employmentStartOn: start },
+    })
+    await flushPromises()
+    expect(mocks.statutoryEvidence.mock.calls[0]?.[1]).toBe(start)
+  })
+
   it('bez oprávnění k zápisu doplnění nenabízí', async () => {
     const wrapper = mount(PayrollPersonStatutoryEvidencePanel, { props: { personId: 17, canWrite: false } })
     await flushPromises()

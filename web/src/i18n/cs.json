@@ -5691,7 +5691,8 @@
         },
         "end_hint": "Po ukončení karta sjede na panel Skončení vztahu. Tam zadáte způsob a důvod skončení (výpověď, dohoda, § 52), odstupné, proplacení dovolené a podklady pro potvrzení pro úřad práce.",
         "delete_title": "Smazat pracovní vztah",
-        "delete_confirm": "Smazat vztah"
+        "delete_confirm": "Smazat vztah",
+        "preregistered_next": "Vztah je předregistrovaný. Přihláška PREZEC ale ještě nevznikla — připravte ji v panelu Registrace ČSSZ tlačítkem Připravit; teprve pak se objeví ve frontě podání."
       },
       "insurance_mode": {
         "automatic": "Automaticky podle pravidel",
