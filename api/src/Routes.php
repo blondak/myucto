@@ -2029,6 +2029,10 @@ final class Routes
                 '/submissions/jmhz-external',
                 [PayrollJmhzExternalSubmissionAction::class, 'list'],
             );
+            $g->get(
+                '/submissions/jmhz-external/{id:[0-9]+}',
+                [PayrollJmhzExternalSubmissionAction::class, 'detail'],
+            );
             $g->delete(
                 '/submissions/jmhz-external/{id:[0-9]+}',
                 [PayrollJmhzExternalSubmissionAction::class, 'delete'],

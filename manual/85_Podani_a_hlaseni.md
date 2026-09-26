@@ -311,9 +311,15 @@ oddíl s podáními, která za ni podal předchozí program: měsíční hláše
 a registrace zaměstnanců převzaté převodem z PAMICA
 ([§ 108.12](108_Prechod_z_PAMICA.md#10812-odeslana-hlaseni-jmhz-a-registrace))
 a měsíční hlášení nahraná jako XML v `Mzdy → Importy → JMHZ`.
-U každého je období, druh (řádné, opravné, registrace), stav odeslání, kdy
-podání odešlo a kdy ho ČSSZ přijala a kolik formulářů se spárovalo se vztahy
-v evidenci. Firma bez převodu tenhle oddíl nevidí.
+Oddíl je rozdělený na **měsíční hlášení JMHZ** (seskupená po období)
+a **registrace zaměstnanců** (seskupené po měsíci odeslání). U každého podání
+je druh, stav, akce s počtem formulářů (u registrací *A1 přihláška*,
+*A2 odhláška*, *A3 změna / dohlášení údajů*), jména osob, u registrací den
+účinnosti, výsledek (přijato ČSSZ, odesláno bez zaznamenaného přijetí,
+neodesláno) a kolik osob se spárovalo se vztahy v evidenci. Tlačítko
+**Detail** ukáže všechny formuláře podání: osobu s odkazem na její kartu,
+akci a den účinnosti; formulář, který se se vztahem nespároval, nese číslo
+vztahu v předchozím programu. Firma bez převodu tenhle oddíl nevidí.
 
 **Měsíc, za který řádné hlášení odešlo, MyÚčto znovu nepodá.** Druhé řádné
 hlášení za stejný měsíc ČSSZ zamítne jako duplicitní (kontrola č. 22 katalogu
@@ -325,11 +331,14 @@ jako opravné podání z programu, který řádné hlášení podal.
 připravil, ale neodeslal, oddíl na to upozorní: ČSSZ ho nemá a je potřeba ho
 podat.
 
-**Záznam, který neodpovídá, odeberte.** Tlačítko *Odebrat* u řádku po
-potvrzení záznam z historie smaže, třeba když hlášení ve skutečnosti neodešlo
-nebo soubor patří jiné firmě. Za měsíc bez odeslaného hlášení pak MyÚčto řádné
-hlášení připraví. Odebírá uživatel s oprávněním zápisu podání
-(`payroll.submissions`).
+**Záznam, který převod převzal chybně, jde odebrat.** Volba *Odebrat
+z historie* je v nabídce **…** u podání. Dialog vysvětlí, kdy odebrání použít
+(podání ve skutečnosti neodešlo, patří jiné firmě, nahrálo se omylem) a co se
+stane: za měsíc bez odeslaného řádného hlášení MyÚčto hlášení připraví
+a vztahy z odebrané registrace přestanou v Dohlášení údajů (A3) platit za
+vyřízené předchozím programem. Podání, které ČSSZ opravdu dostala, v historii
+nechte. Po zopakování převodu se záznam vrátí. Odebírá uživatel s oprávněním
+zápisu podání (`payroll.submissions`).
 
 ## 85.8 Kontroly a bezpečnost
 
