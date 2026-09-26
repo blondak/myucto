@@ -829,11 +829,30 @@ v zúčtovaném příjmu celkem a v základu daně; do mzdy za práci ani do ná
 mzdy nepatří (pokyny MPSV k vyplnění hlášení), takže složka zařazení do rozpadu
 mzdy nepotřebuje. V **Mzdové složky** má u JMHZ štítek **Jen do úhrnu příjmu**.
 
+Před založením odstupného vyplňte **Počet násobků průměru pro srážky**. Z něj
+se počítají exekuční a insolvenční srážky z odstupného: každý násobek jako
+mzda za jeden měsíc doby poskytování odstupného, s vlastní nezabavitelnou
+částkou (§ 299 odst. 4 o. s. ř.). Pole je předvyplněné z návrhu podle § 67
+zákoníku práce a pod ním sekce ukáže, do kdy doba poskytování odstupného trvá.
+Nastoupil-li zaměstnanec v té době k jinému plátci nebo mu vznikl jiný příjem,
+vyplňte **Jiný příjem povinného od** a případně potvrďte, že nezabavitelnou
+částku započítává nový plátce. Podrobnosti výpočtu jsou v kapitole 88.9.6.
+
 U výpovědi nebo dohody pro dlouhodobou zdravotní nezpůsobilost z pracovního
 úrazu nebo nemoci z povolání náleží jednorázová náhrada dvanáctinásobku
-průměrného měsíčního výdělku podle § 271ca zákoníku práce. Sekce ji spočítá,
-ale jako vstup ji nezakládá — založte ji ručně na složce, jejíž zařazení
-určíte, a v odhlášce A2 ji uveďte jako jednorázovou náhradu.
+průměrného měsíčního výdělku podle § 271ca zákoníku práce. Sekce ji spočítá
+a nabídne ji založit tlačítkem **Založit náhradu**. Vyberte, **Kdo náhradu
+vyplácí**, a **Den výplaty**:
+
+- Vyplácí-li ji **zaměstnavatel**, vznikne schválený vstup složky **Jednorázová
+  náhrada při skončení (§ 271ca ZP)** za měsíc výplaty. Náhrada podléhá dani a srážkám,
+  pojistné z ní neplyne. V den skončení ji lze vyplatit jen podle písemné dohody
+  (§ 271ca odst. 2); výplata v některém z dalších měsíců se zúčtuje jako
+  odložený příjem a aplikace ho pro měsíční hlášení rovnou potvrdí.
+- Vyplácí-li ji **pojišťovna přímo zaměstnanci**, mzdový vstup nevzniká, aby se
+  výplata nezdvojila; náhrada zůstane zapsaná pro odhlášku A2.
+
+V odhlášce A2 se náhrada předvyplní jako jednorázová náhrada.
 
 ### 86.13.4 Úmrtí zaměstnance
 
@@ -855,3 +874,28 @@ Běží-li u zaměstnance exekuce, insolvence nebo dohody o srážkách, sekce n
 upozorní s proklikem. Ukončete je v příslušné agendě; aplikace je sama
 nezastavuje. Odhláška A2 se u úmrtí předvyplní s příznakem skončení úmrtím
 a bez podkladů pro Úřad práce.
+
+### 86.13.5 Zápočtový list a pokračující srážky
+
+Zápočtový list (potvrzení o zaměstnání, § 313 odst. 1 zákoníku práce) se
+vytváří v části **Dokumenty při skončení vztahu** na kartě ukončeného vztahu
+(kapitola 83). Blok **Pokračující srážky ze mzdy** nabídne každou srážku, která
+se ke dni skončení ze mzdy provádí a v níž má pokračovat další plátce:
+
+- **Exekuce** s nesplacenou pohledávkou, i doručená a dosud neověřená,
+- **Dohoda o srážkách** — aktivní nebo pozastavená dohoda podle § 146 písm. b)
+  zákoníku práce, jejíž limit ještě není vyčerpaný; srážky ze zákona podle
+  § 147 odst. 1 (vrácení zálohy, nevyúčtovaná záloha, náhrada mzdy bez nároku)
+  jsou pohledávky tohoto zaměstnavatele, které další plátce srážet nesmí, a proto
+  se nenabízejí,
+- **Insolvence** — zahájené insolvenční řízení nebo oddlužení zapsané v měsíční
+  evidenci srážek za měsíc skončení.
+
+U každé srážky doplňte oprávněného, orgán, který srážku nařídil, a spisovou
+značku; u dohod a insolvence je předvyplněno, co zná evidence. Částky se
+nezadávají, přebírají se z evidence srážek. Zápočtový list se nevydá, dokud
+zadané údaje neodpovídají všem srážkám, které evidence zná — chybějící dohoda
+nebo insolvence skončí hláškou, že právní údaje neodpovídají evidenci.
+
+Soudu nebo exekutorovi oznamte skončení poměru zvlášť do jednoho týdne
+(§ 295 odst. 2 o. s. ř., kapitola 88.9.5).

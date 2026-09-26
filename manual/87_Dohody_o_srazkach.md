@@ -46,6 +46,21 @@ po jehož vyčerpání se srážka přestane uplatňovat. Částku lze zadat pev
 nebo procentem ze zadaného základu — z procenta a základu se uloží pevná
 částka, protože mzdový běh zmrazuje podklady dřív, než zná výsledný příjem.
 
+U každé dohody vyberte **Právní titul srážky**:
+
+- **Dohoda o srážkách ze mzdy** (§ 146 písm. b) zákoníku práce) — pořadí vůči
+  exekucím určuje den doručení dohody,
+- **Záloha na mzdu k vrácení** (§ 147 odst. 1 písm. c)), **Nevyúčtovaná
+  záloha** (písm. d)) nebo **Náhrada mzdy bez nároku** (písm. e)) — srážka ze
+  zákona, ke které souhlas zaměstnance není potřeba. U ní je povinný **Den
+  zahájení srážek**; podle něj se určuje pořadí. Sráží se jen z první třetiny
+  zbytku čisté mzdy jako nepřednostní pohledávka. Začínají-li srážky ze zákona
+  týž den, jdou v pořadí písmen c), d), e) a dohody až po nich.
+
+Srážky ze zákona podle § 147 odst. 1 se do zápočtového listu jako pokračující
+nepřenášejí — jsou to pohledávky tohoto zaměstnavatele a další plátce mzdy je
+srážet nesmí (kapitola 86.13.5).
+
 Pořadí zadáváš v rozsahu 10–9999. Nižší pásmo je vyhrazené zákonným
 a exekučním srážkám, takže dobrovolná dohoda nikdy nepředběhne přednostní
 pohledávku ani neobejde nezabavitelnou částku — výpočet dobrovolné srážky vždy
