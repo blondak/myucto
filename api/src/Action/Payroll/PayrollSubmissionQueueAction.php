@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionQueueService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionRetryConfirmationService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -39,7 +40,49 @@ final class PayrollSubmissionQueueAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionGate $productionGate,
         private readonly PayrollSubmissionAbandonService $abandonService,
+        private readonly PayrollSubmissionRetryConfirmationService $retryConfirmation,
     ) {}
+
+    /**
+     * Výslovné potvrzení opakování u podání „možná doručeno". Samo nic
+     * neodesílá: jen uvolní bránu odeslání a zapíše, kdo a proč opakování
+     * pustil. Odeslání pak jde běžnou cestou se stejným zmrazeným dokumentem.
+     *
+     * @param array{submissionId:string} $args
+     */
+    public function confirmRetry(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
+        $environment = self::environmentIn($body['environment'] ?? null)
+            ?? self::environmentIn($request->getQueryParams()['environment'] ?? null);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí podání musí být test nebo production.');
+        }
+        $submissionId = $args['submissionId'] ?? '';
+        if (preg_match('/^[1-9][0-9]*$/D', $submissionId) !== 1) {
+            return $this->invalid($response, 'Identifikátor podání musí být kladné celé číslo.');
+        }
+        $reason = $body['reason'] ?? null;
+
+        try {
+            $result = $this->retryConfirmation->confirm(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $submissionId,
+                is_string($reason) ? $reason : '',
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return $this->noStore(Json::error($response, 'conflict', $exception->getMessage(), 409));
+        }
+
+        return $this->noStore(Json::ok($response, $result));
+    }
 
     public function list(Request $request, Response $response): Response
     {
@@ -412,6 +455,7 @@ final class PayrollSubmissionQueueAction
                 (int) $submissionId,
                 (int) $rowVersion,
                 $reason,
+                $this->userId($request),
             );
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());

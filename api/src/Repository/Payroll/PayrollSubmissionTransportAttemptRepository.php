@@ -24,7 +24,13 @@ final class PayrollSubmissionTransportAttemptRepository
 {
     private const TABLE = 'payroll_submission_transport_attempts';
 
-    private const DUE_POLL_CONDITION = 'status = "awaiting_protocol" AND correlation_reference IS NOT NULL';
+    /**
+     * Doptává se i pokus „možná doručeno", pokud má CorrelationID: tam
+     * potvrzení převzetí dorazilo a spadl až zápis, protokol se tedy dá
+     * dohledat. To je první cesta k rozhodnutí, ne opakované odeslání.
+     */
+    private const DUE_POLL_CONDITION = 'status IN ("awaiting_protocol", "possibly_delivered")'
+        . ' AND correlation_reference IS NOT NULL';
 
     /**
      * Tvrdý strop stránky historie přenosů. Ledger je append-only, takže roste
@@ -450,13 +456,17 @@ final class PayrollSubmissionTransportAttemptRepository
                -- Důvodů, proč ČSSZ podání nepřijme, je víc, než kolik jich umíme
                -- z protokolu spolehlivě rozpoznat, takže o opakování rozhoduje
                -- člověk, ne automatika podle textu odpovědi.
+               -- Třetí výjimka je pokus „možná doručeno", u kterého účetní
+               -- výslovně potvrdila opakování (`expired` s kódem
+               -- `retry_confirmed_by_user`); sám `possibly_delivered` blokuje.
                -- TOTOŽNÉ pravidlo jako PayrollDispatchGate::attemptAllowsRetry().
                LEFT JOIN ' . self::TABLE . ' attempt
                  ON attempt.supplier_id = submission.supplier_id
                 AND attempt.environment = submission.environment
                 AND attempt.submission_id = submission.id
                 AND NOT (attempt.status = "failed" AND attempt.sent_at IS NULL)
-                AND NOT (attempt.status = "expired" AND attempt.error_code = "abandoned_by_user")
+                AND NOT (attempt.status = "expired"
+                         AND attempt.error_code IN ("abandoned_by_user", "retry_confirmed_by_user"))
                LEFT JOIN submission_outbox outbox
                  ON outbox.id = (
                     SELECT MAX(candidate.id)
@@ -1171,6 +1181,64 @@ final class PayrollSubmissionTransportAttemptRepository
                  response_http_status = ?, next_retry_at = ?,
                  row_version = row_version + 1',
             [$errorCode, $message, $httpStatus, $nextRetryAt],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zaznamená pokus, u kterého požadavek MOHL dorazit k ČSSZ, ale odpověď
+     * se nevrátila nebo se nedala zapsat. Na rozdíl od `failed` bez `sent_at`
+     * tenhle stav opakování blokuje, dokud ho účetní výslovně nepotvrdí.
+     *
+     * CorrelationID se zapíše, jen když ho odpověď nesla (potvrzení převzetí
+     * dorazilo, spadl až zápis). Pak podle něj jde protokol dohledat.
+     *
+     * @return array<string,mixed>
+     */
+    public function markPossiblyDelivered(
+        int $attemptId,
+        string $errorCode,
+        string $errorMessage,
+        ?int $httpStatus,
+        ?string $correlationReference,
+        int $expectedVersion,
+    ): array {
+        if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $errorCode) !== 1) {
+            throw new \DomainException(
+                'Kód chyby pokusu o odeslání musí odpovídat ^[a-z][a-z0-9_]{0,63}$, dostali jsme "'
+                . $errorCode . '".',
+            );
+        }
+        $message = trim($errorMessage);
+        if ($message === '') {
+            throw new \DomainException(
+                'Pokus „možná doručeno" musí nést i text chyby, nejen kód.',
+            );
+        }
+        if (mb_strlen($message) > self::ERROR_MESSAGE_MAX_LENGTH) {
+            $message = mb_substr($message, 0, self::ERROR_MESSAGE_MAX_LENGTH);
+        }
+        if ($httpStatus !== null) {
+            self::assertHttpStatus($httpStatus);
+        }
+        if ($correlationReference !== null
+            && preg_match('/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/D', $correlationReference) !== 1
+        ) {
+            $correlationReference = null;
+        }
+
+        // S CorrelationID je převzetí DOLOŽENÉ (potvrzení dorazilo, spadl až
+        // zápis), takže pokus dostane i `sent_at` a automatika se podle
+        // CorrelationID doptá na protokol. Bez něj doklad o odeslání není.
+        return $this->mutate(
+            'SET status = "possibly_delivered", error_code = ?, error_message = ?,
+                 response_http_status = ?,
+                 correlation_reference = COALESCE(correlation_reference, ?),
+                 sent_at = CASE WHEN ? IS NOT NULL THEN COALESCE(sent_at, UTC_TIMESTAMP()) ELSE sent_at END,
+                 next_retry_at = NULL,
+                 row_version = row_version + 1',
+            [$errorCode, $message, $httpStatus, $correlationReference, $correlationReference],
             $attemptId,
             $expectedVersion,
         );

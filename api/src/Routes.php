@@ -1565,6 +1565,13 @@ final class Routes
                 '/submissions/queue/{submissionId:[0-9]+}/abandon',
                 [PayrollSubmissionQueueAction::class, 'abandon'],
             );
+            // Potvrzení opakování u podání „možná doručeno": požadavek odešel,
+            // odpověď nepřišla. Opakuje se až po dohledání protokolu a se
+            // stejným GUID; samo potvrzení nic neodesílá.
+            $g->post(
+                '/submissions/queue/{submissionId:[0-9]+}/confirm-retry',
+                [PayrollSubmissionQueueAction::class, 'confirmRetry'],
+            );
             // Hromadné odeslání. Cesta je bez ID, protože předmětem je DÁVKA;
             // klient ji posílá po porcích, aby žádný požadavek neběžel minuty.
             $g->post(

@@ -444,6 +444,9 @@ final class PayrollJmhzTransportAction
             'settled' => $outcome->isSettled(),
             'report' => $outcome->report === null ? null : [
                 'status' => $outcome->report->status->name,
+                // Jediná chyba „shodné podání už existuje": originál je u ČSSZ,
+                // nejde o zamítnutí, po kterém se posílá nové podání.
+                'original_at_cssz' => $outcome->report->originalAlreadyAtCssz(),
                 // Chyby se posílají vysvětlené: samotná hláška z protokolu
                 // říká, co je špatně, ale ne u koho a ve kterém údaji.
                 'errors' => $this->explainer->explain($outcome->report),

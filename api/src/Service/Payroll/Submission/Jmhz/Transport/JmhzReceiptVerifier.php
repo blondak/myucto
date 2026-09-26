@@ -157,7 +157,7 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
         $formOutcomes = $this->formOutcomes($report);
 
         return new PayrollVerifiedReceipt(
-            $report->status->payrollRemoteStatus(),
+            $report->payrollRemoteStatus(),
             $report->correlationReference,
             $this->partStatuses($formOutcomes),
             $formOutcomes,

@@ -1403,8 +1403,11 @@ final class PayrollSubmissionRepository
      * skutečně dostala, je artefakt odeslaného XML; dohledávat symbol jinde
      * (nastavení pracovišť) by mohlo tiše sáhnout po jiném.
      *
-     * Bere se NEJSTARŠÍ odchozí XML, protože to je ten dokument, který se
-     * zmrazil a odeslal.
+     * Bere se NEJNOVĚJŠÍ odchozí XML. Podání má běžně jediné; druhé vzniká jen
+     * znovuzmrazením po zamítnutí zpracováním (řádné podání dostává nový GUID,
+     * {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzRejectedSubmissionRefreezeService}),
+     * a odesílat, dotazovat se i navazovat opravu či storno se pak musí na TEN
+     * nový dokument. Původní zůstává v archivu jako doklad o prvním odeslání.
      */
     public function findOutboundXmlArtifactId(
         int $supplierId,
@@ -1489,7 +1492,7 @@ final class PayrollSubmissionRepository
                 AND submission_id = ?
                 AND artifact_kind = ?
                 AND direction = "outbound"
-              ORDER BY id
+              ORDER BY id DESC
               LIMIT 1',
         );
         $statement->execute([

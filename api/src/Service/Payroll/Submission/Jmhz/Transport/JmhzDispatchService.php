@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 
@@ -63,6 +64,13 @@ readonly class JmhzDispatchService
      * `markSubmitted()` přicházela PO odeslání, tedy k ničemu.
      */
     private const SENDABLE_STATUS = 'ready';
+
+    /**
+     * Výslovné odmítnutí podání už při převzetí. Jediná odpověď po odeslání,
+     * po které u ČSSZ prokazatelně nic nezůstalo; všechno ostatní je
+     * „možná doručeno".
+     */
+    private const IMMEDIATE_REJECTION_CODE = 'jmhz_dispatch_rejected';
 
     public function __construct(
         private PayrollSubmissionTransportAttemptRepository $attempts,
@@ -137,6 +145,7 @@ readonly class JmhzDispatchService
                 'Chybí datová věta zmrazeného podání.',
             );
         }
+        $this->assertNoOpenAttempt($supplierId, $environment, $submissionId, $idempotencyKey);
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
 
@@ -182,21 +191,36 @@ readonly class JmhzDispatchService
         try {
             $response = $client->submit($sealed->sendableXml(null));
         } catch (JmhzTransportException $exception) {
-            $this->recordFailure(
-                $attempt,
-                $exception->errorCode,
-                $exception->getMessage(),
-                $exception->remoteHttpStatus,
-            );
+            // Vypršený čas čtení, spadlé spojení nebo 5xx: požadavek odešel
+            // a ČSSZ ho mohla převzít. Zapsat to jako `failed` bez `sent_at`
+            // by znamenalo „nic neodešlo" a brána by pustila opakování.
+            if ($exception->possiblyDelivered) {
+                $this->recordPossibleDelivery(
+                    $attempt,
+                    $exception->errorCode,
+                    $exception->getMessage(),
+                    $exception->remoteHttpStatus,
+                    null,
+                );
+            } else {
+                $this->recordFailure(
+                    $attempt,
+                    $exception->errorCode,
+                    $exception->getMessage(),
+                    $exception->remoteHttpStatus,
+                );
+            }
 
             throw $exception;
         }
 
         // Od tohoto místa je zpráva U ČSSZ. Cokoli, co selže dál, musí zůstat
-        // v ledgeru jako neúspěšný pokus, ne jako nezahájený: nečitelná
-        // odpověď, potvrzení bez CorrelationID i ztracený optimistický zámek
-        // by jinak nechaly řádek ve stavu `prepared`, obsluha by odeslala
-        // znovu a ČSSZ by druhé podání odmítla jako duplicitu.
+        // v ledgeru jako „možná doručeno", ne jako nezahájený ani jako
+        // neúspěšný pokus: nečitelná odpověď, potvrzení bez CorrelationID
+        // i ztracený optimistický zámek by jinak pustily opakování a ČSSZ by
+        // druhé podání odmítla jako duplicitu (20022). Jedinou výjimkou je
+        // výslovné odmítnutí na vstupu, po kterém u ČSSZ nic nezůstalo.
+        $acknowledgement = null;
         try {
             $acknowledgement = $this->acknowledgements->parse(
                 $response->body,
@@ -207,7 +231,12 @@ readonly class JmhzDispatchService
                 // protokol o zamítnutí, nebo něco neznámého.
                 $failure = $this->describeImmediateFailure($response->body);
 
-                throw new JmhzTransportException($failure[0], $failure[1], $response->httpStatus);
+                throw new JmhzTransportException(
+                    $failure[0],
+                    $failure[1],
+                    $response->httpStatus,
+                    $failure[0] !== self::IMMEDIATE_REJECTION_CODE,
+                );
             }
 
             $attempt = $this->attempts->markSent(
@@ -225,14 +254,20 @@ readonly class JmhzDispatchService
                 ),
             );
         } catch (\Throwable $exception) {
-            $this->recordFailure(
-                $attempt,
-                $exception instanceof JmhzTransportException
-                    ? $exception->errorCode
-                    : 'jmhz_dispatch_send_unresolved',
-                $exception->getMessage(),
-                $response->httpStatus,
-            );
+            $code = $exception instanceof JmhzTransportException
+                ? $exception->errorCode
+                : 'jmhz_dispatch_send_unresolved';
+            if ($code === self::IMMEDIATE_REJECTION_CODE) {
+                $this->recordFailure($attempt, $code, $exception->getMessage(), $response->httpStatus);
+            } else {
+                $this->recordPossibleDelivery(
+                    $attempt,
+                    $code,
+                    $exception->getMessage(),
+                    $response->httpStatus,
+                    $acknowledgement?->correlationId,
+                );
+            }
 
             throw $exception;
         }
@@ -397,6 +432,35 @@ readonly class JmhzDispatchService
         }
     }
 
+    private function recordOriginalAtCssz(int $supplierId, int $submissionId, string $correlation): void
+    {
+        $submissions = $this->submissions;
+        if ($submissions === null) {
+            return;
+        }
+        try {
+            $submissions->recordIssue(
+                $supplierId,
+                $submissionId,
+                (int) $submissions->get($supplierId, $submissionId)['row_version'],
+                null,
+                'warning',
+                'remote',
+                PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE,
+                'payroll_submission',
+                (string) $submissionId,
+                [
+                    'correlation_reference' => $correlation,
+                    'message' => 'ČSSZ hlásí, že shodné podání už existuje (kontrola 22):'
+                        . ' originál je u ČSSZ. Doložte nebo načtěte protokol'
+                        . ' originálu; znovu neodesílejte.',
+                ],
+            );
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
     /**
      * Zápis neúspěchu nesmí přebít původní chybu. Když se pokus mezitím
      * posunul (jiný běh, ztracený zámek), je zápis marný — ale zahodit kvůli
@@ -421,6 +485,66 @@ readonly class JmhzDispatchService
             );
         } catch (\Throwable) {
             return;
+        }
+    }
+
+    /**
+     * Zápis „možná doručeno". Stejně jako u neúspěchu nesmí selhání zápisu
+     * přebít původní chybu.
+     *
+     * @param array<string,mixed> $attempt
+     */
+    private function recordPossibleDelivery(
+        array $attempt,
+        string $errorCode,
+        string $message,
+        ?int $httpStatus,
+        ?string $correlationReference,
+    ): void {
+        try {
+            $this->attempts->markPossiblyDelivered(
+                (int) $attempt['id'],
+                $errorCode,
+                $message,
+                $httpStatus,
+                $correlationReference,
+                (int) $attempt['row_version'],
+            );
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
+    /**
+     * Druhé odeslání téhož podání pustí jen ledger. `ready` samo nestačí:
+     * pokus „možná doručeno" nechává podání ve stavu `ready` (potvrzení
+     * převzetí nedorazilo), a dokud nerozhodla účetní, další odeslání by
+     * u ČSSZ mohlo založit duplicitu. Opakování téhož idempotenčního klíče
+     * není nové odeslání a vrací původní pokus.
+     */
+    private function assertNoOpenAttempt(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $idempotencyKey,
+    ): void {
+        $replayed = $this->attempts->findByIdempotencyKey($idempotencyKey);
+        foreach ($this->attempts->listForSubmission($supplierId, $environment, $submissionId) as $previous) {
+            if ($replayed !== null && (int) $replayed['id'] === (int) $previous['id']) {
+                continue;
+            }
+            $reason = PayrollDispatchGate::possiblyDeliveredReason($previous);
+            if ($reason !== null) {
+                throw new \DomainException($reason);
+            }
+            if (!PayrollDispatchGate::attemptAllowsRetry($previous)) {
+                throw new \DomainException(sprintf(
+                    'Podání už bylo odesláno (pokus č. %d, stav „%s"). Znovu se'
+                        . ' neodesílá, u ČSSZ by vzniklo jako duplicita.',
+                    (int) ($previous['attempt_no'] ?? 0),
+                    (string) ($previous['status'] ?? ''),
+                ));
+            }
         }
     }
 
@@ -510,15 +634,27 @@ readonly class JmhzDispatchService
             );
         }
 
+        $wasPossiblyDelivered = ($attempt['status'] ?? null) === PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS;
         $attempt = $this->recordPoll($attempt, null, null);
         $attempt = $this->attempts->markCompleted(
             (int) $attempt['id'],
             (int) $attempt['row_version'],
         );
+        if ($wasPossiblyDelivered) {
+            // Potvrzení převzetí dorazilo, ale zápis odeslání spadl, takže
+            // podání zůstalo `ready`. Protokol teď doložil, že je u ČSSZ.
+            $this->markSubmitted((int) $attempt['supplier_id'], (int) $attempt['submission_id'], $correlation);
+        }
         // Teprve tady se podání hne ze stavu `submitted`. Dřív se protokol jen
         // přečetl a zahodil, takže odeslané hlášení zůstalo navždy „odesláno"
         // a uživatel se výsledek zpracování z aplikace nedozvěděl.
         $this->applyReceipt($attempt, $response->body, $correlation, $report, $packageCount);
+        if ($report->originalAlreadyAtCssz()) {
+            // Odpověď na opakované odeslání: shodné podání ČSSZ už má. Podání
+            // zůstává odeslané ({@see JmhzProtocolReport::payrollRemoteStatus()})
+            // a nález říká účetní, že má doložit protokol originálu.
+            $this->recordOriginalAtCssz((int) $attempt['supplier_id'], (int) $attempt['submission_id'], $correlation);
+        }
 
         return new JmhzDispatchOutcome($attempt, null, $report);
     }
@@ -558,7 +694,7 @@ readonly class JmhzDispatchService
         $submissionId = (int) $attempt['submission_id'];
         $idempotencyKey = 'jmhz-protocol:' . (int) $attempt['id']
             . ':' . hash('sha256', $body);
-        $declared = $report->status->payrollRemoteStatus();
+        $declared = $report->payrollRemoteStatus();
         $verifier = $this->receiptVerifier($packageCount);
 
         try {
@@ -754,7 +890,7 @@ readonly class JmhzDispatchService
                 $bytes,
                 self::reverifiedReceiptReference($receipt['receipt_reference'], $receiptId),
                 $correlation,
-                $report->status->payrollRemoteStatus(),
+                $report->payrollRemoteStatus(),
                 'jmhz-protocol-reverify:' . $receiptId . ':' . $receipt['summary_hash'],
                 $report->submissionClass,
                 $this->receiptVerifier(1),
@@ -1069,10 +1205,18 @@ readonly class JmhzDispatchService
                     . ' ani protokolem o zpracování.',
             ];
         }
+        if ($report->originalAlreadyAtCssz()) {
+            return [
+                PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE,
+                'ČSSZ odpověděla, že shodné podání už existuje (kontrola 22):'
+                    . ' originál je u ČSSZ. Znovu neodesílejte; doložte nebo'
+                    . ' načtěte protokol originálu.',
+            ];
+        }
         $first = $report->errors[0] ?? null;
 
         return [
-            'jmhz_dispatch_rejected',
+            self::IMMEDIATE_REJECTION_CODE,
             $first instanceof JmhzProtocolError
                 ? $first->message
                 : 'ČSSZ podání odmítla už při převzetí.',

@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
@@ -21,6 +24,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentificati
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionStatus;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzVrepClient;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -175,15 +179,17 @@ final class JmhzDispatchServiceTest extends TestCase
     }
 
     /**
-     * Selhání přenosu se do ledgeru zapisuje i s HTTP statusem protistrany a
-     * původní výjimka jde dál — přebalit ji na doménovou chybu by zamlčelo,
-     * že podání se vůbec neodeslalo a lhůta pořád běží.
+     * HTTP 5xx znamená, že brána požadavek přijala a o jeho osudu nic neřekla.
+     * Do ledgeru jde „možná doručeno" i s HTTP statusem protistrany a původní
+     * výjimka jde dál. Zapsat to jako `failed` bez `sent_at` by bráně řeklo
+     * „nic neodešlo" a pustila by opakování.
      */
-    public function testSendRecordsAFailureAndRethrowsWhenTheTransportBreaks(): void
+    public function testSendRecordsPossibleDeliveryAndRethrowsWhenTheGatewayAnswers5xx(): void
     {
         $attempts = $this->openedAttempts();
         $attempts->expects(self::never())->method('markSent');
-        $this->captureFailure($attempts);
+        $attempts->expects(self::never())->method('markFailed');
+        $this->capturePossibleDelivery($attempts);
 
         $service = $this->service($attempts, [
             new Response(500, ['Content-Type' => 'text/html'], 'chyba brány'),
@@ -193,7 +199,56 @@ final class JmhzDispatchServiceTest extends TestCase
 
         self::assertSame('jmhz_vrep_http_error', $exception->errorCode);
         self::assertSame(500, $exception->remoteHttpStatus);
-        $this->assertFailureRecorded('jmhz_vrep_http_error', 500);
+        self::assertTrue($exception->possiblyDelivered);
+        $this->assertPossibleDeliveryRecorded('jmhz_vrep_http_error', 500, null);
+    }
+
+    /**
+     * Vypršení času před hlavičkami odpovědi: požadavek odešel, odpověď
+     * nepřišla. ČSSZ ho mohla převzít, takže nejde o „nic neodešlo".
+     */
+    public function testReadTimeoutAfterTheRequestWentOutIsPossiblyDelivered(): void
+    {
+        $attempts = $this->openedAttempts();
+        $attempts->expects(self::never())->method('markFailed');
+        $this->capturePossibleDelivery($attempts);
+
+        $service = $this->service($attempts, [
+            new NetworkTimeoutException(
+                'cURL error 28: Operation timed out after 60000 milliseconds with 0 bytes received',
+                new Request('POST', 'https://t-epodani.cssz.cz/VREP/submission'),
+            ),
+        ]);
+
+        $exception = $this->failedSend($service, JmhzTransportException::class);
+
+        self::assertSame('jmhz_vrep_response_lost', $exception->errorCode);
+        self::assertTrue($exception->possiblyDelivered);
+        $this->assertPossibleDeliveryRecorded('jmhz_vrep_response_lost', null, null);
+    }
+
+    /**
+     * Nenavázané spojení: neodešel ani bajt, u ČSSZ po pokusu nic není
+     * a opakování nemůže nic zdvojit. Tady `failed` bez `sent_at` zůstává.
+     */
+    public function testConnectionThatNeverOpenedIsAnOrdinaryFailure(): void
+    {
+        $attempts = $this->openedAttempts();
+        $attempts->expects(self::never())->method('markPossiblyDelivered');
+        $this->captureFailure($attempts);
+
+        $service = $this->service($attempts, [
+            new ConnectException(
+                'cURL error 7: Failed to connect',
+                new Request('POST', 'https://t-epodani.cssz.cz/VREP/submission'),
+            ),
+        ]);
+
+        $exception = $this->failedSend($service, JmhzTransportException::class);
+
+        self::assertSame('jmhz_vrep_unavailable', $exception->errorCode);
+        self::assertFalse($exception->possiblyDelivered);
+        $this->assertFailureRecorded('jmhz_vrep_unavailable', null);
     }
 
     /**
@@ -204,11 +259,12 @@ final class JmhzDispatchServiceTest extends TestCase
      * `prepared` — obsluha viděla neodeslaný pokus, odeslala znovu a ČSSZ
      * druhé podání odmítla jako duplicitu.
      */
-    public function testSendRecordsAFailureWhenTheAnswerIsNotXmlAtAll(): void
+    public function testSendRecordsPossibleDeliveryWhenTheAnswerIsNotXmlAtAll(): void
     {
         $attempts = $this->openedAttempts();
         $attempts->expects(self::never())->method('markSent');
-        $this->captureFailure($attempts);
+        $attempts->expects(self::never())->method('markFailed');
+        $this->capturePossibleDelivery($attempts);
 
         $service = $this->service($attempts, [
             new Response(200, ['Content-Type' => 'text/html'], '<html><br>502 Bad Gateway<p>brána nedostupná</html>'),
@@ -218,7 +274,7 @@ final class JmhzDispatchServiceTest extends TestCase
             'jmhz_acknowledgement_unreadable',
             $this->failedSend($service, JmhzTransportException::class)->errorCode,
         );
-        $this->assertFailureRecorded('jmhz_acknowledgement_unreadable', 200);
+        $this->assertPossibleDeliveryRecorded('jmhz_acknowledgement_unreadable', 200, null);
     }
 
     /**
@@ -228,11 +284,11 @@ final class JmhzDispatchServiceTest extends TestCase
      * není identifikátor, pod kterým by se podání dalo dohledat a uzavřít.
      * Bez zápisu do ledgeru je takový pokus ztracený úplně.
      */
-    public function testSendRecordsAFailureWhenTheAcknowledgementCarriesNoCorrelation(): void
+    public function testSendRecordsPossibleDeliveryWhenTheAcknowledgementCarriesNoCorrelation(): void
     {
         $attempts = $this->openedAttempts();
         $attempts->expects(self::never())->method('markSent');
-        $this->captureFailure($attempts);
+        $this->capturePossibleDelivery($attempts);
 
         $service = $this->service($attempts, [
             new Response(200, ['Content-Type' => 'text/xml'], str_replace(
@@ -246,7 +302,7 @@ final class JmhzDispatchServiceTest extends TestCase
             'jmhz_acknowledgement_correlation_missing',
             $this->failedSend($service, JmhzTransportException::class)->errorCode,
         );
-        $this->assertFailureRecorded('jmhz_acknowledgement_correlation_missing', 200);
+        $this->assertPossibleDeliveryRecorded('jmhz_acknowledgement_correlation_missing', 200, null);
     }
 
     /**
@@ -254,22 +310,23 @@ final class JmhzDispatchServiceTest extends TestCase
      *
      * Podání prošlo, potvrzení dorazilo — a `markSent` neuspěje, protože řádek
      * mezitím posunul jiný běh. Ani tohle není „nezahájený" pokus: ledger musí
-     * dostat neúspěch s kódem `jmhz_dispatch_send_unresolved` a volajícímu se
-     * musí vrátit původní chyba, ne její náhrada.
+     * dostat „možná doručeno" s kódem `jmhz_dispatch_send_unresolved`
+     * a CorrelationID z potvrzení, podle kterého jde protokol dohledat.
+     * Volajícímu se musí vrátit původní chyba, ne její náhrada.
      */
-    public function testSendRecordsAFailureWhenTheLedgerLosesTheRaceAfterTheEnvelopeWentOut(): void
+    public function testSendRecordsPossibleDeliveryWhenTheLedgerLosesTheRaceAfterTheEnvelopeWentOut(): void
     {
         $lock = new \DomainException('Pokus o odeslání #7 byl mezitím změněn.');
         $attempts = $this->openedAttempts();
         $attempts->expects(self::once())->method('markSent')->willThrowException($lock);
-        $this->captureFailure($attempts);
+        $this->capturePossibleDelivery($attempts);
 
         $service = $this->service($attempts, [
             new Response(200, ['Content-Type' => 'text/xml'], self::acknowledgement()),
         ]);
 
         self::assertSame($lock, $this->failedSend($service, \DomainException::class));
-        $this->assertFailureRecorded('jmhz_dispatch_send_unresolved', 200);
+        $this->assertPossibleDeliveryRecorded('jmhz_dispatch_send_unresolved', 200, self::CORRELATION);
     }
 
     /**
@@ -284,14 +341,92 @@ final class JmhzDispatchServiceTest extends TestCase
         $lock = new \DomainException('Pokus o odeslání #7 byl mezitím změněn.');
         $attempts = $this->openedAttempts();
         $attempts->expects(self::once())->method('markSent')->willThrowException($lock);
-        $this->captureFailure($attempts, new \RuntimeException('Ledger je nedostupný.'));
+        $this->capturePossibleDelivery($attempts, new \RuntimeException('Ledger je nedostupný.'));
 
         $service = $this->service($attempts, [
             new Response(200, ['Content-Type' => 'text/xml'], self::acknowledgement()),
         ]);
 
         self::assertSame($lock, $this->failedSend($service, \DomainException::class));
-        $this->assertFailureRecorded('jmhz_dispatch_send_unresolved', 200);
+        $this->assertPossibleDeliveryRecorded('jmhz_dispatch_send_unresolved', 200, self::CORRELATION);
+    }
+
+    /**
+     * Druhé odeslání podání, jehož pokus je „možná doručeno", musí skončit
+     * dřív, než se otevře ledger nebo cokoli odejde. Podání přitom zůstává
+     * `ready`, takže samotná kontrola stavu by ho pustila.
+     */
+    public function testSendRefusesWhileAnEarlierAttemptIsPossiblyDelivered(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('listForSubmission')->willReturn([
+            self::attemptRow([
+                'status' => 'possibly_delivered',
+                'error_code' => 'jmhz_vrep_response_lost',
+                'error_message' => 'Odpověď nedorazila.',
+                'row_version' => 1,
+            ]),
+        ]);
+        $attempts->expects(self::never())->method('open');
+
+        $service = $this->service($attempts, []);
+        $exception = $this->failedSend($service, \DomainException::class);
+
+        self::assertStringContainsString('možná doručeno', $exception->getMessage());
+        self::assertSame([], $this->history, 'Na VREP nesmělo odejít nic.');
+    }
+
+    /**
+     * Po výslovném potvrzení účetní se posílá TÝŽ zmrazený dokument, tedy se
+     * stejným GUID podání; pokud originál u ČSSZ je, odpoví 20022.
+     */
+    public function testSendIsAllowedOnceTheRetryWasExplicitlyConfirmed(): void
+    {
+        $attempts = $this->openedAttempts();
+        $attempts->method('listForSubmission')->willReturn([
+            self::attemptRow([
+                'status' => 'expired',
+                'error_code' => 'retry_confirmed_by_user',
+                'error_message' => 'Protokol u ČSSZ není.',
+                'row_version' => 2,
+            ]),
+        ]);
+        $attempts->method('markSent')->willReturn(self::sentRow(['attempt_no' => 2]));
+
+        $outcome = $this->send($this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], self::acknowledgement()),
+        ]));
+
+        self::assertSame(self::CORRELATION, $outcome->acknowledgement?->correlationId);
+    }
+
+    /**
+     * Opakované odeslání, na které ČSSZ hned odpoví jen kontrolou 22 ve
+     * variantě „shodné R už existuje": originál je u ČSSZ. Není to zamítnutí,
+     * po kterém se dá zahodit a poslat nové, ale stav, který blokuje další
+     * odeslání a žádá protokol originálu.
+     */
+    public function testImmediateDuplicateAnswerMeansTheOriginalIsAtCssz(): void
+    {
+        $attempts = $this->openedAttempts();
+        $attempts->expects(self::never())->method('markFailed');
+        $this->capturePossibleDelivery($attempts);
+
+        $service = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], JmhzTransportSample::partialProtocol(
+                result: 'ERROR',
+                qualifier: 'error',
+                errMsg: 'JMHZ25_LT_G: 20022 - Podání typu R se stejným idPodani,'
+                    . ' variabilním symbolem, obdobím a balík pořadí již existuje',
+                errNumber: '20022',
+            )),
+        ]);
+
+        self::assertSame(
+            PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE,
+            $this->failedSend($service, JmhzTransportException::class)->errorCode,
+        );
+        $this->assertPossibleDeliveryRecorded(PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE, 200, null);
     }
 
     /**
@@ -428,6 +563,123 @@ final class JmhzDispatchServiceTest extends TestCase
             self::ATTEMPT,
             JmhzTransportSample::VARIABLE_SYMBOL,
         );
+    }
+
+    /**
+     * Pokus „možná doručeno" s CorrelationID (potvrzení dorazilo, spadl
+     * zápis) se primárně DOHLEDÁVÁ: dotaz na stav dotáhne protokol, podání
+     * se posune na „odesláno" a protokol se předá platformě.
+     */
+    public function testPollOfPossiblyDeliveredAttemptFindsTheProtocolAndMarksTheSubmission(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow([
+            'status' => 'possibly_delivered',
+            'error_code' => 'jmhz_dispatch_send_unresolved',
+            'error_message' => 'Zápis odeslání spadl.',
+        ]));
+        $attempts->expects(self::once())->method('markCompleted')->willReturn(
+            self::sentRow(['status' => 'completed', 'row_version' => 2]),
+        );
+
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'ready',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::once())->method('transition')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            'submitted',
+            self::CORRELATION,
+        )->willReturn(['id' => self::SUBMISSION, 'status' => 'submitted', 'row_version' => 8]);
+        $submissions->expects(self::once())->method('importReceipt')->willReturn([
+            'submission_status' => 'accepted',
+            'submission_row_version' => 9,
+            'trusted' => true,
+        ]);
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], JmhzTransportSample::partialProtocol()),
+        ], null, $submissions)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+        );
+
+        self::assertTrue($outcome->isSettled());
+    }
+
+    /**
+     * Protokol, jehož jedinou chybou je 20022 „shodné R už existuje", NENÍ
+     * zamítnutí: platformě jde jako „odesláno" a podání dostane nález, že
+     * originál je u ČSSZ a má se doložit jeho protokol.
+     */
+    public function testDuplicateOnlyProtocolKeepsTheSubmissionSubmittedAndAsksForTheOriginal(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')->willReturn(
+            self::sentRow(['status' => 'completed', 'row_version' => 2]),
+        );
+
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::once())->method('importReceipt')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            self::anything(),
+            self::CORRELATION,
+            self::CORRELATION,
+            'CSSZ_JMHZ',
+            'submitted',
+            JmhzDispatchService::CHANNEL,
+            self::anything(),
+            null,
+            self::isInstanceOf(JmhzReceiptVerifier::class),
+        )->willReturn([
+            'submission_status' => 'submitted',
+            'submission_row_version' => 8,
+            'trusted' => true,
+        ]);
+        $submissions->expects(self::once())->method('recordIssue')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            'warning',
+            'remote',
+            PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE,
+        );
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], JmhzTransportSample::partialProtocol(
+                result: 'ERROR',
+                qualifier: 'error',
+                errMsg: 'JMHZ25_LT_G: 20022 - Podání typu R se stejným idPodani,'
+                    . ' variabilním symbolem, obdobím a balík pořadí již existuje',
+                errNumber: '20022',
+                generalResult: 'ERROR',
+                correlationId: self::CORRELATION,
+            )),
+        ], null, $submissions)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+        );
+
+        self::assertNotNull($outcome->report);
+        self::assertTrue($outcome->report->originalAlreadyAtCssz());
     }
 
     /**
@@ -855,6 +1107,55 @@ final class JmhzDispatchServiceTest extends TestCase
                 return self::attemptRow(['status' => 'failed', 'row_version' => 1]);
             },
         );
+    }
+
+    /**
+     * Zápis „možná doručeno" si zapamatuje argumenty; `$throws` simuluje
+     * ledger, který v ten okamžik sám selže.
+     *
+     * @param MockObject&PayrollSubmissionTransportAttemptRepository $attempts
+     */
+    private function capturePossibleDelivery(MockObject $attempts, ?\Throwable $throws = null): void
+    {
+        $attempts->expects(self::once())->method('markPossiblyDelivered')->willReturnCallback(
+            function (
+                int $attemptId,
+                string $errorCode,
+                string $errorMessage,
+                ?int $httpStatus,
+                ?string $correlation,
+                int $expectedVersion,
+            ) use ($throws): array {
+                $this->failure = [
+                    $attemptId,
+                    $errorCode,
+                    $errorMessage,
+                    $httpStatus,
+                    $correlation,
+                    $expectedVersion,
+                ];
+                if ($throws !== null) {
+                    throw $throws;
+                }
+
+                return self::attemptRow(['status' => 'possibly_delivered', 'row_version' => 1]);
+            },
+        );
+    }
+
+    private function assertPossibleDeliveryRecorded(
+        string $errorCode,
+        ?int $httpStatus,
+        ?string $correlation,
+    ): void {
+        self::assertIsArray($this->failure, 'Ledger nedostal zápis „možná doručeno".');
+        self::assertSame(self::ATTEMPT, $this->failure[0]);
+        self::assertSame($errorCode, $this->failure[1]);
+        self::assertMatchesRegularExpression('/^[a-z][a-z0-9_]{0,63}$/D', $this->failure[1]);
+        self::assertNotSame('', trim($this->failure[2]));
+        self::assertSame($httpStatus, $this->failure[3]);
+        self::assertSame($correlation, $this->failure[4]);
+        self::assertSame(0, $this->failure[5]);
     }
 
     private function assertFailureRecorded(string $errorCode, ?int $httpStatus): void

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzRejectedSubmissionRefreezeService;
 
 /**
  * Zahození rozdělaného odeslání, aby šlo podat znovu.
@@ -43,8 +44,9 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
  * Zahozený pokus se z ledgeru NEMAŽE. Dostane terminální stav `expired` s kódem
  * `abandoned_by_user` a důvodem, takže v historii podání zůstane i s tím, co úřad
  * odpověděl; jen přestane blokovat další odeslání
- * ({@see PayrollDispatchGate::attemptAllowsRetry()}). Zmrazený artefakt se nemění —
- * odesílá se pak přesně totéž XML, ne nově sestavené.
+ * ({@see PayrollDispatchGate::attemptAllowsRetry()}). Zmrazený artefakt se nemění,
+ * s jedinou výjimkou: řádné podání JMHZ, které ČSSZ zpracovala a zamítla, se
+ * znovu zmrazí s novým GUID ({@see JmhzRejectedSubmissionRefreezeService}).
  */
 final readonly class PayrollSubmissionAbandonService
 {
@@ -58,19 +60,26 @@ final readonly class PayrollSubmissionAbandonService
      * povinnost zůstala z aplikace nepodatelná. Viz
      * {@see \MyInvoice\Tests\Unit\Payroll\Submission\PayrollSubmissionAbandonRulesTest}.
      */
-    private const OPEN_ATTEMPT_STATUSES = ['prepared', 'sent', 'awaiting_protocol', 'completed'];
+    private const OPEN_ATTEMPT_STATUSES = [
+        'prepared', 'sent', 'awaiting_protocol', 'completed', 'possibly_delivered',
+    ];
+
+    /** Agendy, jejichž podání nese GUID podání podle pravidel JMHZ. */
+    private const GUID_AGENDAS = ['JMHZ', 'JMHZ25'];
 
     public function __construct(
         private PayrollSubmissionService $submissions,
         private PayrollSubmissionTransportAttemptRepository $attempts,
         private PayrollSubmissionRepository $repository,
+        private JmhzRejectedSubmissionRefreezeService $refreeze,
     ) {}
 
     /**
      * @param  string $reason co úřad odpověděl / proč se odeslání zahazuje
      * @return array{
      *   submission:array{id:int,status:string,row_version:int},
-     *   abandoned_attempts:list<int>
+     *   abandoned_attempts:list<int>,
+     *   refreeze:?array<string,mixed>
      * }
      */
     public function abandon(
@@ -79,7 +88,37 @@ final readonly class PayrollSubmissionAbandonService
         int $submissionId,
         int $expectedRowVersion,
         string $reason,
+        ?int $actorUserId = null,
     ): array {
+        // Zahození pokusů, návrat na `ready` a případné znovuzmrazení s novým
+        // GUID jsou JEDEN krok. Mezi návratem a znovuzmrazením by jinak bylo
+        // podání chvíli odesílatelné se starým GUID.
+        return $this->repository->transaction(fn (): array => $this->abandonInTransaction(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $expectedRowVersion,
+            $reason,
+            $actorUserId,
+        ));
+    }
+
+    /**
+     * @return array{
+     *   submission:array{id:int,status:string,row_version:int},
+     *   abandoned_attempts:list<int>,
+     *   refreeze:?array<string,mixed>
+     * }
+     */
+    private function abandonInTransaction(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $expectedRowVersion,
+        string $reason,
+        ?int $actorUserId,
+    ): array {
+        $before = $this->submissions->get($supplierId, $submissionId);
         // Doložené doručení je STOPKA, a kontroluje se jako první — dřív, než
         // se sáhne na jediný pokus. Kdyby se pokusy uzavřely a teprve pak se
         // zjistilo, že zprávu úřad má, zůstalo by podání bez otevřeného pokusu
@@ -120,6 +159,33 @@ final readonly class PayrollSubmissionAbandonService
             $reason,
         );
 
-        return ['submission' => $submission, 'abandoned_attempts' => $abandoned];
+        // ČSSZ podání ZPRACOVALA a zamítla. Řádné podání se pak posílá znovu
+        // s NOVÝM GUID (pravidla podání, kap. 9; stejné R se stejným GUID
+        // odmítne kontrola 22). Opravné a stornovací podání nesou GUID řádného
+        // podání, ten se nemění. O tom, který GUID se obnoví, rozhoduje
+        // JmhzSubmissionGuidPolicy. U podání bez výsledku zpracování
+        // (odesláno, zpracovává se) zůstává GUID stejný: kdyby originál u ČSSZ
+        // přece jen byl, ohlásí ho kontrola 22, místo aby vznikla duplicita.
+        $refreeze = null;
+        $obligation = $this->repository->findObligationOfSubmission($supplierId, $environment, $submissionId);
+        if ((string) $before['status'] === 'rejected'
+            && $obligation !== null
+            && in_array((string) $obligation['agenda_code'], self::GUID_AGENDAS, true)
+        ) {
+            $refreeze = $this->refreeze->refreeze(
+                $supplierId,
+                $environment,
+                $submissionId,
+                (int) $submission['row_version'],
+                $actorUserId,
+            );
+            $submission['row_version'] = (int) $refreeze['submission_row_version'];
+        }
+
+        return [
+            'submission' => $submission,
+            'abandoned_attempts' => $abandoned,
+            'refreeze' => $refreeze,
+        ];
     }
 }

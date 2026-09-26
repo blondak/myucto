@@ -53,6 +53,24 @@ final class PayrollSubmissionAttemptDeletionRulesTest extends TestCase
         ]));
     }
 
+    /**
+     * Pokus „možná doručeno" je jediná stopa, že požadavek odešel. Jeho
+     * smazání by obešlo potvrzení opakování a pustilo druhé odeslání.
+     */
+    public function testPossiblyDeliveredAttemptCannotBeDeleted(): void
+    {
+        $service = $this->service($this->pdoThatMustNotBeQueried());
+
+        $reason = $service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
+            'status' => 'possibly_delivered',
+            'submission_id' => 5,
+            'correlation_reference' => null,
+        ]);
+
+        self::assertNotNull($reason);
+        self::assertStringContainsString('Dohledejte protokol', $reason);
+    }
+
     /** Připnutá dodejka nebo protokol smazání zakazuje. */
     public function testAttemptWithReceiptCannotBeDeleted(): void
     {

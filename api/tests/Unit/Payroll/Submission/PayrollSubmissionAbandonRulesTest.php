@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
@@ -174,14 +175,59 @@ final class PayrollSubmissionAbandonRulesTest extends TestCase
             $sql,
         );
         self::assertStringContainsString(
-            'attempt.status = "expired" AND attempt.error_code = "abandoned_by_user"',
-            $sql,
-            'Fronta odeslání musí znát tutéž výjimku jako PayrollDispatchGate.',
+            'AND attempt.error_code IN ("' . PayrollDispatchGate::ABANDONED_ERROR_CODE
+                . '", "' . PayrollDispatchGate::RETRY_CONFIRMED_ERROR_CODE . '"))',
+            (string) preg_replace('/\s+/', ' ', $sql),
+            'Fronta odeslání musí znát tytéž výjimky jako PayrollDispatchGate.',
         );
-        self::assertSame(
-            'abandoned_by_user',
-            PayrollDispatchGate::ABANDONED_ERROR_CODE,
-            'Kód v SQL a v bráně se nesmí rozejít.',
+    }
+
+    /**
+     * NÁLEZ: selhání PO odeslání požadavku (vypršený čas, ztracená odpověď)
+     * se zapisovalo jako `failed` bez `sent_at`, a brána ho proto pustila
+     * znovu. Stav „možná doručeno" opakování blokuje s větou, co dělat.
+     */
+    public function testPossiblyDeliveredAttemptBlocksRetryWithGuidance(): void
+    {
+        $attempt = [
+            'status' => PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS,
+            'error_code' => 'jmhz_vrep_response_lost',
+            'sent_at' => null,
+            'attempt_no' => 1,
+        ];
+
+        self::assertFalse(PayrollDispatchGate::attemptAllowsRetry($attempt));
+        $reason = (new PayrollDispatchGate())->blockedReason(
+            ['submission_status' => 'ready', 'attempt' => $attempt, 'outbox' => null],
+            (new PayrollDispatchCapabilityCatalog())->forAgenda('JMHZ25'),
+            'test',
+            0,
         );
+        self::assertIsString($reason);
+        self::assertStringContainsString('možná doručeno', $reason);
+        self::assertStringContainsString('dohledejte protokol', $reason);
+    }
+
+    /** Po výslovném potvrzení účetní brána opakování pustí. */
+    public function testConfirmedRetryAllowsSendingAgain(): void
+    {
+        self::assertTrue(PayrollDispatchGate::attemptAllowsRetry([
+            'status' => 'expired',
+            'error_code' => PayrollDispatchGate::RETRY_CONFIRMED_ERROR_CODE,
+            'sent_at' => null,
+        ]));
+    }
+
+    /** Odpověď 20022 „shodné podání už existuje": originál je u ČSSZ. */
+    public function testOriginalAtCsszAttemptExplainsWhatToDo(): void
+    {
+        $reason = PayrollDispatchGate::possiblyDeliveredReason([
+            'status' => PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS,
+            'error_code' => PayrollDispatchGate::ORIGINAL_AT_CSSZ_ERROR_CODE,
+        ]);
+
+        self::assertIsString($reason);
+        self::assertStringContainsString('Originál podání je u ČSSZ', $reason);
+        self::assertStringContainsString('protokol originálu', $reason);
     }
 }

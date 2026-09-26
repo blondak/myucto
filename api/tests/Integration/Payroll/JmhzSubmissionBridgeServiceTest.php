@@ -35,7 +35,12 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionRetryConfirmationService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzRejectedSubmissionRefreezeService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
@@ -877,6 +882,259 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         );
         self::assertSame(1, $this->countRows('payroll_submission_parts'));
         self::assertSame(1, $this->countRows('payroll_submission_artifacts'));
+    }
+
+    /**
+     * NÁLEZ: zahození odeslání po zamítnutí zpracováním vracelo podání na
+     * `ready` se stejným GUID podání. Řádné podání přitom dostává nový GUID
+     * i po zamítnutí; stejné R se stejným GUID odmítne kontrola 22 (20022).
+     *
+     * Celý tok: zmrazení → odeslání → protokol „zamítnuto" → zahození → nové
+     * zmrazení s novým GUID podání i součástí, stejným VS a obdobím. Návazné
+     * čtení (odeslání, opravné i stornovací podání) bere NOVÝ dokument.
+     */
+    public function testAbandonAfterRejectionRefreezesTheRegularSubmissionWithNewGuids(): void
+    {
+        $created = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $originalForms = $reader->formGuids($this->supplierId, self::ENVIRONMENT, $created['submission_id']);
+        $rejected = $this->rejectAfterSending($created['submission_id'], $created['row_version']);
+
+        $result = $this->abandonService()->abandon(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $created['submission_id'],
+            $rejected,
+            'ČSSZ podání zamítla, příčina je vyřízená.',
+            $this->userId,
+        );
+
+        self::assertSame('ready', $result['submission']['status']);
+        self::assertIsArray($result['refreeze']);
+        self::assertTrue($result['refreeze']['refrozen']);
+        self::assertSame($created['submission_guid'], $result['refreeze']['previous_submission_guid']);
+        self::assertNotSame($created['submission_guid'], $result['refreeze']['submission_guid']);
+
+        $identity = $reader->identity($this->supplierId, self::ENVIRONMENT, $created['submission_id']);
+        self::assertSame($result['refreeze']['submission_guid'], $identity->submissionGuid);
+        self::assertSame($created['variable_symbol'], $identity->variableSymbol);
+        self::assertSame(7, $identity->month);
+        self::assertSame(2026, $identity->year);
+        $renewedForms = $reader->formGuids($this->supplierId, self::ENVIRONMENT, $created['submission_id']);
+        self::assertCount(count($originalForms), $renewedForms);
+        self::assertSame([], array_intersect($originalForms, $renewedForms));
+
+        // Původní dokument zůstává v archivu jako doklad prvního odeslání.
+        self::assertStringContainsString(
+            "<idPodani>{$created['submission_guid']}</idPodani>",
+            $this->submissions->artifactBytes($this->supplierId, $created['artifact_id']),
+        );
+        self::assertSame('2', (string) $this->row(
+            'SELECT COUNT(*) AS c FROM payroll_submission_artifacts
+              WHERE supplier_id = ? AND submission_id = ? AND artifact_kind = "outbound_xml"',
+            [$this->supplierId, $created['submission_id']],
+        )['c']);
+    }
+
+    /**
+     * Zahození BEZ výsledku zpracování (odesláno, protokol nepřišel) GUID
+     * nemění: kdyby originál u ČSSZ přece jen byl, opakování se stejným GUID
+     * ohlásí kontrola 22, místo aby s novým GUID vznikla duplicita.
+     */
+    public function testAbandonWithoutProcessingResultKeepsTheGuid(): void
+    {
+        $created = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $submitted = $this->submissions->transition(
+            $this->supplierId,
+            $created['submission_id'],
+            $created['row_version'],
+            'submitted',
+            'synthetic-correlation-kept',
+        );
+
+        $result = $this->abandonService()->abandon(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $created['submission_id'],
+            $submitted['row_version'],
+            'Protokol nepřišel, posíláme znovu.',
+            $this->userId,
+        );
+
+        self::assertNull($result['refreeze']);
+        $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        self::assertSame(
+            $created['submission_guid'],
+            $reader->identity($this->supplierId, self::ENVIRONMENT, $created['submission_id'])->submissionGuid,
+        );
+        self::assertSame(1, $this->countRows('payroll_submission_artifacts'));
+    }
+
+    /**
+     * NÁLEZ: vypršený čas po odeslání požadavku se zapisoval jako `failed`
+     * bez `sent_at`, a brána tak pustila opakování, jako by nic neodešlo.
+     *
+     * Tok nad skutečnou databází: pokus „možná doručeno" podání z nabídky
+     * k odeslání vyřadí; potvrzení opakování je odmítnuté, dokud je načtený
+     * protokol se stejným GUID (originál je u ČSSZ); bez něj se opakování
+     * potvrdí a podání se vrátí do nabídky se STEJNÝM zmrazeným dokumentem.
+     */
+    public function testPossiblyDeliveredAttemptBlocksRetryUntilExplicitlyConfirmed(): void
+    {
+        $created = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $attempts = new PayrollSubmissionTransportAttemptRepository($this->db);
+        $attempt = $attempts->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $created['submission_id'],
+            'vrep_apep',
+            1,
+            'synthetic-possibly-delivered-' . $created['submission_id'],
+            $created['artifact_sha256'],
+            $this->userId,
+        );
+        $attempts->markPossiblyDelivered(
+            (int) $attempt['id'],
+            'jmhz_vrep_response_lost',
+            'Požadavek odešel, odpověď nedorazila.',
+            null,
+            null,
+            (int) $attempt['row_version'],
+        );
+        $ready = fn (): array => array_column(
+            $attempts->listReadySubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                [JmhzSubmissionBridgeService::AGENDA_CODE],
+            ),
+            'submission_id',
+        );
+        self::assertNotContains($created['submission_id'], $ready(), 'Možná doručené podání nesmí jít odeslat.');
+
+        $protocols = new PayrollImportedJmhzProtocolRepository($this->db);
+        $confirmation = new PayrollSubmissionRetryConfirmationService(
+            $attempts,
+            $protocols,
+            new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions),
+        );
+        $savepoint = 'possibly_delivered_protocol';
+        $this->db->pdo()->exec('SAVEPOINT ' . $savepoint);
+        $protocols->store($this->supplierId, self::ENVIRONMENT, [
+            'protocol_kind' => 'processing',
+            'variable_symbol' => $created['variable_symbol'],
+            'period_month' => 7,
+            'period_year' => 2026,
+            'submission_guid' => $created['submission_guid'],
+            'correlation_reference' => null,
+            'status_code' => 1,
+            'status_name' => 'ProcessedAndComplete',
+            'error_count' => 0,
+            'protocol_dated_at' => null,
+            'submitted_at' => null,
+            'source_filename' => 'synthetic-protocol.xml',
+            'payload_sha256' => str_repeat('e', 64),
+            'payload_xml' => '<protokol/>',
+            'dedupe_key' => str_repeat('e', 64),
+        ], $this->userId);
+        try {
+            $confirmation->confirm($this->supplierId, self::ENVIRONMENT, $created['submission_id'], 'Protokol nenalezen.');
+            self::fail('Načtený protokol se stejným GUID dokládá originál u ČSSZ; opakování se musí odmítnout.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('originál je tedy u ČSSZ', $exception->getMessage());
+        }
+        $this->db->pdo()->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+        self::assertNotContains($created['submission_id'], $ready());
+
+        $confirmed = $confirmation->confirm(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $created['submission_id'],
+            'V datové schránce ani na portálu ČSSZ protokol není.',
+        );
+
+        self::assertSame([(int) $attempt['id']], $confirmed['confirmed_attempts']);
+        self::assertSame($created['submission_guid'], $confirmed['submission_guid']);
+        self::assertContains($created['submission_id'], $ready());
+        $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        self::assertSame(
+            $created['submission_guid'],
+            $reader->identity($this->supplierId, self::ENVIRONMENT, $created['submission_id'])->submissionGuid,
+            'Opakuje se tentýž dokument se stejným GUID.',
+        );
+    }
+
+    private function rejectAfterSending(int $submissionId, int $rowVersion): int
+    {
+        $submitted = $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            $rowVersion,
+            'submitted',
+            'synthetic-correlation-rejected',
+        );
+        $verifier = new class implements PayrollReceiptVerifierInterface {
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt('rejected', $expectedCorrelationReference);
+            }
+        };
+        $rejected = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submissionId,
+            $submitted['row_version'],
+            null,
+            '<receipt status="rejected"/>',
+            'synthetic-receipt-rejected',
+            'synthetic-correlation-rejected',
+            'CSSZ_JMHZ',
+            'rejected',
+            'vrep_apep',
+            'synthetic-idempotency-rejected',
+            null,
+            $verifier,
+        );
+        self::assertSame('rejected', $rejected['submission_status']);
+
+        return (int) $rejected['submission_row_version'];
+    }
+
+    private function abandonService(): PayrollSubmissionAbandonService
+    {
+        return new PayrollSubmissionAbandonService(
+            $this->submissions,
+            new PayrollSubmissionTransportAttemptRepository($this->db),
+            $this->submissionRepository,
+            new JmhzRejectedSubmissionRefreezeService(
+                new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions),
+                $this->submissionRepository,
+                $this->submissions,
+                new JmhzSubmissionGuidFactory(),
+                new JmhzScenario1XmlValidator(),
+                new MockClock('2026-08-25 09:00:00 Europe/Prague'),
+            ),
+        );
     }
 
     public function testStoredXmlValidatesAgainstPinnedSchema(): void

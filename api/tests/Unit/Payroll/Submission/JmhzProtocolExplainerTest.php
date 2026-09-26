@@ -69,6 +69,38 @@ final class JmhzProtocolExplainerTest extends TestCase
         self::assertIsArray($explained[0]['control']);
         self::assertSame(['10001', '10007'], $explained[0]['control']['attribute_ids']);
         self::assertStringContainsString('již existuje', $explained[0]['message']);
+        self::assertTrue($explained[0]['original_at_cssz']);
+    }
+
+    /**
+     * Protokol, jehož jedinou chybou je „shodné podání už existuje", není
+     * zamítnutí: originál je u ČSSZ a podání zůstává odeslané. Varianta
+     * „idPodani je již použito s jiným variabilním symbolem" je naopak
+     * skutečná chyba a zamítnutím zůstává.
+     */
+    public function testOnlyIdenticalSubmissionVariantMeansTheOriginalIsAtCssz(): void
+    {
+        $identical = (new JmhzProtocolParser())->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [],
+            'error',
+            'JMHZ25_LT_G: 20022 - Podání typu S se stejným idPodani, variabilním'
+                . ' symbolem a obdobím již existuje',
+            '20022',
+        ));
+        self::assertTrue($identical->originalAlreadyAtCssz());
+        self::assertSame('submitted', $identical->payrollRemoteStatus());
+
+        $reused = (new JmhzProtocolParser())->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [],
+            'error',
+            'JMHZ25_LT_G: 20022 - Toto idPodani je již použito s jiným variabilním symbolem',
+            '20022',
+        ));
+        self::assertFalse($reused->originalAlreadyAtCssz());
+        self::assertSame($reused->status->payrollRemoteStatus(), $reused->payrollRemoteStatus());
+        self::assertFalse((new JmhzProtocolExplainer())->explain($reused)[0]['original_at_cssz']);
     }
 
     /**
