@@ -92,13 +92,13 @@ final class PohodaExport
                     throw new PohodaException('export_mixed', 'Agenda obsahuje současně MDB převod a standardní účetní XML. Nahrajte pouze jeden export.');
                 }
             }
-            $tables = new PohodaMdbTables($dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE);
+            [$tables, $checked] = PohodaMdbAccounting::scan($dir . DIRECTORY_SEPARATOR . PohodaMdbAccounting::FILE);
             $ico = CompanyIdNormalizer::ic($tables->ico) ?? $tables->ico;
             if (basename($dir) !== $ico . '_' . $tables->year) {
                 throw new PohodaException('mdb_agenda_mismatch', 'Složka agendy neodpovídá firmě a roku v MDB exportu.');
             }
             $export = new self($dir, $ico, $tables->year, ['ico' => $ico, 'program' => $tables->version, 'state' => 'ok', 'item_state' => 'ok', 'note' => '', 'timestamp' => '']);
-            $export->mdb = new PohodaMdbAccounting($tables);
+            $export->mdb = new PohodaMdbAccounting($tables, $checked);
             return $export;
         }
         foreach (self::REQUIRED as $key) {
@@ -441,7 +441,34 @@ final class PohodaExport
         $first = null;
         $last = null;
         $later = [];
-        foreach ($this->records('journal', 'accountingItem') as $item) {
+        $groups = [
+            'issued' => [['issued', 'issued_credit', 'issued_debit', 'issued_advance', 'issued_proforma', 'issued_corrective', 'receivable'], 'invoice'],
+            'purchase' => [['received', 'received_credit', 'received_debit', 'received_advance', 'received_proforma', 'received_corrective', 'commitment'], 'invoice'],
+            'internal' => [['internal'], 'intDoc'],
+            'cash' => [['cash'], 'voucher'],
+            'bank' => [['bank'], 'bank'],
+            'partners' => [['addressbook'], 'addressbook'],
+        ];
+        // Z MDB převodu se deník i všechny počítané agendy čtou jedním průchodem souborem.
+        $tally = [];
+        $journalItems = (function () use ($groups, &$tally): \Generator {
+            if ($this->mdb === null) {
+                yield from $this->records('journal', 'accountingItem');
+                return;
+            }
+            $keys = array_values(array_filter(
+                array_merge(['journal'], ...array_map(static fn (array $group): array => $group[0], array_values($groups))),
+                fn (string $key): bool => $this->mdb->has($key),
+            ));
+            foreach ($this->mdb->recordsOf($keys) as $key => $record) {
+                if ($key === 'journal') {
+                    yield $record;
+                    continue;
+                }
+                $tally[$key] = ($tally[$key] ?? 0) + 1;
+            }
+        })();
+        foreach ($journalItems as $item) {
             $journal++;
             if (PohodaJournal::isOpening($item)) {
                 $opening++;
@@ -457,13 +484,11 @@ final class PohodaExport
                 $last = $last === null || $date > $last ? $date : $last;
             }
         }
-        $sum = function (array $keys, string $tag): int {
+        $sum = function (array $keys, string $tag) use (&$tally): int {
             $n = 0;
             foreach ($keys as $key) {
                 if ($this->mdb !== null && $this->mdb->has($key)) {
-                    foreach ($this->records($key, $tag) as $_) {
-                        $n++;
-                    }
+                    $n += $tally[$key] ?? 0;
                     continue;
                 }
                 $path = $this->path($key);
@@ -472,19 +497,17 @@ final class PohodaExport
             return $n;
         };
         ksort($later);
-        return [
+        $out = [
             'journal' => $journal,
             'opening' => $opening,
             'first_date' => $first,
             'last_date' => $last,
             'later_years' => array_keys($later),
-            'issued' => $sum(['issued', 'issued_credit', 'issued_debit', 'issued_advance', 'issued_proforma', 'issued_corrective', 'receivable'], 'invoice'),
-            'purchase' => $sum(['received', 'received_credit', 'received_debit', 'received_advance', 'received_proforma', 'received_corrective', 'commitment'], 'invoice'),
-            'internal' => $sum(['internal'], 'intDoc'),
-            'cash' => $sum(['cash'], 'voucher'),
-            'bank' => $sum(['bank'], 'bank'),
-            'partners' => $sum(['addressbook'], 'addressbook'),
         ];
+        foreach ($groups as $name => [$keys, $tag]) {
+            $out[$name] = $sum($keys, $tag);
+        }
+        return $out;
     }
 
     /** První hodnota klíče v libovolné hloubce záznamu (přehled účetních jednotek). */

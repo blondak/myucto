@@ -218,6 +218,53 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('121', $first[0]['invoiceDetail']['invoiceItem'][0]['homeCurrency']['priceSum']);
     }
 
+    /**
+     * Výkon: otevření agendy ověří strukturu i doklady jedním průchodem souborem a přehled
+     * nahrání (deník a počty všech agend) přidá nejvýš dva další, ne průchod na každou
+     * tabulku a druh faktury.
+     */
+    public function testOpenAndOverviewCountsReadFileInFewPasses(): void
+    {
+        $this->mapper([
+            'pUD' => [
+                ['ID' => '1', 'RelUdAg' => '2', 'Datum' => '2026-02-03', 'Cislo' => 'TEST-F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100'],
+                ['ID' => '2', 'RelUdAg' => '63', 'Datum' => '2026-01-01', 'UMD' => '221000', 'UD' => '701000', 'Kc' => '50'],
+            ],
+            'FA' => [
+                ['ID' => '1', 'RelTpFak' => '1', 'Cislo' => 'TEST-F1', 'Datum' => '2026-02-03', 'Kc2' => '100', 'KcDPH2' => '21'],
+                ['ID' => '2', 'RelTpFak' => '11', 'Cislo' => 'TEST-P1', 'Datum' => '2026-02-04', 'Kc2' => '200', 'KcDPH2' => '42'],
+                ['ID' => '3', 'RelTpFak' => '15', 'Cislo' => 'TEST-Z1', 'Datum' => '2026-02-05', 'Kc0' => '10'],
+            ],
+            'FApol' => [['ID' => '1', 'RefAg' => '1', 'RelSzDPH' => '2', 'Kc' => '100', 'KcDPH' => '21']],
+            'BV' => [['ID' => '1', 'RelTpBV' => '1', 'Cislo' => 'TEST-B1', 'Datum' => '2026-02-10', 'Vypis' => '1/1']],
+            'HO' => [['ID' => '1', 'RelTpHO' => '2', 'Cislo' => 'TEST-H1', 'Datum' => '2026-02-11']],
+            'pINT' => [['ID' => '1', 'Cislo' => 'TEST-I1', 'Datum' => '2026-02-12']],
+            'AD' => [['ID' => '1', 'Firma' => 'Testovací odběratel']],
+        ]);
+        $agenda = $this->dir . '/12345678_2026';
+        mkdir($agenda);
+        copy($this->path, $agenda . '/' . PohodaMdbAccounting::FILE);
+
+        $export = PohodaExport::open($agenda);
+        $mdb = (new \ReflectionProperty(PohodaExport::class, 'mdb'))->getValue($export);
+        self::assertInstanceOf(PohodaMdbAccounting::class, $mdb);
+        // Před opravou: úvodní průchod + firma a rok + pět tabulek dokladů = 7.
+        self::assertSame(1, $mdb->tables->passes());
+
+        $counts = $export->counts();
+        self::assertSame(
+            ['journal' => 2, 'opening' => 1, 'first_date' => '2026-02-03', 'last_date' => '2026-02-03', 'later_years' => [],
+                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1],
+            $counts,
+        );
+        // Před opravou: deník + sedm druhů faktur zvlášť + každý číselník a položky zvlášť (přes 20).
+        self::assertLessThanOrEqual(3, $mdb->tables->passes());
+        self::assertSame(['TEST-P1'], array_map(
+            static fn (array $invoice): string => $invoice['invoiceHeader']['number']['numberRequested'],
+            iterator_to_array($export->records('received', 'invoice'), false),
+        ));
+    }
+
     public function testMixedMdbAndOfficialXmlIsRejected(): void
     {
         $this->mapper([]);
