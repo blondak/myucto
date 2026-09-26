@@ -158,6 +158,48 @@ describe('PayrollSetupGuide', () => {
     expect(wrapper.emitted('update:visible')?.at(-1)).toEqual([true])
   })
 
+  it('firmě, která začíná lednem, skupinu přechodu v průběhu roku neukáže', async () => {
+    const wrapper = mount(PayrollSetupGuide, { global: MOUNT_GLOBAL, props: { startPeriod: '2026-01-01' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('article')).toHaveLength(11)
+    expect(wrapper.text()).not.toContain('payroll.setup_guide.groups.transition.title')
+    expect(wrapper.find('[data-test="payroll-setup-guide-transition-manual"]').exists()).toBe(false)
+  })
+
+  it('při přechodu v průběhu roku provede převzetím mezd, stavů, evidence, průměrů, dovolené i kontrolou', async () => {
+    const wrapper = mount(PayrollSetupGuide, { global: MOUNT_GLOBAL, props: { startPeriod: '2026-10-01' } })
+    await flushPromises()
+
+    expect(wrapper.findAll('article')).toHaveLength(18)
+    const text = wrapper.text()
+    for (const id of ['takeover_wages', 'takeover_openings', 'takeover_evidence', 'takeover_identifiers', 'takeover_averages', 'takeover_leave', 'takeover_check']) {
+      expect(text).toContain(`payroll.setup_guide.steps.${id}.title`)
+    }
+    const destinations = wrapper.findAll('article a').map(link => link.attributes('data-to'))
+    expect(destinations).toContain('{"name":"payroll-imports","query":{"tab":"takeover"}}')
+    expect(destinations).toContain('{"name":"payroll-imports","query":{"tab":"reconciliation"}}')
+    expect(destinations).toContain('{"name":"payroll-absences","query":{"tab":"averages"}}')
+    expect(destinations).toContain('{"name":"payroll-absences","query":{"tab":"leave"}}')
+    // Skupina stojí za lidmi a před prvním měsícem: převzetí se váže na osobu a vztah.
+    const titles = wrapper.findAll('h4').map(h => h.text())
+    expect(titles.indexOf('payroll.setup_guide.steps.takeover_wages.title'))
+      .toBeGreaterThan(titles.indexOf('payroll.setup_guide.steps.components.title'))
+    expect(titles.indexOf('payroll.setup_guide.steps.takeover_check.title'))
+      .toBeLessThan(titles.indexOf('payroll.setup_guide.steps.first_run.title'))
+    expect(wrapper.get('[data-test="payroll-setup-guide-transition-manual"]').attributes('href'))
+      .toBe('/manual?ch=113_Prechod_mezd_v_prubehu_roku')
+  })
+
+  it('ruční zadání převzatých mezd nabídne jen tomu, kdo smí zapisovat vztahy a vidí sestavy', async () => {
+    m.canWrite.mockImplementation((p: string) => p !== 'payroll.employment.write')
+    const wrapper = mount(PayrollSetupGuide, { global: MOUNT_GLOBAL, props: { startPeriod: '2026-10-01' } })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('payroll.setup_guide.steps.takeover_wages.title')
+    expect(wrapper.text()).toContain('payroll.setup_guide.steps.takeover_check.title')
+  })
+
   it('selhání uložení nesmí shodit průvodce', async () => {
     m.putPreferenceKey.mockRejectedValue(new Error('offline'))
     const wrapper = await mountGuide()

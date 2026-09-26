@@ -212,7 +212,8 @@ final class TaxStatementCalculator
                 . 'odvedenou daň za ně aplikace odvodila jako sražené zálohy snížené '
                 . 'o vyplacené bonusy — ověřte ji proti osobnímu daňovému účtu. Přeplatky '
                 . 'z ročního zúčtování za předchozí rok, které v těchto měsících vyplatil '
-                . 'předchozí program, v převzatých datech nejsou; pokud nějaké byly, doplňte je.',
+                . 'předchozí program, v převzatých datech nejsou; pokud nějaké byly, doplňte je '
+                . 'po stažení XML ručně v EPO podle výplatních listin předchozího programu.',
                 implode(', ', $takenOver),
             );
         }

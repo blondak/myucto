@@ -349,8 +349,10 @@ z PAMICA nebo PREMIER:
 - úhrny každého vztahu a měsíce (hrubé příjmy, čistá mzda, zálohy a srážková
   daň, pojistné, vyměřovací základ, dny pojištění, odpracované hodiny) do
   převzatých mezd; z nich čte kontrolní sestava převodu, převzatý běh,
-  mzdový list i potvrzení o zdanitelných příjmech. Součet hrubých příjmů za
-  měsíc odpovídá úhrnu zúčtovaných příjmů v hlášení,
+  návrh průměrného výdělku a hlídání ročního limitu DPP. Součet hrubých
+  příjmů za měsíc odpovídá úhrnu zúčtovaných příjmů v hlášení. Mzdový list,
+  potvrzení o zdanitelných příjmech, roční zúčtování a vyúčtování daně čtou
+  počáteční stavy ročních součtů (níže), ne převzaté mzdy,
 - sjednanou měsíční mzdu a její předpis, když tarif v měsících bez
   dovolené a nemoci zůstává stejný i při různém fondu pracovní doby,
 - průměrný výdělek, se kterým předchozí program počítal náhrady, po

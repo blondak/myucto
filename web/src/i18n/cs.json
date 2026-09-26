@@ -2584,6 +2584,7 @@
       "takeover": {
         "title": "Převzaté měsíce roku přechodu",
         "subtitle": "Měsíce, které zpracoval předchozí mzdový program. Převzatý běh je jejich zrcadlo: nepočítá se, neschvaluje a znovu se nezaúčtovává.",
+        "jmhz_note": "Hlášení JMHZ za tyto měsíce podal předchozí program a MyÚčto k nim opravné hlášení nesestaví. Opravu podejte tam, odkud šlo řádné hlášení (předchozí program nebo portál ČSSZ), a opravené úhrny promítněte do převzatých mezd i počátečních stavů.",
         "boundary": "MyÚčto počítá mzdy od {period}",
         "loading": "Načítám převzaté měsíce…",
         "rows": "{count} řádků převodu",
@@ -7957,7 +7958,12 @@
       "mark_done": "Označit jako hotové",
       "marked_done": "Hotovo",
       "footnote": "Průvodce se ukazuje, dokud nemáte první schválený mzdový běh. Odškrtnutí je vaše poznámka — aplikace podle něj nic nemění ani nekontroluje.",
+      "transition_manual": "Přechod v průběhu roku",
       "groups": {
+        "transition": {
+          "title": "Přechod v průběhu roku",
+          "hint": "měsíce 1–{last}/{year} zpracoval předchozí program; bez jejich převzetí nevyjde roční zúčtování, potvrzení o příjmech ani vyúčtování daně"
+        },
         "employer": {
           "title": "Nastavení zaměstnavatele",
           "hint": "údaje, bez kterých nejde spočítat ani odvést mzdu"
@@ -7972,6 +7978,35 @@
         }
       },
       "steps": {
+        "takeover_wages": {
+          "title": "Převezměte mzdy za měsíce před přechodem",
+          "text": "Každému zaměstnanci zadejte po měsících a vztazích úhrny z předchozího programu v korunách: hrubou mzdu, pojistné, zálohu a slevy. Ruční zadání naplní převzaté mzdy i počáteční stavy najednou; import CSV nebo XLSX plní jen převzaté mzdy.",
+          "cta": "Zadat převzaté mzdy"
+        },
+        "takeover_openings": {
+          "title": "Zkontrolujte počáteční stavy",
+          "text": "Na kartě pracovního vztahu v sekci Počáteční stavy musí mít každý převzatý měsíc úhrny, nebo zaškrtnuté „Opravdu nula“. Prázdný měsíc není nula — vyúčtování daně i uzávěrka roku na něm skončí."
+        },
+        "takeover_evidence": {
+          "title": "Děti a prohlášení od začátku roku",
+          "text": "Prohlášení poplatníka, děti a invaliditu zaevidujte s platností od ledna, ne od přechodu. Bez nich roční zúčtování převzatou slevu na děti neuzná a potvrzení o příjmech nevyjde."
+        },
+        "takeover_identifiers": {
+          "title": "Identifikátory pro ČSSZ",
+          "text": "OIČ a ID pojistného vztahu přepište u každého vztahu z předchozího programu, případně je načtěte v Importech. Bez nich první hlášení JMHZ nenaváže na hlášení, která podal předchozí program."
+        },
+        "takeover_averages": {
+          "title": "Průměrný výdělek pro první čtvrtletí",
+          "text": "Průměr pro náhrady v prvním čtvrtletí po přechodu se počítá z převzatých mezd předchozího čtvrtletí. Aplikace ho navrhne, pokud převzaté mzdy mají odpracované hodiny; návrh schválíte v Nepřítomnostech."
+        },
+        "takeover_leave": {
+          "title": "Zůstatek dovolené",
+          "text": "Nárok a vyčerpanou dovolenou za část roku v předchozím programu zadejte v knize dovolené, ať zůstatek sedí od prvního měsíce."
+        },
+        "takeover_check": {
+          "title": "Kontrola převzaté části roku",
+          "text": "Sestava ukáže, komu chybí převzatý měsíc a kde si počáteční stavy a převzaté mzdy odporují. Stejné kontroly později zastaví vyúčtování daně i uzávěrku roku."
+        },
         "employer": {
           "title": "Zaměstnavatel a mzdové účtárny",
           "text": "Registrační číslo u ČSSZ, kontakt pro mzdy a alespoň jedna aktivní mzdová účtárna s variabilním symbolem. Bez účtárny nejde založit pracovní vztah."

@@ -436,7 +436,7 @@ onMounted(load)
         <!-- Jednorázové prvotní nastavení (mizí po prvním schváleném běhu) jde
              nad opakovaný měsíční návod: dokud není hotové, měsíční tok stejně
              nejde projet. -->
-        <PayrollSetupGuide v-if="showSetupGuide" />
+        <PayrollSetupGuide v-if="showSetupGuide" :start-period="state?.start_period ?? null" />
 
         <PayrollGuide ref="guide" />
 

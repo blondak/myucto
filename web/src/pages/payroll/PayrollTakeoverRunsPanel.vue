@@ -145,6 +145,9 @@ async function discard() {
         <p class="mt-1 text-sm text-neutral-500">
           {{ t('payroll.runs.takeover.subtitle') }}
         </p>
+        <p class="mt-1 text-sm text-neutral-500" data-testid="payroll-takeover-jmhz-note">
+          {{ t('payroll.runs.takeover.jmhz_note') }}
+        </p>
       </div>
       <span
         v-if="overview?.payroll_start_period"

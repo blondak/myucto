@@ -2584,6 +2584,7 @@
       "takeover": {
         "title": "Taken-over months of the transition year",
         "subtitle": "Months processed by the previous payroll program. A taken-over run mirrors them: it is not calculated, not approved and never posted again.",
+        "jmhz_note": "The previous program filed the JMHZ reports for these months and MyÚčto does not build corrective reports for them. File the correction where the regular report came from (the previous program or the ČSSZ portal) and carry the corrected totals over to the taken-over wages and the opening balances.",
         "boundary": "MyÚčto calculates payroll from {period}",
         "loading": "Loading taken-over months…",
         "rows": "{count} migration rows",
@@ -7957,7 +7958,12 @@
       "mark_done": "Mark as done",
       "marked_done": "Done",
       "footnote": "The guide is shown until you have your first approved payroll run. Ticking a step off is your own note — the application neither changes nor checks anything based on it.",
+      "transition_manual": "Mid-year transition",
       "groups": {
+        "transition": {
+          "title": "Mid-year transition",
+          "hint": "months 1–{last}/{year} were processed by the previous program; without taking them over the annual settlement, income certificate and tax statement cannot be produced"
+        },
         "employer": {
           "title": "Employer setup",
           "hint": "details without which payroll cannot be calculated or paid"
@@ -7972,6 +7978,35 @@
         }
       },
       "steps": {
+        "takeover_wages": {
+          "title": "Take over wages for the months before the switch",
+          "text": "For each employee enter the totals from the previous program per month and employment, in CZK: gross wage, insurance, tax advance and credits. Manual entry fills the taken-over wages and the opening balances at once; a CSV or XLSX import fills the taken-over wages only.",
+          "cta": "Enter taken-over wages"
+        },
+        "takeover_openings": {
+          "title": "Check the opening balances",
+          "text": "On the employment card, in the Opening balances section, every taken-over month needs its totals or a ticked “Really zero”. An empty month is not zero — the tax statement and the year close stop on it."
+        },
+        "takeover_evidence": {
+          "title": "Children and declaration from January",
+          "text": "Record the taxpayer declaration, children and disability as valid from January, not from the switch. Without them the annual settlement will not accept the child credit applied earlier and the income certificate cannot be issued."
+        },
+        "takeover_identifiers": {
+          "title": "ČSSZ identifiers",
+          "text": "Copy the OIČ and the insurance relationship ID of each employment from the previous program, or load them in Imports. Without them the first JMHZ report does not link to the reports filed by the previous program."
+        },
+        "takeover_averages": {
+          "title": "Average earnings for the first quarter",
+          "text": "The average for compensations in the first quarter after the switch comes from the taken-over wages of the previous quarter. The application suggests it when the taken-over wages carry worked hours; you approve the suggestion in Absences."
+        },
+        "takeover_leave": {
+          "title": "Leave balance",
+          "text": "Enter the entitlement and the leave taken while the previous program ran in the leave book, so the balance is right from the first month."
+        },
+        "takeover_check": {
+          "title": "Check the taken-over part of the year",
+          "text": "The report shows who is missing a taken-over month and where the opening balances contradict the taken-over wages. The same checks later stop the tax statement and the year close."
+        },
         "employer": {
           "title": "Employer and payroll offices",
           "text": "Social security registration number, the payroll contact and at least one active payroll office with its variable symbol. Without an office you cannot create an employment."
