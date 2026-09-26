@@ -338,9 +338,15 @@ final class PayrollRunSnapshotBuilder
                     'time_month_missing',
                     'employment',
                     $employmentId,
-                    'Pracovní vztah nemá za období založenou a schválenou pracovní dobu. '
-                    . 'Zamknutím vstupů se stav zmrazí a měsíční hlášení ČSSZ by ji '
-                    . 'už nevidělo — schvalte ji nejdřív.',
+                    // Jméno vpředu (Q15-11): 187 stejných vět bez osoby nešlo
+                    // v kontrolách běhu přiřadit. Varování schválení nezastaví,
+                    // text proto neříká „nejdřív", jen co to znamená pro JMHZ.
+                    sprintf(
+                        '%s: pracovní vztah nemá za období založenou a schválenou pracovní dobu. '
+                        . 'Běh jde schválit i tak, ale zamknutím vstupů se stav zmrazí '
+                        . 'a měsíční hlášení ČSSZ ji neuvidí — schvalte ji před přípravou hlášení.',
+                        (string) $row['full_name'],
+                    ),
                     "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             } elseif ($timeMonth['status'] !== 'approved') {
@@ -349,8 +355,11 @@ final class PayrollRunSnapshotBuilder
                     'time_month_not_approved',
                     'employment',
                     $employmentId,
-                    'Docházka pracovního vztahu není schválena. Zamknutím vstupů se '
-                    . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
+                    sprintf(
+                        '%s: pracovní vztah nemá schválenou docházku. Zamknutím vstupů se '
+                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
+                        (string) $row['full_name'],
+                    ),
                     "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             }

@@ -2657,6 +2657,11 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Kontroly běhu",
+      "validation_scope": {
+        "blocking": "Blokují schválení ({count})",
+        "all": "Všechny kontroly ({count})",
+        "hint": "Zobrazeny jsou jen kontroly, které brání schválení. Dalších {count} varování schválení nezastaví; najdete je pod Všechny kontroly, seskupené podle druhu."
+      },
       "missing_previous": {
         "title": "Před obdobím {period} chybí mzdový běh za {count} měsíců od začátku vedení mezd v MyÚčtu",
         "hint": "Mzda staví na předchozích měsících (roční úhrny, průměry, zálohová daň). Spočítejte chybějící měsíce dřív. Pokud je zpracoval předchozí program, posuňte v Nastavení mezd začátek vedení mezd za ně a převezměte je jako převzaté měsíce.",

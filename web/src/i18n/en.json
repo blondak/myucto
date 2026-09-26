@@ -2657,6 +2657,11 @@
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
       "validations": "Run checks",
+      "validation_scope": {
+        "blocking": "Blocking approval ({count})",
+        "all": "All checks ({count})",
+        "hint": "Only checks that prevent approval are shown. {count} more warnings do not stop approval; find them under All checks, grouped by kind."
+      },
       "missing_previous": {
         "title": "Before {period}, a payroll run is missing for {count} months since payroll started in MyÚčto",
         "hint": "Payroll builds on previous months (annual totals, averages, advance tax). Calculate the missing months first. If the previous program processed them, move the payroll start in the payroll settings past them and take them over as taken-over months.",

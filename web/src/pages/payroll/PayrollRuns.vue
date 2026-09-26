@@ -21,7 +21,7 @@ import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToa
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -324,9 +324,14 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
 
   for (const validation of validations) {
     const canGroup = GROUPED_VALIDATION_CODES.has(validation.code)
+    // Q15-8: samostatná varování jednoho kódu (187× „nemá schválenou
+    // pracovní dobu") jsou jedna skupina se jmény, ne osm stránek karet,
+    // pod kterými se ztratí to, co blokuje.
     const key = validation.requires_override
       ? overrideGroupKey(validation)
-      : canGroup ? validationGroupingKey(validation) : `validation-${validation.id}`
+      : canGroup ? validationGroupingKey(validation)
+        : validation.severity !== 'blocker' ? warningGroupKey(validation)
+          : `validation-${validation.id}`
     let group = grouped.get(key)
     if (!group) {
       group = { primary: validation, items: [] }
@@ -336,7 +341,7 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
     group.items.push(validation)
   }
 
-  return groups.map(({ primary, items }) => {
+  const display = groups.map(({ primary, items }): DisplayValidation => {
     if (primary.requires_override && items.length > 1) {
       return {
         ...primary,
@@ -347,23 +352,29 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
         override_items: overrideItems(items, runPeriod),
       }
     }
-    const entityLabels = Array.from(new Set(items.flatMap((item) => {
-      if (item.entity_type === 'employee' && item.entity_id !== null) {
-        return personNames.value[item.entity_id] ? [personNames.value[item.entity_id]] : []
+    const warningGroup = !GROUPED_VALIDATION_CODES.has(primary.code) && primary.severity !== 'blocker'
+    const personLabel = (item: PayrollRunValidation): string | undefined => {
+      if (item.entity_type === 'employee' && item.entity_id !== null && personNames.value[item.entity_id]) {
+        return personNames.value[item.entity_id]
       }
       const namedEmployment = item.message.match(/^(.+?): pracovní vztah/u)
-      return namedEmployment?.[1] ? [namedEmployment[1]] : []
+      if (namedEmployment?.[1]) return namedEmployment[1]
+      return warningGroup && items.length > 1 ? splitPersonPrefix(item.message)?.label : undefined
+    }
+    const entityLabels = Array.from(new Set(items.flatMap((item) => {
+      const label = personLabel(item)
+      return label ? [label] : []
     })))
 
-    const displayMessage = validationDisplayMessage(primary, items.length)
+    const displayMessage = warningGroup && items.length > 1
+      ? overrideGroupMessage(items)
+      : validationDisplayMessage(primary, items.length)
     const links = new Map<string, string[]>()
     for (const item of items) {
       if (!item.remediation_path) continue
       const path = remediationHref(item.remediation_path, runPeriod)
       const labels = links.get(path) ?? []
-      const label = item.entity_type === 'employee' && item.entity_id !== null
-        ? personNames.value[item.entity_id]
-        : undefined
+      const label = personLabel(item)
       if (label && !labels.includes(label)) labels.push(label)
       links.set(path, labels)
     }
@@ -372,13 +383,33 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
       ...primary,
       group_key: GROUPED_VALIDATION_CODES.has(primary.code)
         ? primary.code
-        : `validation-${primary.id}`,
+        : warningGroup ? warningGroupKey(primary) : `validation-${primary.id}`,
       display_message: displayMessage,
       entity_labels: entityLabels,
       remediation_links: Array.from(links, ([path, labels]) => ({ path, label: labels.join(', ') })),
       override_items: [],
     }
   })
+
+  // Co drží schválení, jde nahoru (Q15-8). Řazení je stabilní, takže pořadí
+  // uvnitř obou částí zůstává, jak ho poslal server.
+  return [
+    ...display.filter(group => blocksApproval(group)),
+    ...display.filter(group => !blocksApproval(group)),
+  ]
+}
+
+function warningGroupKey(validation: PayrollRunValidation): string {
+  return `warning-${validation.code}`
+}
+
+/** Blokátor, nebo varování, které ještě čeká na výjimku. */
+function blocksApproval(validation: DisplayValidation): boolean {
+  if (validation.override_items.length) {
+    return validation.override_items.some(item => item.validation.requires_override && !item.validation.overridden_at)
+  }
+  return validation.severity === 'blocker'
+    || (validation.requires_override && !validation.overridden_at)
 }
 
 /**
@@ -703,7 +734,33 @@ function commandDisabled(run: PayrollRun, command: PayrollRunCommand): boolean {
   return command === 'approve' && approveBlockerCount(run) > 0
 }
 
+/*
+ * Kontroly běhu: blokující zvlášť od varování (Q15-8). Při blokátorech se
+ * karta otevírá jen s nimi — 19 blokujících se jinak ztratilo pod 187
+ * varováními na osmi stránkách. Varování jsou o klik dál, seskupená po kódu.
+ */
+const validationScope = ref<Record<number, 'blocking' | 'all'>>({})
+
+function blockingGroupCount(run: PayrollRun): number {
+  return validationGroups(run.validations, run.period_start).filter(blocksApproval).length
+}
+
+function currentValidationScope(run: PayrollRun): 'blocking' | 'all' {
+  return validationScope.value[run.id]
+    ?? (approveBlockerCount(run) > 0 ? 'blocking' : 'all')
+}
+
+function visibleValidationGroups(run: PayrollRun): DisplayValidation[] {
+  const groups = validationGroups(run.validations, run.period_start)
+  return currentValidationScope(run) === 'blocking' ? groups.filter(blocksApproval) : groups
+}
+
+function setValidationScope(run: PayrollRun, scope: 'blocking' | 'all'): void {
+  validationScope.value = { ...validationScope.value, [run.id]: scope }
+}
+
 function showValidations(run: PayrollRun): void {
+  setValidationScope(run, 'blocking')
   document.querySelector(`[data-testid="payroll-run-${run.id}-validations-section"]`)
     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
@@ -2134,13 +2191,53 @@ onMounted(load)
           class="mt-4 scroll-mt-24 space-y-2"
           :data-testid="`payroll-run-${run.id}-validations-section`"
         >
-          <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
+            <div
+              v-if="blockingGroupCount(run) > 0"
+              class="flex flex-wrap gap-2"
+              role="group"
+              :data-testid="`payroll-run-${run.id}-validation-scope`"
+            >
+              <button
+                type="button"
+                :class="[currentValidationScope(run) === 'blocking' ? btnFilledSm('danger') : btnOutlineSm('danger'), 'whitespace-nowrap']"
+                :aria-pressed="currentValidationScope(run) === 'blocking'"
+                :data-testid="`payroll-run-${run.id}-validation-scope-blocking`"
+                @click="setValidationScope(run, 'blocking')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.lock" />
+                </svg>
+                {{ t('payroll.runs.validation_scope.blocking', { count: approveBlockerCount(run) }) }}
+              </button>
+              <button
+                type="button"
+                :class="[currentValidationScope(run) === 'all' ? btnFilledSm('neutral') : btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                :aria-pressed="currentValidationScope(run) === 'all'"
+                :data-testid="`payroll-run-${run.id}-validation-scope-all`"
+                @click="setValidationScope(run, 'all')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.table" />
+                </svg>
+                {{ t('payroll.runs.validation_scope.all', { count: run.validations.length }) }}
+              </button>
+            </div>
+          </div>
+          <p
+            v-if="currentValidationScope(run) === 'blocking' && run.validations.length > approveBlockerCount(run)"
+            class="text-xs text-neutral-500"
+            :data-testid="`payroll-run-${run.id}-validation-scope-hint`"
+          >
+            {{ t('payroll.runs.validation_scope.hint', { count: run.validations.length - approveBlockerCount(run) }) }}
+          </p>
           <!--
             Nesloučené validace chodí po osobách; u 226 lidí by jich tu viselo
             stovky. Sbalený seznam ukáže prvních pár, zbytek se stránkuje.
           -->
           <ExpandableList
-            :items="validationGroups(run.validations, run.period_start)"
+            :items="visibleValidationGroups(run)"
             :item-key="validationKey"
             :search-text="validationSearchText"
             list-tag="div"
