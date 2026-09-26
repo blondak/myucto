@@ -4611,7 +4611,8 @@
           "dimensions": "no dimension | 1 assigned dimension | {count} assigned dimensions",
           "components": "no recurring component | 1 recurring pay component | {count} recurring pay components",
           "time": "no attendance record | 1 attendance and calendar record | {count} attendance and calendar records",
-          "absences": "no absence | 1 absence and leave record | {count} absence and leave records"
+          "absences": "no absence | 1 absence and leave record | {count} absence and leave records",
+          "sickness": "no benefit case | 1 unsubmitted sickness insurance benefit case | {count} unsubmitted sickness insurance benefit cases"
         },
         "person_cascade": {
           "employments": "no relationship | 1 employment relationship | {count} employment relationships",
