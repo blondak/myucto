@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRepeatedMonth;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverSicknessCompensation;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
@@ -71,6 +72,7 @@ final class PohodaPayrollImporter
         private readonly PohodaPayrollJmhzWriter $jmhz,
         private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
         private readonly PayrollTakeoverRepeatedMonth $repeatedMonth,
+        private readonly PayrollTakeoverSicknessCompensation $sicknessCompensation,
     ) {}
 
     /**
@@ -596,6 +598,13 @@ final class PohodaPayrollImporter
                     $protocol,
                     self::STEP_SICKNESS,
                 );
+                // Náhrada mzdy při DPN za dny od začátku vedení mezd. Až po zápisu případů:
+                // okno § 192 ZP potřebuje dny vyčerpané předchozím plátcem.
+                $sicknessStart = $this->sickness->startPeriod($supplierId);
+                if ($sicknessStart !== null) {
+                    $this->sicknessCompensation->compensate($supplierId, $sicknessStart, $userOrNull,
+                        PohodaPayrollTakeover::policy(), $protocol, self::STEP_SICKNESS);
+                }
                 $protocol->finish(self::STEP_SICKNESS);
             }
 

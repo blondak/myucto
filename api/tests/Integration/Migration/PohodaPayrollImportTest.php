@@ -406,6 +406,27 @@ final class PohodaPayrollImportTest extends TestCase
         $values = json_decode((string) $summary->fetchColumn(), true) ?: [];
         self::assertArrayNotHasKey('sick_hours', $values, json_encode($values));
         self::assertSame([], PayrollJmhzWorkMonthSummaryBuilder::importHoursRequiringDates($values));
+
+        // Měsíc počítá MyÚčto: náhrada mzdy při DPN má zmrazený výpočet a schválený vstup,
+        // jinak by ji běh nevyplatil a krácení měsíční mzdy by skončilo v ruční kontrole.
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_SICKNESS)['sickness_compensations'] ?? 0, $this->explain($protocol));
+        $event = $this->db->pdo()->prepare(
+            "SELECT event.first_day_fully_worked, event.compensation_minor FROM payroll_sickness_events event
+               JOIN payroll_absences absence ON absence.id = event.absence_id
+              WHERE absence.supplier_id = ? AND absence.employment_id = ?"
+        );
+        $event->execute([$supplierId, $employment['id']]);
+        $sickness = $event->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($sickness, $this->explain($protocol));
+        self::assertSame(0, (int) $sickness['first_day_fully_worked']);
+        $input = "SELECT SUM(i.amount_minor) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+                   WHERE i.supplier_id = ? AND i.employment_id = ? AND c.code = 'NAHRADA_MZDY_DPN' AND i.status = 'approved' AND i.period_start = '2026-03-01'";
+        self::assertSame((int) $sickness['compensation_minor'], $this->scalar($input, [$supplierId, $employment['id']]));
+        self::assertGreaterThan(0, (int) $sickness['compensation_minor']);
+
+        // Opakovaný převod výpočet nezdvojí.
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true);
+        self::assertArrayNotHasKey('sickness_compensations', self::stepCounts($again, PohodaPayrollImporter::STEP_SICKNESS), $this->explain($again));
     }
 
     /**

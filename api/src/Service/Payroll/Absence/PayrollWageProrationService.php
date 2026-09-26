@@ -405,6 +405,27 @@ final class PayrollWageProrationService
     }
 
     /**
+     * Doba nemoci v okně § 192 ZP pro výpočet náhrady mzdy — týmiž segmenty, jakými
+     * krácení mzdy měří titul náhrady při DPN, takže náhrada a krácení stojí na týchž
+     * minutách. Nepřítomnost bez publikovaných směn (měsíc ze souhrnu importu) se měří
+     * rozvrhem pracovního kalendáře ({@see calendarSegments()}).
+     *
+     * @param array<string,mixed> $absence
+     * @return list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>
+     */
+    public function sicknessCompensationSegments(array $absence, bool $firstDayFullyWorked): array
+    {
+        $fromCalendar = !$this->hasPublishedShifts(
+            PayrollTimeValue::int($absence['supplier_id'] ?? null, 'supplier_id'),
+            PayrollTimeValue::int($absence['employment_id'] ?? null, 'employment_id'),
+            (string) $absence['date_from'],
+            (string) $absence['date_to'],
+        );
+
+        return $this->windowSegments($absence, $firstDayFullyWorked, AbsenceHolidayTreatment::CompensateSickness, $fromCalendar);
+    }
+
+    /**
      * Doba nepřítomnosti v okně, kterým se řídí titul: u nemoci okno § 192 ZP,
      * jinak celý rozsah nepřítomnosti.
      *

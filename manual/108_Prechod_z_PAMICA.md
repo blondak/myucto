@@ -212,8 +212,18 @@ upravený účetní nemění.
 z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, placené
 volno (ve výši průměru), překážky na straně zaměstnavatele (sazbou, kterou
 platila PAMICA) a za svátek u mzdy za hodiny nebo úkol. Svátek v jinak pracovní
-den u měsíční mzdy převod vede zvlášť, ne mezi odpracovanými hodinami. Náhradu
-mzdy při nemoci a vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+den u měsíční mzdy převod vede zvlášť, ne mezi odpracovanými hodinami.
+
+**Náhrada mzdy při nemoci.** U převzaté dočasné pracovní neschopnosti, která
+zasahuje do měsíců počítaných MyÚčtem, převod spočítá náhradu mzdy stejně
+jako schválení v `Mzdy → Nepřítomnosti`: okno prvních 14 dnů, redukovaný
+průměr ze schváleného průměru čtvrtletí, ve kterém nemoc začala. Dobu měří
+rozvrhem pracovního kalendáře (měsíc ze souhrnu docházky směny nemá). Náhrada
+vznikne jen za dny od začátku vedení mezd, dřívější dny zaplatila PAMICA.
+První den nemoci bere převod jako neodpracovaný; když ho zaměstnanec celý
+odpracoval, opravte nepřítomnost v `Mzdy → Nepřítomnosti`. Nepřítomnost
+bez schváleného průměru protokol vypíše; po doplnění průměru převod
+zopakujte. Vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
 
 **Opakovaný převod** téhož exportu nic nezmění. Když se sešit měsíce, který
 počítá MyÚčto, od dřívějšího převodu změnil (nový export nebo novější verze
