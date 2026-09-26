@@ -127,8 +127,23 @@ const FIELD_GROUPS: { key: string, fields: AmountField[] }[] = [
 /** V UI se pracuje s korunami, kumulace je v haléřích. */
 const drafts = ref<Record<number, Record<AmountField, string>>>({})
 
+/**
+ * Prázdný měsíc není nula. Měsíc bez jediné částky se uloží jen tehdy, když
+ * účetní výslovně potvrdí, že v něm zaměstnanec opravdu neměl příjem — jinak
+ * by se zapomenutý měsíc tvářil jako doložená nula.
+ */
+const confirmedZero = ref<Record<number, boolean>>({})
+
 function emptyRow(): Record<AmountField, string> {
   return Object.fromEntries(AMOUNT_FIELDS.map(field => [field, ''])) as Record<AmountField, string>
+}
+
+function rowIsEmpty(month: number): boolean {
+  const row = drafts.value[month] ?? emptyRow()
+  return AMOUNT_FIELDS.every(field => {
+    const minor = toMinor(row[field])
+    return Number.isFinite(minor) && minor === 0
+  })
 }
 
 function toMinor(value: string): number {
@@ -162,11 +177,16 @@ async function load() {
     // Starší odpověď serveru pole nenese; bez výchozí hodnoty by na ní panel spadl.
     approvedPeriods.value = saved.approved_periods ?? []
     hasSavedOpening.value = hasCompleteOpenings(saved.openings)
-    for (const month of monthNumbers.value) drafts.value[month] = emptyRow()
+    for (const month of monthNumbers.value) {
+      drafts.value[month] = emptyRow()
+      confirmedZero.value[month] = false
+    }
     for (const row of saved.months) {
       const draft = emptyRow()
       for (const field of AMOUNT_FIELDS) draft[field] = toInput(row[field])
       drafts.value[row.month] = draft
+      // Uložený nulový měsíc byl při zadání potvrzený — jinak by uložený nebyl.
+      confirmedZero.value[row.month] = AMOUNT_FIELDS.every(field => (row[field] ?? 0) === 0)
     }
     sourceReference.value = saved.source_reference
     emit('loaded', hasSavedOpening.value)
@@ -193,7 +213,12 @@ async function save() {
       }
       values[field] = minor
     }
-    payload.push({ month, ...values })
+    const empty = rowIsEmpty(month)
+    if (empty && !confirmedZero.value[month]) {
+      error.value = t('payroll.people.openings.explicit.empty_month', { month })
+      return
+    }
+    payload.push({ month, ...values, ...(empty ? { confirmed_zero: true } : {}) })
   }
 
   saving.value = true
@@ -372,6 +397,9 @@ onMounted(load)
                 <th v-for="field in AMOUNT_FIELDS" :key="field" class="px-2 py-1 font-medium">
                   {{ t(`payroll.people.openings.field.${field}`) }}
                 </th>
+                <th class="whitespace-nowrap px-2 py-1 font-medium" :title="t('payroll.people.openings.explicit.confirm_hint')">
+                  {{ t('payroll.people.openings.explicit.confirm') }}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -386,6 +414,16 @@ onMounted(load)
                     class="w-24 rounded-md border border-neutral-300 bg-surface px-2 py-1 text-right tabular-nums disabled:bg-neutral-100"
                   >
                 </td>
+                <td class="px-2 py-1 text-center">
+                  <input
+                    v-model="confirmedZero[month]"
+                    type="checkbox"
+                    :disabled="!canWrite || locked || saving || !rowIsEmpty(month)"
+                    :aria-label="t('payroll.people.openings.explicit.confirm_aria', { month })"
+                    :data-test="`opening-${month}-confirmed-zero`"
+                    class="h-4 w-4 rounded border-neutral-300 disabled:opacity-40"
+                  >
+                </td>
               </tr>
             </tbody>
             <tfoot>
@@ -397,6 +435,7 @@ onMounted(load)
                   class="px-2 py-1 text-right tabular-nums"
                   :data-test="`opening-total-${field}`"
                 >{{ (totals[field] / 100).toLocaleString('cs-CZ') }}</td>
+                <td />
               </tr>
             </tfoot>
           </table>

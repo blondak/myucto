@@ -639,6 +639,8 @@ export interface PayrollOpeningMonth {
   applied_child_credit_minor_units: number
   tax_bonus_minor_units: number
   bonus_qualifying_income_minor_units: number
+  /** Výslovné potvrzení nulového měsíce; prázdný měsíc není nula. Jen při ukládání. */
+  confirmed_zero?: boolean
 }
 
 export interface PayrollOpeningBalances {

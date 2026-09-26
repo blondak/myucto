@@ -5055,7 +5055,7 @@
         "done": "Počáteční stav je potvrzený — výpočet i roční zúčtování s ním počítají. Zkontrolovat nebo opravit jej můžete níže.",
         "panel_title": "Počáteční stavy za rok {year}",
         "panel_hint": "Úhrny za měsíce, které jste zpracovali jinde. Opište je ze sestavy předchozího programu; částky zadávejte v korunách.",
-        "zero_hint": "Pokud zaměstnanec u této firmy v předchozích měsících neměl žádnou mzdu, ponechte všechny částky nulové a formulář uložte. Zdroj není povinný.",
+        "zero_hint": "Vyplňte každý měsíc, ve kterém zaměstnanci trval pracovní vztah. Prázdný měsíc není nula: pokud v něm zaměstnanec opravdu neměl žádný příjem (třeba neplacené volno), zaškrtněte u něj „Opravdu nula“. Zdroj není povinný.",
         "new_hire_zero_hint": "Jde o nový nástup bez předchozí mzdy u této firmy. Uložte nulový počáteční stav; zdroj není povinný.",
         "nothing_to_fill": "Nejsou žádné dříve zpracované měsíce. Uložte níže nulový počáteční stav.",
         "month": "Měsíc",
@@ -5071,7 +5071,7 @@
         "save_failed": "Počáteční stavy se nepodařilo uložit.",
         "import": {
           "title": "Import z tabulky (CSV/XLSX)",
-          "hint": "Jeden soubor za celou firmu. Každý řádek je jeden měsíc jednoho zaměstnance, částky v celých haléřích. Stáhněte si vzor, ať sedí hlavička.",
+          "hint": "Jeden soubor za celou firmu. Každý řádek je jeden měsíc jednoho zaměstnance, částky v celých haléřích. Uveďte každý převzatý měsíc, ve kterém vztah trval; měsíc bez příjmu zapište nulami (prázdný řádek nula není). Stáhněte si vzor, ať sedí hlavička.",
           "template": "Stáhnout vzor",
           "preview": "Náhled",
           "apply": "Naimportovat",
@@ -5108,6 +5108,12 @@
           "applied_child_credit_minor_units": "Daňové zvýhodnění",
           "tax_bonus_minor_units": "Vyplacený bonus",
           "bonus_qualifying_income_minor_units": "Příjem pro bonus"
+        },
+        "explicit": {
+          "confirm": "Opravdu nula",
+          "confirm_hint": "Zaškrtněte jen u měsíce, ve kterém zaměstnanec opravdu neměl žádný příjem. Prázdný měsíc se jako nula neuloží.",
+          "confirm_aria": "Měsíc {month} je opravdu nulový",
+          "empty_month": "Měsíc {month} nemá vyplněnou žádnou částku. Vyplňte úhrny z předchozího programu, nebo zaškrtněte „Opravdu nula“."
         }
       },
       "statutory_evidence": {

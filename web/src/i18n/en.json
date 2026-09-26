@@ -5055,7 +5055,7 @@
         "done": "The opening state is confirmed — the calculation and annual settlement use it. You can review or correct it below.",
         "panel_title": "Opening balances for {year}",
         "panel_hint": "Totals for the months processed elsewhere. Copy them from the previous system's report; enter amounts in whole currency units.",
-        "zero_hint": "If the employee had no payroll with this company in the preceding months, leave every amount at zero and save the form. A source reference is optional.",
+        "zero_hint": "Fill in every month in which the employment lasted. An empty month is not zero: if the employee really had no income in it (e.g. unpaid leave), tick “Really zero” for it. A source reference is optional.",
         "new_hire_zero_hint": "This is a new hire with no previous payroll at this company. Save a zero opening state; a source reference is optional.",
         "nothing_to_fill": "There are no previously processed months. Save the zero opening state below.",
         "month": "Month",
@@ -5071,7 +5071,7 @@
         "save_failed": "Opening balances could not be saved.",
         "import": {
           "title": "Import from a spreadsheet (CSV/XLSX)",
-          "hint": "One file for the whole company. Each row is one month of one employee, amounts in whole minor units. Download the template so the header matches.",
+          "hint": "One file for the whole company. Each row is one month of one employee, amounts in whole minor units. List every taken-over month in which the employment lasted; write a month without income as zeros (an empty row is not zero). Download the template so the header matches.",
           "template": "Download template",
           "preview": "Preview",
           "apply": "Import",
@@ -5108,6 +5108,12 @@
           "applied_child_credit_minor_units": "Child credit",
           "tax_bonus_minor_units": "Tax bonus paid",
           "bonus_qualifying_income_minor_units": "Bonus-qualifying income"
+        },
+        "explicit": {
+          "confirm": "Really zero",
+          "confirm_hint": "Tick only for a month in which the employee really had no income. An empty month is not saved as zero.",
+          "confirm_aria": "Month {month} is really zero",
+          "empty_month": "Month {month} has no amount filled in. Enter the totals from the previous program, or tick “Really zero”."
         }
       },
       "statutory_evidence": {

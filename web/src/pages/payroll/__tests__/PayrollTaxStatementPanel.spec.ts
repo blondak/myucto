@@ -193,6 +193,26 @@ describe('PayrollTaxStatementPanel', () => {
     expect(m.success).toHaveBeenCalled()
   })
 
+  it('shows missing taken-over months as a blocker and does not offer the download', async () => {
+    m.preview.mockResolvedValue(preview({
+      dpzvd6: {
+        blockers: ['Za měsíce 1–9 chybí u 1 zaměstnanců převzaté úhrny.'],
+        taken_over_months: [1],
+        months: [{ ...preview().statements.dpzvd6.months[0], taken_over: true }],
+      },
+    }))
+    const wrapper = mount(PayrollTaxStatementPanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="tax-statement-blockers"]').text())
+      .toContain('chybí u 1 zaměstnanců převzaté úhrny')
+    expect(wrapper.find('[data-test="tax-statement-taken-over"]').exists()).toBe(true)
+    const dpz = wrapper.findAll('button').find(button => button.text().includes('download_dpzvd6'))
+    await dpz?.trigger('click')
+    await flushPromises()
+    expect(m.download).not.toHaveBeenCalled()
+  })
+
   it('reports a refused year instead of rendering an empty statement', async () => {
     m.preview.mockRejectedValue({
       response: { data: { error: { message: 'Za zvolený rok není žádný schválený mzdový běh.' } } },

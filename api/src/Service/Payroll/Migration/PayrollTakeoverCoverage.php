@@ -118,8 +118,12 @@ final class PayrollTakeoverCoverage
      * @param list<int> $takeoverMonths
      * @return array<int,list<int>> employee_id => měsíce
      */
-    public function expectedMonths(int $supplierId, int $year, array $takeoverMonths): array
-    {
+    public function expectedMonths(
+        int $supplierId,
+        int $year,
+        array $takeoverMonths,
+        ?int $employeeId = null,
+    ): array {
         if ($takeoverMonths === []) {
             return [];
         }
@@ -131,14 +135,17 @@ final class PayrollTakeoverCoverage
                 AND status IN (%s)
                 AND (start_date IS NULL OR start_date <= ?)
                 AND (end_date IS NULL OR end_date >= ?)
+                %s
               ORDER BY employee_id, id',
             implode(', ', array_fill(0, count(PayrollEmploymentMonths::STATUSES), '?')),
+            $employeeId === null ? '' : 'AND employee_id = ?',
         ));
         $statement->execute([
             $supplierId,
             ...PayrollEmploymentMonths::STATUSES,
             date('Y-m-t', (int) strtotime(sprintf('%04d-%02d-01', $year, $lastMonth))),
             sprintf('%04d-01-01', $year),
+            ...($employeeId === null ? [] : [$employeeId]),
         ]);
         $spans = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -156,6 +163,21 @@ final class PayrollTakeoverCoverage
         }
 
         return $expected;
+    }
+
+    /**
+     * Převzaté měsíce jedné osoby, ve kterých jí trval vztah.
+     *
+     * @return list<int>
+     */
+    public function expectedMonthsForEmployee(int $supplierId, int $employeeId, int $year): array
+    {
+        return $this->expectedMonths(
+            $supplierId,
+            $year,
+            $this->takeoverMonths($supplierId, $year),
+            $employeeId,
+        )[$employeeId] ?? [];
     }
 
     /**
