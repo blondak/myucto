@@ -1504,6 +1504,14 @@ final class Routes
                 [PayrollForeignPermitAction::class, 'create'],
             );
             $g->get(
+                '/people/{id:[0-9]+}/taxable-income-requests',
+                [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'show'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/taxable-income-requests',
+                [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'save'],
+            );
+            $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',
                 [PayrollOpeningBalanceAction::class, 'show'],
             );

@@ -5498,6 +5498,28 @@
         "edit_section": "Upravit",
         "edit_section_aria": "Upravit: {section}"
       },
+      "taxable_income_requests": {
+        "title": "Žádosti o potvrzení o zdanitelných příjmech",
+        "subtitle": "Potvrzení podle § 38j odst. 3 ZDP se vystavuje na žádost zaměstnance do 10 dnů, i během trvajícího vztahu.",
+        "open_count": "{count} nevyřízená | {count} nevyřízené | {count} nevyřízených",
+        "empty": "Žádná žádost o potvrzení není zapsaná.",
+        "row": "Příjmy za {year} · žádost {requested} · vystavit do {due}",
+        "status": {
+          "open": "Čeká na vystavení",
+          "certificate_issued": "Potvrzení vystaveno",
+          "completed": "Vyřízeno"
+        },
+        "requested_on": "Den žádosti",
+        "income_year": "Rok příjmů",
+        "note": "Poznámka",
+        "hint": "Termín se objeví v hlídači termínů. Žádost se vyřídí sama, jakmile na stránce Dokumenty vystavíte potvrzení; předáte-li ho mimo aplikaci, označte ji jako vyřízenou.",
+        "save": "Zapsat žádost",
+        "saved": "Žádost o potvrzení je zapsaná.",
+        "save_failed": "Žádost se nepodařilo uložit.",
+        "load_failed": "Žádosti o potvrzení se nepodařilo načíst.",
+        "issue": "Vystavit potvrzení",
+        "complete": "Vyřízeno mimo aplikaci"
+      },
       "foreign_permits": {
         "title": "Pobytová a pracovní oprávnění",
         "subtitle": "Účinná historie cizineckých oprávnění s ověřeným firemním podkladem v Dokumentech.",
@@ -8228,7 +8250,10 @@
           "annual_settlement_perform": "Provést roční zúčtování (do 31. 3.)",
           "annual_settlement_refund": "Vrátit přeplatek ze zúčtování se mzdou za březen",
           "foreign_permit_residence": "Končí povolení k pobytu",
-          "foreign_permit_work": "Končí povolení k zaměstnání"
+          "foreign_permit_work": "Končí povolení k zaměstnání",
+          "taxable_income_request": "Vystavit potvrzení o zdanitelných příjmech na žádost (§ 38j)",
+          "business_trip_documents": "Doklady k vyúčtování pracovní cesty (§ 183 ZP)",
+          "business_trip_settlement": "Vyúčtovat pracovní cestu (§ 183 ZP)"
         },
         "annual_settlement_undecided": "{count} lidí s příjmem za rok {year} ještě nemá rozhodnuto, zda o zúčtování žádají"
       },
@@ -25647,6 +25672,12 @@
       "band": "pásmo {band}",
       "settlement": "Doplatek nebo vratka proti záloze: {amount}",
       "manual_review": "Vyúčtování vyžaduje ruční posouzení a nelze ho schválit:"
+    },
+    "deadline": {
+      "submitted_on": "Doklady předloženy dne",
+      "submitted_on_hint": "Zaměstnanec předloží doklady do 10 pracovních dnů po skončení cesty, vy ji vyúčtujete (schválíte) do 10 pracovních dnů od předložení (§ 183 odst. 1 ZP). Obě lhůty hlídá přehled termínů.",
+      "documents_due": "Doklady do {date}",
+      "settlement_due": "Vyúčtovat do {date}"
     },
     "settlement": {
       "label": "Vypořádání zálohy",

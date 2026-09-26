@@ -40,6 +40,7 @@ import JmhzRelationQuestions from './JmhzRelationQuestions.vue'
 import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
 import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
+import PayrollPersonTaxableIncomeRequestsPanel from './PayrollPersonTaxableIncomeRequestsPanel.vue'
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import PersonDataGapBadge from './PersonDataGapBadge.vue'
@@ -1073,6 +1074,8 @@ const FOCUSABLE_PANELS = [
   'registration_identity',
   'addresses',
   'foreign_permit',
+  // Žádosti o potvrzení § 38j (proklik z hlídače termínů).
+  'taxable_income_requests',
   // Sekce osobní karty na jiných záložkách než Identita. Panel si přepnutí
   // záložky řídí sám (`focusSection`), sem stačí povel.
   'contacts',
@@ -1690,6 +1693,12 @@ onMounted(async () => {
               :person-id="expandedId"
               :can-write="auth.canWrite('payroll.person.write') && auth.canRead('documents')"
               :can-read-documents="auth.canRead('documents')"
+            />
+          </div>
+          <div data-panel-anchor="taxable_income_requests" class="scroll-mt-24">
+            <PayrollPersonTaxableIncomeRequestsPanel
+              :person-id="expandedId"
+              :can-write="auth.canWrite('payroll.person.write')"
             />
           </div>
         </div>

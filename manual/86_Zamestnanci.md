@@ -677,6 +677,15 @@ Dokud den žádosti není zapsaný, položka termín nemá. Povinnost se uzavře
 jakmile se v aplikaci vytvoří potvrzení o zdanitelných příjmech; potvrzení
 vydané před zapsanou žádostí ji neuzavře.
 
+O potvrzení může zaměstnanec požádat kdykoli, i během trvajícího vztahu. Takovou
+žádost zapíšeš na kartě osoby v části **Další údaje → Žádosti o potvrzení
+o zdanitelných příjmech**: den žádosti, rok příjmů a volitelně poznámku. Žádost
+dostane termín (den žádosti + 10 dnů) v panelu **Zákonné termíny**, proklik
+z něj vede zpět na tuto část karty. Vyřídí se sama, jakmile na stránce
+**Dokumenty** vystavíš potvrzení o zdanitelných příjmech (zálohové nebo
+srážkové); předáš-li potvrzení jinak, označ žádost tlačítkem **Vyřízeno mimo
+aplikaci**. Omylem zapsanou žádost lze smazat.
+
 Přihlášky a odhlášky se odškrtnou samy až podle **stavu podání**: splněné jsou,
 když podání odešlo (nebo bylo přijato) v ostrém prostředí. Připravené, ale
 neodeslané hlášení ani podání do testovacího prostředí položku nesplní — lhůta

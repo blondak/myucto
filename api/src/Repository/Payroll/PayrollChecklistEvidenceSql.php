@@ -40,6 +40,30 @@ final class PayrollChecklistEvidenceSql
     private const DONE = "obligation.status IN ('submitted', 'fulfilled')
                            AND obligation.environment = 'production'";
 
+    /**
+     * Potvrzení o zdanitelných příjmech (§ 38j odst. 3 ZDP) vystavené osobě
+     * od daného okamžiku. Jediné místo pro položku výstupního checklistu i pro
+     * žádost u trvajícího vztahu
+     * ({@see PayrollTaxableIncomeConfirmationRequestRepository}); `$sinceExpr`
+     * NULL = kdykoli.
+     */
+    public static function taxableIncomeCertificateIssued(
+        string $supplierExpr,
+        string $employeeExpr,
+        string $sinceExpr,
+    ): string {
+        return "EXISTS (
+            SELECT 1 FROM payroll_generated_documents certificate
+             WHERE certificate.supplier_id = {$supplierExpr}
+               AND certificate.employee_id = {$employeeExpr}
+               AND certificate.document_kind IN (
+                     'taxable_income_advance_certificate',
+                     'taxable_income_withholding_certificate'
+                   )
+               AND ({$sinceExpr} IS NULL OR certificate.created_at >= {$sinceExpr})
+          )";
+    }
+
     public static function evidencePresent(): string
     {
         $done = self::DONE;
@@ -52,21 +76,17 @@ final class PayrollChecklistEvidenceSql
           )
           WHEN 'taxable_income_confirmation' THEN EXISTS (
             SELECT 1
-              FROM payroll_generated_documents document
-              JOIN payroll_employments evidence_employment
-                ON evidence_employment.supplier_id = item.supplier_id
+              FROM payroll_employments evidence_employment
+             WHERE evidence_employment.supplier_id = item.supplier_id
                AND evidence_employment.id = item.employment_id
-             WHERE document.supplier_id = item.supplier_id
-               AND document.employee_id = evidence_employment.employee_id
-               AND document.document_kind IN (
-                     'taxable_income_advance_certificate',
-                     'taxable_income_withholding_certificate'
-                   )
                -- Se zapsaným dnem žádosti (termín = žádost + 10 dnů, § 38j
                -- odst. 3 ZDP) uzavře povinnost jen potvrzení vydané od žádosti,
                -- ne staré z dřívějška.
-               AND (item.due_date IS NULL
-                    OR document.created_at >= item.due_date - INTERVAL 10 DAY)
+               AND " . self::taxableIncomeCertificateIssued(
+                   'item.supplier_id',
+                   'evidence_employment.employee_id',
+                   'item.due_date - INTERVAL 10 DAY',
+               ) . "
           )
           WHEN 'social_jmhz_registration' THEN EXISTS (
             SELECT 1 FROM payroll_obligations obligation

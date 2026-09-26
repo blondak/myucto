@@ -75,6 +75,18 @@ final class BusinessTripValidator
             'items' => $this->items($input['items'] ?? []),
             'free_meals' => $this->freeMeals($input['free_meals'] ?? []),
         ];
+        // Den předložení dokladů (§ 183 odst. 1 ZP): od něj běží zaměstnavateli
+        // deset pracovních dnů na vyúčtování. Doklady z cesty nejde předložit
+        // dřív, než cesta skončila.
+        $submitted = $input['documents_submitted_on'] ?? null;
+        $data['documents_submitted_on'] = $submitted === null || $submitted === ''
+            ? null
+            : $this->date($submitted, 'documents_submitted_on');
+        if ($data['documents_submitted_on'] !== null
+            && $data['documents_submitted_on'] < substr((string) $data['arrival_at_local'], 0, 10)
+        ) {
+            throw new \InvalidArgumentException('Doklady k vyúčtování nelze předložit dřív, než cesta skončila.');
+        }
 
         return $data;
     }

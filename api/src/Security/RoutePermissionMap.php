@@ -205,6 +205,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/statutory-openings/import/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll.person.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/people/[0-9]+/taxable-income-requests$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/people/[0-9]+/taxable-income-requests$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],

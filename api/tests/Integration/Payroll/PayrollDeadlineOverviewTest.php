@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Repository\Payroll\PayrollTaxableIncomeConfirmationRequestRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
@@ -265,6 +266,147 @@ final class PayrollDeadlineOverviewTest extends TestCase
         $overview = $this->service->overview($this->supplierId, 'production', 30);
 
         self::assertSame([], $this->itemsOfSource($overview, 'checklist'));
+    }
+
+    /**
+     * § 38j odst. 3 ZDP: potvrzení na žádost do 10 dnů i u trvajícího
+     * vztahu. Dřív šel den žádosti zapsat jen k výstupnímu checklistu, takže
+     * žádost běžícího zaměstnance termín neměla nikde.
+     */
+    public function testTaxableIncomeRequestOfOngoingEmploymentIsADeadline(): void
+    {
+        $requests = new PayrollTaxableIncomeConfirmationRequestRepository($this->db);
+        $actorId = $this->actorId();
+        $list = $requests->create($this->supplierId, $this->employeeId, [
+            'requested_on' => '2026-08-12',
+            'income_year' => 2025,
+            'employment_id' => $this->employmentId,
+        ], $actorId);
+        self::assertCount(1, $list);
+        self::assertSame('2026-08-22', $list[0]['due_on']);
+        self::assertSame('open', $list[0]['status']);
+        self::assertStringContainsString('§ 38j odst. 3', $list[0]['deadline_source']);
+
+        $items = $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'taxable_income_request');
+        self::assertCount(1, $items);
+        self::assertSame('2026-08-22', $items[0]['due_on']);
+        self::assertSame('due_soon', $items[0]['phase']);
+        self::assertSame('taxable_income_request', $items[0]['title']);
+        self::assertSame('2025', $items[0]['period']);
+        self::assertStringContainsString('panel=taxable_income_requests', $items[0]['path']);
+        self::assertStringContainsString("employment={$this->employmentId}", $items[0]['path']);
+
+        $requests->complete($this->supplierId, $this->employeeId, $list[0]['id'], '2026-08-19', $actorId);
+        self::assertSame(
+            [],
+            $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'taxable_income_request'),
+        );
+    }
+
+    /** Karta osoby zapisuje a vyřizuje žádost přes endpoint z kontejneru. */
+    public function testTaxableIncomeRequestEndpointRoundTrip(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        $action = Bootstrap::buildContainer()->get(
+            \MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class,
+        );
+        self::assertInstanceOf(\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, $action);
+        $request = fn (array $body) => (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('POST', "/api/payroll/people/{$this->employeeId}/taxable-income-requests")
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actorId(), 'role' => 'accountant'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            ->withParsedBody($body);
+
+        $created = $action->save(
+            $request(['requested_on' => '2026-08-12', 'income_year' => 2025]),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+        $created->getBody()->rewind();
+        $list = json_decode((string) $created->getBody(), true)['requests'] ?? [];
+        self::assertCount(1, $list);
+
+        $invalid = $action->save(
+            $request(['requested_on' => 'včera', 'income_year' => 2025]),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(422, $invalid->getStatusCode());
+
+        $completed = $action->save(
+            $request(['id' => $list[0]['id'], 'complete' => true, 'completed_on' => '2026-08-19']),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $completed->getStatusCode(), (string) $completed->getBody());
+        $completed->getBody()->rewind();
+        self::assertSame('completed', json_decode((string) $completed->getBody(), true)['requests'][0]['status']);
+    }
+
+    public function testTaxableIncomeRequestRejectsImpossibleDates(): void
+    {
+        $requests = new PayrollTaxableIncomeConfirmationRequestRepository($this->db);
+        $this->expectException(\InvalidArgumentException::class);
+        $requests->create($this->supplierId, $this->employeeId, [
+            'requested_on' => '2026-08-12',
+            'income_year' => 2027,
+        ], $this->actorId());
+    }
+
+    /**
+     * § 183 odst. 1 ZP: doklady do 10 pracovních dnů po skončení cesty,
+     * vyúčtování do 10 pracovních dnů od jejich předložení. Cesta končící
+     * v pátek 14. 8. má doklady do 28. 8.; předložené 19. 8. se vyúčtují do
+     * 2. 9. Schválená (vyúčtovaná) cesta termín nemá.
+     */
+    public function testBusinessTripSettlementDeadlinesFollowTheLabourCode(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_business_trips
+                (supplier_id, employee_id, employment_id, country_code, timezone_name,
+                 departure_at_utc, arrival_at_utc, origin_place, destination_place,
+                 purpose, settlement_period_start)
+             VALUES (?, ?, ?, "CZ", "Europe/Prague", "2026-08-14 05:00:00",
+                     "2026-08-14 14:00:00", "Praha", "Syntetické Brno",
+                     "Syntetické jednání", "2026-08-01")',
+        )->execute([$this->supplierId, $this->employeeId, $this->employmentId]);
+        $tripId = (int) $this->db->pdo()->lastInsertId();
+
+        $items = $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'business_trip');
+        self::assertCount(1, $items);
+        self::assertSame('business_trip_documents', $items[0]['title']);
+        self::assertSame('2026-08-28', $items[0]['due_on']);
+        self::assertSame('Syntetické Brno', $items[0]['trip_label']);
+        self::assertStringContainsString("trip={$tripId}", $items[0]['path']);
+        self::assertStringContainsString('period=2026-08', $items[0]['path']);
+        self::assertStringContainsString('§ 183 odst. 1', (string) $items[0]['deadline_source']);
+
+        $this->db->pdo()->prepare('UPDATE payroll_business_trips SET documents_submitted_on = "2026-08-19" WHERE id = ?')
+            ->execute([$tripId]);
+        $items = $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'business_trip');
+        self::assertCount(1, $items);
+        self::assertSame('business_trip_settlement', $items[0]['title']);
+        self::assertSame('2026-09-02', $items[0]['due_on']);
+
+        $this->db->pdo()->prepare('UPDATE payroll_business_trips SET status = "cancelled" WHERE id = ?')
+            ->execute([$tripId]);
+        self::assertSame(
+            [],
+            $this->itemsOfSource($this->service->overview($this->supplierId, 'production'), 'business_trip'),
+        );
+    }
+
+    private function actorId(): int
+    {
+        $statement = $this->db->pdo()->query('SELECT id FROM users ORDER BY id LIMIT 1');
+        $id = $statement === false ? 0 : (int) $statement->fetchColumn();
+        if ($id <= 0) {
+            self::markTestSkipped('Chybí uživatel.');
+        }
+
+        return $id;
     }
 
     /**

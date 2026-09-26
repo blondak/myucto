@@ -59,6 +59,12 @@ use Psr\Clock\ClockInterface;
  *    k zaměstnání bez nástupce u člověka s trvajícím vztahem. Bez platného
  *    povolení nesmí cizinec pracovat (§ 89 zák. č. 435/2004 Sb.) a dosud to
  *    hlásila jen jeho karta, tedy místo, kam se nikdo nedívá, dokud ho nehledá.
+ * 8. **žádost o potvrzení o zdanitelných příjmech** (§ 38j odst. 3 ZDP)
+ *    u trvajícího vztahu — do 10 dnů od žádosti; u skončení ji dál nese
+ *    položka výstupního checklistu,
+ * 9. **vyúčtování pracovní cesty** (§ 183 odst. 1 ZP) — doklady do 10
+ *    pracovních dnů po skončení cesty, vyúčtování do 10 pracovních dnů od
+ *    jejich předložení.
  *
  * ## Co se do něj vědomě nedostane
  *
@@ -128,6 +134,8 @@ final readonly class PayrollDeadlineOverviewService
         'sickness_case',
         'annual_settlement',
         'foreign_permit',
+        'taxable_income_request',
+        'business_trip',
     ];
 
     /** Kolik dnů dopředu se termín považuje za „brzy". */
@@ -158,6 +166,8 @@ final readonly class PayrollDeadlineOverviewService
         'sickness_case',
         'annual_settlement',
         'foreign_permit',
+        'taxable_income_request',
+        'business_trip',
     ];
 
     /**
@@ -454,6 +464,8 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->sicknessCaseItems($supplierId, $environment, $from, $to),
             ...$this->annualSettlementItems($supplierId, $from, $to),
             ...$this->foreignPermitItems($supplierId, $from, $to),
+            ...$this->taxableIncomeRequestItems($supplierId, $from, $to),
+            ...$this->businessTripItems($supplierId, $from, $to),
         ];
         usort(
             $items,
@@ -593,6 +605,8 @@ final readonly class PayrollDeadlineOverviewService
             'sickness_case' => $this->sicknessCaseItems($supplierId, $environment, $from, $to),
             'annual_settlement' => $this->annualSettlementItems($supplierId, $from, $to),
             'foreign_permit' => $this->foreignPermitItems($supplierId, $from, $to),
+            'taxable_income_request' => $this->taxableIncomeRequestItems($supplierId, $from, $to),
+            'business_trip' => $this->businessTripItems($supplierId, $from, $to),
             default => [],
         };
     }
@@ -1219,6 +1233,109 @@ final readonly class PayrollDeadlineOverviewService
                 'deadline_source' => '§ 89 zákona č. 435/2004 Sb.',
                 'deadline_source_status' => 'statute_verified',
                 'path' => '/payroll/people/' . $row['employee_id'],
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Žádost zaměstnance o potvrzení o zdanitelných příjmech (§ 38j odst. 3
+     * ZDP) mimo výstupní checklist — u trvajícího vztahu.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function taxableIncomeRequestItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        $items = [];
+        foreach ($this->repository->taxableIncomeRequestDeadlines($supplierId, $from, $to) as $row) {
+            $dueOn = $row['due_on'];
+            $phase = $this->phase($dueOn);
+            $query = ['person' => $row['employee_id'], 'panel' => 'taxable_income_requests'];
+            if ($row['employment_id'] !== null) {
+                $query['employment'] = $row['employment_id'];
+            }
+            $items[] = [
+                'source' => 'taxable_income_request',
+                'reference' => 'payroll_taxable_income_request:' . $row['request_id'],
+                'title' => 'taxable_income_request',
+                'subject' => $row['full_name'],
+                'period' => (string) $row['income_year'],
+                'due_on' => $dueOn,
+                'phase' => $phase,
+                'days_to_due' => $this->daysToDue($dueOn),
+                'is_overdue' => $phase === 'overdue',
+                'employee_id' => $row['employee_id'],
+                'employment_id' => $row['employment_id'],
+                'request_id' => $row['request_id'],
+                'deadline_source' => '§ 38j odst. 3 zákona č. 586/1992 Sb. — do 10 dnů od žádosti ze dne '
+                    . (new \DateTimeImmutable($row['requested_on']))->format('j. n. Y'),
+                'deadline_source_status' => 'statute_verified',
+                'path' => '/payroll/people?' . http_build_query($query),
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Vyúčtování pracovní cesty (§ 183 odst. 1 ZP): nejdřív lhůta zaměstnance
+     * na předložení dokladů, po jejich předložení lhůta zaměstnavatele na
+     * vyúčtování (schválení cesty).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function businessTripItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        // Deset pracovních dnů je nejvýš ~16 kalendářních; měsíc rezervy stačí
+        // i přes vánoční svátky.
+        $arrivedFrom = (new \DateTimeImmutable($from))->modify('-40 days')->format('Y-m-d');
+        $items = [];
+        foreach ($this->repository->openBusinessTrips($supplierId, $arrivedFrom) as $row) {
+            $submitted = $row['documents_submitted_on'];
+            if ($submitted === null) {
+                $arrivalLocal = (new \DateTimeImmutable($row['arrival_at_utc'], new \DateTimeZone('UTC')))
+                    ->setTimezone(new \DateTimeZone($row['timezone_name']))
+                    ->format('Y-m-d');
+                $dueOn = BusinessTripSettlementDeadlinePolicy::documentsDueOn($arrivalLocal);
+                $title = 'business_trip_documents';
+                $source = BusinessTripSettlementDeadlinePolicy::SOURCE_DOCUMENTS;
+            } else {
+                $dueOn = BusinessTripSettlementDeadlinePolicy::settlementDueOn($submitted);
+                $title = 'business_trip_settlement';
+                $source = BusinessTripSettlementDeadlinePolicy::SOURCE_SETTLEMENT;
+            }
+            if ($dueOn < $from || $dueOn > $to) {
+                continue;
+            }
+            $phase = $this->phase($dueOn);
+            $items[] = [
+                'source' => 'business_trip',
+                'reference' => 'payroll_business_trip:' . $row['trip_id'],
+                'title' => $title,
+                'subject' => $row['full_name'],
+                'period' => null,
+                'due_on' => $dueOn,
+                'phase' => $phase,
+                'days_to_due' => $this->daysToDue($dueOn),
+                'is_overdue' => $phase === 'overdue',
+                'employee_id' => $row['employee_id'],
+                'employment_id' => $row['employment_id'],
+                'trip_id' => $row['trip_id'],
+                'trip_label' => $row['destination_place'],
+                'trip_period' => $row['settlement_period'],
+                'deadline_source' => $source,
+                'deadline_source_status' => 'statute_verified',
+                'path' => '/payroll/travel?' . http_build_query([
+                    'period' => $row['settlement_period'],
+                    'trip' => $row['trip_id'],
+                ]),
             ];
         }
 

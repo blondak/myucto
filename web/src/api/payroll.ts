@@ -3284,6 +3284,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
   | 'registration_change' | 'tax_statement' | 'sickness_case'
   | 'annual_settlement' | 'foreign_permit'
+  | 'taxable_income_request' | 'business_trip'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -3328,6 +3329,38 @@ export interface PayrollDeadlineItem {
   /** Povolení cizince, jehož platnost končí. */
   permit_id?: number
   permit_label?: string
+  /** Žádost o potvrzení o zdanitelných příjmech (§ 38j odst. 3 ZDP). */
+  request_id?: number
+  /** Pracovní cesta, jejíž doklady nebo vyúčtování čekají (§ 183 ZP). */
+  trip_id?: number
+  trip_label?: string
+  /** Období vyúčtování cesty `YYYY-MM` — proklik otevře správný měsíc. */
+  trip_period?: string
+}
+
+/** Žádost zaměstnance o potvrzení o zdanitelných příjmech (§ 38j odst. 3 ZDP). */
+export interface PayrollTaxableIncomeRequest {
+  id: number
+  employee_id: number
+  employment_id: number | null
+  requested_on: string
+  income_year: number
+  /** Deset dnů od žádosti. */
+  due_on: string
+  deadline_source: string
+  /** `certificate_issued` = od žádosti bylo potvrzení vystaveno v aplikaci. */
+  status: 'open' | 'certificate_issued' | 'completed'
+  completed_on: string | null
+  completion_kind: 'document' | 'manual' | null
+  note: string | null
+  row_version: number
+}
+
+export interface PayrollTaxableIncomeRequestPayload {
+  requested_on: string
+  income_year: number
+  employment_id?: number | null
+  note?: string | null
 }
 
 export interface PayrollDeadlineOverview {
@@ -7200,6 +7233,26 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/foreign-permits`,
       { id: permitId, delete: true },
     ).then(response => response.data.permits),
+  /** Žádosti o potvrzení o zdanitelných příjmech (§ 38j odst. 3 ZDP). */
+  taxableIncomeRequests: (employeeId: number) =>
+    api.get<{ requests: PayrollTaxableIncomeRequest[] }>(
+      `/payroll/people/${employeeId}/taxable-income-requests`,
+    ).then(response => response.data.requests),
+  createTaxableIncomeRequest: (employeeId: number, payload: PayrollTaxableIncomeRequestPayload) =>
+    api.post<{ requests: PayrollTaxableIncomeRequest[] }>(
+      `/payroll/people/${employeeId}/taxable-income-requests`,
+      payload,
+    ).then(response => response.data.requests),
+  completeTaxableIncomeRequest: (employeeId: number, requestId: number, completedOn: string) =>
+    api.post<{ requests: PayrollTaxableIncomeRequest[] }>(
+      `/payroll/people/${employeeId}/taxable-income-requests`,
+      { id: requestId, complete: true, completed_on: completedOn },
+    ).then(response => response.data.requests),
+  deleteTaxableIncomeRequest: (employeeId: number, requestId: number) =>
+    api.post<{ requests: PayrollTaxableIncomeRequest[] }>(
+      `/payroll/people/${employeeId}/taxable-income-requests`,
+      { id: requestId, delete: true },
+    ).then(response => response.data.requests),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(

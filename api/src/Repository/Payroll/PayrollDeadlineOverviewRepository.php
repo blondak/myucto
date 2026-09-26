@@ -720,6 +720,58 @@ final readonly class PayrollDeadlineOverviewRepository
         ], $this->rows($statement));
     }
 
+    /**
+     * Nevyřízené žádosti o potvrzení § 38j s termínem v okně. Pravidlo
+     * vyřízení drží {@see PayrollTaxableIncomeConfirmationRequestRepository}.
+     *
+     * @return list<array{request_id:int,employee_id:int,employment_id:?int,full_name:string,requested_on:string,income_year:int,due_on:string}>
+     */
+    public function taxableIncomeRequestDeadlines(int $supplierId, string $from, string $to): array
+    {
+        return (new PayrollTaxableIncomeConfirmationRequestRepository($this->db))
+            ->openDeadlines($supplierId, $from, $to);
+    }
+
+    /**
+     * Rozpracované (nevyúčtované) pracovní cesty, které skončily nejdřív
+     * `$arrivedFrom` — podklad lhůt § 183 odst. 1 ZP. Termín se dopočítá
+     * v pracovních dnech, proto se okno zužuje až v PHP; dolní mez je jen
+     * pojistka proti neomezenému čtení staré historie.
+     *
+     * @return list<array{trip_id:int,employee_id:int,employment_id:int,full_name:string,arrival_at_utc:string,timezone_name:string,documents_submitted_on:?string,destination_place:string,settlement_period:string}>
+     */
+    public function openBusinessTrips(int $supplierId, string $arrivedFrom): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT trip.id AS trip_id, trip.employee_id, trip.employment_id, employee.full_name,
+                    trip.arrival_at_utc, trip.timezone_name, trip.documents_submitted_on,
+                    trip.destination_place, trip.settlement_period_start
+               FROM payroll_business_trips trip
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = trip.supplier_id
+                AND employee.id = trip.employee_id
+              WHERE trip.supplier_id = ?
+                AND trip.status = "draft"
+                AND trip.arrival_at_utc >= ?
+              ORDER BY trip.arrival_at_utc, trip.id'
+        );
+        $statement->execute([$supplierId, $arrivedFrom . ' 00:00:00']);
+
+        return array_map(static fn (array $row): array => [
+            'trip_id' => (int) $row['trip_id'],
+            'employee_id' => (int) $row['employee_id'],
+            'employment_id' => (int) $row['employment_id'],
+            'full_name' => (string) $row['full_name'],
+            'arrival_at_utc' => (string) $row['arrival_at_utc'],
+            'timezone_name' => (string) $row['timezone_name'],
+            'documents_submitted_on' => $row['documents_submitted_on'] === null
+                ? null
+                : (string) $row['documents_submitted_on'],
+            'destination_place' => (string) $row['destination_place'],
+            'settlement_period' => substr((string) $row['settlement_period_start'], 0, 7),
+        ], $this->rows($statement));
+    }
+
     private function rows(\PDOStatement $statement): array
     {
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));

@@ -5498,6 +5498,28 @@
         "edit_section": "Edit",
         "edit_section_aria": "Edit: {section}"
       },
+      "taxable_income_requests": {
+        "title": "Requests for a certificate of taxable income",
+        "subtitle": "The certificate under § 38j(3) of the Income Tax Act is issued on the employee's request within 10 days, also during employment.",
+        "open_count": "{count} open | {count} open",
+        "empty": "No certificate request is recorded.",
+        "row": "Income for {year} · requested {requested} · issue by {due}",
+        "status": {
+          "open": "Awaiting issue",
+          "certificate_issued": "Certificate issued",
+          "completed": "Completed"
+        },
+        "requested_on": "Request date",
+        "income_year": "Income year",
+        "note": "Note",
+        "hint": "The deadline appears in the deadline watch. The request is completed automatically once you issue the certificate on the Documents page; if you hand it over outside the application, mark it as completed.",
+        "save": "Record request",
+        "saved": "The certificate request is recorded.",
+        "save_failed": "The request could not be saved.",
+        "load_failed": "Certificate requests could not be loaded.",
+        "issue": "Issue certificate",
+        "complete": "Completed outside the app"
+      },
       "foreign_permits": {
         "title": "Residence and work permits",
         "subtitle": "Effective history of foreign-national permits with verified company evidence in Documents.",
@@ -8228,7 +8250,10 @@
           "annual_settlement_perform": "Perform the annual tax settlement (by 31 Mar)",
           "annual_settlement_refund": "Refund the settlement overpayment with the March payroll",
           "foreign_permit_residence": "Residence permit expires",
-          "foreign_permit_work": "Work permit expires"
+          "foreign_permit_work": "Work permit expires",
+          "taxable_income_request": "Issue the certificate of taxable income on request (§ 38j)",
+          "business_trip_documents": "Business trip settlement documents (§ 183 Labour Code)",
+          "business_trip_settlement": "Settle the business trip (§ 183 Labour Code)"
         },
         "annual_settlement_undecided": "{count} people with income for {year} have not yet decided whether they request the settlement"
       },
@@ -25647,6 +25672,12 @@
       "band": "band {band}",
       "settlement": "Balance against the advance: {amount}",
       "manual_review": "The settlement requires manual review and cannot be approved:"
+    },
+    "deadline": {
+      "submitted_on": "Documents submitted on",
+      "submitted_on_hint": "The employee submits the documents within 10 working days after the trip ends and you settle (approve) it within 10 working days of submission (§ 183(1) Labour Code). The deadline overview watches both.",
+      "documents_due": "Documents by {date}",
+      "settlement_due": "Settle by {date}"
     },
     "settlement": {
       "label": "Advance settlement",
