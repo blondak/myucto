@@ -6744,7 +6744,7 @@
         },
         "ready": {
           "title": "Prepared submissions are waiting to be sent",
-          "description": "These exact submissions have already been frozen but have no dispatch attempt yet. Send them directly from here by their submission number — the application will not look up another submission for the same period.",
+          "description": "These exact submissions have already been frozen but have not been sent yet (for a report in partial packages, not all packages have been sent). Send them directly from here by their submission number — the application will not look up another submission for the same period.",
           "submission": "Submission no. {id}",
           "corrects": "follows submission no. {id}",
           "kind": {
@@ -6773,8 +6773,15 @@
           },
           "continue_isds": "Sign in and send",
           "gateway_start_failed": "The message is safely stored in the outbox, but ISDS sign-in could not be started. Open outgoing submissions and try signing in again.",
-          "dispatch_failed": "The prepared submission could not be handed over for dispatch."
+          "dispatch_failed": "The prepared submission could not be handed over for dispatch.",
+          "packages": {
+            "progress": "The report has more than 1500 forms and is sent in {count} partial packages. Sent {sent} of {count}.",
+            "interrupted": "Sending was interrupted. The button sends only the packages that have not left yet; packages already sent are not sent again. Follow the protocols of the individual packages in the history below.",
+            "send_remaining": "Send remaining packages",
+            "vrep_only": "A report split into partial packages is sent only via VREP; it cannot be sent through a data box."
+          }
         },
+        "attempt_package": "Package {ordinal} of {count}",
         "status": {
           "prepared": "Ready to send",
           "sent": "Sent",
@@ -10255,7 +10262,7 @@
       },
       "packages": {
         "title": "The report has more than 1500 forms and is split into partial packages ({count}).",
-        "hint": "All packages carry the same submission number and filling date; the summary and the insurance part travel in the first. The application cannot freeze and send partial packages yet; file them manually through the ČSSZ ePortál.",
+        "hint": "All packages carry the same submission number and filling date; the summary and the insurance part travel in the first. Freezing stores the report package by package and you send it via VREP in Payroll submissions → Submission status: the packages leave one by one starting with the first, and each shows its own protocol. If sending is interrupted, the button sends only the packages that have not left yet.",
         "package": "Package {ordinal}",
         "valid": "passed the checks",
         "invalid": "blocking findings: {count}",
@@ -10833,7 +10840,7 @@
         "jmhz_xml_employee_social_discount_zero": "The employee's social insurance discount is marked as claimed but its amount is zero. Check the discount calculation or its confirmation for the employee.",
         "jmhz_xml_employer_rate_category_unknown": "Without the employer's rate category, the assessment base cannot be split under Section 5a(1) of the Social Security Contributions Act. Set the employer's rate category in the payroll office settings.",
         "jmhz_xml_exempt_income_exceeds_total": "Exempt income must not exceed the total processed income. Check the payroll components in the payroll run.",
-        "jmhz_xml_form_limit_exceeded": "One data package of a submission carries at most 1500 forms. The report test splits a larger submission into partial packages, but the application cannot freeze and send the packages yet; file them manually through the ČSSZ ePortál.",
+        "jmhz_xml_form_limit_exceeded": "One data package of a submission carries at most 1500 forms. The application splits a regular report above that limit into partial packages itself; an amending or cancelling submission of that size does not fit into one package. Amend fewer employments at once and send the rest in another amending submission.",
         "jmhz_xml_identity_name_incomplete": "The employee is reported by name because the social security administration has not yet assigned an OIC or ID PPV, and in addition the surname, first name, date of birth, start date or activity type is missing.",
         "jmhz_xml_no_valid_form": "The JMHZ submission must contain at least one valid component, but none remained after processing. Check the employments included in this report.",
         "jmhz_xml_not_byte_stable": "Re-serializing the same JMHZ submission did not return identical bytes; this is a technical issue for support to investigate.",
@@ -10846,7 +10853,7 @@
         "jmhz_xml_scenario_3_profile_unsupported": "An employment with activity type K through S only supports the statutory profile S with detail 1; any other combination requires individual handling and filing through the ČSSZ ePortal.",
         "jmhz_xml_scenario_unsupported": "The submission component does not belong to a JMHZ scenario the application can build automatically. File this employment's report manually through the ČSSZ ePortal.",
         "jmhz_xml_serialization_failed": "The JMHZ submission XML could not be created due to a technical error. Try again, and contact support if the problem persists.",
-        "jmhz_xml_split_submission_unsupported": "Only the report test builds a submission split into several data packages; the application cannot freeze and send partial packages yet. File them manually through the ČSSZ ePortál.",
+        "jmhz_xml_split_submission_unsupported": "The data package order does not match the number of packages of the report. A report with more than 1500 forms is split into partial packages when it is frozen; run the report test and freeze the report again from the preparation.",
         "jmhz_xml_submission_type_unsupported": "The source document for building the XML must be a complete regular preparation; another document type cannot be serialized. Prepare the regular report again.",
         "jmhz_xml_surcharge_total_missing": "The surcharge breakdown cannot be reported without the total surcharge amount (field 10332). Check the surcharge payroll components in the payroll run.",
         "jmhz_xml_temporary_assignment_user_invalid": "The temporary assignment user is not filled in correctly (the company ID must have eight digits). Correct it on the employment card.",

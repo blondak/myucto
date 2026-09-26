@@ -1658,6 +1658,15 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             'Přijaté oba balíky = přijaté hlášení.',
         );
         self::assertNull($this->readyEntry($submissionId));
+        $timeline = [];
+        foreach ($attempts->listRecentPage($this->supplierId, self::ENVIRONMENT)['items'] as $item) {
+            $timeline[] = [$item['package_ordinal'], $item['package_count'], $item['status']];
+        }
+        self::assertSame(
+            [[2, 2, 'completed'], [2, 2, 'failed'], [1, 2, 'completed']],
+            $timeline,
+            'Přehled odeslání ukazuje u každého pokusu jeho balík.',
+        );
     }
 
     /**

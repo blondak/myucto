@@ -278,7 +278,32 @@ final class PayrollSubmissionTransportAttemptRepository
                                AND trusted.verification_status = "trusted"
                                AND trusted.summary_hash = receipt.summary_hash
                         )
-                    ) AS unverified_receipt_id
+                    ) AS unverified_receipt_id,
+                    -- Dílčí balík rozděleného hlášení, který pokus odeslal
+                    -- (podle otisku zmrazeného artefaktu), a počet balíků.
+                    -- U nerozděleného podání obojí NULL / 0.
+                    (SELECT MIN(CAST(SUBSTRING_INDEX(package_part.part_reference, ":package:", -1) AS UNSIGNED))
+                       FROM payroll_submission_parts package_part
+                       JOIN payroll_submission_artifacts package_artifact
+                         ON package_artifact.supplier_id = package_part.supplier_id
+                        AND package_artifact.environment = package_part.environment
+                        AND package_artifact.submission_id = package_part.submission_id
+                        AND package_artifact.part_id = package_part.id
+                        AND package_artifact.artifact_kind = "outbound_xml"
+                        AND package_artifact.direction = "outbound"
+                      WHERE package_part.supplier_id = attempt.supplier_id
+                        AND package_part.environment = attempt.environment
+                        AND package_part.submission_id = attempt.submission_id
+                        AND package_part.part_reference LIKE "%:package:%"
+                        AND package_artifact.artifact_sha256 = attempt.request_sha256
+                    ) AS package_ordinal,
+                    (SELECT COUNT(*)
+                       FROM payroll_submission_parts package_part
+                      WHERE package_part.supplier_id = attempt.supplier_id
+                        AND package_part.environment = attempt.environment
+                        AND package_part.submission_id = attempt.submission_id
+                        AND package_part.part_reference LIKE "%:package:%"
+                    ) AS package_count
                FROM ' . self::TABLE . ' attempt' . $join . $where . '
               ORDER BY attempt.id DESC
               LIMIT ' . $limit . ' OFFSET ' . $offset,
@@ -1492,14 +1517,14 @@ final class PayrollSubmissionTransportAttemptRepository
         foreach (
             [
                 'id', 'supplier_id', 'submission_id', 'attempt_no',
-                'row_version', 'poll_count', 'close_attempts',
+                'row_version', 'poll_count', 'close_attempts', 'package_count',
             ] as $field
         ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = (int) $normalized[$field];
             }
         }
-        foreach (['response_http_status', 'created_by', 'corrects_submission_id', 'unverified_receipt_id'] as $field) {
+        foreach (['response_http_status', 'created_by', 'corrects_submission_id', 'unverified_receipt_id', 'package_ordinal'] as $field) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null
