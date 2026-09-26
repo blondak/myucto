@@ -561,6 +561,14 @@ final class PayrollRunSnapshotBuilder
         }
         unset($person);
 
+        foreach ($this->receivedEnforcementValidations(
+            $supplierId,
+            array_keys($people),
+            $paymentDate,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
+
         // Nepodepsané prohlášení poplatníka je rozhodnutý stav, ne mezera —
         // assembler ho proto neblokuje. Má ale daňový dopad (bez slevy na
         // poplatníka a zvýhodnění, u DPP a zaměstnání malého rozsahu pod
@@ -1516,6 +1524,55 @@ final class PayrollRunSnapshotBuilder
             'ruleset_hash' => strtolower((string) $row['average_earning_ruleset_hash']),
             'input_hash' => strtolower((string) $row['average_earning_input_hash']),
         ];
+    }
+
+    /**
+     * Doručený, ale nepřevedený exekuční případ zastaví schválení běhu.
+     *
+     * Srážet se má ode dne doručení plátci mzdy (§ 282 odst. 3 o. s. ř.), jenže
+     * případ ve stavu `received` do výpočtu nevstupuje — evidence pohledávek
+     * bere jen případy, které účetní převedla dál. Bez tohohle varování se
+     * zaměstnanci vyplatila celá mzda a nikdo se to nedozvěděl.
+     *
+     * Je to varování s POVINNÝM potvrzením, ne blokátor: příkaz může přijít
+     * den před výplatou, kdy podklady k ověření ještě nejsou, a běh se musí dát
+     * vědomě dokončit s tím, že se srážka dorovná příští měsíc. Tiše už ale ne.
+     * Do `$data` nevstupuje, takže `input_hash` se nemění.
+     *
+     * @param list<int> $employeeIds
+     * @return list<PayrollRunValidation>
+     */
+    private function receivedEnforcementValidations(
+        int $supplierId,
+        array $employeeIds,
+        string $paymentDate,
+    ): array {
+        if (!$this->enforcement instanceof PayrollEnforcementRepository || $employeeIds === []) {
+            return [];
+        }
+        $validations = [];
+        foreach ($this->enforcement->receivedCaseIdsForMany(
+            $supplierId,
+            $employeeIds,
+            $paymentDate,
+        ) as $employeeId => $caseIds) {
+            foreach ($caseIds as $caseId) {
+                $validations[] = new PayrollRunValidation(
+                    'warning',
+                    'enforcement_case_received',
+                    'employee',
+                    $employeeId,
+                    'Exekuční případ je zaevidovaný jako doručený, ale ještě se'
+                    . ' nesráží. Srážet se má ode dne doručení plátci mzdy (§ 282'
+                    . ' odst. 3 o. s. ř.) — doplňte a ověřte podklady a převeďte'
+                    . ' případ do srážení, jinak se v tomto běhu nesrazí nic.',
+                    "/payroll/enforcement?person={$employeeId}&case={$caseId}",
+                    true,
+                );
+            }
+        }
+
+        return $validations;
     }
 
     /**

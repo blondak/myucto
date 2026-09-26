@@ -1783,6 +1783,56 @@ final class PayrollEnforcementRepository implements
     }
 
     /**
+     * Případy, které plátci mzdy už DORUČILI, ale v agendě pořád čekají ve stavu
+     * `received` — mzdový běh je nesráží.
+     *
+     * § 282 odst. 3 o. s. ř. (shodně § 60 exekučního řádu): povinný ztrácí právo
+     * na vyplacení části mzdy odpovídající srážkám dnem, kdy bylo nařízení
+     * doručeno plátci mzdy. Výběr pohledávek do běhu ({@see activeClaimRows()})
+     * ale bere jen případy, které účetní převedla dál, takže doručený a jen
+     * zaevidovaný příkaz propadl tiše: zaměstnanec dostal celou mzdu a plátce
+     * mzdy ručí oprávněnému za nesraženou částku (§ 291 o. s. ř.).
+     *
+     * Běh proto potřebuje vědět, že takový případ existuje. Okno účinnosti je
+     * totéž jako u pohledávek v běhu, aby se hlásil přesně ten případ, který by
+     * po převedení do srážení do běhu vstoupil.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,list<int>> employee_id => ID případů ve stavu `received`
+     */
+    public function receivedCaseIdsForMany(
+        int $supplierId,
+        array $employeeIds,
+        string $paymentDate,
+    ): array {
+        self::assertDate($paymentDate, 'payment_date');
+        $unique = array_values(array_unique($employeeIds));
+        $grouped = [];
+        foreach (array_chunk($unique, self::CHUNK_SIZE) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(sprintf(
+                "SELECT c.id, c.employee_id
+                   FROM payroll_enforcement_cases c
+                  WHERE c.supplier_id = ? AND c.employee_id IN (%s)
+                    AND c.status = 'received'
+                    AND c.effective_from <= ?
+                    AND (c.effective_to IS NULL OR c.effective_to >= ?)
+                  ORDER BY c.employee_id, c.effective_from, c.id",
+                implode(', ', array_fill(0, count($chunk), '?')),
+            ));
+            $stmt->execute([$supplierId, ...$chunk, $paymentDate, $paymentDate]);
+            foreach (PayrollTimeValue::rows(
+                $stmt->fetchAll(PDO::FETCH_ASSOC),
+                'enforcement_received_cases',
+            ) as $row) {
+                $grouped[PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id')][] =
+                    PayrollTimeValue::int($row['id'] ?? null, 'id');
+            }
+        }
+
+        return $grouped;
+    }
+
+    /**
      * @param array<string,mixed>|null $evidence
      * @param list<array<string,mixed>> $claimRows
      * @param list<array<string,mixed>> $dependantRows

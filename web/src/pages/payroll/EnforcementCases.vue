@@ -84,6 +84,8 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
  * kde ho uživatel čeká. Neplatné id nic nezúží.
  */
 const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
+/** Proklik z varování mzdového běhu (`&case=12`) rovnou otevře detail případu. */
+const initialCaseId = payrollQueryId(useRoute().query, 'case')
 const statusFilter = ref<EnforcementCaseStatus | ''>('')
 const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
@@ -1221,7 +1223,12 @@ watch([employeeFilter, statusFilter], () => {
   void load()
 })
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (initialCaseId === null) return
+  const target = cases.value.find((item) => item.id === initialCaseId)
+  if (target) await selectCase(target)
+})
 </script>
 
 <template>

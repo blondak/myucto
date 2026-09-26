@@ -756,6 +756,16 @@ describe('EnforcementCases', () => {
     wrapper.unmount()
   })
 
+  it('otevře detail případu z prokliku varování mzdového běhu', async () => {
+    m.routeQuery = { person: '3', case: '11' }
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.casesPage).toHaveBeenCalledWith({ employee_id: 3, limit: 20, offset: 0 })
+    expect(m.detail).toHaveBeenCalledWith(11)
+    wrapper.unmount()
+  })
+
   it('pages through the list and re-asks the server with the new offset', async () => {
     m.casesPage.mockResolvedValue(page(
       Array.from({ length: 20 }, (_, index) => summary({ id: index + 1 })),
