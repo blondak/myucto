@@ -209,11 +209,21 @@ převod opraví předpis měsíční mzdy, který zapsal dřívější převod; 
 upravený účetní nemění.
 
 **Měsíce, které počítá MyÚčto.** Za měsíce od začátku vedení mezd převod
-z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, překážky
-na straně zaměstnavatele (sazbou, kterou platila PAMICA) a za svátek u mzdy
-za hodiny nebo úkol. Svátek v jinak pracovní den u měsíční mzdy převod vede
-zvlášť, ne mezi odpracovanými hodinami. Náhradu mzdy při nemoci, placené volno
-a vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, placené
+volno (ve výši průměru), překážky na straně zaměstnavatele (sazbou, kterou
+platila PAMICA) a za svátek u mzdy za hodiny nebo úkol. Svátek v jinak pracovní
+den u měsíční mzdy převod vede zvlášť, ne mezi odpracovanými hodinami. Náhradu
+mzdy při nemoci a vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+
+**Opakovaný převod** téhož exportu nic nezmění. Když se sešit měsíce, který
+počítá MyÚčto, od dřívějšího převodu změnil (nový export nebo novější verze
+převodu), převod ho převede znovu: pracovní měsíce se souhrnem z dřívější
+dávky sám znovu otevře, zapíše nový souhrn a mzdové vstupy dřívější dávky,
+které nová dávka už nevede (třeba složka, kterou nová verze převodu vede
+jinak), zruší. Protokol vypíše počty i kódy zrušených složek. Měsíc, jehož
+mzdový běh už má zamčené vstupy, převod znovu nepřevede a vypíše ho:
+neschválený běh nejdřív zrušte v `Mzdy → Mzdové běhy`, schválený měsíc převod
+nepřepisuje.
 
 **Zařazení složek do JMHZ.** Plnění, které svou složku v číselníku má, jde na
 ni: zdanitelná část stravování na *Zdanitelná část stravování*, odměna za
