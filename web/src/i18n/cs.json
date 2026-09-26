@@ -5935,6 +5935,11 @@
           "changed": "Změnilo se: {fields}.",
           "due": "Termín {date}",
           "manual_only": "Tenhle údaj datová věta A3 v aplikaci nenese — podejte ho jinou cestou a návrh pak uzavřete ručně.",
+          "gap": {
+            "registration_change_permanent_address_incomplete": "Nová adresa pobytu je v kartě osoby, ale číslo popisné se tam zvlášť nevede. Doplňte adresu v profilu registrace A1 a uložte ho — změna pak půjde ohlásit jedním kliknutím.",
+            "registration_change_foreign_permit_incomplete": "Povolení k zaměstnání se změnilo (nová platnost), ale číslo nového rozhodnutí aplikace nezná. Doplňte druh, číslo a platnost povolení v profilu registrace A1 a uložte ho."
+          },
+          "open_profile": "Doplnit v profilu A1",
           "file": "Ohlásit změnu",
           "dismiss": "Vyřídit ručně",
           "dismiss_note": "Čím jste povinnost splnili",

@@ -192,6 +192,102 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Kmenová data osoby a vztahu promítnutá do tvaru profilu A1 k danému dni
+     * (stejný návrh, jaký dostane formulář). Detekce změn A3 porovnává tuhle
+     * projekci ke dni posledního podání a k dnešku — obě strany vznikají
+     * TOUTÉŽ cestou, takže rozdíl ve tvaru (adresa jedním řádkem vs. ulice
+     * a číslo zvlášť) se nikdy netváří jako změna údaje.
+     *
+     * `null`, když k tomu dni projekci sestavit nejde (vztah ještě nebo už
+     * neexistuje, chybí identita) — detekce pak kmenová data nepřekrývá.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function a1MasterProjectionAt(
+        int $supplierId,
+        int $employmentId,
+        string $onDate,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->date($onDate, 'Rozhodné datum');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $onDate,
+        ): ?array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                return null;
+            }
+            $employeeId = $employment['employee_id'];
+            try {
+                $sensitive = $this->sensitiveIdentityAtInternal(
+                    $supplierId,
+                    $employeeId,
+                    $onDate,
+                    false,
+                );
+                $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+                    $this->repository->a1DraftSources(
+                        $supplierId,
+                        $employeeId,
+                        $employmentId,
+                        $onDate,
+                    ),
+                    $sensitive['identity'],
+                    null,
+                    $sensitive['identifiers']['foreign_tax_identifier'],
+                    $onDate,
+                    0,
+                    null,
+                    false,
+                );
+            } catch (
+                \DomainException
+                | \InvalidArgumentException
+                | PayrollRegistrationXmlException
+            ) {
+                return null;
+            }
+            $suggested = $draft['suggested'] ?? null;
+
+            return is_array($suggested) ? $suggested : null;
+        });
+    }
+
+    /**
+     * Profil A1 tak, jak ho zmrazilo podání připravené v okamžiku
+     * `$preparedAt` (výchozí stav detekce změn A3). Verze uložené po odeslání
+     * podání se nepřepisují, takže je tahle verze pořád v evidenci.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function a1ProfileAsSubmitted(
+        int $supplierId,
+        int $employmentId,
+        string $preparedAt,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $stored = $this->repository->a1ProfileAsOf(
+            $supplierId,
+            $employmentId,
+            $preparedAt,
+        );
+
+        return $stored === null ? null : $this->publicA1Profile(
+            $stored,
+            $this->decodeA1Profile($stored),
+            false,
+        );
+    }
+
+    /**
      * Poslední OVĚŘENÁ verze profilu.
      *
      * Detekce změn z ní zakládá povinnosti s běžící lhůtou, takže se nesmí

@@ -1211,6 +1211,7 @@ final readonly class PayrollRegistrationEventService
                 'title_prefix', 'contact_address', 'tax_residency',
                 'relationship_detail_code', 'health_insurance_code',
                 'highest_education_code', 'employment',
+                'permanent_address', 'foreign_worker',
             ];
         $this->onlyKeys(
             $raw,
@@ -1243,6 +1244,8 @@ final readonly class PayrollRegistrationEventService
                 ),
                 'tax_residency' => $this->taxResidency($value),
                 'contact_address' => $this->contactAddress($value),
+                'permanent_address' => $this->permanentAddress($value),
+                'foreign_worker' => $this->foreignWorkerChange($value),
                 'employment' => $this->employmentChange($value),
                 // Interní kontrakt: klíče už prošly onlyKeys() výš, sem se
                 // uživatelský vstup nedostane. Zůstává technická — akce ji
@@ -1783,6 +1786,109 @@ final readonly class PayrollRegistrationEventService
                         . "v zaměstnání (NKPZ), teď je „{$code}“.",
                 ));
             }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Trvalý pobyt v A3 (element `adr`). Ulice smí chybět (obec bez ulic),
+     * číslo popisné, PSČ, obec a stát ne.
+     *
+     * @return array<string,string>
+     */
+    private function permanentAddress(mixed $value): array
+    {
+        $raw = $this->object($value, 'permanent_address');
+        $this->onlyKeys($raw, [
+            'street', 'house_number', 'orientation_number', 'postal_code',
+            'city', 'country_code', 'ruian_point',
+        ], 'permanent_address.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [
+            'house_number' => $this->requiredText(
+                $raw['house_number'] ?? null,
+                'permanent_address.house_number',
+                12,
+            ),
+            'postal_code' => $this->requiredText(
+                $raw['postal_code'] ?? null,
+                'permanent_address.postal_code',
+                11,
+            ),
+            'city' => $this->requiredText(
+                $raw['city'] ?? null,
+                'permanent_address.city',
+                50,
+            ),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'permanent_address.country_code',
+            ),
+        ];
+        foreach (['street' => 50, 'orientation_number' => 12, 'ruian_point' => 12] as $key => $max) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->requiredText($raw[$key], 'permanent_address.' . $key, $max);
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Přístup cizince na trh práce v A3 (element `nocitizen`): volný přístup
+     * s důvodem, nebo povolení s druhem, číslem rozhodnutí a platností.
+     *
+     * @return array<string,string|bool>
+     */
+    private function foreignWorkerChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'foreign_worker');
+        $this->onlyKeys($raw, [
+            'free_access', 'free_access_reason_code', 'permit_type_code',
+            'issuing_labour_office_code', 'permit_identifier', 'permit_from',
+            'permit_to',
+        ], 'foreign_worker.', 'v podání „' . $this->actionName(3) . '“');
+        if ($this->bool($raw['free_access'] ?? null, 'foreign_worker.free_access')) {
+            return [
+                'free_access' => true,
+                'free_access_reason_code' => $this->requiredText(
+                    $raw['free_access_reason_code'] ?? null,
+                    'foreign_worker.free_access_reason_code',
+                    4,
+                ),
+            ];
+        }
+        $from = $this->date($raw['permit_from'] ?? null, 'foreign_worker.permit_from');
+        $to = $this->date($raw['permit_to'] ?? null, 'foreign_worker.permit_to');
+        if ($to < $from) {
+            throw new \InvalidArgumentException($this->say(
+                'foreign_worker.permit_to',
+                "nesmí být dřív než začátek platnosti ({$from}).",
+            ));
+        }
+        $result = [
+            'free_access' => false,
+            'permit_type_code' => $this->requiredText(
+                $raw['permit_type_code'] ?? null,
+                'foreign_worker.permit_type_code',
+                4,
+            ),
+            'permit_identifier' => $this->requiredText(
+                $raw['permit_identifier'] ?? null,
+                'foreign_worker.permit_identifier',
+                64,
+            ),
+            'permit_from' => $from,
+            'permit_to' => $to,
+        ];
+        if (($raw['issuing_labour_office_code'] ?? null) !== null) {
+            $result['issuing_labour_office_code'] = $this->requiredText(
+                $raw['issuing_labour_office_code'],
+                'foreign_worker.issuing_labour_office_code',
+                8,
+            );
         }
         ksort($result, SORT_STRING);
 

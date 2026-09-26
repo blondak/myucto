@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   jmhzOptions: vi.fn(),
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
+  detectChanges: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/api/payroll', () => ({
     employmentJmhzEvidenceOptions: m.jmhzOptions,
     searchJmhzMunicipalities: m.searchMunicipalities,
     searchCzIsco: m.searchCzIsco,
+    detectEmploymentRegistrationChanges: m.detectChanges,
   },
 }))
 
@@ -1024,6 +1026,44 @@ describe('EmploymentRegistrationPanel', () => {
       source_submission_id: 44,
       not_started: true,
     }))
+  })
+
+  it('links an A3 proposal blocked by a missing house number to the A1 profile', async () => {
+    m.detectChanges.mockResolvedValue({
+      as_of: '2026-11-03',
+      reason_code: null,
+      without_baseline: {},
+      proposals: [{
+        id: 41,
+        duty_kind: 'regzec_change',
+        action_code: 3,
+        status: 'open',
+        detected_on: '2026-11-03',
+        due_on: '2026-11-11',
+        deadline_source: '§ 19 odst. 5 zákona č. 323/2025 Sb.',
+        deadline_ruleset_id: 'cz-regzec-follow-up-2026-04.v1',
+        findings: [{ path: 'permanent_address.street', group: 'permanent_address', action_code: 3, sensitive: false, from: 'Dlouhá', to: 'Nová 5' }],
+        changes: { health_insurance_code: '211' },
+        unsupported: [
+          { path: 'permanent_address', reason_code: 'registration_change_permanent_address_incomplete' },
+        ],
+        fileable: false,
+        created: true,
+      }],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const gaps = wrapper.get('[data-test="registration-change-profile-gaps"]')
+    expect(gaps.text()).toContain(
+      'payroll.people.registration.changes.gap.registration_change_permanent_address_incomplete',
+    )
+    expect(wrapper.find('[data-test="registration-change-manual"]').exists()).toBe(false)
+    await wrapper.get(
+      '[data-test="registration-change-open-profile-registration_change_permanent_address_incomplete"]',
+    ).trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-a1-field="permanent_address.house_number"]').exists()).toBe(true)
   })
 
   it('sends the explicit ONZ identifier verification with the A2 deregistration', async () => {

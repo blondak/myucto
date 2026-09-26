@@ -363,12 +363,19 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             true,
         );
 
-        $baselineRow = $this->snapshots->latestSubmittedForEmployment(
+        $submitted = $this->proposals->latestSubmittedRegistration(
             $supplierId,
             $environment,
             $employmentId,
         );
-        if ($baselineRow === null) {
+        $baselineRow = $submitted === null
+            ? $this->snapshots->latestSubmittedForEmployment(
+                $supplierId,
+                $environment,
+                $employmentId,
+            )
+            : null;
+        if ($submitted === null && $baselineRow === null) {
             // Registrace ještě neodešla, takže není co „změnit oproti
             // nahlášenému". A3 hlásí změnu ÚDAJE, který už úřad má.
             $this->proposals->rememberScan(
@@ -386,26 +393,63 @@ final readonly class PayrollRegistrationChangeDetectionService implements
                 $today,
             );
         }
-        $baselineSnapshot = $this->snapshotReader->sensitiveSnapshot(
-            $supplierId,
-            (int) $baselineRow['id'],
-            $environment,
-        );
-        $baseline = $this->profiles->build(
-            $this->object($baselineSnapshot, 'identity'),
-            $this->identifiers($baselineSnapshot),
-            $this->optionalObject($baselineSnapshot, 'regzec_a1'),
-        );
+        if ($submitted !== null) {
+            // Výchozí stav = to, co podání zmrazilo: identita a identifikátory
+            // k rozhodnému dni podání a verze profilu A1 platná v okamžiku
+            // přípravy. Obojí je v evidenci verzované, takže se dá sestavit
+            // znovu stejnou cestou jako při přípravě.
+            $baselineOn = $submitted['effective_on'];
+            $atSubmission = $this->identities->sensitiveIdentityAt(
+                $supplierId,
+                $employeeId,
+                $baselineOn,
+            );
+            $baseline = $this->profiles->build(
+                $atSubmission['identity'],
+                $this->identifiers($atSubmission),
+                $this->identities->a1ProfileAsSubmitted(
+                    $supplierId,
+                    $employmentId,
+                    $submitted['prepared_at'],
+                ),
+            );
+        } else {
+            $baselineOn = (string) $baselineRow['effective_on'];
+            $baselineSnapshot = $this->snapshotReader->sensitiveSnapshot(
+                $supplierId,
+                (int) $baselineRow['id'],
+                $environment,
+            );
+            $baseline = $this->profiles->build(
+                $this->object($baselineSnapshot, 'identity'),
+                $this->identifiers($baselineSnapshot),
+                $this->optionalObject($baselineSnapshot, 'regzec_a1'),
+            );
+        }
         $live = $this->identities->sensitiveIdentityAt(
             $supplierId,
             $employeeId,
             $today,
         );
+        $a1Profile = $this->identities->a1Profile($supplierId, $employmentId);
+        $profileOnly = $this->profiles->build(
+            $live['identity'],
+            $live['identifiers'],
+            $a1Profile,
+            $this->overlay($context),
+        );
         $current = $this->profiles->build(
             $live['identity'],
             $live['identifiers'],
-            $this->identities->a1Profile($supplierId, $employmentId),
-            $this->overlay($context),
+            $a1Profile,
+            $this->masterDataChanges(
+                $supplierId,
+                $employmentId,
+                $baselineOn,
+                $today,
+                $baseline,
+                $profileOnly,
+            ) + $this->overlay($context),
         );
         $findings = $this->detector->compare($baseline, $current);
 
@@ -471,7 +515,7 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             $environment,
             $employmentId,
             $watermark,
-            (int) $baselineRow['id'],
+            $baselineRow === null ? null : (int) $baselineRow['id'],
         );
 
         return $this->result($created, $open, null, $today);
@@ -612,6 +656,112 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             'ruleset_id' => $window->rulesetId,
             'source' => '§ 19 odst. 5 zákona č. 323/2025 Sb.',
         ];
+    }
+
+    /**
+     * Kmenové údaje, které se po přihlášení mění na kartě osoby nebo vztahu,
+     * ne v profilu A1: trvalá adresa, zdravotní pojišťovna, CZ-ISCO, místo
+     * výkonu práce a platnost pracovního oprávnění cizince.
+     *
+     * @var list<string>
+     */
+    private const MASTER_TRACKED_PATHS = [
+        'permanent_address.street',
+        'permanent_address.house_number',
+        'permanent_address.orientation_number',
+        'permanent_address.city',
+        'permanent_address.postal_code',
+        'permanent_address.country_code',
+        'permanent_address.ruian_point',
+        'health_insurance_code',
+        'employment.profession_code',
+        'employment.contract_workplace',
+        'employment.workplace_city',
+        'employment.workplace_municipality_code',
+        'foreign_worker.permit_from',
+        'foreign_worker.permit_to',
+    ];
+
+    /**
+     * Co se v kmenových datech změnilo od posledního podání.
+     *
+     * Dřív detekce viděla jen profil A1 a druh činnosti: kdo změnil adresu,
+     * pojišťovnu nebo prodloužil povolení na kartě osoby, profil se sám
+     * neaktualizoval a A3 se nenavrhla, přestože lhůta § 19 odst. 5 běžela.
+     *
+     * Kmenová data se ale nesmí porovnat přímo s profilem — adresu vedou
+     * jedním řádkem, profil ulici a číslo zvlášť, takže by každé porovnání
+     * hlásilo falešnou změnu. Porovnává se proto projekce kmenových dat ke
+     * dni podání s projekcí k dnešku (obě stejnou cestou,
+     * {@see PayrollRegistrationIdentityService::a1MasterProjectionAt()});
+     * dnešní hodnota přebije profil jen tam, kde se kmenová data opravdu
+     * pohnula A profil ještě drží podanou hodnotu. Když už účetní změnu
+     * zapsala i do profilu A1 (třeba adresu s číslem popisným, které kmenová
+     * data samostatně nevedou), platí profil.
+     *
+     * @return array<string,?string>
+     */
+    private function masterDataChanges(
+        int $supplierId,
+        int $employmentId,
+        string $baselineOn,
+        string $today,
+        PayrollRegistrationReportableProfile $baseline,
+        PayrollRegistrationReportableProfile $profileOnly,
+    ): array {
+        if ($baselineOn >= $today) {
+            return [];
+        }
+        $then = $this->identities->a1MasterProjectionAt($supplierId, $employmentId, $baselineOn);
+        $now = $this->identities->a1MasterProjectionAt($supplierId, $employmentId, $today);
+        if ($then === null || $now === null) {
+            return [];
+        }
+        $before = $this->profiles->build([], [], $then);
+        $after = $this->profiles->build([], [], $now);
+        $changes = [];
+        foreach (self::MASTER_TRACKED_PATHS as $path) {
+            if ($before->get($path) !== $after->get($path)) {
+                $changes[$path] = $after->get($path);
+            }
+        }
+        // Adresa je jeden údaj: pohne-li se její kterákoli část, přebírá se
+        // z kmenových dat celá, jinak by vznikla směs staré a nové adresy.
+        // Rozhoduje se o celém bloku najednou i v otázce „už je v profilu".
+        $addressPaths = PayrollRegistrationReportableCatalog::addressPaths('permanent_address');
+        $addressChanged = array_intersect($addressPaths, array_keys($changes)) !== [];
+        foreach ($addressPaths as $path) {
+            unset($changes[$path]);
+        }
+        if ($addressChanged && $this->unchangedInProfile($addressPaths, $baseline, $profileOnly)) {
+            foreach ($addressPaths as $path) {
+                $changes[$path] = $after->get($path);
+            }
+        }
+        foreach (array_keys($changes) as $path) {
+            if (!str_starts_with($path, 'permanent_address.')
+                && !$this->unchangedInProfile([$path], $baseline, $profileOnly)
+            ) {
+                unset($changes[$path]);
+            }
+        }
+
+        return $changes;
+    }
+
+    /** @param list<string> $paths */
+    private function unchangedInProfile(
+        array $paths,
+        PayrollRegistrationReportableProfile $baseline,
+        PayrollRegistrationReportableProfile $profileOnly,
+    ): bool {
+        foreach ($paths as $path) {
+            if ($baseline->get($path) !== $profileOnly->get($path)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

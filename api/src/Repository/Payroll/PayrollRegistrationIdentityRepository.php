@@ -365,6 +365,35 @@ final class PayrollRegistrationIdentityRepository
         ];
     }
 
+    /**
+     * Ověřená verze profilu A1, ze které se zmrazilo podání připravené
+     * v okamžiku `$preparedAt` — tedy poslední verze uložená nejpozději tehdy.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function a1ProfileAsOf(
+        int $supplierId,
+        int $employmentId,
+        string $preparedAt,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, employee_id, employment_id, effective_on,
+                    status, profile_ciphertext, profile_hash, reference_hash,
+                    row_version, created_at
+               FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND status = \'verified\'
+                AND created_at <= ?
+              ORDER BY row_version DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employmentId, $preparedAt]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($raw) ? $raw : null;
+    }
+
     public function insertA1Profile(
         int $supplierId,
         int $employeeId,

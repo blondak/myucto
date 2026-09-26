@@ -1611,6 +1611,37 @@ function proposalSummary(proposal: PayrollRegistrationChangeProposal): string {
     .join(', ')
 }
 
+/**
+ * Nálezy, které podání A3 blokují jen proto, že údaj chybí v profilu A1:
+ * kmenová data vedou adresu jedním řádkem (bez čísla popisného zvlášť)
+ * a u povolení cizince jen označení, ne číslo rozhodnutí. Proklik otevře
+ * profil přímo u pole; po uložení detekce navrhne podání znovu.
+ */
+const PROFILE_GAP_FIELDS: Record<string, string> = {
+  registration_change_permanent_address_incomplete: 'permanent_address.house_number',
+  registration_change_foreign_permit_incomplete: 'foreign_worker.permit_identifier',
+}
+
+function proposalProfileGaps(
+  proposal: PayrollRegistrationChangeProposal,
+): { reason_code: string, field: string }[] {
+  const seen = new Set<string>()
+  const gaps: { reason_code: string, field: string }[] = []
+  for (const item of proposal.unsupported) {
+    const field = PROFILE_GAP_FIELDS[item.reason_code]
+    if (field === undefined || seen.has(item.reason_code)) continue
+    seen.add(item.reason_code)
+    gaps.push({ reason_code: item.reason_code, field })
+  }
+  return gaps
+}
+
+async function openProfileGap(field: string): Promise<void> {
+  a1ProfileOpen.value = true
+  await nextTick()
+  await focusA1Gap(field)
+}
+
 function proposalActions(
   proposal: PayrollRegistrationChangeProposal,
 ): ActionItem[] {
@@ -3502,13 +3533,32 @@ async function copyXml(): Promise<void> {
           <p class="mt-1 text-xs text-neutral-500">
             {{ proposal.deadline_source }}
           </p>
-          <p
-            v-if="!proposal.fileable"
-            class="mt-1 text-xs text-warning-800"
-            data-test="registration-change-manual"
-          >
-            {{ t('payroll.people.registration.changes.manual_only') }}
-          </p>
+          <template v-if="!proposal.fileable">
+            <ul
+              v-if="proposalProfileGaps(proposal).length > 0"
+              class="mt-1 space-y-1 text-xs text-warning-800"
+              data-test="registration-change-profile-gaps"
+            >
+              <li v-for="gap in proposalProfileGaps(proposal)" :key="gap.reason_code">
+                {{ t(`payroll.people.registration.changes.gap.${gap.reason_code}`) }}
+                <button
+                  type="button"
+                  class="ml-1 whitespace-nowrap rounded-full bg-warning-100 px-2 py-0.5 font-medium underline underline-offset-2 hover:bg-warning-200 hover:text-warning-900 focus:outline-none focus:ring-2 focus:ring-warning-500/40"
+                  :data-test="`registration-change-open-profile-${gap.reason_code}`"
+                  @click="openProfileGap(gap.field)"
+                >
+                  {{ t('payroll.people.registration.changes.open_profile') }}
+                </button>
+              </li>
+            </ul>
+            <p
+              v-else
+              class="mt-1 text-xs text-warning-800"
+              data-test="registration-change-manual"
+            >
+              {{ t('payroll.people.registration.changes.manual_only') }}
+            </p>
+          </template>
           <ActionBar :actions="proposalActions(proposal)" />
           <div v-if="dismissOpenFor === proposal.id" class="mt-2 flex flex-wrap gap-2">
             <input

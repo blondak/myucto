@@ -588,7 +588,9 @@ práce a přílohy). Které sekce se zobrazí, určuje varianta podání a obča
 u varianty 10 odpadá daňová rezidence, zdravotní pojišťovna i doplňující
 skutečnosti, u varianty OST naopak přibývá kontaktní adresa, důchod, zahraniční
 legislativa a vzdělání, a u cizince navíc doklad totožnosti a přístup na trh
-práce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
+práce. Občanu EU, EHP nebo Švýcarska aplikace přístup na trh práce předvyplní
+jako volný (důvod 1 — § 87 zákona o zaměstnanosti) a povolení k zaměstnání po
+něm nechce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
 napíše ji nad formulář; ručně se nevolí. Úplný JSON zůstal dostupný jako
 read-only náhled **Zobrazit, co odesíláme**.
 
@@ -839,6 +841,18 @@ Lhůta tedy vzniká, i když kartu vůbec neotevřete. Nic se nespouští při s
 uložení údaje, takže po opravě karty se návrh objeví až při nejbližším
 přepočtu.
 
+**Co detekce porovnává.** Výchozím stavem je poslední podání REGZEC, které
+odešlo na ČSSZ (přihláška i každá další změna). Porovnává se s ním profil
+registrace A1 a také **kmenová data na kartě osoby a vztahu**: adresa trvalého
+pobytu, zdravotní pojišťovna, CZ-ISCO, místo výkonu práce a platnost
+pracovního oprávnění cizince. Změníte-li tedy adresu nebo pojišťovnu na kartě
+osoby, návrh vznikne, i když profil A1 zůstal beze změny. Kmenová data vedou
+adresu jedním řádkem a číslo popisné zvlášť neznají; u nové adresy proto
+návrh napíše, že číslo popisné chybí, a tlačítkem **Doplnit v profilu A1**
+otevře profil přímo u adresy. Po uložení profilu jde změnu ohlásit jedním
+kliknutím. Stejně se chová prodloužené povolení k zaměstnání: nové datum
+platnosti aplikace z karty zná, číslo nového rozhodnutí doplníte v profilu.
+
 > ⚠️ Pozor: **změna úvazku ani mzdy se takto nehlásí.** Stanovená i sjednaná
 > týdenní doba, měsíční mzda, hodinová sazba, mzdové složky, odpracované
 > a neodpracované hodiny, přesčasy i daňové údaje jsou měsíční atributy hlášení.
@@ -868,12 +882,13 @@ Schválením ale **nic neodchází**. Vznikne registrační událost; podání s
 připravuje samostatným krokem a odeslání na ČSSZ je krok další. Postup
 odesílání je stejný jako u prvotní registrace.
 
-Jedním kliknutím se ohlásí **titul před jménem, doručovací adresa, daňová
-rezidence, kód zdravotní pojišťovny, nejvyšší dosažené vzdělání a pracovní
-údaje** — postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
-práce, profese, požadované vzdělání a pozice. Změní-li se kterýkoli pracovní
-údaj, odejde celý pracovní blok v aktuální podobě. Změna jména, adresy pobytu,
-důchodu a dalších údajů se ohlásí větou „Tenhle údaj datová věta A3 v aplikaci
+Jedním kliknutím se ohlásí **titul před jménem, adresa trvalého pobytu,
+doručovací adresa, daňová rezidence, kód zdravotní pojišťovny, nejvyšší
+dosažené vzdělání, přístup cizince na trh práce a pracovní údaje** — postavení
+v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu práce, profese,
+požadované vzdělání a pozice. Změní-li se kterýkoli pracovní údaj, odejde celý
+pracovní blok v aktuální podobě. Změna jména, důchodu a dalších údajů se ohlásí
+větou „Tenhle údaj datová věta A3 v aplikaci
 nenese - podejte ho jinou cestou a návrh pak uzavřete ručně." Nález se
 nezahazuje: povinnost i lhůta existují dál a zůstávají vidět. Jedním kliknutím
 nelze podat ani vymazání hodnoty, ani neúplnou doručovací adresu, ani vznik či
@@ -888,9 +903,11 @@ Nejvyšší vzdělání se tam vybírá ze seznamu.
 Zaměstnance přihlášené do 31. 3. 2026 přes ONZ zná ČSSZ bez údajů, které ONZ
 nevedla: postavení v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu
 práce, profese, pozice, nejvyšší vzdělání a stát daňové rezidence. Zákon je
-ukládá doplnit akcí A3. Dokud ČSSZ dohlášení nepřijme, nemá aplikace čím doložit
-ručně zapsané OIČ a ID PPV, a odhlášku A2 takového zaměstnance proto nepřipraví.
-Přijaté dohlášení čísla potvrdí stejně jako protokol k přihlášce.
+ukládá doplnit akcí A3. Přijaté dohlášení potvrdí ručně zapsané OIČ a ID PPV
+stejně jako protokol k přihlášce. Odhlášku A2 jde ale podat i dřív: s čísly
+z importu exportu zaměstnanců z ePortálu ČSSZ, nebo po výslovném potvrzení,
+že jste ručně zapsaná čísla ověřili v Seznamu zaměstnanců (viz odhláška A2
+výše).
 
 Postup u jednoho zaměstnance:
 

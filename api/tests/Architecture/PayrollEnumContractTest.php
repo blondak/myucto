@@ -555,6 +555,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const CLIENT_ONLY_UNIONS = [
+        'payroll.ts::PayrollRegistrationMode' =>
+            'Parametr požadavku přípravy registrace (`registration_mode`), ne '
+            . 'uložený stav: `auto` = rozhodne resolver, `full` = plná registrace '
+            . 'A1 před nástupem. Server ho čte v PayrollRegistrationAction::'
+            . 'fullRegistrationRequested() a jinou hodnotu odmítne.',
         'payroll.ts::PayrollQuickSurchargeKind' =>
             'Vědomá PODMNOŽINA PayrollSurchargeKind: druhy, které jde zadat ručně '
             . 'v rychlém měsíčním vstupu. Přesčas (§ 114) v ní chybí schválně — má '

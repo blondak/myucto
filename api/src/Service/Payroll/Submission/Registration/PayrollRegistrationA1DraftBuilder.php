@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\PayrollEuFreeMovementCountries;
+
 /**
  * Sbírací vrstva nad kmenovými daty osoby a pracovního vztahu: složí NÁVRH
  * profilu REGZEC A1 a u každé hodnoty řekne, odkud pochází.
@@ -159,7 +161,7 @@ final class PayrollRegistrationA1DraftBuilder
             ? $this->proofIdentity($citizenship)
             : null;
         $foreignWorker = $foreigner
-            ? $this->foreignWorker($this->section($sources, 'work_permit'))
+            ? $this->foreignWorker($this->section($sources, 'work_permit'), $citizenship)
             : null;
 
         $suggested = [
@@ -700,8 +702,32 @@ final class PayrollRegistrationA1DraftBuilder
      * @param array<string,mixed>|null $permit
      * @return array<string,mixed>
      */
-    private function foreignWorker(?array $permit): array
+    private function foreignWorker(?array $permit, ?string $citizenship = null): array
     {
+        // Občan EU/EHP/Švýcarska má volný přístup na trh práce ze zákona
+        // (§ 87 zákona o zaměstnanosti) — povolení nemá a nepotřebuje, takže
+        // se návrh nesmí dožadovat „platného pracovního oprávnění".
+        if (PayrollEuFreeMovementCountries::contains($citizenship)) {
+            $this->source(
+                'foreign_worker.free_access',
+                'Státní občanství v EU/EHP nebo Švýcarsku — volný přístup na '
+                . 'trh práce ze zákona.',
+            );
+            $this->source(
+                'foreign_worker.free_access_reason_code',
+                'Státní občanství v EU/EHP nebo Švýcarsku (důvod 1).',
+            );
+
+            return [
+                'free_access' => true,
+                'free_access_reason_code' => PayrollEuFreeMovementCountries::FREE_ACCESS_REASON_CODE,
+                'permit_type_code' => null,
+                'issuing_labour_office_code' => null,
+                'permit_identifier' => null,
+                'permit_from' => null,
+                'permit_to' => null,
+            ];
+        }
         $this->miss(
             'foreign_worker.free_access',
             'Aplikace nevede volný přístup na trh práce. Potvrďte jej ručně; '

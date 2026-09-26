@@ -5935,6 +5935,11 @@
           "changed": "Changed: {fields}.",
           "due": "Due {date}",
           "manual_only": "The A3 data message in this build does not carry this detail — file it another way and then close the proposal manually.",
+          "gap": {
+            "registration_change_permanent_address_incomplete": "The new residential address is on the person card, but the house number is not kept separately there. Complete the address in the A1 registration profile and save it — the change can then be reported with one click.",
+            "registration_change_foreign_permit_incomplete": "The work permit changed (new validity), but the app does not know the number of the new decision. Fill in the permit type, number and validity in the A1 registration profile and save it."
+          },
+          "open_profile": "Complete in A1 profile",
           "file": "Report the change",
           "dismiss": "Handle manually",
           "dismiss_note": "How you met the obligation",
