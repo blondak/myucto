@@ -898,7 +898,9 @@
         "1912_payroll_enforcement_exit_and_insolvency_handover.sql",
         "1913_payroll_small_statutory_gaps.sql",
         "1914_payroll_travel_and_accident_insurance_posting.sql",
-        "1915_payroll_key_rewrap_trigger_guard.sql"
+        "1915_payroll_key_rewrap_trigger_guard.sql",
+        "1916_payroll_jmhz_risk_work_and_temporary_assignment.sql",
+        "1917_payroll_employment_deferred_incomes.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -9268,6 +9270,39 @@
             },
             "checks": []
         },
+        "payroll_employment_deferred_incomes": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "deferred_type": "enum('1','2','3','4','5','6') NOT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "period_start": "date NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_deferred_income_created_by": "BTREE (created_by)",
+                "fk_payroll_deferred_income_updated_by": "BTREE (updated_by)",
+                "uq_payroll_deferred_income_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_payroll_deferred_income_month": "UNIQUE BTREE (supplier_id, employment_id, period_start)"
+            },
+            "foreign_keys": {
+                "fk_payroll_deferred_income_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_deferred_income_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_deferred_income_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_deferred_income_first_day": "dayofmonth(`period_start`) = 1"
+            }
+        },
         "payroll_employment_dimensions": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -9574,6 +9609,11 @@
                 "is_primary": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_apz_contribution_status": "enum('unverified','no','yes') NOT NULL DEFAULT 'unverified'",
                 "jmhz_apz_instrument_code": "varchar(8) NULL DEFAULT NULL COLLATE ascii_bin",
+                "jmhz_assignment_user_country_code": "char(2) NULL DEFAULT NULL",
+                "jmhz_assignment_user_foreign_id": "varchar(8) NULL DEFAULT NULL",
+                "jmhz_assignment_user_ico": "char(8) NULL DEFAULT NULL",
+                "jmhz_assignment_user_kind": "enum('ico','foreign') NULL DEFAULT NULL",
+                "jmhz_assignment_user_name": "varchar(100) NULL DEFAULT NULL",
                 "jmhz_deep_mining_work_applies": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_external_codebook_manifest_sha256": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
                 "jmhz_external_codebook_overlay_key": "varchar(96) NULL DEFAULT NULL COLLATE ascii_bin",
@@ -9581,6 +9621,7 @@
                 "jmhz_orchard_discount_eligible": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_ozp_employment_support_applies": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_relationship_detail_code": "char(1) NULL DEFAULT NULL COLLATE ascii_bin",
+                "jmhz_risk_categorization_code": "enum('6','7') NULL DEFAULT NULL",
                 "jmhz_specific_legal_fact_applies": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_temporary_assignment_status": "enum('unverified','no','yes') NOT NULL DEFAULT 'unverified'",
                 "jmhz_workplace_country_code": "char(2) NULL DEFAULT NULL COLLATE ascii_bin",
@@ -9626,6 +9667,7 @@
                 "chk_payroll_employment_jmhz_external_codebook_provenance": "`jmhz_external_codebook_overlay_key` is null and `jmhz_external_codebook_manifest_sha256` is null or `jmhz_workplace_municipality_code` is not null and `jmhz_workplace_country_code` is not null and `jmhz_external_codebook_overlay_key` is not null and `jmhz_external_codebook_manifest_sha256` is not null and `jmhz_external_codebook_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_employment_jmhz_relationship_detail": "`jmhz_relationship_detail_code` is null or `activity_code` in ('1','2','3','4','5','6','7','8','9') and `jmhz_relationship_detail_code` in ('1','2','3') or `activity_code` is not null and `activity_code` <> '10' and !(`activity_code` regexp '^[1-9]$') and `jmhz_relationship_detail_code` = '1'",
                 "chk_payroll_employment_jmhz_workplace": "`jmhz_workplace_municipality_code` is null and `jmhz_workplace_country_code` is null or `work_place` is not null and `jmhz_workplace_municipality_code` is not null and `jmhz_workplace_country_code` is not null and char_length(trim(`work_place`)) between 1 and 255 and `jmhz_workplace_municipality_code` regexp '^[0-9]{6}$' and `jmhz_workplace_country_code` regexp '^[A-Z]{2}$'",
+                "chk_payroll_employment_term_assignment_user": "`jmhz_assignment_user_kind` is null and `jmhz_assignment_user_ico` is null and `jmhz_assignment_user_country_code` is null and `jmhz_assignment_user_foreign_id` is null and `jmhz_assignment_user_name` is null or `jmhz_temporary_assignment_status` = 'yes' and `jmhz_assignment_user_kind` = 'ico' and `jmhz_assignment_user_ico` is not null and `jmhz_assignment_user_country_code` is null and `jmhz_assignment_user_foreign_id` is null and `jmhz_assignment_user_name` is null or `jmhz_temporary_assignment_status` = 'yes' and `jmhz_assignment_user_kind` = 'foreign' and `jmhz_assignment_user_ico` is null and `jmhz_assignment_user_country_code` is not null and `jmhz_assignment_user_foreign_id` is not null and `jmhz_assignment_user_name` is not null",
                 "chk_payroll_employment_term_dates": "`fixed_term_end_on` is null or `fixed_term_end_on` >= `planned_start_on`",
                 "chk_payroll_employment_term_flags": "`risky_work` in (0,1) and `tax_declaration_signed` in (0,1) and `is_primary` in (0,1)",
                 "chk_payroll_employment_term_hours": "`weekly_hours` is null or `weekly_hours` > 0 and `weekly_hours` <= 168",
@@ -9635,6 +9677,7 @@
                 "chk_payroll_employment_term_probable_earning": "`probable_hourly_earning_minor` is null or `probable_hourly_earning_minor` > 0 and `probable_earning_rationale` is not null and char_length(trim(`probable_earning_rationale`)) > 0",
                 "chk_payroll_employment_term_rate_category": "`risky_work` = 1 = (`social_employer_rate_category` = 'risk_employment')",
                 "chk_payroll_employment_term_rate_category_evidence": "`social_employer_rate_category` = 'ordinary' and `social_employer_rate_category_evidence` is null or `social_employer_rate_category` <> 'ordinary'",
+                "chk_payroll_employment_term_risk_categorization": "`jmhz_risk_categorization_code` is null or `social_employer_rate_category` = 'rescue_and_company_fire_service'",
                 "chk_payroll_employment_term_workload": "`workload_basis_points` between 1 and 10000",
                 "chk_payroll_employment_terms_jmhz_ordinary_profile": "`jmhz_orchard_discount_eligible` in (0,1) and `jmhz_specific_legal_fact_applies` in (0,1) and `jmhz_ozp_employment_support_applies` in (0,1) and `jmhz_deep_mining_work_applies` in (0,1)"
             }
