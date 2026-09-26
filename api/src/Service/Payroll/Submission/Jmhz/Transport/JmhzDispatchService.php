@@ -849,7 +849,7 @@ readonly class JmhzDispatchService
         if ($partId !== null && $this->submissions !== null) {
             $verifier = new JmhzPackageReceiptVerifier(
                 $verifier,
-                $submissions->packageReceiptStatuses(...),
+                $this->packageReceiptStatuses(...),
                 $supplierId,
                 (string) $attempt['environment'],
                 $submissionId,
@@ -910,6 +910,27 @@ readonly class JmhzDispatchService
         } catch (\Throwable) {
             return;
         }
+    }
+
+    /**
+     * Výsledek každého už dotaženého balíku, přečtený z originálu jeho
+     * ověřeného protokolu. Stav uložený u protokolu je složený stav podání
+     * v okamžiku importu, ne výsledek balíku, takže se z něj skládat nesmí.
+     * Originál se při čtení ověřuje proti otisku v archivu.
+     *
+     * @return array<int,string> id součásti → výsledek balíku
+     */
+    private function packageReceiptStatuses(int $supplierId, string $environment, int $submissionId): array
+    {
+        $submissions = $this->submissions ?? throw new \LogicException('Platforma podání není k dispozici.');
+        $statuses = [];
+        foreach ($submissions->packageReceiptArtifacts($supplierId, $environment, $submissionId) as $partId => $artifactId) {
+            $statuses[$partId] = $this->protocols
+                ->parse($submissions->artifactBytes($supplierId, $artifactId))
+                ->payrollRemoteStatus();
+        }
+
+        return $statuses;
     }
 
     /**
