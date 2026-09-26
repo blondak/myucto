@@ -621,7 +621,7 @@ final readonly class JmhzOrdinaryEvidenceService
         return $payload;
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         int $revisionId,
         int $employmentId,

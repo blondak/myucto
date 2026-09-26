@@ -106,7 +106,7 @@ final class PayrollBankSubmissionService
     {
         try {
             $json = $this->secrets->decryptFor($batch['snapshot_ciphertext'],
-                'payroll-payment-batch:' . $supplierId . ':' . $batch['batch_reference']);
+                PayrollPaymentBatchBuilder::batchContext($supplierId, (string) $batch['batch_reference']));
             $snapshot = json_decode($json, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($snapshot) || CanonicalJson::encode($snapshot) !== $json
                 || !hash_equals($batch['snapshot_hash'], hash('sha256', $json))

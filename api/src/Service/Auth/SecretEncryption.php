@@ -132,6 +132,60 @@ final class SecretEncryption
         return $pt;
     }
 
+    /**
+     * Přebalí kontextově šifrovanou hodnotu na aktuální klíč.
+     *
+     * Vrací `null`, když už hodnota aktuálním klíčem zašifrovaná je; volající
+     * pak nic nepřepisuje, takže opakované spuštění rotace je bez účinku.
+     * Nový ciphertext se před vrácením zpětně dešifruje a porovná s původním
+     * plaintextem; volající tak nikdy nedostane hodnotu, kterou by pak nešlo
+     * přečíst.
+     */
+    public function rewrapFor(string $stored, string $context): ?string
+    {
+        $keyId = $this->keyIdOf($stored);
+        if ($keyId === null) {
+            throw new \RuntimeException('Only context-bound ciphertext can be rewrapped.');
+        }
+        if (hash_equals($this->currentKeyId(), $keyId)) {
+            return null;
+        }
+        $plaintext = $this->decryptFor($stored, $context);
+        $rewrapped = $this->encryptFor($plaintext, $context);
+        if (!hash_equals($plaintext, $this->decryptFor($rewrapped, $context))) {
+            throw new \RuntimeException('Rewrapped ciphertext verification failed.');
+        }
+
+        return $rewrapped;
+    }
+
+    /** Identifikátor aktuálního klíče (prvních 16 hex sha256 klíče, ne klíč). */
+    public function currentKeyId(): string
+    {
+        return $this->keyId($this->key());
+    }
+
+    /** Identifikátor klíče z `enc:v2:` hodnoty; `null` u jiného formátu. */
+    public function keyIdOf(string $stored): ?string
+    {
+        if (!str_starts_with($stored, self::CONTEXT_PREFIX)) {
+            return null;
+        }
+        $encoded = substr($stored, strlen(self::CONTEXT_PREFIX));
+        $separator = strpos($encoded, ':');
+        if ($separator === false || $separator === 0) {
+            return null;
+        }
+
+        return substr($encoded, 0, $separator);
+    }
+
+    /** Je klíč s tímhle identifikátorem v konfiguraci (aktuální nebo předchozí)? */
+    public function hasKeyId(string $keyId): bool
+    {
+        return isset($this->keyRing()[$keyId]);
+    }
+
     /** @internal Pomáhá testům / migracím rozpoznat encrypted vs legacy plaintext */
     public function isEncrypted(string $stored): bool
     {

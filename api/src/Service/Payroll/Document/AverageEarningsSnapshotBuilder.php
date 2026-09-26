@@ -528,7 +528,7 @@ final class AverageEarningsSnapshotBuilder
         return self::normalizeObject($decoded, 'Snapshot průměrného výdělku');
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         int $employeeId,
         int $employmentId,

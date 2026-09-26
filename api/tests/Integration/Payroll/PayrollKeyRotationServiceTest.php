@@ -1,0 +1,375 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyRing;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
+use MyInvoice\Service\Payroll\Document\PayrollSheetSnapshotBuilder;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
+use MyInvoice\Service\Payroll\Security\PayrollKeyRotationService;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Rotace master klíče: po výměně `app.secret_encryption_key` se mzdové
+ * hodnoty přebalí na nový klíč a pak jdou číst i bez starého klíče.
+ *
+ * Pokryté druhy úložišť: měnitelná tabulka (vyživovaná osoba), tabulka
+ * s triggerem nad ověřením (bankovní účet zaměstnance), append-only tabulka
+ * (roční snapshot mzdového listu, výjimka z migrace 1931), datové klíče
+ * dokumentů a šifrovaný soubor exportu. Klíče jsou náhodné, vznikají jen
+ * v testu a nikam se nezapisují.
+ */
+#[Group('integration')]
+final class PayrollKeyRotationServiceTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    private Connection $db;
+    private int $supplierId;
+    private int $userId;
+    private int $employeeId;
+    private string $oldKey;
+    private string $newKey;
+    private string|false $previousDataDir;
+    private string $dataDir;
+
+    private int $dependantId;
+    private int $accountId;
+    private int $annualId;
+    private string $exportKey;
+    private string $documentKey;
+
+    protected function setUp(): void
+    {
+        if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
+            self::markTestSkipped('cfg.php neexistuje - test vyžaduje DB.');
+        }
+        $this->db = Bootstrap::buildContainer()->get(Connection::class);
+        foreach ([
+            'payroll_dependants',
+            'payroll_person_accounts',
+            'payroll_annual_document_revisions',
+            'payroll_document_data_keys',
+        ] as $table) {
+            if (!$this->db->hasTable($table)) {
+                self::markTestSkipped("Chybí tabulka {$table}.");
+            }
+        }
+        $pdo = $this->db->pdo();
+        $trigger = $pdo->query(
+            "SELECT ACTION_STATEMENT FROM information_schema.TRIGGERS
+              WHERE TRIGGER_SCHEMA = DATABASE()
+                AND TRIGGER_NAME = 'trg_payroll_annual_revision_immutable_update'",
+        )->fetchColumn();
+        if (!is_string($trigger) || !str_contains($trigger, 'payroll_key_rewrap')) {
+            self::fail('Chybí migrace 1931 (výjimka pro přebalení v append-only triggerech).');
+        }
+        $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        if ($sourceSupplierId === 0 || $this->userId === 0) {
+            self::markTestSkipped('Chybí výchozí firma nebo uživatel.');
+        }
+
+        $this->previousDataDir = getenv('MYINVOICE_DATA_DIR');
+        $this->dataDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'myucto-rotace-' . bin2hex(random_bytes(6));
+        mkdir($this->dataDir, 0750, true);
+        putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
+
+        $this->oldKey = base64_encode(random_bytes(32));
+        $this->newKey = base64_encode(random_bytes(32));
+
+        $pdo->beginTransaction();
+        $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+        $this->seedUnderOldKey();
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->db->pdo()->inTransaction()) {
+            $this->db->pdo()->rollBack();
+        }
+        if (isset($this->dataDir)) {
+            $this->removeDirectory($this->dataDir);
+            $this->previousDataDir === false
+                ? putenv('MYINVOICE_DATA_DIR')
+                : putenv('MYINVOICE_DATA_DIR=' . $this->previousDataDir);
+        }
+    }
+
+    public function testRewrapMovesEverythingToNewKeyAndOldKeyCanBeRetired(): void
+    {
+        $service = $this->service($this->encryption($this->newKey, [$this->oldKey]));
+
+        $before = $service->status($this->supplierId);
+        self::assertSame(5, $before['stale_total'], json_encode($before));
+        self::assertSame(0, $before['unknown_total']);
+
+        $dry = $service->rewrapAll($this->supplierId, true);
+        self::assertSame(5, $dry['would_rewrap'], json_encode($dry));
+        self::assertSame(0, $dry['rewrapped']);
+        self::assertSame(5, $service->status($this->supplierId)['stale_total'], 'Dry-run nesmí nic přepsat.');
+
+        $updatedAt = $this->column('payroll_dependants', 'updated_at', $this->dependantId);
+        $result = $service->rewrapAll($this->supplierId, false);
+
+        self::assertSame(0, $result['failed'], json_encode($result));
+        self::assertSame(5, $result['rewrapped'], json_encode($result));
+        self::assertSame(0, $service->status($this->supplierId)['stale_total']);
+        self::assertSame(0, $service->rewrapAll($this->supplierId, false)['rewrapped'], 'Druhý běh nemá co dělat.');
+
+        // Starý klíč z konfigurace pryč: všechno musí jít přečíst jen novým.
+        $newOnly = $this->encryption($this->newKey, []);
+        self::assertSame('7001010009', $newOnly->decryptFor(
+            $this->column('payroll_dependants', 'birth_number_ciphertext', $this->dependantId),
+            PayrollSensitiveData::context(PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $this->dependantId),
+        ));
+        self::assertSame('1000000005/0100', $newOnly->decryptFor(
+            $this->column('payroll_person_accounts', 'bank_account_ciphertext', $this->accountId),
+            PayrollSensitiveData::context(PayrollSensitiveField::BANK_ACCOUNT, $this->supplierId, $this->accountId),
+        ));
+        self::assertSame('{"synteticky":"snapshot"}', $newOnly->decryptFor(
+            $this->column('payroll_annual_document_revisions', 'snapshot_ciphertext', $this->annualId),
+            PayrollSheetSnapshotBuilder::encryptionContext($this->supplierId, $this->employeeId, 2019, str_repeat('e', 64)),
+        ));
+        self::assertSame(
+            'synteticky export',
+            (new PayrollPeriodExportStorage($newOnly))->readVerified($this->supplierId, $this->exportKey),
+        );
+        self::assertSame(
+            '%PDF-1.4 syntetická páska',
+            (new PayrollDocumentStorage(new PayrollDocumentKeyRing($this->db, $newOnly)))
+                ->readVerified($this->supplierId, $this->documentKey, $this->employeeId),
+        );
+
+        // Obsah se nezměnil, takže se nesmí ztratit ověření účtu ani posunout
+        // čas poslední změny.
+        self::assertNotNull($this->column('payroll_person_accounts', 'verified_on', $this->accountId));
+        self::assertSame($updatedAt, $this->column('payroll_dependants', 'updated_at', $this->dependantId));
+        self::assertNull(
+            $this->db->pdo()->query('SELECT @payroll_key_rewrap_annual_document_revisions')->fetchColumn(),
+            'Výjimka z triggeru nesmí po zápisu zůstat nastavená.',
+        );
+    }
+
+    /** Výjimka z migrace 1931 je adresná: běžný UPDATE append-only tabulky dál neprojde. */
+    public function testAppendOnlyTableStillRejectsOrdinaryUpdate(): void
+    {
+        $this->expectException(\PDOException::class);
+        $this->expectExceptionMessage('immutable');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_document_revisions SET snapshot_ciphertext = ? WHERE id = ?',
+        )->execute(['enc:v2:0000000000000000:AAAA', $this->annualId]);
+    }
+
+    /** Ani s nastavenou výjimkou nejde změnit nic jiného než ciphertext. */
+    public function testRewrapExceptionDoesNotAllowOtherColumns(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('SET @payroll_key_rewrap_annual_document_revisions = CAST(? AS UNSIGNED)')
+            ->execute([$this->annualId]);
+        try {
+            $this->expectException(\PDOException::class);
+            $pdo->prepare('UPDATE payroll_annual_document_revisions SET tax_year = 2020 WHERE id = ?')
+                ->execute([$this->annualId]);
+        } finally {
+            $pdo->exec('SET @payroll_key_rewrap_annual_document_revisions = NULL');
+        }
+    }
+
+    /**
+     * Starý klíč odebraný dřív, než rotace doběhla: hodnoty nejdou přečíst.
+     * Stav to musí říct nahlas a přebalení je nesmí poškodit.
+     */
+    public function testMissingOldKeyIsReportedAndNothingIsOverwritten(): void
+    {
+        $service = $this->service($this->encryption($this->newKey, []));
+        $ciphertext = $this->column('payroll_dependants', 'birth_number_ciphertext', $this->dependantId);
+
+        self::assertSame(5, $service->status($this->supplierId)['unknown_total']);
+        $result = $service->rewrapAll($this->supplierId, false);
+
+        self::assertSame(0, $result['rewrapped']);
+        self::assertSame(5, $result['failed']);
+        self::assertSame($ciphertext, $this->column('payroll_dependants', 'birth_number_ciphertext', $this->dependantId));
+    }
+
+    /**
+     * Kontext každého cíle se skládá ze sloupců, které v tabulce opravdu jsou.
+     * Překlep v názvu sloupce by jinak vyšel najevo až při ostré rotaci.
+     */
+    public function testEveryTargetBuildsContextFromRealColumns(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+        );
+        foreach (PayrollKeyRotationService::targets() as $target) {
+            $stmt->execute([$target['table']]);
+            $row = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_KEY_PAIR) as $column => $type) {
+                $row[$column] = in_array($type, ['int', 'bigint', 'smallint', 'tinyint', 'mediumint'], true) ? '7' : 'x';
+            }
+            self::assertNotSame([], $row, $target['table']);
+            $row['purpose'] = $target['table'] === 'payroll_annual_document_revisions'
+                ? 'payroll_sheet'
+                : ($row['purpose'] ?? 'x');
+            set_error_handler(static function (int $errno, string $message): never {
+                throw new \OutOfBoundsException($message);
+            });
+            try {
+                $context = ($target['context'])($row);
+            } catch (\OutOfBoundsException $e) {
+                self::fail($target['table'] . '.' . $target['column'] . ': ' . $e->getMessage());
+            } finally {
+                restore_error_handler();
+            }
+            self::assertNotSame('', $context);
+        }
+    }
+
+    public function testLimitStopsEarly(): void
+    {
+        $service = $this->service($this->encryption($this->newKey, [$this->oldKey]));
+
+        $first = $service->rewrapAll($this->supplierId, false, 3);
+
+        self::assertTrue($first['limit_reached'], json_encode($first));
+        self::assertSame(2, $service->status($this->supplierId)['stale_total']);
+        $service->rewrapAll($this->supplierId, false, 3);
+        self::assertSame(0, $service->status($this->supplierId)['stale_total']);
+    }
+
+    private function seedUnderOldKey(): void
+    {
+        $old = $this->encryption($this->oldKey, []);
+        $pdo = $this->db->pdo();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Syntetický zaměstnanec", "employee", 1)',
+        )->execute([$this->supplierId]);
+        $this->employeeId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_dependants (supplier_id, employee_id, relation, full_name, birth_date, existence_from)
+             VALUES (?, ?, "child_own", "Syntetické dítě", "2015-01-01", "2015-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->dependantId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'UPDATE payroll_dependants
+                SET birth_number_ciphertext = ?, birth_number_hash = ?, birth_number_masked = "••••09",
+                    updated_at = "2020-01-01 10:00:00"
+              WHERE id = ?',
+        )->execute([
+            $old->encryptFor('7001010009', PayrollSensitiveData::context(
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $this->supplierId,
+                $this->dependantId,
+            )),
+            random_bytes(32),
+            $this->dependantId,
+        ]);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_person_accounts
+                (supplier_id, employee_id, label, bank_account_ciphertext, bank_account_hash,
+                 bank_account_masked, effective_from)
+             VALUES (?, ?, "Mzda", "", ?, "••••0100", "2019-01-01")',
+        )->execute([$this->supplierId, $this->employeeId, random_bytes(32)]);
+        $this->accountId = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE payroll_person_accounts SET bank_account_ciphertext = ? WHERE id = ?')->execute([
+            $old->encryptFor('1000000005/0100', PayrollSensitiveData::context(
+                PayrollSensitiveField::BANK_ACCOUNT,
+                $this->supplierId,
+                $this->accountId,
+            )),
+            $this->accountId,
+        ]);
+        $pdo->prepare(
+            'UPDATE payroll_person_accounts
+                SET verification_source = "user_verified", verified_on = "2019-01-02", verified_by = ?
+              WHERE id = ?',
+        )->execute([$this->userId, $this->accountId]);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_annual_document_revisions
+                (supplier_id, employee_id, tax_year, purpose, revision_no,
+                 snapshot_ciphertext, snapshot_hash, source_manifest_json,
+                 source_manifest_hash, approved_at)
+             VALUES (?, ?, 2019, ?, 1, ?, ?, "{}", ?, "2019-12-31 12:00:00")',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            PayrollSheetSnapshotBuilder::PURPOSE,
+            $old->encryptFor(
+                '{"synteticky":"snapshot"}',
+                PayrollSheetSnapshotBuilder::encryptionContext($this->supplierId, $this->employeeId, 2019, str_repeat('e', 64)),
+            ),
+            str_repeat('2', 64),
+            str_repeat('e', 64),
+        ]);
+        $this->annualId = (int) $pdo->lastInsertId();
+
+        $this->exportKey = (new PayrollPeriodExportStorage($old))
+            ->store($this->supplierId, 'synteticky export')['storage_key'];
+        $this->documentKey = (new PayrollDocumentStorage(new PayrollDocumentKeyRing($this->db, $old)))
+            ->store($this->supplierId, '%PDF-1.4 syntetická páska', null, $this->employeeId)['storage_key'];
+    }
+
+    private function service(SecretEncryption $encryption): PayrollKeyRotationService
+    {
+        return new PayrollKeyRotationService(
+            $this->db,
+            $encryption,
+            new PayrollDocumentKeyRing($this->db, $encryption),
+        );
+    }
+
+    /** @param list<string> $previous */
+    private function encryption(string $key, array $previous): SecretEncryption
+    {
+        $config = (new \ReflectionClass(Config::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty($config, 'data'))->setValue($config, [
+            'app' => [
+                'secret_encryption_key' => $key,
+                'secret_encryption_previous_keys' => $previous,
+                'pepper' => '',
+            ],
+        ]);
+
+        return new SecretEncryption($config);
+    }
+
+    private function column(string $table, string $column, int $id): ?string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT {$column} FROM {$table} WHERE id = ?");
+        $stmt->execute([$id]);
+        $value = $stmt->fetchColumn();
+
+        return $value === null || $value === false ? null : (string) $value;
+    }
+
+    private function removeDirectory(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+        foreach (new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        ) as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($path);
+    }
+}

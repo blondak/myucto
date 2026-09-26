@@ -98,7 +98,7 @@ final readonly class XmlzamCooperationFlowService
             'xmlzam-cooperation-request',
             $supplierId,
         );
-        $context = "payroll:xmlzam:request:{$supplierId}:{$environment}:{$sha}:{$fingerprint}";
+        $context = XmlzamCooperationArtifactStore::requestSnapshotContext($supplierId, $environment, $sha, $fingerprint);
         $stored = $this->repository->insertRequest([
             'supplier_id' => $supplierId,
             'environment' => $environment,
@@ -369,7 +369,7 @@ final readonly class XmlzamCooperationFlowService
             'xmlzam-cooperation-response',
             $supplierId,
         );
-        $snapshotContext = "payroll:xmlzam:response-snapshot:{$supplierId}:{$environment}:{$requestId}:{$fingerprint}";
+        $snapshotContext = XmlzamCooperationArtifactStore::responseSnapshotContext($supplierId, $environment, $requestId, $fingerprint);
         $xmlContext = XmlzamCooperationArtifactStore::responseXmlContext(
             $supplierId,
             $environment,
@@ -454,7 +454,7 @@ final readonly class XmlzamCooperationFlowService
         }
         $sha = strtolower((string) $row['source_xml_sha256']);
         $fingerprint = strtolower((string) $row['snapshot_fingerprint']);
-        $context = "payroll:xmlzam:request:{$supplierId}:{$environment}:{$sha}:{$fingerprint}";
+        $context = XmlzamCooperationArtifactStore::requestSnapshotContext($supplierId, $environment, $sha, $fingerprint);
         try {
             $canonical = $this->encryption->decryptFor((string) $row['snapshot_ciphertext'], $context);
             $calculatedFingerprint = $this->sensitiveData->keyedFingerprint(

@@ -45,4 +45,14 @@ final readonly class XmlzamCooperationArtifactStore
     {
         return "payroll:xmlzam:response-xml:{$supplierId}:{$environment}:{$requestId}:{$fingerprint}";
     }
+
+    public static function responseSnapshotContext(int $supplierId, string $environment, int $requestId, string $fingerprint): string
+    {
+        return "payroll:xmlzam:response-snapshot:{$supplierId}:{$environment}:{$requestId}:{$fingerprint}";
+    }
+
+    public static function requestSnapshotContext(int $supplierId, string $environment, string $sourceSha, string $fingerprint): string
+    {
+        return "payroll:xmlzam:request:{$supplierId}:{$environment}:{$sourceSha}:{$fingerprint}";
+    }
 }

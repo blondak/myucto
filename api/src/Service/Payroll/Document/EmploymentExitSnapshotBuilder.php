@@ -539,7 +539,7 @@ final class EmploymentExitSnapshotBuilder
         ]);
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         int $employeeId,
         int $employmentId,

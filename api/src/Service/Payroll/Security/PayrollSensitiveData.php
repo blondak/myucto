@@ -168,7 +168,7 @@ final class PayrollSensitiveData
         );
     }
 
-    private function context(PayrollSensitiveField $field, int $supplierId, int $entityId): string
+    public static function context(PayrollSensitiveField $field, int $supplierId, int $entityId): string
     {
         if ($supplierId <= 0 || $entityId <= 0) {
             throw new \InvalidArgumentException('Tenant i entita musí mít kladné ID.');

@@ -789,7 +789,7 @@ final readonly class EldpStatementService
         return "eldp_statement:{$statementId}";
     }
 
-    private function encryptionContext(
+    public static function encryptionContext(
         int $supplierId,
         string $environment,
         int $employmentId,

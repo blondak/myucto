@@ -437,8 +437,10 @@ final class PayrollPaymentExportService
         }
         $snapshotJson = $this->encryption->decryptFor(
             $batch['snapshot_ciphertext'],
-            "payroll-payment-batch:{$supplierId}:"
-                . $batch['batch_reference'],
+            PayrollPaymentBatchBuilder::batchContext(
+                $supplierId,
+                (string) $batch['batch_reference'],
+            ),
         );
         $snapshot = $this->canonicalObject(
             $snapshotJson,
@@ -504,8 +506,10 @@ final class PayrollPaymentExportService
             }
             $instructionJson = $this->encryption->decryptFor(
                 $storedItem['instruction_ciphertext'],
-                "payroll-payment-item:{$supplierId}:"
-                    . $storedItem['item_reference'],
+                PayrollPaymentBatchBuilder::itemContext(
+                    $supplierId,
+                    (string) $storedItem['item_reference'],
+                ),
             );
             $instruction = $this->canonicalObject(
                 $instructionJson,

@@ -999,7 +999,7 @@ final readonly class JmhzPreparationSnapshotService
         return array_values(array_unique($ids));
     }
 
-    private function encryptionContext(int $supplierId, string $environment, int $revisionId, string $snapshotFingerprint, string $manifestHash, string $readinessHash): string
+    public static function encryptionContext(int $supplierId, string $environment, int $revisionId, string $snapshotFingerprint, string $manifestHash, string $readinessHash): string
     {
         return "payroll:jmhz-preparation:{$supplierId}:{$environment}:{$revisionId}:{$snapshotFingerprint}:{$manifestHash}:{$readinessHash}";
     }
