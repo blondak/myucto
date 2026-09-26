@@ -39,6 +39,7 @@ final class PayrollYearCloseService
     public const WARNING_CODES = [
         'open_liabilities',
         'takeover_layers_mismatch',
+        'takeover_start_estimated',
     ];
 
     /** Kolik nedoložených závazků se vypíše jmenovitě. */

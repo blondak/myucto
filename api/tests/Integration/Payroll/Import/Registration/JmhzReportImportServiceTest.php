@@ -285,11 +285,12 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertContains('applied', array_column($applied['results'], 'status'), $this->dump($applied['results']));
         $terms = $this->container->get(JmhzReportLookup::class)->termVersions($this->supplierId, $employmentId);
         self::assertCount(2, $terms, 'Únorová změna pracoviště musí založit novou verzi podmínek.');
+        // Změna z převzatého měsíce vyřídil předchozí program (PayrollPredecessorObligationScope):
+        // povinnost ke změně se nezakládá, takže nemá co zůstat nesplněné ani co odškrtávat.
         $statuses = $this->checklistStatuses($employmentId);
         self::assertArrayNotHasKey('pending', $statuses['change'] ?? [], $this->dump($statuses));
-        self::assertGreaterThan(0, $statuses['change']['completed'] ?? 0, $this->dump($statuses));
         self::assertSame(
-            ['completed' => $statuses['change']['completed'], 'failed' => []],
+            ['completed' => $statuses['change']['completed'] ?? 0, 'failed' => []],
             $applied['change_checklist'],
         );
         self::assertSame($onboardingBefore, $statuses['onboarding'] ?? [], 'Nástupní povinnosti import nemění.');
