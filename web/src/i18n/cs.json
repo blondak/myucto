@@ -9794,7 +9794,8 @@
         "reported_by_employer": "Hlásí zaměstnavatel (celý měsíc)",
         "code_undocumented": "Bez kódu změny (celý měsíc)",
         "overdue": "Po lhůtě (celý měsíc)",
-        "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá."
+        "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá.",
+        "predecessor": "{count} oznámení z doby před začátkem vedení mezd v MyÚčtu vyřídil předchozí program; do lhůt se nepočítají a synchronizace je nezakládá."
       },
       "unresolved": {
         "title": "Vztahy, u kterých povinnost odvodit nelze ({count})"
@@ -9823,12 +9824,14 @@
       },
       "deadline": {
         "employer": "Běží zaměstnavateli",
-        "none": "Zaměstnavateli neběží"
+        "none": "Zaměstnavateli neběží",
+        "predecessor": "Oznámil předchozí program"
       },
       "state": {
         "needs_sync": "Vyhodnoceno; synchronizujte do inboxu",
         "obligation_registered": "V inboxu; HOZ podejte ručně",
-        "insured_reports": "Hlásí sám pojištěnec"
+        "insured_reports": "Hlásí sám pojištěnec",
+        "predecessor": "Před začátkem vedení mezd v MyÚčtu; vyřídil předchozí program"
       },
       "kind": {
         "employment_start": "Nástup do zaměstnání",

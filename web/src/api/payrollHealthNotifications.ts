@@ -131,6 +131,8 @@ export interface HealthDutyItem {
   change_code: HealthChangeCode
   channel: HealthInsurerChannel
   dispatch: HealthDispatchDescription
+  /** Událost před prvním mzdovým obdobím v MyÚčtu oznamoval předchozí program. */
+  handled_by_predecessor?: boolean
 }
 
 /**
@@ -153,6 +155,8 @@ export interface HealthDutySummary {
   code_documented: number
   code_undocumented: number
   overdue: number
+  /** Události před prvním mzdovým obdobím v MyÚčtu (oznamoval předchozí program). */
+  handled_by_predecessor?: number
 }
 
 export interface HealthDutyPage {

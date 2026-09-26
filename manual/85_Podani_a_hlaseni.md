@@ -1243,6 +1243,12 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
   sestaví z nich datovou větu XML i PDF a obojí zmrazí. Připravený soubor není
   odeslaný — odeslání datovou schránkou musíte potvrdit sami.
 
+U firmy převedené z jiného mzdového programu ukazuje záložka **ZP — oznámení**
+i události z měsíců před prvním mzdovým obdobím v MyÚčtu, ale jako
+**Oznámil předchozí program**: nepočítají se do dlaždice *Po lhůtě*
+a synchronizace do inboxu z nich povinnost nezaloží. Když pojišťovna takové
+oznámení nemá, hromadné oznámení za ten měsíc jde připravit ručně.
+
 Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
 
 - **Nástup** má kód `P`. U cizince rozhoduje státní příslušnost na kartě osoby

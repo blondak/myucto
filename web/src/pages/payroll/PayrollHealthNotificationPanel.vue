@@ -253,6 +253,7 @@ const canQueueBulkIsds = computed(() => Boolean(
 ))
 
 function deadlineClass(item: HealthDutyItem): string {
+  if (item.handled_by_predecessor) return 'bg-success-50 text-success-700'
   if (!item.reported_by_employer) return 'bg-neutral-100 text-neutral-600'
   const dueOn = item.deadline?.due_on
   if (!dueOn) return 'bg-neutral-100 text-neutral-600'
@@ -814,6 +815,14 @@ onMounted(() => {
     </dl>
 
     <p
+      v-if="summary && (summary.handled_by_predecessor ?? 0) > 0"
+      class="-mt-2 text-xs text-neutral-600"
+      data-test="health-notifications-summary-predecessor"
+    >
+      {{ t('payroll.health_notifications.summary.predecessor', { count: summary.handled_by_predecessor ?? 0 }) }}
+    </p>
+
+    <p
       v-if="summary && filtersActive"
       class="-mt-2 text-xs text-neutral-500"
       data-test="health-notifications-summary-scope"
@@ -1000,9 +1009,11 @@ onMounted(() => {
                     :class="deadlineClass(item)"
                     data-test="health-notification-deadline"
                   >
-                    {{ item.reported_by_employer
-                      ? t('payroll.health_notifications.deadline.employer')
-                      : t('payroll.health_notifications.deadline.none') }}
+                    {{ item.handled_by_predecessor
+                      ? t('payroll.health_notifications.deadline.predecessor')
+                      : item.reported_by_employer
+                        ? t('payroll.health_notifications.deadline.employer')
+                        : t('payroll.health_notifications.deadline.none') }}
                   </span>
                 </td>
                 <td v-if="tbl.isVisible('change_code')" class="px-4 py-3">
@@ -1025,7 +1036,9 @@ onMounted(() => {
                   >{{ t('payroll.health_notifications.source_unverified') }}</span>
                 </td>
                 <td v-if="tbl.isVisible('state')" class="px-4 py-3 text-xs text-neutral-600">
-                  {{ t(!item.reported_by_employer
+                  {{ t(item.handled_by_predecessor
+                    ? 'payroll.health_notifications.state.predecessor'
+                    : !item.reported_by_employer
                     ? 'payroll.health_notifications.state.insured_reports'
                     : item.obligation_id !== null
                       ? 'payroll.health_notifications.state.obligation_registered'
@@ -1058,8 +1071,10 @@ onMounted(() => {
                 class="rounded-full px-2.5 py-1 text-xs font-medium"
                 :class="deadlineClass(item)"
               >
-                {{ item.deadline ? formatDate(item.deadline.due_on)
-                  : t('payroll.health_notifications.deadline.none') }}
+                {{ item.handled_by_predecessor
+                  ? t('payroll.health_notifications.deadline.predecessor')
+                  : item.deadline ? formatDate(item.deadline.due_on)
+                    : t('payroll.health_notifications.deadline.none') }}
               </span>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -1091,7 +1106,9 @@ onMounted(() => {
                   {{ t('payroll.health_notifications.table.state') }}
                 </dt>
                 <dd class="mt-0.5 text-neutral-800">
-                  {{ t(!item.reported_by_employer
+                  {{ t(item.handled_by_predecessor
+                    ? 'payroll.health_notifications.state.predecessor'
+                    : !item.reported_by_employer
                     ? 'payroll.health_notifications.state.insured_reports'
                     : item.obligation_id !== null
                       ? 'payroll.health_notifications.state.obligation_registered'

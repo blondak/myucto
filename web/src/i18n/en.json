@@ -9794,7 +9794,8 @@
         "reported_by_employer": "Reported by employer (whole month)",
         "code_undocumented": "Without change code (whole month)",
         "overdue": "Past deadline (whole month)",
-        "scope_note": "The tiles count the whole month, not the narrowed selection in the table — a filter cannot hide a missed deadline."
+        "scope_note": "The tiles count the whole month, not the narrowed selection in the table — a filter cannot hide a missed deadline.",
+        "predecessor": "{count} notifications from before payroll started in MyÚčto were handled by the previous program; they do not count toward deadlines and synchronization does not create them."
       },
       "unresolved": {
         "title": "Relationships whose duty cannot be resolved ({count})"
@@ -9823,12 +9824,14 @@
       },
       "deadline": {
         "employer": "Runs for the employer",
-        "none": "Does not run for the employer"
+        "none": "Does not run for the employer",
+        "predecessor": "Notified by the previous program"
       },
       "state": {
         "needs_sync": "Evaluated; synchronize to inbox",
         "obligation_registered": "In inbox; file HOZ manually",
-        "insured_reports": "Reported by the insured person"
+        "insured_reports": "Reported by the insured person",
+        "predecessor": "Before payroll started in MyÚčto; handled by the previous program"
       },
       "kind": {
         "employment_start": "Employment start",

@@ -106,10 +106,21 @@ final class PayrollPredecessorObligationScope
         if (in_array($itemKey, self::ALWAYS_RELEVANT, true)) {
             return false;
         }
-        $anchor = self::anchorDay($itemKey, $phase, $dueOn, $startOn, $endOn, $changeOn);
+        return self::eventHandledByPredecessor(
+            $startPeriod,
+            self::anchorDay($itemKey, $phase, $dueOn, $startOn, $endOn, $changeOn),
+        );
+    }
 
-        return $anchor !== null
-            && PayrollHistoricalPeriodService::precedesStart($startPeriod, $anchor);
+    /**
+     * Povinnost vázaná přímo na den události mimo checklist (oznámení
+     * zdravotní pojišťovně o nástupu, skončení, mateřské…): událost před
+     * prvním mzdovým obdobím v MyÚčtu hlásil předchozí program.
+     */
+    public static function eventHandledByPredecessor(?string $startPeriod, ?string $eventDay): bool
+    {
+        return $eventDay !== null && $eventDay !== ''
+            && PayrollHistoricalPeriodService::precedesStart($startPeriod, $eventDay);
     }
 
     /**
