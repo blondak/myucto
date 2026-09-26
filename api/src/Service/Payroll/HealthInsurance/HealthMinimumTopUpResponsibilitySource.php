@@ -35,4 +35,22 @@ enum HealthMinimumTopUpResponsibilitySource: string
      * stav podle § 3 odst. 10 zákona č. 592/1992 Sb. — doplatek hradí zaměstnanec.
      */
     case StatutoryDefault = 'statutory_default';
+
+    /**
+     * Měsíční evidence neexistuje a v měsíci je schválená překážka na straně
+     * zaměstnavatele s náhradou nižší než průměrný výdělek (§ 207, § 209 ZP).
+     * Vyměřovací základ je nižší z důvodu překážek na straně organizace, takže
+     * rozdíl doplácí zaměstnavatel (§ 3 odst. 10 věta třetí zákona
+     * č. 592/1992 Sb.). Dokladem je schválená nepřítomnost (`absence:{id}`).
+     */
+    case DerivedEmployerObstacle = 'derived_employer_obstacle';
+
+    /**
+     * Totéž, ale v měsíci je vedle překážky zaměstnavatele i neplacená
+     * nepřítomnost (neplacené volno, neomluvená absence, náhradní volno,
+     * neplacená překážka zaměstnance). Doplatek pak neplyne jen z překážky
+     * a kdo ho hradí, musí rozhodnout účetní v měsíční evidenci — výpočet ho
+     * neodhaduje.
+     */
+    case DerivedMixedCauses = 'derived_mixed_causes';
 }

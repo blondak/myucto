@@ -809,6 +809,104 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         );
     }
 
+    /**
+     * § 3 odst. 10 věta třetí zákona č. 592/1992 Sb.: základ snížený
+     * překážkou na straně zaměstnavatele doplácí zaměstnavatel. Prostoj
+     * s náhradou 80 % se v měsíci bez prohlášení odvodí sám, dokladem je
+     * schválená nepřítomnost.
+     */
+    public function testReducedEmployerObstacleShiftsTheTopUpToTheEmployer(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence'] = null;
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            self::obstacleAbsence(41, 'downtime', 8_000),
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        $person = $bundle->healthInsurance->people[0];
+        self::assertSame(HealthMinimumTopUpResponsibility::EmployerObstacleVerified, $person->topUpResponsibility);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::DerivedEmployerObstacle,
+            $person->topUpResponsibilitySource,
+        );
+        self::assertSame('absence:41', $person->topUpResponsibilityEvidenceReference);
+    }
+
+    /** § 208 ZP se platí průměrem a základ nesnižuje: výchozí stav zůstává. */
+    public function testFullyCompensatedEmployerObstacleKeepsTheStatutoryDefault(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence'] = null;
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            self::obstacleAbsence(42, 'other_employer_obstacle', 10_000),
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault,
+            $bundle->healthInsurance->people[0]->topUpResponsibilitySource,
+        );
+    }
+
+    /** Prostoj a neplacené volno v jednom měsíci: rozhodne účetní, ne odhad. */
+    public function testEmployerObstacleMixedWithUnpaidLeaveLeavesTheResponsibilityOpen(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence'] = null;
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            self::obstacleAbsence(43, 'weather_interruption', 6_000),
+            [
+                'id' => 44,
+                'absence_type' => 'unpaid_leave',
+                'date_from' => '2026-06-22',
+                'date_to' => '2026-06-23',
+            ],
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        $person = $bundle->healthInsurance->people[0];
+        self::assertSame(HealthMinimumTopUpResponsibility::Unverified, $person->topUpResponsibility);
+        self::assertSame(HealthMinimumTopUpResponsibilitySource::DerivedMixedCauses, $person->topUpResponsibilitySource);
+        self::assertSame([], $bundle->issues, 'Bez doplatku se na nic neptá.');
+    }
+
+    /** Prohlášení v měsíční evidenci má vždy přednost před odvozením. */
+    public function testDeclaredResponsibilityWinsOverTheObstacleDerivation(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            self::obstacleAbsence(45, 'downtime', 8_000),
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::Declared,
+            $bundle->healthInsurance->people[0]->topUpResponsibilitySource,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private static function obstacleAbsence(int $id, string $kind, int $rate): array
+    {
+        return [
+            'id' => $id,
+            'absence_type' => 'employer_obstacle',
+            'obstacle_kind' => $kind,
+            'compensation_rate_basis_points' => $rate,
+            'date_from' => '2026-06-15',
+            'date_to' => '2026-06-16',
+        ];
+    }
+
     public function testEmployerObstacleDoesNotRequireEvidenceReference(): void
     {
         $snapshot = $this->completeSnapshot();

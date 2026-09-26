@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionInterval;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
@@ -248,6 +249,53 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
         self::assertSame(45_000, $result->employeeContributionMinorUnits);
         self::assertSame(257_400, $result->employerContributionMinorUnits);
         self::assertSame(167_400, $result->people[0]->employerMinimumTopUpMinorUnits);
+    }
+
+    /**
+     * Doplatek odvozený z překážky zaměstnavatele (bez prohlášení) platí
+     * zaměstnavatel a snímek to nese jako odvozené, ne prohlášené.
+     */
+    public function testDerivedEmployerObstacleTopUpIsPaidByTheEmployer(): void
+    {
+        $person = new HealthPersonMonthInput(
+            'person-1',
+            HealthJurisdictionEvidence::CzechRegimeVerified,
+            null,
+            HealthInsurerSnapshotStatus::Verified,
+            '111',
+            'insurer:synthetic-snapshot',
+            [$this->relationship('hpp', HealthEmploymentKind::Employment, 1_000_000)],
+            topUpResponsibility: HealthMinimumTopUpResponsibility::EmployerObstacleVerified,
+            topUpResponsibilityEvidenceReference: 'absence:41',
+            topUpResponsibilitySource: HealthMinimumTopUpResponsibilitySource::DerivedEmployerObstacle,
+        );
+
+        $result = $this->calculate([$person]);
+
+        self::assertSame(HealthCalculationStatus::Calculated, $result->status);
+        self::assertSame(167_400, $result->people[0]->employerMinimumTopUpMinorUnits);
+        self::assertSame('derived_employer_obstacle', $result->people[0]->jsonSerialize()['top_up_responsibility_source']);
+    }
+
+    /** Překážka a neplacené volno v jednom měsíci: doplatek čeká na rozhodnutí účetní. */
+    public function testMixedCausesTopUpAsksForADecision(): void
+    {
+        $person = new HealthPersonMonthInput(
+            'person-1',
+            HealthJurisdictionEvidence::CzechRegimeVerified,
+            null,
+            HealthInsurerSnapshotStatus::Verified,
+            '111',
+            'insurer:synthetic-snapshot',
+            [$this->relationship('hpp', HealthEmploymentKind::Employment, 1_000_000)],
+            topUpResponsibility: HealthMinimumTopUpResponsibility::Unverified,
+            topUpResponsibilitySource: HealthMinimumTopUpResponsibilitySource::DerivedMixedCauses,
+        );
+
+        $result = $this->calculate([$person]);
+
+        self::assertSame(HealthCalculationStatus::ManualReview, $result->status);
+        self::assertContains('person:person-1:minimum_top_up_cause_mixed', $result->issues);
     }
 
     public function testFosterRewardOnlyExceptionRejectsAnotherRelationshipKind(): void

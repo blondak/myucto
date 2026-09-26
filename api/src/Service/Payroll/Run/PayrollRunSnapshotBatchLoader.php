@@ -190,6 +190,7 @@ final class PayrollRunSnapshotBatchLoader
                     absence.lone_carer,
                     absence.partial_first_minutes, absence.partial_last_minutes,
                     absence.timezone_name, absence.compensation_policy,
+                    absence.obstacle_kind, absence.compensation_rate_basis_points,
                     absence.average_snapshot_id, absence.decided_at,
                     sickness.compensation_window_from,
                     sickness.compensation_window_to,
