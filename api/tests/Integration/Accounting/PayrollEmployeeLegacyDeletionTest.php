@@ -303,6 +303,41 @@ final class PayrollEmployeeLegacyDeletionTest extends TestCase
         self::assertSame($employeeId, (int) $row['holder']);
     }
 
+    /**
+     * Formulář podání předchozím programem (převod PAMICA) je historie podání
+     * firmy: se smazáním osoby nezmizí, jen přestane ukazovat na smazanou osobu.
+     */
+    public function testModuleDeletionKeepsExternalSubmissionFormAndDetachesPerson(): void
+    {
+        if (!$this->db->hasTable('payroll_external_jmhz_submission_forms')) {
+            self::markTestSkipped('Chybí tabulka payroll_external_jmhz_submission_forms.');
+        }
+        $employeeId = $this->employee('Převzatý Z Pamicy');
+        $this->insertProfile($employeeId);
+        $this->moduleState('active');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_external_jmhz_submissions
+                (supplier_id, environment, source, source_key, document_kind, period, submission_type,
+                 status, form_count, payload_ciphertext, payload_hash, payload_sha256)
+             VALUES (?, 'test', 'pamica', ?, 'monthly', '2026-07', 'R', 'sent', 1, 'x', ?, ?)"
+        )->execute([$this->supplierId, 'MH:' . $employeeId, random_bytes(32), str_repeat('a', 64)]);
+        $submissionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_external_jmhz_submission_forms
+                (supplier_id, submission_id, position, employee_id, payload_ciphertext, payload_hash, payload_sha256)
+             VALUES (?, ?, 1, ?, 'x', ?, ?)"
+        )->execute([$this->supplierId, $submissionId, $employeeId, random_bytes(32), str_repeat('b', 64)]);
+        $formId = (int) $pdo->lastInsertId();
+
+        self::assertSame(200, $this->delete($employeeId)->getStatusCode());
+
+        $row = $pdo->query("SELECT employee_id FROM payroll_external_jmhz_submission_forms WHERE id = {$formId}")
+            ->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'Formulář převzatého podání se se smazáním osoby nesmí ztratit.');
+        self::assertNull($row['employee_id']);
+    }
+
     // ── Auditní stopa ────────────────────────────────────────────────────────
 
     public function testLegacyDeletionLeavesNonEmptyAuditTrail(): void

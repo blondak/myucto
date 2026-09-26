@@ -138,6 +138,9 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_enforcement_person_month_evidence',
                 'payroll_insolvency_payment_instructions',
                 'payroll_enforcement_xmlzam_requests',
+                // Oznámení soudu nebo exekutorovi o skončení poměru (§ 295
+                // odst. 2 o. s. ř.) je vnější úkon plátce.
+                'payroll_enforcement_termination_notices',
             ],
             'code' => 'payroll_employee_has_enforcement',
             'message' => 'Na zaměstnance je vedená exekuce nebo insolvence. '
@@ -232,11 +235,16 @@ final class PayrollEmployeeDeletionRepository
      * Mzdy i starší agenda) jdou přes {@see self::detachReferences()}, takže nový
      * takový odkaz stačí zapsat sem.
      *
+     * Totéž platí pro formuláře podání předchozím programem (převod PAMICA): je to
+     * kopie historie podání FIRMY, ne data osoby. Formulář zůstává a jen přestane
+     * ukazovat na smazanou osobu (cizí klíč je ON DELETE SET NULL ze stejného důvodu).
+     *
      * @var array<string,string> tabulka => sloupec s id zaměstnance
      */
     private const DETACH = [
         'cars' => 'driver_employee_id',
         'payment_cards' => 'employee_id',
+        'payroll_external_jmhz_submission_forms' => 'employee_id',
     ];
 
     /**
@@ -260,6 +268,9 @@ final class PayrollEmployeeDeletionRepository
         'payroll_registration_a1_profiles',
         'payroll_registration_identity_snapshots',
         'payroll_registration_event_snapshots',
+        // Odložení vztahu z řádného hlášení je rozhodnutí nad revizí běhu; běh
+        // mazání blokuje dřív, tady jde jen o atomickou podmínku.
+        'payroll_jmhz_deferrals',
     ];
 
     public function __construct(
