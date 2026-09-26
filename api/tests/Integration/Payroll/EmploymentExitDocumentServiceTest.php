@@ -552,6 +552,125 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         );
     }
 
+    /**
+     * CYK-B16b — § 313 odst. 1 písm. e) ZP: zápočtový list uvádí srážky, které
+     * se ze mzdy provádějí. Dřív z něj vypadly dohody o srážkách, insolvence
+     * i doručená, dosud neověřená exekuce (`received`) — další plátce mzdy by
+     * v nich nepokračoval.
+     */
+    public function testCertificateListsAgreementsInsolvencyAndReceivedEnforcement(): void
+    {
+        [$agreementId, $claimId, $insolvencyId] = $this->continuingDeductions();
+
+        $readiness = $this->service->readiness($this->supplierId, $this->employmentId);
+        $sources = $readiness['employment_certificate']['deduction_sources'];
+
+        self::assertTrue($readiness['employment_certificate']['available']);
+        self::assertSame([$claimId], $readiness['employment_certificate']['deduction_claim_ids']);
+        self::assertSame(
+            [
+                ['enforcement_claim', $claimId],
+                ['deduction_agreement', $agreementId],
+                ['insolvency', $insolvencyId],
+            ],
+            array_map(static fn (array $row): array => [$row['source_kind'], $row['source_claim_id']], $sources),
+        );
+        self::assertSame('Syntetický věřitel', $sources[1]['beneficiary']);
+        self::assertSame('SYNTH-DOHODA-1', $sources[1]['decision_reference']);
+
+        // Podklad bez dohody a insolvence neodpovídá evidenci — nic se nevydá.
+        $evidence = self::completeEvidence();
+        $evidence['deductions'] = [[
+            'source_claim_id' => $claimId,
+            'beneficiary' => 'Syntetický oprávněný',
+            'ordering_authority' => 'Syntetický exekutor',
+            'decision_reference' => '000 EX 1/26',
+        ]];
+        try {
+            $this->service->generateEmploymentCertificate(
+                $this->supplierId,
+                $this->employmentId,
+                $evidence,
+                'synthetic-exit-partial',
+                $this->userId,
+            );
+            self::fail('Zápočtový list bez dohody a insolvence nesmí vzniknout.');
+        } catch (EmploymentExitReadinessException $exception) {
+            self::assertSame('deduction_source_mismatch', $exception->readinessCode);
+        }
+
+        foreach ([$sources[1], $sources[2]] as $source) {
+            $evidence['deductions'][] = [
+                'source_claim_id' => $source['source_claim_id'],
+                'source_kind' => $source['source_kind'],
+                'beneficiary' => $source['beneficiary'],
+                'ordering_authority' => $source['ordering_authority'],
+                'decision_reference' => $source['decision_reference'] !== ''
+                    ? $source['decision_reference']
+                    : 'KSPH 00 INS 1/2026',
+            ];
+        }
+        $document = $this->service->generateEmploymentCertificate(
+            $this->supplierId,
+            $this->employmentId,
+            $evidence,
+            'synthetic-exit-complete',
+            $this->userId,
+        );
+
+        $manifest = json_decode((string) $this->db->pdo()->query(
+            'SELECT source_manifest_json FROM payroll_employment_exit_revisions WHERE id = '
+                . (int) $document['employment_exit_revision_id'],
+        )->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertCount(1, $manifest['sources']['deduction_claims']);
+        self::assertCount(1, $manifest['sources']['deduction_agreements']);
+        self::assertSame($insolvencyId, $manifest['sources']['insolvency']['id']);
+    }
+
+    /** @return array{0:int,1:int,2:int} */
+    private function continuingDeductions(): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_deduction_agreements
+                (supplier_id, employee_id, agreement_reference, title, deduction_kind,
+                 status, priority_no, requested_minor, total_limit_minor,
+                 withheld_total_minor, valid_from, delivered_on, recipient_reference)
+             VALUES (?, ?, "SYNTH-DOHODA-1", "Splátka půjčky", "other", "active", 100,
+                     200000, 1000000, 200000, "2026-01-01", "2026-01-05", "Syntetický věřitel")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $agreementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_deduction_agreements
+                (supplier_id, employee_id, agreement_reference, title, deduction_kind,
+                 legal_basis, status, priority_no, requested_minor, withheld_total_minor,
+                 valid_from, delivered_on)
+             VALUES (?, ?, "SYNTH-147-1", "Nevyúčtovaná záloha", "advance", "zp_147_1_d",
+                     "active", 100, 100000, 0, "2026-07-01", "2026-07-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status, effective_from)
+             VALUES (?, ?, "SYNTH-EXE-RECEIVED", "enforcement", "received", "2026-07-20")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $caseId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, legal_basis, category, outstanding_minor_units,
+                 priority_date, first_payer_delivered_on)
+             VALUES (?, ?, "SYNTH-EXE-RECEIVED-1", "statutory", "non_priority", 5000000,
+                     "2026-07-20", "2026-07-20")',
+        )->execute([$this->supplierId, $caseId]);
+        $claimId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_person_month_evidence
+                (supplier_id, employee_id, period_start, insolvency_mode)
+             VALUES (?, ?, "2026-07-01", "approved_standard")',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        return [$agreementId, $claimId, (int) $pdo->lastInsertId()];
+    }
+
     private function insertTaxDeclaration(string $status): void
     {
         $this->db->pdo()->prepare(

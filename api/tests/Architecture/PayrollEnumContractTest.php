@@ -481,6 +481,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
         'payrollDeductions.ts::DeductionAgreementKind' => 'db:payroll_deduction_agreements.deduction_kind',
         'payrollDeductions.ts::DeductionLegalBasis' => 'db:payroll_deduction_agreements.legal_basis',
+        'payroll.ts::PayrollEmploymentCertificateDeductionSourceKind'
+            => 'const:MyInvoice\Service\Payroll\Document\EmploymentCertificateDeduction::SOURCE_KINDS',
 
         'payrollEnforcement.ts::EnforcementCaseStatus'
             => 'enum:MyInvoice\Service\Payroll\Garnishment\EnforcementCaseStatus',
@@ -733,6 +735,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.deductions.commands'    => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
         'payroll.deductions.kinds'       => 'db:payroll_deduction_agreements.deduction_kind',
         'payroll.deductions.legal_basis' => 'db:payroll_deduction_agreements.legal_basis',
+        'payroll.people.exit_documents.source_kind'
+            => 'const:MyInvoice\Service\Payroll\Document\EmploymentCertificateDeduction::SOURCE_KINDS',
         'payroll.deductions.change_kind' => 'db:payroll_deduction_agreement_versions.change_kind',
         'payroll.deductions.ledger_kind' => 'db:payroll_deduction_ledger.event_kind',
 

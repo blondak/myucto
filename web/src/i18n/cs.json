@@ -5815,9 +5815,14 @@
         "one_per_line": "Každou skutečnost uveďte na samostatný řádek",
         "exposure_confirm": "Potvrzuji, že pracovní expozice byla posouzena a uvedené skutečnosti jsou úplné.",
         "deductions": "Pokračující srážky ze mzdy",
-        "deductions_hint": "Vyplňte právní údaje jen k nárokům nalezeným v uzavřené evidenci srážek. Částky se do formuláře nezadávají.",
+        "deductions_hint": "Vyplňte právní údaje k exekucím (i doručeným, dosud neověřeným), dohodám o srážkách a insolvenci, které se ke dni skončení ze mzdy srážejí. U dohod a insolvence je předvyplněno, co zná evidence. Částky se do formuláře nezadávají.",
         "claim_count": "Nároky: {count}",
         "claim_id": "Evidovaný nárok č. {id}",
+        "source_kind": {
+          "enforcement_claim": "Exekuce",
+          "deduction_agreement": "Dohoda o srážkách",
+          "insolvency": "Insolvence"
+        },
         "beneficiary": "Oprávněný",
         "ordering_authority": "Orgán, který srážku nařídil",
         "decision_reference": "Spisová značka / rozhodnutí",

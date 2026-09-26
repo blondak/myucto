@@ -70,7 +70,17 @@ final class EmploymentExitSnapshotBuilder
             self::positiveInt($employee, 'id'),
             self::text($employment, 'end_date'),
         );
-        $deductions = $this->deductions($claims, $evidence['deductions']);
+        $agreements = $this->revisions->lockContinuingDeductionAgreements(
+            $supplierId,
+            self::positiveInt($employee, 'id'),
+            self::text($employment, 'end_date'),
+        );
+        $insolvency = $this->revisions->lockContinuingInsolvency(
+            $supplierId,
+            self::positiveInt($employee, 'id'),
+            self::text($employment, 'end_date'),
+        );
+        $deductions = $this->deductions($claims, $agreements, $insolvency, $evidence['deductions']);
         if ($relationType === 'dpp') {
             if ($evidence['dpp_issuance_basis'] === 'sickness_insurance') {
                 throw new EmploymentExitReadinessException(
@@ -85,7 +95,10 @@ final class EmploymentExitSnapshotBuilder
                     'Potvrzení pro DPP vyžaduje doložený zákonný důvod vydání.',
                 );
             }
-            if ($deductions === []) {
+            // § 313 odst. 1 ZP: u DPP se potvrzení vydává, byl-li z odměny
+            // prováděn VÝKON ROZHODNUTÍ nebo exekuce — dohoda o srážkách ani
+            // insolvence tuhle podmínku nesplní.
+            if ($claims === []) {
                 throw new EmploymentExitReadinessException(
                     'dpp_wage_deduction_missing',
                     'Důvod vydání pro DPP neodpovídá žádné pokračující srážce.',
@@ -155,6 +168,20 @@ final class EmploymentExitSnapshotBuilder
                     ],
                     $claims,
                 ),
+                // Jen je-li co uvést — manifest starších revizí se nemění.
+                ...($agreements === [] ? [] : ['deduction_agreements' => array_map(
+                    fn (array $agreement): array => $this->sourceReference(
+                        $agreement,
+                        'employment-certificate-deduction-agreement-v1',
+                        $supplierId,
+                    ),
+                    $agreements,
+                )]),
+                ...($insolvency === null ? [] : ['insolvency' => $this->sourceReference(
+                    $insolvency,
+                    'employment-certificate-insolvency-v1',
+                    $supplierId,
+                )]),
             ],
             'employer_snapshot_hash' => $this->fingerprint(
                 $employerSnapshot,
@@ -339,25 +366,37 @@ final class EmploymentExitSnapshotBuilder
     }
 
     /**
+     * Pokračující srážky do zápočtového listu: exekuce (včetně doručených
+     * a dosud neověřených nebo odložených insolvencí), dohody o srážkách ze
+     * mzdy a insolvence. Podklad od účetní (oprávněný, orgán, rozhodnutí)
+     * musí pokrýt přesně tytéž zdroje — nic navíc, nic chybějícího.
+     *
      * @param list<array<string,mixed>> $claims
-     * @param list<array{source_claim_id:int,beneficiary:string,ordering_authority:string,decision_reference:string}> $evidence
+     * @param list<array<string,mixed>> $agreements
+     * @param array<string,mixed>|null $insolvency
+     * @param list<array{source_claim_id:int,source_kind?:string,beneficiary:string,ordering_authority:string,decision_reference:string}> $evidence
      * @return list<EmploymentCertificateDeduction>
      */
-    private function deductions(array $claims, array $evidence): array
+    private function deductions(array $claims, array $agreements, ?array $insolvency, array $evidence): array
     {
-        $byId = [];
+        $byKey = [];
         foreach ($evidence as $row) {
-            $byId[$row['source_claim_id']] = $row;
+            $byKey[($row['source_kind'] ?? 'enforcement_claim') . ':' . $row['source_claim_id']] = $row;
         }
-        $claimIds = array_map(
-            static fn (array $claim): int =>
-                self::positiveInt($claim, 'id'),
-            $claims,
-        );
-        sort($claimIds, SORT_NUMERIC);
-        $evidenceIds = array_keys($byId);
-        sort($evidenceIds, SORT_NUMERIC);
-        if ($claimIds !== $evidenceIds) {
+        $expected = [];
+        foreach ($claims as $claim) {
+            $expected[] = 'enforcement_claim:' . self::positiveInt($claim, 'id');
+        }
+        foreach ($agreements as $agreement) {
+            $expected[] = 'deduction_agreement:' . self::positiveInt($agreement, 'id');
+        }
+        if ($insolvency !== null) {
+            $expected[] = 'insolvency:' . self::positiveInt($insolvency, 'id');
+        }
+        $given = array_keys($byKey);
+        sort($expected, SORT_STRING);
+        sort($given, SORT_STRING);
+        if ($expected !== $given) {
             throw new EmploymentExitReadinessException(
                 'deduction_source_mismatch',
                 'Podklad pokračujících srážek neodpovídá ověřenému ledgeru.',
@@ -365,17 +404,92 @@ final class EmploymentExitSnapshotBuilder
         }
         $result = [];
         foreach ($claims as $claim) {
-            $source = $byId[self::positiveInt($claim, 'id')];
+            $source = $byKey['enforcement_claim:' . self::positiveInt($claim, 'id')];
+            $priority = $claim['priority_date'] ?? null;
             $result[] = new EmploymentCertificateDeduction(
                 beneficiary: $source['beneficiary'],
                 claimAmountMinorUnits:
                     self::positiveInt($claim, 'claim_amount_minor_units'),
                 withheldAmountMinorUnits:
                     self::nonNegativeInt($claim, 'withheld_amount_minor_units'),
-                priorityDate: self::text($claim, 'priority_date'),
+                priorityDate: is_string($priority) && $priority !== '' ? $priority : null,
                 orderingAuthority: $source['ordering_authority'],
                 decisionReference: $source['decision_reference'],
             );
+        }
+        foreach ($agreements as $agreement) {
+            $source = $byKey['deduction_agreement:' . self::positiveInt($agreement, 'id')];
+            $limit = $agreement['total_limit_minor'] ?? null;
+            $result[] = new EmploymentCertificateDeduction(
+                beneficiary: $source['beneficiary'],
+                claimAmountMinorUnits: is_int($limit) ? $limit : null,
+                withheldAmountMinorUnits:
+                    self::nonNegativeInt($agreement, 'withheld_total_minor'),
+                priorityDate: is_string($agreement['delivered_on'] ?? null) ? $agreement['delivered_on'] : null,
+                orderingAuthority: $source['ordering_authority'],
+                decisionReference: $source['decision_reference'],
+                sourceKind: 'deduction_agreement',
+            );
+        }
+        if ($insolvency !== null) {
+            $source = $byKey['insolvency:' . self::positiveInt($insolvency, 'id')];
+            $result[] = new EmploymentCertificateDeduction(
+                beneficiary: $source['beneficiary'],
+                claimAmountMinorUnits: null,
+                withheldAmountMinorUnits:
+                    self::nonNegativeInt($insolvency, 'withheld_minor_units'),
+                priorityDate: null,
+                orderingAuthority: $source['ordering_authority'],
+                decisionReference: $source['decision_reference'],
+                sourceKind: 'insolvency',
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * Zdroje pokračujících srážek pro formulář zápočtového listu, s tím, co
+     * lze předvyplnit z evidence. Suchý běh stejné cesty jako {@see build()}.
+     *
+     * @return list<array{source_kind:string,source_claim_id:int,label:string,beneficiary:string,ordering_authority:string,decision_reference:string}>
+     */
+    public function probeSources(int $supplierId, int $employmentId): array
+    {
+        $sources = $this->revisions->lockCertificateSources($supplierId, $employmentId);
+        $employeeId = self::positiveInt($sources['employee'], 'id');
+        $endDate = self::text($sources['employment'], 'end_date');
+        $result = [];
+        foreach ($this->revisions->lockContinuingDeductionClaims($supplierId, $employeeId, $endDate) as $claim) {
+            $result[] = [
+                'source_kind' => 'enforcement_claim',
+                'source_claim_id' => self::positiveInt($claim, 'id'),
+                'label' => '',
+                'beneficiary' => '',
+                'ordering_authority' => '',
+                'decision_reference' => '',
+            ];
+        }
+        foreach ($this->revisions->lockContinuingDeductionAgreements($supplierId, $employeeId, $endDate) as $agreement) {
+            $result[] = [
+                'source_kind' => 'deduction_agreement',
+                'source_claim_id' => $agreement['id'],
+                'label' => $agreement['title'],
+                'beneficiary' => $agreement['recipient_reference'] ?? $agreement['title'],
+                'ordering_authority' => 'Dohoda o srážkách ze mzdy (§ 146 písm. b) zákoníku práce)',
+                'decision_reference' => $agreement['agreement_reference'],
+            ];
+        }
+        $insolvency = $this->revisions->lockContinuingInsolvency($supplierId, $employeeId, $endDate);
+        if ($insolvency !== null) {
+            $result[] = [
+                'source_kind' => 'insolvency',
+                'source_claim_id' => $insolvency['id'],
+                'label' => '',
+                'beneficiary' => 'Insolvenční správce',
+                'ordering_authority' => 'Insolvenční soud',
+                'decision_reference' => '',
+            ];
         }
 
         return $result;
@@ -440,13 +554,15 @@ final class EmploymentExitSnapshotBuilder
             $row = self::normalizeObject($row, 'Srážka ve snapshotu');
             $deductions[] = new EmploymentCertificateDeduction(
                 beneficiary: self::text($row, 'beneficiary'),
-                claimAmountMinorUnits:
-                    self::positiveInt($row, 'claim_amount_minor_units'),
+                claimAmountMinorUnits: ($row['claim_amount_minor_units'] ?? null) === null
+                    ? null
+                    : self::positiveInt($row, 'claim_amount_minor_units'),
                 withheldAmountMinorUnits:
                     self::nonNegativeInt($row, 'withheld_amount_minor_units'),
-                priorityDate: self::text($row, 'priority_date'),
+                priorityDate: self::nullableText($row, 'priority_date'),
                 orderingAuthority: self::text($row, 'ordering_authority'),
                 decisionReference: self::text($row, 'decision_reference'),
+                sourceKind: self::nullableText($row, 'source_kind') ?? 'enforcement_claim',
             );
         }
 

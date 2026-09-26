@@ -245,12 +245,19 @@ final class EmploymentExitDocumentService
                         $supplierId,
                         $employmentId,
                     ),
+                    // Všechny pokračující srážky — exekuce, dohody o srážkách
+                    // i insolvence — s předvyplněním z evidence.
+                    'deduction_sources' => $this->builder->probeSources(
+                        $supplierId,
+                        $employmentId,
+                    ),
                 ];
             } catch (EmploymentExitReadinessException $exception) {
                 $certificate = [
                     'available' => false,
                     'readiness_code' => $exception->readinessCode,
                     'deduction_claim_ids' => [],
+                    'deduction_sources' => [],
                 ];
             }
             $end = new \DateTimeImmutable(
@@ -286,6 +293,7 @@ final class EmploymentExitDocumentService
                 'available' => false,
                 'readiness_code' => $exception->readinessCode,
                 'deduction_claim_ids' => [],
+                'deduction_sources' => [],
             ];
             $average = $blocked;
             $statement = $blocked;

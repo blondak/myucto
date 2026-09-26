@@ -5709,6 +5709,12 @@ export interface PayrollEmploymentExitDocumentList {
   readiness: {
     employment_certificate: PayrollEmploymentExitReadinessItem & {
       deduction_claim_ids: number[]
+      /**
+       * Všechny pokračující srážky ke dni skončení (§ 313 odst. 1 písm. e) ZP):
+       * exekuce, dohody o srážkách i insolvence, s předvyplněním z evidence.
+       * Starší server klíč neposílá — pak platí jen `deduction_claim_ids`.
+       */
+      deduction_sources?: PayrollEmploymentCertificateDeductionSource[]
     }
     average_earnings_certificate: PayrollEmploymentExitReadinessItem & {
       decisive_year: number | null
@@ -6006,8 +6012,23 @@ export interface PayrollAnnualDocumentBatchItem
   status: PayrollAnnualDocumentBatchItemStatus
 }
 
+export type PayrollEmploymentCertificateDeductionSourceKind =
+  | 'enforcement_claim'
+  | 'deduction_agreement'
+  | 'insolvency'
+
+export interface PayrollEmploymentCertificateDeductionSource {
+  source_kind: PayrollEmploymentCertificateDeductionSourceKind
+  source_claim_id: number
+  label: string
+  beneficiary: string
+  ordering_authority: string
+  decision_reference: string
+}
+
 export interface PayrollEmploymentCertificateDeductionEvidence {
   source_claim_id: number
+  source_kind?: PayrollEmploymentCertificateDeductionSourceKind
   beneficiary: string
   ordering_authority: string
   decision_reference: string

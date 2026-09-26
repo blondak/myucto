@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Document;
 /**
  * @phpstan-type DeductionEvidence array{
  *   source_claim_id:int,
+ *   source_kind?:string,
  *   beneficiary:string,
  *   ordering_authority:string,
  *   decision_reference:string
@@ -132,7 +133,7 @@ final class EmploymentCertificateEvidenceValidator
         ];
     }
 
-    /** @return list<array{source_claim_id:int,beneficiary:string,ordering_authority:string,decision_reference:string}> */
+    /** @return list<array{source_claim_id:int,source_kind?:string,beneficiary:string,ordering_authority:string,decision_reference:string}> */
     private function deductions(mixed $value): array
     {
         $rows = $this->list($value, 'deductions');
@@ -146,6 +147,7 @@ final class EmploymentCertificateEvidenceValidator
             }
             $unknown = array_diff(array_keys($row), [
                 'source_claim_id',
+                'source_kind',
                 'beneficiary',
                 'ordering_authority',
                 'decision_reference',
@@ -155,18 +157,26 @@ final class EmploymentCertificateEvidenceValidator
                     "Pole deductions.{$index} obsahuje nepodporovaný údaj.",
                 );
             }
+            $kind = $row['source_kind'] ?? 'enforcement_claim';
+            if (!is_string($kind) || !in_array($kind, EmploymentCertificateDeduction::SOURCE_KINDS, true)) {
+                throw new \InvalidArgumentException(
+                    "Pole deductions.{$index}.source_kind není podporované.",
+                );
+            }
             $claimId = $this->positiveInt(
                 $row['source_claim_id'] ?? null,
                 "deductions.{$index}.source_claim_id",
             );
-            if (isset($seen[$claimId])) {
+            if (isset($seen[$kind][$claimId])) {
                 throw new \InvalidArgumentException(
                     'Pokračující srážka je v podkladu uvedená vícekrát.',
                 );
             }
-            $seen[$claimId] = true;
+            $seen[$kind][$claimId] = true;
             $result[] = [
                 'source_claim_id' => $claimId,
+                // Exekuce bez klíče — otisk podkladu starších revizí se nemění.
+                ...($kind === 'enforcement_claim' ? [] : ['source_kind' => $kind]),
                 'beneficiary' => $this->text(
                     $row['beneficiary'] ?? null,
                     "deductions.{$index}.beneficiary",

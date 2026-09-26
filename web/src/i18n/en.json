@@ -5815,9 +5815,14 @@
         "one_per_line": "Enter each fact on a separate line",
         "exposure_confirm": "I confirm that occupational exposure has been assessed and the stated facts are complete.",
         "deductions": "Continuing wage deductions",
-        "deductions_hint": "Enter legal details only for claims found in the closed deduction ledger. Amounts are never entered in this form.",
+        "deductions_hint": "Enter legal details for garnishments (including delivered, not yet verified ones), deduction agreements and insolvency still being deducted on the termination date. For agreements and insolvency, what the records know is prefilled. Amounts are never entered in this form.",
         "claim_count": "Claims: {count}",
         "claim_id": "Recorded claim no. {id}",
+        "source_kind": {
+          "enforcement_claim": "Garnishment",
+          "deduction_agreement": "Deduction agreement",
+          "insolvency": "Insolvency"
+        },
         "beneficiary": "Beneficiary",
         "ordering_authority": "Ordering authority",
         "decision_reference": "Case / decision reference",
