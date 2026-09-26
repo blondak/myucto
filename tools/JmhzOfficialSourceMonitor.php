@@ -106,7 +106,7 @@ final class JmhzOfficialSourceMonitor
             $hosts = $source['document_hosts'] ?? null;
             $prefixes = $source['document_path_prefixes'] ?? null;
             $extensions = $source['document_extensions'] ?? null;
-            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'mpsv_api_pages', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
+            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'document_links', 'mpsv_api', 'mpsv_api_pages', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
                 throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný zdroj {$id}.");
             }
             $this->assertHttpsUrl($indexUrl, []);
@@ -214,10 +214,12 @@ final class JmhzOfficialSourceMonitor
             $documents = $this->extractArticles($index, $source);
         } elseif ($source['index_format'] === 'epo_structures') {
             $documents = $this->extractEpoStructures($index, $source);
+        } elseif ($source['index_format'] === 'document_links') {
+            $documents = $this->extractDocumentLinks($index, $source);
         } else {
             $documents = $this->extractDocuments($index, $source);
         }
-        if (!in_array($source['index_format'], ['article_list', 'epo_structures', 'mpsv_api_pages'], true)) {
+        if (!in_array($source['index_format'], ['article_list', 'epo_structures', 'mpsv_api_pages', 'document_links'], true)) {
             // Články se po jednom NESTAHUJÍ. Jde o provozní oznámení, kde je
             // signálem to, že přibyla položka — a stránka článku nese menu,
             // patičku a další volatilní obsah, takže by se hlásila změna
@@ -374,6 +376,80 @@ final class JmhzOfficialSourceMonitor
         ksort($articles, SORT_STRING);
 
         return array_values($articles);
+    }
+
+    /**
+     * Stránka ČSSZ „Definice e-Podání" (NEMPRI, HZUPN, ELDP, REGZEC) — seznam
+     * ODKAZŮ na dokumenty, ne jejich obsah.
+     *
+     * Každá stránka nese desítky příloh včetně archivních verzí a vzorů tisku
+     * po desítkách MB; stahovat je denně by hlídač zahltil a změnu nijak
+     * nezpřesnilo. ČSSZ novou verzi vystavuje jako NOVÝ soubor s novým
+     * odkazem (DV_NEMPRI25_v1_20260309.pdf vedle …_20240324.pdf), takže
+     * signálem je přibylý nebo změněný odkaz. Otisk je proto z názvu a odkazu.
+     *
+     * Stejný název se na stránce může opakovat s jiným odkazem (aktuální
+     * a archivní verze). Na rozdíl od `html` to není chyba: druhý výskyt dostane
+     * pořadovou příponu, aby se žádný z nich neztratil.
+     *
+     * @param array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>} $source
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256:string,byte_length:int}>
+     */
+    private function extractDocumentLinks(string $html, array $source): array
+    {
+        $documents = [];
+        $seenUrls = [];
+        foreach ($this->indexLinks($html, $source) as [$url, $title]) {
+            if ($url === '' || !$this->isOfficialDocumentUrl($url, $source)) {
+                continue;
+            }
+            $url = $this->canonicalUrl($url);
+            if (isset($seenUrls[$url])) {
+                continue;
+            }
+            $seenUrls[$url] = true;
+            $fileName = rawurldecode($this->documentFileName($url));
+            if (in_array(mb_strtolower($title, 'UTF-8'), ['', 'stáhnout', 'download'], true)) {
+                $title = $fileName;
+            }
+            $baseKey = $this->documentKey($title);
+            if ($baseKey === '') {
+                continue;
+            }
+            $key = $baseKey;
+            for ($n = 2; isset($documents[$key]); $n++) {
+                $key = "{$baseKey}:{$n}";
+            }
+            $fingerprint = $title . "\n" . $url;
+            $documents[$key] = [
+                'key' => $key,
+                'title' => $this->shorten($title),
+                'version' => $this->versionFrom($fileName . ' ' . $title),
+                'url' => $url,
+                'sha256' => hash('sha256', $fingerprint),
+                'byte_length' => strlen($fingerprint),
+            ];
+        }
+        if ($documents === []) {
+            throw new RuntimeException("Index {$source['index_url']} neobsahuje žádný rozpoznatelný oficiální dokument.");
+        }
+        ksort($documents, SORT_STRING);
+
+        return array_values($documents);
+    }
+
+    /**
+     * Název souboru z odkazu. Liferay ČSSZ ho nese jako předposlední segment
+     * (`/documents/20143/2739697/NEMPRI25.xsd/<uuid>`), jinde je poslední.
+     */
+    private function documentFileName(string $url): string
+    {
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        if (preg_match('#/documents/\d+/\d+/([^/]+)/[0-9a-f-]{36}\z#Di', $path, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return basename($path);
     }
 
     /**
