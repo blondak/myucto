@@ -123,7 +123,7 @@ final class PayrollEmploymentTerminationRepository
             return;
         }
         // Úmrtí se nedá „přepnout" na jiný způsob s ponechaným daňovým
-        // posouzením — to se váže jen ke skončení úmrtím (CHECK v 1923).
+        // posouzením — to se váže jen ke skončení úmrtím (CHECK v 1909).
         $stmt = $pdo->prepare(
             'UPDATE payroll_employment_terminations
                 SET termination_method = ?, legal_ground = ?,

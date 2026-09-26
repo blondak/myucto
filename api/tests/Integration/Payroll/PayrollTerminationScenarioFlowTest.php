@@ -40,7 +40,7 @@ final class PayrollTerminationScenarioFlowTest extends TestCase
     {
         $this->bootPayrollFullFlow();
         if (!$this->db->hasTable('payroll_employment_terminations')) {
-            self::markTestSkipped('Migrace 1923 neproběhla.');
+            self::markTestSkipped('Migrace 1909 neproběhla.');
         }
         $this->officeId = $this->createOffice('SKON', 'Syntetická účtárna skončení', '9990001234');
         $this->configureSocialInsuranceOutput($this->officeId);

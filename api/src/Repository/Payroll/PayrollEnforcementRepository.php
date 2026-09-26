@@ -3317,7 +3317,7 @@ final class PayrollEnforcementRepository implements
      * JEDINÉ místo, kde se v PHP počítá zůstatek depozita: deponováno minus
      * vráceno zaměstnanci, minus vydáno insolvenčnímu správci, minus uvolněno
      * oprávněnému (resp. odesláno, je-li víc). Tentýž vzorec drží trigger
-     * `trg_payroll_enforcement_ledger_consistency_insert` (migrace 1926)
+     * `trg_payroll_enforcement_ledger_consistency_insert` (migrace 1912)
      * a SQL rozpadu případu v PayrollEnforcementPaymentRepository.
      *
      * @return list<array{result_id:int,claim_id:int,amount:int}>

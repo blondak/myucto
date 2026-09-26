@@ -44,14 +44,14 @@ final class PayrollKeyRotationCatalogTest extends TestCase
     }
 
     /**
-     * Append-only tabulka pustí přebalení jen přes výjimku z migrace 1931.
+     * Append-only tabulka pustí přebalení jen přes výjimku z migrace 1915.
      * Proměnná v katalogu a v triggeru se musí shodovat, jinak UPDATE
      * narazí na trigger.
      */
     public function testGuardVariablesMatchMigration(): void
     {
         $migration = (string) file_get_contents(
-            dirname(__DIR__, 5) . '/db/migrations/1931_payroll_key_rewrap_trigger_guard.sql',
+            dirname(__DIR__, 5) . '/db/migrations/1915_payroll_key_rewrap_trigger_guard.sql',
         );
         foreach (PayrollKeyRotationService::targets() as $target) {
             if ($target['guard'] === null) {

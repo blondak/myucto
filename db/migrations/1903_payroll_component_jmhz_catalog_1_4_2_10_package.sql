@@ -15,8 +15,8 @@
 --     Shodu hlídají `PayrollComponentJmhzKindDefaultsMigrationTest`
 --     a `PayrollComponentJmhzCreationDefaultsTest`. Seznam kódů zahrnuje
 --     i náhrady za svátek a při překážkách (10339–10341), které do starého
---     balíku doplňuje 1912: bez nich by tahle migrace zařadila existující
---     složky podle druhu do úhrnu 10337 a 1912 by je pak přeskočila.
+--     balíku doplňuje 1905: bez nich by tahle migrace zařadila existující
+--     složky podle druhu do úhrnu 10337 a 1905 by je pak přeskočila.
 --
 -- Když balík 1.4.2.10 ještě nainstalovaný není, neudělá se nic a převzetí
 -- i výchozí zařazení provede aplikace sama při čtení složek. Opakované

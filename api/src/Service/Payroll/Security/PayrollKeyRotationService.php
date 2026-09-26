@@ -52,7 +52,7 @@ use PDO;
  *   `payroll-payment-exports`), které jsou šifrované master klíčem přímo.
  *
  * Zápis je vždy compare-and-swap na původní ciphertext. Append-only tabulky
- * pustí změnu jen přes adresnou výjimku z migrace 1931 (session proměnná
+ * pustí změnu jen přes adresnou výjimku z migrace 1915 (session proměnná
  * `@payroll_key_rewrap_<tabulka>` pro konkrétní řádek); `updated_at` ani
  * `row_version` se nemění, protože se nemění obsah.
  */
@@ -270,7 +270,7 @@ final class PayrollKeyRotationService
 
     /**
      * Session proměnná pro adresnou výjimku z append-only triggeru (migrace
-     * 1931) platí jen po dobu jednoho UPDATE a jen pro jeden řádek.
+     * 1915) platí jen po dobu jednoho UPDATE a jen pro jeden řádek.
      */
     private function guarded(?string $variable, int $id, callable $update): void
     {

@@ -42,7 +42,7 @@ final class PayrollAccountOptionsAction
             // jediného pole vrátí prázdná a účetní si předkontaci nenastaví,
             // přestože ji validátor vyžaduje. `revenue` přibyl kvůli výnosu
             // z paušálu plátce mzdy (`enforcement_fee_revenue_credit`, 648,
-            // migrace 1925). Kapitálové účty se dál nepouštějí — žádná mzdová
+            // migrace 1911). Kapitálové účty se dál nepouštějí — žádná mzdová
             // předkontace na ně nemíří.
             $type = $account['account_type'] ?? null;
             if (!in_array($type, ['expense', 'liability', 'asset', 'revenue'], true)) {

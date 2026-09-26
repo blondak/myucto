@@ -161,7 +161,7 @@ final class PayrollDispatchGate
      * Neúspěšný pokus BEZ `sent_at` znamená, že se odeslání nepovedlo dřív,
      * než cokoli opustilo aplikaci — u úřadu po něm nic nezůstalo, takže druhý
      * pokus nemůže nic zdvojit. Selhání PO odeslání požadavku (vypršený čas,
-     * ztracená nebo nečitelná odpověď) se od migrace 1906 zapisuje jako
+     * ztracená nebo nečitelná odpověď) se od migrace 1904 zapisuje jako
      * `possibly_delivered`, takže sem nepropadne.
      *
      * Druhá povolená cesta je pokus, který účetní VĚDOMĚ ZAHODILA poté, co viděla,

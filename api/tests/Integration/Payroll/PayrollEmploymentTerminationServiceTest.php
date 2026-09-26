@@ -49,7 +49,7 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         }
         $this->db = $db;
         if (!$db->hasTable('payroll_employment_terminations') || !$db->hasTable('payroll_employment_survivors')) {
-            self::markTestSkipped('Migrace 1923/1924 neproběhly.');
+            self::markTestSkipped('Migrace 1909/1910 neproběhly.');
         }
         $service = $container->get(PayrollEmploymentTerminationService::class);
         $leave = $container->get(PayrollLeaveRepository::class);

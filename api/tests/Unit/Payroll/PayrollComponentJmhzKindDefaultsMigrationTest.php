@@ -28,10 +28,10 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     private const MIGRATIONS = [
         '1839_payroll_component_jmhz_kind_default_mappings.sql',
         '1847_payroll_component_jmhz_stravovani_mapping.sql',
-        '1912_payroll_component_jmhz_compensation_detail_mappings.sql',
+        '1905_payroll_component_jmhz_compensation_detail_mappings.sql',
     ];
 
-    private const PACKAGE_TRANSITION = '1905_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
+    private const PACKAGE_TRANSITION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
 
     /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
     private const KINDS = [
@@ -186,7 +186,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     }
 
     /**
-     * Přechod na balík s katalogem 1.4.2.10 (migrace 1905) doplňuje výchozí
+     * Přechod na balík s katalogem 1.4.2.10 (migrace 1903) doplňuje výchozí
      * zařazení znovu, do nového balíku. Pravidlo musí být doslova totéž jako
      * v 1839 a 1847, jinak by firmy zařazené před přechodem a po něm dostaly
      * různé cíle.

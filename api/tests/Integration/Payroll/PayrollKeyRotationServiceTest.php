@@ -25,7 +25,7 @@ use PHPUnit\Framework\TestCase;
  *
  * Pokryté druhy úložišť: měnitelná tabulka (vyživovaná osoba), tabulka
  * s triggerem nad ověřením (bankovní účet zaměstnance), append-only tabulka
- * (roční snapshot mzdového listu, výjimka z migrace 1931), datové klíče
+ * (roční snapshot mzdového listu, výjimka z migrace 1915), datové klíče
  * dokumentů a šifrovaný soubor exportu. Klíče jsou náhodné, vznikají jen
  * v testu a nikam se nezapisují.
  */
@@ -72,7 +72,7 @@ final class PayrollKeyRotationServiceTest extends TestCase
                 AND TRIGGER_NAME = 'trg_payroll_annual_revision_immutable_update'",
         )->fetchColumn();
         if (!is_string($trigger) || !str_contains($trigger, 'payroll_key_rewrap')) {
-            self::fail('Chybí migrace 1931 (výjimka pro přebalení v append-only triggerech).');
+            self::fail('Chybí migrace 1915 (výjimka pro přebalení v append-only triggerech).');
         }
         $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
         $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -161,7 +161,7 @@ final class PayrollKeyRotationServiceTest extends TestCase
         );
     }
 
-    /** Výjimka z migrace 1931 je adresná: běžný UPDATE append-only tabulky dál neprojde. */
+    /** Výjimka z migrace 1915 je adresná: běžný UPDATE append-only tabulky dál neprojde. */
     public function testAppendOnlyTableStillRejectsOrdinaryUpdate(): void
     {
         $this->expectException(\PDOException::class);
