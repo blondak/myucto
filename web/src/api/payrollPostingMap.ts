@@ -8,7 +8,7 @@ import type { PayrollEmployerAccounts, PayrollEmployerSettings } from './payroll
 // nastavení; z převzatých dat se bere jen podklad pro to nastavení.
 
 /** Zdroj převzatého zaúčtování; musí sedět na ENUM v migraci 1852. */
-export type PayrollPostingMapSource = 'pamica' | 'pohoda' | 'money_s3' | 'other' | 'stereo_nx'
+export type PayrollPostingMapSource = 'pamica' | 'pohoda' | 'money_s3' | 'other'
 
 /**
  * Stav jednoho významu.
