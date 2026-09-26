@@ -38,6 +38,13 @@ final readonly class TaxStatementBasis
         public array $warnings = [],
         public array $blockers = [],
         public array $monthsBeforeStart = [],
+        /**
+         * Komu chybí převzaté úhrny — jen pro náhled, aby šlo proklikem otevřít
+         * kartu toho, u koho se to doplňuje. Do tiskopisu nejde.
+         *
+         * @var list<array{employee_id:int,employee_name:string,missing_months:list<int>}>
+         */
+        public array $takeoverGaps = [],
     ) {
         if (count($months) !== 12) {
             throw new \LogicException('Podklad vyúčtování musí mít dvanáct měsíců.');

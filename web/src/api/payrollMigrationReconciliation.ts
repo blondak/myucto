@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { TakeoverCheck } from './payrollTakeover'
 
 // PAM-11 — kontrolní sestava „naše přepočtená mzda vs. mzda převzatá z původního
 // systému". Read-only report; žádné mutační metody.
@@ -107,6 +108,8 @@ export interface PayrollMigrationReconciliation {
   }
   sources: PayrollMigrationSource[]
   source: PayrollMigrationSource | null
+  /** Úplnost a shoda převzatých vrstev (počáteční stavy vs. převzaté mzdy). */
+  takeover_check?: TakeoverCheck
 }
 
 export const payrollMigrationReconciliationApi = {

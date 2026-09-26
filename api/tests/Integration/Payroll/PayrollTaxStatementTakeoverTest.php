@@ -121,6 +121,9 @@ final class PayrollTaxStatementTakeoverTest extends TestCase
         self::assertStringContainsString('Za měsíce 1–9', $preview['dpzvd6']['blockers'][0]);
         self::assertStringContainsString('u 1 zaměstnanců', $preview['dpzvd6']['blockers'][0]);
         self::assertStringNotContainsString('Převzatá osoba', $preview['dpzvd6']['blockers'][0]);
+        // U koho: náhled nese osoby zvlášť, aby šlo proklikem otevřít jejich kartu.
+        self::assertSame('Převzatá osoba D', $preview['dpzvd6']['takeover_gaps'][0]['employee_name']);
+        self::assertSame(range(1, 9), $preview['dpzvd6']['takeover_gaps'][0]['missing_months']);
         self::assertNotSame([], $preview['dpsvd2']['blockers']);
 
         $this->expectException(\DomainException::class);

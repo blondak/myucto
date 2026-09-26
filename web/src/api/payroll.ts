@@ -4,6 +4,11 @@ import { downloadApiFile } from '@/utils/downloadFile'
 // certifikátu je rozhodnutí stejné třídy jako správa klíče samotného, takže
 // kódování důkazu se nesmí rozejít se zbytkem aplikace.
 import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
+import type {
+  TakeoverGap,
+  TakeoverLayerDifference,
+  TakeoverLayerOneSided,
+} from './payrollTakeover'
 
 /** Stránka seznamu. Bez hodnot platí serverový výchozí strop, ne „všechno". */
 export interface PayrollPageParams {
@@ -4944,6 +4949,7 @@ export type PayrollYearCloseStatus = 'open' | 'closed'
 export type PayrollYearCloseBlockerCode =
   | 'schema_unavailable'
   | 'missing_months'
+  | 'takeover_months_missing'
   | 'open_corrections'
   | 'open_submissions'
   | 'open_leave'
@@ -4955,7 +4961,7 @@ export type PayrollYearCloseBlockerCode =
  * doloženého bankovního pohybu; příkaz odešel v den výplaty, výpis dorazí
  * o týdny později. Rozhodnutí zavřít rok patří účetní.
  */
-export type PayrollYearCloseWarningCode = 'open_liabilities'
+export type PayrollYearCloseWarningCode = 'open_liabilities' | 'takeover_layers_mismatch'
 
 export interface PayrollYearCloseWarningItem {
   liability_id: number
@@ -4974,6 +4980,10 @@ export interface PayrollYearCloseWarning {
   count: number
   items: PayrollYearCloseWarningItem[]
   truncated: boolean
+  /** Jen u `takeover_layers_mismatch`: rozdíly počátečních stavů a převzatých mezd. */
+  differences?: TakeoverLayerDifference[]
+  opening_only?: TakeoverLayerOneSided[]
+  takeover_only?: TakeoverLayerOneSided[]
 }
 
 export interface PayrollYearCloseBlocker {
@@ -4981,6 +4991,8 @@ export interface PayrollYearCloseBlocker {
   count?: number
   months?: string[]
   tables?: string[]
+  /** Jen u `takeover_months_missing`: komu chybí převzaté úhrny a za které měsíce. */
+  people?: TakeoverGap[]
 }
 
 export interface PayrollYearClose {
@@ -5071,6 +5083,8 @@ export interface PayrollDependentActivityStatement {
   /** Proč XML nejde sestavit (chybějící převzaté měsíce); prázdné = lze. */
   blockers?: string[]
   taken_over_months?: number[]
+  /** U koho převzaté úhrny chybí — jen náhled, do tiskopisu nejde. */
+  takeover_gaps?: TakeoverGap[]
 }
 
 /** Část I. vyúčtování srážkové daně — částky v HALÉŘÍCH (schéma má 2 des. místa). */

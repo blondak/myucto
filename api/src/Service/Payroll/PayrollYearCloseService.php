@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollYearCloseRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService;
 use PDO;
 
@@ -15,6 +17,7 @@ final class PayrollYearCloseService
     public const BLOCKER_CODES = [
         'schema_unavailable',
         'missing_months',
+        'takeover_months_missing',
         'open_corrections',
         'open_submissions',
         'open_leave',
@@ -35,6 +38,7 @@ final class PayrollYearCloseService
      */
     public const WARNING_CODES = [
         'open_liabilities',
+        'takeover_layers_mismatch',
     ];
 
     /** Kolik nedoložených závazků se vypíše jmenovitě. */
@@ -53,6 +57,8 @@ final class PayrollYearCloseService
         private readonly PayrollYearCloseRepository $repository,
         private readonly ActivityLogger $activity,
         private readonly PayrollPostingReconciliationService $postingReconciliation,
+        private readonly PayrollTakeoverCoverage $takeover,
+        private readonly PayrollTakeoverLayerCheck $takeoverLayers,
     ) {}
 
     /** @return array<string,mixed> */
@@ -233,6 +239,18 @@ final class PayrollYearCloseService
         if ($missingMonths !== []) {
             $blockers[] = ['code' => 'missing_months', 'months' => $missingMonths];
         }
+        // `missing_months` hlídá jen měsíce od začátku vedení mezd. Měsíce před
+        // ním se nepočítají, ale rok je musí mít doložené převzatými úhrny —
+        // jinak roční zúčtování, vyúčtování daně i roční doklady stojí na
+        // neúplném roce a uzavření by ho zamklo.
+        $takeoverGaps = $this->takeover->gaps($supplierId, $year);
+        if ($takeoverGaps !== []) {
+            $blockers[] = [
+                'code' => 'takeover_months_missing',
+                'count' => count($takeoverGaps),
+                'people' => array_slice($takeoverGaps, 0, self::WARNING_SAMPLE_LIMIT),
+            ];
+        }
         foreach ([
             'open_corrections' => $this->repository->openCorrectionCount($supplierId, $year),
             'open_submissions' => $this->repository->openSubmissionCount($supplierId, $year),
@@ -263,22 +281,42 @@ final class PayrollYearCloseService
         if ($missingTables !== []) {
             return [];
         }
+        $warnings = [];
         $count = $this->repository->openLiabilityCount($supplierId, $year);
-        if ($count <= 0) {
-            return [];
+        if ($count > 0) {
+            $items = $this->repository->openLiabilities(
+                $supplierId,
+                $year,
+                self::WARNING_SAMPLE_LIMIT,
+            );
+            $warnings[] = [
+                'code' => 'open_liabilities',
+                'count' => $count,
+                'items' => $items,
+                'truncated' => $count > count($items),
+            ];
         }
-        $items = $this->repository->openLiabilities(
-            $supplierId,
-            $year,
-            self::WARNING_SAMPLE_LIMIT,
-        );
+        // Rozchod počátečních stavů a převzatých mezd rok nedrží — která strana
+        // je správně, rozhodne účetní. Uzavřít ale nesmí naslepo. Patří sem i
+        // měsíc jen v jedné vrstvě: bez převzaté mzdy nevznikne evidenční list
+        // za rok přechodu, bez počátečního stavu s měsícem nepočítá daň.
+        $layers = $this->takeoverLayers->check($supplierId, $year);
+        $findings = count($layers['differences'])
+            + count($layers['opening_only'])
+            + count($layers['takeover_only']);
+        if ($findings > 0) {
+            $warnings[] = [
+                'code' => 'takeover_layers_mismatch',
+                'count' => $findings,
+                'items' => [],
+                'differences' => array_slice($layers['differences'], 0, self::WARNING_SAMPLE_LIMIT),
+                'opening_only' => array_slice($layers['opening_only'], 0, self::WARNING_SAMPLE_LIMIT),
+                'takeover_only' => array_slice($layers['takeover_only'], 0, self::WARNING_SAMPLE_LIMIT),
+                'truncated' => count($layers['differences']) > self::WARNING_SAMPLE_LIMIT,
+            ];
+        }
 
-        return [[
-            'code' => 'open_liabilities',
-            'count' => $count,
-            'items' => $items,
-            'truncated' => $count > count($items),
-        ]];
+        return $warnings;
     }
 
     private function reconciliationDifferenceCount(int $supplierId, int $year): int

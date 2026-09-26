@@ -28,7 +28,10 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/utils/downloadFile', () => ({ downloadApiFile: m.download }))
 // Panel čte z adresy jen rok z prokliku hlídače termínů; plný router by sem
 // přitáhl celý strom rout kvůli jedné hodnotě v dotazu.
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.routeQuery }) }))
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery }),
+  RouterLink: { props: ['to'], template: '<a><slot /></a>' },
+}))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs-CZ' } }),
@@ -197,6 +200,7 @@ describe('PayrollTaxStatementPanel', () => {
     m.preview.mockResolvedValue(preview({
       dpzvd6: {
         blockers: ['Za měsíce 1–9 chybí u 1 zaměstnanců převzaté úhrny.'],
+        takeover_gaps: [{ employee_id: 5, employee_name: 'Syntetická osoba', missing_months: [1, 2, 3] }],
         taken_over_months: [1],
         months: [{ ...preview().statements.dpzvd6.months[0], taken_over: true }],
       },
@@ -206,6 +210,8 @@ describe('PayrollTaxStatementPanel', () => {
 
     expect(wrapper.get('[data-test="tax-statement-blockers"]').text())
       .toContain('chybí u 1 zaměstnanců převzaté úhrny')
+    // U koho: proklik na kartu osoby, kde se počáteční stavy doplňují.
+    expect(wrapper.find('[data-test="takeover-gap-link-5"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="tax-statement-taken-over"]').exists()).toBe(true)
     const dpz = wrapper.findAll('button').find(button => button.text().includes('download_dpzvd6'))
     await dpz?.trigger('click')

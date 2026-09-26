@@ -288,6 +288,40 @@ describe('Roční zúčtování', () => {
    * na téhle obrazovce, je proto klikací a pole se otevře a vysvítí.
    * Překážka mířící jinam (karta zaměstnance) zůstává větou.
    */
+  /**
+   * Převzaté zvýhodnění na dítě bez nároku v evidenci se opravuje v kartě
+   * zaměstnance — překážka tam musí rovnou vést.
+   */
+  it('u převzatého zvýhodnění bez nároku na dítě nabídne proklik na kartu zaměstnance', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        performed: false,
+        outcome: null,
+        blockers: ['takeover_child_claim_missing'],
+        payable_minor_units: 0,
+      }),
+    }))
+    const wrapper = mount(PayrollAnnualSettlement, {
+      global: {
+        stubs: {
+          ActionBar: actionBarStub,
+          EmptyState: emptyStateStub,
+          SavedFiltersMenu: true,
+          RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="annual-settlement-blocker-card-takeover_child_claim_missing"]')
+    expect(link.attributes('data-to')).toContain('"payroll-person"')
+    expect(link.attributes('data-to')).toContain('7')
+    expect(wrapper.get('[data-test="annual-settlement-blockers"]').text())
+      .toContain('payroll.annual_settlement.blocker.takeover_child_claim_missing')
+  })
+
   it('u překážky se zdejším polem nabídne proklik, u cizí ne', async () => {
     m.previewAnnualSettlement.mockResolvedValue(previewResponse({
       result: result({

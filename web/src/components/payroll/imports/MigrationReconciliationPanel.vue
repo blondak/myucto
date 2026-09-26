@@ -33,6 +33,7 @@ import { useAuthStore } from '@/stores/auth'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import TakeoverCheckSection from '@/components/payroll/takeover/TakeoverCheckSection.vue'
 import MigrationYearFilter from './MigrationYearFilter.vue'
 import { useMigrationWorkspace } from './migrationWorkspace'
 
@@ -227,6 +228,8 @@ onMounted(() => { void load() })
     <div v-else-if="loading" class="h-40 animate-pulse rounded-lg bg-neutral-100" />
 
     <template v-else-if="report">
+      <TakeoverCheckSection v-if="report.takeover_check" :check="report.takeover_check" />
+
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div class="rounded-lg bg-payroll-50 p-3">
           <p class="text-xs text-payroll-800">{{ t('payroll.migration_reconciliation.summary.rows') }}</p>

@@ -83,6 +83,55 @@ describe('PayrollYearClosePanel', () => {
     expect(blocker).not.toContain('2026-03')
   })
 
+  /**
+   * Rok přechodu: u koho převzaté úhrny chybí, za které měsíce a kde se
+   * doplní — samotné „u 2 zaměstnanců" by účetní poslalo hledat po celé firmě.
+   */
+  it('chybějící převzaté úhrny vypíše po lidech s proklikem na kartu', async () => {
+    m.status.mockResolvedValue(openYear([{
+      code: 'takeover_months_missing',
+      count: 1,
+      people: [{ employee_id: 41, employee_name: 'Syntetická osoba', missing_months: [1, 2, 3, 5] }],
+    }]))
+    const wrapper = mount(PayrollYearClosePanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    const blocker = wrapper.get('[data-test="year-close-blocker-takeover_months_missing"]')
+    expect(blocker.text()).toContain('Syntetická osoba')
+    expect(blocker.text()).toContain('1–3, 5')
+    expect(blocker.find('[data-test="takeover-gap-link-41"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="year-close-blocker-link-takeover_months_missing"]').exists()).toBe(true)
+  })
+
+  it('rozchod převzatých vrstev ukáže jako varování s rozdíly', async () => {
+    m.status.mockResolvedValue({
+      ...openYear([]),
+      warnings: [{
+        code: 'takeover_layers_mismatch',
+        count: 2,
+        items: [],
+        truncated: false,
+        differences: [{
+          employee_id: 41,
+          employee_name: 'Syntetická osoba',
+          period: '2026-01',
+          metric: 'advance_tax',
+          opening_minor: 343_000,
+          takeover_minor: 300_000,
+          difference_minor: 43_000,
+        }],
+        opening_only: [{ employee_id: 41, employee_name: 'Syntetická osoba', periods: ['2026-02'] }],
+        takeover_only: [],
+      }],
+    })
+    const wrapper = mount(PayrollYearClosePanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="year-close-warning-takeover_layers_mismatch"]')
+    expect(warning.find('[data-test="takeover-difference-41-2026-01-advance_tax"]').exists()).toBe(true)
+    expect(warning.find('[data-test="takeover-opening-only-41"]').exists()).toBe(true)
+  })
+
   /** Nový kód ze serveru se nesmí vypsat jako překladový klíč. */
   it('neznámou překážku pojmenuje větou, ne klíčem překladu', async () => {
     m.status.mockResolvedValue(openYear([{ code: 'exotic_new_blocker', count: 2 }]))

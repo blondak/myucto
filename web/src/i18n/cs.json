@@ -1787,6 +1787,36 @@
     "license_required_title": "Modul Mzdy není v licenci aktivní",
     "license_required_description": "Po skončení zkušební doby je pro modul Mzdy potřeba samostatný doplněk.",
     "license_required_action": "Objednat modul Mzdy",
+    "takeover_check": {
+      "title": "Kontrola převzaté části roku",
+      "hint": "Měsíce {months} vedl předchozí mzdový program. Každý z nich musí mít počáteční stav (z něj počítá roční zúčtování, vyúčtování daně a potvrzení o příjmech) i převzatou mzdu (z ní vzniká evidenční list důchodového pojištění) a obě musí tvrdit totéž.",
+      "all_ok": "Převzaté měsíce jsou úplné a počáteční stavy se s převzatými mzdami shodují.",
+      "gaps_title": "Chybí počáteční stavy",
+      "gaps_hint": "Těmto zaměstnancům v převzatých měsících trval pracovní vztah, ale počáteční stav za ně nic neříká. Doplňte úhrny z předchozího programu, nebo měsíc bez příjmu potvrďte jako nulový.",
+      "gap_person": "{name} — měsíce {months}",
+      "open_person": "Otevřít kartu",
+      "open_takeover": "Zadat převzaté mzdy",
+      "differences_title": "Počáteční stavy a převzaté mzdy si odporují",
+      "differences_hint": "Opravte tu stranu, která neodpovídá podkladům předchozího programu. U základu daně může být rozdíl oprávněný (osvobozený příjem je v hrubé mzdě, ne v základu daně).",
+      "person": "Zaměstnanec",
+      "period": "Měsíc",
+      "metric_column": "Veličina",
+      "opening": "Počáteční stav",
+      "takeover": "Převzatá mzda",
+      "difference": "Rozdíl",
+      "metric": {
+        "tax_base": "Základ daně / hrubá mzda",
+        "advance_tax": "Záloha na daň",
+        "withholding_tax": "Srážková daň",
+        "tax_bonus": "Daňový bonus",
+        "social_base": "Vyměřovací základ SP",
+        "health_base": "Vyměřovací základ ZP"
+      },
+      "opening_only_title": "Chybí převzaté mzdy",
+      "opening_only_hint": "Počáteční stav měsíc má, převzatá mzda ne. Bez ní nevznikne evidenční list důchodového pojištění za rok přechodu.",
+      "takeover_only_title": "Převzatá mzda bez počátečního stavu",
+      "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne — roční zúčtování ani vyúčtování daně s ním nepočítají."
+    },
     "year_close": {
       "title": "Roční uzávěrka mezd",
       "description": "Uzavřete rok až po dokončení všech dvanácti mzdových období, oprav a podání. Odvody, ke kterým ještě nedorazil výpis, uzavření nebrání — jen se vypíšou.",
@@ -1801,6 +1831,7 @@
         "schema_unavailable": "Potřebná mzdová evidence není v databázi dostupná.",
         "unknown": "Uzavření brání další překážka, kterou tahle verze aplikace neumí pojmenovat. Ozvěte se prosím podpoře.",
         "missing_months": "Chybí uzavřená období: {months}.",
+        "takeover_months_missing": "U {count} zaměstnanců chybí převzaté úhrny za měsíce před začátkem vedení mezd v MyÚčtu, přestože jim v nich trval pracovní vztah. Doplňte je (u koho a za které měsíce, je vypsané níže) v kartě zaměstnance nebo v Importech → Převzaté mzdy.",
         "open_corrections": "Čekají {count} otevřené opravy mzdových běhů.",
         "open_submissions": "Čeká {count} neukončených zákonných podání.",
         "open_liabilities": "Zůstává {count} neuhrazených mzdových závazků.",
@@ -1811,7 +1842,8 @@
       "warnings_title": "Na co upozornit (uzavření to nebrání)",
       "warning": {
         "unknown": "Zůstává {count} nálezů, které tahle verze aplikace neumí pojmenovat.",
-        "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis."
+        "open_liabilities": "Zůstává {count} mzdových závazků bez doloženého bankovního pohybu. Doloží se samy, až dorazí a spáruje se výpis.",
+        "takeover_layers_mismatch": "Převzatá část roku má {count} nálezů: počáteční stavy (z nich počítá roční zúčtování a vyúčtování daně) a převzaté mzdy (z nich vzniká evidenční list důchodového pojištění) si za týž měsíc odporují, nebo měsíc má jen jedna z nich."
       },
       "warning_truncated": "a další ({count})",
       "close": "Uzavřít mzdový rok",
@@ -4025,6 +4057,7 @@
         "request_date_missing": "U podané žádosti chybí datum podání. Bez něj nejde doložit, že žádost přišla do 15. února. Podklady jsou uložené, doplňte datum v poli Datum žádosti.",
         "prior_documents_date_missing": "U doložených dokladů předchozích zaměstnavatelů chybí datum převzetí. Bez něj nejde doložit lhůtu do 15. února. Podklady jsou uložené, doplňte datum v poli Datum převzetí dokladů."
       },
+      "open_employee_card": "Otevřít kartu zaměstnance",
       "settle_read_only": "Provést zúčtování může jen uživatel s právem schvalovat mzdy.",
       "settle_unavailable": "Náhled zúčtování zatím neprošel. Načtěte ho znovu, nebo zkontrolujte podklady zaměstnance.",
       "save_request_read_only": "Evidenci podkladů může měnit jen uživatel s právem zapisovat mzdové doklady."

@@ -44,12 +44,15 @@ final class TaxStatementService
     public function preview(int $supplierId, int $year, array $meta = []): array
     {
         $basis = $this->basis($supplierId, $year);
+        // Kdo převzaté úhrny nemá, se ukazuje jen v náhledu — s proklikem na
+        // kartu, kde se doplňují. Do tiskopisu jména nepatří.
+        $gaps = ['takeover_gaps' => $basis->takeoverGaps];
 
         return [
             self::FORM_DEPENDENT_ACTIVITY =>
-                $this->calculator->dependentActivity($basis, $meta)->toSummary(),
+                $this->calculator->dependentActivity($basis, $meta)->toSummary() + $gaps,
             self::FORM_WITHHOLDING_TAX =>
-                $this->calculator->withholdingTax($basis, $meta)->toSummary(),
+                $this->calculator->withholdingTax($basis, $meta)->toSummary() + $gaps,
         ];
     }
 
@@ -155,7 +158,7 @@ final class TaxStatementService
                 + (int) $row['settled_minor'];
         }
 
-        [$takenOver, $blockers] = $this->takeoverMonths(
+        [$takenOver, $blockers, $gaps] = $this->takeoverMonths(
             $supplierId,
             $year,
             $byMonth,
@@ -188,6 +191,7 @@ final class TaxStatementService
             $warnings,
             $blockers,
             $this->takeover->takeoverMonths($supplierId, $year),
+            $gaps,
         );
     }
 
@@ -212,7 +216,7 @@ final class TaxStatementService
      * @param array<int,array{headcount:int,advance:int,bonus:int,withholding:int,has_run:bool}> $byMonth
      * @param array{advance_tax:array<int,int>,withholding_tax:array<int,int>} $remitted
      * @param list<string> $warnings
-     * @return array{0:array<int,true>,1:list<string>}
+     * @return array{0:array<int,true>,1:list<string>,2:list<array{employee_id:int,employee_name:string,missing_months:list<int>}>}
      */
     private function takeoverMonths(
         int $supplierId,
@@ -223,7 +227,7 @@ final class TaxStatementService
     ): array {
         $takeoverMonths = $this->takeover->takeoverMonths($supplierId, $year);
         if ($takeoverMonths === []) {
-            return [[], []];
+            return [[], [], []];
         }
 
         $takenOver = [];
@@ -281,9 +285,8 @@ final class TaxStatementService
         $blockers = [];
         $gaps = $this->takeover->gaps($supplierId, $year);
         if ($gaps !== []) {
-            // Jména sem nepatří — podklad vyúčtování je souhrnný (viz nápověda
-            // panelu). Koho se mezera týká, ukazuje kontrola převzetí a uzávěrka
-            // mzdového roku.
+            // Jména do textu nepatří — tiskopis je souhrnný. Koho se mezera týká,
+            // nese náhled zvlášť (`takeover_gaps`) s proklikem na kartu osoby.
             $missing = [];
             foreach ($gaps as $gap) {
                 foreach ($gap['missing_months'] as $month) {
@@ -294,14 +297,14 @@ final class TaxStatementService
                 'Za měsíce %s (před začátkem vedení mezd v MyÚčtu) chybí u %d zaměstnanců '
                 . 'převzaté úhrny, přestože jim v nich trval pracovní vztah. Bez nich by '
                 . 'vyúčtování vykázalo nižší úhrn záloh, než jaký se skutečně srazil. Doplňte '
-                . 'počáteční stavy v kartě zaměstnance nebo v převzetí mezd (koho se to týká, '
-                . 'ukáže kontrolní sestava převzetí); měsíc bez příjmu potvrďte jako nulový.',
+                . 'počáteční stavy v kartě zaměstnance (Počáteční stavy) nebo v Importech → '
+                . 'Převzaté mzdy; měsíc bez příjmu potvrďte jako nulový.',
                 PayrollTakeoverCoverage::monthRanges(array_values($missing)),
                 count($gaps),
             );
         }
 
-        return [$takenOver, $blockers];
+        return [$takenOver, $blockers, $gaps];
     }
 
     /**

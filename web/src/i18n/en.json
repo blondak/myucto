@@ -1787,8 +1787,38 @@
     "license_required_title": "Payroll is not active in your licence",
     "license_required_description": "After the trial period, Payroll requires a separate add-on.",
     "license_required_action": "Buy the Payroll add-on",
+    "takeover_check": {
+      "title": "Check of the taken-over part of the year",
+      "hint": "Months {months} were processed by the previous payroll program. Each of them needs an opening balance (used by the annual settlement, the tax statement and the income certificate) and taken-over wages (used by the pension insurance record sheet), and both must say the same.",
+      "all_ok": "The taken-over months are complete and the opening balances agree with the taken-over wages.",
+      "gaps_title": "Opening balances missing",
+      "gaps_hint": "These employees' employment lasted in taken-over months, but the opening balance says nothing about them. Enter the totals from the previous program, or confirm a month without income as zero.",
+      "gap_person": "{name} — months {months}",
+      "open_person": "Open card",
+      "open_takeover": "Enter taken-over wages",
+      "differences_title": "Opening balances and taken-over wages disagree",
+      "differences_hint": "Fix the side that does not match the previous program's records. For the tax base a difference can be legitimate (exempt income is in gross pay, not in the tax base).",
+      "person": "Employee",
+      "period": "Month",
+      "metric_column": "Item",
+      "opening": "Opening balance",
+      "takeover": "Taken-over wages",
+      "difference": "Difference",
+      "metric": {
+        "tax_base": "Tax base / gross pay",
+        "advance_tax": "Tax advance",
+        "withholding_tax": "Withholding tax",
+        "tax_bonus": "Tax bonus",
+        "social_base": "Social insurance base",
+        "health_base": "Health insurance base"
+      },
+      "opening_only_title": "Taken-over wages missing",
+      "opening_only_hint": "The opening balance has the month, the taken-over wages do not. Without them the pension insurance record sheet for the transition year cannot be produced.",
+      "takeover_only_title": "Taken-over wages without an opening balance",
+      "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it."
+    },
     "year_close": {
-      "title": "Payroll year close",
+      "title":"Payroll year close",
       "description": "Close the year only after all twelve payroll periods, corrections and submissions are complete. Liabilities still waiting for a bank statement do not prevent closing — they are only listed.",
       "year": "Year",
       "status": {
@@ -1801,6 +1831,7 @@
         "schema_unavailable": "The required payroll records are unavailable in the database.",
         "unknown": "Another blocker prevents closing that this version cannot name. Please contact support.",
         "missing_months": "Missing closed periods: {months}.",
+        "takeover_months_missing": "{count} employees have no taken-over totals for months before payroll started in MyÚčto, although their employment lasted in them. Fill them in (who and which months is listed below) on the employee card or in Imports → Taken-over wages.",
         "open_corrections": "{count} payroll run corrections are still open.",
         "open_submissions": "{count} statutory submissions are not finished.",
         "open_liabilities": "{count} payroll payment liabilities remain unpaid.",
@@ -1811,7 +1842,8 @@
       "warnings_title": "Worth knowing (does not prevent closing)",
       "warning": {
         "unknown": "{count} findings remain that this version cannot name.",
-        "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched."
+        "open_liabilities": "{count} payroll liabilities have no bank movement on record yet. They settle themselves once the statement arrives and is matched.",
+        "takeover_layers_mismatch": "The taken-over part of the year has {count} findings: opening balances (used by the annual settlement and the tax statement) and taken-over wages (used by the pension insurance record sheet) disagree for the same month, or the month exists in only one of them."
       },
       "warning_truncated": "and {count} more",
       "close": "Close payroll year",
@@ -4025,6 +4057,7 @@
         "request_date_missing": "The request is recorded as submitted but has no submission date. Without it there is no proof the request arrived by 15 February. The record is saved — fill in the request date.",
         "prior_documents_date_missing": "The prior employers' documents are recorded as provided but have no receipt date. Without it the 15 February deadline cannot be evidenced. The record is saved — fill in the receipt date."
       },
+      "open_employee_card": "Open employee card",
       "settle_read_only": "Only a user allowed to approve payroll can perform the settlement.",
       "settle_unavailable": "The settlement preview did not go through. Reload it or check the employee's documents.",
       "save_request_read_only": "Only a user allowed to write payroll documents can change these records."

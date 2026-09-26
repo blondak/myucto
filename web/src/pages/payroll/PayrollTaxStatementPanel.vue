@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
+import TakeoverGapList from '@/components/payroll/takeover/TakeoverGapList.vue'
 
 /**
  * Roční vyúčtování daně ze závislé činnosti (DPZVD6) a daně vybírané srážkou
@@ -79,6 +80,8 @@ const blockers = computed(() => {
   const all = [...(dpz.value?.blockers ?? []), ...(dps.value?.blockers ?? [])]
   return [...new Set(all)]
 })
+/** U koho převzaté úhrny chybí — s proklikem na kartu osoby. */
+const takeoverGaps = computed(() => dpz.value?.takeover_gaps ?? [])
 
 const formatter = computed(() => new Intl.NumberFormat(locale.value, {
   style: 'currency', currency: 'CZK', minimumFractionDigits: 0, maximumFractionDigits: 0,
@@ -315,6 +318,7 @@ onMounted(load)
         <ul class="mt-1 space-y-1">
           <li v-for="blocker in blockers" :key="blocker">{{ blocker }}</li>
         </ul>
+        <TakeoverGapList v-if="takeoverGaps.length > 0" class="mt-2" :gaps="takeoverGaps" />
       </div>
       <ul
         v-if="warnings.length"
