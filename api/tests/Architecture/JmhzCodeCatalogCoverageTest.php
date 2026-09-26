@@ -49,6 +49,7 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'eldp_source_manifest_sha256' => 'field',
         'eldp_statement' => 'key',
         'eldp_submission' => 'key',
+        'eldp_type' => 'field',
         'jmhz_activity' => 'field',
         'jmhz_amount' => 'field',
         'jmhz_amount_minor' => 'field',
@@ -94,6 +95,24 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_work_summary_status' => 'field',
         'jmhz_workplace_country_code' => 'field',
         'jmhz_workplace_municipality_code' => 'field',
+        'jmhz_xml' => 'enum',
+        // Počty a upozornění v protokolu převodu PAMICA (PohodaPayrollJmhzWriter),
+        // ne kódy blokací podání.
+        'jmhz_data_failed' => 'other',
+        'jmhz_eldp_days_compared' => 'other',
+        'jmhz_eldp_days_differ' => 'other',
+        'jmhz_failed' => 'other',
+        'jmhz_form_unreadable' => 'other',
+        'jmhz_forms' => 'other',
+        'jmhz_forms_unreadable' => 'other',
+        'jmhz_identifiers_unconfirmed' => 'other',
+        'jmhz_messages_truncated' => 'other',
+        'jmhz_month_not_sent' => 'other',
+        'jmhz_months_not_sent' => 'other',
+        'jmhz_oic_invalid' => 'other',
+        'jmhz_registrations' => 'other',
+        'jmhz_submissions' => 'other',
+        'jmhz_terms_closed_employment' => 'other',
     ];
 
     public function testEveryEmittedCodeHasRemediationAndBothLabels(): void
