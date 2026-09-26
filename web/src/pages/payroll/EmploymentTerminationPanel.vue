@@ -348,8 +348,6 @@ function issueLink(issue: PayrollTerminationIssue): { to: string, label: string 
       return { to: '/payroll/enforcement', label: t('payroll.people.termination.links.enforcement') }
     case 'death_deduction_agreements_active':
       return { to: '/payroll/deduction-agreements', label: t('payroll.people.termination.links.deductions') }
-    case 'severance_jmhz_mapping_missing':
-      return { to: '/payroll/components', label: t('payroll.people.termination.links.components') }
     case 'severance_garnishment_multiple_missing':
       return { to: `/payroll/quick-inputs?employment=${employmentId}`, label: t('payroll.people.termination.links.inputs') }
     default:

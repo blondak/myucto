@@ -5839,7 +5839,6 @@
           "leave": "Kniha dovolené",
           "enforcement": "Exekuce a insolvence",
           "deductions": "Dohody o srážkách",
-          "components": "Mzdové složky",
           "inputs": "Mzdové vstupy"
         },
         "issues": {
@@ -5855,9 +5854,7 @@
           "work_injury_compensation_manual": "Jednorázovou náhradu podle § 271ca ZP aplikace do běhu nezakládá — chybí jí mzdová složka s ověřeným zařazením. Založte ji ručně a v odhlášce A2 uveďte jako jednorázovou náhradu.",
           "work_injury_compensation_ready": "Jednorázovou náhradu podle § 271ca ZP založte níže tlačítkem Založit náhradu — uveďte, kdo ji vyplácí (zaměstnavatel, nebo přímo pojišťovna) a kdy.",
           "severance_garnishment_multiple_missing": "U založeného odstupného chybí počet násobků průměru, ze kterých se počítají srážky (§ 299 odst. 4 o. s. ř.). Doplňte ho jako množství u vstupu odstupného v Mzdových vstupech.",
-          "severance_input_differs": "Založené odstupné ({input_amount_minor}) se liší od současného návrhu. Opravte vstup v Mzdových vstupech.",
-          "severance_jmhz_mapping_missing": "Složka {component_code} nemá zařazení do měsíčního hlášení JMHZ. Bez něj se hlášení za poslední měsíc nesestaví — zařaďte ji v Mzdové složky.",
-          "death_no_entitled_survivor": "Není zapsaná žádná osoba blízká ze společné domácnosti. Mzdová práva se pak stávají předmětem dědictví — vyplácejte až podle rozhodnutí o dědictví.",
+          "severance_input_differs": "Založené odstupné ({input_amount_minor}) se liší od současného návrhu. Opravte vstup v Mzdových vstupech.",          "death_no_entitled_survivor": "Není zapsaná žádná osoba blízká ze společné domácnosti. Mzdová práva se pak stávají předmětem dědictví — vyplácejte až podle rozhodnutí o dědictví.",
           "death_tax_assessment_missing": "Chybí daňové posouzení výplaty pozůstalým. Zapište ho níže, než výplatu provedete.",
           "death_enforcement_active": "Zaměstnanec má {count} živé exekuce nebo insolvence. Po úmrtí je ukončete a informujte plátce, soud nebo správce v Exekuce a insolvence.",
           "death_deduction_agreements_active": "Zaměstnanec má {count} aktivní dohody o srážkách. Pohledávky zaměstnavatele smrtí zanikají (§ 328 odst. 2 ZP) — ukončete je v Dohody o srážkách."

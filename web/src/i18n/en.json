@@ -5839,7 +5839,6 @@
           "leave": "Leave ledger",
           "enforcement": "Enforcement and insolvency",
           "deductions": "Deduction agreements",
-          "components": "Payroll components",
           "inputs": "Payroll inputs"
         },
         "issues": {
@@ -5855,9 +5854,7 @@
           "work_injury_compensation_manual": "The app does not add the Section 271ca lump-sum compensation to the run — it has no payroll component with a verified classification. Create it manually and report it in A2 as lump-sum compensation.",
           "work_injury_compensation_ready": "Create the Section 271ca lump-sum compensation below with Create compensation — state who pays it (the employer or directly the insurer) and when.",
           "severance_garnishment_multiple_missing": "The created severance pay has no number of multiples of average earnings for garnishment (Section 299(4) Civil Procedure Code). Add it as the quantity of the severance input in Payroll inputs.",
-          "severance_input_differs": "The created severance pay ({input_amount_minor}) differs from the current proposal. Correct the input in Payroll inputs.",
-          "severance_jmhz_mapping_missing": "Component {component_code} has no JMHZ monthly report mapping. Without it the report for the last month cannot be built — map it in Payroll components.",
-          "death_no_entitled_survivor": "No close person from the shared household is recorded. The wage claims then become part of the estate — pay out only under the probate decision.",
+          "severance_input_differs": "The created severance pay ({input_amount_minor}) differs from the current proposal. Correct the input in Payroll inputs.",          "death_no_entitled_survivor": "No close person from the shared household is recorded. The wage claims then become part of the estate — pay out only under the probate decision.",
           "death_tax_assessment_missing": "The tax assessment of the payout to survivors is missing. Record it below before paying out.",
           "death_enforcement_active": "The employee has {count} active enforcement or insolvency cases. After death, end them and inform the payer, court or administrator in Enforcement and insolvency.",
           "death_deduction_agreements_active": "The employee has {count} active deduction agreements. The employer's claims end with death (Section 328(2) Labour Code) — end them in Deduction agreements."
