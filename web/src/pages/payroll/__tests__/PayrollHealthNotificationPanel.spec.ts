@@ -79,6 +79,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 import PayrollHealthNotificationPanel
   from '@/pages/payroll/PayrollHealthNotificationPanel.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { routeLocationKey } from 'vue-router'
 import { payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 /**
@@ -1154,5 +1155,52 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(box.exists()).toBe(true)
     expect(box.text()).toContain('rodné číslo ani EČP')
     expect(box.text()).not.toContain('payroll.health_notifications.prepare_bulk.failed')
+  })
+})
+
+describe('PayrollHealthNotificationPanel — oznámení přímo z karty zaměstnance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setup()
+    m.prepareBulk.mockResolvedValue({
+      submission_id: 61,
+      obligation_id: 9,
+      part_id: 3,
+      artifact_id: 14,
+      status: 'draft',
+      row_version: 2,
+      insurer_code: '111',
+      period: '2026-10',
+      agenda_code: 'HOZ_2026',
+      artifact_sha256: 'a1'.repeat(32),
+      changes_count: 1,
+      created: true,
+      deadline: { earliest_submission_on: '2026-10-01', due_on: '2026-10-09', calendar_basis: 'calendar_days', ruleset_id: 'cz-health-insurance-notification-deadlines.v1', ruleset_hash: 'a'.repeat(64), source: 'synthetic', source_status: 'statute_verified' },
+      schema_validated: false,
+    })
+  })
+
+  function mountWithQuery(query: Record<string, string>) {
+    return mount(PayrollHealthNotificationPanel, {
+      global: { provide: { [routeLocationKey as symbol]: { query } } },
+    })
+  }
+
+  it('s ?insurer a hoz=1 synchronizuje povinnosti a sestaví HOZ bez dalšího klikání', async () => {
+    mountWithQuery({ period: '2026-10', insurer: '111', hoz: '1' })
+    await flushPromises()
+
+    expect(m.registerPeriod).toHaveBeenCalledWith('2026-10')
+    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111')
+    expect(m.duties).toHaveBeenLastCalledWith('2026-10', expect.objectContaining({ insurer_code: '111' }))
+  })
+
+  it('bez hoz=1 pojišťovnu jen předvybere a nic nesestavuje', async () => {
+    mountWithQuery({ period: '2026-10', insurer: '111' })
+    await flushPromises()
+
+    expect(m.registerPeriod).not.toHaveBeenCalled()
+    expect(m.prepareBulk).not.toHaveBeenCalled()
+    expect(m.duties).toHaveBeenLastCalledWith('2026-10', expect.objectContaining({ insurer_code: '111' }))
   })
 })

@@ -1010,6 +1010,40 @@ describe('EmploymentCard', () => {
   })
 
   /**
+   * UX-5: oznámení ZP se dřív skládalo v šesti krocích na stránce ZP. Otevřená
+   * povinnost na kartě vede rovnou tam, s obdobím nástupu a pojišťovnou.
+   */
+  it('u otevřené registrace ZP vede přímo na sestavení oznámení za měsíc nástupu', async () => {
+    const hired = employment()
+    hired.health_insurer = { status: 'verified', code: '111', effective_from: '2026-01-01' }
+    hired.checklist = [{
+      id: 6,
+      phase: 'onboarding',
+      item_key: 'health_insurance_registration',
+      status: 'pending',
+      due_date: '2026-01-09',
+      completed_at: null,
+      note: null,
+      row_version: 1,
+    }]
+    const wrapper = await mountCard(hired, {
+      props: { employment: hired, canWrite: true },
+      global: {
+        stubs: {
+          ...actionBarStub,
+          RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)" v-bind="$attrs"><slot /></a>' },
+        },
+      },
+    })
+
+    const link = wrapper.get('[data-test="checklist-health-notification-health_insurance_registration"]')
+    expect(JSON.parse(link.attributes('data-to')!)).toEqual({
+      path: '/payroll/submissions/health',
+      query: { period: '2026-01', hoz: '1', insurer: '111' },
+    })
+  })
+
+  /**
    * Časová osa dřív vypisovala hodnoty diffu syrově z databáze, takže uživatel
    * v české aplikaci četl „pending → completed" a „→ partner_dependent".
    */

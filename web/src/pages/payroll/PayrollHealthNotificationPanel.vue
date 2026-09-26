@@ -13,7 +13,7 @@
  * Filtry i stránkování jsou serverové. Půl na půl (filtr u sebe, stránka na
  * serveru) by znamenalo, že počet nahoře popisuje jiný seznam než tabulka.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { usePayrollServerMessage } from './payrollServerMessage'
@@ -634,10 +634,31 @@ watch(period, () => {
   void loadRuns()
 })
 
+/*
+ * UX-5: karta zaměstnance odkazuje sem s `?insurer=111&hoz=1`. Pojišťovna se
+ * předvybere ve filtru i v sestavení HOZ a s `hoz=1` se povinnosti rovnou
+ * synchronizují a hromadné oznámení sestaví — dřív to bylo šest kroků přes
+ * tři sekce. Sestavení nic neodesílá; odeslání zůstává na tlačítku.
+ */
+const bulkSection = ref<HTMLElement | null>(null)
+
+async function prepareFromRoute() {
+  const insurer = route?.query?.insurer
+  if (typeof insurer !== 'string' || !/^\d{3}$/.test(insurer)) return
+  filterInsurer.value = insurer
+  prepareBulkInsurer.value = insurer
+  if (route?.query?.hoz !== '1' || !canWrite.value) return
+  await synchronizeObligations()
+  await prepareBulk()
+  await nextTick()
+  bulkSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
 onMounted(() => {
   void load()
   void loadCapability()
   void loadRuns()
+  void prepareFromRoute()
 })
 </script>
 
@@ -1307,7 +1328,8 @@ onMounted(() => {
     </section>
 
     <section
-      class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      ref="bulkSection"
+      class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
       data-test="health-notifications-prepare-bulk"
     >
       <h3 class="text-lg font-semibold text-neutral-900">

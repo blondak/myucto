@@ -4764,7 +4764,8 @@
         "collapse_confirm": "The full personal record has unsaved changes. Collapsing it discards them. Continue?",
         "stopped": "Saving stopped at section {section}. Fix what the section points out and save again; the other edited sections remain unsaved.",
         "statutory_defaults": "Fill in standard records (Czech resident)",
-        "a1_profile": "REGZEC A1 profile"
+        "a1_profile": "REGZEC A1 profile",
+        "health_notification": "Prepare health insurer notice"
       },
       "quick_edit": {
         "title": "Common employee details",

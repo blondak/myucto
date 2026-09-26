@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import {
   payrollApi,
   type PayrollChecklistStatus,
@@ -644,6 +645,33 @@ async function save(): Promise<boolean> {
     return false
   } finally {
     busy.value = false
+  }
+}
+
+/*
+ * UX-5: oznámení zdravotní pojišťovně přímo z povinnosti na kartě. Dřív to
+ * znamenalo najít stránku ZP, přepnout období, synchronizovat povinnosti,
+ * vybrat pojišťovnu ve filtru a znovu v sekci HOZ. Odkaz nese období a
+ * pojišťovnu a stránka hromadné oznámení rovnou sestaví (nic neodesílá).
+ */
+const HEALTH_NOTIFICATION_ITEMS = [
+  'health_insurance_registration',
+  'health_insurance_change',
+  'health_insurance_deregistration',
+]
+
+function healthNotificationTarget(item: PayrollEmploymentChecklistItem) {
+  if (!HEALTH_NOTIFICATION_ITEMS.includes(item.item_key)) return null
+  const insurer = props.employment.health_insurer?.code ?? null
+  const eventDate = item.item_key === 'health_insurance_registration'
+    ? props.employment.start_date
+    : item.item_key === 'health_insurance_deregistration'
+      ? props.employment.end_date
+      : item.due_date
+  const period = (eventDate ?? todayIso()).slice(0, 7)
+  return {
+    path: '/payroll/submissions/health',
+    query: { period, hoz: '1', ...(insurer ? { insurer } : {}) },
   }
 }
 
@@ -1864,6 +1892,15 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <p class="w-full text-neutral-500">{{ t('payroll.people.confirmation_request_hint') }}</p>
             </div>
             <div v-if="canWrite" class="flex flex-wrap gap-1">
+              <RouterLink
+                v-if="item.status === 'pending' && healthNotificationTarget(item)"
+                :to="healthNotificationTarget(item)!"
+                :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                :data-test="`checklist-health-notification-${item.item_key}`"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.send" /></svg>
+                {{ t('payroll.people.card_save.health_notification') }}
+              </RouterLink>
               <template v-if="item.status === 'pending'">
                 <button type="button" :class="btnOutlineSm('success')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'completed')">{{ t('payroll.people.complete') }}</button>
                 <button type="button" :class="btnOutlineSm('neutral')" :disabled="busy" :data-test="`checklist-na-${item.item_key}`" @click="setChecklist(item.item_key, item.row_version, 'not_applicable')">{{ t('payroll.people.not_applicable') }}</button>
