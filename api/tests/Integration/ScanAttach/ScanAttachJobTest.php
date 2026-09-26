@@ -69,7 +69,7 @@ final class ScanAttachJobTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->c = Bootstrap::buildApp()->getContainer();
+            $this->c = Bootstrap::buildContainer();
             $this->db = $this->c->get(Connection::class);
         } catch (\Throwable $e) {
             self::markTestSkipped('DI nedostupné: ' . $e->getMessage());

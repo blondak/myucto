@@ -120,7 +120,89 @@ final class InvoiceSeriesCompletenessService
                 $result[] = $report;
             }
         }
+        array_push($result, ...$this->buildInferredReports($supplierId, $year, $byPriority));
         return $result;
+    }
+
+    /**
+     * Importované číslo nemusí odpovídat dnešní šabloně. Bezpečně rozpoznatelná
+     * řada má rok vystavení přímo v čísle a stejně široký číselný suffix.
+     * Rozsah začíná prvním nalezeným číslem, protože import může být jen částečný.
+     * Suffix začínající číslem měsíce se vynechá, aby měsíční řada netvořila
+     * falešné mezery v roční řadě.
+     *
+     * @param list<array<string,mixed>> $byPriority
+     * @return list<array<string,mixed>>
+     */
+    private function buildInferredReports(int $supplierId, int $year, array $byPriority): array
+    {
+        $series = [];
+        foreach (self::SCANNED_TYPES as $type) {
+            foreach ($this->fetchDocuments($supplierId, $type, (string) $year, 'year') as $row) {
+                if ($this->ownerOf($row, $type, $byPriority) !== null) {
+                    continue;
+                }
+                $number = (string) $row['varsymbol'];
+                if (preg_match('/^([A-Za-z]{0,4}[-\/]?)((?:19|20)\d{2})([-\/]?)(\d{3,8})$/D', $number, $matches) !== 1
+                    || (int) $matches[2] !== (int) substr((string) $row['issue_date'], 0, 4)) {
+                    continue;
+                }
+                if (strlen($matches[4]) >= 4 && preg_match('/^(0[1-9]|1[0-2])/', $matches[4]) === 1) {
+                    continue;
+                }
+                $prefix = $matches[1] . $matches[2] . $matches[3];
+                $width = strlen($matches[4]);
+                $key = $prefix . '|' . $width;
+                $series[$key]['prefix'] = $prefix;
+                $series[$key]['width'] = $width;
+                $series[$key]['types'][$type] = true;
+                $series[$key]['used'][(int) $matches[4]] = true;
+            }
+        }
+
+        $reports = [];
+        foreach ($series as $candidate) {
+            $used = $candidate['used'];
+            if (count($used) < 2) {
+                continue;
+            }
+            $numbers = array_keys($used);
+            $from = min($numbers);
+            $to = max($numbers);
+            $missingTotal = $to - $from + 1 - count($used);
+            $missing = [];
+            for ($n = $from; $n <= $to && count($missing) < self::MAX_LISTED_MISSING; $n++) {
+                if (!isset($used[$n])) {
+                    $missing[] = $n;
+                }
+            }
+            $template = $candidate['prefix'] . '{' . str_repeat('C', $candidate['width']) . '}';
+            $types = array_keys($candidate['types']);
+            $reports[] = [
+                'types' => $types,
+                'client_id' => 0,
+                'client_name' => null,
+                'revenue_category_id' => 0,
+                'revenue_category_name' => null,
+                'period' => 'year',
+                'template_by_type' => array_fill_keys($types, $template),
+                'inferred' => true,
+                'buckets' => [[
+                    'period_key' => (string) $year,
+                    'used_count' => count($used),
+                    'range_from' => $from,
+                    'range_to' => $to,
+                    'missing' => $missing,
+                    'missing_total' => $missingTotal,
+                    'missing_truncated' => $missingTotal > count($missing),
+                    'missing_preview' => array_map(
+                        static fn (int $n): string => $candidate['prefix'] . str_pad((string) $n, $candidate['width'], '0', STR_PAD_LEFT),
+                        $missing,
+                    ),
+                ]],
+            ];
+        }
+        return $reports;
     }
 
     /** @param array{client_id:int, revenue_category_id:int} $group */

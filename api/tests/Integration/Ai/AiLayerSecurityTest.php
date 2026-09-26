@@ -37,7 +37,7 @@ final class AiLayerSecurityTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->worker = $container->get(AiWorker::class);
             $this->killSwitch = $container->get(AiKillSwitchService::class);

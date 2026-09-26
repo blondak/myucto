@@ -131,7 +131,7 @@ final class DimensionCashFlowService
                    COALESCE(p.account_code, a.account_code) AS code,
                    COALESCE(p.name, a.name) AS name,
                    a.account_type,
-                   SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS delta
+                   SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS delta
               FROM {$linesSql}
               JOIN journal_entries e ON e.id = l.entry_id
               " . JournalTaxOrigin::join() . "

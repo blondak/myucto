@@ -80,6 +80,28 @@ final class BankHttpClientFactoryTest extends TestCase
         self::assertStringNotContainsString('private-', json_encode($context, JSON_THROW_ON_ERROR));
     }
 
+    public function testFioErrorDiagnosticsDescribeResponseWithoutLoggingBody(): void
+    {
+        $log = new TestHandler();
+        $factory = new BankHttpClientFactory(new Config(['app' => ['env' => 'development']]), new Logger('test', [$log]));
+        $secret = 'private-bank-token-and-account';
+        $body = '<!DOCTYPE html><html><body>' . $secret . '</body></html>';
+        $response = new Response(502, ['Content-Type' => 'text/html; charset=UTF-8'], $body);
+        $response->getBody()->seek(5);
+        $client = $factory->create('fio', new MockHandler([$response]));
+
+        $result = $client->request('GET', 'https://bank.example/periods/private-token', ['http_errors' => false]);
+
+        self::assertSame(5, $result->getBody()->tell());
+        self::assertSame($body, (string) $result->getBody());
+        $context = $log->getRecords()[0]->context;
+        self::assertSame(502, $context['http_status']);
+        self::assertSame('text/html', $context['response_content_type']);
+        self::assertSame('html', $context['response_body_format']);
+        self::assertSame(strlen($body), $context['response_body_bytes']);
+        self::assertStringNotContainsString($secret, json_encode($log->getRecords(), JSON_THROW_ON_ERROR));
+    }
+
     public function testKbPlusErrorDiagnosticsLogMaskedBankReasonOnlyForErrors(): void
     {
         $log = new TestHandler();

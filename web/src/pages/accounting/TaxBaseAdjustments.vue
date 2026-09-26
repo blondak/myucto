@@ -154,6 +154,33 @@ function deductibilityClass(d: string): string {
         </div>
       </div>
 
+      <!-- (b2) prodané podíly a cenné papíry, § 24/2/w -->
+      <div v-if="data.securities && data.securities.accounts.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">
+        <h2 class="text-sm font-semibold mb-2">{{ t('taxReturn.po_securities_title') }}</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mb-2">
+          <div>
+            <div class="text-xs text-neutral-500">{{ t('taxReturn.po_securities_shares') }}</div>
+            <div class="font-mono">{{ formatMoney(data.securities.shares_cost) }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-neutral-500">{{ t('taxReturn.po_securities_other') }}</div>
+            <div class="font-mono">{{ formatMoney(data.securities.other_cost) }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-neutral-500">{{ t('taxReturn.po_securities_income') }}</div>
+            <div class="font-mono">{{ formatMoney(data.securities.income) }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-neutral-500">{{ t('taxReturn.po_securities_addback') }}</div>
+            <div class="font-mono" :class="data.securities.addback > 0 ? 'text-warning-600' : ''">{{ formatMoney(data.securities.addback) }}</div>
+          </div>
+        </div>
+        <p v-if="data.securities.review_amount > 0" class="text-sm text-warning-700 mb-1">
+          {{ t('taxReturn.po_securities_review') }}: <span class="font-mono">{{ formatMoney(data.securities.review_amount) }}</span>
+        </p>
+        <p class="text-xs text-neutral-500">{{ t('taxReturn.po_securities_note') }}</p>
+      </div>
+
       <!-- (c) informativní zůstatky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <h2 class="text-sm font-semibold mb-2">{{ t('accounting.tax_base_adjustments.info_title') }}</h2>

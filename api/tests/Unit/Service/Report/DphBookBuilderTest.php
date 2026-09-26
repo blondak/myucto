@@ -9,6 +9,7 @@ use MyInvoice\Repository\Section74bCorrectionRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Report\DphBookBuilder;
+use MyInvoice\Service\Report\InvoiceKhSections;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 use PDO;
@@ -27,6 +28,7 @@ final class DphBookBuilderTest extends TestCase
 {
     private PDO $pdo;
     private DphBookBuilder $builder;
+    private InvoiceKhSections $khSections;
     private Section74bService $section74b;
 
     protected function setUp(): void
@@ -49,7 +51,29 @@ final class DphBookBuilderTest extends TestCase
             new ActivityLogger($conn),
             $taxConstants,
         );
-        $this->builder = new DphBookBuilder($conn, new VatLedgerService($conn, $taxConstants), $taxConstants, $this->section74b);
+        $ledger = new VatLedgerService($conn, $taxConstants);
+        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b);
+        $this->khSections = new InvoiceKhSections($this->builder, $ledger);
+    }
+
+    public function testInvoiceKhSectionsUseBookAndExcludeCashDocumentWithSameId(): void
+    {
+        $this->insertSale(1, '2026-05-10', 1000.0, 210.0, '1');
+        $this->insertReceivedInvoice(20, 200, '2026-05-05', 'PF-TEST-20', 10000.0, 2100.0, '40');
+        $this->pdo->exec("INSERT INTO cash_documents
+            (id, supplier_id, doc_number, status, doc_type, vat_mode, tax_date, issue_date, total_amount)
+            VALUES (1, 1, 'PD-TEST-1', 'posted', 'in', 'vat', '2026-05-10', '2026-05-10', 24200)");
+        $this->pdo->exec("INSERT INTO cash_document_vat_lines
+            (id, cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code)
+            VALUES (1, 1, 21, 20000, 4200, '1')");
+
+        $issued = [['invoices' => [['id' => 1, 'month_bucket' => '2026-05']]]];
+        $this->khSections->addToGroups(1, $issued, 'issued');
+        self::assertSame(['A.5'], $issued[0]['invoices'][0]['kh_sections']);
+
+        $received = [['invoices' => [['id' => 20, 'month_bucket' => '2026-05']]]];
+        $this->khSections->addToGroups(1, $received, 'received');
+        self::assertSame(['B.2'], $received[0]['invoices'][0]['kh_sections']);
     }
 
     public function testReverseChargeNetsToZeroInBalance(): void

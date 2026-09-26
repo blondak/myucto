@@ -13,6 +13,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
@@ -35,6 +36,7 @@ use MyInvoice\Service\Ai\AiKillSwitchService;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Service\Ai\AnomalyDetector;
 use MyInvoice\Service\Ai\EmbeddingWriter;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -121,7 +123,7 @@ final class BankPostingService
     /**
      * Má transakce živý zápis TOTOŽNÝ s předloženými řádky? Vrací jeho id, jinak null.
      *
-     * Porovnává se množina (strana, kód účtu, částka v haléřích) — tedy účetní obsah,
+     * Porovnává se množina (strana, kód účtu, podepsaná částka v haléřích) — tedy účetní obsah,
      * ne pořadí řádků ani jejich id. Částky přes haléře, ať float reprezentace nedělá
      * falešné rozdíly.
      *
@@ -136,7 +138,7 @@ final class BankPostingService
         $entryId = (int) $existing['id'];
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code AS code, jel.side, jel.amount
+            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?'
@@ -150,7 +152,7 @@ final class BankPostingService
                     '%s|%s|%d',
                     (string) $r['side'],
                     (string) $r['code'],
-                    (int) round(((float) $r['amount']) * 100.0)
+                    JournalLineAmount::signedCents($r)
                 );
             }
             sort($out);
@@ -162,6 +164,7 @@ final class BankPostingService
                 'side'   => $l['side'],
                 'code'   => $l['account_code'],
                 'amount' => $l['amount'],
+                'is_red_storno' => $l['is_red_storno'] ?? false,
             ],
             $lines
         ));
@@ -481,7 +484,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
                 'entry_date'    => $postedAt,
                 'document_date' => $postedAt,
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $this->entryDescription($tx),
                 'posted'        => true,
                 'user_id'       => $userId,
@@ -903,7 +905,8 @@ final class BankPostingService
 
     /**
      * CZK karetní/bankovní úhrada jedné cizoměnové přijaté faktury. Částka 321 se
-     * bere z nominálu a kurzu předpisu, bankovní noha je skutečně odepsaná CZK částka.
+     * bere ze zbytku dokladu v cizí měně a kurzu předpisu, bankovní noha je skutečně
+     * odepsaná CZK částka.
      * Rozdíl je kurzový zisk/ztráta; nejde o haléřové dorovnání 548/648.
      *
      * @return array{lines:list<array{account_code:string, side:string, amount:float}>}
@@ -929,9 +932,30 @@ final class BankPostingService
             throw new PostingException('document_not_posted', 'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.');
         }
         $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], $purchase);
-        $foreign = round((float) $purchase['amount_to_pay'], 2);
-        $predpisCzk = round($foreign * $rate, 2);
         $bankCzk = round(abs((float) $tx['amount']), 2);
+        // Odúčtovat se smí jen ZBYTEK dokladu (bez tohoto pohybu) a jen když ho korunová
+        // platba v kurzové toleranci pokryje. Menší platba je částečná úhrada: ruční
+        // párování doklad nechá otevřený ({@see FxPaymentSettlement::settlesRemaining()})
+        // a SSOT {@see PurchaseSettledExpr::bankAmountSql()} ji počítá přepočtem, takže
+        // odúčtovat celý nominál s rozdílem na 563 by 321 uzavřelo dřív než doklad a
+        // „Vyrovnat zbytek" by závazek odúčtoval podruhé. Totéž u druhé platby už
+        // uhrazeného dokladu. Obojí jde k ručnímu ověření, stejně jako příchozí křížová měna.
+        $settled = PurchaseSettledExpr::settled('pi', excludeBankTransactionId: (int) $tx['id']);
+        $remainingStmt = $this->db->pdo()->prepare(
+            "SELECT pi.amount_to_pay - ({$settled}) FROM purchase_invoices pi WHERE pi.id = ? AND pi.supplier_id = ?"
+        );
+        $remainingStmt->execute([$purchaseId, $supplierId]);
+        $foreign = round((float) $remainingStmt->fetchColumn(), 2);
+        $docRate = (float) ($purchase['exchange_rate'] ?? 0) > 0.0 ? (float) $purchase['exchange_rate'] : $rate;
+        if ($foreign <= 0.005
+            || !FxPaymentSettlement::isFullCzkSettlement($bankCzk, $foreign, (string) $purchase['currency'], $docRate, FxPaymentSettlement::LOCAL_CURRENCY)
+        ) {
+            throw new PostingException(
+                'cross_currency',
+                'Korunová platba nepokrývá zbytek cizoměnové přijaté faktury #' . $purchaseId . ' v kurzové toleranci — vyžaduje ruční ověření.',
+            );
+        }
+        $predpisCzk = round($foreign * $rate, 2);
 
         $lines = [
             $this->withFxTrace(
@@ -1771,7 +1795,6 @@ final class BankPostingService
                 'Vypořádání platby kartou',
                 $this->entryDescription($tx),
             ]),
-            'document_no' => $this->documentNo($tx),
             'user_id'     => $userId,
         ]);
     }
@@ -2202,7 +2225,6 @@ final class BankPostingService
                 ]), [
                     'entry_date' => (string) $tx['posted_at'],
                     'document_date' => (string) $tx['posted_at'],
-                    'document_no' => $this->documentNo($tx),
                     // Popis z detektoru je VĚCNÝ OBSAH („Záloha na daň z příjmů"),
                     // ne identifikace pohybu — proto vstupuje jako detail, ne místo
                     // celého popisu. Sám o sobě je u desítek plateb shodný.
@@ -2326,7 +2348,6 @@ final class BankPostingService
                 ]), [
                     'entry_date'    => $postedAt,
                     'document_date' => $postedAt,
-                    'document_no'   => $this->documentNo($tx),
                     // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
                     // stejné místo u detektoru výš.
                     'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
@@ -2698,7 +2719,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $this->entryDescription($tx),
                 'posted'        => true,
                 'user_id'       => $meta['user_id'] ?? null,
@@ -2911,7 +2931,6 @@ final class BankPostingService
             $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
-                'document_no'   => $this->documentNo($tx),
                 'description'   => $description,
                 'posted'        => true,
                 'user_id'       => $meta['user_id'] ?? null,
@@ -3666,6 +3685,21 @@ final class BankPostingService
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)];
     }
 
+    /** @param array<string,mixed> $line */
+    private function redStornoFlag(array $line, int $index): bool
+    {
+        if (!array_key_exists('is_red_storno', $line)) {
+            return false;
+        }
+        if (!is_bool($line['is_red_storno'])) {
+            throw new PostingException(
+                'validation_failed',
+                'Řádek ' . ($index + 1) . ': is_red_storno musí být boolean.',
+            );
+        }
+        return $line['is_red_storno'];
+    }
+
     /**
      * Validace řádků rozúčtování z UI. Vyváženost (Σ MD = Σ D) i existenci účtů ověří až
      * PostingService::postDocument(); tady se hlídá to, co je specifické pro bankovní pohyb:
@@ -3706,6 +3740,7 @@ final class BankPostingService
             $code = trim((string) ($r['account_code'] ?? ''));
             $side = (string) ($r['side'] ?? '');
             $amount = round((float) ($r['amount'] ?? 0), 2);
+            $isRedStorno = $this->redStornoFlag($r, $i);
             if ($code === '' || !in_array($side, ['debit', 'credit'], true)) {
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': chybí účet nebo strana.');
             }
@@ -3713,8 +3748,11 @@ final class BankPostingService
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': částka musí být kladná.');
             }
             $line = $this->line($code, $side, $amount);
+            if ($isRedStorno) {
+                $line['is_red_storno'] = true;
+            }
             if (str_starts_with($code, '221')) {
-                $bankCents += (int) round($amount * 100.0) * ($side === 'debit' ? 1 : -1);
+                $bankCents += JournalLineAmount::signedCents($line) * ($side === 'debit' ? 1 : -1);
                 // §4/12 — cizoměnový účet se vede i v cizí měně. Stopa patří na bankovní
                 // nohu: jen ta je skutečně v cizí měně (protiúčty jsou korunové předpisy).
                 if ($fxRate !== null && $currency !== null && $absAmount > 0.0) {
@@ -3765,6 +3803,7 @@ final class BankPostingService
             $code = trim((string) ($r['account_code'] ?? ''));
             $side = (string) ($r['side'] ?? '');
             $foreign = round((float) ($r['amount'] ?? 0), 2);
+            $isRedStorno = $this->redStornoFlag($r, $i);
             if ($code === '' || !in_array($side, ['debit', 'credit'], true)) {
                 throw new PostingException('validation_failed', 'Řádek ' . ($i + 1) . ': chybí účet nebo strana.');
             }
@@ -3777,7 +3816,10 @@ final class BankPostingService
                         . ': saldokonto rozúčtuj v korunách, pohledávka i závazek se odúčtovávají kurzem předpisu.');
                 }
             }
-            $cents = (int) round($foreign * 100.0);
+            $cents = JournalLineAmount::signedCents([
+                'amount' => $foreign,
+                'is_red_storno' => $isRedStorno,
+            ]);
             $isBank = str_starts_with($code, '221');
             if ($isBank) {
                 $bankForeignCents += $side === 'debit' ? $cents : -$cents;
@@ -3787,7 +3829,13 @@ final class BankPostingService
             } else {
                 $creditForeignCents += $cents;
             }
-            $parsed[] = ['code' => $code, 'side' => $side, 'foreign' => $foreign, 'bank' => $isBank];
+            $parsed[] = [
+                'code' => $code,
+                'side' => $side,
+                'foreign' => $foreign,
+                'bank' => $isBank,
+                'is_red_storno' => $isRedStorno,
+            ];
         }
 
         $expectedForeignCents = (int) round(($signedAmount > 0 ? $foreignAmount : -$foreignAmount) * 100.0);
@@ -3827,20 +3875,32 @@ final class BankPostingService
         // Banka musí sedět na korunový ekvivalent výpisu přesně (invariant 221 = výpis).
         $bankNetCents = 0;
         foreach ($parsed as $idx => $p) {
-            if ($p['bank']) $bankNetCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+            if ($p['bank']) {
+                $bankNetCents += JournalLineAmount::signedCents([
+                    'amount' => $czk[$idx],
+                    'is_red_storno' => $p['is_red_storno'],
+                ]) * ($p['side'] === 'debit' ? 1 : -1);
+            }
         }
         $bankFix = (int) round(($signedAmount > 0 ? $absAmount : -$absAmount) * 100.0) - $bankNetCents;
-        $czk[$largestBank] = round($czk[$largestBank] + ($parsed[$largestBank]['side'] === 'debit' ? $bankFix : -$bankFix) / 100, 2);
+        $bankDirection = ($parsed[$largestBank]['side'] === 'debit' ? 1 : -1)
+            * ($parsed[$largestBank]['is_red_storno'] ? -1 : 1);
+        $czk[$largestBank] = round($czk[$largestBank] + $bankFix * $bankDirection / 100, 2);
 
         // Haléřový rozdíl z přepočtu protiúčtů vyrovná největší protiúčet.
         $diffCents = 0;
         foreach ($parsed as $idx => $p) {
-            $diffCents += (int) round($czk[$idx] * 100.0) * ($p['side'] === 'debit' ? 1 : -1);
+            $diffCents += JournalLineAmount::signedCents([
+                'amount' => $czk[$idx],
+                'is_red_storno' => $p['is_red_storno'],
+            ]) * ($p['side'] === 'debit' ? 1 : -1);
         }
         if (abs($diffCents) > count($parsed)) {
             throw new PostingException('validation_failed', 'Po přepočtu kurzem se zápis nepodařilo vyrovnat.');
         }
-        $adjust = $parsed[$largestCounter]['side'] === 'credit' ? $diffCents : -$diffCents;
+        $counterDirection = ($parsed[$largestCounter]['side'] === 'debit' ? 1 : -1)
+            * ($parsed[$largestCounter]['is_red_storno'] ? -1 : 1);
+        $adjust = -$diffCents * $counterDirection;
         $czk[$largestCounter] = round($czk[$largestCounter] + $adjust / 100, 2);
         if ($czk[$largestCounter] <= 0.0) {
             throw new PostingException('validation_failed', 'Po přepočtu kurzem vyšla částka řádku nulová.');
@@ -3849,6 +3909,9 @@ final class BankPostingService
         $lines = [];
         foreach ($parsed as $idx => $p) {
             $line = $this->line($p['code'], $p['side'], $czk[$idx]);
+            if ($p['is_red_storno']) {
+                $line['is_red_storno'] = true;
+            }
             $lines[] = $p['bank'] ? $this->withFxTrace($line, $currency, $fxRate, $p['foreign']) : $line;
         }
         return $lines;
@@ -3879,7 +3942,10 @@ final class BankPostingService
         $bank = '';
         $counter = '';
         foreach ($lines as $l) {
-            if ($bank === '' && str_starts_with($l['account_code'], '221') && $l['side'] === $wantBankSide) {
+            $effectiveSide = !empty($l['is_red_storno'])
+                ? ($l['side'] === 'debit' ? 'credit' : 'debit')
+                : $l['side'];
+            if ($bank === '' && str_starts_with($l['account_code'], '221') && $effectiveSide === $wantBankSide) {
                 $bank = $l['account_code'];
             } elseif ($counter === '' && !str_starts_with($l['account_code'], '221')) {
                 $counter = $l['account_code'];
@@ -4003,6 +4069,42 @@ final class BankPostingService
         return true;
     }
 
+    /**
+     * Přepíše ŽIVÝ zápis spárované úhrady podle aktuálního párování, na místě a k jeho
+     * vlastnímu datu. Pro dávkové srovnání haléřového zbytku
+     * ({@see PurchaseRoundingSettlementBackfill}) u úhrad, které už zaúčtované jsou,
+     * často v datu zamčeném podaným DPH. Zámek tu obchází jen daňově neutrální přepis
+     * ({@see \MyInvoice\Service\Accounting\TaxNeutralReclassification}), který
+     * PostingService ověří znovu pod zámkem zápisu: haléřové dorovnání 321 ↔ 548/648
+     * projde jen do podání DPPO, cokoli jiného skončí `date_locked`.
+     *
+     * Řádky staví týž {@see buildMatched()} jako živý import — žádná druhá logika.
+     */
+    public function repostMatchedInPlace(int $supplierId, int $txId, ?int $userId = null): int
+    {
+        $tx = $this->loadTx($txId);
+        if ($tx === null || !$this->txOwnedBySupplier($txId, $supplierId)) {
+            throw new PostingException('not_found', 'Transakce nenalezena.', 404);
+        }
+        $live = $this->journal->findBySource($supplierId, 'bank', $txId);
+        if ($live === null || ($live['reversed_by'] ?? null) !== null) {
+            throw new PostingException('document_not_posted', 'Pohyb nemá živý zápis, který by se dal přepsat.');
+        }
+        $build = $this->buildMatched($supplierId, $tx);
+        $lines = $this->withBankAnalytic($supplierId, $tx, $build['lines']);
+
+        return $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
+            'entry_date'          => (string) $live['entry_date'],
+            'document_date'       => $live['document_date'] ?? null,
+            'description'         => $live['description'] ?? null,
+            'posted'              => true,
+            'posted_at'           => $live['posted_at'] ?? null,
+            'posted_by'           => isset($live['posted_by']) ? (int) $live['posted_by'] : null,
+            'user_id'             => $userId,
+            'tax_neutral_rewrite' => true,
+        ]);
+    }
+
     public function normalizeRoundingFullPurchase(int $supplierId, int $txId): bool
     {
         $pdo = $this->db->pdo();
@@ -4011,7 +4113,7 @@ final class BankPostingService
                     bs.currency AS statement_currency,
                     pm.id AS match_id, pm.invoice_id, pm.purchase_invoice_id, pm.amount AS allocated,
                     pm.match_type, pm.match_confidence,
-                    pi.status, pi.amount_to_pay, pi.exchange_rate, cur.code AS invoice_currency
+                    pi.status, pi.amount_to_pay, pi.rounding, pi.exchange_rate, cur.code AS invoice_currency
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
                JOIN payment_matches pm ON pm.bank_transaction_id = bt.id AND pm.supplier_id = ?
@@ -4030,26 +4132,39 @@ final class BankPostingService
         $row = $rows[0];
         $txCurrency = strtoupper(trim((string) ($row['tx_currency'] ?: $row['statement_currency'])));
         $txAmount = abs((float) $row['amount']);
-        $invoiceAmount = (float) $row['amount_to_pay'];
+        // Dobropis má amount_to_pay záporné a jeho úhradou je PŘÍCHOZÍ vratka. Srovnává
+        // se v absolutní hodnotě; směr pohybu musí znaménku dokladu odpovídat (guard níž).
+        $refund = (float) $row['amount_to_pay'] < 0.0;
+        $invoiceAmount = abs((float) $row['amount_to_pay']);
         $invoiceCurrency = strtoupper((string) $row['invoice_currency']);
         // Ruční párování nemá confidence (NULL) — důkazem je člověk, ne skóre.
         $manualMatch = (string) $row['match_type'] === 'manual';
         $confidence = (int) ($row['match_confidence'] ?? 0);
         $sameCurrency = $txCurrency !== '' && $txCurrency === $invoiceCurrency;
+        // Pohyb přesně na částku „k úhradě", kterou uvádí sám doklad (amount_to_pay +
+        // rounding), je plná úhrada i při slabém skóre párování: dodavatel zaokrouhlil
+        // a zaplaceno je přesně to, co žádal. Nejde o náhodnou shodu částky, kterou
+        // práh 70 chrání. Bez toho zůstal doklad se zaokrouhlením na 321 s haléřovým
+        // zbytkem (párování shodou částky a data má skóre 65).
+        $rounding = (float) ($row['rounding'] ?? 0);
+        $declaredFull = $sameCurrency
+            && abs($rounding) >= 0.005
+            && abs($txAmount - abs(round((float) $row['amount_to_pay'] + $rounding, 2))) < 0.005;
         $sameCurrencyFull = $sameCurrency
-            && ($manualMatch || $confidence >= 70)
+            && ($manualMatch || $confidence >= 70 || $declaredFull)
             && abs($txAmount - $invoiceAmount) <= FxPaymentSettlement::AMOUNT_TOLERANCE;
         $invoiceRate = (float) ($row['exchange_rate'] ?? 0);
         $expectedCzk = $invoiceRate > 0.0
             ? FxPaymentSettlement::expectedLocalAmount($invoiceAmount, $invoiceRate)
             : 0.0;
         $crossCurrencyFull = !$sameCurrency
+            && !$refund
             && FxPaymentSettlement::isCzkPaymentOfForeignInvoice($txCurrency, $invoiceCurrency)
             && ($manualMatch || $confidence >= 60)
             && $expectedCzk > 0.0
             && abs($txAmount - $expectedCzk) <= FxPaymentSettlement::matchTolerance($expectedCzk);
         if ((string) $row['source'] !== 'statement'
-            || (float) $row['amount'] >= 0.0
+            || ($refund ? (float) $row['amount'] <= 0.0 : (float) $row['amount'] >= 0.0)
             // auto_exact patří do seznamu taky: rozdíl do EXACT_MATCH_TOLERANCE (0,05) sice
             // fakturu rovnou označí jako paid, ale alokace i tak drží částku TRANSAKCE, takže
             // haléřový zbytek zůstane viset na 321 a doklad vypadá uzavřeně, aniž by byl.
@@ -4120,12 +4235,6 @@ final class BankPostingService
         } else {
             $lines[] = $this->line('548', 'debit', -$cents / 100.0);
         }
-    }
-
-    private function documentNo(array $tx): string
-    {
-        $ref = isset($tx['bank_ref']) && trim((string) $tx['bank_ref']) !== '' ? trim((string) $tx['bank_ref']) : null;
-        return $ref ?? ('BANK-' . (int) $tx['id']);
     }
 
     /**

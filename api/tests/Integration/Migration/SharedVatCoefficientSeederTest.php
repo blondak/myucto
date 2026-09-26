@@ -32,7 +32,7 @@ final class SharedVatCoefficientSeederTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->seeder = $container->get(VatCoefficientSeeder::class);
             $this->coefficients = $container->get(VatCoefficientRepository::class);

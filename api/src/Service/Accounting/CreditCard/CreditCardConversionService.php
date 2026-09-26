@@ -137,6 +137,9 @@ final class CreditCardConversionService
                 'cost_center'  => $l['cost_center'],
                 'project_id'   => $l['project_id'],
             ];
+            if (!empty($l['is_red_storno'])) {
+                $line['is_red_storno'] = true;
+            }
             if ($l['currency_code'] !== null) {
                 $line['currency_code'] = (string) $l['currency_code'];
                 $line['fx_rate'] = $l['fx_rate'];
@@ -150,7 +153,6 @@ final class CreditCardConversionService
         $this->posting->postDocument($supplierId, 'bank', $entry['tx_id'], $lines, [
             'entry_date'          => (string) $header['entry_date'],
             'document_date'       => $header['document_date'] ?? null,
-            'document_no'         => $header['document_no'] ?? null,
             'description'         => $header['description'] ?? null,
             'posted'              => true,
             'user_id'             => $userId,

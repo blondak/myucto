@@ -83,7 +83,7 @@ final class DimensionRuleAudit
 
             $sum = $this->db->pdo()->prepare(
                 "SELECT LEFT(a.account_code, 3) AS synthetic, {$sevSql} AS severity, je.source_type,
-                        COUNT(*) AS line_count, SUM(l.amount) AS amount
+                        COUNT(*) AS line_count, SUM(l.signed_amount) AS amount
                    {$where}
                   GROUP BY synthetic, severity, je.source_type
                   ORDER BY synthetic, severity DESC, je.source_type"
@@ -104,7 +104,7 @@ final class DimensionRuleAudit
 
             $detail = $this->db->pdo()->prepare(
                 "SELECT l.id AS line_id, je.id AS entry_id, je.entry_date, je.document_no, je.source_type, je.source_id,
-                        a.account_code, a.name AS account_name, l.side, l.amount, {$sevSql} AS severity
+                        a.account_code, a.name AS account_name, l.side, l.signed_amount AS amount, {$sevSql} AS severity
                    {$where}
                   ORDER BY je.entry_date, je.id, l.line_no, l.id
                   LIMIT " . max(1, $limit)

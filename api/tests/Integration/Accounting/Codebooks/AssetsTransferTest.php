@@ -40,7 +40,7 @@ final class AssetsTransferTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db       = $c->get(Connection::class);
             $this->assets   = $c->get(AssetRepository::class);
             $this->service  = $c->get(AssetImportService::class);

@@ -38,7 +38,7 @@ trait PayrollDeletionFixturesTrait
         if (!is_file($rootDir . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         if ($container === null) {
             self::markTestSkipped('DI kontejner není k dispozici.');
         }

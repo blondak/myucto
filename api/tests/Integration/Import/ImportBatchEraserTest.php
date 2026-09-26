@@ -43,7 +43,7 @@ final class ImportBatchEraserTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->eraser = $c->get(ImportBatchEraser::class);
         } catch (\Throwable $e) {

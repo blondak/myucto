@@ -8,13 +8,14 @@ const m = vi.hoisted(() => ({
   replace: vi.fn(),
 }))
 
-const routeQuery = {
+const defaultRouteQuery = {
   period_id: '3',
   from: '2026-01-01',
   to: '2026-12-31',
   analytics: '1',
   account_id: '3138611',
 }
+const routeQuery: Record<string, string> = { ...defaultRouteQuery }
 
 // Dimenze (Firma → Dimenze) jsou u firmy vypnuté — jejich komponenty se nevykreslí.
 vi.mock('@/composables/useDimensions', () => ({
@@ -57,6 +58,8 @@ vi.mock('@/composables/useTablePrefs', () => ({
     densityClass: ref(''),
     setFlag: vi.fn(),
     flag: () => false,
+    sort: ref(null),
+    toggleSort: vi.fn(),
   }),
 }))
 vi.mock('@/composables/useSavedFilters', () => ({
@@ -112,6 +115,8 @@ function allPeriodsReport() {
 
 describe('GeneralLedger period navigation', () => {
   beforeEach(() => {
+    for (const key of Object.keys(routeQuery)) delete routeQuery[key]
+    Object.assign(routeQuery, defaultRouteQuery)
     m.listPeriods.mockReset()
     m.getGeneralLedger.mockReset()
     m.replace.mockReset()
@@ -193,5 +198,58 @@ describe('GeneralLedger period navigation', () => {
       account_id: '3138611',
     }) })
     expect(wrapper.get('#gl-account-3138611').classes()).toContain('bg-primary-50/40')
+  })
+
+  it('odkaz přes dvě období otevře hlavní knihu v režimu všech období', async () => {
+    delete routeQuery.period_id
+    routeQuery.from = '2026-10-01'
+    routeQuery.to = '2027-03-31'
+    routeQuery.dimension_value_id = '9'
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    expect(m.getGeneralLedger).toHaveBeenCalledWith(expect.objectContaining({
+      all_periods: 1, from: '2026-10-01', to: '2027-03-31', dimension_value_id: 9,
+    }))
+    expect(m.replace).toHaveBeenCalledWith({ query: expect.objectContaining({ all_periods: '1' }) })
+    wrapper.unmount()
+  })
+
+  it('po otevření URL obnoví filtr dodavatele, klienta a položky', async () => {
+    routeQuery.vendor = 'Dodavatel A'
+    routeQuery.client = 'Klient B'
+    routeQuery.item = 'Služba C'
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    expect(m.getGeneralLedger).toHaveBeenCalledWith(expect.objectContaining({
+      vendor: 'Dodavatel A', client: 'Klient B', item: 'Služba C',
+    }))
+    expect(m.replace).toHaveBeenCalledWith({ query: expect.objectContaining({
+      vendor: 'Dodavatel A', client: 'Klient B', item: 'Služba C',
+    }) })
+    wrapper.unmount()
+  })
+
+  it('zachová vypnutý rozpad analytik v URL', async () => {
+    routeQuery.analytics = '0'
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    expect(m.getGeneralLedger).toHaveBeenCalledWith(expect.objectContaining({ analytics: undefined }))
+    expect(m.replace).toHaveBeenCalledWith({ query: expect.objectContaining({ analytics: '0' }) })
+    wrapper.unmount()
   })
 })

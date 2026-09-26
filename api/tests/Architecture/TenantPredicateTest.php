@@ -305,12 +305,6 @@ final class TenantPredicateTest extends TestCase
         $files = glob($dir . '/*.php');
         self::assertNotEmpty($files, 'Repository adresář nenalezen.');
 
-        // Regex per tabulka: FROM/JOIN/UPDATE/DELETE FROM následované jménem tabulky.
-        $patterns = [];
-        foreach (self::TENANT_TABLES as $table) {
-            $patterns[$table] = '/\b(?:FROM|JOIN|UPDATE)\s+`?' . preg_quote($table, '/') . '`?\b/i';
-        }
-
         $violations = [];
         foreach ($files as $file) {
             $raw = SourceCorpus::read($file);
@@ -344,10 +338,7 @@ final class TenantPredicateTest extends TestCase
                 if (preg_match('/\b(?:WHERE|AND)\s+\(?\s*(?:`?\w+`?\.)?\w+_id\s*(?:=\s*(?:\?|:\w+)|IN\s*\()/i', $chunk) === 1) {
                     continue;
                 }
-                foreach ($patterns as $table => $pattern) {
-                    if (preg_match($pattern, $chunk) !== 1) {
-                        continue;
-                    }
+                foreach ($this->tenantTablesInSql($chunk) as $table) {
                     if (isset(self::WHITELIST[$base . ':' . $table])) {
                         continue;
                     }
@@ -469,11 +460,6 @@ final class TenantPredicateTest extends TestCase
         self::assertNotEmpty($files, 'Service/Action adresáře nenalezeny.');
         sort($files);
 
-        $patterns = [];
-        foreach (self::TENANT_TABLES as $table) {
-            $patterns[$table] = '/\b(?:FROM|JOIN|UPDATE)\s+`?' . preg_quote($table, '/') . '`?\b/i';
-        }
-
         $violations = [];
         foreach ($files as $file) {
             $base = basename($file);
@@ -491,16 +477,23 @@ final class TenantPredicateTest extends TestCase
                 if (preg_match('/\b(?:WHERE|AND)\s+\(?\s*(?:`?\w+`?\.)?\w+_id\s*(?:=\s*(?:\?|:\w+)|IN\s*\()/i', $body) === 1) {
                     continue;
                 }
-                foreach ($patterns as $table => $pattern) {
-                    if (preg_match($pattern, $body) !== 1) {
-                        continue;
-                    }
+                foreach ($this->tenantTablesInSql($body) as $table) {
                     $violations[] = $base . '::' . $method['name'] . "() — SQL na tenant tabulce '" . $table . "' bez supplier_id";
                 }
             }
         }
 
         self::assertSame([], $violations, "Cross-tenant riziko ve Service/Action vrstvě:\n  " . implode("\n  ", $violations));
+    }
+
+    private function tenantTablesInSql(string $sql): array
+    {
+        static $pattern = null;
+        $pattern ??= '/\b(?:FROM|JOIN|UPDATE)\s+`?('
+            . implode('|', array_map(static fn (string $table): string => preg_quote($table, '/'), self::TENANT_TABLES))
+            . ')`?\b/i';
+        preg_match_all($pattern, $sql, $matches);
+        return array_values(array_intersect(self::TENANT_TABLES, array_map('strtolower', $matches[1])));
     }
 
     /**

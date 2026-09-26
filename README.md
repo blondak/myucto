@@ -312,8 +312,8 @@ Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 ### Vývoj a ověření
 
 ```powershell
-# Backendové testy
-Set-Location api; php vendor/bin/phpunit
+# Backendové testy (paralelně nad izolovanými testovacími databázemi)
+.\cmd\test.ps1
 
 # Frontendová typová kontrola a build
 Set-Location web; pnpm type-check; pnpm build

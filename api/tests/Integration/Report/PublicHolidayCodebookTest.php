@@ -26,7 +26,7 @@ final class PublicHolidayCodebookTest extends TestCase
 {
     public function testImpossibleFixedDatesAreRejectedBeforePersistence(): void
     {
-        $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\Codebook\PublicHolidaysAction::class);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Codebook\PublicHolidaysAction::class);
         foreach (['02-30', '02-31', '04-31', '06-31', '09-31', '11-31'] as $monthDay) {
             $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/codebooks/public-holidays')
                 ->withAttribute('auth.effective_role', new \MyInvoice\Security\EffectiveRole(1, 'Fixture', 'superadmin', true, [], 'superadmin'))
@@ -48,7 +48,7 @@ final class PublicHolidayCodebookTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->repo = $container->get(PublicHolidayRepository::class);
         } catch (\Throwable $e) {

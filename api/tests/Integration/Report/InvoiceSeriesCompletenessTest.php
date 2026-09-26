@@ -51,7 +51,7 @@ final class InvoiceSeriesCompletenessTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container     = Bootstrap::buildApp()->getContainer();
+            $container     = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->service = $container->get(InvoiceSeriesCompletenessService::class);
             $this->varsymbol = $container->get(VarsymbolGenerator::class);
@@ -178,8 +178,9 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         string $type = 'invoice',
         ?int $revenueCategoryId = null,
         ?int $clientId = null,
+        ?string $issueDate = null,
     ): void {
-        $issue = self::YEAR . '-06-15';
+        $issue = $issueDate ?? self::YEAR . '-06-15';
         $this->db->pdo()->prepare(
             'INSERT INTO invoices
                 (supplier_id, varsymbol, invoice_type, client_id, revenue_category_id,
@@ -203,6 +204,54 @@ final class InvoiceSeriesCompletenessTest extends TestCase
             }
         }
         self::fail("Řada pro client_id={$clientId}, revenue_category_id={$categoryId} v reportu chybí.");
+    }
+
+    public function testImportedNumbersOutsideConfiguredTemplatesRevealInternalGap(): void
+    {
+        $this->setTemplates('F{YYYY}{CCCC}', 'D{YYYY}{CCCC}');
+        $this->insertInvoice('20980033');
+        $this->insertInvoice('20980034');
+        $this->insertInvoice('20980036');
+        $this->insertInvoice('20980037', 'credit_note');
+        $this->insertInvoice('20991238');
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        self::assertCount(1, $series);
+        self::assertTrue($series[0]['inferred']);
+        self::assertSame(['invoice', 'credit_note'], $series[0]['types']);
+        self::assertSame('2098{CCCC}', $series[0]['template_by_type']['invoice']);
+        $bucket = $series[0]['buckets'][0];
+        self::assertSame(33, $bucket['range_from']);
+        self::assertSame(37, $bucket['range_to']);
+        self::assertSame(4, $bucket['used_count']);
+        self::assertSame([35], $bucket['missing']);
+        self::assertSame(['20980035'], $bucket['missing_preview']);
+        self::assertSame(1, $bucket['missing_total']);
+    }
+
+    public function testConfiguredSeriesNumbersAreNotDuplicatedInInferredSeries(): void
+    {
+        $this->setTemplates('{YYYY}{CCCC}', 'D{YYYY}{CCCC}');
+        $this->insertInvoice('20980033');
+        $this->insertInvoice('20980035');
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        self::assertCount(1, $series);
+        self::assertArrayNotHasKey('inferred', $series[0]);
+        self::assertContains(34, $series[0]['buckets'][0]['missing']);
+    }
+
+    public function testImportedMonthlyNumbersDoNotBecomeAnnualGaps(): void
+    {
+        $this->setTemplates('F{YYYY}{CCCC}', 'D{YYYY}{CCCC}');
+        $this->insertInvoice('209801001', issueDate: '2098-01-15');
+        $this->insertInvoice('209802001', issueDate: '2098-02-15');
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        self::assertSame([], $series);
     }
 
     public function testSharedSeriesCombinesInvoiceAndCreditNoteNumbers(): void

@@ -9,21 +9,23 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
-use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use PDO;
 use PDOException;
 
 final class GoPayService
 {
+    use GoPayUnitOfWork;
+
     public function __construct(
         private readonly Connection $db,
         private readonly GoPayClearingXmlParser $parser,
-        private readonly PostingService $posting,
         private readonly BankPostingService $bankPosting,
         private readonly JournalEntryRepository $journal,
         private readonly InvoicePaymentService $invoicePayments,
         private readonly ActivityLogger $activity,
+        private readonly GoPayMovementPoster $poster,
+        private readonly GoPayPendingService $pending,
     ) {}
 
     /** @return array<string,mixed> */
@@ -102,7 +104,7 @@ final class GoPayService
             throw new GoPayException('accounts_not_distinct', 'GoPay účet a cílový bankovní účet musí být různé analytiky.');
         }
 
-        $accounts = $this->accountsById($supplierId, array_values($ids));
+        $accounts = $this->poster->accountsById($supplierId, array_values($ids));
         $this->assertAccount($accounts, $ids['gopay_account_id'], '221', null, 'gopay_account_id');
         $this->assertAccount($accounts, $ids['destination_bank_account_id'], '221', null, 'destination_bank_account_id');
         $this->assertAccount($accounts, $ids['receivable_account_id'], '311', null, 'receivable_account_id');
@@ -289,16 +291,12 @@ final class GoPayService
             }
 
             $entries = $pdo->prepare(
-                'SELECT DISTINCT je.id,je.entry_date,je.source_type,je.source_id,je.reversed_by,
-                        ap.status period_status,
-                        EXISTS(SELECT 1 FROM journal_entries original
-                                WHERE original.supplier_id=je.supplier_id
-                                  AND original.reversed_by=je.id) is_reversal
+                'SELECT DISTINCT je.id,je.source_type,je.source_id
                    FROM journal_entries je
-                   JOIN accounting_periods ap ON ap.id=je.period_id AND ap.supplier_id=je.supplier_id
                   WHERE je.supplier_id=?
                     AND ((je.source_type="gopay" AND je.source_id IN
-                          (SELECT id FROM gopay_movements WHERE clearing_id=? AND supplier_id=?))
+                          (SELECT id FROM gopay_movements
+                            WHERE clearing_id=? AND supplier_id=? AND origin="clearing"))
                          OR je.id=?)
                   FOR UPDATE'
             );
@@ -324,36 +322,11 @@ final class GoPayService
                     ? (int) $clearing['bank_journal_entry_id'] : 0;
             $entries->execute([$supplierId, $clearingId, $supplierId, $bankEntryId]);
             $entryRows = $entries->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-            $locked = $pdo->prepare(
-                'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id=? FOR UPDATE'
+            $this->poster->assertEntriesRemovable(
+                $supplierId,
+                array_map(static fn (array $entry): int => (int) $entry['id'], $entryRows),
+                'Vyúčtování',
             );
-            $locked->execute([$supplierId]);
-            $lockedUntil = $locked->fetchColumn();
-            foreach ($entryRows as $entry) {
-                if ((string) $entry['period_status'] !== 'open') {
-                    throw new GoPayException(
-                        'period_not_open',
-                        'Vyúčtování obsahuje účetní zápis v uzavřeném období.',
-                        409,
-                    );
-                }
-                if ($lockedUntil !== false && $lockedUntil !== null
-                    && (string) $entry['entry_date'] <= (string) $lockedUntil) {
-                    throw new GoPayException(
-                        'date_locked',
-                        'Vyúčtování obsahuje účetní zápis v uzamčené části účetnictví.',
-                        409,
-                    );
-                }
-                if ($entry['reversed_by'] !== null || (bool) $entry['is_reversal']) {
-                    throw new GoPayException(
-                        'entry_has_reversal',
-                        'Vyúčtování obsahuje stornovaný účetní zápis. Nejprve vyřeš jeho storno v deníku.',
-                        409,
-                    );
-                }
-            }
 
             $deletedEntryIds = [];
             foreach ($entryRows as $entry) {
@@ -393,6 +366,9 @@ final class GoPayService
 
             // Smazání importu neruší obchodní fakt platby ani vratky. Stejně jako u úhrady
             // faktury se odstraňuje účetní import a vazby, nikoli platební stav dokladu.
+            // Pohyb založený úhradou faktury patří úhradě: vrací se mezi čekající i se
+            // zápisem ke dni platby a příští import vyúčtování ho převezme znovu.
+            $this->pending->releaseFromClearing($supplierId, $clearingId);
             $deleteClearing = $pdo->prepare('DELETE FROM gopay_clearings WHERE id=? AND supplier_id=?');
             $deleteClearing->execute([$clearingId, $supplierId]);
             if ($deleteClearing->rowCount() !== 1) {
@@ -508,10 +484,11 @@ final class GoPayService
         $this->db->pdo()->prepare('UPDATE gopay_clearings SET status="processing" WHERE id=? AND supplier_id=?')
             ->execute([$clearingId, $supplierId]);
 
+        $this->pending->adoptIntoClearing($supplierId, $clearingId);
         $ids = $this->db->pdo()->prepare('SELECT id FROM gopay_movements WHERE clearing_id=? AND supplier_id=? ORDER BY id');
         $ids->execute([$clearingId, $supplierId]);
         foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $movementId) {
-            $this->processMovement($supplierId, (int) $movementId, $userId);
+            $this->poster->post($supplierId, (int) $movementId, $userId);
         }
         $this->reconcileCreditNoteStatuses($supplierId, $clearingId, $userId);
         $this->matchPayout($supplierId, $clearingId, $userId);
@@ -620,106 +597,6 @@ final class GoPayService
             && $row['bank_journal_entry_id'] !== null;
     }
 
-    private function processMovement(int $supplierId, int $movementId, ?int $userId): void
-    {
-        $pdo = $this->db->pdo();
-        $ownTx = $this->beginUnit($pdo, 'gopay_movement');
-        try {
-            $stmt = $pdo->prepare(
-                'SELECT gm.*,gc.clearing_id provider_clearing_id,gc.currency,
-                        gs.gopay_account_id,gs.receivable_account_id,gs.fee_account_id,gs.clearing_account_id
-                   FROM gopay_movements gm
-                   JOIN gopay_clearings gc ON gc.id=gm.clearing_id AND gc.supplier_id=gm.supplier_id
-                   JOIN gopay_settings gs ON gs.supplier_id=gm.supplier_id AND gs.currency=gc.currency
-                  WHERE gm.id=? AND gm.supplier_id=? FOR UPDATE'
-            );
-            $stmt->execute([$movementId, $supplierId]);
-            $movement = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($movement)) {
-                throw new GoPayException('movement_not_found', 'GoPay pohyb nebyl nalezen.', 404);
-            }
-            if ($movement['status'] === 'posted' && $movement['journal_entry_id'] !== null) {
-                $existing = $this->journal->find((int) $movement['journal_entry_id'], $supplierId);
-                if (is_array($existing) && ($existing['reversed_by'] ?? null) === null) {
-                    $this->commitUnit($pdo, $ownTx, 'gopay_movement');
-                    return;
-                }
-            }
-
-            $accounts = $this->accountsById($supplierId, [
-                (int) $movement['gopay_account_id'], (int) $movement['receivable_account_id'],
-                (int) $movement['fee_account_id'], (int) $movement['clearing_account_id'],
-            ]);
-            $gopay = $accounts[(int) $movement['gopay_account_id']]['account_code'];
-            $receivable = $accounts[(int) $movement['receivable_account_id']]['account_code'];
-            $fee = $accounts[(int) $movement['fee_account_id']]['account_code'];
-            $clearing = $accounts[(int) $movement['clearing_account_id']]['account_code'];
-            $amount = number_format(abs((float) $movement['amount']), 2, '.', '');
-
-            $links = ['invoice_id' => null, 'invoice_payment_id' => null, 'credit_note_id' => null];
-            [$debit, $credit, $description] = match ((string) $movement['movement_type']) {
-                'credit' => $this->creditPosting($supplierId, $movement, $gopay, $receivable, $links),
-                'storno' => $this->stornoPosting($supplierId, $movement, $receivable, $gopay, $links),
-                'storno_fee' => [$fee, $gopay, 'Poplatek GoPay za vratku'],
-                'clearing_fee' => [$fee, $gopay, 'Poplatek GoPay za vyúčtování a zpracování plateb'],
-                'fee_credit' => [$gopay, $fee, 'Dobropis poplatků GoPay'],
-                'payout' => [$clearing, $gopay, 'Převod vyúčtování GoPay na běžný účet'],
-                default => throw new GoPayException('unsupported_movement', 'Nepodporovaný typ GoPay pohybu.'),
-            };
-
-            $entryId = $this->posting->postDocument($supplierId, 'gopay', $movementId, [
-                ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount],
-                ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
-            ], [
-                'entry_date' => (string) $movement['performed_on'],
-                'document_date' => (string) $movement['performed_on'],
-                'document_no' => 'GP-' . $movement['provider_clearing_id'] . '-' . $movementId,
-                'description' => $description,
-                'posted' => true,
-                'posted_by' => $userId,
-                'user_id' => $userId,
-            ]);
-
-            $pdo->prepare(
-                'UPDATE gopay_movements
-                    SET invoice_id=?,invoice_payment_id=?,credit_note_id=?,journal_entry_id=?,
-                        status="posted",issue_code=NULL,issue_message=NULL,processed_at=NOW()
-                  WHERE id=? AND supplier_id=?'
-            )->execute([
-                $links['invoice_id'], $links['invoice_payment_id'], $links['credit_note_id'],
-                $entryId, $movementId, $supplierId,
-            ]);
-            $this->commitUnit($pdo, $ownTx, 'gopay_movement');
-        } catch (\Throwable $e) {
-            $this->rollbackUnit($pdo, $ownTx, 'gopay_movement');
-            $status = $e instanceof GoPayException ? 'unmatched' : 'error';
-            $code = $e instanceof GoPayException ? $e->errorCode
-                : ($e instanceof PostingException ? $e->errorCode : 'processing_failed');
-            $message = mb_substr($e->getMessage(), 0, 500);
-            $pdo->prepare(
-                'UPDATE gopay_movements SET status=?,issue_code=?,issue_message=?,processed_at=NOW()
-                  WHERE id=? AND supplier_id=? AND status<>"posted"'
-            )->execute([$status, $code, $message, $movementId, $supplierId]);
-        }
-    }
-
-    /** @param array<string,mixed> $movement @param array<string,?int> $links @return array{string,string,string} */
-    private function creditPosting(int $supplierId, array $movement, string $gopay, string $receivable, array &$links): array
-    {
-        $match = $this->matchInvoicePayment($supplierId, $movement);
-        $links['invoice_id'] = (int) $match['invoice_id'];
-        $links['invoice_payment_id'] = (int) $match['payment_id'];
-        return [$gopay, $receivable, 'GoPay úhrada faktury ' . (string) $match['varsymbol'] . ' (' . (string) $movement['order_id'] . ')'];
-    }
-
-    /** @param array<string,mixed> $movement @param array<string,?int> $links @return array{string,string,string} */
-    private function stornoPosting(int $supplierId, array $movement, string $receivable, string $gopay, array &$links): array
-    {
-        $match = $this->matchCreditNote($supplierId, $movement);
-        $links['credit_note_id'] = (int) $match['id'];
-        return [$receivable, $gopay, 'GoPay vratka k dobropisu ' . (string) $match['varsymbol'] . ' (' . (string) $movement['order_id'] . ')'];
-    }
-
     private function reconcileCreditNoteStatuses(int $supplierId, int $clearingId, ?int $userId): void
     {
         $stmt = $this->db->pdo()->prepare(
@@ -748,98 +625,6 @@ final class GoPayService
                     'clearing_id' => $clearingId,
                 ], supplierId: $supplierId);
             }
-        }
-    }
-
-    /** @param array<string,mixed> $movement @return array<string,mixed> */
-    private function matchInvoicePayment(int $supplierId, array $movement): array
-    {
-        $paymentSessionId = trim((string) ($movement['payment_session_id'] ?? ''));
-        $amount = number_format(abs((float) $movement['amount']), 2, '.', '');
-        $currency = (string) $movement['currency'];
-        if ($paymentSessionId !== '') {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,
-                        i.supplier_order_number,i.note_below_items
-                   FROM invoice_payments p JOIN invoices i ON i.id=p.invoice_id AND i.supplier_id=p.supplier_id
-                  WHERE p.supplier_id=? AND p.bank_reference=?
-                    AND i.invoice_type IN ("invoice","proforma")'
-            );
-            $stmt->execute([$supplierId, 'GOPAY:' . $paymentSessionId]);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if (count($rows) > 1) {
-                throw new GoPayException('payment_reference_ambiguous', 'GoPay ID je uložené u více úhrad.');
-            }
-            if (count($rows) === 1) {
-                if (number_format((float) $rows[0]['amount'], 2, '.', '') !== $amount || (string) $rows[0]['currency'] !== $currency) {
-                    throw new GoPayException('payment_amount_mismatch', 'GoPay platba se liší částkou nebo měnou od úhrady faktury.');
-                }
-                $this->assertInvoicePosted($supplierId, (int) $rows[0]['invoice_id']);
-                return $rows[0];
-            }
-        }
-
-        $orderId = trim((string) ($movement['order_id'] ?? ''));
-        if ($orderId === '') {
-            throw new GoPayException('invoice_reference_missing', 'Platba nemá GoPay ID ani číslo objednávky.');
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT p.id payment_id,p.invoice_id,p.amount,p.currency,i.varsymbol,
-                    i.supplier_order_number,i.note_below_items
-               FROM invoice_payments p JOIN invoices i ON i.id=p.invoice_id AND i.supplier_id=p.supplier_id
-              WHERE p.supplier_id=? AND p.amount=? AND p.currency=?
-                AND i.invoice_type IN ("invoice","proforma")
-                AND (i.supplier_order_number=?
-                     OR (i.supplier_order_number IS NULL AND i.note_below_items LIKE ?))'
-        );
-        $stmt->execute([$supplierId, $amount, $currency, $orderId, '%' . $orderId . '%']);
-        $rows = array_values(array_filter($stmt->fetchAll(PDO::FETCH_ASSOC),
-            fn (array $row): bool => $this->documentHasOrder($row, $orderId)));
-        if (count($rows) !== 1) {
-            throw new GoPayException(count($rows) === 0 ? 'invoice_not_found' : 'invoice_ambiguous',
-                count($rows) === 0 ? 'K GoPay platbě nebyla nalezena faktura a její úhrada.' : 'K GoPay platbě bylo nalezeno více faktur.');
-        }
-        $this->assertInvoicePosted($supplierId, (int) $rows[0]['invoice_id']);
-        return $rows[0];
-    }
-
-    /** @param array<string,mixed> $movement @return array<string,mixed> */
-    private function matchCreditNote(int $supplierId, array $movement): array
-    {
-        $orderId = trim((string) ($movement['order_id'] ?? ''));
-        if ($orderId === '') {
-            throw new GoPayException('credit_note_reference_missing', 'Vratka nemá číslo objednávky.');
-        }
-        $amount = number_format(abs((float) $movement['amount']), 2, '.', '');
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT i.id,i.varsymbol,i.supplier_order_number,i.note_below_items,i.parent_invoice_id
-               FROM invoices i JOIN currencies c ON c.id=i.currency_id
-              WHERE i.supplier_id=? AND i.invoice_type="credit_note" AND ABS(i.amount_to_pay)=?
-                AND c.code=?
-                AND (i.supplier_order_number=?
-                     OR (i.supplier_order_number IS NULL AND i.note_below_items LIKE ?))'
-        );
-        $stmt->execute([$supplierId, $amount, (string) $movement['currency'], $orderId, '%' . $orderId . '%']);
-        $rows = array_values(array_filter($stmt->fetchAll(PDO::FETCH_ASSOC),
-            fn (array $row): bool => $this->documentHasOrder($row, $orderId)));
-        if (count($rows) !== 1) {
-            throw new GoPayException(count($rows) === 0 ? 'credit_note_not_found' : 'credit_note_ambiguous',
-                count($rows) === 0 ? 'K GoPay vratce nebyl nalezen dobropis.' : 'K GoPay vratce bylo nalezeno více dobropisů.');
-        }
-        $this->assertInvoicePosted($supplierId, (int) $rows[0]['id']);
-        return $rows[0];
-    }
-
-    private function assertInvoicePosted(int $supplierId, int $invoiceId): void
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM journal_entries
-              WHERE supplier_id=? AND source_type="invoice" AND source_id=?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1'
-        );
-        $stmt->execute([$supplierId, $invoiceId]);
-        if ($stmt->fetchColumn() === false) {
-            throw new GoPayException('invoice_not_posted', 'Faktura nebo dobropis ještě není zaúčtovaný v deníku.');
         }
     }
 
@@ -1079,29 +864,6 @@ final class GoPayService
         }
     }
 
-    /** @param list<int> $ids @return array<int,array<string,mixed>> */
-    private function accountsById(int $supplierId, array $ids): array
-    {
-        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
-        if ($ids === []) {
-            return [];
-        }
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id,account_code,name,account_type,is_active,is_synthetic FROM chart_of_accounts
-              WHERE supplier_id=? AND id IN (' . $placeholders . ')'
-        );
-        $stmt->execute(array_merge([$supplierId], $ids));
-        $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $out[(int) $row['id']] = $row;
-        }
-        if (count($out) !== count($ids)) {
-            throw new GoPayException('account_not_found', 'Některý zvolený účet nepatří této firmě.');
-        }
-        return $out;
-    }
-
     /** @param array<int,array<string,mixed>> $accounts */
     private function assertAccount(array $accounts, int $id, ?string $prefix, ?string $type, string $field): void
     {
@@ -1199,21 +961,6 @@ final class GoPayService
         return is_string($content) && $content !== '';
     }
 
-    private function noteHasOrder(string $note, string $orderId): bool
-    {
-        return preg_match('/(?:^|\R)\s*Objednávka:\s*' . preg_quote($orderId, '/') . '\s*(?:\R|$)/iu', $note) === 1;
-    }
-
-    /** @param array<string,mixed> $document */
-    private function documentHasOrder(array $document, string $orderId): bool
-    {
-        $stored = trim((string) ($document['supplier_order_number'] ?? ''));
-        if ($stored !== '') {
-            return mb_strtoupper($stored) === mb_strtoupper(trim($orderId));
-        }
-        return $this->noteHasOrder((string) ($document['note_below_items'] ?? ''), $orderId);
-    }
-
     private function accountKey(string $account): string
     {
         return ltrim((string) preg_replace('/[^0-9]/', '', $account), '0');
@@ -1247,38 +994,5 @@ final class GoPayService
             $foundCredit = $foundCredit || ($row['side'] === 'credit' && $row['account_code'] === $creditCode);
         }
         return $foundDebit && $foundCredit;
-    }
-
-    private function beginUnit(PDO $pdo, string $savepoint): bool
-    {
-        if ($pdo->inTransaction()) {
-            $pdo->exec('SAVEPOINT ' . $savepoint);
-            return false;
-        }
-        $pdo->beginTransaction();
-        return true;
-    }
-
-    private function commitUnit(PDO $pdo, bool $ownTx, string $savepoint): void
-    {
-        if ($ownTx) {
-            $pdo->commit();
-            return;
-        }
-        $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-    }
-
-    private function rollbackUnit(PDO $pdo, bool $ownTx, string $savepoint): void
-    {
-        if ($ownTx) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            return;
-        }
-        if ($pdo->inTransaction()) {
-            $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
-            $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
-        }
     }
 }

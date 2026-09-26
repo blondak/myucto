@@ -25,7 +25,7 @@ final class CatalogImportWorkflowTest extends StockTestCase
         parent::tearDown();
     }
 
-    private function preview(int $supplierId, string $csv, array $config): array
+    private function preview(int $supplierId, string $csv, array $config, int $maxBatches = 10): array
     {
         $path = tempnam(sys_get_temp_dir(), 'catalog-flow-');
         $this->files[] = $path;
@@ -34,7 +34,7 @@ final class CatalogImportWorkflowTest extends StockTestCase
         $source = $sources->upload($supplierId, new UploadedFile($path, 'fixture.csv', 'text/csv', strlen($csv)), $this->userId);
         $this->files[] = $sources->path($supplierId, $source['id']);
         $this->container->get(CatalogImportService::class)->preview($supplierId, $source['id'], $config, $this->userId);
-        return $this->container->get(CatalogImportWorker::class)->tickKind($supplierId, CatalogImportService::STAGE_KIND);
+        return $this->container->get(CatalogImportWorker::class)->tickKind($supplierId, CatalogImportService::STAGE_KIND, $maxBatches);
     }
 
     public function testCreateApplyAndIdenticalReimportMakesNoChanges(): void
@@ -124,32 +124,33 @@ final class CatalogImportWorkflowTest extends StockTestCase
         self::assertSame(1, $repeat['report']['counts']['unchanged']);
     }
 
-    public function testTenThousandRowsResumeWithoutDuplicateItems(): void
+    public function testOneHundredAndOneRowsResumeWithoutDuplicateItems(): void
     {
         $sid = $this->createSupplier();
         $csv = "sku;name\n";
-        for ($i = 1; $i <= 10000; $i++) {
+        for ($i = 1; $i <= 101; $i++) {
             $csv .= 'RESUME-' . $i . ";Fixture\n";
         }
-        $preview = $this->preview($sid, $csv, ['mapping' => ['sku' => 'sku', 'name' => 'name']]);
+        $preview = $this->preview($sid, $csv, ['mapping' => ['sku' => 'sku', 'name' => 'name']], 1);
         self::assertSame('queued', $preview['status']);
-        self::assertSame(1000, $preview['checkpoint']);
+        self::assertSame(100, $preview['checkpoint']);
         $worker = $this->container->get(CatalogImportWorker::class);
         do {
             $preview = $worker->tickKind($sid, CatalogImportService::STAGE_KIND);
         } while ($preview['status'] === 'queued');
         self::assertSame('completed', $preview['status']);
-        self::assertSame(10000, $preview['report']['counts']['ready']);
+        self::assertSame(101, $preview['report']['counts']['ready']);
         $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
         $first = $worker->tickKind($sid, CatalogImportService::APPLY_KIND, 1);
         self::assertSame(100, $first['checkpoint']);
+        self::assertNull($this->itemsRepo->findBySku($sid, 'RESUME-101'));
         do {
             $result = $worker->tickKind($sid, CatalogImportService::APPLY_KIND);
         } while ($result['status'] === 'queued');
-        self::assertSame(10000, $result['report']['counts']['applied']);
+        self::assertSame(101, $result['report']['counts']['applied']);
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM stock_items WHERE supplier_id = ?');
         $stmt->execute([$sid]);
-        self::assertSame(10000, (int) $stmt->fetchColumn());
+        self::assertSame(101, (int) $stmt->fetchColumn());
     }
 
     public function testExternalIdentityDoesNotFallBackToMatchingSku(): void

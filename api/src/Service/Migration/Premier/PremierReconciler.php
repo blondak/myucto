@@ -134,7 +134,7 @@ final class PremierReconciler
             return round((float) $stmt->fetchColumn(), 2);
         };
         $oneSided = static fn (string $entry, string $prefix): string =>
-            "(SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2
+            "(SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2 FORCE INDEX (ix_jel_closing_by_entry)
                 JOIN chart_of_accounts a2 ON a2.id = l2.account_id AND a2.supplier_id = l2.supplier_id
                WHERE l2.supplier_id = l.supplier_id AND l2.entry_id = {$entry} AND a2.account_code LIKE '{$prefix}%') = 1";
         $mapped = static fn (string $alias, string $kinds): string =>

@@ -116,6 +116,7 @@ final class JmhzReportPlanner
         $this->planStatutory($supplierId, $plan, $item, $batch, $employeeId, $reference);
         $this->planChildren($supplierId, $plan, $item, $employeeId, $reference);
         $this->fundInfo($plan, $form);
+        $this->historyWarnings($plan, $item, $batch, $row);
 
         $steps = $plan['_steps'];
         $work = $steps['terms'] !== null
@@ -242,9 +243,13 @@ final class JmhzReportPlanner
             $auto = $this->lookup->employment($supplierId, (int) $hit['employment_id']);
             $matchedBy = 'id_ppv';
         } elseif (count($oicEmployees) === 1) {
+            // Formulář s ID PPV, které evidence nezná, patří jinému vztahu osoby
+            // (souběh) než vztah, který už ID PPV má — ten mu nepatří.
             $rows = array_values(array_filter(
                 $this->lookup->employments($supplierId, $oicEmployees[0]),
-                fn (array $row): bool => $this->activeIn($row, $item->file),
+                fn (array $row): bool => $this->activeIn($row, $item->file)
+                    && ($form->employmentIdentifier === null
+                        || $this->registrations->activeExternalId($supplierId, (int) $row['id'], $environment, 'id_ppv') === null),
             ));
             if (count($rows) === 1) {
                 $auto = $rows[0];
@@ -267,19 +272,29 @@ final class JmhzReportPlanner
                 )];
             }
         } elseif ($form->lastName !== null && $form->firstName !== null && $form->birthDate !== null) {
-            foreach ($this->jmhzLookup->employeesByNameAndBirthDate(
+            $named = $this->lookup->employeesByNameAndBirthDate(
                 $supplierId,
                 $form->firstName,
                 $form->lastName,
                 $form->birthDate,
-            ) as $employeeId) {
-                $candidates = [...$candidates, ...$this->employmentCandidates(
-                    array_values(array_filter(
-                        $this->lookup->employments($supplierId, $employeeId),
-                        fn (array $row): bool => $this->activeIn($row, $item->file),
-                    )),
-                    $supplierId,
-                )];
+            );
+            $active = [];
+            foreach ($named as $employeeId) {
+                $active = [...$active, ...array_values(array_filter(
+                    $this->lookup->employments($supplierId, $employeeId),
+                    fn (array $row): bool => $this->activeIn($row, $item->file),
+                ))];
+            }
+            // Větev B nese jméno, datum narození, a když je v ní i datum nástupu,
+            // musí sedět i to. Jediný vztah jediné takové osoby trvající v měsíci
+            // hlášení je týž vztah; cokoli víc se nechává na ruční volbě.
+            if (count($named) === 1 && count($active) === 1
+                && ($form->startDate === null || $form->startDate === ($active[0]['actual_start_date'] ?? $active[0]['start_date']))
+            ) {
+                $auto = $active[0];
+                $matchedBy = 'name_birth_date';
+            } else {
+                $candidates = $this->employmentCandidates($active, $supplierId);
             }
         }
 
@@ -294,8 +309,11 @@ final class JmhzReportPlanner
             }
             if ($auto !== null && (int) $auto['id'] !== (int) $pair['id']) {
                 return ['public' => []] + $result(
-                    'Formulář je podle ' . ($matchedBy === 'id_ppv' ? 'ID PPV' : 'OIČ') . ' spárovaný se vztahem '
-                    . $auto['code'] . '; ruční přiřazení k jinému vztahu import nepřijme.',
+                    'Formulář je podle ' . match ($matchedBy) {
+                        'id_ppv' => 'ID PPV',
+                        'name_birth_date' => 'jména a data narození',
+                        default => 'OIČ',
+                    } . ' spárovaný se vztahem ' . $auto['code'] . '; ruční přiřazení k jinému vztahu import nepřijme.',
                 );
             }
             if ($auto === null && $oicEmployees !== [] && !in_array((int) $pair['employee_id'], $oicEmployees, true)) {
@@ -423,8 +441,10 @@ final class JmhzReportPlanner
     }
 
     /**
-     * Podmínky vztahu podle vykonávané pozice (10229–10233, 10247, 10251).
-     * Fond pracovní doby je souhrn měsíce, ne podmínka — jen se ukáže.
+     * Podmínky vztahu podle vykonávané pozice (10229–10233, 10247, 10251)
+     * a úvazek podle fondu pracovní doby (10259–10261). Fond samotný je souhrn
+     * měsíce, ne podmínka — jen se ukáže. Sjednanou mzdu zapisuje převzetí
+     * historie mezd ({@see JmhzTakeoverPlanner}).
      *
      * @param array<string,mixed> $plan
      * @param array<string,mixed> $row
@@ -439,18 +459,14 @@ final class JmhzReportPlanner
         if ($desired === []) {
             return;
         }
-        if (!in_array($row['status'], self::OPEN_STATUSES, true)) {
-            $plan['warnings'][] = 'Pracovní vztah není otevřený, podmínky (pracoviště, APZ, funkční požitky) '
-                . 'se z hlášení nezapisují.';
-
-            return;
-        }
         $monthStart = $item->file->periodStart();
         $versions = $this->jmhzLookup->termVersions($supplierId, (int) $row['id']);
         $covering = JmhzEvidenceTimeline::covering($versions, $monthStart);
         if ($covering === null) {
-            $plan['warnings'][] = "K 1. dni měsíce {$item->period()} vztah nemá platné sjednané podmínky, "
-                . 'pracoviště ani APZ z hlášení se nezapíšou.';
+            if (in_array($row['status'], self::OPEN_STATUSES, true)) {
+                $plan['warnings'][] = "K 1. dni měsíce {$item->period()} vztah nemá platné sjednané podmínky, "
+                    . 'pracoviště, úvazek ani APZ z hlášení se nezapíšou.';
+            }
 
             return;
         }
@@ -461,6 +477,12 @@ final class JmhzReportPlanner
             }
         }
         if ($diff === []) {
+            return;
+        }
+        if (!in_array($row['status'], self::OPEN_STATUSES, true)) {
+            $plan['warnings'][] = 'Pracovní vztah není otevřený, podmínky (pracoviště, úvazek, APZ, funkční požitky) '
+                . 'se z hlášení nezapisují.';
+
             return;
         }
         if ((int) $covering['id'] !== (int) $versions[0]['id']) {
@@ -477,6 +499,36 @@ final class JmhzReportPlanner
         ];
         foreach ($diff as $field => $value) {
             $this->change($plan, $field, self::termLabel($field), self::text($covering[$field] ?? null), $value);
+        }
+    }
+
+    /**
+     * Co z řady měsíců plyne pro práci od prvního zpracovaného období. Ukazuje se
+     * jen u posledního hlášeného měsíce vztahu, jinak by se opakovalo u každého.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed> $row
+     */
+    private function historyWarnings(array &$plan, JmhzBatchItem $item, JmhzBatch $batch, array $row): void
+    {
+        $key = $item->form->relationKey();
+        $history = $batch->history();
+        if ($key === null || $history->latest($key)?->key !== $item->key
+            || !in_array($row['status'], self::OPEN_STATUSES, true)
+        ) {
+            return;
+        }
+        $idle = $history->trailingIdleMonths($key);
+        if ($idle !== null) {
+            $plan['warnings'][] = "Od {$idle['from']} ({$idle['months']} " . ($idle['months'] === 1 ? 'měsíc' : 'měsíce/ů')
+                . ') zaměstnanec podle hlášení neodpracoval žádnou hodinu a nemá mzdu, vztah přitom trvá. Nejspíš '
+                . 'čerpá mateřskou nebo rodičovskou dovolenou (nebo neplacené volno) — zaevidujte nepřítomnost '
+                . 'v Mzdy → Nepřítomnosti, jinak ji výpočet mzdy od prvního zpracovaného měsíce nezohlední.';
+        }
+        $form = $item->form;
+        if (!$item->file->lenient && $form->eldp === null && ($form->socialBase ?? 0) === 0) {
+            $plan['warnings'][] = 'Vztah není účasten na důchodovém pojištění (formulář nemá ELDP ani vyměřovací '
+                . 'základ). Jde nejspíš o dohodu nebo zaměstnání malého rozsahu — zkontrolujte druh vztahu na kartě.';
         }
     }
 
@@ -507,6 +559,11 @@ final class JmhzReportPlanner
                 . 'To evidence zatím nevede, údaj se nepřebírá.';
         } elseif ($form->temporaryAssignment === false) {
             $desired['jmhz_temporary_assignment_status'] = 'no';
+        }
+        $workload = $form->workload();
+        if ($workload !== null) {
+            $desired['weekly_hours'] = $workload['weekly_hours'];
+            $desired['workload_basis_points'] = (string) $workload['workload_basis_points'];
         }
 
         return $desired;
@@ -814,6 +871,8 @@ final class JmhzReportPlanner
             'jmhz_apz_instrument_code' => 'Nástroj APZ',
             'jmhz_functional_benefits_status' => 'Funkční požitky',
             'jmhz_temporary_assignment_status' => 'Dočasné přidělení',
+            'weekly_hours' => 'Týdenní pracovní doba',
+            'workload_basis_points' => 'Úvazek (setiny procenta)',
             default => $field,
         };
     }

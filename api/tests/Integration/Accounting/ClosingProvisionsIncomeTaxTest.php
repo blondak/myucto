@@ -48,7 +48,7 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->closing = $container->get(ClosingService::class);
@@ -161,7 +161,7 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
             ['account_code' => '391', 'side' => 'credit', 'amount' => 10000],
         ], ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId]);
         $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
-        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        $repository = Bootstrap::buildContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
         $this->expectException(ClosingException::class);
         $repository->deleteClosingEntry($this->supplierId, 'provision', $invoice);
     }
@@ -182,7 +182,7 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         $zero = $this->closing->runProvisions($this->supplierId, $this->periodId, [['invoice_id' => $invoice]], $this->rv(), $this->meta());
         self::assertSame([], $zero['entries']);
         self::assertSame($reversedLines, $this->entryLines($reversal));
-        $repository = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
+        $repository = Bootstrap::buildContainer()->get(\MyInvoice\Repository\ClosingRepository::class);
         self::assertSame(0.0, $repository->provisionOpeningState($this->supplierId, '2099-01-01', '2099-12-31')[$invoice]['legal_amount']);
     }
 
@@ -238,14 +238,24 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         self::assertNull($this->journal->findBySource($this->supplierId, 'provision', $second));
     }
 
-    public function testProvisionsRemainUsableAboveSaldoReportLimit(): void
+    public function testProvisionsStreamAcrossBatchesWithoutUsingBoundedSaldoReport(): void
     {
-        $seed = $this->receivable(10.0, self::YEAR . '-02-01', '2096-11-30');
+        $saldo = $this->getMockBuilder(\MyInvoice\Repository\SaldoRepository::class)
+            ->setConstructorArgs([$this->db, 10])
+            ->onlyMethods(['openItems'])
+            ->getMock();
+        $saldo->expects(self::never())->method('openItems');
+        $container = Bootstrap::buildContainer();
+        $container->set(Connection::class, $this->db);
+        $container->set(\MyInvoice\Repository\SaldoRepository::class, $saldo);
+        $this->closing = $container->get(ClosingService::class);
+
+        $seed = $this->receivable(400.0, self::YEAR . '-02-01', '2096-11-30');
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO invoices (supplier_id, varsymbol, client_id, issue_date, due_date, currency_id, created_by, total_with_vat, status)
              SELECT i.supplier_id, CONCAT("OPLIMIT", seq), i.client_id, i.issue_date, i.due_date, i.currency_id, i.created_by, i.total_with_vat, i.status
-               FROM invoices i CROSS JOIN seq_1_to_25000 WHERE i.id = ?'
+               FROM invoices i CROSS JOIN seq_1_to_100 WHERE i.id = ?'
         )->execute([$seed]);
         $pdo->prepare(
             'INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, posted_at, posted_by)
@@ -254,7 +264,7 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         )->execute([$this->periodId, $this->supplierId, $seed]);
         $pdo->prepare(
             'INSERT INTO journal_entry_lines (entry_id, supplier_id, account_id, side, amount, line_no)
-             SELECT e.id, e.supplier_id, ca.id, IF(ca.account_code = "311", "debit", "credit"), 10.0, IF(ca.account_code = "311", 1, 2)
+             SELECT e.id, e.supplier_id, ca.id, IF(ca.account_code = "311", "debit", "credit"), 400.0, IF(ca.account_code = "311", 1, 2)
                FROM journal_entries e JOIN chart_of_accounts ca ON ca.supplier_id = e.supplier_id AND ca.account_code IN ("311", "602")
               WHERE e.supplier_id = ? AND e.source_type = "invoice" AND e.source_id <> ?'
         )->execute([$this->supplierId, $seed]);
@@ -271,10 +281,13 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         self::assertSame([], $boundedState(self::YEAR . '-01-01', self::ENDS_ON));
         $preview = $this->closing->provisionsPreview($this->supplierId, $this->periodId);
         self::assertCount(100, $preview['items']);
-        self::assertSame(25001, $preview['pagination']['total']);
-        self::assertEqualsWithDelta(250010.0, $preview['totals']['remaining'], 0.001);
-        self::assertEqualsWithDelta(250010.0, $preview['items'][0]['debtor_total_remaining'], 0.001);
+        self::assertSame(101, $preview['pagination']['total']);
+        self::assertEqualsWithDelta(40400.0, $preview['totals']['remaining'], 0.001);
+        self::assertEqualsWithDelta(40400.0, $preview['items'][0]['debtor_total_remaining'], 0.001);
         self::assertNull($preview['items'][0]['legal_section']);
+        $lastPage = $this->closing->provisionsPreview($this->supplierId, $this->periodId, 2);
+        self::assertCount(1, $lastPage['items']);
+        self::assertEqualsWithDelta(400.0, $lastPage['items'][0]['remaining'], 0.001);
         $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $result = $this->closing->runProvisions($this->supplierId, $this->periodId, [
             ['invoice_id' => $seed, 'acct_amount' => 5],
@@ -295,8 +308,8 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
               WHERE e.supplier_id = ? AND e.period_id = ? AND e.source_type = 'provision'"
         )->execute([$this->supplierId, $next]);
         $state = $boundedState('2099-01-01', '2099-12-31');
-        self::assertCount(25001, $state);
-        self::assertSame(25000.0, array_sum(array_column($state, 'legal_amount')));
+        self::assertCount(101, $state);
+        self::assertSame(100.0, array_sum(array_column($state, 'legal_amount')));
         self::assertSame(5.0, array_sum(array_column($state, 'acct_amount')));
     }
 

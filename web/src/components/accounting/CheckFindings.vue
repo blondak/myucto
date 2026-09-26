@@ -196,7 +196,12 @@ function issueText(f: Finding): string {
   const codes = f.issues?.length ? f.issues : legacyIssueCodes(f.note)
   if (!codes.length) return f.note ?? ''
   return codes.map(code => {
-    const key = `checks.issue.${code}`
+    // Tentýž kód hlásí kontrola vydaných (311) i přijatých faktur (321), ale nápověda se
+    // liší: GoPay inkasuje jen vydané faktury, u přijatých by odkaz na něj mátl.
+    const labelCode = code === 'marked_paid_unposted' && props.checkKey === 'paid_purchases_open_saldo'
+      ? 'marked_paid_unposted_payable'
+      : code
+    const key = `checks.issue.${labelCode}`
     const label = t(key)
     const base = label === key ? code : label
     const d = f.detail?.[code]

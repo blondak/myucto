@@ -195,8 +195,9 @@ final class LedgerReportRepository
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
-                       l.side, l.amount, l.is_red_storno, l.line_no,
+                       l.id AS line_id, l.side, l.amount, l.is_red_storno, l.line_no, l.currency_code, l.amount_foreign,
                        bt.statement_id AS source_statement_id,
+                       bt.bank_ref AS source_bank_ref,
                        cd.doc_number AS source_doc_number,
                        cd.register_id AS source_register_id,
                        ast.id AS source_asset_id,
@@ -232,6 +233,7 @@ final class LedgerReportRepository
         $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
         return array_map(static function (array $r): array {
             $r['entry_id'] = (int) $r['entry_id'];
+            $r['line_id'] = (int) $r['line_id'];
             $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
             $r['amount'] = round((float) $r['amount'], 2);
             $r['is_red_storno'] = (bool) $r['is_red_storno'];
@@ -721,7 +723,7 @@ final class LedgerReportRepository
      * zaúčtované uzávěrky → volající nechává kumulativní okno (dnešní chování).
      * Počítá se jednou per volání sestavy (žádný N+1).
      */
-    private function openingAnchor(int $supplierId, string $date): ?string
+    public function openingAnchor(int $supplierId, string $date): ?string
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT MAX(p.starts_on)

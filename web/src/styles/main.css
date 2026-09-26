@@ -702,6 +702,159 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     font-size: 0.8125rem;
   }
 
+  @media (min-width: 768px) {
+    .singleline-list-table:not(.multirow-table) > thead > tr > th,
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td {
+      white-space: nowrap;
+    }
+    .singleline-list-table:not(.multirow-table) > thead > tr > th span {
+      white-space: nowrap;
+    }
+    .singleline-list-table:not(.multirow-table) > thead > tr > th:first-child,
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td:first-child {
+      width: 4rem;
+      min-width: 4rem;
+      max-width: 4rem;
+    }
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      min-width: 16rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .multirow-table,
+    .multirow-table > thead,
+    .multirow-table > tbody {
+      display: block;
+      width: 100%;
+    }
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      display: grid;
+      position: relative;
+      padding-left: 2.75rem;
+      min-height: 3.75rem;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .multirow-table > thead > tr > th,
+    .multirow-table > tbody > tr:not(.table-detail-row) > td {
+      min-width: 0;
+      text-align: left !important;
+      border-right: 1px solid color-mix(in oklab, var(--color-neutral-200) 55%, transparent);
+      padding: 0.3rem 0.65rem !important;
+      line-height: 1.25;
+      align-self: center;
+    }
+    .multirow-table > thead > tr > th {
+      background-color: var(--color-neutral-50);
+      border-bottom: 1px solid var(--color-neutral-200);
+      align-self: stretch;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      border-bottom: 1px solid var(--color-neutral-200);
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .multirow-table > thead > tr > th.wrap-cell,
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.wrap-cell {
+      grid-column: span 2;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td.clip-cell {
+      overflow: hidden;
+    }
+    .multirow-table > thead > tr > :nth-last-child(2):not(:first-child),
+    .multirow-table > tbody > tr:not(.table-detail-row) > :nth-last-child(2):not(:first-child) {
+      border-right: 0;
+    }
+    .multirow-table > thead > tr > :first-child,
+    .multirow-table > tbody > tr:not(.table-detail-row) > :first-child {
+      position: absolute !important;
+      left: 0;
+      top: 0;
+      width: 2.75rem;
+      height: 1.75rem;
+      padding: 0 !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid var(--color-neutral-200);
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td:first-child > div {
+      justify-content: flex-start;
+    }
+    .multirow-table > thead > tr > :last-child,
+    .multirow-table > tbody > tr:not(.table-detail-row) > :last-child {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 2.75rem !important;
+      height: 1.75rem;
+      padding: 0 !important;
+      text-align: center !important;
+      border-left: 0;
+      border-right: 0;
+    }
+    .multirow-table > tbody > tr:not(.table-detail-row) > td:not(:first-child) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .multirow-table > tbody > tr.table-detail-row,
+    .multirow-table > tbody > tr.table-detail-row > td {
+      display: block;
+      width: 100%;
+    }
+  }
+  @media (min-width: 1200px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1360px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1800px) {
+    .multirow-table > thead > tr,
+    .multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1900px) {
+    .purchase-multirow-table > thead > tr,
+    .purchase-multirow-table > tbody > tr:not(.table-detail-row) {
+      grid-template-columns: repeat(9, minmax(0, 1fr));
+    }
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .pointer-fine-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .pointer-fine-hidden:focus-within {
+      position: static;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      clip-path: none;
+    }
+  }
+
   /*
    * ─── Datové tabulky: vzhledové defaulty ───
    * Doplněk k nevrstveným pravidlům výš. Tady schválně přes :where() (specificita 0),

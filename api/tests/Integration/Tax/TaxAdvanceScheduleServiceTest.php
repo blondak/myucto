@@ -39,7 +39,7 @@ final class TaxAdvanceScheduleServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->service = $c->get(TaxAdvanceScheduleService::class);
             $this->repo = $c->get(TaxAdvanceScheduleRepository::class);

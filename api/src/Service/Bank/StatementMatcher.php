@@ -951,13 +951,13 @@ final class StatementMatcher
         // Platební VS může být jiný než číslo dokladu. Zachováváme i hledání
         // podle interního a dodavatelského čísla, včetně numerické normalizace.
         $vsDigits = VariableSymbolNormalizer::digits($vs);
-        $settled = PurchaseSettledExpr::settled('pi');
+        // Vlastní alokace pohybu (z dřívějšího auto_partial) se vynechá přímo ve výrazu:
+        // součet je v měně dokladu, takže odečíst syrovou částku párování by u korunové
+        // úhrady cizoměnové faktury míchalo dvě měny.
+        $settled = PurchaseSettledExpr::settled('pi', excludeBankTransactionId: $transactionId);
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number,
                        COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                        ({$settled}) AS settled_amount,
-                       (SELECT COALESCE(SUM(own.amount), 0) FROM payment_matches own
-                         WHERE own.supplier_id = pi.supplier_id AND own.purchase_invoice_id = pi.id
-                           AND own.bank_transaction_id = ?) AS own_amount,
                        pi.exchange_rate, pi.status, cur.code AS currency,
                        CASE WHEN pi.payment_variable_symbol = ? OR pi.varsymbol = ? OR pi.vendor_invoice_number = ? THEN 2 ELSE 1 END AS vs_match_rank
                   FROM purchase_invoices pi
@@ -978,7 +978,7 @@ final class StatementMatcher
                  -- těch, které trefila až normalizace na číslice (viz preferExactVsMatches).
                  ORDER BY vs_match_rank DESC, pi.id LIMIT 5";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$transactionId, $vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $vsDigits, $vsDigits, $vsDigits]);
+        $stmt->execute([$vs, $vs, $vs, $supplierId, $vs, $vs, $vs, $vsDigits, $vsDigits, $vsDigits]);
         $matches = $this->preferExactVsMatches($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
         if (count($matches) > 1) {
             return ['status' => 'unmatched', 'reason' => 'ambiguous_vs_purchase', 'tx_currency' => $txCurrency];
@@ -991,7 +991,8 @@ final class StatementMatcher
         $alreadyPaid = ($pi['status'] === 'paid');
         // Vlastní alokace pohybu (z dřívějšího auto_partial) není cizí úhrada — jinak by
         // opakované párování porovnávalo platbu sama se sebou a přesná shoda by ji zdvojila.
-        $settledAmount = round((float) ($pi['settled_amount'] ?? 0.0) - (float) ($pi['own_amount'] ?? 0.0), 2);
+        // Vynechává ji už výraz výše (excludeBankTransactionId).
+        $settledAmount = round((float) ($pi['settled_amount'] ?? 0.0), 2);
         $remaining = round((float) $pi['amount_to_pay'] - $settledAmount, 2);
         if (!$alreadyPaid && $remaining <= 0.005) {
             return [
@@ -1414,7 +1415,8 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = pi.currency_id
                   WHERE pi.supplier_id = ?
                     AND pi.status IN ('received', 'booked', 'paid')
-                    AND pi.document_kind = 'invoice'
+                    -- Zálohová faktura zaplacená kartou nemá na pohybu VS, jinak se chová jako faktura.
+                    AND pi.document_kind IN ('invoice', 'advance')
                     AND pi.cash_register_id IS NULL
                     AND pi.payment_method IN ('bank_transfer', 'card', 'direct_debit')
                     AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)

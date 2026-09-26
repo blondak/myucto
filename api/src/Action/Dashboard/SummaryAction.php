@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Dashboard;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Cache\SupplierDataCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
@@ -43,15 +44,31 @@ final class SummaryAction
         private readonly PendingBackfillCounter $pendingBackfill,
         private readonly OverduePolicy $overduePolicy,
         private readonly ExistingObligationSourceService $obligationSources,
+        private readonly SupplierDataCache $cache,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
+    {
+        $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        $payroll = RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ);
+        $reports = RequestAuthorization::allows($request, 'reports', AccessLevel::READ);
+
+        // Souhrn je jen z dat firmy; od uživatele se liší jen podle dvou oprávnění výše.
+        return Json::ok($response, $this->cache->remember(
+            $sid,
+            'dashboard-summary:' . (int) $payroll . (int) $reports,
+            new \DateTimeImmutable('today'),
+            fn (): array => $this->summary($sid, $payroll, $reports),
+        ));
+    }
+
+    /** @return array<string,mixed> */
+    private function summary(int $sid, bool $payroll, bool $reports): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
         $year = (int) $today->format('Y');
         $prevYear = $year - 1;
-        $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         $isVatPayer = $this->fetchIsVatPayer($pdo, $sid);
         // revenueByYear počítáme jednou a sdílíme s forecastem (CAGR trend) — žádný druhý dotaz.
         $revenueByYear = $this->revenueByYear($pdo, $sid, $isVatPayer);
@@ -60,15 +77,15 @@ final class SummaryAction
         $derived = [];
         $forecastFrom = $today->format('Y-m-d');
         $forecastTo = $today->modify('+90 days')->format('Y-m-d');
-        if (RequestAuthorization::allows($request, 'payroll.payments', AccessLevel::READ)) {
+        if ($payroll) {
             $derived = $this->obligationSources->payrollLiabilities($sid, $forecastFrom, $forecastTo);
             array_push($derived, ...$this->obligationSources->payrollForecasts($sid, $forecastFrom, $forecastTo));
         }
-        if (RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+        if ($reports) {
             array_push($derived, ...$this->obligationSources->taxForecasts($sid, $forecastFrom, $forecastTo));
         }
 
-        return Json::ok($response, [
+        return [
             'has_purchase_invoices'  => (bool) $purchaseExists->fetchColumn(),
             'kpi'                    => $this->kpi($pdo, $year, $prevYear, $sid, $isVatPayer),
             'overdue'                => $this->overdue($pdo, $sid),
@@ -110,7 +127,7 @@ final class SummaryAction
             'year'                   => $year,
             'prev_year'              => $prevYear,
             'is_vat_payer'           => $isVatPayer,
-        ]);
+        ];
     }
 
     /** Počet aktivních (neaarchivovaných) zákazníků v rámci aktuálního dodavatele (bez čistých dodavatelů). */

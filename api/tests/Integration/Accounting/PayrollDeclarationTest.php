@@ -56,7 +56,7 @@ final class PayrollDeclarationTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db      = $c->get(Connection::class);
             $this->payroll = $c->get(PayrollPostingService::class);
             $this->periods = $c->get(AccountingPeriodRepository::class);
@@ -198,7 +198,7 @@ final class PayrollDeclarationTest extends TestCase
      */
     public function testDeclarationFlagIsExposedAsBoolean(): void
     {
-        $c = Bootstrap::buildApp()->getContainer();
+        $c = Bootstrap::buildContainer();
         $repo = $c->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
 
         $signedId = $this->employee(creditClaimed: true, declarationSigned: true);
@@ -367,7 +367,7 @@ final class PayrollDeclarationTest extends TestCase
      */
     public function testAutoPostColumnsAreExposedInCorrectPhpTypes(): void
     {
-        $repo = Bootstrap::buildApp()->getContainer()
+        $repo = Bootstrap::buildContainer()
             ->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
 
         $withGross = $this->employee(
@@ -391,7 +391,7 @@ final class PayrollDeclarationTest extends TestCase
     /** Do výběru pro cron patří jen aktivní zaměstnanec s automatem A s částkou. */
     public function testAutoPostCandidatesRequireBothFlagAndAmount(): void
     {
-        $repo = Bootstrap::buildApp()->getContainer()
+        $repo = Bootstrap::buildContainer()
             ->get(\MyInvoice\Repository\PayrollEmployeeRepository::class);
 
         $ok = $this->employee(creditClaimed: true, declarationSigned: true, monthlyGross: 30_000, autoPost: true);

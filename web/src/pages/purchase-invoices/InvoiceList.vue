@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -22,6 +24,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import { clientsApi, type Client } from '@/api/clients'
@@ -29,11 +32,16 @@ import { projectsApi, type Project } from '@/api/projects'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import type { SavedFilter } from '@/api/preferences'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useDimensions } from '@/composables/useDimensions'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
+import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
@@ -43,6 +51,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+const dimensions = useDimensions()
 // Hromadné účtování a filtr zaúčtování jsou dostupné jen v podvojném účetnictví.
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 const router = useRouter()
@@ -55,6 +64,8 @@ const page = ref(1)
 const pages = ref(1)
 const loading = ref(true)
 const loadingMore = ref(false)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < pages.value, () => load(false))
 const error = ref('')
 /**
  * Řádky k probliknutí po hromadné akci. Značku zapisují bulk handlery přes
@@ -67,7 +78,7 @@ const flashedIds = ref<Set<number>>(new Set())
 const search = ref('')
 const statusFilter = ref<PurchaseInvoiceStatus | ''>('')
 const kindFilter = ref<PurchaseDocumentKind | ''>('')
-const yearFilter = ref<number | ''>(new Date().getFullYear())
+const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -78,6 +89,8 @@ const unpaidOnly = ref(false)
 const unpaidAsOf = ref<string>('')
 // „Bez párování úhrady" — doklady bez zaúčtované úhrady (banka ani pokladna).
 const unmatchedOnly = ref(false)
+// „Uhrazeno s rozdílem": uhrazený doklad, který evidované úhrady nepokrývají.
+const paidShortfallOnly = ref(false)
 const needsReviewOnly = ref(false)
 const paymentOrderedFilter = ref<'' | '1' | '0'>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
@@ -106,6 +119,7 @@ const activeFilterCount = computed(() => {
   if (unpaidOnly.value) n++
   if (unpaidAsOf.value) n++
   if (unmatchedOnly.value) n++
+  if (paidShortfallOnly.value) n++
   if (needsReviewOnly.value) n++
   if (paymentOrderedFilter.value) n++
   if (bookedFilter.value) n++
@@ -146,6 +160,7 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'unpaid_as_of', value: `${t('purchase_invoice.filters.unpaid_as_of_label')}: ${formatDate(unpaidAsOf.value)}` })
   }
   if (unmatchedOnly.value) chips.push({ key: 'unmatched', value: t('purchase_invoice.filters.unmatched') })
+  if (paidShortfallOnly.value) chips.push({ key: 'paidShortfall', value: t('purchase_invoice.filters.paid_shortfall') })
   if (needsReviewOnly.value) chips.push({ key: 'needsReview', value: t('purchase_invoice.filters.needs_review') })
   if (paymentOrderedFilter.value) {
     chips.push({ key: 'paymentOrdered', value: t(paymentOrderedFilter.value === '1' ? 'purchase_invoice.filters.payment_ordered_yes' : 'purchase_invoice.filters.payment_ordered_no') })
@@ -170,6 +185,7 @@ function clearFilter(key: string) {
     case 'unpaid': unpaidOnly.value = false; break
     case 'unpaid_as_of': unpaidAsOf.value = ''; break
     case 'unmatched': unmatchedOnly.value = false; break
+    case 'paidShortfall': paidShortfallOnly.value = false; break
     case 'needsReview': needsReviewOnly.value = false; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
     case 'booked': bookedFilter.value = ''; break
@@ -215,6 +231,19 @@ const bulkBusy = ref(false)
  * seznamu tak, jak ho uživatel vidí, ne po skupinách.
  */
 const flatRows = computed(() => groups.value.flatMap(g => g.invoices))
+
+// Kontrola AI vytěžených dokladů faktura po faktuře — vybrané řádky, jinak vše načtené s hlášením.
+const reviewIds = ref<number[] | null>(null)
+const reviewableIds = computed(() => {
+  const flagged = flatRows.value.filter(r => r.extraction_warning)
+  const selected = new Set(selectedIds.value)
+  const pick = selected.size ? flagged.filter(r => selected.has(r.id)) : flagged
+  return pick.map(r => r.id)
+})
+function onReviewClosed() {
+  reviewIds.value = null
+  load()
+}
 const rowIndexById = computed(() => {
   const map = new Map<number, number>()
   flatRows.value.forEach((inv, i) => map.set(inv.id, i))
@@ -272,26 +301,110 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // detekovat menu click (= URL bez query → reset). Pro klika na menu link
 // "Přijaté faktury" už když je na této stránce a má aktivní filtr (např. overdue=1)
 // se URL změní zpět na čistou — watch fires reset všech ref.
-const DEFAULT_YEAR = new Date().getFullYear()
+const DEFAULT_YEAR: number | '' = ''
 
 const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
   { key: 'vendor', labelKey: 'purchase_invoice.fields.vendor', required: true },
+  { key: 'vendor_ic', labelKey: 'common.ic' },
   { key: 'vendor_number', labelKey: 'purchase_invoice.fields.vendor_invoice_number' },
   { key: 'kind', labelKey: 'purchase_invoice.fields.document_kind' },
   { key: 'tax_date', labelKey: 'purchase_invoice.fields.tax_date' },
   { key: 'due_date', labelKey: 'purchase_invoice.fields.due_date' },
   { key: 'amount', labelKey: 'purchase_invoice.totals.with_vat', required: true },
-  { key: 'status', labelKey: 'purchase_invoice.status.draft' },
+  { key: 'status', labelKey: 'purchase_invoice.list_status' },
+  // Úhrada, defaultně viditelné: bez nich účetní částečně uhrazený doklad nepozná.
+  { key: 'paid_amount', labelKey: 'purchase_invoice.col_paid_amount' },
+  { key: 'remaining_amount', labelKey: 'purchase_invoice.col_remaining_amount' },
   // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
   { key: 'paid_at', labelKey: 'invoice.col_paid_at', defaultHidden: true },
   { key: 'booked_at', labelKey: 'invoice.col_booked_at', defaultHidden: true },
   { key: 'exchange_rate', labelKey: 'invoice.col_exchange_rate', defaultHidden: true },
   { key: 'vat_deduction', labelKey: 'purchase_invoice.col_vat_deduction', defaultHidden: true },
   { key: 'expense_category', labelKey: 'purchase_invoice.classification.expense_category', defaultHidden: true },
+  { key: 'base', labelKey: 'invoice.col_base', defaultHidden: true },
+  { key: 'vat', labelKey: 'invoice.col_vat', defaultHidden: true },
+  { key: 'balance', labelKey: 'invoice.amount_to_pay', defaultHidden: true },
+  { key: 'project', labelKey: 'invoice.col_project', defaultHidden: true },
+  { key: 'received_at', labelKey: 'purchase_invoice.col_received_at', defaultHidden: true },
+  { key: 'payment_ordered_at', labelKey: 'purchase_invoice.col_payment_ordered_at', defaultHidden: true },
+  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
+  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
+  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
+  { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true },
+  { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dimensions.enabled.value },
   { key: 'locked', labelKey: 'lock.column' },
 ]
 const tbl = useTablePrefs('purchase_invoices', COLUMNS)
+const COLUMN_PRESETS = [
+  { key: 'client', labelKey: 'common.columns_preset_client', visibleKeys: null },
+  { key: 'accountant', labelKey: 'common.columns_preset_accountant', visibleKeys: [
+    'number', 'vendor', 'vendor_ic', 'vendor_number', 'tax_date', 'amount', 'remaining_amount',
+    'vat_deduction', 'vat_breakdown', 'debit_accounts', 'credit_accounts', 'kh', 'locked',
+  ] },
+  { key: 'complete', labelKey: 'common.columns_preset_complete', visibleKeys: COLUMNS.map(c => c.key) },
+]
+const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (!groupByMonth.value && el.scrollTop + el.clientHeight >= el.scrollHeight - 240
+    && !loading.value && !loadingMore.value && page.value < pages.value) void load(false)
+}
+function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; label: string; value: string }> {
+  const values: Record<string, string> = {
+    paid_at: inv.paid_at ? formatDate(inv.paid_at) : '—',
+    booked_at: inv.booked_at ? formatDate(inv.booked_at) : '—',
+    exchange_rate: inv.currency !== 'CZK' && inv.exchange_rate ? formatRate(inv.exchange_rate) : '—',
+    vat_deduction: vatDeductionLabel(inv),
+    expense_category: inv.expense_category_label || '—',
+    base: formatMoney(inv.total_without_vat, inv.currency),
+    vat: formatMoney(inv.total_vat, inv.currency),
+    balance: formatMoney(inv.amount_to_pay, inv.currency),
+    project: inv.project_name || '—',
+    received_at: inv.received_at ? formatDate(inv.received_at) : '—',
+    payment_ordered_at: inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—',
+    kh: inv.kh_sections?.join(', ') || '—',
+    debit_accounts: inv.debit_accounts?.join(', ') || '—',
+    credit_accounts: inv.credit_accounts?.join(', ') || '—',
+    dimensions: inv.dimension_labels?.join(' · ') || '—',
+  }
+  return COLUMNS.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+    .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
+}
+watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
+const groupByMonth = computed(() => tbl.flag('group_by_month', true))
+const listBoxes = ref<HTMLElement[]>([])
+const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
+useFillViewportHeight(listBox)
+function toggleGrouping() {
+  tbl.setFlag('group_by_month', !groupByMonth.value)
+  load()
+}
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  load()
+}
+function clearSort() {
+  tbl.clearSort()
+  load()
+}
+
+// Úhrada dává smysl jen u platného dokladu, koncept a storno nic nedluží.
+function showsPayment(inv: PurchaseInvoiceListItem): boolean {
+  return inv.status !== 'draft' && inv.status !== 'cancelled'
+}
+
+// „Uhrazeno s rozdílem": doklad je uhrazený, ale evidované úhrady ho nepokrývají.
+// Hranici (víc než koruna) drží BE, stejnou jako saldo a uzávěrková kontrola.
+function hasPaidShortfall(inv: PurchaseInvoiceListItem): boolean {
+  return !!inv.paid_shortfall
+}
+
+function remainingClass(inv: PurchaseInvoiceListItem): string {
+  if (!showsPayment(inv)) return ''
+  if (hasPaidShortfall(inv)) return 'text-warning-700 font-semibold'
+  return inv.status !== 'paid' && (inv.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-400'
+}
 
 // Kurz do tabulky — 3 desetinná místa (ČNB konvence), lokalizovaný zápis.
 function formatRate(rate: number): string {
@@ -330,6 +443,7 @@ function onViewClick(f: SavedFilter) {
 }
 
 onMounted(async () => {
+  await ensurePrefsLoaded()
   // Dodavatelé pro filtr (jen dodavatelé — přijaté faktury chodí od nich).
   clientsApi.list({ archived: false, per_page: 200, role: 'vendors' })
     .then(r => { vendors.value = r.data }).catch(() => {})
@@ -350,6 +464,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   unpaidOnly.value  = q.unpaid === '1' || q.unpaid === 'true'
   unpaidAsOf.value  = typeof q.unpaid_as_of === 'string' ? q.unpaid_as_of : ''
   unmatchedOnly.value = q.unmatched === '1' || q.unmatched === 'true'
+  paidShortfallOnly.value = q.paid_shortfall === '1' || q.paid_shortfall === 'true'
   needsReviewOnly.value = q.needs_review === '1' || q.needs_review === 'true'
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
@@ -357,7 +472,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || unmatchedOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || unmatchedOnly.value || paidShortfallOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -377,9 +492,8 @@ function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
   if (statusFilter.value) q.status = statusFilter.value
   if (kindFilter.value) q.kind = kindFilter.value
-  // year=DEFAULT_YEAR je default a nepatří do URL; explicit "" (Vše) ano (jako 'all').
-  if (yearFilter.value === '') q.year = 'all'
-  else if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
+  // Výchozí jsou všechny roky a do URL nepatří; starý odkaz year=all se čte dál.
+  if (yearFilter.value !== DEFAULT_YEAR) q.year = String(yearFilter.value)
   if (monthFilter.value !== '') q.month = String(monthFilter.value)
   if (dateFrom.value) q.from = dateFrom.value
   if (dateTo.value) q.to = dateTo.value
@@ -390,6 +504,7 @@ function buildQuery(): Record<string, string> {
   if (unpaidOnly.value) q.unpaid = '1'
   if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
   if (unmatchedOnly.value) q.unmatched = '1'
+  if (paidShortfallOnly.value) q.paid_shortfall = '1'
   if (needsReviewOnly.value) q.needs_review = '1'
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (bookedFilter.value) q.booked = bookedFilter.value
@@ -413,7 +528,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
        currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
@@ -439,6 +554,7 @@ watch(() => route.query, (newQ) => {
     unpaidOnly.value = false
     unpaidAsOf.value = ''
     unmatchedOnly.value = false
+    paidShortfallOnly.value = false
     needsReviewOnly.value = false
     paymentOrderedFilter.value = ''
     bookedFilter.value = ''
@@ -475,7 +591,7 @@ function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGrou
       }
     }
   }
-  return Array.from(byMonth.values()).sort((a, b) => b.month.localeCompare(a.month))
+  return Array.from(byMonth.values())
 }
 
 /**
@@ -524,12 +640,21 @@ async function fetchPage(reset: boolean) {
       overdue:       overdueOnly.value  || undefined,
       unpaid_as_of:  unpaidAsOf.value   || undefined,
       unmatched:     unmatchedOnly.value || undefined,
+      paid_shortfall: paidShortfallOnly.value || undefined,
       needs_review:  needsReviewOnly.value || undefined,
       payment_ordered: paymentOrderedFilter.value || undefined,
       booked:        bookedFilter.value  || undefined,
       import_batch_id: importBatchFilter.value || undefined,
       q:             search.value       || undefined,
       page: page.value,
+      per_page: 50,
+      sort_key: tbl.sort.value?.key,
+      sort_dir: tbl.sort.value?.dir,
+      group_by_month: groupByMonth.value,
+      include_kh: tbl.isVisible('kh'),
+      include_vat_breakdown: tbl.isVisible('vat_breakdown'),
+      include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
+      include_dimensions: tbl.isVisible('dimensions'),
     })
     if (seq !== loadSeq) return
     if (reset) {
@@ -541,7 +666,12 @@ async function fetchPage(reset: boolean) {
     pages.value = res.meta.pages ?? 1
   } catch (e) {
     if (seq !== loadSeq) return
-    error.value = apiErrorMessage(e)
+    if (reset) {
+      error.value = apiErrorMessage(e)
+    } else {
+      page.value--
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
     if (seq === loadSeq) {
       loading.value = false
@@ -607,21 +737,24 @@ function toggleSelected(id: number) {
   else selectedIds.value.push(id)
 }
 
-function allRowIds(): number[] {
-  return groups.value.flatMap(g => g.invoices.map(i => i.id))
+function isGroupSelected(group: PurchaseMonthGroup): boolean {
+  return group.invoices.length > 0 && group.invoices.every(invoice => selectedIds.value.includes(invoice.id))
 }
 
-const allSelected = computed(() => {
-  const ids = allRowIds()
-  return ids.length > 0 && ids.every(id => selectedIds.value.includes(id))
-})
+function isGroupSelectionPartial(group: PurchaseMonthGroup): boolean {
+  const count = group.invoices.filter(invoice => selectedIds.value.includes(invoice.id)).length
+  return count > 0 && count < group.invoices.length
+}
 
-function toggleAll() {
-  if (allSelected.value) {
-    selectedIds.value = []
-  } else {
-    selectedIds.value = allRowIds()
+function toggleGroupSelected(group: PurchaseMonthGroup) {
+  const groupIds = group.invoices.map(invoice => invoice.id)
+  const selected = new Set(selectedIds.value)
+  if (groupIds.every(id => selected.has(id))) {
+    selectedIds.value = selectedIds.value.filter(id => !groupIds.includes(id))
+    return
   }
+  for (const id of groupIds) selected.add(id)
+  selectedIds.value = Array.from(selected)
 }
 
 // Helpers per row
@@ -826,7 +959,13 @@ async function bulkSetKind() {
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('purchase_invoice.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('purchase_invoice.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">
+          {{ t('purchase_invoice.subtitle') }}
+          <template v-if="!loading && total > 0">
+            <span class="ml-2 whitespace-nowrap">· {{ t('purchase_invoice.summary_count', { count: total }) }}</span>
+            <span v-if="loadedCount < total" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
+          </template>
+        </p>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
@@ -840,6 +979,11 @@ async function bulkSetKind() {
             {{ t('purchase_invoice.filters.vendor_edit') }}
           </RouterLink>
         </template>
+        <button v-if="reviewableIds.length && auth.canWrite('purchase_invoices')" type="button"
+          :class="btnOutline('warning')" class="whitespace-nowrap" @click="reviewIds = reviewableIds">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          {{ t('purchase_invoice.extraction_review.open_count', { count: reviewableIds.length }) }}
+        </button>
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"
@@ -1046,6 +1190,11 @@ async function bulkSetKind() {
           <input v-model="unmatchedOnly" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('purchase_invoice.filters.unmatched') }}
         </label>
+        <label class="flex items-center gap-1.5 text-sm text-warning-700 px-2"
+          :title="t('purchase_invoice.filters.paid_shortfall_hint')">
+          <input v-model="paidShortfallOnly" type="checkbox" class="rounded border-neutral-300 text-warning-600" />
+          {{ t('purchase_invoice.filters.paid_shortfall') }}
+        </label>
         <label class="flex items-center gap-1.5 text-sm text-warning-700 px-2">
           <input v-model="needsReviewOnly" type="checkbox" class="rounded border-neutral-300 text-warning-600" />
           {{ t('purchase_invoice.filters.needs_review') }}
@@ -1076,7 +1225,11 @@ async function bulkSetKind() {
         </select>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
-        <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+        <button type="button" :class="btnOutline('neutral')" @click="toggleGrouping">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
+        </button>
+        <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
@@ -1101,17 +1254,13 @@ async function bulkSetKind() {
     </div>
 
     <div v-else>
-      <div class="text-xs text-neutral-500 mb-3 flex items-center justify-between">
-        <span>{{ t('purchase_invoice.summary_count', { count: total }) }}</span>
-        <span v-if="loadedCount < total">{{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
-      </div>
 
       <!-- ═══ Skupiny po měsících ═══ -->
-      <section v-for="g in groups" :key="g.month" class="mb-5">
+      <section v-for="g in groups" :key="g.month" :class="groupByMonth ? 'mb-5' : ''">
         <!-- Měsíční rozdělovník ve stylu účetní knihy — stejný vzor jako u vydaných
              faktur: název měsíce vlevo, hairline přes volné místo, součet v mono
              vpravo. Součty se musí umět zalomit, jinak by na mobilu vytlačily stránku. -->
-        <header class="sticky top-16 z-[5] flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 backdrop-blur-md border border-neutral-200 rounded-t-lg px-4 py-2.5 mb-0">
+        <header v-if="groupByMonth" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-neutral-50/92 border border-neutral-200 rounded-t-lg px-3 py-2.5 mb-0">
           <div class="flex items-baseline gap-2.5 shrink-0">
             <h2 class="text-[13px] font-semibold uppercase tracking-[0.16em] text-neutral-800">{{ formatMonth(g.month) }}</h2>
             <span class="text-[11px] text-neutral-500 tabular-nums">{{ g.count }}</span>
@@ -1126,38 +1275,32 @@ async function bulkSetKind() {
         </header>
 
         <!-- Desktop: tabulka -->
-        <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
-              <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+        <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
+          <div ref="listBoxes" class="overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
+            <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table purchase-multirow-table' : '']">
+              <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
                 <tr>
                   <th class="px-2 py-2 w-10 text-center">
                     <input
                       type="checkbox"
-                      :checked="allSelected"
-                      @change="toggleAll"
-                      :title="t('common.select_all')"
+                      :checked="isGroupSelected(g)"
+                      :indeterminate="isGroupSelectionPartial(g)"
+                      @change="toggleGroupSelected(g)"
+                      :title="groupByMonth ? t('invoice.select_month', { month: formatMonth(g.month) }) : t('common.select_all')"
+                      :aria-label="groupByMonth ? t('invoice.select_month', { month: formatMonth(g.month) }) : t('common.select_all')"
                       class="w-4 h-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
                     />
                   </th>
-                  <th v-if="tbl.isVisible('number')" class="text-left px-4 py-2 font-medium w-32">{{ t('purchase_invoice.fields.varsymbol') }}</th>
-                  <th v-if="tbl.isVisible('vendor')" class="text-left px-4 py-2 font-medium">{{ t('purchase_invoice.fields.vendor') }}</th>
-                  <th v-if="tbl.isVisible('vendor_number')" class="text-left px-4 py-2 font-medium w-32">{{ t('purchase_invoice.fields.vendor_invoice_number') }}</th>
-                  <th v-if="tbl.isVisible('kind')" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.document_kind') }}</th>
-                  <th v-if="tbl.isVisible('tax_date')" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.tax_date') }}</th>
-                  <th v-if="tbl.isVisible('due_date')" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.fields.due_date') }}</th>
-                  <th v-if="tbl.isVisible('amount')" class="text-right px-4 py-2 font-medium">{{ t('purchase_invoice.totals.with_vat') }}</th>
-                  <th v-if="tbl.isVisible('status')" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.status.draft') }}</th>
-                  <th v-if="tbl.isVisible('paid_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_paid_at') }}</th>
-                  <th v-if="tbl.isVisible('booked_at')" class="text-center px-4 py-2 font-medium">{{ t('invoice.col_booked_at') }}</th>
-                  <th v-if="tbl.isVisible('exchange_rate')" class="text-right px-4 py-2 font-medium">{{ t('invoice.col_exchange_rate') }}</th>
-                  <th v-if="tbl.isVisible('vat_deduction')" class="text-center px-4 py-2 font-medium">{{ t('purchase_invoice.col_vat_deduction') }}</th>
-                  <th v-if="tbl.isVisible('expense_category')" class="text-left px-4 py-2 font-medium">{{ t('purchase_invoice.classification.expense_category') }}</th>
-                  <th v-if="tbl.isVisible('locked')" class="text-center px-2 py-2 font-medium w-8">
-                    <span class="sr-only">{{ t('lock.column') }}</span>
-                  </th>
+                  <template v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key">
+                    <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left">{{ t(c.labelKey) }}</th>
+                    <SortableTh v-else :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                      :align="['amount', 'exchange_rate', 'base', 'vat', 'balance', 'paid_amount', 'remaining_amount'].includes(c.key) ? 'right' : 'left'"
+                      @toggle="onSortToggle" />
+                  </template>
                   <th class="px-1 py-2 w-8">
-                    <span class="sr-only">{{ t('common.expand_items') }}</span>
+                    <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                      :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+                    <span v-else class="sr-only">{{ t('common.expand_items') }}</span>
                   </th>
                 </tr>
               </thead>
@@ -1185,17 +1328,17 @@ async function bulkSetKind() {
                       />
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
+                  <td v-if="tbl.isVisible('number')" class="px-3 py-2.5 font-mono text-xs">
                     <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">#{{ inv.id }}</span>
                     </RouterLink>
                   </td>
-                  <td v-if="tbl.isVisible('vendor')" class="px-4 py-2.5">
-                    <div class="font-medium text-neutral-900">{{ inv.vendor_company_name }}</div>
-                    <div v-if="inv.vendor_ic" class="text-xs text-neutral-500 font-mono">{{ t('common.ic') }} {{ inv.vendor_ic }}</div>
+                  <td v-if="tbl.isVisible('vendor')" class="px-3 py-2.5">
+                    <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
-                  <td v-if="tbl.isVisible('vendor_number')" class="px-4 py-2.5 font-mono text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
+                  <td v-if="tbl.isVisible('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span
                         v-if="inv.extraction_warning"
@@ -1220,23 +1363,23 @@ async function bulkSetKind() {
                       <span>{{ inv.vendor_invoice_number }}</span>
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('kind')" class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
-                  <td v-if="tbl.isVisible('tax_date')" class="px-4 py-2.5 text-center text-xs">
+                  <td v-if="tbl.isVisible('kind')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ t(`purchase_invoice.document_kind.${inv.document_kind}`) }}</td>
+                  <td v-if="tbl.isVisible('tax_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="taxDateClass(inv.tax_date, inv.issue_date)">{{ formatDate(inv.tax_date || inv.issue_date) }}</span>
                   </td>
-                  <td v-if="tbl.isVisible('due_date')" class="px-4 py-2.5 text-center text-xs">
+                  <td v-if="tbl.isVisible('due_date')" class="px-3 py-2.5 text-center text-xs">
                     <span :class="isOverdue(inv.due_date, inv.status) ? 'text-danger-500 font-medium' : 'text-neutral-600'">
                       {{ formatDate(inv.due_date) }}
                     </span>
                   </td>
                   <td
                     v-if="tbl.isVisible('amount')"
-                    class="amount-cell px-4 py-2.5 text-right font-mono font-semibold text-neutral-900"
+                    class="amount-cell px-3 py-2.5 text-right font-mono font-semibold text-neutral-900"
                     :style="{ '--bar': amountBarWidth(inv, g) }"
                   >
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}
                   </td>
-                  <td v-if="tbl.isVisible('status')" class="px-4 py-2.5 text-center">
+                  <td v-if="tbl.isVisible('status')" class="px-3 py-2.5 text-center">
                     <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
@@ -1247,26 +1390,51 @@ async function bulkSetKind() {
                         {{ t('purchase_invoice.payment_ordered_badge') }}
                       </span>
                     </div>
+                    <div v-if="hasPaidShortfall(inv)" class="mt-1">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 border border-warning-500/30 whitespace-nowrap"
+                        :title="t('purchase_invoice.paid_shortfall_tooltip', { amount: formatMoney(inv.remaining_amount ?? 0, inv.currency) })">
+                        {{ t('purchase_invoice.paid_shortfall_badge') }}
+                      </span>
+                    </div>
                   </td>
-                  <td v-if="tbl.isVisible('paid_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('paid_amount')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
+                    <span v-if="showsPayment(inv)">{{ formatMoney(inv.paid_amount ?? 0, inv.currency) }}</span>
+                    <span v-else class="text-neutral-300">—</span>
+                  </td>
+                  <td v-if="tbl.isVisible('remaining_amount')" class="px-3 py-2.5 text-right font-mono text-xs" :class="remainingClass(inv)">
+                    <span v-if="showsPayment(inv)">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
+                    <span v-else class="text-neutral-300">—</span>
+                  </td>
+                  <td v-if="tbl.isVisible('paid_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.paid_at">{{ formatDate(inv.paid_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('booked_at')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('booked_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     <span v-if="inv.booked_at">{{ formatDate(inv.booked_at) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('exchange_rate')" class="px-4 py-2.5 text-right font-mono text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('exchange_rate')" class="px-3 py-2.5 text-right font-mono text-xs text-neutral-600">
                     <span v-if="inv.currency !== 'CZK' && inv.exchange_rate">{{ formatRate(inv.exchange_rate) }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
-                  <td v-if="tbl.isVisible('vat_deduction')" class="px-4 py-2.5 text-center text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('vat_deduction')" class="px-3 py-2.5 text-center text-xs text-neutral-600">
                     {{ vatDeductionLabel(inv) }}
                   </td>
-                  <td v-if="tbl.isVisible('expense_category')" class="px-4 py-2.5 text-xs text-neutral-600">
+                  <td v-if="tbl.isVisible('expense_category')" class="px-3 py-2.5 text-xs text-neutral-600">
                     <span v-if="inv.expense_category_label">{{ inv.expense_category_label }}</span>
                     <span v-else class="text-neutral-300">—</span>
                   </td>
+                  <td v-if="tbl.isVisible('base')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_without_vat, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('vat')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.total_vat, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('balance')" class="px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(inv.amount_to_pay, inv.currency) }}</td>
+                  <td v-if="tbl.isVisible('project')" class="px-3 py-2.5 text-xs text-neutral-600">{{ inv.project_name || '—' }}</td>
+                  <td v-if="tbl.isVisible('received_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.received_at ? formatDate(inv.received_at) : '—' }}</td>
+                  <td v-if="tbl.isVisible('payment_ordered_at')" class="px-3 py-2.5 text-center text-xs text-neutral-600">{{ inv.payment_ordered_at ? formatDate(inv.payment_ordered_at) : '—' }}</td>
+                  <td v-if="tbl.isVisible('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
+                  <td v-if="tbl.isVisible('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
+                  <td v-if="tbl.isVisible('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
+                <td v-if="tbl.isVisible('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
                   <td v-if="tbl.isVisible('locked')" class="px-2 py-2.5 text-center">
                     <PostingBadge v-if="inv.locked?.journal_entry_id"
                       :booked-at="inv.booked_at" :journal-entry-id="inv.locked.journal_entry_id" />
@@ -1293,7 +1461,7 @@ async function bulkSetKind() {
 
                 <!-- Náhled položek dokladu. Neklikatelný řádek (žádné @click), aby
                      klik do náhledu neotevřel fakturu — uživatel si tu chce jen číst. -->
-                <tr v-if="expandedId === inv.id" class="bg-neutral-50/60">
+                <tr v-if="expandedId === inv.id" class="table-detail-row bg-neutral-50/60">
                   <td :colspan="expandedColspan" class="px-6 py-3">
                     <div v-if="expandedLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
                     <div v-else-if="!expandedItems || expandedItems.length === 0" class="text-xs text-neutral-500">{{ t('common.no_data') }}</div>
@@ -1324,7 +1492,7 @@ async function bulkSetKind() {
         </div>
 
         <!-- Mobile: karty -->
-        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-hidden">
+        <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100">
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
@@ -1405,19 +1573,40 @@ async function bulkSetKind() {
                     {{ t('purchase_invoice.fields.due_date') }}: {{ formatDate(inv.due_date) }}
                   </span>
                 </div>
+                <!-- Částečná úhrada / nedoplatek: na mobilu jinak není kde to poznat. -->
+                <div v-if="showsPayment(inv) && (inv.paid_amount ?? 0) > 0.005 && (inv.remaining_amount ?? 0) > 0.005"
+                  class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mt-1 text-xs">
+                  <span class="text-neutral-500">
+                    {{ t('purchase_invoice.col_paid_amount') }}: <span class="font-mono text-neutral-700">{{ formatMoney(inv.paid_amount ?? 0, inv.currency) }}</span>
+                  </span>
+                  <span :class="remainingClass(inv)">
+                    {{ t('purchase_invoice.col_remaining_amount') }}: <span class="font-mono">{{ formatMoney(inv.remaining_amount ?? 0, inv.currency) }}</span>
+                    <span v-if="hasPaidShortfall(inv)"
+                      class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 border border-warning-500/30 whitespace-nowrap">
+                      {{ t('purchase_invoice.paid_shortfall_badge') }}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div v-if="mobileExtraFields(inv).length || tbl.isVisible('vat_breakdown')" class="mt-3 ml-8 border-t border-neutral-200 pt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div v-for="field in mobileExtraFields(inv)" :key="field.key" class="min-w-0">
+                <div class="text-neutral-500">{{ field.label }}</div>
+                <div class="font-medium text-neutral-800 break-words">{{ field.value }}</div>
+              </div>
+              <div v-if="tbl.isVisible('vat_breakdown')" class="col-span-2">
+                <div class="text-neutral-500 mb-1">{{ t('invoice.col_vat_breakdown') }}</div>
+                <VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" />
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <div v-if="page < pages" class="text-center mt-3">
-        <button @click="load(false)" :disabled="loadingMore"
-          class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium disabled:opacity-50 rounded-md inline-flex items-center gap-2 shadow-sm">
-          {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-        </button>
+      <div v-if="page < pages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
       </div>
     </div>
+    <ListLoadingSpinner :show="loading || loadingMore" />
+    <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
   </div>
 </template>

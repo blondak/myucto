@@ -231,7 +231,7 @@ final class JmhzReportWriter
             'Údaje z importovaného měsíčního hlášení JMHZ za ' . $item->period() . '.',
         );
         foreach ($desired as $field => $value) {
-            $body[$field] = $value;
+            $body[$field] = $field === 'workload_basis_points' ? (int) $value : $value;
         }
         if (($body['jmhz_workplace_municipality_code'] ?? null) === null) {
             $body['jmhz_workplace_country_code'] = null;

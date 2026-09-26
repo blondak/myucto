@@ -27,7 +27,7 @@ final class JournalVersioningSelfHealTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->pdo = Bootstrap::buildApp()->getContainer()->get(Connection::class)->pdo();
+            $this->pdo = Bootstrap::buildContainer()->get(Connection::class)->pdo();
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

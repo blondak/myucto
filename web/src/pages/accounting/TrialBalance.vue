@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
@@ -20,13 +21,17 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<TrialBalanceReport | null>(null)
 const loading = ref(false)
+const rangeAdjusted = ref(false)
 
 const filters = reactive({
   period_id: '' as number | '',
@@ -66,6 +71,17 @@ async function load() {
   loading.value = true
   try {
     report.value = await accountingApi.getTrialBalance(queryParams())
+    void router.replace({ query: {
+      period_id: String(filters.period_id),
+      from: filters.from || report.value.from,
+      to: filters.to || report.value.to,
+      analytics: filters.analytics ? '1' : '0',
+      ...(filters.after_closing ? { after_closing: '1' } : {}),
+      ...(filters.dimension_value_id ? {
+        dimension_value_id: String(filters.dimension_value_id),
+        dimension_descendants: filters.dimension_descendants ? '1' : '0',
+      } : {}),
+    } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -75,6 +91,7 @@ async function load() {
 }
 
 function onPeriodChange() {
+  rangeAdjusted.value = false
   const period = findAccountingPeriod(periods.value, filters.period_id)
   if (!period) return
   filters.from = period.starts_on
@@ -125,6 +142,20 @@ const COLUMNS: ColumnDef[] = [
   { key: 'ks_d', labelKey: 'accounting.trial_balance.col_ks_d' },
 ]
 const tbl = useTablePrefs('trial_balance', COLUMNS)
+const sortedRows = computed(() => {
+  const rows = report.value?.rows ?? []
+  const sort = tbl.sort.value
+  if (!sort) return rows
+  const key = sort.key === 'account' ? 'account_code' : sort.key
+  return [...rows].sort((a, b) => {
+    const left = a[key as keyof TrialBalanceRow]
+    const right = b[key as keyof TrialBalanceRow]
+    const cmp = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true })
+    return (sort.dir === 'asc' ? 1 : -1) * (cmp || a.account_code.localeCompare(b.account_code))
+  })
+})
 
 // Rozpad po analytikách je volba pohledu, ne filtr dat — firma, která analytiky
 // vede, je chce vidět pokaždé. Bez zapamatování předvaha default zobrazí holé
@@ -142,8 +173,25 @@ onMounted(async () => {
   const def = open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
     : periods.value[0]
-  if (def) {
-    filters.period_id = def.id
+  const q = route.query
+  const fromQuery = typeof q.from === 'string' ? q.from : ''
+  const toQuery = typeof q.to === 'string' ? q.to : ''
+  const queryPeriod = periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= toQuery)
+  const explicitPeriod = periods.value.find(p => p.id === Number(q.period_id))
+  const selectedPeriod = explicitPeriod ?? queryPeriod
+    ?? periods.value.find(p => p.starts_on <= toQuery && p.ends_on >= toQuery)
+    ?? periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= fromQuery)
+    ?? def
+  if (selectedPeriod) {
+    rangeAdjusted.value = !!fromQuery && !!toQuery && !queryPeriod
+    filters.period_id = selectedPeriod.id
+    if (fromQuery) filters.from = fromQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : fromQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : fromQuery
+    if (toQuery) filters.to = toQuery > selectedPeriod.ends_on ? selectedPeriod.ends_on : toQuery < selectedPeriod.starts_on ? selectedPeriod.starts_on : toQuery
+    const valueId = Number(q.dimension_value_id)
+    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_descendants = q.dimension_descendants !== '0'
+    if (q.analytics === '1' || q.analytics === '0') filters.analytics = q.analytics === '1'
+    filters.after_closing = q.after_closing === '1'
     await load()
   }
 })
@@ -183,12 +231,12 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_from') }}</label>
-          <DateInput v-model="filters.from" @change="load"
+          <DateInput v-model="filters.from" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.trial_balance.filter_to') }}</label>
-          <DateInput v-model="filters.to" @change="load"
+          <DateInput v-model="filters.to" @change="rangeAdjusted = false; load()"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div class="flex items-end pb-2">
@@ -210,6 +258,10 @@ onMounted(async () => {
         :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
         @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
     </div>
+
+    <DimensionReportLinks current="trial" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
+      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+    <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="trial-range-adjusted">{{ t('dimensions.trial_range_adjusted') }}</p>
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
@@ -259,19 +311,14 @@ onMounted(async () => {
         <table class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
-              <th v-if="tbl.isVisible('account')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.trial_balance.col_account') }}</th>
-              <th v-if="tbl.isVisible('name')" class="px-3 py-2 text-left font-medium">{{ t('accounting.trial_balance.col_name') }}</th>
-              <th v-if="tbl.isVisible('account_type')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_type') }}</th>
-              <th v-if="tbl.isVisible('ps_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ps_md') }}</th>
-              <th v-if="tbl.isVisible('ps_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ps_d') }}</th>
-              <th v-if="tbl.isVisible('turnover_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_turnover_md') }}</th>
-              <th v-if="tbl.isVisible('turnover_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_turnover_d') }}</th>
-              <th v-if="tbl.isVisible('ks_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ks_md') }}</th>
-              <th v-if="tbl.isVisible('ks_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.trial_balance.col_ks_d') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="['account', 'name', 'account_type'].includes(c.key) ? 'left' : 'right'"
+                @toggle="tbl.toggleSort" />
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="row in report.rows" :key="row.account_id" class="hover:bg-neutral-50">
+            <tr v-for="row in sortedRows" :key="row.account_id" class="hover:bg-neutral-50">
               <td v-if="tbl.isVisible('account')" class="px-3 py-2">
                 <RouterLink :to="statementLink(row)"
                   class="font-mono text-primary-600 hover:text-primary-700 hover:underline">

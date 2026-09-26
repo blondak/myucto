@@ -40,7 +40,7 @@ final class SampleDataPurgeTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db        = $c->get(Connection::class);
             $this->bankPosting = $c->get(BankPostingService::class);
             $this->generator = $c->get(SampleDataGenerator::class);

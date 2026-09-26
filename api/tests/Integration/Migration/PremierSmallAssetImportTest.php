@@ -38,7 +38,7 @@ final class PremierSmallAssetImportTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje - test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PremierImporter::class);
         } catch (\Throwable $e) {
@@ -281,7 +281,7 @@ final class PremierSmallAssetImportTest extends TestCase
     {
         $dir = $this->tmp . DIRECTORY_SEPARATOR . 'backup_' . md5((string) json_encode($flags));
         if (!is_dir($dir)) {
-            PremierBackup::extractArchive(SyntheticPremierBackup::writeCab($this->tmp . DIRECTORY_SEPARATOR . 'zaloha.icab', $this->tmp, false, $flags), $dir);
+            SyntheticPremierBackup::writeDir($dir, false, $flags);
         }
         return PremierBackup::open($dir);
     }

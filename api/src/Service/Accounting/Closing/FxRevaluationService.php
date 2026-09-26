@@ -101,7 +101,7 @@ final class FxRevaluationService
             }
 
             $remainingForeign = round((float) $item['amount_foreign'] * (1 - $ratio), 2);
-            if ($remainingForeign <= 0) {
+            if (self::cents($remainingForeign) === 0) {
                 continue;
             }
             $bookedCzk = round($remainingForeign * (float) $item['fx_rate'], 2);

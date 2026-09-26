@@ -42,7 +42,7 @@ final class DomainLoginFlowTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->login = $container->get(DomainLoginService::class);
             $this->sessions = $container->get(SessionManager::class);

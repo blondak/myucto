@@ -61,7 +61,7 @@ final class DimensionLockedPeriodTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->dimensions = $container->get(DimensionService::class);
@@ -214,6 +214,7 @@ final class DimensionLockedPeriodTest extends TestCase
         $purchase = $this->purchase('PREVIEW', [[1_000.00, 210.00], [500.00, 105.00]]);
         $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->projectType => $from], []);
         $entryId = $this->postPurchase($purchase);
+        $this->db->pdo()->prepare('UPDATE journal_entry_lines SET is_red_storno = 1 WHERE entry_id = ? AND supplier_id = ?')->execute([$entryId, $this->supplierId]);
         $this->periods->setStatus($this->periodId, $this->supplierId, 'closed');
         $dimsBefore = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
 
@@ -224,6 +225,8 @@ final class DimensionLockedPeriodTest extends TestCase
             self::assertSame($entryId, $line['entry_id']);
             self::assertSame([$this->projectType => $to], $line['dimensions']);
             self::assertNotNull($line['account_code']);
+            self::assertTrue($line['is_red_storno'] ?? false);
+            self::assertLessThan(0, \MyInvoice\Service\Accounting\JournalLineAmount::signed($line));
         }
 
         $refused = $this->dimensions->previewDocument($this->supplierId, 'purchase_invoice', $purchase, [], [

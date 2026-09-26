@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Portfolio\PortfolioAggregationService;
+use MyInvoice\Service\Portfolio\PortfolioCheckCache;
 use MyInvoice\Service\Portfolio\PortfolioCheckService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -23,6 +24,7 @@ final class PortfolioAction
     public function __construct(
         private readonly PortfolioAggregationService $portfolio,
         private readonly PortfolioCheckService $checks,
+        private readonly PortfolioCheckCache $checkCache,
     ) {}
 
     public function overview(Request $request, Response $response): Response
@@ -54,8 +56,10 @@ final class PortfolioAction
             return Json::error($response, 'not_found', 'Firma nenalezena.', 404);
         }
 
+        $now = new \DateTimeImmutable();
+
         return Json::ok($response, [
-            'summary' => $this->checks->summary($supplierId, new \DateTimeImmutable()),
+            'summary' => $this->checkCache->remember($supplierId, $now, fn () => $this->checks->summary($supplierId, $now)),
         ]);
     }
 }

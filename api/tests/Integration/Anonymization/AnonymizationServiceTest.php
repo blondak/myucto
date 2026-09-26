@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Anonymization;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Anonymization\AnonymizationOptions;
 use MyInvoice\Service\Anonymization\AnonymizationService;
@@ -51,7 +52,7 @@ final class AnonymizationServiceTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php') && !getenv('MYINVOICE_DB_NAME')) {
             self::markTestSkipped('Integrační databáze není nastavená.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->config = $container->get(Config::class);
         $testDb = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test', $testDb);
@@ -120,8 +121,8 @@ final class AnonymizationServiceTest extends TestCase
         );
         self::assertSame('0', $this->scalar($this->target, 'SELECT COUNT(*) FROM sessions'));
         self::assertSame(
-            $this->scalar($this->source, "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()"),
-            $this->scalar($this->target, "SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()"),
+            count(TriggerMetadata::read($this->server, $this->source)),
+            count(TriggerMetadata::read($this->server, $this->target)),
         );
         self::assertNotFalse($this->scalar($this->target, "SELECT v FROM app_meta WHERE k = 'anonymized_clone'"));
 

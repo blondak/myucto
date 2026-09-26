@@ -56,7 +56,7 @@ final class InstanceExportManifestTest extends TestCase
         }
         try {
             [self::$db, self::$export] = Connection::withoutSharedTestConnection(static function (): array {
-                $container = Bootstrap::buildApp()->getContainer();
+                $container = Bootstrap::buildContainer();
                 return [$container->get(Connection::class), $container->get(InstanceExportService::class)];
             });
         } catch (\Throwable $e) {

@@ -144,7 +144,7 @@ $expectedDatabase = $argv[4];
 require $root . '/api/vendor/autoload.php';
 $config = \MyInvoice\Infrastructure\Config\Config::load($root);
 if ((string) $config->get('db.name') !== $expectedDatabase) { exit(10); }
-$container = \MyInvoice\Bootstrap::buildApp()->getContainer();
+$container = \MyInvoice\Bootstrap::buildContainer();
 $pdo = $container->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
 if ((string) $pdo->query('SELECT DATABASE()')->fetchColumn() !== $expectedDatabase) { exit(11); }
 file_put_contents($controlFile, json_encode(['ready' => true, 'connection_id' => (int) $pdo->query('SELECT CONNECTION_ID()')->fetchColumn()], JSON_THROW_ON_ERROR));

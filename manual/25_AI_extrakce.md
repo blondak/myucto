@@ -25,8 +25,13 @@ kontrole"** a uživatel by měl řádky před zaúčtováním ověřit.
 
 ### 25.1.2 Jak zrušit warning
 
-- Tlačítko **Beru na vědomí** v banneru — pošle POST
-  `/api/purchase-invoices/{id}/dismiss-extraction-warning` a flag se smaže.
+- Hlášení mizí **po částech**. Odrážka návrhu druhu nákladu zmizí sama, jakmile
+  řádek druh nákladu dostane (v editoru i v kontrolním okně). S poslední odrážkou
+  zmizí celá sekce.
+- Ostatní body (reverse charge, nesedící součty apod.) odstraní tlačítko
+  **Vyřešeno** u daného bodu. Ostatní body zůstávají.
+- Tlačítko **Beru na vědomí** v banneru smaže celé hlášení najednou.
+- Když z hlášení nezbude nic, doklad přestane být „ke kontrole".
 - **Automaticky** při přechodu z draftu na další stav (received / booked /
   paid) — uživatel posunul stav = ověřil data.
 
@@ -87,6 +92,11 @@ z dokladu, takže zůstane poznat, o co šlo (PHM, poplatky).
 Koncept nese **varování**, že položky nebyly vytěženy — pokud potřebuješ doklad
 rozepsaný, doplň řádky ručně. Doklady, které jednotkové ceny uvádějí, se
 extrahují **beze změny** i nadále včetně rozpadu na položky.
+
+**Nulové řádky** se do dokladu nepřebírají. Typicky předplatné, které rozepisuje
+kvóty zahrnuté v ceně („50 GB reserved logs — 0,00"), nemění základ ani DPH.
+Slevy se zápornou částkou zůstávají. Pokud má doklad nulové všechny řádky,
+převezmou se všechny.
 
 ### 25.1.8 Kontrola dat a identifikátorů při extrakci
 
@@ -173,6 +183,48 @@ dávku. Tam lze vybraným dokladům změnit typ hromadně akcí **Nastavit typ**
 Nahoře na stránce je vždy vidět **poslední import** (datum a počet dokladů)
 s odkazem do seznamu. Starší importy najdeš v seznamu přijatých faktur ve filtru
 **Import (dávka)**.
+
+### 25.1.12 Kontrola vytěžených dokladů
+
+Po AI importu se otevře okno **Kontrola vytěžených dokladů**. Prochází doklady
+jeden po druhém a ukáže jen ty, které mají hlášení ke kontrole. Když žádný
+nemá, okno jen oznámí, že není co kontrolovat.
+
+- Nahoře je dodavatel, číslo dokladu, datum, stav a částka a odkaz **Otevřít doklad**.
+- Pod tím jsou ostatní části hlášení (reverse charge, nesouhlasící součty apod.),
+  každá s tlačítkem **Vyřešeno**.
+- Hlavní část je **druh nákladu po položkách**. Položka, u které AI navrhuje druh
+  nákladu a druh zatím není zvolený, je **orámovaná červeně**. U návrhu je jistota
+  a zdůvodnění, tlačítko **Použít** ho převezme. **Použít návrhy AI** převezme
+  všechny najednou.
+- **Uložit a další** uloží druhy nákladu a přejde na další doklad. Odrážky
+  vyřešených řádků z hlášení zmizí, nevyřešené body zůstanou.
+  **Přeskočit** nechá doklad beze změny.
+
+Doklad, na kterém je napsáno „zaplaceno", import zakládá jako **koncept**, aby šel
+po vytěžení volně upravit. Hlášení na to upozorní a tlačítko **Potvrdit a označit
+jako uhrazenou** doklad přijme a uhradí k datu vystavení. Výjimkou je účtenka
+zaplacená kartou, když má firma zapnuté vypořádání plateb kartou: ta se dál hned
+uhradí, spáruje s pohybem karty a zaúčtuje.
+
+Druh nákladu jde v okně změnit i u dokladu, který už koncept není, bez vynucené
+úpravy v editoru. Klient z portálu ho mění jen
+u konceptu. Zaúčtovaný doklad v otevřeném období se po změně
+přeúčtuje. Doklad v uzavřeném období nebo stornovaný okno jen zobrazí; opravu
+je potřeba udělat v editoru.
+
+Okno se otevírá:
+
+- samo po importu na stránce **Nákup → AI import** (jednotlivý doklad i dávka),
+  znovu tlačítkem **Zkontrolovat vytěžené**,
+- po **Vytěžit a vytvořit** v příchozích dokladech, před otevřením editoru,
+- po ručním spuštění **scan inboxu** ([§ 21](21_Importy.md)),
+- tlačítkem **Zkontrolovat** ve žlutém hlášení v detailu faktury,
+- tlačítkem **Zkontrolovat vytěžené** v seznamu přijatých faktur (vybrané
+  řádky, jinak všechny načtené doklady s hlášením).
+
+V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u výběru
+druhu nákladu s tlačítkem **Použít**.
 
 ## 25.2 Multi-provider AI brána (výběr poskytovatele)
 

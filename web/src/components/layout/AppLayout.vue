@@ -389,7 +389,7 @@ const navSections = computed<NavSection[]>(() => {
   // Sklad (Epic SKLAD) — nezávislé na accounting_mode (funguje i pro tax_evidence).
   const isStockEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled === true
   // Firma → Dimenze (migrace 1860) — opt-in; vypnuté nesmí v menu nic přidat.
-  const dimensionsEnabled = supplierStore.currentSupplier?.dimensions_enabled === true
+  const dimensionsEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.dimensions_enabled === true
   const sections: NavSection[] = [
     {
       // Grafy — přehledové/analytické položky nahoře v menu: akce k řešení, náhled
@@ -405,6 +405,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/crm',             label: t('nav.crm'),            icon: ICONS.crm },
         { to: '/stats',           label: t('nav.stats'),          icon: ICONS.stats },
         { to: '/purchase-stats',  label: t('nav.purchase_stats'), icon: ICONS.purchase },
+        ...(dimensionsEnabled && isDoubleEntry ? [{ to: '/dimension-stats', label: t('nav.dimensions'), icon: ICONS.tag, permission: 'accounting' as PermissionKey }] : []),
       ],
     },
     {

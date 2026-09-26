@@ -215,6 +215,7 @@ use MyInvoice\Action\PurchaseInvoice\BankPaymentOrderSubmissionAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceImportBatchesAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceDocumentKindAction;
+use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceExpenseKindsAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceActivityAction;
 use MyInvoice\Action\PurchaseInvoice\ScanInboxAction;
@@ -717,6 +718,7 @@ final class Routes
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
+        $app->put    ('/api/purchase-invoices/{id:[0-9]+}/expense-kinds',   SetPurchaseInvoiceExpenseKindsAction::class);
         // Kontrola dokladu proti vytěžení přílohy (odznak v detailu) a potvrzení „v pořádku"
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showPurchaseInvoice']);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgePurchaseInvoice']);
@@ -2157,6 +2159,8 @@ final class Routes
             // BankPostingService, ne obecná cesta.
             $g->get   ('/journal/repost-plan/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repostPlan']);
+            $g->post  ('/journal/repost-plan/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
+                [JournalAction::class, 'repostPlan']);
             $g->post  ('/journal/repost/{source:invoices|purchase-invoices|bank-transactions}/{id:[0-9]+}',
                 [JournalAction::class, 'repost']);
             // Podle jaké šablony (předkontace / pravidla) kontace vznikla a kde se opraví.
@@ -2305,10 +2309,22 @@ final class Routes
             $g->get('/reports/trial-balance/export',              [TrialBalanceAction::class, 'export']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}',        [AccountStatementAction::class, 'get']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}/export', [AccountStatementAction::class, 'export']);
+            // Otevřené položky a párování řádků deníku (okruhy) na libovolném účtu.
+            $g->post  ('/open-items/pairings/delete',                         [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'delete']);
+            $g->get   ('/open-items/pairings/{id:[0-9]+}',                    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'pairing']);
+            $g->post  ('/open-items/pairings/{id:[0-9]+}/lines',              [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'addLines']);
+            $g->delete('/open-items/pairings/{id:[0-9]+}/lines/{entryId:[0-9]+}/{lineNo:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'removeLine']);
+            $g->get   ('/open-items/{accountId:[0-9]+}',                      [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'get']);
+            $g->get   ('/open-items/{accountId:[0-9]+}/suggestions',          [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'suggestions']);
+            $g->post  ('/open-items/{accountId:[0-9]+}/suggestions/apply',    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'applySuggestions']);
+            $g->post  ('/open-items/{accountId:[0-9]+}/pairings',             [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'create']);
             $g->get('/reports/balance-sheet',                     [FinancialStatementAction::class, 'balanceSheet']);
             $g->get('/reports/balance-sheet/export',              [FinancialStatementAction::class, 'exportBalanceSheet']);
             $g->get('/reports/income-statement',                  [FinancialStatementAction::class, 'incomeStatement']);
             $g->get('/reports/income-statement/export',           [FinancialStatementAction::class, 'exportIncomeStatement']);
+            $g->get('/reports/statement-accounts',                [FinancialStatementAction::class, 'accountView']);
+            $g->get('/reports/statement-accounts/export',         [FinancialStatementAction::class, 'exportAccountView']);
+            $g->get('/reports/statement-accounts/tax-estimate',   [\MyInvoice\Action\Accounting\Reports\YearEndTaxEstimateAction::class, 'get']);
             // VZZ v účelovém členění (vyhl. 500/2002 Sb., př. 2 část II, § 39b) — jiný výkaz
             // s jinými řádky, proto vlastní adresa, ne `?variant=` nad druhovým.
             $g->get('/reports/income-statement-by-function',        [FinancialStatementAction::class, 'incomeStatementByFunction']);
@@ -2326,6 +2342,8 @@ final class Routes
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
+            $g->get('/reports/dimension-analytics',               [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'analytics']);
+            $g->get('/reports/dimension-analytics/export',        [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'exportAnalytics']);
             $g->get('/reports/dimension-profit/export',           [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'export']);
             $g->get('/reports/dimension-cash-flow',               \MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class);
             $g->get('/reports/dimension-cash-flow/export',        [\MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class, 'export']);
@@ -2533,6 +2551,8 @@ final class Routes
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
             $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
             $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
+            $g->get   ('/gopay/pending',                              [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'pending']);
+            $g->post  ('/gopay/pending/post',                         [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'postPending']);
             $g->get   ('/gopay/clearings',                            [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'list']);
             $g->post  ('/gopay/clearings/import',                     [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'import']);
             $g->get   ('/gopay/clearings/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'detail']);
@@ -3212,6 +3232,9 @@ final class Routes
         $app->get  ('/api/bank-statements/{id:[0-9]+}',      [BankStatementAction::class, 'detail']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/download', [BankStatementAction::class, 'download']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/export-gpc', \MyInvoice\Action\Bank\GpcExportAction::class);
+        $app->get  ('/api/bank-statements/{id:[0-9]+}/export-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'download']);
+        $app->get  ('/api/bank-statements/{id:[0-9]+}/unmatched-recipients', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'recipients']);
+        $app->post ('/api/bank-statements/{id:[0-9]+}/send-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'send']);
         $app->post ('/api/bank-statements/{id:[0-9]+}/pdf',  [BankStatementAction::class, 'uploadPdf']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/pdf',  [BankStatementAction::class, 'downloadPdf']);
         $app->delete('/api/bank-statements/{id:[0-9]+}/pdf', [BankStatementAction::class, 'deletePdf']);

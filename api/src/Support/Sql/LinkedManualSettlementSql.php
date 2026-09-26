@@ -1,0 +1,81 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Support\Sql;
+
+/**
+ * Jediný zdroj pravdy pro „doklad vyrovnaný RUČNÍM zápisem, který na něj účetní
+ * výslovně navázala" (`journal_entry_document_links`, migrace 1514).
+ *
+ * Ruční zápis (kurzový rozdíl 563/311, odpis 321/365, přeúčtování) nemá jinou vazbu
+ * na doklad než tuhle měkkou vazbu. Bez ní uzávěrková kontrola K3 hlásila doklad
+ * s vyrovnaným saldokontem jako nesoulad a saldokonto ho drželo otevřený, přestože
+ * hlavní kniha je na nule. Počítá se čistý pohyb zápisu na saldokontním účtu na
+ * straně, která saldo dokladu snižuje.
+ *
+ * Zápis navázaný na VÍC dokladů téhož typu se nepočítá: vazba nenese rozpad částky
+ * a přiznat ji celou každému dokladu by nesoulad schovalo. Doklad pak zůstane
+ * v kontrole i v saldu k ručnímu posouzení.
+ *
+ * Volají ji `ClosingRepository` (K3) a `SaldoRepository` (otevřené položky).
+ */
+final class LinkedManualSettlementSql
+{
+    /**
+     * Agregace `doc_id`, `settled` (CZK, kladné = snižuje saldo dokladu).
+     *
+     * Obsahuje placeholdery podle předaných výrazů: `$supplierExpr` a dvakrát `$asOfExpr`.
+     * Podmínka účtu dostává aliasy `ca` (řádkový účet) a `pa` (jeho rodič).
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param 'credit'|'debit' $settleSide strana, na které zápis saldo dokladu snižuje
+     */
+    public static function sql(
+        string $docType,
+        string $settleSide,
+        string $accountPredicate,
+        string $supplierExpr = '?',
+        string $asOfExpr = '?',
+    ): string {
+        if (!in_array($docType, ['invoice', 'purchase_invoice'], true)
+            || !in_array($settleSide, ['credit', 'debit'], true)) {
+            throw new \InvalidArgumentException('linked_manual_settlement_invalid');
+        }
+
+        return "SELECT dl.doc_id,
+                       SUM(CASE WHEN l.side = '{$settleSide}' THEN l.signed_amount ELSE -l.signed_amount END) AS settled
+                  FROM journal_entry_document_links dl
+                  JOIN journal_entries e ON e.id = dl.entry_id AND e.supplier_id = dl.supplier_id
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                 WHERE dl.supplier_id = {$supplierExpr} AND dl.doc_type = '{$docType}'
+                   AND e.source_type = 'manual'
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= {$asOfExpr}
+                   AND (e.reversed_by IS NULL OR rev.entry_date > {$asOfExpr})
+                   AND ({$accountPredicate})
+                   AND NOT EXISTS (
+                       SELECT 1 FROM journal_entry_document_links other
+                        WHERE other.supplier_id = dl.supplier_id AND other.entry_id = dl.entry_id
+                          AND other.doc_type = dl.doc_type AND other.doc_id <> dl.doc_id
+                   )
+                 GROUP BY dl.doc_id";
+    }
+
+    /** Podmínka „řádek je na saldokontním účtu s tímto prefixem" (vč. analytik). */
+    public static function accountPrefixPredicate(string $prefix): string
+    {
+        if (preg_match('/^\d{3}$/D', $prefix) !== 1) {
+            throw new \InvalidArgumentException('linked_manual_settlement_prefix');
+        }
+        return "ca.account_code LIKE '{$prefix}%' OR COALESCE(pa.account_code, '') LIKE '{$prefix}%'";
+    }
+
+    /** Podmínka „řádek je na účtu `$accountId` nebo jeho analytice". */
+    public static function accountIdPredicate(int $accountId): string
+    {
+        return "ca.id = {$accountId} OR ca.parent_id = {$accountId}";
+    }
+}

@@ -10,6 +10,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
@@ -21,6 +22,8 @@ use MyInvoice\Service\Accounting\Reports\DimensionProfitService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Tax\Return\NonDeductibleCostsService;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -68,7 +71,7 @@ final class DimensionReportsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
@@ -182,6 +185,24 @@ final class DimensionReportsTest extends TestCase
         self::assertSame([$a => 1, $b => 2, $c => 2], $cents, 'Zbytek po zaokrouhlení nese hodnota s nižším id při shodě podílů.');
     }
 
+    public function testRedStornoSplitReducesEachDimensionCost(): void
+    {
+        $a = $this->value($this->centerType, 'R-S1');
+        $b = $this->value($this->centerType, 'R-S2');
+        $split = ['dimension_splits' => [$this->centerType => [$a => 0.5, $b => 0.5]]];
+        $this->post([['518', 'debit', 100.00, $split], ['321', 'credit', 100.00]]);
+        $this->post([
+            ['518', 'debit', 20.00, $split + ['is_red_storno' => true]],
+            ['321', 'credit', 20.00, ['is_red_storno' => true]],
+        ]);
+
+        $rows = array_column($this->profit->build($this->supplierId, $this->centerType, self::FROM, self::TO, [$this->supplierId])['rows'], null, 'value_id');
+        foreach ([$a, $b] as $valueId) {
+            self::assertEqualsWithDelta(40.0, $rows[$valueId]['own']['cost'], 0.001);
+            self::assertEqualsWithDelta(-40.0, $this->incomeProfit($this->dimensions->filter($this->supplierId, $valueId)), 0.001);
+        }
+    }
+
     public function testJournalFilterFindsEntryWithSplitLine(): void
     {
         $a = $this->value($this->centerType, 'R-J1');
@@ -272,11 +293,26 @@ final class DimensionReportsTest extends TestCase
         $dims = ['dimensions' => [(int) $type['id'] => $project]];
         $this->post([['311', 'debit', 800.00], ['602', 'credit', 800.00, $dims]]);
         $this->post([['518', 'debit', 300.00, $dims], ['321', 'credit', 300.00]], $second);
+        $this->post([['518', 'debit', 50.00], ['321', 'credit', 50.00]]);
 
         $alone = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO, [$this->supplierId]);
         $group = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO, [$this->supplierId, $second]);
         self::assertEqualsWithDelta(800.00, array_column($alone['rows'], null, 'value_id')[$project]['total']['result'], 0.001);
         self::assertEqualsWithDelta(500.00, array_column($group['rows'], null, 'value_id')[$project]['total']['result'], 0.001, 'Skupinový projekt sečte obě firmy.');
+
+        $companies = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO,
+            [$this->supplierId, $second], ['companies' => true]);
+        $byCompany = array_column($companies['companies'], null, 'id');
+        self::assertEqualsWithDelta(800.00, $byCompany[$this->supplierId]['revenue'], 0.001);
+        self::assertEqualsWithDelta(50.00, $byCompany[$this->supplierId]['cost'], 0.001);
+        self::assertEqualsWithDelta(300.00, $byCompany[$second]['cost'], 0.001);
+        self::assertEqualsWithDelta($companies['totals']['result'], array_sum(array_column($companies['companies'], 'result')), 0.001);
+
+        $branch = $this->profit->build($this->supplierId, (int) $type['id'], self::FROM, self::TO,
+            [$this->supplierId, $second], ['companies' => true, 'value_id' => $project]);
+        $branchCompanies = array_column($branch['companies'], null, 'id');
+        self::assertEqualsWithDelta(0.00, $branchCompanies[$this->supplierId]['cost'], 0.001);
+        self::assertEqualsWithDelta(500.00, array_sum(array_column($branch['companies'], 'result')), 0.001);
 
         $cf = $this->cashFlow->build(self::FROM, self::TO, [
             $this->supplierId => $this->dimensions->filter($this->supplierId, $project),
@@ -285,6 +321,128 @@ final class DimensionReportsTest extends TestCase
         self::assertEqualsWithDelta(500.00, $cf['profit'], 0.001);
         self::assertSame([$this->supplierId, $second], $cf['supplier_ids']);
         unset($pdo);
+    }
+
+    public function testAnalyticsMonthlySplitsAndCompanyTotalsMatchProfitReport(): void
+    {
+        $groupId = $this->dimensions->createGroup($this->supplierId, 'Skupina analytiky');
+        $second = $this->newSupplier($this->supplierId, 'Dceřiná firma analytiky');
+        $this->prepareCompany($second);
+        $this->dimensions->joinGroup($second, $groupId, [$this->supplierId, $second], true);
+        $type = $this->dimensions->createType($this->supplierId, ['code' => 'analytics', 'name' => 'Analytika', 'kind' => 'project', 'level' => 'global']);
+        $typeId = (int) $type['id'];
+        $this->db->pdo()->prepare("UPDATE chart_of_accounts SET tax_deductibility = 'non_deductible' WHERE supplier_id = ? AND account_code = '518'")
+            ->execute([$this->supplierId]);
+        $parent = $this->value($typeId, 'A');
+        $child = $this->value($typeId, 'A-1', $parent);
+        $other = $this->value($typeId, 'B');
+        $split = ['dimension_splits' => [$typeId => [$child => 0.5, $other => 0.5]]];
+        $this->post([['311', 'debit', 101.01], ['602', 'credit', 101.01, $split]]);
+        $this->post([['518', 'debit', 30.00, ['dimensions' => [$typeId => $child]]], ['321', 'credit', 30.00]], $second);
+        $this->post([['518', 'debit', 10.00], ['321', 'credit', 10.00]]);
+
+        $companies = [
+            ['id' => $this->supplierId, 'company_name' => 'Mateřská firma'],
+            ['id' => $second, 'company_name' => 'Dceřiná firma'],
+        ];
+        $analytics = $this->profit->analytics($this->supplierId, $typeId, self::YEAR, $companies);
+        $report = $this->profit->build($this->supplierId, $typeId, self::FROM, self::TO, [$this->supplierId, $second]);
+        self::assertSame($report['totals'], array_intersect_key($analytics['totals'], $report['totals']));
+        self::assertSame($report['unassigned'], array_intersect_key($analytics['unassigned'], $report['unassigned']));
+        self::assertCount(12, $analytics['monthly']);
+        self::assertEqualsWithDelta(101.01, $analytics['monthly'][4]['revenue'], 0.001);
+        self::assertEqualsWithDelta(40.00, $analytics['monthly'][4]['cost'], 0.001);
+        self::assertEqualsWithDelta(0.00, $analytics['previous_monthly'][4]['result'], 0.001);
+        $series = (array) $analytics['value_monthly'];
+        $reportRows = array_column($report['rows'], null, 'value_id');
+        self::assertEqualsWithDelta($reportRows[$parent]['total']['revenue'], $series[(string) $parent][4]['revenue'], 0.001);
+        self::assertEqualsWithDelta($reportRows[$other]['total']['revenue'], $series[(string) $other][4]['revenue'], 0.001);
+        self::assertEqualsWithDelta(101.01, $series[(string) $parent][4]['revenue'] + $series[(string) $other][4]['revenue'], 0.001);
+        self::assertEqualsWithDelta(30.00, $series[(string) $parent][4]['cost'], 0.001);
+        self::assertEqualsWithDelta(10.00, $series[''][4]['cost'], 0.001);
+        self::assertEqualsWithDelta(30.00, $analytics['totals']['tax_deductible_cost'], 0.001);
+        self::assertEqualsWithDelta(10.00, $analytics['totals']['non_deductible_cost'], 0.001);
+        self::assertEqualsWithDelta(10.00, (new NonDeductibleCostsService($this->db))->sum($this->supplierId, self::FROM, self::TO), 0.001);
+        self::assertEqualsWithDelta(61.01, array_sum(array_column($analytics['companies'], 'result')), 0.001);
+        $companyValues = (array) $analytics['company_value_totals'];
+        $secondValues = (array) $companyValues[$second];
+        self::assertEqualsWithDelta(-30.00, $secondValues[(string) $parent]['result'], 0.001);
+
+        $action = $this->container->get(DimensionProfitAction::class);
+        $invalid = $action->analytics($this->request(['type_id' => (string) $typeId, 'year' => (string) self::YEAR, 'supplier_id' => '999999999']), new Psr7Response());
+        self::assertSame(403, $invalid->getStatusCode());
+        $foreign = $action->analytics($this->request(['type_id' => (string) $typeId, 'year' => (string) self::YEAR, 'supplier_id' => (string) $second]), new Psr7Response());
+        self::assertSame(403, $foreign->getStatusCode());
+        $visible = $this->json($action->analytics($this->request(['type_id' => (string) $typeId, 'year' => (string) self::YEAR, 'supplier_id' => 'all']), new Psr7Response()));
+        self::assertSame([$this->supplierId], ($visible['data'] ?? $visible)['supplier_ids']);
+    }
+
+    public function testSupplierBoundTokenCannotReadOtherGroupCompanies(): void
+    {
+        $groupId = $this->dimensions->createGroup($this->supplierId, 'Skupina tokenu');
+        $second = $this->newSupplier($this->supplierId, 'Druhá firma tokenu');
+        $this->prepareCompany($second);
+        $this->dimensions->joinGroup($second, $groupId, [$this->supplierId, $second], true);
+        $type = $this->dimensions->createType($this->supplierId, ['code' => 'token-project', 'name' => 'Projekt tokenu', 'kind' => 'project', 'level' => 'global']);
+        $typeId = (int) $type['id'];
+        $value = $this->value($typeId, 'T-1');
+        $this->post([['311', 'debit', 100.00], ['602', 'credit', 100.00, ['dimensions' => [$typeId => $value]]]], $second);
+
+        $request = $this->request(['type_id' => (string) $typeId, 'year' => (string) self::YEAR, 'supplier_id' => 'all'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => $this->supplierId]);
+        $action = $this->container->get(DimensionProfitAction::class);
+        $analytics = $this->json($action->analytics($request, new Psr7Response()));
+        self::assertSame([$this->supplierId], ($analytics['data'] ?? $analytics)['supplier_ids']);
+        self::assertEqualsWithDelta(0.0, ($analytics['data'] ?? $analytics)['totals']['revenue'], 0.001);
+        self::assertSame(403, $action->analytics($request->withQueryParams([
+            'type_id' => (string) $typeId, 'year' => (string) self::YEAR, 'supplier_id' => (string) $second,
+        ]), new Psr7Response())->getStatusCode());
+
+        $report = $this->json($action($request->withQueryParams([
+            'type_id' => (string) $typeId, 'from' => self::FROM, 'to' => self::TO, 'scope' => 'group', 'companies' => '1',
+        ]), new Psr7Response()));
+        self::assertSame([$this->supplierId], ($report['data'] ?? $report)['supplier_ids']);
+        self::assertSame([$this->supplierId], array_column(($report['data'] ?? $report)['companies'], 'id'));
+
+        $domainRequest = $request
+            ->withoutAttribute(AuthMiddleware::ATTR_API_TOKEN)
+            ->withAttribute(TenantDomainMiddleware::ATTR_CONTEXT, new TenantDomainContext(
+                TenantDomainContext::CUSTOM, 'company.example', 'https://company.example', supplierId: $this->supplierId,
+            ));
+        $domainReport = $this->json($action->analytics($domainRequest, new Psr7Response()));
+        self::assertSame([$this->supplierId], ($domainReport['data'] ?? $domainReport)['supplier_ids']);
+    }
+
+    public function testAnalyticsClassifiesNondeductiblePurchaseAndIncomeTaxSeparately(): void
+    {
+        $value = $this->value($this->centerType, 'TAX');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id)
+            SELECT ?, 'Syntetický dodavatel', 'Testovací 1', 'Praha', '10000', country_id, 'tax-test@example.invalid', default_currency_id FROM supplier WHERE id = ?")
+            ->execute([$this->supplierId, $this->supplierId]);
+        $vendorId = (int) $pdo->lastInsertId();
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $pdo->prepare("INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot, status, tax_deductible, created_by)
+            VALUES (?, ?, 'TEST-DIM-TAX', ?, ?, ?, ?, ?, '{}', 'received', 0, ?)")
+            ->execute([$this->supplierId, $vendorId, self::DATE, self::DATE, self::DATE, self::DATE, $currencyId, $this->userId]);
+        $purchaseId = (int) $pdo->lastInsertId();
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $purchaseId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 25.00, 'dimensions' => [$this->centerType => $value]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 25.00],
+        ], ['entry_date' => self::DATE, 'posted_by' => $this->userId]);
+        $this->post([['591', 'debit', 5.00, ['dimensions' => [$this->centerType => $value]]], ['341', 'credit', 5.00]]);
+
+        $analytics = $this->profit->analytics($this->supplierId, $this->centerType, self::YEAR, [
+            ['id' => $this->supplierId, 'company_name' => 'Testovací firma'],
+        ]);
+        self::assertEqualsWithDelta(30.00, $analytics['totals']['cost'], 0.001);
+        self::assertEqualsWithDelta(0.00, $analytics['totals']['tax_deductible_cost'], 0.001);
+        self::assertEqualsWithDelta(25.00, $analytics['totals']['non_deductible_cost'], 0.001);
+        self::assertEqualsWithDelta(5.00, $analytics['totals']['income_tax_cost'], 0.001);
+        self::assertEqualsWithDelta(25.00, (new NonDeductibleCostsService($this->db))->sum($this->supplierId, self::FROM, self::TO), 0.001);
+        $values = (array) $analytics['value_totals'];
+        self::assertEqualsWithDelta(25.00, $values[(string) $value]['non_deductible_cost'], 0.001);
     }
 
     public function testEndpointsReturnReportAndXlsx(): void
@@ -319,6 +477,23 @@ final class DimensionReportsTest extends TestCase
         $xlsx = $profit->export($this->request(['type_id' => (string) $this->centerType, 'from' => self::FROM, 'to' => self::TO]), new Psr7Response());
         self::assertSame(200, $xlsx->getStatusCode());
         self::assertStringStartsWith('PK', (string) $xlsx->getBody());
+        $pdf = $profit->export($this->request(['type_id' => (string) $this->centerType, 'from' => self::FROM, 'to' => self::TO, 'format' => 'pdf']), new Psr7Response());
+        self::assertStringStartsWith('%PDF', (string) $pdf->getBody());
+        $analytics = $profit->exportAnalytics($this->request([
+            'type_id' => (string) $this->centerType, 'year' => (string) self::YEAR,
+            'table' => 'monthly', 'value_id' => (string) $a, 'format' => 'xlsx',
+        ]), new Psr7Response());
+        self::assertStringStartsWith('PK', (string) $analytics->getBody());
+        $analyticsPdf = $profit->exportAnalytics($this->request([
+            'type_id' => (string) $this->centerType, 'year' => (string) self::YEAR,
+            'table' => 'comparison', 'format' => 'pdf',
+        ]), new Psr7Response());
+        self::assertStringStartsWith('%PDF', (string) $analyticsPdf->getBody());
+        $invalidValue = $profit->exportAnalytics($this->request([
+            'type_id' => (string) $this->centerType, 'year' => (string) self::YEAR,
+            'table' => 'monthly', 'value_id' => '999999999', 'format' => 'pdf',
+        ]), new Psr7Response());
+        self::assertSame(404, $invalidValue->getStatusCode());
     }
 
     // ── pomocné ──────────────────────────────────────────────────────────────

@@ -12,6 +12,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\InvoiceListDetailsRepository;
+use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
 use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
@@ -25,6 +27,7 @@ use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\PostingOriginService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -79,6 +82,7 @@ final class JournalAction
         private readonly AiPostingOverrideResolver $aiOverrides,
         private readonly EmbeddingWriter $embeddingWriter,
         private readonly JournalEntryRepository $journal,
+        private readonly InvoiceListDetailsRepository $listDetails,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
@@ -102,6 +106,7 @@ final class JournalAction
         private readonly JournalIntegrityService $integrity,
         private readonly LoggerInterface $log,
         private readonly DimensionService $dimensions,
+        private readonly DimensionListSummaryRepository $dimensionSummaries,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -116,6 +121,8 @@ final class JournalAction
         $offset = ($page - 1) * $perPage;
 
         $filters = $this->parseFilters($q, $supplierId);
+        $filters['sort_key'] = is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '';
+        $filters['sort_dir'] = is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '';
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         $result = $this->journal->paginate($supplierId, $filters, $perPage, $offset);
         $provenance = $this->automationProvenance->forJournalEntries(
@@ -126,9 +133,37 @@ final class JournalAction
         // viz JournalLinkService::hasRelatedMap(). Bez něj by účetní musel rozbalit
         // každý řádek, aby zjistil, jestli je zápis na něco navázaný.
         $related = $this->links->hasRelatedMap($supplierId, $result['items']);
+        $includePosting = ($q['include_posting_accounts'] ?? null) === '1';
+        $includeVat = ($q['include_vat_breakdown'] ?? null) === '1';
+        $includeDimensions = ($q['include_dimensions'] ?? null) === '1';
+        $entryIds = array_map(static fn (array $item): int => (int) $item['id'], $result['items']);
+        $linesByEntry = $includePosting
+            ? $this->journal->linesForEntries($entryIds, $supplierId)
+            : [];
+        $dimensionLabels = $includeDimensions ? $this->dimensionSummaries->forJournalEntries($supplierId, $entryIds) : [];
+        $vatBySource = [];
+        if ($includeVat) {
+            foreach (['invoice', 'purchase_invoice'] as $source) {
+                $ids = array_values(array_unique(array_map(
+                    static fn (array $item): int => (int) $item['source_id'],
+                    array_filter($result['items'], static fn (array $item): bool => $item['source_type'] === $source && $item['source_id'] !== null),
+                )));
+                $vatBySource[$source] = $this->listDetails->vatForDocuments($supplierId, $source, $ids);
+            }
+        }
         foreach ($result['items'] as &$item) {
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
             $item['has_related'] = isset($related[(int) $item['id']]);
+            if ($includePosting) {
+                $item['posting_lines'] = $linesByEntry[(int) $item['id']] ?? [];
+            }
+            if ($includeVat) {
+                $item['vat_breakdown'] = $vatBySource[$item['source_type']][(int) $item['source_id']]['vat_breakdown'] ?? [];
+                $item['source_currency'] = $vatBySource[$item['source_type']][(int) $item['source_id']]['source_currency'] ?? null;
+            }
+            if ($includeDimensions) {
+                $item['dimension_labels'] = $dimensionLabels[(int) $item['id']] ?? [];
+            }
         }
         unset($item);
         return Json::ok($response, [
@@ -584,6 +619,9 @@ final class JournalAction
      *
      * Rozhodnutí přepsat × stornovat × odmítnout dělá {@see DocumentRepostService},
      * tedy TATÁŽ služba, která ho pak provede — náhled se s výsledkem nemůže rozejít.
+     *
+     * POST s tělem `{ lines: [...] }` vrátí rozhodnutí pro ty konkrétní opravené řádky
+     * (přepis na místě v zamčeném datu, nebo důvod storna). Nic nezapisuje.
      */
     public function repostPlan(Request $request, Response $response, array $args): Response
     {
@@ -597,6 +635,19 @@ final class JournalAction
         }
 
         try {
+            if (strtoupper($request->getMethod()) === 'POST') {
+                $body = (array) ($request->getParsedBody() ?? []);
+                $lines = is_array($body['lines'] ?? null) ? $this->parsePostingLines($body['lines']) : null;
+                if ($lines === null) {
+                    return Json::error(
+                        $response,
+                        'validation_failed',
+                        'Každý řádek potřebuje account_code, side (debit/credit) a kladnou částku.',
+                        422,
+                    );
+                }
+                return Json::ok($response, $this->repost->previewPlan($supplierId, $sourceType, $docId, $lines));
+            }
             return Json::ok($response, $this->repost->plan($supplierId, $sourceType, $docId));
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
@@ -894,6 +945,7 @@ final class JournalAction
                 'account_name' => $names[$code] ?? null,
                 'side'         => (string) $l['side'],
                 'amount'       => round((float) $l['amount'], 2),
+                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
                 'cost_center'  => $l['cost_center'] ?? null,
             ];
         }, $lines);
@@ -904,7 +956,7 @@ final class JournalAction
     {
         $delta = 0;
         foreach ($lines as $l) {
-            $cents = (int) round(((float) $l['amount']) * 100);
+            $cents = JournalLineAmount::signedCents($l);
             $delta += (string) $l['side'] === 'debit' ? $cents : -$cents;
         }
 
@@ -932,7 +984,7 @@ final class JournalAction
      * pod uživatelovým jménem, aniž by ho kdy viděl.
      *
      * @param list<mixed> $raw
-     * @return list<array{account_code:string, side:string, amount:float}>|null
+     * @return list<array{account_code:string, side:string, amount:float, is_red_storno:bool}>|null
      */
     private function parsePostingLines(array $raw): ?array
     {
@@ -947,7 +999,11 @@ final class JournalAction
             if ($code === '' || !in_array($side, ['debit', 'credit'], true) || $amount <= 0) {
                 return null;
             }
-            $out[] = ['account_code' => $code, 'side' => $side, 'amount' => $amount];
+            if (array_key_exists('is_red_storno', $line) && !is_bool($line['is_red_storno'])) {
+                return null;
+            }
+            $out[] = ['account_code' => $code, 'side' => $side, 'amount' => $amount,
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false)];
         }
 
         return $out === [] ? null : $out;
@@ -1579,9 +1635,25 @@ final class JournalAction
                 $deletedLines[(int) $row['id']] = $this->journal->linesForEntry((int) $row['id'], $supplierId);
             }
 
+            // Doklad po stornu často nese NÁHRADNÍ živý zápis (přeúčtování stornem).
+            // Dvojice se pak smaže, ale doklad zůstává zaúčtovaný: nevrací se do fronty
+            // ani se neodemyká.
+            $replacementId = null;
+            if ($sourceId !== null) {
+                $replacement = $pdo->prepare(
+                    'SELECT id FROM journal_entries
+                      WHERE supplier_id = ? AND source_type = ? AND source_id = ?
+                        AND reversed_by IS NULL AND id NOT IN (?, ?)
+                      LIMIT 1'
+                );
+                $replacement->execute([$supplierId, $sourceType, $sourceId, (int) $original['id'], $reversalId]);
+                $found = $replacement->fetchColumn();
+                $replacementId = $found === false ? null : (int) $found;
+            }
+
             // Bankovní pohyb se vrací do fronty k zaúčtování. Zápis bez zdroje
             // (pohyb už smazaný) nemá co vracet — proto podmínka na source_id.
-            if ($sourceType === 'bank' && $sourceId !== null) {
+            if ($sourceType === 'bank' && $sourceId !== null && $replacementId === null) {
                 $this->bankPosting->prepareEntryDeletion(
                     $supplierId,
                     $sourceId,
@@ -1590,9 +1662,11 @@ final class JournalAction
                 );
             }
 
-            // Protizápis první: `journal_entries.reversed_by` je cizí klíč se SET NULL,
-            // takže po jeho smazání už původní zápis stornovaný není a jde smazat.
-            foreach ([$reversalId, (int) $original['id']] as $deleteId) {
+            // Původní zápis PRVNÍ. `journal_entries.reversed_by` je cizí klíč se SET NULL:
+            // smazání protizápisu napřed by původní zápis „oživilo" (reversed_by NULL →
+            // active_source_id) a vedle náhradního zápisu téhož dokladu by to narazilo
+            // na unikát uq_je_supplier_active_source. Na původní zápis nic neodkazuje.
+            foreach ([(int) $original['id'], $reversalId] as $deleteId) {
                 $deleted = $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?');
                 $deleted->execute([$deleteId, $supplierId]);
                 if ($deleted->rowCount() !== 1) {
@@ -1602,7 +1676,7 @@ final class JournalAction
 
             $statusFrom = null;
             $statusTo = null;
-            if ($sourceId !== null && $sourceType === 'purchase_invoice') {
+            if ($replacementId === null && $sourceId !== null && $sourceType === 'purchase_invoice') {
                 $doc = $pdo->prepare('SELECT status FROM purchase_invoices WHERE id = ? AND supplier_id = ? FOR UPDATE');
                 $doc->execute([$sourceId, $supplierId]);
                 $status = $doc->fetchColumn();
@@ -1616,7 +1690,7 @@ final class JournalAction
                           WHERE id = ? AND supplier_id = ?"
                     )->execute([$sourceId, $supplierId]);
                 }
-            } elseif ($sourceId !== null && $sourceType === 'invoice') {
+            } elseif ($replacementId === null && $sourceId !== null && $sourceType === 'invoice') {
                 $pdo->prepare('UPDATE invoices SET booked_at = NULL, booked_by = NULL WHERE id = ? AND supplier_id = ?')
                     ->execute([$sourceId, $supplierId]);
             }
@@ -1637,6 +1711,7 @@ final class JournalAction
                     'source_id' => $sourceId,
                     'document_status_from' => $statusFrom,
                     'document_status_to' => $statusTo,
+                    'replacement_entry_id' => $replacementId,
                     'entries' => array_map(static fn (array $row): array => [
                         'id' => (int) $row['id'],
                         'document_no' => $row['document_no'],
@@ -1661,6 +1736,18 @@ final class JournalAction
             );
 
             if ($ownTx) $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            if (($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'entry_delete_conflict',
+                'Storno dvojici se nepodařilo smazat, protože na zápisy navazuje jiný záznam v účetnictví '
+                    . '(například náhradní zápis dokladu nebo párování). Nic se nesmazalo.',
+                409,
+            );
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;

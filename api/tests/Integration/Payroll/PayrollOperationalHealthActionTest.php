@@ -35,7 +35,7 @@ final class PayrollOperationalHealthActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->appTimezone = (string) $container->get(Config::class)
             ->get('app.timezone', 'Europe/Prague');

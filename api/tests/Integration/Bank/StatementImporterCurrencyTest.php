@@ -50,7 +50,7 @@ final class StatementImporterCurrencyTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(StatementImporter::class);
             $this->action = $container->get(BankStatementAction::class);

@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Settings;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -33,6 +35,7 @@ final class CompanyProfileAction
     public function __construct(
         private readonly CompanyProfileExporter $exporter,
         private readonly CompanyProfileImporter $importer,
+        private readonly DimensionRepository $dimensions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -81,7 +84,18 @@ final class CompanyProfileAction
         }
 
         try {
-            $present = array_keys(CompanyProfileFormat::sections($profile, $only));
+            $sections = CompanyProfileFormat::sections($profile, $only);
+            $present = array_keys($sections);
+            if (LicenseMiddleware::state($request)?->hasCommercialFeatures() === false) {
+                $company = (array) ($sections['company'] ?? []);
+                $dimensionTypes = (array) (($sections['dimensions']['types'] ?? []));
+                if ($dimensionTypes !== [] || ($sections['dimension_defaults'] ?? []) !== []
+                    || ($sections['dimension_rules'] ?? []) !== []
+                    || (!empty($company['dimensions_enabled']) && !$this->dimensions->enabled($supplierId))) {
+                    return Json::error($response, 'license_commercial_feature_unavailable',
+                        'Dimenze vyžadují aktivní licenci účetnictví.', 403);
+                }
+            }
             $missing = [];
             foreach ($present as $section) {
                 $permission = CompanyProfileFormat::SECTION_PERMISSIONS[$section];

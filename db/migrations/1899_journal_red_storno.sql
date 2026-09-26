@@ -33,6 +33,5 @@ ALTER TABLE journal_entry_lines
 ALTER TABLE journal_entry_lines
     ADD CONSTRAINT chk_jel_red_storno_boolean CHECK (is_red_storno IN (0, 1));
 
--- Před sloučením větve nesla stejná změna číslo nyní obsazené masterem.
--- Odstraňujeme jen její starý evidenční název, nikoli změnu schématu.
-DELETE FROM migrations WHERE filename = '1866_journal_red_storno.sql';
+-- Úklid názvu použitého v dosud nevydané pracovní větvi.
+DELETE FROM migrations WHERE filename IN ('1866_journal_red_storno.sql', '1893_journal_red_storno.sql');

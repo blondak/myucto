@@ -59,7 +59,7 @@ final class CashDocumentServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db        = $container->get(Connection::class);
             $this->service   = $container->get(CashDocumentService::class);
             $this->registers = $container->get(CashRegisterService::class);
@@ -125,6 +125,35 @@ final class CashDocumentServiceTest extends TestCase
         self::assertEqualsWithDelta(1000.00, $byAcc['501']['debit'], 0.001);
         self::assertEqualsWithDelta(210.00, $byAcc['343.100']['debit'], 0.001);
         self::assertEqualsWithDelta(1210.00, $byAcc['211']['credit'], 0.001);
+    }
+
+    public function testPdfPostingSerializesRedStornoAmountsWithTheirAccountingSign(): void
+    {
+        $reg = $this->makeRegister();
+        $cash = $this->service->create($this->supplierId, $this->sale($reg, 100.00), $this->userId);
+        $entryId = (int) $cash['journal_entry_id'];
+
+        $rewritten = $this->posting->postDocument($this->supplierId, 'cash', (int) $cash['id'], [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00, 'is_red_storno' => true],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 100.00, 'is_red_storno' => true],
+        ], [
+            'entry_date' => self::YEAR . '-06-15',
+            'description' => 'Červené storno pokladního zápisu',
+            'posted' => true,
+            'posted_by' => $this->userId,
+            'user_id' => $this->userId,
+        ]);
+        self::assertSame($entryId, $rewritten);
+
+        $posting = $this->service->pdfData($this->supplierId, (int) $cash['id'])['posting'];
+        self::assertSame([
+            ['side' => 'debit', 'amount' => -100.0, 'account_code' => '211'],
+            ['side' => 'credit', 'amount' => -100.0, 'account_code' => '602'],
+        ], array_map(static fn (array $line): array => [
+            'side' => $line['side'],
+            'amount' => $line['amount'],
+            'account_code' => $line['account_code'],
+        ], $posting));
     }
 
     public function testExactVatEqualityInsteadOfRounding(): void

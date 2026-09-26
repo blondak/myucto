@@ -124,7 +124,7 @@ tři věci:
 jednotlivých zaměstnanců v šifrované databázi agendy, kterou převod přečíst
 nemůže. Starší čitelné tabulky mzdového modulu v záloze (u agend vedených dlouho
 končí typicky rokem 2020) převod také nepřebírá: historie osob se nepřevádí.
-Aktuální zaměstnance převezměte importem přijatých podání JMHZ a registrací
+Zaměstnance i historii jejich mezd převezměte importem přijatých podání JMHZ a registrací
 v Mzdy → Importy, viz [§ 90.9.1](90_Nastaveni_mezd.md#9091-jmhz-registrace-a-mesicni-hlaseni).
 
 **Zaúčtování se nepřepočítává.** Deník je přesná kopie toho, co bylo v Money,

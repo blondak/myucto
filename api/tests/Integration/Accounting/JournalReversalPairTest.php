@@ -51,7 +51,7 @@ final class JournalReversalPairTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db            = $container->get(Connection::class);
             $this->journalAction = $container->get(JournalAction::class);
             $this->otherItems    = $container->get(OtherItemService::class);
@@ -116,6 +116,30 @@ final class JournalReversalPairTest extends TestCase
 
         self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame(0, $this->countEntries([$entryId, $reversalId]));
+    }
+
+    /**
+     * Přeúčtování stornem nechá u dokladu storno dvojici a NÁHRADNÍ živý zápis. Smazání
+     * dvojice dřív mazalo protizápis první: FK SET NULL „oživil" původní zápis a ten se
+     * srazil s náhradním na uq_je_supplier_active_source (500). Náhradní zápis zůstane
+     * a doklad zůstane zaúčtovaný.
+     */
+    public function testPairWithReplacementEntryIsDeletedAndReplacementKept(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Původní zápis dokladu');
+        $sourceId = 987654321;
+        $this->db->pdo()->prepare("UPDATE journal_entries SET source_type = 'purchase_invoice', source_id = ? WHERE id = ?")
+            ->execute([$sourceId, $entryId]);
+        $replacementId = $this->manualEntry('Náhradní zápis dokladu');
+        $this->db->pdo()->prepare("UPDATE journal_entries SET source_type = 'purchase_invoice', source_id = ? WHERE id = ?")
+            ->execute([$sourceId, $replacementId]);
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $reversalId]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId, $reversalId]));
+        self::assertSame(1, $this->countEntries([$replacementId]), 'Náhradní zápis dokladu zůstává.');
+        self::assertSame($replacementId, $this->auditPayload('accounting.reversal_pair_deleted', $entryId)['replacement_entry_id'] ?? null);
     }
 
     public function testEntryWithoutReversalIsRejected(): void

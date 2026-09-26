@@ -112,6 +112,36 @@ export interface GoPayDeleteResult {
   preserved_bank_entry_id: number | null
 }
 
+export interface GoPayPendingMovement {
+  id: number
+  performed_on: string
+  amount: number
+  currency: string
+  payment_session_id: string | null
+  status: GoPayMovementStatus
+  issue_code: string | null
+  issue_message: string | null
+  invoice_id: number | null
+  invoice_payment_id: number | null
+  invoice_number: string | null
+  journal_entry_id: number | null
+  journal_document_no: string | null
+}
+
+export interface GoPayPendingOverview {
+  items: GoPayPendingMovement[]
+  totals: { currency: string; amount: number; count: number }[]
+  unrecorded_count: number
+  unposted_count: number
+}
+
+export interface GoPayPendingPostResult {
+  created: number
+  posted: number
+  issues: GoPayPendingMovement[]
+  overview: GoPayPendingOverview
+}
+
 export interface GoPayPayoutCandidate extends GoPayClearing {
   transaction_source: 'email_notice' | 'statement'
 }
@@ -123,6 +153,10 @@ export const gopayApi = {
     api.put<GoPaySettingsResponse>('/accounting/gopay/settings', settings).then(r => r.data),
   list: () =>
     api.get<{ items: GoPayClearing[] }>('/accounting/gopay/clearings').then(r => r.data.items),
+  pending: () =>
+    api.get<GoPayPendingOverview>('/accounting/gopay/pending').then(r => r.data),
+  postPending: () =>
+    api.post<GoPayPendingPostResult>('/accounting/gopay/pending/post', {}).then(r => r.data),
   detail: (id: number) =>
     api.get<GoPayClearingDetail>(`/accounting/gopay/clearings/${id}`).then(r => r.data),
   importXml: (file: File, pdf?: File | null) => {

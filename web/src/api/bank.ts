@@ -464,7 +464,11 @@ export const bankApi = {
     api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`)
       .then(r => r.data),
   matchManual: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; varsymbol?: string }) =>
-    api.post<{ matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null }>(`/bank-transactions/${txId}/match`, {
+    api.post<{
+      matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null
+      /** Přijatá faktura: platba nepokryla zbytek, doklad zůstal částečně uhrazený. */
+      partial_payment?: boolean; remaining?: number; currency?: string
+    }>(`/bank-transactions/${txId}/match`, {
       ...(ref.invoiceId ? { invoice_id: ref.invoiceId } : {}),
       ...(ref.purchaseInvoiceId ? { purchase_invoice_id: ref.purchaseInvoiceId } : {}),
       ...(ref.varsymbol ? { varsymbol: ref.varsymbol } : {}),
@@ -526,6 +530,14 @@ export const bankApi = {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-gpc`
   },
+  unmatchedExportUrl: (id: number): string => {
+    const base = api.defaults.baseURL ?? ''
+    return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-unmatched`
+  },
+  unmatchedRecipients: (id: number) =>
+    api.get<{ to: string[]; count: number; account: string }>(`/bank-statements/${id}/unmatched-recipients`).then(r => r.data),
+  sendUnmatched: (id: number) =>
+    api.post<{ sent_to: string[]; count: number; deferred: boolean }>(`/bank-statements/${id}/send-unmatched`, { confirmed: true }).then(r => r.data),
   downloadUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/download`

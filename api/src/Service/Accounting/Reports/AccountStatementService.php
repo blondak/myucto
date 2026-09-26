@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
  * Opis účtu (Epic F2): stránkovaný výpis pohybů účtu (vč. analytik pod
@@ -20,6 +21,7 @@ final class AccountStatementService
         private readonly LedgerReportRepository $ledger,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingPeriodRepository $periods,
+        private readonly JournalLineContext $context,
     ) {}
 
     /**
@@ -56,7 +58,7 @@ final class AccountStatementService
                 'source_type' => (string) $l['source_type'],
                 'source_id'   => $l['source_id'],
                 'side'        => (string) $l['side'],
-                'amount'      => (float) $l['amount'],
+                'amount'      => JournalLineAmount::signed($l),
                 'balance'     => round($opening + (float) $l['running_delta'], 2),
                 // Účet ŘÁDKU — u syntetiky je opis složený z analytik, bez tohohle
                 // sloupce nešlo poznat, na které z nich pohyb visí.
@@ -66,14 +68,22 @@ final class AccountStatementService
                 // Drill-down na prvotní doklad — shodná sada polí jako v deníku
                 // (JournalEntryRepository::paginate), aby proklik vedl na tentýž doklad.
                 'source_statement_id'       => $l['source_statement_id'],
-                'source_doc_number'         => $l['source_doc_number'],
+                'source_bank_ref'           => $l['source_bank_ref'] ?? null,
+                'source_doc_number'       => $l['source_doc_number'],
                 'source_register_id'        => $l['source_register_id'],
                 'source_asset_id'           => $l['source_asset_id'],
                 'source_asset_name'         => $l['source_asset_name'],
                 'source_settlement_doc_type' => $l['source_settlement_doc_type'],
                 'source_settlement_doc_id'  => $l['source_settlement_doc_id'],
+                'line_id'        => (int) $l['line_id'],
+                'line_no'        => (int) $l['line_no'],
+                'currency_code'  => $l['currency_code'],
+                'amount_foreign' => $l['amount_foreign'] === null ? null : JournalLineAmount::signed([
+                    'amount' => $l['amount_foreign'], 'is_red_storno' => $l['is_red_storno'],
+                ]),
             ];
         }
+        $items = $this->context->enrich($supplierId, $items);
 
         $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
 

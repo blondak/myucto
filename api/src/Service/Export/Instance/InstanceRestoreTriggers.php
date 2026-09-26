@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Export\Instance;
 
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 
 final class InstanceRestoreTriggers
@@ -120,7 +121,8 @@ final class InstanceRestoreTriggers
 
     private function snapshot(): array
     {
-        $rows = $this->pdo->query('SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER')->fetchAll(PDO::FETCH_ASSOC);
+        $database = (string) $this->pdo->query('SELECT DATABASE()')->fetchColumn();
+        $rows = TriggerMetadata::read($this->pdo, $database);
         $result = [];
         foreach ($rows as $row) {
             $definition = $this->pdo->query('SHOW CREATE TRIGGER ' . $this->quote($row['TRIGGER_NAME']))->fetch(PDO::FETCH_ASSOC);

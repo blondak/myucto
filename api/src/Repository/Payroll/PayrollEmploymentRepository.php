@@ -1002,6 +1002,174 @@ final class PayrollEmploymentRepository
         });
     }
 
+    /**
+     * Posune nástup už nastoupeného vztahu na DŘÍVĚJŠÍ den, který doložila podání
+     * (typicky řada přijatých měsíčních hlášení nahraná až po založení vztahu).
+     *
+     * Nástup nese víc míst najednou a všechna se musí posunout spolu, jinak by
+     * evidence ke dni nového nástupu neexistovala: sloupce vztahu, první verze
+     * podmínek, události vzniku a aktivace (z nich se čte stav vztahu v čase),
+     * identifikátory ČSSZ vztahu a nejstarší záznamy osobní evidence, které začínaly
+     * právě starým nástupem (identita, adresy, rezidence, příslušnost, pojišťovna,
+     * OIČ). Záznam osoby, který začínal jindy, patří jinému vztahu a zůstává.
+     *
+     * Jen dřív, nikdy později: pozdější nástup by uřízl dobu, za kterou už vztah
+     * mohl mít zapsané údaje. A jen tehdy, když v posunutém rozsahu žádná mzda
+     * není zaúčtovaná ani vyplacená.
+     *
+     * @return array{from:string,to:string}
+     */
+    public function correctStartEarlier(
+        int $supplierId,
+        int $employmentId,
+        string $newStart,
+        ?int $expectedVersion,
+        string $note,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $newStart,
+            $expectedVersion,
+            $note,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $status = (string) $employment['status'];
+            if (!in_array($status, ['active', 'suspended', 'ended'], true)) {
+                throw new \DomainException('Nástup jde opravit jen u vztahu, který už začal.');
+            }
+            $current = (string) ($employment['actual_start_date'] ?? $employment['start_date'] ?? '');
+            if (\DateTimeImmutable::createFromFormat('!Y-m-d', $newStart)?->format('Y-m-d') !== $newStart) {
+                throw new \InvalidArgumentException('Nový nástup musí být datum.');
+            }
+            if ($current === '' || $newStart >= $current) {
+                throw new \DomainException('Nástup jde posunout jen na dřívější den, než eviduje vztah.');
+            }
+            $this->assertTermsOpenFrom($supplierId, $employmentId, $newStart, $current);
+            $employeeId = (int) $employment['employee_id'];
+            $pdo = $this->db->pdo();
+
+            $first = $pdo->prepare(
+                'SELECT id, effective_from, planned_start_on, actual_start_on
+                   FROM payroll_employment_terms
+                  WHERE supplier_id = ? AND employment_id = ?
+                  ORDER BY effective_from, id
+                  LIMIT 1
+                  FOR UPDATE'
+            );
+            $first->execute([$supplierId, $employmentId]);
+            $terms = $first->fetch(PDO::FETCH_ASSOC);
+            if ($terms === false || (string) $terms['effective_from'] > $current) {
+                throw new \DomainException('Pracovní vztah nemá verzi podmínek platnou od nástupu.');
+            }
+            $pdo->prepare(
+                'UPDATE payroll_employment_terms
+                    SET effective_from = ?,
+                        planned_start_on = CASE WHEN planned_start_on IS NULL OR planned_start_on > ? THEN ? ELSE planned_start_on END,
+                        actual_start_on = CASE WHEN actual_start_on IS NULL THEN NULL WHEN actual_start_on > ? THEN ? ELSE actual_start_on END,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ?'
+            )->execute([$newStart, $newStart, $newStart, $newStart, $newStart, $supplierId, (int) $terms['id']]);
+
+            $update = $pdo->prepare(
+                'UPDATE payroll_employments
+                    SET start_date = CASE WHEN start_date IS NULL OR start_date > ? THEN ? ELSE start_date END,
+                        actual_start_date = CASE WHEN actual_start_date IS NULL THEN NULL WHEN actual_start_date > ? THEN ? ELSE actual_start_date END,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([$newStart, $newStart, $newStart, $newStart, $supplierId, $employmentId, (int) $employment['row_version']]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException((int) $employment['row_version']);
+            }
+
+            // Stav vztahu v čase se čte z událostí: aktivace ke starému nástupu
+            // by nechala dobu mezi novým a starým nástupem „plánovanou".
+            $pdo->prepare(
+                "UPDATE payroll_employment_events
+                    SET effective_on = ?
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND event_type = 'status_changed' AND to_status = 'active' AND effective_on = ?"
+            )->execute([$newStart, $supplierId, $employmentId, $current]);
+            $this->alignCreatedEvent($supplierId, $employmentId, $newStart);
+
+            $this->moveEarliestRows($supplierId, 'payroll_employment_external_ids', 'valid_from',
+                ['employment_id' => $employmentId], ['environment', 'identifier_type'], $current, $newStart);
+            $this->moveEarliestRows($supplierId, 'payroll_person_external_ids', 'valid_from',
+                ['employee_id' => $employeeId], ['environment', 'identifier_type'], $current, $newStart);
+            $this->moveEarliestRows($supplierId, 'payroll_person_identity_history', 'effective_from',
+                ['employee_id' => $employeeId], [], $current, $newStart);
+            $this->moveEarliestRows($supplierId, 'payroll_person_addresses', 'effective_from',
+                ['employee_id' => $employeeId], ['address_type'], $current, $newStart);
+            foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_health_coverage_history'] as $table) {
+                $this->moveEarliestRows($supplierId, $table, 'effective_from', ['employee_id' => $employeeId], [], $current, $newStart);
+            }
+
+            $diff = ['start_date' => ['from' => $current, 'to' => $newStart]];
+            $this->insertEvent($supplierId, $employmentId, 'terms_corrected', null, null, $newStart, $note, $diff, $userId);
+            $this->activityLogger->log(
+                'payroll.employment.start_corrected',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['from' => $current, 'to' => $newStart],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return ['from' => $current, 'to' => $newStart];
+        });
+    }
+
+    /**
+     * Nejstarší záznam každé skupiny (`$partition`), který začínal přesně starým
+     * nástupem, začne novým. Starší záznam skupiny znamená, že údaj platil už před
+     * vztahem (jiný vztah osoby) — pak se skupina nemění.
+     *
+     * @param array<string,int> $owner sloupec vlastníka => id
+     * @param list<string> $partition
+     */
+    private function moveEarliestRows(
+        int $supplierId,
+        string $table,
+        string $dateColumn,
+        array $owner,
+        array $partition,
+        string $from,
+        string $to,
+    ): void {
+        $ownerColumn = (string) array_key_first($owner);
+        $columns = implode(', ', ['id', $dateColumn, ...$partition]);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT {$columns} FROM {$table}
+              WHERE supplier_id = ? AND {$ownerColumn} = ?
+              ORDER BY {$dateColumn}, id
+              FOR UPDATE"
+        );
+        $stmt->execute([$supplierId, $owner[$ownerColumn]]);
+        $seen = [];
+        $update = $this->db->pdo()->prepare(
+            "UPDATE {$table} SET {$dateColumn} = ?, row_version = row_version + 1 WHERE supplier_id = ? AND id = ?"
+        );
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $group = implode('|', array_map(static fn (string $column): string => (string) $row[$column], $partition));
+            if (isset($seen[$group])) {
+                continue;
+            }
+            $seen[$group] = true;
+            if ((string) $row[$dateColumn] === $from) {
+                $update->execute([$to, $supplierId, (int) $row['id']]);
+            }
+        }
+    }
+
     /** @return array<string,mixed> */
     public function updateChecklist(
         int $supplierId,

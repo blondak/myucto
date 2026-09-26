@@ -25,7 +25,7 @@ final class CostCenterTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->costCenters = $container->get(CostCenterRepository::class);
         } catch (\Throwable $e) {

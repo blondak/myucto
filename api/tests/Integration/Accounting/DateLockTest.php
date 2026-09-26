@@ -64,7 +64,7 @@ final class DateLockTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->container = Bootstrap::buildApp()->getContainer();
+            $this->container = Bootstrap::buildContainer();
             $this->db       = $this->container->get(Connection::class);
             $this->periods  = $this->container->get(AccountingPeriodRepository::class);
             $this->settings = $this->container->get(AccountingSupplierSettingsRepository::class);

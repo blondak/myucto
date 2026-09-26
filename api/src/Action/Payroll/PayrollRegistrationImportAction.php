@@ -80,6 +80,7 @@ final class PayrollRegistrationImportAction
                 ($body['apply_averages'] ?? false) === true,
                 ($body['auto_approve_changes'] ?? false) === true,
                 ($body['auto_approve_averages'] ?? false) === true,
+                ($body['apply_takeover'] ?? false) === true,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -93,6 +94,7 @@ final class PayrollRegistrationImportAction
                 'environment' => $body['environment'] ?? null,
                 'opening_balances_saved' => $result['opening_balances']['saved'],
                 'averages_created' => $result['averages']['created'],
+                'takeover_months_saved' => $result['takeover']['saved'] ?? 0,
             ],
             $ip,
             $request->getHeaderLine('User-Agent'),

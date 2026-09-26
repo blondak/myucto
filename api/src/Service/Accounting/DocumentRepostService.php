@@ -127,6 +127,26 @@ final class DocumentRepostService
     }
 
     /**
+     * Náhled rozhodnutí pro KONKRÉTNÍ opravené řádky, jak je dialog právě má. Jde
+     * touž cestou jako {@see repost()} (u banky přes bankovní invarianty), jen nic
+     * nezapíše. Dialog podle něj ukáže, jestli se zápis přepíše na místě, nebo proč
+     * je potřeba storno. Bez něj by se o tom rozhodovalo až po potvrzení.
+     *
+     * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
+     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     *
+     * @return array<string,mixed> totéž co {@see plan()}
+     */
+    public function previewPlan(int $supplierId, string $sourceType, int $docId, array $lines): array
+    {
+        if ($sourceType === 'bank') {
+            $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines);
+        }
+
+        return $this->plan($supplierId, $sourceType, $docId, $lines);
+    }
+
+    /**
      * ROZHODNUTÍ samo — čistá funkce nad stavem, bez DB.
      *
      * Je oddělené schválně, a to ze dvou důvodů. Za prvé je to jediné místo, kde se
@@ -303,7 +323,12 @@ final class DocumentRepostService
                 ]);
             }
 
-            $postMeta = array_merge($meta, ['entry_date' => $targetDate]);
+            // Řádky z dialogu nenesou cizoměnovou stopu (321 v EUR apod.). Převezme se
+            // z opravovaného zápisu, ať je oprava přepisem nebo stornem a novým zápisem.
+            $postMeta = array_merge($meta, [
+                'entry_date'              => $targetDate,
+                'inherit_line_trace_from' => (int) $plan['entry_id'],
+            ]);
             if ($plan['reason_code'] === 'tax_neutral_rewrite') {
                 // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
                 $postMeta['tax_neutral_rewrite'] = true;
@@ -381,6 +406,7 @@ final class DocumentRepostService
                 'account_id' => $codeMap[$code]['id'],
                 'side'       => (string) ($line['side'] ?? ''),
                 'amount'     => (float) ($line['amount'] ?? 0),
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
 
@@ -484,6 +510,7 @@ final class DocumentRepostService
                 'account_name' => isset($acc['name']) ? (string) $acc['name'] : null,
                 'side'         => (string) $line['side'],
                 'amount'       => (float) $line['amount'],
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
             ];
         }
         return $out;

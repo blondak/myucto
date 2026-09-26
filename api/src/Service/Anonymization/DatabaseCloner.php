@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Anonymization;
 
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 
 /**
@@ -84,9 +85,7 @@ final class DatabaseCloner
             ];
         }
 
-        $triggers = $this->pdo->prepare('SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER');
-        $triggers->execute([$source]);
-        foreach ($triggers->fetchAll(PDO::FETCH_ASSOC) as $trigger) {
+        foreach (TriggerMetadata::read($this->pdo, $source) as $trigger) {
             $plan['triggers'][] = [
                 'table' => (string) $trigger['EVENT_OBJECT_TABLE'],
                 'ddl' => $this->showCreate('TRIGGER', $source, (string) $trigger['TRIGGER_NAME']),

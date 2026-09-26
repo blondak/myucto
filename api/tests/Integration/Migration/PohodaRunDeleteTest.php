@@ -30,7 +30,7 @@ final class PohodaRunDeleteTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->pdo = $container->get(Connection::class)->pdo();
             $this->runs = $container->get(PohodaImportRepository::class);
         } catch (\Throwable $e) {

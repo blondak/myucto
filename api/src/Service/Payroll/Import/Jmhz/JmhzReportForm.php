@@ -17,7 +17,14 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
  *    kde Person = `{given_name:string, family_name:string, birth_date:?string, birth_number:?string}`
  *    a Child = Person + `{ztp_p:bool, order:string}` (10435–10440),
  *  - `workplace`: `{city:string, municipality_code:string, country_code:string}` (10229–10231),
- *  - `fund`: `{standard:string, agreed:string, weekly:string}` (10259–10261, desetinný zápis).
+ *  - `fund`: `{standard:string, agreed:string, weekly:string}` (10259–10261, desetinný zápis),
+ *  - `eldp`: `{code:?string, insurance_days:int, excluded_days:int}` — kód první sekce ELDP
+ *    a součty dnů přes sekce (10240, 10356, 10357); `null`, když formulář seznam ELDP nemá.
+ *
+ * Údaje z bloků, které měkký režim čtení smí přejít (pojištění do, pojistné, čistá mzda,
+ * zdravotní pojištění, neodpracované hodiny, ELDP), se čtou tolerantně: nečitelná hodnota
+ * je `null`. Spolehnout se na ně jde jen u souboru, který prošel XSD
+ * ({@see JmhzReportFile::$lenient}).
  */
 final readonly class JmhzReportForm
 {
@@ -79,7 +86,85 @@ final readonly class JmhzReportForm
         public ?int $standbyPay = null,
         public ?int $averageHourlyMilli = null,
         public ?string $insuranceFrom = null,
+        public ?string $insuranceTo = null,
+        public ?array $eldp = null,
+        public ?int $employeeSocial = null,
+        public ?int $employerSocial = null,
+        public ?int $employeeHealth = null,
+        public ?int $employerHealth = null,
+        public ?int $netWage = null,
+        public ?bool $deductionsRecorded = null,
+        public ?int $tariff = null,
+        public ?int $unworkedMillihours = null,
+        public ?int $leaveMillihours = null,
+        /** Neodpracované hodiny pro nemoc (s náhradou i bez ní) a OČR — snižují tarif měsíční mzdy. */
+        public ?int $absenceMillihours = null,
     ) {}
+
+    /**
+     * Klíč pracovního vztahu v dávce: ID PPV, u větve B (osoba ještě bez OIČ)
+     * jméno s datem narození. Bez obojího formulář ke vztahu přiřadit nejde.
+     */
+    public function relationKey(): ?string
+    {
+        return self::relationKeyOf($this->employmentIdentifier, $this->lastName, $this->firstName, $this->birthDate);
+    }
+
+    public static function relationKeyOf(
+        ?string $employmentIdentifier,
+        ?string $lastName,
+        ?string $firstName,
+        ?string $birthDate,
+    ): ?string {
+        if ($employmentIdentifier !== null) {
+            return 'ppv:' . $employmentIdentifier;
+        }
+        if ($lastName === null || $firstName === null || $birthDate === null) {
+            return null;
+        }
+
+        return 'person:' . mb_strtolower($lastName . '|' . $firstName) . '|' . $birthDate;
+    }
+
+    /**
+     * Úvazek podle fondu pracovní doby: sjednaný fond / stanovený fond (10260/10259)
+     * a z něj týdenní pracovní doba ze stanovené týdenní doby (10261). `null`, když
+     * měsíc úvazek nedokládá (stanovený fond 0 při celoměsíční nepřítomnosti,
+     * sjednaný vyšší než stanovený, chybějící údaj).
+     *
+     * @return array{workload_basis_points:int,weekly_hours:string}|null
+     */
+    public function workload(): ?array
+    {
+        if ($this->fund === null) {
+            return null;
+        }
+        $standard = self::milli($this->fund['standard']);
+        $agreed = self::milli($this->fund['agreed']);
+        $weekly = self::milli($this->fund['weekly']);
+        if ($standard === null || $agreed === null || $weekly === null
+            || $standard <= 0 || $agreed <= 0 || $weekly <= 0 || $agreed > $standard
+        ) {
+            return null;
+        }
+        $basisPoints = (int) round($agreed * 10_000 / $standard);
+        $weeklyCenti = (int) round($weekly * $agreed / $standard / 10);
+
+        return [
+            'workload_basis_points' => $basisPoints,
+            'weekly_hours' => sprintf('%d.%02d', intdiv($weeklyCenti, 100), $weeklyCenti % 100),
+        ];
+    }
+
+    /** Hodiny v tisícinách; desetinný zápis s tečkou, nejvýš tři místa. */
+    private static function milli(string $value): ?int
+    {
+        if (preg_match('/^(\d{1,6})(?:\.(\d{1,3}))?$/D', trim($value), $match) !== 1) {
+            return null;
+        }
+
+        return (int) $match[1] * 1000 + (int) str_pad($match[2] ?? '', 3, '0');
+    }
 
     public function hasBody(): bool
     {

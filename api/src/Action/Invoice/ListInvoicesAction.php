@@ -7,8 +7,13 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\InvoiceListDetailsRepository;
+use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -18,12 +23,19 @@ final class ListInvoicesAction
         private readonly InvoiceRepository $repo,
         private readonly Config $config,
         private readonly DocumentLockService $locks,
+        private readonly InvoiceKhSections $khSections,
+        private readonly InvoiceListDetailsRepository $listDetails,
+        private readonly DimensionListSummaryRepository $dimensionSummaries,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        if (($filter['include_dimensions'] ?? null) === '1'
+            && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
 
         // Neuhrazené K DATU X (task #4) — na rozdíl od `unpaid_only` (dnešní status) jde
         // o historický dotaz: doklad vystavený do X, u kterého k X nebyl uhrazen celý
@@ -67,6 +79,9 @@ final class ListInvoicesAction
                 ? (string) $filter['oss_review']
                 : null,
             'supplier_id' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
+            'group_by_month' => !is_scalar($filter['group_by_month'] ?? null) || (string) $filter['group_by_month'] !== '0',
+            'sort_key' => is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '',
+            'sort_dir' => is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '',
         ];
 
         // Status / type může být čárkou oddělené — split
@@ -92,15 +107,33 @@ final class ListInvoicesAction
         }
         if ($ids !== []) {
             $map = $this->locks->lockedMapForSources((int) $filters['supplier_id'], 'invoice', $ids);
+            $includeVat = ($filter['include_vat_breakdown'] ?? null) === '1';
+            $includePosting = ($filter['include_posting_accounts'] ?? null) === '1';
+            $details = $includeVat || $includePosting
+                ? $this->listDetails->forDocuments((int) $filters['supplier_id'], 'invoice', $ids, $includeVat, $includePosting)
+                : [];
+            $dimensionLabels = ($filter['include_dimensions'] ?? null) === '1'
+                ? $this->dimensionSummaries->forDocuments((int) $filters['supplier_id'], 'invoice', $ids)
+                : [];
             foreach ($result['data'] as &$group) {
                 foreach ($group['invoices'] as &$row) {
                     $lock = $map[(int) $row['id']] ?? null;
                     if ($lock !== null) {
                         $row['locked'] = $lock->toArray();
                     }
+                    if (isset($details[(int) $row['id']])) {
+                        $row += $details[(int) $row['id']];
+                    }
+                    if (($filter['include_dimensions'] ?? null) === '1') {
+                        $row['dimension_labels'] = $dimensionLabels[(int) $row['id']] ?? [];
+                    }
                 }
             }
             unset($group, $row);
+        }
+
+        if (($filter['include_kh'] ?? null) === '1') {
+            $this->khSections->addToGroups((int) $filters['supplier_id'], $result['data'], 'issued');
         }
 
         return Json::ok($response, $result);

@@ -54,7 +54,7 @@ final class StatementMatcherVarsymbolTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             // Mailer null: párování nesmí v testu posílat reálné e-maily.
             $this->matcher = new StatementMatcher(

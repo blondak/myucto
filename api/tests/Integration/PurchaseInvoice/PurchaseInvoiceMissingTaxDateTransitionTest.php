@@ -47,7 +47,7 @@ final class PurchaseInvoiceMissingTaxDateTransitionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container              = Bootstrap::buildApp()->getContainer();
+            $container              = Bootstrap::buildContainer();
             $this->db               = $container->get(Connection::class);
             $this->createAction     = $container->get(CreatePurchaseInvoiceAction::class);
             $this->transitionAction = $container->get(TransitionPurchaseInvoiceStatusAction::class);

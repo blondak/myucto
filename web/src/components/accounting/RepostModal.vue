@@ -140,12 +140,31 @@ const saving = ref(false)
 const error = ref('')
 const editorRef = ref<InstanceType<typeof JournalLinesEditor> | null>(null)
 
+/**
+ * Rozhodnutí nad UPRAVENÝMI řádky. V zamčeném datu záleží na tom, co se mění:
+ * přesun mezi nákladovými účty se přepíše na místě, změna DPH nebo závazku jde
+ * stornem. Rozhoduje server touž funkcí jako při uložení, dialog jen ukáže výsledek.
+ */
+const linesPlan = ref<RepostPlan | null>(null)
+const linesPlanLoading = ref(false)
+let linesPlanTimer: ReturnType<typeof setTimeout> | null = null
+let linesPlanSeq = 0
+
+const effectivePlan = computed<RepostPlan | null>(() => linesPlan.value ?? plan.value)
 const blocked = computed(() => plan.value?.strategy === 'blocked')
+const inPlaceLocked = computed(() => effectivePlan.value?.strategy === 'replace'
+  && effectivePlan.value?.reason_code === 'tax_neutral_rewrite')
+/** Zamčené datum, o přepisu na místě ale rozhodnou až upravené řádky. */
+const awaitingLinesDecision = computed(() => !!plan.value && plan.value.tax_neutral_available
+  && plan.value.strategy !== 'replace' && linesPlan.value === null)
+const needsShiftConfirm = computed(() => !!effectivePlan.value && effectivePlan.value.date_shifted
+  && !awaitingLinesDecision.value)
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   plan.value = null
+  linesPlan.value = null
   lines.value = []
   confirmShift.value = false
   try {
@@ -162,7 +181,7 @@ async function load(): Promise<void> {
       account_code: l.account_code ?? '',
       side: l.side,
       amount: l.amount,
-    is_red_storno: l.is_red_storno,
+      is_red_storno: l.is_red_storno,
     }))
     applyProposal()
   } catch (e: any) {
@@ -203,10 +222,48 @@ function applyProposal(): void {
 const postingChanged = computed(() => {
   if (!plan.value) return false
   if (description.value.trim() !== (plan.value.description ?? '').trim()) return true
-  const key = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null }>) =>
-    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}`).sort().join(';')
+  const key = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null; is_red_storno?: boolean }>) =>
+    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}|${l.is_red_storno ? 1 : 0}`).sort().join(';')
   return key(lines.value) !== key(plan.value.lines)
 })
+
+function scheduleLinesPlan(): void {
+  if (linesPlanTimer) clearTimeout(linesPlanTimer)
+  const base = plan.value
+  const linesKey = (ls: Array<{ account_code: string | null; side: string; amount: number | string | null; is_red_storno?: boolean }>) =>
+    ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}|${l.is_red_storno ? 1 : 0}`).sort().join(';')
+  if (!base || !base.tax_neutral_available || base.strategy === 'replace'
+    || linesKey(lines.value) === linesKey(base.lines)
+    || lines.value.some(l => !l.account_code.trim() || !(Number(l.amount ?? 0) > 0))) {
+    linesPlanSeq++
+    linesPlan.value = null
+    linesPlanLoading.value = false
+    return
+  }
+  linesPlanLoading.value = true
+  linesPlanTimer = setTimeout(async () => {
+    const seq = ++linesPlanSeq
+    try {
+      const result = await accountingApi.repostPlanForLines(props.source, props.docId, lines.value.map(l => ({
+        account_code: l.account_code,
+        side: l.side,
+        amount: l.amount ?? 0,
+        is_red_storno: l.is_red_storno,
+      })))
+      if (seq === linesPlanSeq) linesPlan.value = result
+    } catch {
+      if (seq === linesPlanSeq) linesPlan.value = null
+    } finally {
+      if (seq === linesPlanSeq) linesPlanLoading.value = false
+    }
+  }, 400)
+}
+
+watch(lines, () => {
+  confirmShift.value = false
+  scheduleLinesPlan()
+}, { deep: true })
+onBeforeUnmount(() => { if (linesPlanTimer) clearTimeout(linesPlanTimer) })
 
 const notesRef = ref<InstanceType<typeof JournalEntryNotes> | null>(null)
 const notesPending = computed(() => notesRef.value?.hasPending ?? false)
@@ -218,9 +275,9 @@ const notesOnly = computed(() => notesPending.value && !postingChanged.value && 
 
 const canSubmit = computed(() => notesOnly.value
   ? !loading.value && !saving.value
-  : !!plan.value && !blocked.value && !loading.value && !saving.value
+  : !!plan.value && !blocked.value && !loading.value && !saving.value && !linesPlanLoading.value
     && (editorRef.value?.valid ?? false)
-    && (!plan.value.date_shifted || confirmShift.value || plan.value.tax_neutral_available))
+    && (!needsShiftConfirm.value || confirmShift.value))
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
@@ -275,17 +332,33 @@ async function submit(): Promise<void> {
         {{ error }}
       </div>
 
-      <template v-if="plan && !loading">
+      <template v-if="plan && effectivePlan && !loading">
         <!-- Co se stane. Bez téhle věty by uživatel nepoznal rozdíl mezi „přepíše se"
-             a „vznikne protizápis" — a přitom je to ten rozdíl, který zůstane v deníku. -->
-        <div class="px-3 py-2 rounded-md text-sm border"
+             a „vznikne protizápis" — a přitom je to ten rozdíl, který zůstane v deníku.
+             V zamčeném datu o tom rozhodují upravené řádky (server, linesPlan). -->
+        <div v-if="awaitingLinesDecision && !blocked"
+          class="px-3 py-2 rounded-md text-sm border bg-neutral-50 border-neutral-200 text-neutral-700"
+          data-test="repost-tax-neutral-pending">
+          <p class="font-medium">{{ t('accounting.repost.strategy_pending') }}</p>
+          <p class="mt-1">
+            {{ t('accounting.repost.tax_neutral_available', {
+              date: formatDate(plan.entry_date),
+              lock: plan.locked_until ? formatDate(plan.locked_until) : '',
+            }) }}
+          </p>
+          <p v-if="linesPlanLoading" class="mt-1 text-neutral-500">{{ t('accounting.repost.checking') }}</p>
+        </div>
+        <div v-else class="px-3 py-2 rounded-md text-sm border"
+          :data-test="inPlaceLocked ? 'repost-in-place' : 'repost-strategy'"
           :class="blocked
             ? 'bg-danger-50 border-danger-500/30 text-danger-600'
-            : (plan.strategy === 'reverse'
+            : (effectivePlan.strategy === 'reverse'
               ? 'bg-warning-50 border-warning-500/30 text-warning-700'
               : 'bg-neutral-50 border-neutral-200 text-neutral-700')">
           <p class="font-medium">
-            {{ t(`accounting.repost.strategy_${plan.strategy}`) }}
+            {{ inPlaceLocked
+              ? t('accounting.repost.strategy_replace_in_place', { date: formatDate(effectivePlan.entry_date) })
+              : t(`accounting.repost.strategy_${effectivePlan.strategy}`) }}
           </p>
           <p v-if="blocked" class="mt-1">
             {{ t(`accounting.repost.blocked_${plan.reason_code === 'date_locked' ? 'date_locked' : 'period_not_open'}`, {
@@ -293,15 +366,19 @@ async function submit(): Promise<void> {
               status: plan.period_status ?? '',
             }) }}
           </p>
-          <p v-else-if="plan.strategy === 'reverse'" class="mt-1">
-            {{ t(`accounting.repost.reason_${plan.reason_code ?? 'period_not_open'}`, {
-              status: plan.period_status ?? '',
-              date: plan.locked_until ? formatDate(plan.locked_until) : '',
+          <p v-else-if="effectivePlan.strategy === 'reverse' && effectivePlan.tax_neutral_violation" class="mt-1"
+            data-test="repost-violation">
+            {{ t('accounting.repost.reverse_because', {
+              reason: t(`accounting.repost.violation_${effectivePlan.tax_neutral_violation}`),
             }) }}
           </p>
-          <p v-if="plan.tax_neutral_available && plan.strategy !== 'replace'" class="mt-1">
-            {{ t('accounting.repost.tax_neutral_available') }}
+          <p v-else-if="effectivePlan.strategy === 'reverse'" class="mt-1">
+            {{ t(`accounting.repost.reason_${effectivePlan.reason_code ?? 'period_not_open'}`, {
+              status: effectivePlan.period_status ?? '',
+              date: effectivePlan.locked_until ? formatDate(effectivePlan.locked_until) : '',
+            }) }}
           </p>
+          <p v-if="linesPlanLoading" class="mt-1 text-neutral-500">{{ t('accounting.repost.checking') }}</p>
         </div>
         <p v-if="proposalApplied" class="text-sm text-primary-700" data-test="repost-proposal-hint">
           {{ t('accounting.repost.proposal_from_rule') }}
@@ -316,10 +393,10 @@ async function submit(): Promise<void> {
             <dt class="text-neutral-500">{{ t('accounting.repost.entry_date') }}</dt>
             <dd class="font-mono">{{ formatDate(plan.entry_date) }}</dd>
           </div>
-          <div v-if="plan.target_date" class="flex justify-between gap-2">
+          <div v-if="effectivePlan.target_date && !awaitingLinesDecision" class="flex justify-between gap-2">
             <dt class="text-neutral-500">{{ t('accounting.repost.target_date') }}</dt>
-            <dd class="font-mono" :class="plan.date_shifted ? 'text-warning-700 font-semibold' : ''">
-              {{ formatDate(plan.target_date) }}
+            <dd class="font-mono" :class="effectivePlan.date_shifted ? 'text-warning-700 font-semibold' : ''">
+              {{ formatDate(effectivePlan.target_date) }}
             </dd>
           </div>
         </dl>
@@ -366,12 +443,12 @@ async function submit(): Promise<void> {
 
           <!-- Posun data se NIKDY nedělá potichu: zamčené období nedovolí zapsat
                k původnímu datu, ale rozdíl v deníku uvidí až účetní závěrka. -->
-          <label v-if="plan.date_shifted" class="flex items-start gap-2 text-sm">
+          <label v-if="needsShiftConfirm" class="flex items-start gap-2 text-sm" data-test="repost-confirm-shift">
             <input v-model="confirmShift" type="checkbox" class="mt-0.5" />
             <span>
               {{ t('accounting.repost.confirm_date_shift', {
-                from: formatDate(plan.entry_date),
-                to: plan.target_date ? formatDate(plan.target_date) : '',
+                from: formatDate(effectivePlan.entry_date),
+                to: effectivePlan.target_date ? formatDate(effectivePlan.target_date) : '',
               }) }}
             </span>
           </label>

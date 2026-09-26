@@ -46,7 +46,7 @@ final class IsdocExportXsdValidationTest extends TestCase
             $this->markTestSkipped('Chybí api/xsd/isdoc-invoice-6.0.2.xsd — spusť `bash cmd/download-xsd.sh isdoc`.');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->exporter = $container->get(IsdocExporter::class);
         $this->validator = $container->get(XmlSchemaValidator::class);
         $this->conn = $container->get(Connection::class);

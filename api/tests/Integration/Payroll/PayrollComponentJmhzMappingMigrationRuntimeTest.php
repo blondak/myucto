@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -53,10 +54,9 @@ final class PayrollComponentJmhzMappingMigrationRuntimeTest extends TestCase
     {
         $this->runMigrator();
         $db = $this->databasePdo();
-        self::assertSame(3, $this->scalar($db,
-            "SELECT COUNT(*) FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE()
-                AND TRIGGER_NAME LIKE 'trg_payroll_component_jmhz_%'",
+        self::assertCount(3, array_filter(
+            TriggerMetadata::read($db, $this->database),
+            static fn (array $trigger): bool => str_starts_with($trigger['TRIGGER_NAME'], 'trg_payroll_component_jmhz_'),
         ));
         self::assertSame(1, $this->constraintCount(
             $db,
@@ -85,10 +85,9 @@ final class PayrollComponentJmhzMappingMigrationRuntimeTest extends TestCase
         );
         $this->runMigrator();
 
-        self::assertSame(3, $this->scalar($db,
-            "SELECT COUNT(*) FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE()
-                AND TRIGGER_NAME LIKE 'trg_payroll_component_jmhz_%'",
+        self::assertCount(3, array_filter(
+            TriggerMetadata::read($db, $this->database),
+            static fn (array $trigger): bool => str_starts_with($trigger['TRIGGER_NAME'], 'trg_payroll_component_jmhz_'),
         ));
         self::assertSame(1, $this->constraintCount(
             $db,

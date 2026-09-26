@@ -8,6 +8,7 @@ export interface ColumnDef {
   required?: boolean        // nelze skrýt (číslo dokladu, částka, akce)
   sortable?: boolean        // jen stránky se zapnutým sortem (§5.6)
   defaultHidden?: boolean   // doplňkový sloupec — dokud uživatel nesáhne na výběr, je skrytý
+  available?: () => boolean // podmíněný sloupec, např. dimenze zapnuté pro firmu
 }
 
 export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
@@ -34,6 +35,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   // pokud není defaultHidden.
   function isVisible(key: string): boolean {
     const col = columns.find(c => c.key === key)
+    if (col?.available && !col.available()) return false
     if (col?.required) return true
     return !hidden.value.includes(key)
   }
@@ -60,6 +62,13 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
 
   function resetColumns(): void {
     patchPagePrefs(pageKey, { hidden: null, shown: null })
+  }
+
+  function setVisibleColumns(keys: string[]): void {
+    const visible = new Set(keys)
+    const hidden = columns.filter(c => !c.required && !visible.has(c.key)).map(c => c.key)
+    const shown = columns.filter(c => c.defaultHidden && visible.has(c.key)).map(c => c.key)
+    patchPagePrefs(pageKey, { hidden, shown })
   }
 
   /*
@@ -106,22 +115,25 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   }
 
   const sort = computed<SortPref | null>(() => prefs.value.sort ?? null)
-  // Cyklus asc → desc → výchozí; persistuje do prefs.
+  // Cyklus desc → asc → výchozí; persistuje do prefs.
   function toggleSort(key: string): void {
     const cur = sort.value
     let next: SortPref | null
-    if (!cur || cur.key !== key) next = { key, dir: 'asc' }
-    else if (cur.dir === 'asc') next = { key, dir: 'desc' }
+    if (!cur || cur.key !== key) next = { key, dir: 'desc' }
+    else if (cur.dir === 'desc') next = { key, dir: 'asc' }
     else next = null
     patchPagePrefs(pageKey, { sort: next })
+  }
+  function clearSort(): void {
+    patchPagePrefs(pageKey, { sort: null })
   }
 
   return {
     columns,
-    isVisible, toggleColumn, resetColumns,
+    isVisible, toggleColumn, resetColumns, setVisibleColumns,
     isDynamicShown, setDynamicShown,
     density, setDensity, densityClass,
-    sort, toggleSort,
+    sort, toggleSort, clearSort,
     flag, setFlag,
     ready,
   }

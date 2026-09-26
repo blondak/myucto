@@ -18,7 +18,7 @@ foreach (['MYINVOICE_DB_NAME', 'MYSQL_DATABASE'] as $name) {
     putenv($name . '=' . $database);
     $_ENV[$name] = $_SERVER[$name] = $database;
 }
-$container = Bootstrap::buildApp()->getContainer();
+$container = Bootstrap::buildContainer();
 $pdo = $container->get(Connection::class)->pdo();
 if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $database) {
     throw new RuntimeException('The stock worker connected to a different database.');

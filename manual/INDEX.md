@@ -31,6 +31,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 11. [Zisk](11_Zisk.md)
 12. [Tržby](12_Trzby.md)
 13. [Náklady](13_Naklady.md)
+[Dimenze](110_Dimenze.md) (při zapnutých dimenzích)
 
 ### Prodej
 

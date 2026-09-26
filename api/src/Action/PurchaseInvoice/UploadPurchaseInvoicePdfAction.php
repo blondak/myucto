@@ -13,6 +13,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Support\PdfBytes;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -116,7 +117,12 @@ final class UploadPurchaseInvoicePdfAction
         // Obrázek (fotka z telefonu, issue #75) → konvertuj na PDF a pokračuj
         // standardní cestou (magic/MIME checky pak projdou, ukládá se .pdf).
         $convertedFromImage = false;
-        $head = (string) @file_get_contents($tmpPath, false, null, 0, 16);
+        // PDF s hlavičkou posunutou o prázdný řádek / BOM ({@see PdfBytes}) se opraví.
+        $head = (string) @file_get_contents($tmpPath, false, null, 0, 1024);
+        if (($offset = PdfBytes::headerOffset($head)) !== null && $offset > 0) {
+            @file_put_contents($tmpPath, PdfBytes::normalize((string) @file_get_contents($tmpPath)));
+            $head = (string) @file_get_contents($tmpPath, false, null, 0, 16);
+        }
         if (!str_starts_with($head, self::PDF_MAGIC)) {
             $raw = (string) @file_get_contents($tmpPath);
             $imgMime = $this->imageToPdf->detectImageMime($raw);

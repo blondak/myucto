@@ -43,7 +43,7 @@ final class PriceListItemListPaginationTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             if ($container === null) $this->markTestSkipped('Container not available');
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PriceListItemAction::class);

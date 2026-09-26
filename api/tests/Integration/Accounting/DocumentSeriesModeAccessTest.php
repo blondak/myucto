@@ -41,7 +41,7 @@ final class DocumentSeriesModeAccessTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('accounting_document_series')) {
             $this->markTestSkipped('Migrace číselných řad neproběhly.');

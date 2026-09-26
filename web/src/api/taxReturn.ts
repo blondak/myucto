@@ -32,6 +32,9 @@ export interface TaxReturnProjectionItem {
 export interface TaxReturnProjection {
   vh_posted: number
   vh_projected: number
+  /** Projektovaný ř. 70 / ř. 170 (s rozdílem nezaúčtovaných odpisů). */
+  projected_increases?: number
+  projected_decreases?: number
   projected_base: number
   projected_tax: number
   is_projection: boolean

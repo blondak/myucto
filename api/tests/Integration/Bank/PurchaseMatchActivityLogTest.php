@@ -58,7 +58,7 @@ final class PurchaseMatchActivityLogTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             // ActivityLogger injektován → ověřujeme zápis do activity_log; mailer/payments null.
             $this->matcher = new StatementMatcher(
@@ -142,6 +142,7 @@ final class PurchaseMatchActivityLogTest extends TestCase
         string $status = 'received',
         ?string $txVs = self::TEST_VS,
         string $counterpartyName = '',
+        string $documentKind = 'invoice',
     ): void
     {
         $pdo = $this->db->pdo();
@@ -152,9 +153,9 @@ final class PurchaseMatchActivityLogTest extends TestCase
                 (supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind,
                  issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot,
                  total_without_vat, total_with_vat, status, paid_at, created_by)
-             VALUES (?, ?, ?, ?, 'invoice', ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)"
         )->execute([
-            $this->supplierId, $this->vendorId, self::TEST_VS, self::TEST_VS,
+            $this->supplierId, $this->vendorId, self::TEST_VS, self::TEST_VS, $documentKind,
             $d, $d, $d, $d, $this->currencyId, $amount, $amount, $status,
             $status === 'paid' ? $d : null, $this->userId,
         ]);
@@ -348,6 +349,20 @@ final class PurchaseMatchActivityLogTest extends TestCase
         self::assertCount(1, $allocations);
         self::assertSame($this->purchaseId, (int) $allocations[0]['purchase_invoice_id']);
         self::assertEqualsWithDelta($amount, (float) $allocations[0]['amount'], 0.001);
+    }
+
+    public function testSecondPassMatchesCardPaidAdvanceWithoutVs(): void
+    {
+        $this->seed(2500.00, 'received', null, 'GOPAY *' . self::VENDOR_MARKER . ' CZE', 'advance');
+
+        $res = $this->matcher->matchBatch([$this->transactionId])[$this->transactionId];
+
+        self::assertSame('auto_exact', $res['status'] ?? null);
+        self::assertSame($this->purchaseId, $res['purchase_invoice_id'] ?? null);
+        self::assertTrue($res['amount_date'] ?? false);
+        self::assertSame('paid', $this->db->pdo()->query(
+            "SELECT status FROM purchase_invoices WHERE id = {$this->purchaseId}"
+        )->fetchColumn());
     }
 
     public function testPrimaryPassDefersAmountDateFallback(): void

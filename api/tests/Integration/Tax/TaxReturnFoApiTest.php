@@ -37,7 +37,7 @@ final class TaxReturnFoApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(TaxReturnAction::class);
         } catch (\Throwable $e) {
@@ -199,7 +199,7 @@ final class TaxReturnFoApiTest extends TestCase
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $final = $this->json($response);
         self::assertNotEmpty(array_filter($final['warnings'], static fn (string $warning): bool => str_contains($warning, 'limit 99')));
-        $service = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class);
+        $service = Bootstrap::buildContainer()->get(\MyInvoice\Service\Tax\Return\TaxReturnService::class);
         $export = $service->buildXml($this->supplierId, self::YEAR, 'fo');
         self::assertNotEmpty(array_filter($export['warnings'], static fn (string $warning): bool => str_contains($warning, 'limit 99')));
         self::assertSame(99, substr_count($export['xml'], '<VetaC'));

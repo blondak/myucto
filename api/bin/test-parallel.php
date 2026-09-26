@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use Symfony\Component\Process\Process;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -151,16 +152,15 @@ function sourceClonePlan(PDO $pdo, string $source): array
         $plan['tables'][$table] = [
             'ddl' => showCreate($pdo, 'TABLE', $source, $table),
             'columns' => implode(', ', array_map(quoteIdentifier(...), $columns[$table])),
+            'has_rows' => $pdo->query(
+                'SELECT 1 FROM ' . quoteIdentifier($source) . '.' . quoteIdentifier($table) . ' LIMIT 1',
+            )->fetchColumn() !== false,
         ];
     }
     foreach (databaseObjects($pdo, $source, 'VIEW') as $view) {
         $plan['views'][] = showCreate($pdo, 'VIEW', $source, $view);
     }
-    $statement = $pdo->prepare(
-        'SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY TRIGGER_NAME',
-    );
-    $statement->execute([$source]);
-    foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $trigger) {
+    foreach (TriggerMetadata::read($pdo, $source) as $trigger) {
         $plan['triggers'][] = [
             'table' => (string) $trigger['EVENT_OBJECT_TABLE'],
             'ddl' => showCreate($pdo, 'TRIGGER', $source, (string) $trigger['TRIGGER_NAME']),
@@ -202,6 +202,9 @@ function cloneDatabase(PDO $pdo, array $plan, string $target): void
             throw new RuntimeException('Po kopii DDL chybí tabulky: ' . implode(', ', array_keys($missingTables)));
         }
         foreach ($plan['tables'] as $name => $table) {
+            if (!$table['has_rows']) {
+                continue;
+            }
             try {
                 $pdo->exec(
                 'INSERT INTO ' . quoteIdentifier($target) . '.' . quoteIdentifier($name) . ' (' . $table['columns'] . ')'
@@ -337,7 +340,11 @@ if ($source === $configuredDb) {
     fail('Zdroj nesmí být databáze z cfg.php.');
 }
 
-$processes = (int) ($options['processes'] ?? min(4, max(2, (int) (getenv('NUMBER_OF_PROCESSORS') ?: 4))));
+$availableProcessors = (int) (getenv('NUMBER_OF_PROCESSORS') ?: 0);
+$defaultProcesses = $availableProcessors > 0
+    ? min(12, max(2, (int) floor($availableProcessors * 0.75)))
+    : 4;
+$processes = (int) ($options['processes'] ?? $defaultProcesses);
 if ($processes < 2 || $processes > 16) {
     fail('--processes musí být mezi 2 a 16.');
 }

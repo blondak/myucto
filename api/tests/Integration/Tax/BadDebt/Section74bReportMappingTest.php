@@ -46,7 +46,7 @@ final class Section74bReportMappingTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db      = $c->get(Connection::class);
             $this->service = $c->get(Section74bService::class);
             $this->periods = $c->get(AccountingPeriodRepository::class);

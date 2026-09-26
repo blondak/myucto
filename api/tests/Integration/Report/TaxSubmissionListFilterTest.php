@@ -47,7 +47,7 @@ final class TaxSubmissionListFilterTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->container = Bootstrap::buildApp()->getContainer();
+            $this->container = Bootstrap::buildContainer();
             $this->db   = $this->container->get(Connection::class);
             $this->repo = $this->container->get(TaxSubmissionRepository::class);
         } catch (\Throwable $e) {

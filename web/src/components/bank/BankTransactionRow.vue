@@ -110,7 +110,13 @@ const statusText = computed(() => payrollMatched.value
   ? t('bank.match_status.payroll')
   : ownTransfer.value ? t('bank.match_status.transfer')
     : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
-const statusTitle = computed(() => outsideSaldo.value ? t('bank.outside_saldo_hint') : undefined)
+// Štítek „Nespárováno" je zkratka k párování — stejná podmínka jako akce „Spárovat" v menu.
+const badgeMatchable = computed(() => !noInvoiceExpected.value
+  && auth.canWrite('bank.match') && !props.tx.posting?.payroll_matched
+  && (props.tx.match_status === 'unmatched' || props.tx.match_status === 'auto_partial'))
+const statusTitle = computed(() => outsideSaldo.value
+  ? t('bank.outside_saldo_hint')
+  : badgeMatchable.value ? t('bank.match_badge_hint') : undefined)
 // Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
 // dvou podobách (tabulka i karta) a dvě instance dialogu by si přebíjely stav.
 const repostTx = ref<RowTx | null>(null)
@@ -385,10 +391,13 @@ function candidateReject() {
         </template>
       </td>
       <td class="px-3 py-2 text-center">
-        <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status)"
-          :title="statusTitle">
+        <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"
+          class="text-xs px-2 py-0.5 rounded font-medium"
+          :class="[statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status),
+            badgeMatchable ? 'cursor-pointer hover:brightness-95 hover:underline' : '']"
+          :title="statusTitle" @click="badgeMatchable && startMatch(tx)">
           {{ statusText }}
-        </span>
+        </component>
         <div v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="mt-1 text-[11px] leading-tight text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}
@@ -452,10 +461,13 @@ function candidateReject() {
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
       <div class="flex flex-col items-end gap-1">
-        <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status)"
-          :title="statusTitle">
+        <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"
+          class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
+          :class="[statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status),
+            badgeMatchable ? 'cursor-pointer hover:brightness-95 hover:underline' : '']"
+          :title="statusTitle" @click="badgeMatchable && startMatch(tx)">
           {{ statusText }}
-        </span>
+        </component>
         <span v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="text-[11px] leading-tight text-right text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}

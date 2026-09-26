@@ -62,7 +62,7 @@ final class PayrollDependantApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollDependantAction::class);
             $this->statutory = $container->get(

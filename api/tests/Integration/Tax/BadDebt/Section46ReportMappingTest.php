@@ -50,7 +50,7 @@ final class Section46ReportMappingTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db      = $c->get(Connection::class);
             $this->service = $c->get(Section46Service::class);
             // Buildery MUSÍ pocházet z TÉHOŽ kontejneru — jinak dostanou vlastní připojení

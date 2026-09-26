@@ -45,7 +45,7 @@ final class DocumentTrashDeletionGuardTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_document_dms_links') || !$this->db->hasTable('tax_submission_artifacts')) {
             $this->markTestSkipped('Migrace mzdových dokladů / artefaktů podání neproběhly.');

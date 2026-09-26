@@ -302,6 +302,7 @@ final class JmhzReportReader
             lenient: $warnings !== [],
             warnings: $warnings,
             forms: $forms,
+            variableSymbol: $this->text($xpath, 'p:hlavicka/p:variabilniSymbol', $root),
         );
     }
 
@@ -412,7 +413,95 @@ final class JmhzReportReader
             standbyPay: $i('f:mzda/f:odmeny/f:pohotovost'),
             averageHourlyMilli: $this->scaled($t('f:mzda/f:vydelek/f:vydelekPrumernyHod'), 3, 'vydelekPrumernyHod'),
             insuranceFrom: $this->lenientDate($t('f:pojisteni/f:trvani/f:pojisteniOd')),
+            insuranceTo: $this->lenientDate($t('f:pojisteni/f:trvani/f:pojisteniDo')),
+            eldp: $this->eldp($xpath, $body),
+            employeeSocial: $this->lenientInt($t('f:pojisteni/f:pojisteniZamestnanec/f:socialniPojisteni')),
+            employerSocial: $this->lenientInt($t('f:pojisteni/f:pojisteniZamestnavatel/f:socialniPojisteni')),
+            employeeHealth: $this->lenientInt($t('f:souhrnDataZec/f:zdravPojZamestnanec/f:zdravotniPojisteni')),
+            employerHealth: $this->lenientInt($t('f:souhrnDataZec/f:zdravPojZamestnavatel/f:zdravotniPojisteni')),
+            netWage: $this->lenientInt($t('f:souhrnDataZec/f:mzdaCista/f:mzdaCista')),
+            deductionsRecorded: $this->lenientBool($t('f:souhrnDataZec/f:mzdaCista/f:srazkyZeMzdyEvidovany')),
+            tariff: $i('f:mzda/f:mzdaRozpad/f:tarif'),
+            unworkedMillihours: $this->lenientScaled($t('f:prubehZamestnani/f:neodpracovaneHodiny/f:hodinyNeodpracCelkem'), 3),
+            leaveMillihours: $this->lenientScaled($t('f:prubehZamestnani/f:neodpracovaneHodiny/f:hodinyNeodpracDovol'), 3),
+            absenceMillihours: $this->absenceMillihours($xpath, $body),
         );
+    }
+
+    /**
+     * Seznam ELDP formuláře: kód první sekce s kódem a součty dnů přes sekce.
+     * Blok `eldpSeznam` smí měkký režim přejít, proto se čte tolerantně.
+     *
+     * @return array{code:?string,insurance_days:int,excluded_days:int}|null
+     */
+    private function eldp(DOMXPath $xpath, DOMElement $body): ?array
+    {
+        $entries = $xpath->query('f:pojisteni/f:eldpSeznam/f:eldp', $body);
+        if ($entries === false || $entries->length === 0) {
+            return null;
+        }
+        $code = null;
+        $days = 0;
+        $excluded = 0;
+        foreach ($entries as $entry) {
+            if (!$entry instanceof DOMElement) {
+                continue;
+            }
+            $code ??= $this->text($xpath, 'f:kod', $entry);
+            $days += $this->lenientInt($this->text($xpath, 'f:pocetDnu', $entry)) ?? 0;
+            $excluded += $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:vylouceneDobyCelkem', $entry)) ?? 0;
+        }
+
+        return ['code' => $code, 'insurance_days' => $days, 'excluded_days' => $excluded];
+    }
+
+    /**
+     * Nemoc (s náhradou i bez ní) a OČR v součtu. Chybějící prvek je
+     * nula jen tehdy, když blok neodpracovaných hodin existuje; bez bloku `null`.
+     */
+    private function absenceMillihours(DOMXPath $xpath, DOMElement $body): ?int
+    {
+        $block = $this->element($xpath, 'f:prubehZamestnani/f:neodpracovaneHodiny', $body);
+        if ($block === null) {
+            return null;
+        }
+        $sum = 0;
+        foreach (['hodinyNeodpracNeschop', 'hodinyNeodpracOcr', 'hodinyNeodpracBezNahrady'] as $element) {
+            $value = $this->text($xpath, 'f:' . $element, $block);
+            if ($value === null) {
+                continue;
+            }
+            $hours = $this->lenientScaled($value, 3);
+            if ($hours === null) {
+                return null;
+            }
+            $sum += $hours;
+        }
+
+        return $sum;
+    }
+
+    private function lenientInt(?string $value): ?int
+    {
+        return $value !== null && preg_match('/^\d{1,15}$/D', $value) === 1 ? (int) $value : null;
+    }
+
+    private function lenientBool(?string $value): ?bool
+    {
+        return match ($value) {
+            'true', '1' => true,
+            'false', '0' => false,
+            default => null,
+        };
+    }
+
+    private function lenientScaled(?string $value, int $scale): ?int
+    {
+        try {
+            return $this->scaled($value, $scale, 'hodiny');
+        } catch (RegistrationImportFileException) {
+            return null;
+        }
     }
 
     /**

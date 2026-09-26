@@ -575,14 +575,14 @@ final class OtherItemService
     {
         $requiredSide = $itemSide === 'receivable' ? 'credit' : 'debit';
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(l.signed_amount), 0)
+            'SELECT COALESCE(SUM(CASE WHEN l.side = ? THEN l.signed_amount ELSE -l.signed_amount END), 0)
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
               WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ?
                 AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
-                AND l.side = ? AND l.account_id = ?'
+                AND l.account_id = ?'
         );
-        $stmt->execute([$supplierId, $sourceType, $sourceId, $requiredSide, $accountId]);
+        $stmt->execute([$requiredSide, $supplierId, $sourceType, $sourceId, $accountId]);
         if ((float) $stmt->fetchColumn() + 0.001 < $allocatedTotal) {
             throw new OtherItemException('payment_not_posted', 'Platbu nejprve zaúčtujte proti účtu pohledávky nebo závazku.', 409);
         }

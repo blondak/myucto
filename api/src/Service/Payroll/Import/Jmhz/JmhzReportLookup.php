@@ -26,7 +26,8 @@ final class JmhzReportLookup
             'SELECT id, effective_from, effective_to, work_place,
                     jmhz_workplace_municipality_code, jmhz_workplace_country_code,
                     jmhz_apz_contribution_status, jmhz_apz_instrument_code,
-                    jmhz_functional_benefits_status, jmhz_temporary_assignment_status
+                    jmhz_functional_benefits_status, jmhz_temporary_assignment_status,
+                    weekly_hours, workload_basis_points
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?
               ORDER BY effective_from DESC, id DESC'
@@ -79,27 +80,26 @@ final class JmhzReportLookup
     }
 
     /**
-     * Osoby, jejichž platná identita se shoduje jménem a datem narození —
-     * nápověda pro ruční párování formuláře hlášeného jménem.
+     * Převzaté měsíce vztahu, které už firma má, podle zdroje:
+     * `period (YYYY-MM) => list<source>`.
      *
-     * @return list<int>
+     * @return array<string,list<string>>
      */
-    public function employeesByNameAndBirthDate(
-        int $supplierId,
-        string $firstName,
-        string $lastName,
-        string $birthDate,
-    ): array {
+    public function takeoverSources(int $supplierId, int $employmentId): array
+    {
         $statement = $this->db->pdo()->prepare(
-            'SELECT DISTINCT employee_id
-               FROM payroll_person_identity_history
-              WHERE supplier_id = ? AND birth_date = ?
-                AND LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?)
-              ORDER BY employee_id'
+            'SELECT DATE_FORMAT(period_start, \'%Y-%m\') AS period, source
+               FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY period_start, source'
         );
-        $statement->execute([$supplierId, $birthDate, $firstName, $lastName]);
+        $statement->execute([$supplierId, $employmentId]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(string) $row['period']][] = (string) $row['source'];
+        }
 
-        return array_map(intval(...), $statement->fetchAll(PDO::FETCH_COLUMN));
+        return $result;
     }
 
     /**

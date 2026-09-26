@@ -209,6 +209,28 @@ final class RegistrationImportLookup
         return array_map(strval(...), array_keys($symbols));
     }
 
+    /**
+     * Osoby se shodným jménem, příjmením a datem narození v kterékoli verzi identity.
+     * Slouží jen tam, kde věta žádný identifikátor nenese (formulář hlášení větve B).
+     *
+     * @return list<int>
+     */
+    public function employeesByNameAndBirthDate(
+        int $supplierId,
+        string $firstName,
+        string $lastName,
+        string $birthDate,
+    ): array {
+        return $this->ids(
+            'SELECT DISTINCT employee_id
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND birth_date = ?
+                AND LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?)
+              ORDER BY employee_id',
+            [$supplierId, $birthDate, $firstName, $lastName],
+        );
+    }
+
     /** VS bez oddělovačů a úvodních nul; `null`, když v něm žádná číslice není. */
     public static function variableSymbol(string $value): ?string
     {

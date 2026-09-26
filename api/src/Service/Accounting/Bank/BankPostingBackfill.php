@@ -239,7 +239,7 @@ final class BankPostingBackfill
                        -- bere i 'auto_exact'/'manual' a ruční párování confidence nemá).
                        -- Shodu obou stran hlídá BankPostingBackfillCandidatesTest.
                        OR (
-                           bt.match_status IN ('auto_partial', 'auto_exact', 'manual') AND bt.amount < 0
+                           bt.match_status IN ('auto_partial', 'auto_exact', 'manual') AND bt.amount <> 0
                            AND EXISTS (
                                SELECT 1
                                  FROM payment_matches pm
@@ -249,15 +249,21 @@ final class BankPostingBackfill
                                 WHERE pm.supplier_id = ? AND pm.bank_transaction_id = bt.id
                                   AND pm.invoice_id IS NULL AND pm.purchase_invoice_id IS NOT NULL
                                   AND pm.match_type IN ('auto', 'manual')
+                                  -- odchozí úhrada faktury, nebo příchozí vratka dobropisu
+                                  AND ((bt.amount < 0 AND pi.amount_to_pay > 0) OR (bt.amount > 0 AND pi.amount_to_pay < 0))
                                   AND (
                                       (
                                           UPPER(pic.code) = UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, '')))
-                                          -- ruční párování nemá confidence (NULL) — důkazem je člověk, ne skóre
-                                          AND (pm.match_type = 'manual' OR COALESCE(pm.match_confidence, 0) >= 70)
-                                          AND ABS(ABS(bt.amount) - pi.amount_to_pay) <= ?
+                                          -- ruční párování nemá confidence (NULL) — důkazem je člověk, ne skóre;
+                                          -- pohyb přesně na částku k úhradě z dokladu (amount_to_pay + rounding) taky
+                                          AND (pm.match_type = 'manual' OR COALESCE(pm.match_confidence, 0) >= 70
+                                               OR (ABS(COALESCE(pi.rounding, 0)) >= 0.005
+                                                   AND ABS(ABS(bt.amount) - ABS(pi.amount_to_pay + COALESCE(pi.rounding, 0))) < 0.005))
+                                          AND ABS(ABS(bt.amount) - ABS(pi.amount_to_pay)) <= ?
                                       )
                                       OR (
-                                          UPPER(pic.code) <> UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, '')))
+                                          bt.amount < 0
+                                          AND UPPER(pic.code) <> UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, '')))
                                           AND (pm.match_type = 'manual' OR COALESCE(pm.match_confidence, 0) >= 60)
                                           AND UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''))) = 'CZK'
                                           AND UPPER(pic.code) <> 'CZK' AND pi.exchange_rate > 0

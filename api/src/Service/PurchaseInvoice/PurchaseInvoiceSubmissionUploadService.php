@@ -10,6 +10,7 @@ use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Service\Document\DocumentException;
 use MyInvoice\Service\Document\DocumentIngestService;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Support\PdfBytes;
 use PDOException;
 use Psr\Http\Message\UploadedFileInterface;
 
@@ -267,9 +268,9 @@ final class PurchaseInvoiceSubmissionUploadService
 
     private function validateMagic(string $path, string $extension): void
     {
-        $head = (string) @file_get_contents($path, false, null, 0, 512);
+        $head = (string) @file_get_contents($path, false, null, 0, 1024);
         $valid = match ($extension) {
-            'pdf' => str_starts_with($head, '%PDF-'),
+            'pdf' => $this->repairPdfHeader($path, $head),
             'jpg', 'jpeg' => str_starts_with($head, "\xFF\xD8\xFF"),
             'png' => str_starts_with($head, "\x89PNG\r\n\x1A\n"),
             'isdoc', 'xml' => str_contains($head, '<'),
@@ -283,6 +284,24 @@ final class PurchaseInvoiceSubmissionUploadService
                 422,
             );
         }
+    }
+
+    /**
+     * PDF, jehož hlavička `%PDF-` není na prvním bajtu (prázdný řádek nebo BOM před
+     * ní, {@see PdfBytes}), se v dočasném souboru opraví ještě před hashem a uložením.
+     * Do fronty i k vytěžení tak jde PDF, které začíná hlavičkou.
+     */
+    private function repairPdfHeader(string $path, string $head): bool
+    {
+        $offset = PdfBytes::headerOffset($head);
+        if ($offset === null) {
+            return false;
+        }
+        if ($offset === 0) {
+            return true;
+        }
+        $bytes = @file_get_contents($path);
+        return is_string($bytes) && @file_put_contents($path, PdfBytes::normalize($bytes)) !== false;
     }
 
     private function bankTransactionBelongsToSupplier(int $id, int $supplierId): bool

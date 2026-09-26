@@ -51,7 +51,7 @@ final class PayrollFoundationTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->states = $container->get(PayrollModuleStateRepository::class);
             $this->ownership = $container->get(PayrollPeriodOwnershipService::class);

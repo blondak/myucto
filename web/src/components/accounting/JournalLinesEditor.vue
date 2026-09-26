@@ -64,7 +64,8 @@ function update(lines: EditorLine[]) {
 }
 
 function addLine() {
-  update([...props.modelValue, { account_code: '', side: 'debit', amount: null }])
+  const isRedStorno = props.modelValue.length > 0 && props.modelValue.every(l => l.is_red_storno === true)
+  update([...props.modelValue, { account_code: '', side: 'debit', amount: null, is_red_storno: isRedStorno }])
 }
 
 function removeLine(i: number) {

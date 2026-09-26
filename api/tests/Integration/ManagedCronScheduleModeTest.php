@@ -37,7 +37,7 @@ final class ManagedCronScheduleModeTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -47,7 +47,7 @@ final class ManagedCronScheduleModeTest extends TestCase
     {
         return new SetCronScheduleModeAction(
             $this->db,
-            Bootstrap::buildApp()->getContainer()->get(ActivityLogger::class),
+            Bootstrap::buildContainer()->get(ActivityLogger::class),
             new ManagedModeGuard(new Config(['app' => ['managed' => $managed]])),
         );
     }

@@ -163,7 +163,7 @@ final class PohodaReconciler
             return round((float) $stmt->fetchColumn(), 2);
         };
         $oneSided = static fn (string $entry, string $prefix): string =>
-            "(SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2
+            "(SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2 FORCE INDEX (ix_jel_closing_by_entry)
                 JOIN chart_of_accounts a2 ON a2.id = l2.account_id AND a2.supplier_id = l2.supplier_id
                WHERE l2.supplier_id = l.supplier_id AND l2.entry_id = {$entry} AND a2.account_code LIKE '{$prefix}%') = 1";
         $ledger = static fn (string $kind, string $docType, string $prefix, string $sign): string =>
@@ -313,7 +313,7 @@ final class PohodaReconciler
                       WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '{$prefix}%') AS journal
                FROM journal_entries e
               WHERE e.supplier_id = ? AND e.period_id IN (" . (implode(',', array_map('intval', $periodIds)) ?: '0') . ") AND e.source_type <> 'opening' AND EXISTS (SELECT 1 {$linked})
-                AND (SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2
+                AND (SELECT COUNT(DISTINCT l2.side) FROM journal_entry_lines l2 FORCE INDEX (ix_jel_closing_by_entry)
                        JOIN chart_of_accounts a2 ON a2.id = l2.account_id AND a2.supplier_id = l2.supplier_id
                       WHERE l2.supplier_id = e.supplier_id AND l2.entry_id = e.id AND a2.account_code LIKE '{$prefix}%') = 1"
         );

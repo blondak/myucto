@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Settings;
 
 use MyInvoice\Action\Settings\SettingsAction;
+use MyInvoice\Action\Settings\CompanyProfileAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -30,6 +33,7 @@ final class SupplierAccountingModeGuardTest extends TestCase
 
     private Connection $db;
     private SettingsAction $action;
+    private CompanyProfileAction $profileAction;
 
     private int $userId = 0;
     private int $supplierId = 0;
@@ -42,9 +46,10 @@ final class SupplierAccountingModeGuardTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container    = Bootstrap::buildApp()->getContainer();
+            $container    = Bootstrap::buildContainer();
             $this->db     = $container->get(Connection::class);
             $this->action = $container->get(SettingsAction::class);
+            $this->profileAction = $container->get(CompanyProfileAction::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -60,6 +65,7 @@ final class SupplierAccountingModeGuardTest extends TestCase
         $this->inTx = true;
 
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplier);
+        $pdo->prepare('UPDATE supplier SET dimensions_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
     }
 
     protected function tearDown(): void
@@ -130,22 +136,80 @@ final class SupplierAccountingModeGuardTest extends TestCase
         self::assertSame('fo', $this->column('taxpayer_type'), 'Odmítnuté uložení nesmí nic změnit.');
     }
 
+    public function testDimensionsCannotBeActivatedWithoutAccountingLicence(): void
+    {
+        $free = $this->license(false);
+        $blocked = $this->save(['dimensions_enabled' => true], $free);
+        self::assertSame(403, $blocked['status']);
+        self::assertSame('license_commercial_feature_unavailable', $blocked['body']['error']['code'] ?? null);
+        self::assertSame('0', $this->column('dimensions_enabled'));
+
+        self::assertSame(200, $this->save(['dimensions_enabled' => true], $this->license(true))['status']);
+        self::assertSame('1', $this->column('dimensions_enabled'));
+        self::assertSame(200, $this->save(['dimensions_enabled' => true, 'email' => 'test@example.invalid'], $free)['status']);
+        self::assertSame(200, $this->save(['dimensions_enabled' => false], $free)['status']);
+        self::assertSame('0', $this->column('dimensions_enabled'));
+    }
+
+    public function testCompanyProfileCannotActivateDimensionsWithoutAccountingLicence(): void
+    {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/settings/company-profile/import')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(LicenseMiddleware::ATTR_STATE, $this->license(false))
+            ->withParsedBody(['profile' => [
+                'format' => 'myucto.company-profile', 'version' => 1,
+                'sections' => ['company' => ['dimensions_enabled' => true]],
+            ]]);
+        $response = $this->profileAction->import($request, new Psr7Response());
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('0', $this->column('dimensions_enabled'));
+    }
+
+    public function testUnlicensedProfileImportAllowsEmptyDimensionSections(): void
+    {
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/settings/company-profile/import')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(LicenseMiddleware::ATTR_STATE, $this->license(false))
+            ->withParsedBody(['profile' => [
+                'format' => 'myucto.company-profile', 'version' => 1,
+                'sections' => [
+                    'company' => ['dimensions_enabled' => false],
+                    'dimensions' => ['types' => []],
+                    'dimension_defaults' => [],
+                    'dimension_rules' => [],
+                ],
+            ]]);
+
+        self::assertSame(200, $this->profileAction->import($request, new Psr7Response())->getStatusCode());
+    }
+
     // ── Pomocné ──────────────────────────────────────────────────────────────
 
     /** @param array<string,mixed> $body @return array{status:int,body:array<string,mixed>} */
-    private function save(array $body): array
+    private function save(array $body, ?LicenseState $license = null): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/settings/supplier')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
             ->withParsedBody($body);
+        if ($license !== null) $req = $req->withAttribute(LicenseMiddleware::ATTR_STATE, $license);
 
         $resp = $this->action->updateSupplier($req, new Psr7Response());
         $resp->getBody()->rewind();
         $decoded = json_decode((string) $resp->getBody(), true);
 
         return ['status' => $resp->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
+    }
+
+    private function license(bool $commercial): LicenseState
+    {
+        return new LicenseState(LicenseState::ACTIVE, 'test-instance', 'test', null, 0, 0, 0,
+            time() + 3600, null, null, null, null, true, commercial: $commercial);
     }
 
     private function column(string $name): ?string

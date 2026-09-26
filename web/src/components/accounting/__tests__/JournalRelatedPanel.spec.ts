@@ -47,6 +47,22 @@ describe('JournalRelatedPanel', () => {
     expect(wrapper.find('[data-test="related-entry-notes"]').text()).toContain('test')
   })
 
+  it('proforma bez zápisu má neutrální štítek, ne „Nezaúčtováno"', async () => {
+    relatedMock.mockResolvedValueOnce({
+      items: [
+        { ...payment(null), relation: 'document', source_type: 'invoice', source_id: 5, postable: false },
+        { ...payment(null), relation: 'document', source_type: 'invoice', source_id: 6, postable: true },
+      ],
+      truncated: false,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    const text = wrapper.text()
+    expect(wrapper.findAll('[data-test="related-advance-not-postable"]')).toHaveLength(1)
+    expect(text).toContain('accounting.journal.related.advance_not_postable')
+    expect(text.split('accounting.journal.related.not_posted').length - 1).toBe(1)
+  })
+
   it('nezaúčtovaný protějšek poznámky nenačítá', async () => {
     notesMock.mockClear()
     relatedMock.mockResolvedValueOnce({ items: [payment(null)], truncated: false })

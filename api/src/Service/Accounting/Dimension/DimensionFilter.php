@@ -37,7 +37,7 @@ final class DimensionFilter
     /**
      * Zdroj řádků deníku pro sestavu filtrovanou na hodnotu: odvozená tabulka se
      * sloupci `journal_entry_lines` (id, entry_id, supplier_id, account_id, side,
-     * amount, cost_center, line_no) pod aliasem `$alias`, kterou volající dosadí místo
+     * amount, signed_amount, cost_center, line_no) pod aliasem `$alias`, kterou volající dosadí místo
      * `journal_entry_lines {$alias}`. Obsahuje
      *   • řádky s jedinou hodnotou z větve v plné výši,
      *   • u Střediska řádky bez dimenze typu s textovým kódem navázaného střediska,

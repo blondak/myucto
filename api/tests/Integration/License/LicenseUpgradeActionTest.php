@@ -59,7 +59,7 @@ final class LicenseUpgradeActionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }

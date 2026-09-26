@@ -46,7 +46,7 @@ final class SeatPolicyTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -197,7 +197,7 @@ final class SeatPolicyTest extends TestCase
 
     public function testReadOnlySystemRoleCannotBeGivenWriteAccess(): void
     {
-        $repo = Bootstrap::buildApp()->getContainer()->get(RoleRepository::class);
+        $repo = Bootstrap::buildContainer()->get(RoleRepository::class);
         $role = $repo->find($this->readonlyRoleId);
         self::assertIsArray($role);
 

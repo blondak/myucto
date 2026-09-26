@@ -58,7 +58,22 @@ export type PaymentAccountSource = 'isdoc' | 'ai' | 'ai_reextract' | 'qr_image' 
  * service=518, material=501 (vč. PHM), small_asset=501 + karta drobného majetku,
  * fixed_asset=042 + odpisy. NULL = neurčeno (chová se jako dosud → 518).
  */
-export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'fixed_asset'
+export type ExpenseKind = 'service' | 'material' | 'small_asset' | 'small_intangible' | 'fixed_asset'
+
+/** Návrh druhu nákladu z AI extrakce pro řádek (klíčem je order_index). */
+export interface ExtractionExpenseKindProposal {
+  order_index: number
+  kind: ExpenseKind
+  confidence: number
+  reason: string
+}
+
+/** Strukturované podklady ke kontrole AI extrakce (migrace 1893). */
+export interface ExtractionReview {
+  expense_kinds?: ExtractionExpenseKindProposal[]
+  /** Podle PDF už uhrazeno — import nechal koncept, úhradu potvrdí uživatel. */
+  paid_per_document?: boolean
+}
 
 /** Odkud návrh přišel: pravidlo tenanta / klíčové slovo / práh §26/2 ZDP / AI. */
 export type ExpenseKindSuggestionSource = 'rule' | 'keyword' | 'threshold' | 'ai'
@@ -326,6 +341,11 @@ export interface PurchaseInvoice {
   rounding: number
   advance_paid_amount: number
   amount_to_pay: number
+  /** Uhrazeno / zbývá uhradit v měně dokladu (banka, pokladna, zápočty). */
+  paid_amount?: number
+  remaining_amount?: number
+  /** Uhrazeno s rozdílem: stav paid, ale zbytek po úhradách je vyšší než 1 Kč. */
+  paid_shortfall?: boolean
   // Multi-currency platba (USD faktura placená z CZK účtu)
   payment_currency_id: number | null
   payment_currency: string | null
@@ -446,6 +466,8 @@ export interface PurchaseInvoice {
    * NULL = vše OK / faktura nebyla AI-importována.
    */
   extraction_warning: string | null
+  /** Strukturované návrhy ke kontrole — maže se spolu s extraction_warning. */
+  extraction_review?: ExtractionReview | null
   created_by: number
   created_at: string
   updated_at: string
@@ -506,6 +528,11 @@ export interface PurchaseInvoiceListItem {
   total_with_vat: number
   advance_paid_amount: number
   amount_to_pay: number
+  /** Uhrazeno / zbývá uhradit v měně dokladu. */
+  paid_amount?: number
+  remaining_amount?: number
+  /** Uhrazeno s rozdílem: stav paid, ale zbytek po úhradách je vyšší než 1 Kč. */
+  paid_shortfall?: boolean
   status: PurchaseInvoiceStatus
   booked_at: string | null
   paid_at: string | null
@@ -520,6 +547,12 @@ export interface PurchaseInvoiceListItem {
   vendor_company_name: string
   vendor_ic: string | null
   month_bucket: string
+  project_name?: string | null
+  kh_sections?: string[]
+  vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
+  debit_accounts?: string[]
+  credit_accounts?: string[]
+  dimension_labels?: string[]
   /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
   has_small_asset?: boolean
   extraction_warning: string | null
@@ -620,6 +653,13 @@ export interface PurchaseInvoicePayload {
 }
 
 export interface PurchaseListFilters {
+  sort_key?: string
+  sort_dir?: 'asc' | 'desc'
+  group_by_month?: boolean
+  include_kh?: boolean
+  include_vat_breakdown?: boolean
+  include_posting_accounts?: boolean
+  include_dimensions?: boolean
   status?: PurchaseInvoiceStatus | PurchaseInvoiceStatus[]
   document_kind?: PurchaseDocumentKind | PurchaseDocumentKind[]
   vendor_id?: number
@@ -641,6 +681,8 @@ export interface PurchaseListFilters {
   unpaid_as_of?: string
   /** Bez zaúčtované úhrady (banka ani pokladna) — odhalí ručně/legacy uhrazené doklady. */
   unmatched?: boolean
+  /** Uhrazené doklady, které evidované úhrady nepokrývají (nedoplatek). */
+  paid_shortfall?: boolean
   needs_review?: boolean
   /** '1' = předané k úhradě, '0' = nepředané (odvozeno z payment_ordered_at). */
   payment_ordered?: '1' | '0'
@@ -711,12 +753,20 @@ export const purchaseInvoicesApi = {
     if (filters.overdue)      params['filter[overdue]']      = 1
     if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
     if (filters.unmatched)    params['filter[unmatched]']    = 1
+    if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
+    if (filters.sort_key)    params.sort_key               = filters.sort_key
+    if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
+    if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
+    if (filters.include_kh) params['filter[include_kh]'] = 1
+    if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
+    if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
+    if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
     return api.get<{ data: PurchaseMonthGroup[]; meta: PurchaseListMeta }>(
       '/purchase-invoices',
       { params },
@@ -779,8 +829,15 @@ export const purchaseInvoicesApi = {
       ...(target === 'paid' ? { paid_date: paidDate || appIsoDate() } : {}),
     }).then(r => r.data),
 
-  dismissExtractionWarning: (id: number) =>
-    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`).then(r => r.data),
+  /** Bez `section` smaže celé hlášení, se `section` jen tuto jeho část (vyřešený bod). */
+  dismissExtractionWarning: (id: number, section?: string) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`, section ? { section } : undefined)
+      .then(r => r.data),
+
+  /** Druh nákladu po položkách — kontrolní okno po AI importu, i u zaplaceného dokladu. */
+  setExpenseKinds: (id: number, items: { id: number; expense_kind: ExpenseKind | null }[]) =>
+    api.put<PurchaseInvoice & { _repost?: { entry_id: number } }>(`/purchase-invoices/${id}/expense-kinds`, { items })
+      .then(r => r.data),
 
   /** Rychlá změna typu dokladu (#232) — oprava AI klasifikace po importu. */
   setDocumentKind: (id: number, documentKind: PurchaseDocumentKind) =>

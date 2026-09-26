@@ -58,7 +58,7 @@ final class TenantReferenceGuardSchemaTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — schema test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildApp()->getContainer()->get(Connection::class);
+            $this->db = Bootstrap::buildContainer()->get(Connection::class);
             $this->db->pdo();
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());

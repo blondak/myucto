@@ -44,7 +44,7 @@ final class UnpaidAsOfFilterActionTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->invoicesAction = $container->get(ListInvoicesAction::class);
             $this->purchasesAction = $container->get(ListPurchaseInvoicesAction::class);

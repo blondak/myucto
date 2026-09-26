@@ -527,7 +527,11 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertStringContainsString('ani měsíční hlášení JMHZ', (string) $preview['files'][2]['error']);
         self::assertNull($preview['files'][3]['error']);
         self::assertStringContainsString('převzal s varováním', implode(' ', $preview['files'][3]['warnings']));
-        self::assertCount(2, $preview['records']);
+        self::assertCount(3, $preview['records']);
+        // Osoba z hlášení v evidenci není: dávka ji dokládá odvozenou větou.
+        $derived = $preview['records'][2];
+        self::assertSame('JMHZ_DERIVED', $derived['document_type'], $this->dump($derived));
+        self::assertSame('create_person', $derived['operation']);
     }
 
     public function testActionPassesPairsAndFlagsThrough(): void

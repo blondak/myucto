@@ -12,7 +12,7 @@
  * Přijatá faktura nemá paid_total → cash i settlement vyžadují PLNOU výši (backend
  * to vynucuje, tady jen zamkneme pole a řekneme to uživateli).
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountingApi, type ChartAccount, type SettlementDocType } from '@/api/accounting'
 import { cashApi, type CashRegister } from '@/api/cash'
@@ -35,6 +35,19 @@ const props = defineProps<{
   thanks?: { enabled: boolean; hasRecipient: boolean; defaultChecked: boolean }
   /** Rodič právě běží (mark-paid/transition) → zamknout tlačítko. */
   busy?: boolean
+  /**
+   * Jen zápočet proti účtu, bez volby způsobu: vyrovnání zbytku (nedoplatku) dokladu.
+   * Nadpis, úvodní věta a tlačítka se pak berou z props, protože nejde o „označit uhrazené".
+   */
+  settlementOnly?: boolean
+  title?: string
+  intro?: string
+  cancelLabel?: string
+  confirmLabel?: string
+  /** Měna částky (u cizoměnové přijaté faktury se zápočet eviduje v měně dokladu). */
+  currency?: string
+  /** Předvolený protiúčet místo předvolby z kontací (např. 648 / 663 u vyrovnání zbytku). */
+  defaultAccountCode?: string
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +59,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useToast()
 
-const method = ref<Method>('plain')
+const method = ref<Method>(props.settlementOnly ? 'settlement' : 'plain')
 const settledOn = ref(appIsoDate())
 const amount = ref(props.amount)
 const note = ref('')
@@ -111,7 +124,12 @@ async function ensureLoaded(m: Method) {
       // by v osnově bez analytik select vyprázdnilo.
       const parentIds = new Set(all.map(a => a.parent_id).filter((v): v is number => v !== null))
       accounts.value = all.filter(a => a.is_active && !parentIds.has(a.id))
-      accountId.value = current.default_account.account_id
+      const preferred = props.defaultAccountCode
+        ? accounts.value.find(a => a.account_code === props.defaultAccountCode)
+          ?? accounts.value.find(a => a.account_code.startsWith(props.defaultAccountCode as string))
+        : undefined
+      accountId.value = preferred?.id
+        ?? current.default_account.account_id
         ?? accounts.value.find(a => a.account_code === current.default_account.account_code)?.id
         ?? null
     } catch (e: any) {
@@ -123,6 +141,7 @@ async function ensureLoaded(m: Method) {
 }
 
 watch(method, m => { ensureLoaded(m) })
+onMounted(() => { if (props.settlementOnly) ensureLoaded('settlement') })
 watch(() => props.amount, v => { amount.value = v })
 // Přepnutí metody vrátí částku na plnou výši: ručně zkrácená částka dává smysl jen
 // u zápočtu a u ostatních metod by se tiše propsala do úhrady, která částečná být nemůže.
@@ -183,12 +202,13 @@ async function submit() {
 <template>
   <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="emit('close')">
     <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-      <h3 class="text-lg font-semibold mb-1">{{ t('invoice.modals.mark_paid_title') }}</h3>
+      <h3 class="text-lg font-semibold mb-1">{{ title || t('invoice.modals.mark_paid_title') }}</h3>
       <p class="text-sm text-neutral-500 mb-3">{{ docNumber }}</p>
+      <p v-if="intro" class="text-sm text-neutral-700 mb-3">{{ intro }}</p>
 
       <div class="space-y-3">
         <!-- Volba způsobu úhrady -->
-        <div>
+        <div v-if="!settlementOnly">
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.pay_method.label') }}</label>
           <div class="grid grid-cols-3 gap-1 p-1 bg-neutral-100 rounded-lg">
             <button v-for="m in methods" :key="m.key" type="button" @click="method = m.key"
@@ -229,7 +249,7 @@ async function submit() {
           </div>
 
           <div v-if="method !== 'plain'">
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.pay_common.amount') }}</label>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.pay_common.amount') }}<template v-if="currency"> ({{ currency }})</template></label>
             <input v-model.number="amount" type="number" step="0.01" min="0" :disabled="fixedAmount"
               class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-50 disabled:text-neutral-500" />
             <p v-if="fixedAmount" class="text-xs text-neutral-500 mt-1">{{ t('invoice.pay_common.full_amount_only') }}</p>
@@ -254,17 +274,17 @@ async function submit() {
 
           <p v-if="postingHint" class="text-xs text-neutral-500">
             {{ t('invoice.pay_common.will_post') }}: <span class="font-mono">{{ postingHint }}</span>
-            — {{ formatMoney(amount) }}
+            — {{ formatMoney(amount, currency) }}
           </p>
         </template>
 
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
 
         <div class="flex justify-end gap-2 pt-1">
-          <button type="button" @click="emit('close')" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button type="button" @click="emit('close')" :class="btnOutline('neutral')">{{ cancelLabel || t('common.cancel') }}</button>
           <button type="button" @click="submit" :disabled="saving || busy || loading" :class="btnFilled('success')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
-            {{ saving || busy ? t('common.saving') : t('invoice.pay_common.confirm') }}
+            {{ saving || busy ? t('common.saving') : (confirmLabel || t('invoice.pay_common.confirm')) }}
           </button>
         </div>
       </div>

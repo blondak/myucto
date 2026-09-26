@@ -94,6 +94,18 @@
                     <td class="num">{{ p.total_remaining|cz_money }}</td>
                 </tr>
                 {% for it in p.items %}
+                    {% if it.kind is defined and it.kind == 'advance_pending' %}
+                    {# Záloha čekající na vyúčtování: částka = platba, uhrazeno = daň z DDKP. #}
+                    <tr>
+                        <td>{{ it.doc_no }}<br><span style="color:#888">{{ it.label }}</span></td>
+                        <td>{{ it.issue_date|cz_date }}</td>
+                        <td>{{ it.due_date|cz_date }}</td>
+                        <td class="num"></td>
+                        <td class="num">{{ it.advance_payment_czk|cz_money }}</td>
+                        <td class="num">{% if it.advance_vat_czk %}{{ it.advance_vat_czk|cz_money }}<br><span style="color:#888">DPH z daňového dokladu k platbě</span>{% endif %}</td>
+                        <td class="num">{{ it.remaining_czk|cz_money }}</td>
+                    </tr>
+                    {% else %}
                     <tr>
                         <td>{{ it.doc_no }}</td>
                         <td>{{ it.issue_date|cz_date }}</td>
@@ -103,6 +115,7 @@
                         <td class="num">{{ it.paid_czk|cz_money }}</td>
                         <td class="num">{{ it.remaining_czk|cz_money }}</td>
                     </tr>
+                    {% endif %}
                 {% endfor %}
             {% endfor %}
         </tbody>

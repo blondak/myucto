@@ -253,7 +253,13 @@ final class DpfoReturnDataProvider
         // zvýšení základu (= snížení výdajů) PLUS §23 manuální snížení základu (= zvýšení
         // výdajů) — zrcadlí DppoReturnCalculator ř. 40/62/162, jen promítnuté do výdajů §7
         // místo samostatných řádků formuláře DPFDP7 (Příloha 1 nemá ekvivalent ř. 40/62/162).
-        $expenses = max(0.0, round($ledgerExpenses - $nonDeductible - $manualIncrease + $manualDecrease, 2));
+        // § 24 odst. 2 písm. w) platí i pro podíly v obchodním majetku FO — stejné pravidlo
+        // jako DPPO ř. 40 ze stejného zdroje ({@see SecuritiesSaleCostLimit}). Týká se jen
+        // podvojného účetnictví: v daňové evidenci 561/661 nejsou a prodej cenných papírů
+        // mimo obchodní majetek je příjem podle § 10 (Příloha č. 2, výdaje se tam párují
+        // s příjmem téhož druhu už ve výpočtu § 10), takže tam omezení deník nepotřebuje.
+        $securitiesAddback = (new SecuritiesSaleCostLimit($this->db))->forPeriod($supplierId, $startsOn, $endsOn)['addback'];
+        $expenses = max(0.0, round($ledgerExpenses - $nonDeductible - $securitiesAddback - $manualIncrease + $manualDecrease, 2));
 
         $warnings = [
             'Fyzická osoba s podvojným účetnictvím: dílčí základ §7 je odvozen z výsledku hospodaření '
@@ -262,6 +268,11 @@ final class DpfoReturnDataProvider
         if ($nonDeductible > 0) {
             $warnings[] = 'Nedaňové náklady (§25 ZDP, ' . number_format($nonDeductible, 0, ',', ' ')
                 . ' Kč, dle příznaku „Daňová uznatelnost" na účtech) byly z výdajů §7 vyloučeny (přičteny zpět k základu).';
+        }
+        if ($securitiesAddback > 0) {
+            $warnings[] = 'Nabývací cena prodaných podílů (561P) převyšuje příjmy z prodeje (661) o '
+                . number_format($securitiesAddback, 0, ',', ' ') . ' Kč; převis je podle § 24 odst. 2 písm. w) ZDP '
+                . 'nedaňový a byl z výdajů §7 vyloučen.';
         }
         if ($manualIncrease > 0 || $manualDecrease > 0) {
             $warnings[] = 'Ruční položky §23 promítnuty do §7: zvýšení základu '

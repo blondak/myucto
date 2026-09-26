@@ -287,6 +287,79 @@ final class PayrollTakeoverAbsenceWriter
     }
 
     /**
+     * Čerpání dovolené po měsících ({@see PayrollTakeoverEmployment::$leaveTaken}) pro zdroj,
+     * který zůstatek nenese (měsíční hlášení JMHZ vykazuje jen hodiny dovolené). Každý měsíc
+     * je jedna položka `taken` v knize dovolené s doložením původu, s účinností posledního
+     * dne měsíce; kniha ji pustí jen před zahájením vedení mezd v MyÚčtu. Zůstatek pak
+     * vyjde z nároku, který určí účetní, minus převzaté čerpání.
+     *
+     * Vylučuje se s {@see self::leaveCarryover()}: zůstatek ze zdroje už čerpání odečtené má.
+     * Položku za měsíc, která v knize už je, zápis nemění; liší-li se, ohlásí to.
+     *
+     * @return array<string,int>
+     */
+    public function leaveTaken(int $supplierId, int $employmentId, PayrollTakeoverEmployment $employment, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        if ($employment->leaveTaken === [] || $employment->leave !== null) {
+            return [];
+        }
+        $written = 0;
+        $existing = 0;
+        $different = [];
+        $ledgers = [];
+        foreach ($employment->leaveTaken as $month) {
+            $minutes = (int) $month['minutes'];
+            if ($minutes <= 0) {
+                continue;
+            }
+            $period = (string) $month['period'];
+            $year = (int) substr($period, 0, 4);
+            $marker = self::leaveTakenMarker($policy, $period);
+            $ledgers[$year] ??= $this->leave->list($supplierId, $employmentId, $year);
+            $found = null;
+            foreach ($ledgers[$year] as $entry) {
+                if ($entry['entry_type'] === 'taken' && str_contains((string) $entry['reason'], $marker)) {
+                    $found = (int) $entry['minutes_delta'];
+                    break;
+                }
+            }
+            if ($found !== null) {
+                if ($found === -$minutes) {
+                    $existing++;
+                } else {
+                    $different[] = PayrollTakeoverFormat::czechPeriod($period);
+                }
+                continue;
+            }
+            $end = (new \DateTimeImmutable($period . '-01'))->modify('last day of this month')->format('Y-m-d');
+            $this->leave->appendManual(
+                $supplierId,
+                $employmentId,
+                $year,
+                $end,
+                'taken',
+                -$minutes,
+                $marker . ': ' . PayrollTakeoverFormat::decimal($minutes / 60) . ' h.',
+                $userId,
+                null,
+                $policy->label,
+            );
+            $written++;
+        }
+        if ($different !== []) {
+            throw new \DomainException('v knize dovolené už je převzaté čerpání za ' . implode(', ', $different)
+                . ' s jinou hodnotou; opravte ho ručně.');
+        }
+        $counts = $written > 0 ? ['leave_taken' => $written] : [];
+        return $existing > 0 ? $counts + ['leave_taken_existing' => $existing] : $counts;
+    }
+
+    private static function leaveTakenMarker(PayrollTakeoverPolicy $policy, string $period): string
+    {
+        return 'Čerpání za ' . PayrollTakeoverFormat::czechPeriod($period) . ' podle ' . $policy->label;
+    }
+
+    /**
      * Nese tutéž dobu souhrn z importu docházky? Rozhoduje se podle skutečných hodin
      * souhrnu daného měsíce, ne podle druhu nepřítomnosti: podklady se firmu od firmy
      * liší a co v souhrnu opravdu je, má mít jediný zdroj. Nepřítomnost přes víc měsíců

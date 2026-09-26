@@ -52,7 +52,7 @@ final class PaymentCalendarTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db       = $c->get(Connection::class);
             $this->action   = $c->get(IssueInvoiceAction::class);
             $this->schedule = $c->get(PaymentScheduleRepository::class);
@@ -207,7 +207,7 @@ final class PaymentCalendarTest extends TestCase
      */
     public function testSimplifiedFlagSurvivesSaveRoundTrip(): void
     {
-        $repo = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $repo = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
 
         $data = [
             'invoice_type' => 'invoice',
@@ -243,8 +243,8 @@ final class PaymentCalendarTest extends TestCase
      */
     public function testPdfShowsPaymentScheduleAndCalendarTitle(): void
     {
-        $renderer = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
-        $repo = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $renderer = Bootstrap::buildContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
+        $repo = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
 
         $id = $this->calendar(12_000.0);
         $this->schedule->replaceForInvoice($this->supplierId, $id, [
@@ -277,8 +277,8 @@ final class PaymentCalendarTest extends TestCase
      */
     public function testPaymentCalendarHasNoSinglePaymentQrCode(): void
     {
-        $renderer = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
-        $repo = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $renderer = Bootstrap::buildContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
+        $repo = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
 
         $id = $this->calendar(12_000.0);
         $pdo = $this->db->pdo();
@@ -301,8 +301,8 @@ final class PaymentCalendarTest extends TestCase
     /** Běžná faktura rozpis plateb nedostane — nemá ho z čeho vzít a nepatří tam. */
     public function testOrdinaryInvoicePdfHasNoScheduleBlock(): void
     {
-        $renderer = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
-        $repo = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        $renderer = Bootstrap::buildContainer()->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
+        $repo = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
 
         $id = $this->calendar(5_000.0);
         $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'invoice' WHERE id = ?")->execute([$id]);

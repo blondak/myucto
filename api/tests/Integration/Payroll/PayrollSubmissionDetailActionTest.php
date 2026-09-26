@@ -32,7 +32,7 @@ final class PayrollSubmissionDetailActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_obligations')) {
             $this->markTestSkipped('Migrace 1279 neproběhla.');

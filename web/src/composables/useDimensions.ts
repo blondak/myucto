@@ -31,7 +31,7 @@ export function useDimensions() {
   const { t } = useI18n()
 
   /** Sekce je zapnutá a uživatel smí číst účetnictví — jinak se nic neukazuje. */
-  const enabled = computed(() => supplier.currentSupplier?.dimensions_enabled === true && auth.canRead('accounting'))
+  const enabled = computed(() => auth.hasCommercialFeatures && supplier.currentSupplier?.dimensions_enabled === true && auth.canRead('accounting'))
   const canEdit = computed(() => enabled.value && auth.canWrite('accounting'))
 
   async function load(force = false): Promise<void> {

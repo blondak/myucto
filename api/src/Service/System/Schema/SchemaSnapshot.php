@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\System\Schema;
 
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 
 /**
@@ -151,10 +152,7 @@ final class SchemaSnapshot
         }
 
         $triggers = [];
-        foreach (self::rows($pdo,
-            'SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
-               FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE()'
-        ) as $row) {
+        foreach (TriggerMetadata::read($pdo, $schema) as $row) {
             $triggers[(string) $row['TRIGGER_NAME']] = sprintf(
                 '%s %s ON %s #%s',
                 $row['ACTION_TIMING'], $row['EVENT_MANIPULATION'], $row['EVENT_OBJECT_TABLE'],

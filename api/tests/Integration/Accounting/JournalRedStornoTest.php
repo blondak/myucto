@@ -142,6 +142,31 @@ final class JournalRedStornoTest extends TestCase
         ]);
     }
 
+    public function testAccountStatementAndExportShowSignedDomesticAndForeignMovement(): void
+    {
+        $id = $this->entry(20.00, true, 'Syntetický opis červeného storna');
+        $this->db->pdo()->prepare("UPDATE journal_entry_lines SET currency_code = 'EUR', fx_rate = 20, amount_foreign = 1 WHERE entry_id = ?")
+            ->execute([$id]);
+        $container = Bootstrap::buildApp()->getContainer();
+        $data = $container->get(\MyInvoice\Service\Accounting\Reports\AccountStatementService::class)->build(
+            $this->supplierId, $this->accounts['518'], self::YEAR . '-01-01', self::YEAR . '-12-31', 1, 50,
+        );
+        self::assertSame(-20.0, $data['items'][0]['amount']);
+        self::assertSame(-1.0, $data['items'][0]['amount_foreign']);
+        self::assertSame(-20.0, $data['items'][0]['balance']);
+        self::assertSame(-20.0, $data['turnover_md']);
+        $xlsx = $container->get(\MyInvoice\Service\Accounting\Reports\ReportXlsxExporter::class)->accountStatement($data);
+        $path = tempnam(sys_get_temp_dir(), 'red-statement-');
+        try {
+            file_put_contents($path, $xlsx['bytes']);
+            $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path)->getActiveSheet();
+            self::assertSame(-20.0, (float) $sheet->getCell('G6')->getValue());
+            self::assertSame(-20.0, (float) $sheet->getCell('I6')->getValue());
+        } finally {
+            unlink($path);
+        }
+    }
+
     public function testAmountUpperBoundFindsNegativeRedStornoEntry(): void
     {
         $id = $this->entry(10.00, true, 'Záporný filtr');

@@ -59,7 +59,7 @@ final class IdentifiedPersonDphTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection (CI runner skipne).');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db  = $container->get(Connection::class);
             $this->dph = $container->get(DphPriznaniBuilder::class);
             $this->kh  = $container->get(KontrolniHlaseniBuilder::class);

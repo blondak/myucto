@@ -226,8 +226,12 @@ final class SaldoService
                     422,
                 );
             }
+            $kind = (string) ($it['kind'] ?? 'document');
+            $advancePending = $kind === 'advance_pending';
             $daysOverdue = 0;
-            if ($it['due_date'] !== '' && $asOf > $it['due_date']) {
+            // Záloha čekající na vyúčtování není pohledávka po splatnosti — splatnost proformy
+            // už proběhla úhradou.
+            if (!$advancePending && $it['due_date'] !== '' && $asOf > $it['due_date']) {
                 $daysOverdue = (int) (new \DateTimeImmutable($it['due_date']))->diff(new \DateTimeImmutable($asOf))->days;
             }
             $pid = $it['partner_id'];
@@ -251,6 +255,14 @@ final class SaldoService
                 'paid_czk'      => $paidNative,
                 'remaining_czk' => $remaining,
                 'days_overdue'  => $daysOverdue,
+                // `advance_pending`: záloha zaplacená přímo na saldokontní účet, ke které ještě
+                // nevznikla konečná faktura. Čísla nahoře drží znaménko kvůli součtu = HK;
+                // pro čtení je tu přijatá/poskytnutá platba a daň z daňového dokladu k platbě.
+                'kind'          => $kind,
+                'label'         => $advancePending ? self::advancePendingLabel($normalSide) : null,
+                'advance_payment_czk' => $advancePending ? abs($bookedNative) : null,
+                'advance_vat_czk'     => $advancePending ? abs($paidNative) : null,
+                'tax_document_id'     => $advancePending ? ($it['tax_document_id'] ?? null) : null,
             ];
             $byPartner[$pid]['total_remaining'] = round($byPartner[$pid]['total_remaining'] + $remaining, 2);
             $openTotalCents += self::cents($remaining);
@@ -337,5 +349,16 @@ final class SaldoService
     private static function cents(float|int|string|null $amount): int
     {
         return (int) round(((float) $amount) * 100.0);
+    }
+
+    /**
+     * Popis zálohy čekající na vyúčtování pro exporty (PDF/XLSX jsou česky); UI má
+     * vlastní překlad podle strany salda.
+     */
+    public static function advancePendingLabel(string $normalSide): string
+    {
+        return $normalSide === 'credit'
+            ? 'Poskytnutá záloha – čeká na vyúčtování'
+            : 'Přijatá záloha – čeká na vyúčtování';
     }
 }

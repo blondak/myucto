@@ -181,12 +181,11 @@ final class DocumentBackfill
                     $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
                     $ensuredYears[$yearKey] = true;
                 }
-                // Popis záměrně nepředáváme: postDocument ho složí přes defaultDescription()
-                // podle typu dokladu (dobropis, DDKP, penalizace…) stejně jako automatika.
+                // Popis ani číslo dokladu záměrně nepředáváme: postDocument je složí stejně
+                // jako u automatiky (defaultDescription, DocumentEntryNumber).
                 $entryId = $this->posting->postDocument($supplierId, $sourceType, $id, $lines, [
                     'entry_date' => $entryDate,
                     'document_date' => $doc['issue_date'] ?? null,
-                    'document_no' => $doc['doc_no'] ?: null,
                     'posted' => !$asDrafts,
                 ]);
 

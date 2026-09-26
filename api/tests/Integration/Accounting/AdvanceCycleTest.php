@@ -158,6 +158,36 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
+    // (d2) — poskytnutá záloha vedená přímo na závazku (předkontace 321/321): zúčtování by
+    //        byl pár 321 MD / 321 D, který se vyruší a jen zdvojí obrat → nezapisuje se.
+    public function testPurchaseAdvanceOnPayableHasNoSelfCancellingSettlementPair(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+             VALUES (?, ?, "Záloha na 321", ?, ?, 0, 1)
+             ON DUPLICATE KEY UPDATE debit_account_code = VALUES(debit_account_code), credit_account_code = VALUES(credit_account_code)'
+        );
+        $stmt->execute([$this->supplierId, 'advance.paid.payment', '321', '221']);
+        $stmt->execute([$this->supplierId, 'advance.paid.settlement', '321', '321']);
+
+        $vendor = $this->client('Dodavatel záloha na 321');
+        $advPf = $this->purchaseInvoice('ZPF-D2', $vendor, 1210.00, 'advance');
+        $tx = $this->payAdvancePfViaBank($advPf, 1210.00);
+        $final = $this->purchaseWithItem('PF-D2', $vendor, 1000.00, 210.00, 'invoice', $advPf);
+        $entryId = $this->posting->postDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $final,
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final),
+            ['entry_date' => self::YEAR . '-06-20'],
+        );
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1210.00, $byAcc['321']['credit'] ?? 0.0, 0.001, 'Závazek z faktury.');
+        self::assertSame(0.0, $byAcc['321']['debit'] ?? 0.0, 'Žádný pár 321 MD / 321 D.');
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $entryId]);
+        self::assertSame(0, self::cents($sum['321'] ?? 0), '321 po vyúčtování na nule.');
+    }
+
     public function testSaldo324ShowsOnlyUnsettledReceivedAdvance(): void
     {
         $client = $this->client('Odběratel saldo 324');
@@ -257,20 +287,220 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
-    // (f1) — DDKP + vyúčtování je out of scope v1 → hlasitá chyba.
-    public function testFinalInvoiceWithTaxDocumentThrowsAmbiguous(): void
+    // (f1) — DDKP + vyúčtování: DDKP odčerpal z 324 daň, vyúčtování s odpočtem § 37a
+    //        (základ i daň DDKP odečtené) přizná výnos za celý základ a zúčtuje zbytek
+    //        zálohy. 324 i 311 skončí na nule, 343 nese daň jen jednou (z DDKP).
+    public function testFinalInvoiceWithTaxDocumentSettlesRemainingAdvance(): void
     {
         $client   = $this->client('Odběratel s.r.o.');
         $proforma = $this->saleWithItem('PRO-F1', $client, 1000.00, 210.00, 'proforma');
+        $tx = $this->payProformaViaBank($proforma, 1210.00);
+        $ddkp = $this->saleWithItem('DDKP-F1', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $ddkpEntry = $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F1', $client, $proforma, 1000.00, 210.00, 1000.00, 210.00);
+
+        $entryId = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(1000.00, $byAcc['311']['debit'] ?? 0.0, 0.001, '311 MD = základ pokrytý DDKP.');
+        self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'] ?? 0.0, 0.001, '602 D = výnos za celý základ.');
+        self::assertArrayNotHasKey('343.200', $byAcc, 'Daň přiznal DDKP, vyúčtování ji znovu neúčtuje.');
+        self::assertEqualsWithDelta(1000.00, $byAcc['324']['debit'] ?? 0.0, 0.001, '324 MD = zbytek zálohy po dani z DDKP.');
+        self::assertEqualsWithDelta(1000.00, $byAcc['311']['credit'] ?? 0.0, 0.001, '311 D = vyrovnání předpisu zálohou.');
+        $this->assertBalancedEntry($entryId);
+
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $entryId]);
+        self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyúčtování na nule.');
+        self::assertSame(0, self::cents($sum['311'] ?? 0), '311 po vyúčtování na nule.');
+        self::assertSame(-21000, self::cents($sum['343.200'] ?? 0), '343 nese daň 210 právě jednou.');
+    }
+
+    // (f1a) — částečná úhrada s DDKP a vyúčtování na celou zakázku: zbytek zůstane
+    //         pohledávkou, 324 se vyrovná.
+    public function testFinalInvoiceWithPartialTaxDocumentLeavesRemainderOn311(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F1A', $client, 1000.00, 210.00, 'proforma');
+        $tx = $this->payProformaViaBank($proforma, 605.00);
+        $ddkp = $this->saleWithItem('DDKP-F1A', $client, 500.00, 105.00, 'tax_document', $proforma, 1);
+        $ddkpEntry = $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F1A', $client, $proforma, 1000.00, 210.00, 500.00, 105.00);
+
+        $entryId = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $this->assertBalancedEntry($entryId);
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $entryId]);
+        self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyúčtování na nule.');
+        self::assertSame(60500, self::cents($sum['311'] ?? 0), 'Na 311 zůstává nedoplatek 605.');
+        self::assertSame(-100000, self::cents($sum['602'] ?? 0), 'Výnos za celou zakázku.');
+        self::assertSame(-21000, self::cents($sum['343.200'] ?? 0), 'Daň 105 z DDKP + 105 z vyúčtování.');
+    }
+
+    // (f1e) — vyúčtování s DDKP, ale bez odpočtového řádku (smazaný v konceptu / ručně
+    //         navázané vyúčtování): výnos by se přičetl podruhé → hlasitá chyba.
+    public function testFinalWithoutDeductionRowsThrowsAmbiguous(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F1E', $client, 1000.00, 210.00, 'proforma');
         $this->payProformaViaBank($proforma, 1210.00);
-        $this->saleWithItem('DDKP-F1', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
-        $final = $this->saleWithItem('FV-F1', $client, 1000.00, 210.00, 'invoice', $proforma);
+        $ddkp = $this->saleWithItem('DDKP-F1E', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+
+        foreach ([
+            'bez odpočtu' => $this->saleWithItem('FV-F1E', $client, 1000.00, 210.00, 'invoice', $proforma),
+            'upravený odpočet' => $this->finalWithDeduction('FV-F1E2', $client, $proforma, 1000.00, 210.00, 500.00, 105.00),
+        ] as $case => $final) {
+            try {
+                $this->posting->buildFromInvoice($this->supplierId, $final);
+                self::fail("{$case}: nesoulad odpočtu s DDKP má vyhodit advance_settlement_ambiguous.");
+            } catch (PostingException $e) {
+                self::assertSame('advance_settlement_ambiguous', $e->errorCode, $case);
+            }
+            $this->db->pdo()->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$final]);
+        }
+    }
+
+    // (f1f) — prodej drobného majetku přes proformu s DDKP: odpočtový řádek bez karty
+    //         nesmí stáhnout výnos na 602, celý základ patří na 642.
+    public function testAssetSaleThroughProformaWithTaxDocumentKeepsAssetRevenue(): void
+    {
+        $client = $this->client('Kupec majetku s.r.o.');
+        $card = $this->smallAssetCard('Stroj', 30000.00);
+        $proforma = $this->saleWithItem('PRO-F1F', $client, 12000.00, 2520.00, 'proforma');
+        $this->payProformaViaBank($proforma, 14520.00);
+        $ddkp = $this->saleWithItem('DDKP-F1F', $client, 12000.00, 2520.00, 'tax_document', $proforma, 1);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+
+        foreach (['plně předplaceno' => [12000.00, 2520.00], 's doplatkem' => [20000.00, 4200.00]] as $case => [$base, $vat]) {
+            $final = $this->finalWithDeduction('FV-F1F-' . (int) $base, $client, $proforma, $base, $vat, 12000.00, 2520.00);
+            $this->db->pdo()->prepare('UPDATE invoice_items SET small_asset_id = ? WHERE invoice_id = ? AND total_with_vat > 0')
+                ->execute([$card, $final]);
+            $byAcc = $this->linesByAccountCode($this->postInvoiceEntry($final, self::YEAR . '-06-20'));
+            self::assertEqualsWithDelta($base, $byAcc['642']['credit'] ?? 0.0, 0.001, "{$case}: celý základ na 642.");
+            self::assertArrayNotHasKey('602', $byAcc, "{$case}: odpočet nesmí jít na 602.");
+            $this->db->pdo()->prepare("DELETE FROM journal_entries WHERE supplier_id = ? AND source_type = 'invoice' AND source_id = ?")
+                ->execute([$this->supplierId, $final]);
+            $this->db->pdo()->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$final]);
+        }
+    }
+
+    // (f1g) — záloha s DDKP, ale úhrada zálohy není zaúčtovaná bankou/pokladnou: zúčtování
+    //         se nesmí potichu vynechat (311 by nesl fantomovou pohledávku) → hlasitá chyba.
+    public function testUnpostedAdvancePaymentWithTaxDocumentThrows(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F1G', $client, 1000.00, 210.00, 'proforma');
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source)
+             VALUES (?, ?, ?, 1210.00, "CZK", "manual")'
+        )->execute([$this->supplierId, $proforma, self::YEAR . '-06-15']);
+        $ddkp = $this->saleWithItem('DDKP-F1G', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F1G', $client, $proforma, 1000.00, 210.00, 1000.00, 210.00);
 
         try {
             $this->posting->buildFromInvoice($this->supplierId, $final);
-            self::fail('DDKP + vyúčtování má vyhodit advance_settlement_ambiguous.');
+            self::fail('Nezaúčtovaná úhrada zálohy s DDKP má vyhodit advance_settlement_ambiguous.');
         } catch (PostingException $e) {
             self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+        }
+    }
+
+    // (f1h) — vyúčtování MENŠÍ než záloha s DDKP: odpočet vrací víc daně, než nese plnění.
+    //         Daň jde na opačnou stranu, na 324 zůstane nevyčerpaná záloha.
+    public function testFinalSmallerThanAdvanceWithTaxDocumentBalances(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F1H', $client, 12000.00, 2520.00, 'proforma');
+        $tx = $this->payProformaViaBank($proforma, 14520.00);
+        $ddkp = $this->saleWithItem('DDKP-F1H', $client, 12000.00, 2520.00, 'tax_document', $proforma, 1);
+        $ddkpEntry = $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F1H', $client, $proforma, 10000.00, 2100.00, 12000.00, 2520.00);
+
+        $entryId = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $this->assertBalancedEntry($entryId);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(9580.00, $byAcc['311']['debit'] ?? 0.0, 0.001);
+        self::assertEqualsWithDelta(420.00, $byAcc['343.200']['debit'] ?? 0.0, 0.001, 'Přebytek daně z odpočtu → 343 MD.');
+        self::assertEqualsWithDelta(10000.00, $byAcc['602']['credit'] ?? 0.0, 0.001);
+        self::assertEqualsWithDelta(9580.00, $byAcc['324']['debit'] ?? 0.0, 0.001);
+        self::assertEqualsWithDelta(9580.00, $byAcc['311']['credit'] ?? 0.0, 0.001);
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $entryId]);
+        self::assertSame(-242000, self::cents($sum['324'] ?? 0), 'Na 324 zůstává nevyčerpaná záloha 2 420.');
+        self::assertSame(0, self::cents($sum['311'] ?? 0));
+    }
+
+    // (f1i) — DDKP jen s daní OSS: samostatně se neúčtuje → srozumitelná chyba s radou,
+    //         ne věčné „nezaúčtovaný DDKP".
+    public function testOssOnlyTaxDocumentGivesActionableError(): void
+    {
+        if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
+            self::markTestSkipped('Instance bez OSS schématu.');
+        }
+        $client   = $this->client('Odběratel OSS');
+        $proforma = $this->saleWithItem('PRO-F1I', $client, 1000.00, 210.00, 'proforma');
+        $this->payProformaViaBank($proforma, 1210.00);
+        $ddkp = $this->saleWithItem('DDKP-F1I', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $this->db->pdo()->prepare('UPDATE invoice_items SET oss_applicable = 1 WHERE invoice_id = ?')->execute([$ddkp]);
+        $final = $this->finalWithDeduction('FV-F1I', $client, $proforma, 1000.00, 210.00, 1000.00, 210.00);
+
+        try {
+            $this->posting->buildFromInvoice($this->supplierId, $final);
+            self::fail('OSS DDKP má vyhodit advance_tax_document_oss.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_tax_document_oss', $e->errorCode);
+        }
+    }
+
+    // (f1j) — cizoměnové vyúčtování plně předplacené přes DDKP: předpis na 311 nese
+    //         cizoměnovou stopu vráceného základu, ne nulu z hlavičky.
+    public function testForeignCurrencyFinalWithTaxDocumentKeepsFxTrace(): void
+    {
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $client = $this->client('Odběratel EUR');
+        $proforma = $this->saleWithItem('PRO-F1J', $client, 100.00, 21.00, 'proforma');
+        $ddkp = $this->saleWithItem('DDKP-F1J', $client, 100.00, 21.00, 'tax_document', $proforma, 1);
+        $final = $this->finalWithDeduction('FV-F1J', $client, $proforma, 100.00, 21.00, 100.00, 21.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = 25 WHERE id IN (?, ?, ?)')
+            ->execute([$eur, $proforma, $ddkp, $final]);
+        // Úhrada zálohy v EUR zaúčtovaná bankou (121 EUR × 25 = 3 025 Kč).
+        $tx = $this->transaction($this->statement(), 3025.00);
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, bank_transaction_id)
+             VALUES (?, ?, ?, 121.00, "EUR", "bank", ?)'
+        )->execute([$this->supplierId, $proforma, self::YEAR . '-06-15', $tx]);
+        $this->postPredpis('bank', $tx, '221', '324', 3025.00);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+
+        $entryId = $this->postInvoiceEntry($final, self::YEAR . '-06-20');
+        $this->assertBalancedEntry($entryId);
+        $receivable = null;
+        foreach ($this->journal->find($entryId, $this->supplierId)['lines'] as $l) {
+            if ($this->accountCode((int) $l['account_id']) === '311' && $l['side'] === 'debit') {
+                $receivable = $l;
+            }
+        }
+        self::assertNotNull($receivable);
+        self::assertEqualsWithDelta(2500.00, (float) $receivable['amount'], 0.001, '311 MD = základ 100 EUR × 25.');
+        self::assertSame('EUR', $receivable['currency_code']);
+        self::assertEqualsWithDelta(100.00, (float) $receivable['amount_foreign'], 0.001, 'Cizoměnová stopa = vrácený základ, ne 0.');
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(2500.00, $byAcc['324']['debit'] ?? 0.0, 0.001, 'Zúčtování = 3 025 − daň DDKP 525.');
+    }
+
+    // (f1d) — nezaúčtovaný DDKP: vyúčtování s ním počítá, ale jeho daň na 324/343 ještě
+    //         není → hlasitá chyba místo přečerpání zálohy.
+    public function testFinalInvoiceWithUnpostedTaxDocumentThrows(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F1D', $client, 1000.00, 210.00, 'proforma');
+        $this->payProformaViaBank($proforma, 1210.00);
+        $this->saleWithItem('DDKP-F1D', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $final = $this->finalWithDeduction('FV-F1D', $client, $proforma, 1000.00, 210.00, 1000.00, 210.00);
+
+        try {
+            $this->posting->buildFromInvoice($this->supplierId, $final);
+            self::fail('Nezaúčtovaný DDKP má vyhodit advance_tax_document_unposted.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_tax_document_unposted', $e->errorCode);
         }
     }
 
@@ -295,9 +525,9 @@ final class AdvanceCycleTest extends BankPostingTestCase
     }
 
     // (f1c) — DDKP navázaný JEN přes invoice_payments (historicky rozpojený doklad,
-    //         parent_invoice_id NULL) blokovat MUSÍ: z 324 daň už odčerpal, takže
+    //         parent_invoice_id NULL) se počítat MUSÍ: z 324 daň už odčerpal, takže
     //         zúčtování zálohy na plnou výši by 324 přečerpalo.
-    public function testTaxDocumentLinkedOnlyViaPaymentBlocksSettlement(): void
+    public function testTaxDocumentLinkedOnlyViaPaymentReducesSettlement(): void
     {
         $client   = $this->client('Odběratel s.r.o.');
         $proforma = $this->saleWithItem('PRO-F1C', $client, 1000.00, 210.00, 'proforma');
@@ -307,14 +537,11 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->db->pdo()->prepare(
             'UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE invoice_id = ? AND bank_transaction_id = ?'
         )->execute([$ddkp, $proforma, $txId]);
-        $final = $this->saleWithItem('FV-F1C', $client, 1000.00, 210.00, 'invoice', $proforma);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F1C', $client, $proforma, 1000.00, 210.00, 1000.00, 210.00);
 
-        try {
-            $this->posting->buildFromInvoice($this->supplierId, $final);
-            self::fail('Rozpojený DDKP musí vyhodit advance_settlement_ambiguous.');
-        } catch (PostingException $e) {
-            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
-        }
+        $byAcc = $this->linesByAccountCode($this->postInvoiceEntry($final, self::YEAR . '-06-20'));
+        self::assertEqualsWithDelta(1000.00, $byAcc['324']['debit'] ?? 0.0, 0.001, 'Zúčtuje se jen zbytek zálohy po dani DDKP.');
     }
 
     // (f2) — víc než jedna vyúčtovací faktura na proformu → hlasitá chyba.
@@ -583,6 +810,62 @@ final class AdvanceCycleTest extends BankPostingTestCase
              VALUES (?, 'Položka', 1, 'ks', ?, ?, 21.00, ?, ?, ?, 0)"
         )->execute([$id, $base, $this->vatRateId, $base, $vat, $with]);
         return $id;
+    }
+
+    /**
+     * Vyúčtovací faktura tak, jak ji staví FinalFromProformaCreator: položka zakázky
+     * a záporný odpočtový řádek § 37a za daňový doklad k platbě.
+     */
+    private function finalWithDeduction(string $vs, int $clientId, int $proformaId, float $base, float $vat, float $ddkpBase, float $ddkpVat): int
+    {
+        $id = $this->saleWithItem($vs, $clientId, $base, $vat, 'invoice', $proformaId);
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+             VALUES (?, 'Odpočet zálohy', 1, '', ?, ?, 21.00, ?, ?, ?, 1)"
+        )->execute([$id, -$ddkpBase, $this->vatRateId, -$ddkpBase, -$ddkpVat, -($ddkpBase + $ddkpVat)]);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET total_without_vat = ?, total_vat = ?, total_with_vat = ? WHERE id = ?'
+        )->execute([$base - $ddkpBase, $vat - $ddkpVat, $base + $vat - $ddkpBase - $ddkpVat, $id]);
+        return $id;
+    }
+
+    private function smallAssetCard(string $name, float $price): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO small_assets (supplier_id, name, acquisition_date, quantity, unit_price, price, status)
+             VALUES (?, ?, ?, 1, ?, ?, "in_use")'
+        )->execute([$this->supplierId, $name, self::YEAR . '-01-10', $price, $price]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function postInvoiceEntry(int $invoiceId, string $date): int
+    {
+        return $this->posting->postDocument(
+            $this->supplierId,
+            'invoice',
+            $invoiceId,
+            $this->posting->buildFromInvoice($this->supplierId, $invoiceId),
+            ['entry_date' => $date],
+        );
+    }
+
+    /**
+     * Σ (MD − D) po účtech přes dané zápisy.
+     *
+     * @param list<int> $entryIds
+     * @return array<string,float>
+     */
+    private function accountSums(array $entryIds): array
+    {
+        $sum = [];
+        foreach ($entryIds as $entryId) {
+            foreach ($this->linesByAccountCode($entryId) as $code => $sides) {
+                $sum[$code] = round(($sum[$code] ?? 0.0) + ($sides['debit'] ?? 0.0) - ($sides['credit'] ?? 0.0), 2);
+            }
+        }
+        return $sum;
     }
 
     private function purchaseWithItem(string $number, int $vendorId, float $base, float $vat, string $kind = 'invoice', ?int $advanceId = null): int

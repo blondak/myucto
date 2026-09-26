@@ -49,7 +49,7 @@ final class PayrollEmployeeLegacyDeletionTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_module_state') || !$this->db->hasTable('payroll_employments')) {
             $this->markTestSkipped('Mzdové migrace neproběhly.');

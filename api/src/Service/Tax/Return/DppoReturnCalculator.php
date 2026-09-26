@@ -18,7 +18,8 @@ namespace MyInvoice\Service\Tax\Return;
  * Pipeline (§23–§35 ZDP, formulář DPPDP9):
  *   ř.10  VH před zdaněním (Σ 6xx − Σ 5xx mimo 59x)
  *   ř.40  výdaje neuznávané za náklady §25 (nedaňové účty + neuznatelná ZC vyřazení
- *         + účetní ZC vyřazení převyšující daňovou + add-back PHM při paušálu na dopravu §24/2/zt)
+ *         + účetní ZC vyřazení převyšující daňovou + nabývací cena prodaných podílů nad
+ *         příjmy z prodeje §24/2/w + add-back PHM při paušálu na dopravu §24/2/zt)
  *   ř.50  účetní odpisy převyšující daňové (zvýšení základu)
  *   ř.62  ostatní částky zvyšující základ §23 (ruční mimo paušál dopravy)
  *   ř.112 doplňková informace k §23/3 písm. c) — např. paušální výdaj na dopravu (§24/2/zt),
@@ -145,8 +146,6 @@ final class DppoReturnCalculator
         $advHigh = (float) ($c['advance_threshold_high'] ?? 150000);
 
         // ── Úpravy základu (§23) ────────────────────────────────────────────
-        $depIncrease = max(0.0, round($depAcc - $depTax, 2)); // ř.50: účetní > daňové → +
-        $depDecrease = max(0.0, round($depTax - $depAcc, 2)); // ř.150: daňové > účetní → −
         // Můstek ZC vyřazeného majetku podle pokynů k tiskopisu 25 5404 (vzor pro 2024):
         //   - „K ř. 160 … např. při prodeji hmotného a nehmotného majetku rozdíl, o který
         //     daňová zůstatková cena (§ 29 zákona) převyšuje účetní zůstatkovou cenu" →
@@ -183,9 +182,9 @@ final class DppoReturnCalculator
         $increaseLines = array_map(TaxFormAmount::kc(...), $increaseByLine);
         $decreaseLines = array_map(TaxFormAmount::kc(...), $decreaseByLine);
         $line40Reported = TaxFormAmount::kc($line40 + $flatRateTravelAddback + ($increaseByLine[40] ?? 0.0));
-        $line50 = TaxFormAmount::kc($depIncrease);
+        // ř.50: účetní > daňové → +, ř.150: daňové > účetní → − (táž funkce i pro projekci)
+        [50 => $line50, 150 => $line150] = self::depreciationLines($depAcc, $depTax);
         $line62Reported = TaxFormAmount::kc($manualIncrease - $flatRateTravelAddback - array_sum($increaseByLine));
-        $line150 = TaxFormAmount::kc($depDecrease);
         $line160Reported = TaxFormAmount::kc($disposalDecrease + ($decreaseByLine[160] ?? 0.0));
         $line162Reported = TaxFormAmount::kc($manualDecrease - $flatRateTravelDeduction - array_sum($decreaseByLine));
         $line112Reported = TaxFormAmount::kc($flatRateTravelDeduction + ($decreaseByLine[112] ?? 0.0));
@@ -296,13 +295,23 @@ final class DppoReturnCalculator
         $proj = $data['closing_projection'] ?? null;
         if (is_array($proj) && ($proj['is_projection'] ?? false) === true) {
             $vhProjected = round((float) ($proj['vh_projected'] ?? $vh), 2);
-            // Projektovaný základ = posted základ posunutý o rozdíl VH (ostatní úpravy §23 se nemění);
-            // ř. 10 je i v projekci v celých korunách.
-            $projectedBase = $base + (TaxFormAmount::kc($vhProjected) - $line10);
+            // Projektovaný základ = posted základ posunutý o rozdíl VH a o změnu rozdílu odpisů
+            // ř. 50/150 po přičtení nezaúčtovaných odpisů roku (stejná funkce jako u zaúčtovaných);
+            // ostatní úpravy §23 se nemění. ř. 10 je i v projekci v celých korunách.
+            $pendingDep = (array) ($proj['depreciation'] ?? []);
+            $projectedDep = self::depreciationLines(
+                round($depAcc + (float) ($pendingDep['accounting'] ?? 0), 2),
+                round($depTax + (float) ($pendingDep['tax'] ?? 0), 2),
+            );
+            $projectedIncreases = $line70Reported + ($projectedDep[50] - $line50);
+            $projectedDecreases = $line170Reported + ($projectedDep[150] - $line150);
+            $projectedBase = TaxFormAmount::kc($vhProjected) + $projectedIncreases - $projectedDecreases;
             $projectedTax = $this->taxFromBase($projectedBase, $lossCarry, $donations, $donationCapPct, $rate, $roundBase, $creditsEntitlement, $rndClaimed, $eduClaimed);
             $projection = [
                 'vh_posted' => round($vh, 2),
                 'vh_projected' => $vhProjected,
+                'projected_increases' => $projectedIncreases,
+                'projected_decreases' => $projectedDecreases,
                 'projected_base' => $projectedBase,
                 'projected_tax' => $projectedTax,
                 'is_projection' => true,
@@ -352,6 +361,7 @@ final class DppoReturnCalculator
             $itemLine(20, $increaseLines),
             $itemLine(30, $increaseLines),
             $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + účetní ZC vyřazení převyšující daňovou'
+                . ((float) ($data['securities_cost_excess'] ?? 0) > 0 ? ' + nabývací cena prodaných podílů nad příjmy z prodeje (§24/2/w)' : '')
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
             $this->line(50, '50', 'Účetní odpisy převyšující daňové', $line50, 'rozdíl odpisů (zvýšení)'),
             $itemLine(61, $increaseLines),
@@ -436,8 +446,23 @@ final class DppoReturnCalculator
     }
 
     /**
+     * Ř. 50 a ř. 150 z účetních a daňových odpisů roku, v celých korunách. Jediné místo
+     * rozdílu odpisů — zaúčtované odpisy i projekce s nezaúčtovanými jdou touto funkcí.
+     *
+     * @return array{50:float,150:float}
+     */
+    public static function depreciationLines(float $accounting, float $tax): array
+    {
+        return [
+            50 => TaxFormAmount::kc(max(0.0, round($accounting - $tax, 2))),
+            150 => TaxFormAmount::kc(max(0.0, round($tax - $accounting, 2))),
+        ];
+    }
+
+    /**
      * Část ř. 40 a ř. 160, kterou přiznání bere z účetnictví a karet majetku (nedaňové účty,
-     * můstek ZC vyřazeného majetku), bez ručních vstupů. Převzetí podaného přiznání
+     * můstek ZC vyřazeného majetku, převis nabývací ceny prodaných podílů nad příjmy z prodeje
+     * podle § 24/2/w), bez ručních vstupů. Převzetí podaného přiznání
      * ({@see \MyInvoice\Service\Migration\Shared\FiledDppoInputs}) z ř. 40 a ř. 160 přebírá
      * jen zbytek nad ni, jinak by se tatáž částka v základu objevila dvakrát.
      *
@@ -450,7 +475,8 @@ final class DppoReturnCalculator
             40 => round(
                 round((float) ($data['non_deductible_costs'] ?? 0), 2)
                 + round((float) ($data['disposal_nondeductible_residual'] ?? 0), 2)
-                + max(0.0, round((float) ($data['disposal_tax_increase'] ?? 0), 2)),
+                + max(0.0, round((float) ($data['disposal_tax_increase'] ?? 0), 2))
+                + max(0.0, round((float) ($data['securities_cost_excess'] ?? 0), 2)),
                 2
             ),
             160 => max(0.0, round((float) ($data['disposal_tax_decrease'] ?? 0), 2)),

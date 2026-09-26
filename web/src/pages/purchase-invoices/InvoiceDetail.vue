@@ -4,6 +4,8 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
+import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -19,7 +21,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilledSm, btnOutline } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
@@ -94,12 +96,13 @@ const pdfPreviewOpen = pdfPreview.open
 const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
+const reviewOpen = ref(false)
 
-async function dismissWarning() {
+async function dismissWarning(section?: string) {
   if (!invoice.value || dismissingWarning.value) return
   dismissingWarning.value = true
   try {
-    invoice.value = await purchaseInvoicesApi.dismissExtractionWarning(invoice.value.id)
+    invoice.value = await purchaseInvoicesApi.dismissExtractionWarning(invoice.value.id, section)
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -360,6 +363,25 @@ async function onAltPayDone() {
   markPaidOpen.value = false
   invoice.value = await purchaseInvoicesApi.get(id.value)
   purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+}
+
+// Úhrada dokladu: kolik je uhrazeno a kolik zbývá (v měně dokladu, SSOT na BE).
+const showPaymentSummary = computed(() =>
+  !!invoice.value && invoice.value.status !== 'draft' && invoice.value.status !== 'cancelled'
+  && invoice.value.remaining_amount !== undefined)
+// Uhrazený doklad, který evidované úhrady nepokrývají, zbytek visí na saldokontě.
+const hasPaidShortfall = computed(() => !!invoice.value?.paid_shortfall)
+// „Vyrovnat zbytek": existuje úhrada a po ní zbytek. Zápočet proti účtu je účetní
+// operace (podvojné účetnictví, právo na účetnictví); bez jakékoli úhrady jde o běžné
+// „Označit jako uhrazené".
+const canSettleRest = computed(() =>
+  !!invoice.value && isDoubleEntry.value && auth.canWrite('accounting')
+  && ['received', 'booked', 'paid'].includes(invoice.value.status)
+  && (invoice.value.paid_amount ?? 0) > 0.005 && (invoice.value.remaining_amount ?? 0) > 0.005)
+const settleRestOpen = ref(false)
+async function onSettleRestDone() {
+  settleRestOpen.value = false
+  await load()
 }
 
 async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
@@ -723,6 +745,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
     }
   }
 
+  items.push({ key: 'settle-rest', label: t('purchase_invoice.payment_summary.settle_rest'), icon: 'coin', tier: 'secondary', variant: 'warning',
+    show: canSettleRest.value, run: () => { settleRestOpen.value = true } })
+
   items.push({ key: 'qr', label: t('purchase_invoice.qr.button'), icon: 'qr', tier: 'secondary', variant: 'primary',
     show: canPayWithQr.value, run: openQr })
 
@@ -792,17 +817,25 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </svg>
         <div class="text-sm flex-1 min-w-0">
           <div class="font-medium text-warning-700">{{ t('purchase_invoice.extraction.warning_title') }}</div>
-          <div class="text-warning-700/90 mt-1">{{ invoice.extraction_warning }}</div>
+          <ExtractionWarningText :warning="invoice.extraction_warning" class="text-warning-700/90 mt-1"
+            dismissible :busy="dismissingWarning" @dismiss="dismissWarning" />
         </div>
-        <button
-          type="button"
-          @click="dismissWarning"
-          :disabled="dismissingWarning"
-          class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50 shrink-0"
-        >
-          {{ t('purchase_invoice.extraction.dismiss') }}
-        </button>
+        <div class="flex flex-col gap-1.5 shrink-0">
+          <button type="button" :class="btnFilledSm('warning')" @click="reviewOpen = true">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('purchase_invoice.extraction_review.open') }}
+          </button>
+          <button
+            type="button"
+            @click="dismissWarning()"
+            :disabled="dismissingWarning"
+            class="cursor-pointer text-xs px-2 py-1 border border-warning-500/50 rounded text-warning-700 hover:bg-warning-100 disabled:opacity-50"
+          >
+            {{ t('purchase_invoice.extraction.dismiss') }}
+          </button>
+        </div>
       </div>
+      <ExtractionReviewModal v-if="reviewOpen" :invoice-ids="[invoice.id]" @updated="(inv) => (invoice = inv)" @close="reviewOpen = false" />
 
       <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
       <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
@@ -1425,6 +1458,23 @@ const purchaseActions = computed<ActionItem[]>(() => {
             </template>
             <div v-if="invoice.advance_paid_amount > 0" class="flex justify-between text-neutral-500"><dt>{{ t('purchase_invoice.totals.advance_paid') }}</dt><dd class="font-mono">−{{ formatMoney(invoice.advance_paid_amount, invoice.currency) }}</dd></div>
             <div class="flex justify-between font-semibold text-lg border-t border-neutral-200 pt-2"><dt>{{ t('purchase_invoice.totals.to_pay') }}</dt><dd class="font-mono">{{ formatMoney((invoice.amount_to_pay ?? invoice.total_with_vat) + (invoice.rounding || 0), invoice.currency) }}</dd></div>
+            <!-- Úhrada dokladu: uhrazeno / zbývá (v měně dokladu) -->
+            <template v-if="showPaymentSummary">
+              <div class="flex justify-between text-neutral-600" data-testid="pi-paid-amount"><dt>{{ t('purchase_invoice.payment_summary.paid') }}</dt><dd class="font-mono">{{ formatMoney(invoice.paid_amount ?? 0, invoice.currency) }}</dd></div>
+              <div class="flex justify-between font-semibold" data-testid="pi-remaining-amount"
+                :class="hasPaidShortfall ? 'text-warning-700' : (invoice.status !== 'paid' && (invoice.remaining_amount ?? 0) > 0.005 ? 'text-neutral-900' : 'text-neutral-500')">
+                <dt>{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
+                <dd class="font-mono">{{ formatMoney(invoice.remaining_amount ?? 0, invoice.currency) }}</dd>
+              </div>
+              <div v-if="hasPaidShortfall" class="rounded-md bg-warning-50 border border-warning-500/30 px-3 py-2 text-xs text-warning-700">
+                {{ t('purchase_invoice.payment_summary.shortfall_note') }}
+                <button v-if="canSettleRest" type="button" @click="settleRestOpen = true"
+                  :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+                  {{ t('purchase_invoice.payment_summary.settle_rest') }}
+                </button>
+              </div>
+            </template>
             <!-- CZK přepočet (jen pokud faktura není CZK + má exchange_rate) -->
             <template v-if="invoice.currency !== 'CZK' && invoice.exchange_rate">
               <div class="border-t border-neutral-200 pt-3 mt-3">
@@ -1730,10 +1780,22 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
       <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="purchase_invoice"
         :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
-        :amount="Number(invoice.total_with_vat ?? 0)" :partner-name="invoice.vendor_snapshot?.company_name"
+        :amount="Number(invoice.remaining_amount ?? invoice.amount_to_pay ?? invoice.total_with_vat ?? 0)"
+        :currency="invoice.currency" :partner-name="invoice.vendor_snapshot?.company_name"
         :busy="acting"
         @close="markPaidOpen = false" @done="onAltPayDone"
         @mark-paid="p => transition('paid', p.date)" />
+
+      <!-- Vyrovnání zbytku (nedoplatku) zápočtem proti účtu: 321 MD / zvolený účet D. -->
+      <PaymentMethodModal v-if="settleRestOpen && invoice" doc-type="purchase_invoice" settlement-only
+        :doc-id="invoice.id" :doc-number="invoice.vendor_invoice_number || `#${invoice.id}`"
+        :amount="Number(invoice.remaining_amount ?? 0)" :currency="invoice.currency"
+        :partner-name="invoice.vendor_snapshot?.company_name"
+        :default-account-code="invoice.currency === 'CZK' ? '648' : '663'"
+        :title="t('purchase_invoice.payment_summary.settle_rest_title')"
+        :intro="t('purchase_invoice.payment_summary.settle_rest_intro', { amount: formatMoney(invoice.remaining_amount ?? 0, invoice.currency) })"
+        :confirm-label="t('purchase_invoice.payment_summary.settle_rest')"
+        @close="settleRestOpen = false" @done="onSettleRestDone" />
 
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
 

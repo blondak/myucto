@@ -44,6 +44,9 @@ final class CreditCardPostingTest extends BankPostingTestCase
                  ON DUPLICATE KEY UPDATE level = 'auto'"
             )->execute([$this->supplierId, $op, $this->userId]);
         }
+        // Výchozí režim nákupů je napřímo; tyhle testy ověřují zapnutý mezičlen.
+        $this->container->get(\MyInvoice\Service\Accounting\CreditCard\CreditCardSettingsService::class)
+            ->save($this->supplierId, ['purchase_mode' => 'clearing'], $this->userId);
         $this->cards = $this->container->get(CreditCardAccountRepository::class);
         $this->ccId = $this->cards->create($this->supplierId, [
             'issuer'         => 'kb',
@@ -421,6 +424,42 @@ final class CreditCardPostingTest extends BankPostingTestCase
         self::assertSame('credit_card', (string) $this->db->pdo()->query("SELECT kind FROM supplier_bank_accounts WHERE id = {$bankAccountId}")->fetchColumn());
     }
 
+    public function testCurrentAccountConversionPreservesRedStornoEffect(): void
+    {
+        $number = '6000000010';
+        $this->db->pdo()->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, 'Účet 6000000010', ?, '0300', '0300', 'CZK', ?, 'current', 'statement', 1)"
+        )->execute([$this->supplierId, $number, $number]);
+        $bankAccountId = (int) $this->db->pdo()->lastInsertId();
+        $tx = $this->transaction($this->statement($number, '0300'), -300.00, [
+            'description' => 'Červené storno karetního pohybu',
+        ]);
+        $this->service->postManual($this->supplierId, $tx, [
+            'lines' => [
+                ['account_code' => '221', 'side' => 'debit', 'amount' => 300.00, 'is_red_storno' => true],
+                ['account_code' => '518', 'side' => 'credit', 'amount' => 300.00, 'is_red_storno' => true],
+            ],
+        ], $this->meta());
+        $entryId = (int) $this->journal->findBySource($this->supplierId, 'bank', $tx)['id'];
+        self::assertSame([true, true], array_column($this->entryLinesWithRed($entryId), 'is_red_storno'));
+
+        $result = $this->container->get(CreditCardConversionService::class)
+            ->convert($this->supplierId, $bankAccountId, $this->userId, 'csob');
+
+        self::assertSame(1, $result['reposted']);
+        $account = $this->cards->find($this->supplierId, $result['credit_card_account_id']);
+        $code = CreditCardAccounts::codeFor((string) $account['analytic_suffix']);
+        $lines = $this->entryLinesWithRed($entryId);
+        self::assertSame([true, true], array_column($lines, 'is_red_storno'), 'Převod 221 na 231 nesmí změnit červené storno na běžný řádek.');
+        self::assertSame([
+            ['account_code' => $code, 'side' => 'debit', 'amount' => 300.0, 'is_red_storno' => true],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 300.0, 'is_red_storno' => true],
+        ], $lines);
+        self::assertEqualsWithDelta(-300.00, $this->signedBalance($code), 0.001, 'Dluh na 231 má stejný účinek jako původní red řádek na 221.');
+        self::assertEqualsWithDelta(300.00, $this->signedBalance('518'), 0.001, 'Protiúčet si zachová původní účinek.');
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────
 
     private string $lastPdf = '';
@@ -501,6 +540,38 @@ final class CreditCardPostingTest extends BankPostingTestCase
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ? AND e.entry_date BETWEEN '2099-01-01' AND '2099-12-31' AND a.account_code = ?"
+        );
+        $stmt->execute([$this->supplierId, $code]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /** @return list<array{account_code:string,side:string,amount:float,is_red_storno:bool}> */
+    private function entryLinesWithRed(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_code, l.side, l.amount, l.is_red_storno
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? AND l.supplier_id = ?
+              ORDER BY l.line_no, l.id'
+        );
+        $stmt->execute([$entryId, $this->supplierId]);
+        return array_map(static fn (array $line): array => [
+            'account_code' => (string) $line['account_code'],
+            'side' => (string) $line['side'],
+            'amount' => (float) $line['amount'],
+            'is_red_storno' => (bool) $line['is_red_storno'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    private function signedBalance(string $code): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM((CASE WHEN l.side = 'debit' THEN 1 ELSE -1 END) * l.signed_amount), 0)
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id

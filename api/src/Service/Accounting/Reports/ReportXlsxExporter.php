@@ -293,7 +293,7 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A2', 'Období: ' . $this->czDate($from) . ' – ' . $this->czDate($to));
         $sheet->setCellValue('A3', 'Počáteční zůstatek: ' . $this->czMoney((float) ($data['opening_balance'] ?? 0)));
 
-        $headers = ['Datum', 'Doklad', 'Popis', 'MD', 'D', 'Zůstatek'];
+        $headers = ['Datum', 'Doklad', 'Popis', 'Partner', 'VS', 'Protiúčet', 'MD', 'D', 'Zůstatek', 'Okruh'];
         $cols = count($headers);
         $head = 5;
         $this->headerRow($sheet, $head, $headers);
@@ -303,22 +303,28 @@ final class ReportXlsxExporter
             $sheet->setCellValue([1, $r], $this->czDate((string) $item['entry_date']));
             $sheet->setCellValueExplicit([2, $r], (string) $item['document_no'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], (string) $item['description'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) ($item['partner'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([5, $r], (string) ($item['variable_symbol'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([6, $r], (string) ($item['counter_accounts'] ?? ''), DataType::TYPE_STRING);
             if (($item['side'] ?? '') === 'debit') {
-                $sheet->setCellValue([4, $r], (float) $item['amount']);
+                $sheet->setCellValue([7, $r], (float) $item['amount']);
             } else {
-                $sheet->setCellValue([5, $r], (float) $item['amount']);
+                $sheet->setCellValue([8, $r], (float) $item['amount']);
             }
-            $sheet->setCellValue([6, $r], (float) $item['balance']);
+            $sheet->setCellValue([9, $r], (float) $item['balance']);
+            if (!empty($item['pairing_id'])) {
+                $sheet->setCellValueExplicit([10, $r], '#' . $item['pairing_id'], DataType::TYPE_STRING);
+            }
             $r++;
         }
 
         $sheet->setCellValue([1, $r], 'Obraty / konečný zůstatek');
-        $sheet->setCellValue([4, $r], (float) ($data['turnover_md'] ?? 0));
-        $sheet->setCellValue([5, $r], (float) ($data['turnover_d'] ?? 0));
-        $sheet->setCellValue([6, $r], (float) ($data['closing_balance'] ?? 0));
+        $sheet->setCellValue([7, $r], (float) ($data['turnover_md'] ?? 0));
+        $sheet->setCellValue([8, $r], (float) ($data['turnover_d'] ?? 0));
+        $sheet->setCellValue([9, $r], (float) ($data['closing_balance'] ?? 0));
         $this->boldRow($sheet, $r, $cols);
 
-        $this->finishTable($sheet, $head, $r, $cols, 4);
+        $this->finishTable($sheet, $head, $r, $cols, 7);
 
         return $this->out($ss, 'opis-uctu-' . $code . '-' . $from . '-' . $to . '.xlsx');
     }
@@ -601,6 +607,127 @@ final class ReportXlsxExporter
         return $this->out($ss, 'vysledovka-' . $asOf . '.xlsx');
     }
 
+    private const ACCOUNT_CLASS_LABELS = [
+        '0' => 'Dlouhodobý majetek',
+        '1' => 'Zásoby',
+        '2' => 'Krátkodobý finanční majetek a peněžní prostředky',
+        '3' => 'Zúčtovací vztahy',
+        '4' => 'Kapitálové účty a dlouhodobé závazky',
+    ];
+
+    private const ACCOUNT_SECTION_LABELS = [
+        'operating'  => 'Provozní činnost',
+        'financial'  => 'Finanční činnost',
+        'unassigned' => 'Účty nezařazené ve výkazu',
+        'tax'        => 'Daň z příjmů',
+        'transfer'   => 'Převod podílu na výsledku hospodaření společníkům',
+    ];
+
+    /**
+     * Rozvaha nebo výsledovka po účtech (pracovní sestava, ne zákonný výkaz).
+     *
+     * @param array<string,mixed> $data výstup FinancialStatementService::accountView()
+     * @param 'balance'|'profit_loss' $part
+     * @param 'czk'|'thousands' $unit
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function accountView(array $data, string $part, string $unit = 'czk'): array
+    {
+        $thousands = $unit === 'thousands';
+        $amount = fn (float|int $v): float|int => $thousands ? $this->toThousands($v) : (float) $v;
+
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $asOf = (string) ($data['as_of'] ?? '');
+        $isBalance = $part === 'balance';
+        $sheet->setTitle($isBalance ? 'Rozvaha po účtech' : 'Výsledovka po účtech');
+        $sheet->setCellValue('A1', ($isBalance ? 'ROZVAHA PO ÚČTECH' : 'VÝSLEDOVKA PO ÚČTECH')
+            . ' ke dni ' . $this->czDate($asOf) . ($thousands ? ' (v celých tisících Kč)' : ' (v Kč)'));
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $this->entityHeader($sheet, $data);
+        $sheet->setCellValue('A5', 'Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu).');
+        $sheet->getStyle('A5')->getFont()->setSize(9)->setItalic(true);
+        $this->dimensionLine($sheet, 'A6', $data);
+
+        $head = 7;
+        $this->headerRow($sheet, $head, $isBalance
+            ? ['Účet', 'Název', 'Zůstatek MD', 'Zůstatek D']
+            : ['Účet', 'Název', 'Náklady (MD)', 'Výnosy (D)']);
+        $r = $head + 1;
+
+        $write = function (array $acc, bool $analytic, bool $net) use ($sheet, &$r, $amount): void {
+            $md = (float) $acc['md'];
+            $d = (float) $acc['d'];
+            if ($net) {
+                [$md, $d] = [max(0.0, $md - $d), max(0.0, $d - $md)];
+            }
+            $sheet->setCellValueExplicit([1, $r], ($analytic ? '    ' : '') . (string) $acc['account_code'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([2, $r], (string) $acc['name'], DataType::TYPE_STRING);
+            $sheet->setCellValue([3, $r], $amount($md));
+            $sheet->setCellValue([4, $r], $amount($d));
+            $r++;
+        };
+        $label = function (string $text, float|int|null $md = null, float|int|null $d = null) use ($sheet, &$r, $amount): void {
+            $sheet->setCellValue([1, $r], $text);
+            if ($md !== null) {
+                $sheet->setCellValue([3, $r], $amount($md));
+            }
+            if ($d !== null) {
+                $sheet->setCellValue([4, $r], $amount($d));
+            }
+            $this->boldRow($sheet, $r, 4);
+            $r++;
+        };
+
+        if ($isBalance) {
+            foreach ($data['balance']['classes'] ?? [] as $class) {
+                $label('Třída ' . $class['class'] . ' · ' . (self::ACCOUNT_CLASS_LABELS[(string) $class['class']] ?? ''));
+                foreach ($class['accounts'] as $acc) {
+                    $write($acc, false, false);
+                    foreach ($acc['analytics'] as $an) {
+                        $write($an, true, false);
+                    }
+                }
+                $label('Celkem třída ' . $class['class'], (float) $class['md'], (float) $class['d']);
+            }
+            $label('Součet rozvahových účtů', (float) ($data['balance']['md'] ?? 0), (float) ($data['balance']['d'] ?? 0));
+            $label('Výsledek hospodaření', (float) ($data['balance']['profit'] ?? 0));
+        } else {
+            $pl = $data['profit_loss'] ?? [];
+            foreach ($pl['sections'] ?? [] as $section) {
+                if ($section['expenses'] === [] && $section['revenues'] === []) {
+                    continue;
+                }
+                $name = self::ACCOUNT_SECTION_LABELS[(string) $section['key']] ?? (string) $section['key'];
+                $label($name);
+                foreach (array_merge($section['expenses'], $section['revenues']) as $acc) {
+                    $write($acc, false, true);
+                    foreach ($acc['analytics'] as $an) {
+                        $write($an, true, false);
+                    }
+                }
+                $label('Výsledek: ' . $name, (float) $section['expense_total'], (float) $section['revenue_total']);
+            }
+            $label('Provozní výsledek hospodaření', (float) ($pl['operating_profit'] ?? 0));
+            $label('Finanční výsledek hospodaření', (float) ($pl['financial_profit'] ?? 0));
+            $label('Výsledek hospodaření před zdaněním', (float) ($pl['profit_before_tax'] ?? 0));
+            $label('Výsledek hospodaření po zdanění', (float) ($pl['profit_after_tax'] ?? 0));
+            $label('Výsledek hospodaření za účetní období', (float) ($pl['profit'] ?? 0));
+        }
+        $this->finishTable($sheet, $head, $r - 1, 4, 3);
+
+        if (empty($data['checks']['profit_matches'])) {
+            $cr = $r + 1;
+            $sheet->setCellValue("A{$cr}", 'Výsledek hospodaření z rozvahových účtů ('
+                . $this->czMoney((float) ($data['checks']['profit_balance'] ?? 0))
+                . ') se neshoduje s výsledkem z výsledkových účtů ('
+                . $this->czMoney((float) ($data['checks']['profit_loss'] ?? 0)) . ').');
+            $sheet->getStyle("A{$cr}")->getFont()->setBold(true);
+        }
+
+        return $this->out($ss, ($isBalance ? 'rozvaha' : 'vysledovka') . '-po-uctech-' . $asOf . '.xlsx');
+    }
+
     /**
      * Peněžní deník daňové evidence (Epic DE A3) — výstup CashJournalService::build().
      * List řádků (datum/doklad/protistrana/popis/příjem/výdaj/zůstatek/klasifikace),
@@ -823,12 +950,13 @@ final class ReportXlsxExporter
                     if ($ccy !== 'CZK') {
                         $docNo .= ' (' . $this->czMoney((float) ($it['amount_foreign'] ?? 0)) . ' ' . $ccy . ')';
                     }
+                    [$docNo, $amount, $paid] = $this->saldoItemCells($it, $docNo);
                     $sheet->setCellValueExplicit([1, $r], $docNo, DataType::TYPE_STRING);
                     $sheet->setCellValue([2, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
                     $sheet->setCellValue([3, $r], $this->czDate((string) ($it['due_date'] ?? '')));
                     $sheet->setCellValue([4, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
-                    $sheet->setCellValue([5, $r], (float) ($it['booked_czk'] ?? 0));
-                    $sheet->setCellValue([6, $r], (float) ($it['paid_czk'] ?? 0));
+                    $sheet->setCellValue([5, $r], $amount);
+                    $sheet->setCellValue([6, $r], $paid);
                     $sheet->setCellValue([7, $r], (float) ($it['remaining_czk'] ?? 0));
                     $r++;
                 }
@@ -850,6 +978,28 @@ final class ReportXlsxExporter
      * @param array<string,mixed> $data
      * @return array{bytes:string, filename:string, mime:string}
      */
+    /**
+     * Popis a částky řádku saldokonta. Záloha čekající na vyúčtování nemá „částku
+     * a úhradu" jako faktura: Částka = přijatá/poskytnutá platba, Uhrazeno = daň
+     * z daňového dokladu k platbě a popis to řekne slovy. Zbývá (základ zálohy se
+     * znaménkem) zůstává, aby součet seděl na hlavní knihu.
+     *
+     * @param array<string,mixed> $it
+     * @return array{0:string, 1:float, 2:float}
+     */
+    private function saldoItemCells(array $it, string $docNo): array
+    {
+        if (($it['kind'] ?? 'document') !== 'advance_pending') {
+            return [$docNo, (float) ($it['booked_czk'] ?? 0), (float) ($it['paid_czk'] ?? 0)];
+        }
+        $vat = (float) ($it['advance_vat_czk'] ?? 0);
+        $label = $docNo . ' — ' . (string) ($it['label'] ?? '');
+        if (abs($vat) >= 0.005) {
+            $label .= ' (Uhrazeno = DPH z daňového dokladu k platbě)';
+        }
+        return [$label, (float) ($it['advance_payment_czk'] ?? 0), $vat];
+    }
+
     private function saldoFlat(array $data): array
     {
         $asOf = (string) ($data['as_of'] ?? '');
@@ -905,15 +1055,16 @@ final class ReportXlsxExporter
             $total = 0.0;
             foreach ($rows as $it) {
                 $ccy = (string) ($it['currency_code'] ?? 'CZK');
+                [$docNo, $amount, $paid] = $this->saldoItemCells($it, (string) ($it['doc_no'] ?? ''));
                 $sheet->setCellValueExplicit([1, $r], (string) ($it['account_code'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([2, $r], (string) ($it['partner_name'] ?? ''), DataType::TYPE_STRING);
-                $sheet->setCellValueExplicit([3, $r], (string) ($it['doc_no'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([3, $r], $docNo, DataType::TYPE_STRING);
                 $sheet->setCellValue([4, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
                 $sheet->setCellValue([5, $r], $this->czDate((string) ($it['due_date'] ?? '')));
                 $sheet->setCellValue([6, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
                 $sheet->setCellValueExplicit([7, $r], $ccy, DataType::TYPE_STRING);
-                $sheet->setCellValue([8, $r], (float) ($it['booked_czk'] ?? 0));
-                $sheet->setCellValue([9, $r], (float) ($it['paid_czk'] ?? 0));
+                $sheet->setCellValue([8, $r], $amount);
+                $sheet->setCellValue([9, $r], $paid);
                 $sheet->setCellValue([10, $r], (float) ($it['remaining_czk'] ?? 0));
                 $total += (float) ($it['remaining_czk'] ?? 0);
                 $r++;
@@ -1203,6 +1354,33 @@ final class ReportXlsxExporter
         $sheet->getStyle('A4')->getFont()->setSize(9)->setItalic(true);
     }
 
+    /** @return array{bytes:string, filename:string, mime:string} */
+    public function dimensionAnalyticsTable(array $table): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle(mb_substr($table['title'], 0, 31));
+        $sheet->setCellValueExplicit('A1', $table['title'], DataType::TYPE_STRING);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $sheet->setCellValueExplicit('A2', $table['subtitle'], DataType::TYPE_STRING);
+        $head = 4;
+        $this->headerRow($sheet, $head, $table['headers']);
+        $r = $head + 1;
+        foreach ([...$table['rows'], $table['totals']] as $row) {
+            foreach ($row as $column => $value) {
+                if (is_string($value)) {
+                    $sheet->setCellValueExplicit([$column + 1, $r], (string) $value, DataType::TYPE_STRING);
+                } else {
+                    $sheet->setCellValue([$column + 1, $r], (float) $value);
+                }
+            }
+            $r++;
+        }
+        $this->boldRow($sheet, $r - 1, count($table['headers']));
+        $this->finishTable($sheet, $head, $r - 1, count($table['headers']), 2);
+        return $this->out($ss, $table['filename'] . '.xlsx');
+    }
+
     /**
      * Výsledovka po dimenzi: strom hodnot (výnosy, náklady, výsledek) a na druhém listu
      * rozpad po syntetických účtech (řádky = účty, sloupce = kořeny sestavy).
@@ -1293,6 +1471,30 @@ final class ReportXlsxExporter
             $ms->setCellValue([$cols, $r], (float) ($matrix['total_result'] ?? 0));
             $this->boldRow($ms, $r, $cols);
             $this->finishTable($ms, $mh, $r, $cols, 3);
+        }
+
+        if (!empty($data['companies'])) {
+            $cs = $ss->createSheet();
+            $cs->setTitle('Po firmách');
+            $cs->setCellValue('A1', 'VÝSLEDOVKA PO FIRMÁCH ' . $typeName . ' za ' . $this->czDate($from) . ' – ' . $this->czDate($to));
+            $cs->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+            $head = 3;
+            $this->headerRow($cs, $head, ['Firma', 'Výnosy', 'Náklady', 'Výsledek']);
+            $r = $head + 1;
+            foreach ($data['companies'] as $company) {
+                if (abs((float) $company['revenue']) < 0.005 && abs((float) $company['cost']) < 0.005) continue;
+                $cs->setCellValueExplicit([1, $r], (string) $company['name'], DataType::TYPE_STRING);
+                $cs->setCellValue([2, $r], (float) $company['revenue']);
+                $cs->setCellValue([3, $r], (float) $company['cost']);
+                $cs->setCellValue([4, $r], (float) $company['result']);
+                $r++;
+            }
+            $cs->setCellValue([1, $r], 'Celkem');
+            $cs->setCellValue([2, $r], (float) $data['totals']['revenue']);
+            $cs->setCellValue([3, $r], (float) $data['totals']['cost']);
+            $cs->setCellValue([4, $r], (float) $data['totals']['result']);
+            $this->boldRow($cs, $r, 4);
+            $this->finishTable($cs, $head, $r, 4, 2);
         }
 
         return $this->out($ss, 'vysledovka-po-dimenzi-' . $from . '.xlsx');

@@ -46,7 +46,7 @@ final class PayrollLegacyHandoverCarryOverTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $connection = $container->get(Connection::class);
         $handover = $container->get(PayrollLegacyRecapitulationService::class);

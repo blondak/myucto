@@ -39,7 +39,7 @@ final class CloneInvoiceDueDateTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $c = Bootstrap::buildApp()->getContainer();
+            $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->bulk = $c->get(BulkReissueAction::class);
             $this->defaults = $c->get(InvoiceDefaults::class);

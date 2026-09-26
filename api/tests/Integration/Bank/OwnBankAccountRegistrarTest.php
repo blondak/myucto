@@ -43,7 +43,7 @@ final class OwnBankAccountRegistrarTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->ownership = $container->get(BankStatementOwnershipResolver::class);
         } catch (\Throwable $e) {

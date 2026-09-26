@@ -41,6 +41,23 @@ final class ExpenseAutoClassifier
     ) {}
 
     /**
+     * Má řádek RUČNÍ klasifikaci, kterou automat nesmí přebít? Ruční je účet na řádku,
+     * ale i samotný druh nákladu bez účtu, pokud za ním nestojí automat
+     * (`expense_classification_source` NULL = volba účetní, migrace 1755). Dřív se
+     * chránil jen účet, takže jistý návrh (≥ 0,9) tiše přepsal ručně zvolený druh.
+     *
+     * Jediné místo rozhodnutí — používá ho zápis automatu i zaúčtování
+     * ({@see \MyInvoice\Service\Accounting\PostingService}).
+     */
+    public static function isManualClassification(?string $kind, ?string $accountCode, ?string $source): bool
+    {
+        if ($accountCode !== null && trim($accountCode) !== '') {
+            return true;
+        }
+        return $kind !== null && $kind !== '' && ($source === null || $source === '');
+    }
+
+    /**
      * Doplní jistou klasifikaci na položky faktury, které ji ještě nemají.
      *
      * @param list<int> $forceItemIds položky, které se přepíšou i když už účet mají
@@ -72,8 +89,8 @@ final class ExpenseAutoClassifier
             $row = $current[$itemId];
             $forced = isset($force[$itemId]);
 
-            // Ruční volbu účetní automat nepřepisuje (leda u prokazatelného PHM).
-            if (!$forced && $row['expense_account_code'] !== null) {
+            // Ruční volbu účetní (účet i samotný druh) automat nepřepisuje (leda u prokazatelného PHM).
+            if (!$forced && self::isManualClassification($row['expense_kind'], $row['expense_account_code'], $row['expense_classification_source'])) {
                 continue;
             }
             $toKind = (string) $s['expense_kind'];
@@ -149,11 +166,11 @@ final class ExpenseAutoClassifier
         return $out;
     }
 
-    /** @return array<int, array{description:string, expense_kind:?string, expense_account_code:?string}> */
+    /** @return array<int, array{description:string, expense_kind:?string, expense_account_code:?string, expense_classification_source:?string}> */
     private function currentItems(int $supplierId, int $purchaseInvoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pii.description, pii.expense_kind, pii.expense_account_code
+            'SELECT pii.id, pii.description, pii.expense_kind, pii.expense_account_code, pii.expense_classification_source
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
               WHERE pii.purchase_invoice_id = ? AND pi.supplier_id = ?'
@@ -166,6 +183,8 @@ final class ExpenseAutoClassifier
                 'expense_kind'         => $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
                 'expense_account_code' => $row['expense_account_code'] !== null
                     ? (string) $row['expense_account_code'] : null,
+                'expense_classification_source' => $row['expense_classification_source'] !== null
+                    ? (string) $row['expense_classification_source'] : null,
             ];
         }
         return $out;

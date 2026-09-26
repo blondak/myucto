@@ -57,7 +57,7 @@ final class EpoXsdValidationTest extends TestCase
             $this->markTestSkipped('Žádné XSD v api/xsd/ — chybí commitnutá schémata MFČR.');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->validator = $container->get(XmlSchemaValidator::class);
         $this->conn = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
         $this->supplierId = $this->createSyntheticSupplier();

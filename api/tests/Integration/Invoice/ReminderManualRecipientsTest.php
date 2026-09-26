@@ -33,7 +33,7 @@ final class ReminderManualRecipientsTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             self::markTestSkipped('Test vyžaduje nakonfigurovanou testovací DB.');
         }
-        $this->container = Bootstrap::buildApp()->getContainer();
+        $this->container = Bootstrap::buildContainer();
         $this->pdo = $this->container->get(Connection::class)->pdo();
         $this->pdo->beginTransaction();
         $sourceId = (int) $this->pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();

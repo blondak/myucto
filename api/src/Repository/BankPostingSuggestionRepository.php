@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\BankTransactionSort;
+use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use PDO;
 use PDOException;
@@ -683,10 +684,11 @@ final class BankPostingSuggestionRepository
      * @return array{items:list<array<string,mixed>>, total:int}
      */
     /**
-     * @param array{year?:?int, q?:?string, scope?:string, account?:?string, sort?:?string, direction?:?string} $filters
+     * @param array{year?:?int, q?:?string, scope?:string, status?:?string, account?:?string, sort?:?string, direction?:?string} $filters
      *   year      — kalendářní rok pohybu (NULL = všechny),
      *   q         — fulltext přes protistranu, VS, popis a číslo účtu,
      *   scope     — 'unposted' (výchozí, jen nezaúčtované) | 'all' (všechny pohyby na všech účtech).
+     *   status    — stav spárování v scope 'all'; nespárované vynechávají vyřízené pohyby bez faktury.
      *   account   — náš zdrojový účet (bs.account_number, normalizováno stejně jako u BankStatementAction::list).
      *   sort      — sloupec řazení z whitelistu {@see BankTransactionSort::KEYS} (jinak datum),
      *   direction — asc | desc (výchozí desc, nejnovější nahoře).
@@ -695,8 +697,7 @@ final class BankPostingSuggestionRepository
     {
         $unpostedOnly = ($filters['scope'] ?? 'unposted') !== 'all';
         $scopeSql = "bt.source = 'statement'
-            AND bt.match_status <> 'ignored'"
-            . ($unpostedOnly ? "
+            " . ($unpostedOnly ? "AND bt.match_status <> 'ignored'
             AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') : '') . "
             AND (
                 " . BankStatementOwnershipResolver::sql() . "
@@ -711,6 +712,15 @@ final class BankPostingSuggestionRepository
         // jednoznačném vlastníkovi účtu), ne pouhá shoda čísla účtu.
         $scopeParams = BankStatementOwnershipResolver::params($supplierId);
         array_push($scopeParams, $supplierId, $supplierId, $supplierId);
+
+        $status = $unpostedOnly ? null : ($filters['status'] ?? null);
+        if (in_array($status, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)) {
+            $scopeSql .= ' AND bt.match_status = ?';
+            $scopeParams[] = $status;
+            if ($status === 'unmatched') {
+                $scopeSql .= ' AND NOT ' . NonInvoiceBankTransactionScope::sql($supplierId, 'bt.id');
+            }
+        }
 
         $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
         if ($year !== null) {

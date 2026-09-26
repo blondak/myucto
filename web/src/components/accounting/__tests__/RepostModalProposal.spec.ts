@@ -14,6 +14,7 @@ vi.mock('@/api/accounting', () => ({
     repostPlan: () => Promise.resolve(m.plan),
     listAccounts: () => Promise.resolve([]),
     repost: vi.fn(),
+    repostPlanForLines: vi.fn(() => Promise.resolve(m.plan)),
   },
   postingErrorI18nKey: (code: string) => `err.${code}`,
 }))
@@ -25,6 +26,7 @@ vi.mock('@/components/accounting/JournalLinesEditor.vue', () => ({
 }))
 
 import RepostModal from '@/components/accounting/RepostModal.vue'
+import { accountingApi } from '@/api/accounting'
 
 function plan(lines: Array<{ account_code: string; side: 'debit' | 'credit'; amount: number }>) {
   return {
@@ -47,6 +49,7 @@ function editorCodes(wrapper: Awaited<ReturnType<typeof mountModal>>) {
 
 describe('RepostModal — kontace z nového pravidla', () => {
   beforeEach(() => {
+    vi.mocked(accountingApi.repostPlanForLines).mockClear()
     m.plan = plan([
       { account_code: '518', side: 'debit', amount: 299 },
       { account_code: '221.001', side: 'credit', amount: 299 },
@@ -61,6 +64,40 @@ describe('RepostModal — kontace z nového pravidla', () => {
     const wrapper = await mountModal({})
     const rows = wrapper.findComponent({ name: 'JournalLinesEditor' }).props('modelValue')
     expect(rows.map((row: { is_red_storno?: boolean }) => row.is_red_storno)).toEqual([true, true])
+    wrapper.unmount()
+  })
+
+  it('odesílá červené storno také při náhledu zamčeného přeúčtování', async () => {
+    m.plan.strategy = 'reverse'
+    m.plan.tax_neutral_available = true
+    m.plan.lines = [
+      { account_code: '518', side: 'debit', amount: 100, is_red_storno: true },
+      { account_code: '321', side: 'credit', amount: 100, is_red_storno: true },
+    ]
+    const wrapper = await mountModal({ source: 'purchase-invoices' })
+    const editor = wrapper.findComponent({ name: 'JournalLinesEditor' })
+    editor.vm.$emit('update:modelValue', [
+      { account_code: '501', side: 'debit', amount: 100, is_red_storno: true },
+      { account_code: '321', side: 'credit', amount: 100, is_red_storno: true },
+    ])
+    await new Promise(resolve => setTimeout(resolve, 450))
+    await flushPromises()
+    expect(accountingApi.repostPlanForLines).toHaveBeenCalledWith('purchase-invoices', 42, [
+      { account_code: '501', side: 'debit', amount: 100, is_red_storno: true },
+      { account_code: '321', side: 'credit', amount: 100, is_red_storno: true },
+    ])
+    wrapper.unmount()
+  })
+
+  it('přepočítá plán také při změně samotného znaménka', async () => {
+    m.plan.strategy = 'reverse'
+    m.plan.tax_neutral_available = true
+    const wrapper = await mountModal({})
+    const editor = wrapper.findComponent({ name: 'JournalLinesEditor' })
+    editor.vm.$emit('update:modelValue', (m.plan.lines as Array<Record<string, unknown>>).map(line => ({ ...line, is_red_storno: true })))
+    await new Promise(resolve => setTimeout(resolve, 450))
+    await flushPromises()
+    expect(accountingApi.repostPlanForLines).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

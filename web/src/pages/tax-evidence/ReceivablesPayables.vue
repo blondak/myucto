@@ -9,6 +9,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
@@ -60,7 +61,16 @@ function pivot(rows: AgingBucket[] | undefined): PivotRow[] {
     row.cells[r.bucket] = (row.cells[r.bucket] ?? 0) + (r.total ?? 0)
     row.total = Math.round((row.total + (r.total ?? 0)) * 100) / 100
   }
-  return Object.values(map).sort((a, b) => a.currency.localeCompare(b.currency))
+  const sort = tbl.sort.value
+  return Object.values(map).sort((a, b) => {
+    if (!sort) return a.currency.localeCompare(b.currency)
+    const left = sort.key === 'currency' ? a.currency : sort.key === 'total' ? a.total : (a.cells[sort.key] ?? 0)
+    const right = sort.key === 'currency' ? b.currency : sort.key === 'total' ? b.total : (b.cells[sort.key] ?? 0)
+    const cmp = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true })
+    return (sort.dir === 'asc' ? 1 : -1) * (cmp || a.currency.localeCompare(b.currency))
+  })
 }
 
 const receivableRows = computed(() => pivot(report.value?.receivables))
@@ -177,9 +187,9 @@ onMounted(load)
             <table class="w-full text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
-                  <th v-if="tbl.isVisible('currency')" class="px-3 py-2 text-left font-medium">{{ t('tax_evidence.receivables_payables.col_currency') }}</th>
-                  <th v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" class="px-3 py-2 text-right font-medium">{{ t(BUCKET_KEY[b]) }}</th>
-                  <th v-if="tbl.isVisible('total')" class="px-3 py-2 text-right font-medium">{{ t('tax_evidence.receivables_payables.row_total') }}</th>
+                  <SortableTh v-if="tbl.isVisible('currency')" :label="t('tax_evidence.receivables_payables.col_currency')" sort-key="currency" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+                  <SortableTh v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" :label="t(BUCKET_KEY[b])" :sort-key="b" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
+                  <SortableTh v-if="tbl.isVisible('total')" :label="t('tax_evidence.receivables_payables.row_total')" sort-key="total" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
@@ -207,9 +217,9 @@ onMounted(load)
             <table class="w-full text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
-                  <th v-if="tbl.isVisible('currency')" class="px-3 py-2 text-left font-medium">{{ t('tax_evidence.receivables_payables.col_currency') }}</th>
-                  <th v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" class="px-3 py-2 text-right font-medium">{{ t(BUCKET_KEY[b]) }}</th>
-                  <th v-if="tbl.isVisible('total')" class="px-3 py-2 text-right font-medium">{{ t('tax_evidence.receivables_payables.row_total') }}</th>
+                  <SortableTh v-if="tbl.isVisible('currency')" :label="t('tax_evidence.receivables_payables.col_currency')" sort-key="currency" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
+                  <SortableTh v-for="b in BUCKETS" v-show="tbl.isVisible(b)" :key="b" :label="t(BUCKET_KEY[b])" :sort-key="b" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
+                  <SortableTh v-if="tbl.isVisible('total')" :label="t('tax_evidence.receivables_payables.row_total')" sort-key="total" :sort="tbl.sort.value" align="right" @toggle="tbl.toggleSort" />
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">

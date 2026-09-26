@@ -10,9 +10,12 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
+use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -129,6 +132,8 @@ final class PostingService
 
     private ?DimensionStamper $dimensionStamper = null;
 
+    private ?BankDocumentNumber $bankDocumentNumber = null;
+
     /**
      * Varování pravidel dimenzí (vynucení `warning`) z posledního {@see postDocument()}.
      *
@@ -244,6 +249,17 @@ final class PostingService
         $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
+        // Přeúčtování ručně zadanými řádky (DocumentRepostService): dialog cizoměnovou
+        // stopu saldokontních řádků nezná, převezme se z opravovaného zápisu — i když se
+        // mezitím stornoval a oprava jde novým zápisem.
+        if (!empty($meta['inherit_line_trace_from'])) {
+            $resolved = $this->inheritLineTrace(
+                $supplierId,
+                $this->journal->linesForEntry((int) $meta['inherit_line_trace_from'], $supplierId),
+                $resolved,
+            );
+        }
+
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
         // závěrkové zápisy k ends_on se účtují do období ve stavu 'closing' (nikdy closed/approved).
         $allowClosing = !empty($meta['allow_closing_period']);
@@ -327,12 +343,24 @@ final class PostingService
             if ($description === null || trim((string) $description) === '') {
                 $description = $this->defaultDescription($supplierId, $sourceType, $sourceId);
             }
+            // Číslo bankovního dokladu určuje jen řada účtu a měsíc zápisu, nikdy volající:
+            // jinak by každá cesta (párování, pravidlo, převod, kreditka, přeúčtování) mohla
+            // číslovat po svém a po novém importu výpisu by týž pohyb dostal jiné číslo.
+            $bankDocument = BankDocumentNumber::numbersSource($sourceType) && $sourceId !== null;
+            $documentNo = $bankDocument
+                ? $this->bankDocumentNumber()->forTransaction($supplierId, $sourceId, $entryDate)
+                : ($meta['document_no'] ?? null);
+            // Zápis faktury nese číslo dokladu i tehdy, když ho volající nedodá (automatické
+            // zaúčtování po vystavení, přeúčtování zápisu bez čísla) — viz DocumentEntryNumber.
+            if (($documentNo === null || trim((string) $documentNo) === '') && $sourceId !== null) {
+                $documentNo = (new DocumentEntryNumber($this->db))->forDocument($supplierId, $sourceType, $sourceId);
+            }
             $header = [
                 'supplier_id'   => $supplierId,
                 'period_id'     => (int) $period['id'],
                 'entry_date'    => $entryDate,
                 'document_date' => $meta['document_date'] ?? null,
-                'document_no'   => $meta['document_no'] ?? null,
+                'document_no'   => $documentNo,
                 'description'   => $description,
                 'source_type'   => $sourceType,
                 'source_id'     => $sourceId,
@@ -358,10 +386,13 @@ final class PostingService
                         'Zaúčtovaný mzdový předpis je neměnný; oprava patří do nové revize.',
                     );
                 }
+                if ($bankDocument && $this->bankDocumentNumber()->isTakenOver($supplierId, (int) $existing['id'])) {
+                    $header['document_no'] = $existing['document_no'];
+                }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
                 if ($taxNeutralRewrite) {
                     $this->assertTaxNeutralRewrite($supplierId, $existing, $entryDate, $resolved);
-                    $resolved = self::carryOverLineTrace($existing['lines'], $resolved);
+                    $resolved = $this->inheritLineTrace($supplierId, $existing['lines'], $resolved);
                 }
                 $entryId = $this->rewriteExisting(
                     $supplierId,
@@ -815,21 +846,72 @@ final class PostingService
     }
 
     /**
-     * Při daňově neutrálním přepisu se mění jen účet. Cizoměnová stopa saldokontních
-     * řádků a středisko se proto přenesou z původních řádků, které zůstaly beze změny
-     * (týž účet, strana i částka) — jinak by přepis tiše smazal podklad kurzových rozdílů.
+     * Cizoměnová stopa (a středisko) z původních řádků do opravených. SSOT pro přepis
+     * na místě i pro přeúčtování stornem a novým zápisem: ručně zadané řádky stopu
+     * neznají a bez ní by oprava tiše smazala podklad kurzových rozdílů a přecenění.
+     *
+     * Nejdřív řádky beze změny (týž účet, strana i částka) převezmou stopu doslova. Pak
+     * saldokontní řádek (31x/32x), jehož částka se změnila: když na tomtéž účtu a straně
+     * zůstal právě jeden původní řádek se stopou, cizí částka se přepočte poměrem nové
+     * a původní korunové částky (kurz zůstává). Víc kandidátů = nejednoznačné, řádek
+     * zůstane bez stopy a přecenění ho uvidí jako korunový — stejně jako dosud.
      *
      * @param list<array<string,mixed>> $existingLines
      * @param list<array<string,mixed>> $resolved
      * @return list<array<string,mixed>>
      */
-    private static function carryOverLineTrace(array $existingLines, array $resolved): array
+    private function inheritLineTrace(int $supplierId, array $existingLines, array $resolved): array
     {
+        [$resolved, $pool, $matched] = self::carryOverExactTrace($existingLines, $resolved);
+        $pool = array_values(array_filter($pool, static fn (array $l): bool => ($l['currency_code'] ?? null) !== null
+            && ($l['amount_foreign'] ?? null) !== null && self::cents($l['amount']) !== 0));
+        if ($pool === []) {
+            return $resolved;
+        }
+        $accounts = $this->accounts->idToAccountMap($supplierId);
+        foreach ($resolved as $i => $line) {
+            if (isset($matched[$i]) || ($line['currency_code'] ?? null) !== null) {
+                continue;
+            }
+            $code = (string) ($accounts[(int) $line['account_id']]['code'] ?? '');
+            if (!in_array(substr($code, 0, 2), ['31', '32'], true)) {
+                continue;
+            }
+            $candidates = array_filter(
+                $pool,
+                static fn (array $old): bool => (int) $old['account_id'] === (int) $line['account_id']
+                    && (string) $old['side'] === (string) $line['side']
+                    && (bool) ($old['is_red_storno'] ?? false) === (bool) ($line['is_red_storno'] ?? false),
+            );
+            if (count($candidates) !== 1) {
+                continue;
+            }
+            $old = array_values($candidates)[0];
+            $resolved[$i]['currency_code'] = $old['currency_code'];
+            $resolved[$i]['fx_rate'] = $old['fx_rate'] ?? null;
+            $resolved[$i]['amount_foreign'] = round(
+                (float) $old['amount_foreign'] * (float) $line['amount'] / (float) $old['amount'],
+                2,
+            );
+        }
+        return $resolved;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $existingLines
+     * @param list<array<string,mixed>> $resolved
+     * @return array{0:list<array<string,mixed>>, 1:list<array<string,mixed>>, 2:array<int,true>}
+     *         opravené řádky, nespárované původní řádky, indexy řádků spárovaných doslova
+     */
+    private static function carryOverExactTrace(array $existingLines, array $resolved): array
+    {
+        $matched = [];
         $pool = $existingLines;
         foreach ($resolved as $i => $line) {
             foreach ($pool as $j => $old) {
                 if ((int) $old['account_id'] !== (int) $line['account_id']
                     || (string) $old['side'] !== (string) $line['side']
+                    || (bool) ($old['is_red_storno'] ?? false) !== (bool) ($line['is_red_storno'] ?? false)
                     || self::cents($old['amount']) !== self::cents($line['amount'])
                 ) {
                     continue;
@@ -842,11 +924,12 @@ final class PostingService
                 if (($line['cost_center'] ?? null) === null && ($old['cost_center'] ?? null) !== null) {
                     $resolved[$i]['cost_center'] = $old['cost_center'];
                 }
+                $matched[$i] = true;
                 unset($pool[$j]);
                 break;
             }
         }
-        return $resolved;
+        return [$resolved, array_values($pool), $matched];
     }
 
     // ── build helpers (vrací řádky; zápis dělá postDocument → jednotkově testovatelné) ──
@@ -930,6 +1013,16 @@ final class PostingService
         // resp. u čistě OSS dokladu rovnou na 'document_not_postable'.
         [$ossNet, $ossVat] = $this->ossItemTotals($invoiceId, $rate);
 
+        // Vyúčtování zálohy s daňovými doklady k platbě (§ 37a): odpočtové řádky snížily
+        // základ vyúčtování o základ DDKP, jenže DDKP účtoval jen daň (324/343), výnos
+        // nikdy. Základ, který vyúčtování SKUTEČNĚ odečetlo, proto patří zpátky do výnosu
+        // i do předpisu 311, jinak by plně předplacené vyúčtování vyšlo na nulu a na 324
+        // by navždy zůstal základ. Bere se z odpočtových řádků dokladu, ne z DDKP, aby
+        // se výnos nemohl započítat dvakrát (viz advanceDeduction).
+        $deduction = $this->advanceDeduction($supplierId, $invoiceId, $inv, $rate);
+        $net = round($net + $deduction['base'], 2);
+        $totalCzk = round($totalCzk + $deduction['base'], 2);
+
         if ($net + $vat + $ossNet + $ossVat === 0.0) {
             throw new PostingException('document_not_postable', 'Faktura #' . $invoiceId . ' nemá DPH řádky k zaúčtování (proforma/storno?).');
         }
@@ -956,37 +1049,50 @@ final class PostingService
         // Explicitní rule_key od volajícího je adresný pokyn pro CELÝ doklad (ruční zaúčtování
         // s vybranou předkontací) → rozpad se pak nedělá; hlavičkový revenue_rule_key naopak
         // slouží jen jako výchozí účet NEklasifikovaných řádků, takže rozpad neruší.
+        // Odpočtové řádky § 37a se do vah nepočítají: nejsou prodejem ničeho, jejich základ
+        // se výnosu vrací výš a rozdělí se podle skutečných položek. Jinak by odpočet bez
+        // karty majetku spadl zápornou vahou na 602 a výnos z prodeje majetku by se rozjel.
         $weights = isset($opts['rule_key'])
             ? null
-            : $this->revenueWeights($supplierId, $invoiceId, $rate, $revenue);
+            : $this->revenueWeights($supplierId, $invoiceId, $rate, $revenue, $deduction['item_ids']);
 
         // Normálně 311 MD / 6xx+343 D; dobropis obrací obě strany (§ vratka výnosu i DPH).
         $receivableSide = $isCreditNote ? 'credit' : 'debit';
         $otherSide      = $isCreditNote ? 'debit'  : 'credit';
+        // Daň s opačným znaménkem než doklad (vyúčtování menší než záloha s DDKP: odpočet
+        // vrací víc daně, než kolik nese plnění) patří na opačnou stranu — shodně
+        // s otočenými skupinami v appendSplit. Slepé abs() by zápis rozvážilo.
+        $vatSide = static fn (float $v): string => (($v < 0.0) !== $isCreditNote) ? $receivableSide : $otherSide;
 
         $lines = [];
-        // Saldokonto 311 nese i cizí měnu/kurz/částku (§4/12 — přecenění §24/6).
-        $lines[] = $this->withForeign($this->line($receivable, $receivableSide, abs($totalCzk), $cc), $inv, $rate);
+        // Saldokonto 311 nese i cizí měnu/kurz/částku (§4/12 — přecenění §24/6). U vyúčtování
+        // zálohy s DDKP je předpis vyšší o vrácený základ, cizoměnová stopa musí sedět s ním.
+        $lines[] = $this->withForeign(
+            $this->line($receivable, $receivableSide, abs($totalCzk), $cc),
+            $inv,
+            $rate,
+            $deduction['active'] ? (float) $inv['total_with_vat'] + $deduction['foreign_base'] : null,
+        );
         // Výnos je výnos bez ohledu na to, kterému státu patří daň — OSS základ jde na
         // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
         $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet, $cc);
         if ($vat !== 0.0) {
-            $lines[] = $this->line($this->outputVatAccount($supplierId), $otherSide, abs($vat), $cc);
+            $lines[] = $this->line($this->outputVatAccount($supplierId), $vatSide($vat), abs($vat), $cc);
         }
         // Daň odváděná do jiného členského státu na vlastní účet (kontace oss.output.vat,
         // default analytika 345.100). Tohle je celý smysl rozdělení: na 343 zůstane přesně
         // to, co jde do přiznání k DPH, takže zůstatek účtu jde s přiznáním srovnat.
         if ($ossVat !== 0.0) {
             $ossAccount = $this->ruleCode($supplierId, 'oss.output.vat', 'credit', self::OSS_OUTPUT_VAT_ACCOUNT);
-            $lines[] = $this->line($ossAccount, $otherSide, abs($ossVat), $cc);
+            $lines[] = $this->line($ossAccount, $vatSide($ossVat), abs($ossVat), $cc);
         }
         $this->appendRounding($lines, $totalCzk, $net + $vat + $ossNet + $ossVat, $cc, $isCreditNote);
 
         // Vyúčtovací faktura z proformy (parent_invoice_id → proforma): DOPLŇ zúčtování
         // skutečně přijaté zálohy 324 MD / 311 D (self-balanced pár — nemění vyváženost
         // vlastní faktury). Běžná faktura bez proformy zůstává beze změny.
-        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines);
+        $this->appendAdvanceSettlementSale($supplierId, $inv, $lines, abs($totalCzk), $deduction);
 
         return $lines;
     }
@@ -1393,7 +1499,8 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, expense_kind, expense_account_code, total_without_vat, total_vat
+            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
+                    expense_classification_source, total_without_vat, total_vat
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1403,8 +1510,16 @@ final class PostingService
             return null;
         }
 
+        // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
+        // PurchaseDiscountAllocation, tentýž rozpad používá evidence drobného majetku).
+        $discounts = PurchaseDiscountAllocation::allocate(
+            PurchaseDiscountAllocation::withReturns($this->db->pdo(), $supplierId, $purchaseInvoiceId, $items),
+        );
+
         $anyClassified = false;
         $weights = [];
+        $itemAccounts = [];
+        $itemWeights = [];
         foreach ($items as $row) {
             $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
             $override = trim((string) ($row['expense_account_code'] ?? ''));
@@ -1421,9 +1536,15 @@ final class PostingService
             }
 
             // Náhled i samotné zaúčtování musí použít jistý návrh stejně jako auto-post,
-            // ale bez zápisu do dokladu. Ručně zvolený účet má vždy přednost.
+            // ale bez zápisu do dokladu. Ruční volba účetní (účet i samotný druh) má vždy
+            // přednost — stejné pravidlo jako zápis automatu (ExpenseAutoClassifier).
             $suggestion = $suggestions[(int) $row['id']] ?? null;
-            if ($approved === null && $override === null && $suggestion !== null && !empty($suggestion['auto'])) {
+            $manual = ExpenseAutoClassifier::isManualClassification(
+                $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
+                $override,
+                $row['expense_classification_source'] !== null ? (string) $row['expense_classification_source'] : null,
+            );
+            if ($approved === null && !$manual && $suggestion !== null && !empty($suggestion['auto'])) {
                 $kindValue = (string) $suggestion['expense_kind'];
                 $suggestedAccount = trim((string) ($suggestion['expense_account_code'] ?? ''));
                 $override = $suggestedAccount === '' ? null : $suggestedAccount;
@@ -1446,8 +1567,6 @@ final class PostingService
                 $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
             }
 
-            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][(int) $row['id']] = $account;
-
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
             $w = match (true) {
@@ -1456,7 +1575,30 @@ final class PostingService
                 $vatDeduction === 'proportional' => round($net + round($vat * (1.0 - $pct), 2), 2),
                 default => $net,
             };
-            $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
+            $itemAccounts[(int) $row['id']] = $account;
+            $itemWeights[(int) $row['id']] = $w;
+        }
+
+        foreach ($itemAccounts as $itemId => $account) {
+            $shares = $discounts[$itemId] ?? null;
+            if ($shares === null) {
+                $weights[$account] = round(($weights[$account] ?? 0.0) + $itemWeights[$itemId], 2);
+                continue;
+            }
+            // Váha slevy se rozdělí na účty cílových položek; do stopy řádku (dimenze)
+            // jde účet té, na kterou připadá největší díl.
+            $main = null;
+            foreach ($shares as $targetId => $share) {
+                $targetAccount = $itemAccounts[$targetId];
+                $weights[$targetAccount] = round(($weights[$targetAccount] ?? 0.0) + $itemWeights[$itemId] * $share, 2);
+                if ($main === null || $share > $shares[$main]) {
+                    $main = $targetId;
+                }
+            }
+            $itemAccounts[$itemId] = $itemAccounts[$main];
+        }
+        foreach ($itemAccounts as $itemId => $account) {
+            $this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId][$itemId] = $account;
         }
 
         if (!$anyClassified) {
@@ -1495,13 +1637,15 @@ final class PostingService
      *
      * SLEVOVÉ ŘÁDKY (item_kind='discount') vazbu na kartu nemají a spadnou proto na
      * $defaultAccount — procentní sleva z hlavičky se generuje per sazba DPH, ne per položka,
-     * takže není ke které kartě ji přiřadit. Shodné chování má nákladová strana (viz komentář
-     * o slevách Alzy v appendSplit); u prodeje majetku se sleva na hlavičce stejně nepoužívá,
-     * cena se zadá rovnou na řádku.
+     * takže není ke které kartě ji přiřadit. Nákladová strana je jiná: přijatá faktura nese
+     * slevu jako samostatný řádek u konkrétního zboží a ta se rozpouští do zlevněných
+     * položek ({@see PurchaseDiscountAllocation}). U prodeje majetku se sleva na hlavičce
+     * nepoužívá, cena se zadá rovnou na řádku.
      *
+     * @param list<int> $excludeItemIds odpočtové řádky § 37a (viz {@see advanceDeduction})
      * @return array<string,float>|null
      */
-    private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount): ?array
+    private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount, array $excludeItemIds = []): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, small_asset_id, asset_id, total_without_vat
@@ -1517,6 +1661,9 @@ final class PostingService
         $anyClassified = false;
         $weights = [];
         foreach ($items as $row) {
+            if (in_array((int) $row['id'], $excludeItemIds, true)) {
+                continue;
+            }
             // asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant to zakazuje,
             // CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
             if ($row['asset_id'] !== null) {
@@ -1765,14 +1912,22 @@ final class PostingService
      * zálohu a nuluje závazek ze zálohy 324. Běžná faktura (bez proformy) i nezaplacená
      * proforma → beze změny.
      *
-     * Mimo scope v1 (hlasitá chyba místo tichého rozvahového rozhozu): proforma s DDKP
-     * (VAT už odštěpená z 324 → prostý brutto settlement by 324 přetáhl) a proforma s víc
-     * než jednou vyúčtovací fakturou (nejednoznačná částka) → 'advance_settlement_ambiguous'.
+     * Proforma s daňovým dokladem k platbě (DDKP): DDKP už z 324 odčerpal daň (324/343),
+     * takže se zúčtovává jen zbytek zálohy = přijato − daň DDKP ({@see advanceDeduction}).
+     * Odečtený základ přitom {@see buildFromInvoice} vrátil do předpisu 311 i výnosu, takže
+     * zúčtování ho z 311 zase vyrovná. DDKP musí být zaúčtovaný — jinak by se zbytek zálohy
+     * spočítal z daně, která na 324 ještě neleží, a zúčtování by 324 přečerpalo.
+     *
+     * Hlasitou chybou (advance_settlement_ambiguous) je proforma s víc než jednou
+     * vyúčtovací fakturou (nejednoznačná částka) a proforma s DDKP, u které po odečtení
+     * jeho daně nezbývá žádná zaúčtovaná úhrada k zúčtování.
      *
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury (z fetchDocHeader)
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
+     * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
+     * @param array{active:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
      */
-    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines): void
+    private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction): void
     {
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return; // jen finální vyúčtovací faktura (ne dobropis/proforma/DDKP)
@@ -1786,13 +1941,6 @@ final class PostingService
             return; // parent není proforma → nejde o zálohový cyklus
         }
 
-        if ($this->hasActiveTaxDocument($supplierId, $parentId)) {
-            throw new PostingException(
-                'advance_settlement_ambiguous',
-                'Proforma #' . $parentId . ' má daňový doklad k přijaté platbě (DDKP) — kombinace '
-                    . 'DDKP + vyúčtování se ve v1 neúčtuje automaticky, zaúčtuj zúčtování zálohy ručně.',
-            );
-        }
         if ($this->activeFinalInvoiceCount($supplierId, $parentId) > 1) {
             throw new PostingException(
                 'advance_settlement_ambiguous',
@@ -1801,16 +1949,39 @@ final class PostingService
             );
         }
 
-        $received = min(
-            $this->postedAdvanceReceived($supplierId, $parentId),
-            abs((float) ($inv['total_with_vat'] ?? 0) * $this->fxRate($inv)),
-        );
+        // invoice_payments.amount je v měně proformy, daň DDKP v Kč → přepočet kurzem
+        // proformy. Kurz se čte jen tam, kde je co přepočítávat, aby cizoměnová proforma
+        // bez kurzu nerozbila vyúčtování, které zálohu stejně nezúčtovává.
+        $received = $this->postedAdvanceReceived($supplierId, $parentId);
+        if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
+            $received = round($received * $this->fxRate($parent), 2);
+        }
+        $remaining = round($received - $deduction['drawn_vat'], 2);
+        if ($deduction['active'] && self::cents($remaining) <= 0) {
+            // Vyúčtování už základ zálohy odečetlo a vrátilo do předpisu 311 — bez zúčtování
+            // by na 311 zůstal jako fantomová pohledávka a na účtu zálohy celý základ.
+            // Typicky úhrada zálohy není zaúčtovaná bankou/pokladnou (ruční úhrada, cizí
+            // měna, kterou banka automaticky neúčtuje).
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Proforma #' . $parentId . ' má daňový doklad k platbě, ale k ní není zaúčtovaná úhrada '
+                    . 'zálohy (banka/pokladna) převyšující jeho daň — zúčtování zálohy nelze určit, '
+                    . 'zaúčtuj úhradu zálohy nebo zúčtování ručně.',
+            );
+        }
+        $received = min($remaining, $receivable);
         if (self::cents($received) <= 0) {
             return; // proforma nezaplacena / žádné inkaso na 324 → běžná faktura beze změny
         }
 
         $draw = $this->ruleCode($supplierId, 'advance.received.settlement', 'debit', '324');
         $recv = $this->ruleCode($supplierId, 'advance.received.settlement', 'credit', '311');
+        if ($draw === $recv) {
+            // Záloha vedená přímo na pohledávce (předkontace 311/311): pár MD 311 / D 311
+            // se vyruší, na saldo ani výsledek nemá vliv a jen zdvojí obrat zápisu.
+            // Vyrovnání zálohy tu nese sám předpis na 311 proti inkasu zálohy.
+            return;
+        }
         $lines[] = $this->line($draw, 'debit', $received, null);
         $lines[] = $this->line($recv, 'credit', $received, null);
     }
@@ -1851,10 +2022,15 @@ final class PostingService
 
         // Je-li záloha (nebo je-li sama zálohou) DDKP, byla už část 314 vyčerpána o DPH
         // (343/314). Automatické zúčtování 321/314 na PLNOU zaplacenou zálohu by pak
-        // přečerpalo 314 do minusu o už uplatněnou daň → ve v1 (symetricky k vydané straně)
-        // neúčtujeme automaticky a necháme účetní zúčtovat ručně. Hláška rovnou spočítá,
-        // kolik daně má na 343 zbýt doúčtovat — "zaúčtuj ručně" bez čísla nutí účetní
-        // dopočítávat totéž z hlavy z dvou různých dokladů.
+        // přečerpalo 314 do minusu o už uplatněnou daň → neúčtujeme automaticky a necháme
+        // účetní zúčtovat ručně. Hláška rovnou spočítá, kolik daně má na 343 zbýt doúčtovat —
+        // "zaúčtuj ručně" bez čísla nutí účetní dopočítávat totéž z hlavy z dvou různých dokladů.
+        //
+        // Vydaná strana to účtuje automaticky ({@see advanceDeduction}), ale jen proto, že
+        // vyúčtování vystavujeme sami: odpočtové řádky § 37a z něj přesně ukazují, kolik
+        // základu a daně DDKP pokryl. Přijatou vyúčtovací fakturu píše dodavatel — nese
+        // základ i daň v plné výši a odpočet zálohy z ní spolehlivě vyčíst nejde, takže
+        // stejná automatika by tu musela hádat. Odlišnost je záměrná, ne zapomenutá.
         $ddkp = $advIsStandaloneDdkp ? $adv : $this->activePurchaseTaxDocument($supplierId, $advId);
         if ($ddkp !== null) {
             $finalVat = abs((float) ($pi['total_vat'] ?? 0));
@@ -1882,6 +2058,10 @@ final class PostingService
 
         $draw    = $this->ruleCode($supplierId, 'advance.paid.settlement', 'debit', '321');
         $advAcc  = $this->ruleCode($supplierId, 'advance.paid.settlement', 'credit', '314');
+        if ($draw === $advAcc) {
+            // Zrcadlo vydané strany: záloha vedená přímo na závazku, pár se vyruší.
+            return;
+        }
         $lines[] = $this->line($draw, 'debit', $paid, null);
         $lines[] = $this->line($advAcc, 'credit', $paid, null);
     }
@@ -1990,35 +2170,144 @@ final class PostingService
         return (float) $stmt->fetchColumn();
     }
 
+    /** Tolerance souladu odpočtových řádků s DDKP (haléřové zaokrouhlení v režimu brutto cen). */
+    private const ADVANCE_DEDUCTION_TOLERANCE_CZK = 1.0;
+
     /**
-     * Má proforma navázaný ŽIVÝ DDKP (daňový doklad k přijaté platbě)?
+     * Odpočet zálohy § 37a, který vyúčtovací faktura SKUTEČNĚ nese, a daň, kterou živé DDKP
+     * proformy odčerpaly z účtu zálohy.
      *
-     * „Živý" = vystavený, tedy NE draft a NE stornovaný. Draft DDKP nemá zápis v deníku,
-     * z 324 nic neodčerpal a nevyrobí ani odpočtové řádky § 37a — blokovat kvůli němu
-     * zaúčtování legitimní vyúčtovací faktury (advance_settlement_ambiguous) je chybné.
-     * Stejnou definici používá FinalFromProformaCreator při sestavování § 37a řádků.
+     *   - `base` / `foreign_base`: Σ základu odpočtových řádků (záporné řádky mimo slevové)
+     *     jako kladné číslo, v Kč a v měně dokladu. Tenhle základ se vrací do výnosu a předpisu.
+     *     Bere se z dokladu, ne z DDKP: odpočet smazaný v konceptu nebo ručně navázané
+     *     vyúčtování bez odpočtu by jinak přičetly výnos podruhé.
+     *   - `drawn_vat`: Σ daně ze zaúčtovaných DDKP (DPH evidence, stejný zdroj jako
+     *     zaúčtování DDKP) — přesně to, co DDKP z účtu zálohy odčerpal.
+     *   - `item_ids`: odpočtové řádky, které se nepočítají do vah rozpadu výnosu.
      *
-     * Vazba se hledá OBĚMA cestami — přes parent_invoice_id i přes
-     * invoice_payments.tax_document_invoice_id. Druhá cesta pokrývá historicky rozpojené
-     * doklady (rozpojení dnes brání guard v InvoiceRepository::unlinkAdvance, ale
-     * self-heal v PaymentTaxDocumentCreator s takovými řádky výslovně počítá). Bez ní
-     * guard u rozpojeného DDKP nezabere a zúčtování zálohy se zaúčtuje 324 MD / 311 D
-     * na plnou zálohu, přestože DDKP z 324 daň už odčerpal. Stejnou dvojí vazbu používá
-     * FinalFromProformaCreator, CancelInvoiceAction, IssueInvoiceAction i unlinkAdvance.
+     * Aktivní jen u vyúčtování proformy, která má živý DDKP („živý" = ne draft, ne storno;
+     * vazba přes parent_invoice_id i přes invoice_payments.tax_document_invoice_id — stejná
+     * definice jako ve FinalFromProformaCreator). Hlasité chyby:
+     *   - odpočtové řádky nesedí s DDKP (chybí, jsou upravené, ručně navázané vyúčtování)
+     *     → advance_settlement_ambiguous: výnos ani zúčtování zálohy nejde určit,
+     *   - DDKP s daní není zaúčtovaný → advance_tax_document_unposted,
+     *   - DDKP nese jen daň OSS → advance_tax_document_oss (samostatně se neúčtuje, v režimu
+     *     OSS se daňový doklad k záloze nevydává).
+     *
+     * @param array<string,mixed> $inv hlavička vyúčtovací faktury
+     * @return array{active:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>}
      */
-    private function hasActiveTaxDocument(int $supplierId, int $proformaId): bool
+    private function advanceDeduction(int $supplierId, int $invoiceId, array $inv, float $rate): array
     {
+        $none = ['active' => false, 'base' => 0.0, 'foreign_base' => 0.0, 'drawn_vat' => 0.0, 'item_ids' => []];
+        if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
+            return $none;
+        }
+        $parentId = (int) ($inv['parent_invoice_id'] ?? 0);
+        if ($parentId <= 0) {
+            return $none;
+        }
+        $parent = $this->fetchDocHeader('invoices', $supplierId, $parentId);
+        if ($parent === null || (string) ($parent['invoice_type'] ?? '') !== 'proforma') {
+            return $none;
+        }
+
         $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM invoices td
+            "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date,
+                    EXISTS (SELECT 1 FROM journal_entries je
+                             WHERE je.supplier_id = td.supplier_id AND je.source_type = 'invoice'
+                               AND je.source_id = td.id AND je.reversed_by IS NULL
+                               AND je.posted_at IS NOT NULL) AS posted
+               FROM invoices td
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'
                 AND td.status NOT IN ('draft', 'cancelled')
                 AND (td.parent_invoice_id = ?
                      OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
                                    WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
-              LIMIT 1"
+              ORDER BY td.id"
         );
-        $stmt->execute([$supplierId, $proformaId, $proformaId]);
-        return $stmt->fetchColumn() !== false;
+        $stmt->execute([$supplierId, $parentId, $parentId]);
+        $taxDocs = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($taxDocs === []) {
+            return $none;
+        }
+
+        $ddkpGross = 0.0;
+        $drawnVat = 0.0;
+        foreach ($taxDocs as $td) {
+            $label = ($td['varsymbol'] ?: '#' . $td['id']);
+            [$tdNet, $tdVat] = $this->ledgerTotals(
+                $supplierId,
+                'sale',
+                (int) $td['id'],
+                (string) ($td['tax_date'] ?? $td['issue_date']),
+                (string) $td['issue_date'],
+            );
+            $tdHeader = $this->fetchDocHeader('invoices', $supplierId, (int) $td['id']);
+            [$tdOssNet, $tdOssVat] = $this->ossItemTotals((int) $td['id'], $this->fxRate($tdHeader ?? []));
+            $ddkpGross += $tdNet + $tdVat + $tdOssNet + $tdOssVat;
+
+            if ((int) $td['posted'] !== 1) {
+                if (self::cents($tdVat) === 0 && self::cents($tdOssVat) !== 0) {
+                    throw new PostingException(
+                        'advance_tax_document_oss',
+                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $parentId . ' nese jen daň OSS. '
+                            . 'Samostatně se neúčtuje: v režimu OSS se daň z úplaty přiznává v OSS přiznání '
+                            . 'a daňový doklad k záloze se nevydává. Doklad stornuj a vyúčtování vystav bez něj, '
+                            . 'nebo zúčtuj zálohu ručním zápisem.',
+                    );
+                }
+                if (self::cents($tdVat) !== 0) {
+                    throw new PostingException(
+                        'advance_tax_document_unposted',
+                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $parentId
+                            . ' není zaúčtovaný — zaúčtuj ho před vyúčtovací fakturou.',
+                    );
+                }
+                continue; // bez daně (neplátce): ze zálohy nic neodčerpal
+            }
+            $drawnVat += $tdVat;
+        }
+
+        $items = $this->db->pdo()->prepare(
+            "SELECT id, total_without_vat, total_vat
+               FROM invoice_items
+              WHERE invoice_id = ? AND total_with_vat < 0 AND COALESCE(item_kind, 'standard') <> 'discount'"
+        );
+        $items->execute([$invoiceId]);
+        $foreignBase = 0.0;
+        $base = 0.0;
+        $gross = 0.0;
+        $ids = [];
+        foreach ($items->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $ids[] = (int) $row['id'];
+            $foreignBase += -(float) $row['total_without_vat'];
+            $base += round(-(float) $row['total_without_vat'] * $rate, 2);
+            $gross += round(-((float) $row['total_without_vat'] + (float) $row['total_vat']) * $rate, 2);
+        }
+
+        if (abs($gross - $ddkpGross) > self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                sprintf(
+                    'Vyúčtovací faktura #%d odečítá zálohu %.2f Kč, ale daňové doklady k platbě proformy #%d '
+                        . 'přiznaly %.2f Kč. Odpočtové řádky (§ 37a) musí odpovídat vystaveným daňovým dokladům — '
+                        . 'jinak nejde určit výnos ani zúčtování zálohy. Oprav odpočtové řádky, nebo zaúčtuj ručně.',
+                    $invoiceId,
+                    $gross,
+                    $parentId,
+                    $ddkpGross,
+                ),
+            );
+        }
+
+        return [
+            'active'       => true,
+            'base'         => round($base, 2),
+            'foreign_base' => round($foreignBase, 2),
+            'drawn_vat'    => round($drawnVat, 2),
+            'item_ids'     => $ids,
+        ];
     }
 
     private function activeFinalInvoiceCount(int $supplierId, int $proformaId): int
@@ -2034,12 +2323,13 @@ final class PostingService
 
     /**
      * Živý DDKP (daňový doklad k platbě) navázaný na danou poskytnutou zálohu jako DÍTĚ
-     * (parent_purchase_invoice_id, přetíženo dle document_kind, jako hasActiveTaxDocument
-     * na vydané straně přes parent_invoice_id). Vrací ID + total_vat (ne jen bool) —
+     * (parent_purchase_invoice_id, přetíženo dle document_kind; vydaná strana hledá DDKP
+     * přes parent_invoice_id v {@see advanceDeduction}). Vrací ID + total_vat (ne jen bool) —
      * appendAdvanceSettlementPurchase z toho dopočítá, kolik DPH finální faktury ještě
      * zbývá doúčtovat na 343 nad rámec toho, co DDKP uplatnil už při platbě.
      *
-     * „Živý" = NE draft a NE stornovaný — zrcadlo hasActiveTaxDocument. Draft nemá zápis
+     * „Živý" = NE draft a NE stornovaný — stejná definice jako u vydaných DDKP
+     * v {@see advanceDeduction}. Draft nemá zápis
      * v deníku a z 314 nic neodčerpal, takže kvůli němu nemá co blokovat zúčtování zálohy.
      * Platební vazba (invoice_payments) na přijaté větvi neexistuje, proto jen parent.
      *
@@ -2339,6 +2629,11 @@ final class PostingService
     }
 
     // ── interní ───────────────────────────────────────────────────────────────
+
+    private function bankDocumentNumber(): BankDocumentNumber
+    {
+        return $this->bankDocumentNumber ??= new BankDocumentNumber($this->db);
+    }
 
     private function dimensionStamper(): DimensionStamper
     {
@@ -2741,7 +3036,7 @@ final class PostingService
      * @param array<string,mixed> $doc
      * @return array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string, currency_code?:string, fx_rate?:float, amount_foreign?:float}
      */
-    private function withForeign(array $line, array $doc, float $rate): array
+    private function withForeign(array $line, array $doc, float $rate, ?float $foreignAmount = null): array
     {
         $code = (string) ($doc['currency_code'] ?? 'CZK');
         if ($code === 'CZK') {
@@ -2751,7 +3046,9 @@ final class PostingService
         $line['fx_rate']        = $rate;
         // abs(): u dobropisu (B4) je resolved 'amount' taky abs (strany se obrací
         // přes side, ne přes znaménko) — cizoměnová stopa musí nést stejnou magnitudu.
-        $line['amount_foreign'] = abs(round((float) $doc['total_with_vat'], 2));
+        // $foreignAmount přebije hlavičku tam, kde se předpis od ní liší (vyúčtování
+        // zálohy s DDKP nese i vrácený základ odpočtových řádků).
+        $line['amount_foreign'] = abs(round($foreignAmount ?? (float) $doc['total_with_vat'], 2));
         return $line;
     }
 

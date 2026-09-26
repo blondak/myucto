@@ -126,6 +126,37 @@ final class FxPaymentTest extends BankPostingTestCase
         self::assertArrayNotHasKey('321', $byAcc);
     }
 
+    // Korunová platba, která zbytek cizoměnové PF v kurzové toleranci nepokryje, je částečná
+    // úhrada: doklad zůstává otevřený, takže závazek se nesmí odúčtovat celý s rozdílem na 563.
+    public function testOutgoingCzkPartialPaymentOfForeignPurchaseRoutesToReview(): void
+    {
+        $pf = $this->fxPurchaseInvoice('PF-EUR-CZK-PART', $this->client('CZK částečně EUR dodavatel'), 500.00, 25.00);
+        $out = $this->transaction($this->statement(), -6000.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($out, $pf, 6000.00);
+
+        $res = $this->service->handleTransaction($out, $this->userId);
+
+        self::assertSame('suggested', $res['action'], json_encode($res));
+        self::assertSame('cross_currency', $res['reason'] ?? '');
+        self::assertSame(0, $this->entryCountForTx($out), 'Částečná korunová úhrada nesmí odúčtovat celý nominál 321.');
+    }
+
+    // Druhá korunová platba už uhrazené cizoměnové PF (duplicita) nesmí závazek odúčtovat znovu.
+    public function testOutgoingCzkSecondPaymentOfSettledForeignPurchaseRoutesToReview(): void
+    {
+        $pf = $this->fxPurchaseInvoice('PF-EUR-CZK-DUP', $this->client('CZK duplicita EUR dodavatel'), 500.00, 25.00);
+        $first = $this->transaction($this->statement(), -12400.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($first, $pf, 12400.00);
+        self::assertSame('posted', $this->service->handleTransaction($first, $this->userId)['action']);
+
+        $second = $this->transaction($this->statement(), -12400.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($second, $pf, 12400.00);
+        $res = $this->service->handleTransaction($second, $this->userId);
+
+        self::assertSame('suggested', $res['action'], json_encode($res));
+        self::assertSame(0, $this->entryCountForTx($second));
+    }
+
     private function analytic(string $code): void
     {
         $map = $this->accounts->codeToIdMap($this->supplierId);

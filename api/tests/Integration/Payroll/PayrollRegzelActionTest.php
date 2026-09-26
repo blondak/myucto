@@ -31,7 +31,7 @@ final class PayrollRegzelActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollRegzelAction::class);
         if (!$this->db->hasTable('payroll_regzel_employer_profiles')) {

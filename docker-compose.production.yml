@@ -41,6 +41,7 @@ services:
     environment:
       TZ: Europe/Prague
       MYINVOICE_DATA_DIR: /data
+      MYINVOICE_APP_ENV: ${MYINVOICE_APP_ENV:-}
       # Vestavěný cron v app kontejneru (default 1). Při více replikách app nastav 0,
       # jinak by plánované úlohy běžely v každé replice (duplicitní zálohy, recurring…).
       MYINVOICE_ENABLE_CRON: ${MYINVOICE_ENABLE_CRON:-1}
@@ -67,6 +68,9 @@ services:
       MYINVOICE_REDIS_AUTH: ${MYINVOICE_REDIS_AUTH:-}
       MYINVOICE_REDIS_DB: ${MYINVOICE_REDIS_DB:-0}
       MYINVOICE_REDIS_PREFIX: ${MYINVOICE_REDIS_PREFIX:-myinvoice:}
+      # Workery php-fpm (image default 8, každý ~30-60 MB). Na silnějším stroji zvyš,
+      # aby souběžní uživatelé nečekali ve frontě; prázdné = default image.
+      PHP_FPM_MAX_CHILDREN: ${PHP_FPM_MAX_CHILDREN:-}
 
   db:
     image: mariadb:11.8

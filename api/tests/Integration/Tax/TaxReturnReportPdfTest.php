@@ -55,7 +55,7 @@ final class TaxReturnReportPdfTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(TaxReturnAction::class);
             $this->returns = $container->get(TaxReturnService::class);
@@ -217,7 +217,7 @@ final class TaxReturnReportPdfTest extends TestCase
      */
     public function testEveryAppendixRowHasItsOfficialCodeAndLabel(): void
     {
-        $repo = Bootstrap::buildApp()->getContainer()->get(StatementDefinitionRepository::class);
+        $repo = Bootstrap::buildContainer()->get(StatementDefinitionRepository::class);
         $labels = [];
         foreach (['balance_sheet', 'income_statement'] as $statementType) {
             $version = $repo->findVersion($statementType, self::YEAR . '-12-31');

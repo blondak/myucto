@@ -44,7 +44,7 @@ final class CashDocumentDeletionGuardTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_payment_matches') || !$this->db->hasTable('cash_documents')) {
             $this->markTestSkipped('Mzdové nebo pokladní migrace neproběhly.');

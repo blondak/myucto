@@ -5,12 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Action\Invoice\ListInvoicesAction;
+use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
  * Viditelnost dimenzí mezi firmami (Firma → Dimenze).
@@ -37,7 +43,7 @@ final class DimensionVisibilityTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildApp()->getContainer();
+            $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(DimensionService::class);
             $this->repo = $container->get(DimensionRepository::class);
@@ -92,6 +98,54 @@ final class DimensionVisibilityTest extends TestCase
         $this->expectRejected(fn () => $this->service->normalize($outsider, [$global['id'] => $project['id']]));
         $this->expectRejected(fn () => $this->service->normalize($spv, [$firm['id'] => $center['id']]));
         $this->expectRejected(fn () => $this->service->normalize($spv, [$firm['id'] => $project['id']]));
+    }
+
+    public function testSeznamDokladuNacitaDimenzeJenPriZapnutiFirmy(): void
+    {
+        $supplier = $this->supplier('Seznam dimenzí s.r.o.');
+        $type = $this->service->createType($supplier, ['code' => 'stredisko', 'name' => 'Středisko', 'kind' => 'cost_center']);
+        $value = $this->service->createValue($supplier, $type['id'], ['code' => 'BRNO', 'name' => 'Brno']);
+        $summary = new DimensionListSummaryRepository($this->db);
+        $docId = 800001;
+        $this->db->pdo()->prepare(
+            "INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
+             VALUES (?, 'invoice', ?, 0, ?, ?)"
+        )->execute([$supplier, $docId, $type['id'], $value['id']]);
+
+        self::assertSame([], $summary->forDocuments($supplier, 'invoice', [$docId]));
+        $this->repo->setEnabled($supplier, true);
+        self::assertSame([$docId => ['Středisko: BRNO']], $summary->forDocuments($supplier, 'invoice', [$docId]));
+        self::assertSame([], $summary->forDocuments($supplier, 'purchase_invoice', [$docId]));
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on) VALUES (?, 2026, '2026-01-01', '2026-12-31')")
+            ->execute([$supplier]);
+        $periodId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type) VALUES (?, '501', 'Materiál', 'expense')")
+            ->execute([$supplier]);
+        $accountId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, description) VALUES (?, ?, '2026-01-01', 'Test dimenze')")
+            ->execute([$supplier, $periodId]);
+        $entryId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (?, ?, ?, 'debit', 100)")
+            ->execute([$supplier, $entryId, $accountId]);
+        $lineId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO journal_entry_line_dimensions (supplier_id, line_id, dimension_type_id, dimension_value_id) VALUES (?, ?, ?, ?)')
+            ->execute([$supplier, $lineId, $type['id'], $value['id']]);
+        self::assertSame([$entryId => ['Středisko: BRNO']], $summary->forJournalEntries($supplier, [$entryId]));
+    }
+
+    public function testVolitelneDimenzeVeFakturachVyzadujiUcetniPravo(): void
+    {
+        $supplier = $this->supplier('Omezený přístup s.r.o.');
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
+            ->withQueryParams(['filter' => ['include_dimensions' => '1']]);
+        $container = Bootstrap::buildContainer();
+        foreach ([ListInvoicesAction::class, ListPurchaseInvoicesAction::class] as $class) {
+            $response = $container->get($class)($request, (new ResponseFactory())->createResponse());
+            self::assertSame(403, $response->getStatusCode(), $class);
+        }
     }
 
     public function testJoiningGroupRequiresAccessToItsMember(): void

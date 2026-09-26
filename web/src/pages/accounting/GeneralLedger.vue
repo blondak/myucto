@@ -14,6 +14,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -26,6 +27,7 @@ import { usePaneDom } from '@/composables/usePaneDom'
 import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -95,6 +97,7 @@ async function load() {
   closeMonth()
   try {
     report.value = await accountingApi.getGeneralLedger(queryParams())
+    void router.replace({ query: { ...buildQuery(true), ...(route.query.account_id ? { account_id: route.query.account_id } : {}) } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -158,6 +161,7 @@ const ledgerGroups = computed<LedgerGroup[]>(() => {
     const delta = g.opening_md - g.opening_d + g.turnover_md - g.turnover_d
     return {
       ...g,
+      accounts: [...g.accounts].sort(compareLedger),
       opening_md: g.opening_md / 100,
       opening_d: g.opening_d / 100,
       turnover_md: g.turnover_md / 100,
@@ -165,7 +169,7 @@ const ledgerGroups = computed<LedgerGroup[]>(() => {
       closing_md: (delta > 0 ? delta : 0) / 100,
       closing_d: (delta > 0 ? 0 : -delta) / 100,
     }
-  }).sort((a, b) => a.code.localeCompare(b.code))
+  }).sort(compareLedger)
 })
 
 /** Syntetika s jedinou vlastní analytikou = obyčejný řádek, mezisoučet by nic nepřidal. */
@@ -209,7 +213,7 @@ const displayRows = computed<LedgerRow[]>(() => {
   const r = report.value
   if (!r) return []
   if (!r.analytics) {
-    return r.accounts.map(a => ({ type: 'account' as const, key: `a${a.account_id}`, account: a, nested: false }))
+    return [...r.accounts].sort(compareLedger).map(a => ({ type: 'account' as const, key: `a${a.account_id}`, account: a, nested: false }))
   }
   const rows: LedgerRow[] = []
   for (const g of ledgerGroups.value) {
@@ -367,11 +371,15 @@ function buildQuery(includeAfterClosing = false): Record<string, string> {
   else q.period_id = String(filters.period_id)
   if (filters.from) q.from = filters.from
   if (filters.to) q.to = filters.to
-  if (filters.analytics) q.analytics = '1'
+  q.analytics = filters.analytics ? '1' : '0'
   if (includeAfterClosing && filters.after_closing) q.after_closing = '1'
   if (filters.vendor) q.vendor = filters.vendor
   if (filters.client) q.client = filters.client
   if (filters.item) q.item = filters.item
+  if (filters.dimension_value_id) {
+    q.dimension_value_id = String(filters.dimension_value_id)
+    if (!filters.dimension_descendants) q.dimension_descendants = '0'
+  }
   return q
 }
 
@@ -384,6 +392,9 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.vendor = q.vendor ?? ''
   filters.client = q.client ?? ''
   filters.item = q.item ?? ''
+  const valueId = Number(q.dimension_value_id)
+  filters.dimension_value_id = Number.isSafeInteger(valueId) && valueId > 0 ? valueId : null
+  filters.dimension_descendants = q.dimension_descendants !== '0'
   load()
 }
 
@@ -400,6 +411,24 @@ const COLUMNS: ColumnDef[] = [
   { key: 'closing_d', labelKey: 'accounting.general_ledger.col_ks_d' },
 ]
 const tbl = useTablePrefs('general_ledger', COLUMNS)
+function compareLedger(a: LedgerGroup | GeneralLedgerAccount, b: LedgerGroup | GeneralLedgerAccount): number {
+  const code = (row: LedgerGroup | GeneralLedgerAccount) => 'code' in row ? row.code : row.account_code
+  const value = (row: LedgerGroup | GeneralLedgerAccount, key: string): string | number => {
+    if (key === 'account') return code(row)
+    if (key === 'account_type') return 'accounts' in row ? (row.accounts[0]?.account_type ?? '') : row.account_type
+    if (key === 'synthetic') return 'accounts' in row ? row.code : (row.parent_code ?? row.account_code.slice(0, 3))
+    if (key in row) return row[key as keyof typeof row] as string | number
+    return ''
+  }
+  const sort = tbl.sort.value
+  if (!sort) return code(a).localeCompare(code(b), undefined, { numeric: true })
+  const left = value(a, sort.key)
+  const right = value(b, sort.key)
+  const cmp = typeof left === 'number' && typeof right === 'number'
+    ? left - right
+    : String(left).localeCompare(String(right), undefined, { numeric: true })
+  return (sort.dir === 'asc' ? 1 : -1) * (cmp || code(a).localeCompare(code(b), undefined, { numeric: true }))
+}
 const saved = useSavedFilters('general_ledger', { getQuery: buildQuery, applyQuery: applyQueryToPage })
 const visibleColCount = computed(() => 1 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
@@ -456,20 +485,30 @@ onMounted(async () => {
   // Drill-down z karty účtu / jiné sestavy — období, rozsah i rozpad analytik
   // z URL mají přednost před výchozím otevřeným obdobím.
   const q = route.query
+  const fromQuery = typeof q.from === 'string' ? q.from : ''
+  const toQuery = typeof q.to === 'string' ? q.to : ''
+  const queryPeriod = periods.value.find(p => p.starts_on <= fromQuery && p.ends_on >= toQuery)
+  const spansPeriods = !!fromQuery && !!toQuery && !queryPeriod
   const periodId: number | '' = q.all_periods === '1'
     ? ''
-    : (typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (def?.id ?? 0))
+    : (typeof q.period_id === 'string' && q.period_id ? Number(q.period_id) : (spansPeriods ? '' : (queryPeriod?.id ?? def?.id ?? 0)))
   if (periodId === 0 || periods.value.length === 0) return
   filters.period_id = periodId
   if (typeof q.from === 'string' && q.from) filters.from = q.from
   if (typeof q.to === 'string' && q.to) filters.to = q.to
+  const valueId = Number(q.dimension_value_id)
+  if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+  filters.dimension_descendants = q.dimension_descendants !== '0'
   if (periodId === '') {
     const allRange = allAccountingPeriodsRange(periods.value)
     if (!filters.from) filters.from = allRange.from ?? ''
     if (!filters.to) filters.to = allRange.to ?? ''
   }
-  if (q.analytics === '1') filters.analytics = true
+  if (q.analytics === '1' || q.analytics === '0') filters.analytics = q.analytics === '1'
   if (q.after_closing === '1') filters.after_closing = true
+  if (typeof q.vendor === 'string') filters.vendor = q.vendor
+  if (typeof q.client === 'string') filters.client = q.client
+  if (typeof q.item === 'string') filters.item = q.item
   await load()
   await focusAccountFromQuery()
 })
@@ -601,6 +640,9 @@ onMounted(async () => {
       </div>
     </div>
 
+    <DimensionReportLinks current="ledger" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
+      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
     </p>
@@ -620,16 +662,10 @@ onMounted(async () => {
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="px-3 py-2 w-8"></th>
-              <th v-if="tbl.isVisible('account')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_account') }}</th>
-              <th v-if="tbl.isVisible('name')" class="px-3 py-2 text-left font-medium">{{ t('accounting.general_ledger.col_name') }}</th>
-              <th v-if="tbl.isVisible('account_type')" class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.general_ledger.col_type') }}</th>
-              <th v-if="tbl.isVisible('synthetic')" class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.general_ledger.col_synthetic') }}</th>
-              <th v-if="tbl.isVisible('opening_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ps_md') }}</th>
-              <th v-if="tbl.isVisible('opening_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ps_d') }}</th>
-              <th v-if="tbl.isVisible('turnover_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_turnover_md') }}</th>
-              <th v-if="tbl.isVisible('turnover_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_turnover_d') }}</th>
-              <th v-if="tbl.isVisible('closing_md')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ks_md') }}</th>
-              <th v-if="tbl.isVisible('closing_d')" class="px-3 py-2 text-right font-medium">{{ t('accounting.general_ledger.col_ks_d') }}</th>
+              <SortableTh v-for="c in COLUMNS.filter(c => tbl.isVisible(c.key))" :key="c.key"
+                :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
+                :align="['account', 'name', 'account_type', 'synthetic'].includes(c.key) ? 'left' : 'right'"
+                @toggle="tbl.toggleSort" />
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -759,6 +795,9 @@ onMounted(async () => {
                                           class="font-mono text-xs text-primary-600 hover:text-primary-700 hover:underline">
                                           {{ it.document_no || t('accounting.account_statement.journal_link', { id: it.entry_id }) }}
                                         </RouterLink>
+                                        <div v-if="it.source_bank_ref && it.source_bank_ref !== it.document_no"
+                                             class="font-mono text-[10px] text-neutral-400 whitespace-nowrap"
+                                             :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                                       </td>
                                       <td class="px-2 py-1 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
                                       <td class="px-2 py-1">{{ it.description || '—' }}</td>

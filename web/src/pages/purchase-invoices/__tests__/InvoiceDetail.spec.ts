@@ -342,6 +342,29 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(wrapper.text()).toContain('purchase_invoice.payment_provenance.mark_paid_unposted')
     expect(bankLinks(wrapper)).toHaveLength(0)
   })
+
+  it('uhrazená faktura s nedoplatkem → uhrazeno, zbývá, upozornění a akce „Vyrovnat zbytek"', async () => {
+    m.get.mockResolvedValue(makeInvoice({ status: 'paid', currency: 'EUR', amount_to_pay: 236.84, paid_amount: 233.17, remaining_amount: 3.67, paid_shortfall: true }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="pi-paid-amount"]').text()).toContain('233.17 EUR')
+    expect(wrapper.get('[data-testid="pi-remaining-amount"]').text()).toContain('3.67 EUR')
+    expect(wrapper.text()).toContain('purchase_invoice.payment_summary.shortfall_note')
+    const actions = wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean }[]
+    expect(actions.find(a => a.key === 'settle-rest')?.show).toBe(true)
+  })
+
+  it('plně uhrazená faktura → bez upozornění i bez akce vyrovnání', async () => {
+    m.get.mockResolvedValue(makeInvoice({ status: 'paid', paid_amount: 1210, remaining_amount: 0, paid_shortfall: false }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="pi-remaining-amount"]').text()).toContain('0 CZK')
+    expect(wrapper.text()).not.toContain('purchase_invoice.payment_summary.shortfall_note')
+    const actions = wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean }[]
+    expect(actions.find(a => a.key === 'settle-rest')?.show).toBe(false)
+  })
 })
 
 describe('InvoiceDetail.vue — vazba daňového dokladu k platbě', () => {

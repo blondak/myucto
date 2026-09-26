@@ -10,6 +10,7 @@ use MyInvoice\Action\Document\FoldersAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DocumentFolderRepository;
@@ -69,7 +70,7 @@ final class PayrollEnforcementApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }
@@ -1221,21 +1222,10 @@ final class PayrollEnforcementApiTest extends TestCase
             'trg_payroll_enforcement_result_immutable_delete',
             'trg_payroll_enforcement_result_immutable_update',
         ];
-        $stmt = $this->db->pdo()->query(
-            "SELECT TRIGGER_NAME
-               FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE()
-                AND TRIGGER_NAME LIKE 'trg_payroll_enforcement_%'
-              ORDER BY TRIGGER_NAME"
-        );
-        self::assertNotFalse($stmt);
-        $actual = array_map(
-            static fn (mixed $value): string => PayrollTimeValue::string(
-                $value,
-                'trigger_name',
-            ),
-            $stmt->fetchAll(PDO::FETCH_COLUMN),
-        );
+        $pdo = $this->db->pdo();
+        $database = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+        $actual = array_column(TriggerMetadata::read($pdo, $database), 'TRIGGER_NAME');
+        self::assertNotEmpty($actual);
 
         foreach ($expected as $trigger) {
             self::assertContains($trigger, $actual);

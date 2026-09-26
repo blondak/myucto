@@ -21,7 +21,7 @@ final class PayrollRulesetImpactPreviewActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildApp()->getContainer()
+        $container = Bootstrap::buildContainer()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $action = $container->get(PayrollRulesetAction::class);
         if (!$action instanceof PayrollRulesetAction) {

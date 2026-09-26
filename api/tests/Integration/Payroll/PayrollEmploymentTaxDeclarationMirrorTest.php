@@ -42,7 +42,7 @@ final class PayrollEmploymentTaxDeclarationMirrorTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
 
-        $container = Bootstrap::buildApp()->getContainer();
+        $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         foreach (['payroll_employment_terms', 'payroll_person_tax_declarations'] as $table) {
             if (!$this->db->hasTable($table)) {

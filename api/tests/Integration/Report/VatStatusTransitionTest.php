@@ -50,7 +50,7 @@ final class VatStatusTransitionTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container     = Bootstrap::buildApp()->getContainer();
+            $container     = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->action  = $container->get(VatStatusHistoryAction::class);
             $this->closing = $container->get(ClosingService::class);

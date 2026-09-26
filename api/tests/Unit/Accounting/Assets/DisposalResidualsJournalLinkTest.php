@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Accounting\Assets;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use PDO;
 use PHPUnit\Framework\TestCase;
@@ -24,7 +25,7 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
-        $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL)');
+        $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER NOT NULL DEFAULT 0, signed_amount REAL GENERATED ALWAYS AS (CASE WHEN is_red_storno = 1 THEN -amount ELSE amount END) VIRTUAL)');
         $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, disposal_date TEXT,
             disposal_type TEXT, disposal_price REAL, input_price REAL, opening_tax_years INTEGER DEFAULT 0, opening_tax_amount REAL DEFAULT 0,
             opening_acc_amount REAL DEFAULT 0, tax_method TEXT, asset_account_code TEXT, accumulated_account_code TEXT, status TEXT, disposal_entry_id INTEGER)');
@@ -32,7 +33,7 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES (1,'541','expense'),(2,'082','asset'),(3,'022','asset'),(4,'518','expense'),(5,'221','asset')");
 
-        $db = new Connection($this->createStub(\MyInvoice\Infrastructure\Config\Config::class));
+        $db = new Connection(new Config([]));
         (new \ReflectionClass($db))->getProperty('pdo')->setValue($db, $this->pdo);
         $this->residuals = new DisposalResiduals($db);
     }
@@ -48,6 +49,17 @@ final class DisposalResidualsJournalLinkTest extends TestCase
             [$row['book_residual_value'], $row['book_residual_source'], $row['journal_residual_value'], $row['expense_group']]);
         $warnings = implode("\n", $result['warnings']);
         self::assertStringContainsString('zápis č. 10) 1 200,00 Kč, podle karty 1 000,00 Kč', $warnings);
+    }
+
+    public function testLinkedEntryNetsRedStornoAgainstBookResidual(): void
+    {
+        $this->entry(10, [['541', 'debit', 1200], ['082', 'credit', 1200],
+            ['541', 'debit', 200, true], ['082', 'credit', 200, true]]);
+        $this->card(1, 'A', 100000, 99000, 10);
+
+        $row = $this->residuals->forPeriod(1, '2025-01-01', '2025-12-31')['rows'][0];
+        self::assertSame([1000.0, 'linked_entry', 1000.0],
+            [$row['book_residual_value'], $row['book_residual_source'], $row['journal_residual_value']]);
     }
 
     /** Roční interní doklad nese i odpisy jiných karet: ZC karty je jen MD 54x proti jejím oprávkám. */
@@ -105,14 +117,16 @@ final class DisposalResidualsJournalLinkTest extends TestCase
         self::assertFalse($this->residuals->isJournalDisposalEntry(2, 10, '082'), 'Zápis jiné firmy.');
     }
 
-    /** @param list<array{0:string,1:string,2:float|int}> $lines */
+    /** @param list<array{0:string,1:string,2:float|int,3?:bool}> $lines */
     private function entry(int $id, array $lines): void
     {
         $this->pdo->prepare("INSERT INTO journal_entries VALUES (?,1,'2025-06-30','manual',NULL,'2025-06-30',NULL)")->execute([$id]);
-        foreach ($lines as [$code, $side, $amount]) {
+        foreach ($lines as $line) {
+            [$code, $side, $amount] = $line;
+            $red = $line[3] ?? false;
             $account = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE account_code = '{$code}'")->fetchColumn();
-            $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (1,?,?,?,?)')
-                ->execute([$id, $account, $side, $amount]);
+            $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount, is_red_storno) VALUES (1,?,?,?,?,?)')
+                ->execute([$id, $account, $side, $amount, (int) ($red ?? false)]);
         }
     }
 

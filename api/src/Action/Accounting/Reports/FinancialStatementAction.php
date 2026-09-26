@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\Reports\StatementMapResolver;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Pdf\AccountViewPdfRenderer;
 use MyInvoice\Service\Pdf\BalanceSheetPdfRenderer;
 use MyInvoice\Service\Pdf\IncomeStatementPdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -31,6 +32,8 @@ use Psr\Log\LoggerInterface;
  *   GET /api/accounting/reports/balance-sheet/export      — PDF / XLSX
  *   GET /api/accounting/reports/income-statement          — výsledovka
  *   GET /api/accounting/reports/income-statement/export   — PDF / XLSX
+ *   GET /api/accounting/reports/statement-accounts        — rozvaha a výsledovka po účtech
+ *   GET /api/accounting/reports/statement-accounts/export — PDF / XLSX (?part=balance|profit_loss)
  */
 final class FinancialStatementAction
 {
@@ -51,6 +54,7 @@ final class FinancialStatementAction
         private readonly StatementDefinitionRepository $definitions,
         private readonly StatementMapResolver $maps,
         private readonly DimensionService $dimensions,
+        private readonly AccountViewPdfRenderer $accountViewPdf,
     ) {}
 
     public function balanceSheet(Request $request, Response $response): Response
@@ -216,6 +220,86 @@ final class FinancialStatementAction
     public function exportIncomeStatement(Request $request, Response $response): Response
     {
         return $this->export($request, $response, 'income_statement');
+    }
+
+    /**
+     * Rozvaha a výsledovka po účtech s hospodářským výsledkem (obě části naráz, aby VH
+     * z rozvahové i výsledkové strany pocházel z jednoho běhu).
+     */
+    public function accountView(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $params = $this->validateParams($request, $response, $supplierId, $err);
+        if ($params === null) return $err;
+
+        try {
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            $this->log->error('Účetní sestavu se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
+            return Json::error($response, 'build_failed', 'Sestavu se nepodařilo vytvořit.', 500);
+        }
+
+        return Json::ok($response, $data);
+    }
+
+    /**
+     * Export jedné části pohledu po účtech (`part=balance|profit_loss`). Nejde o zákonný
+     * výkaz, proto jednotku (`unit`) respektuje i PDF.
+     */
+    public function exportAccountView(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $params = $this->validateParams($request, $response, $supplierId, $err);
+        if ($params === null) return $err;
+
+        $q = $request->getQueryParams();
+        $format = strtolower(trim((string) ($q['format'] ?? '')));
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
+        }
+        $part = trim((string) ($q['part'] ?? 'balance'));
+        if (!in_array($part, ['balance', 'profit_loss'], true)) {
+            return Json::error($response, 'validation_failed', "part musí být 'balance' nebo 'profit_loss'.", 422);
+        }
+        $unit = strtolower(trim((string) ($q['unit'] ?? 'czk')));
+        if ($unit === '') {
+            $unit = 'czk';
+        }
+        if (!in_array($unit, ['czk', 'thousands'], true)) {
+            return Json::error($response, 'validation_failed', "unit musí být 'czk' nebo 'thousands'.", 422);
+        }
+
+        try {
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+            $out = $format === 'pdf'
+                ? [
+                    'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit]),
+                    'filename' => sprintf('%s-po-uctech-%s.pdf', $part === 'balance' ? 'rozvaha' : 'vysledovka', (string) $data['as_of']),
+                    'mime'     => 'application/pdf',
+                ]
+                : $this->xlsx->accountView($data, $part, $unit);
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            $this->log->error('Účetní sestavu se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
+            return Json::error($response, 'build_failed', 'Sestavu se nepodařilo vytvořit.', 500);
+        }
+
+        $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
+            ['report' => 'account_view_' . $part, 'format' => $format],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'), $supplierId);
+
+        $response->getBody()->write($out['bytes']);
+        return $response
+            ->withHeader('Content-Type', $out['mime'])
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
+            ->withHeader('Content-Length', (string) strlen($out['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store');
     }
 
     /** @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type */

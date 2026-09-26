@@ -163,6 +163,14 @@ jako chybějící a naopak. Má-li klient v nastavení vlastní šablonu číslo
 řada. Kolize dvou různých šablon (dvě řady vyprodukující stejný VS) hlásí
 samostatná kontrola v nastavení dodavatele — viz **K8** výše.
 
+Doklady importované s jiným číslováním se mohou zobrazit jako **odvozená řada**
+i bez odpovídající současné šablony. Sestava ji rozpozná, pokud číslo obsahuje
+rok shodný s rokem vystavení a má stejně široký číselný konec. Kontroluje jen
+mezery mezi nejnižším a nejvyšším nalezeným číslem; začátek případného
+částečného importu nezná. Čísla bez bezpečně rozpoznatelného vzoru sestava
+do odvozené řady nezařadí. Nejednoznačné konce začínající číslem měsíce
+vynechá, aby měsíční číslování nehlásilo falešné mezery v roční řadě.
+
 ## 46.9 Vazba na uzávěrku a balíček
 
 Uzávěrkový balíček umí shromáždit účetní výkazy, deník, knihu DPH, daňový výstup,

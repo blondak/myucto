@@ -303,25 +303,78 @@ Při použití se věty exportu zapíšou dřív než formuláře hlášení, ta
 formuláře k nově založeným vztahům spárují podle ID zaměstnání samy. Vyberte
 proto v náhledu obojí najednou.
 
-**Měsíční hlášení z předchozího mzdového programu.** Hlášení samo osobu
-nezakládá, proto nejdřív naimportujte registrace nebo export zaměstnanců ČSSZ,
-případně zaměstnance založte ručně. Náhled u každé věty ukáže období a spárovaný pracovní vztah.
-Větu bez jednoznačné shody přiřadíte ručně výběrem vztahu. Náhled se pak
-přepočítá. Z hlášení se převezme zdravotní pojišťovna, prohlášení
-poplatníka, uplatňované slevy a vyživované děti podle období, ve kterém
-platily. Opravné a stornovací podání se skládá s řádným podle pořadí.
-Údaje pro ELDP a zdravotní pojištění náhled jen ukáže, import je nepřebírá.
+**Měsíční hlášení z předchozího mzdového programu.** Hlášení se přebírají jen
+od zaměstnavatele, kterému patří: variabilní symbol v hlášení se porovná
+s variabilními symboly vašich mzdových účtáren a hlášení jiné firmy náhled
+odmítne. Pokud žádná účtárna variabilní symbol vyplněný nemá, projde jen dávka
+jediného zaměstnavatele a náhled upozorní, že VS je potřeba doplnit.
 
-Z historie hlášení aplikace navrhne:
+Náhled u každé věty ukáže období a spárovaný pracovní vztah. Formulář se páruje
+podle ID zaměstnání, OIČ a u formuláře bez identifikátorů podle jména a data
+narození. Větu bez jednoznačné shody přiřadíte ručně výběrem vztahu a náhled se
+přepočítá. Z formuláře se převezme pracoviště, úvazek podle fondu pracovní doby,
+prohlášení poplatníka, uplatňované slevy a vyživované děti podle období, ve
+kterém platily. Opravné a stornovací podání se skládá s řádným podle pořadí.
+
+**Zaměstnanci, které dokládají jen hlášení.** Když pro vztah z hlášení nemáte
+registraci ani export zaměstnanců, náhled nabídne větu **Odvozeno z hlášení
+JMHZ**, která osobu i s vztahem založí:
+
+- nástupem je datum nástupu z formuláře, jinak začátek pojištění v prvním
+  hlášeném měsíci; když dávka nemá hlášení za dřívější měsíce, náhled
+  upozorní, že vztah mohl začít už dřív,
+- druh činnosti se vezme z kódu ELDP; vztah bez ELDP (dohoda, zaměstnání
+  malého rozsahu) import nezaloží a založíte ho ručně,
+- formulář, který nese jméno a datum narození, založí osobu pod jejím jménem;
+  formulář jen s OIČ a ID zaměstnání založí osobu se zástupným jménem
+  **Doplňte**. Jméno, rodné číslo, adresu a zdravotní pojišťovnu pak doplňte
+  na kartě osoby, případně nahrajte export zaměstnanců z ePortálu ČSSZ.
+
+Vyberte větu spolu s formuláři hlášení; při zápisu se formuláře k nově
+založenému vztahu spárují samy.
+
+**Dřívější nástup z pozdější dávky.** Když nahrajete hlášení za starší měsíce,
+než ze kterých vztah vznikl (nebo export zaměstnanců, ke kterému dávka taková
+hlášení nese), náhled u vztahu nabídne změnu **Nástup** na doložený den.
+Import nástup posune všude, kde na něm evidence stojí: ve vztahu, v první
+verzi podmínek, v datu aktivace, u identifikátorů ČSSZ i u nejstarších údajů
+osoby (identita, adresy, pojišťovna), které začínaly původním nástupem.
+Nástup se posouvá jen dřív, nikdy později, a jen když v posunutém období není
+zaúčtovaná ani vyplacená mzda.
+
+**Převzaté mzdy a údaje vztahů.** Z hlášení za měsíce před zahájením vedení
+mezd v MyÚčtu import převezme historii mezd stejnou cestou jako převod
+z PAMICA nebo PREMIER:
+
+- úhrny každého vztahu a měsíce (hrubé příjmy, čistá mzda, zálohy a srážková
+  daň, pojistné, vyměřovací základ, dny pojištění, odpracované hodiny) do
+  převzatých mezd; z nich čte kontrolní sestava převodu, převzatý běh,
+  mzdový list i potvrzení o zdanitelných příjmech. Součet hrubých příjmů za
+  měsíc odpovídá úhrnu zúčtovaných příjmů v hlášení,
+- sjednanou měsíční mzdu a její předpis, když tarif v měsících bez
+  dovolené a nemoci zůstává stejný i při různém fondu pracovní doby,
+- průměrný výdělek, se kterým předchozí program počítal náhrady, po
+  čtvrtletích jako schválený průměr,
+- čerpání dovolené po měsících do knihy dovolené,
+- skončení vztahu, když pojištění končí před koncem měsíce nebo vztah
+  v řádném hlášení dalšího měsíce chybí.
+
+Zdravotní vyměřovací základ a výši srážek hlášení nenese, v převzatých mzdách
+zůstávají nulové. Měsíc, který už je u vztahu převzatý z jiného zdroje, se
+z hlášení nepřebírá. Opakovaný import nic nezdvojí. Když vztah podle hlášení
+v posledních měsících neodpracoval žádnou hodinu, náhled doporučí zaevidovat
+dlouhodobou nepřítomnost (mateřskou, rodičovskou).
+
+Z historie hlášení aplikace navrhne také:
 
 - **počáteční stavy ročních součtů** (základy, zálohy, slevy a bonus po
   měsících), které potřebujete při přechodu z jiného programu během roku pro
   roční zúčtování a limity,
-- **průměrné výdělky** po čtvrtletích, které se zakládají ke schválení
-  v Nepřítomnostech.
+- **průměrné výdělky** po čtvrtletích spočítané z hlášení, které se zakládají
+  ke schválení v Nepřítomnostech.
 
 Návrh, kterému chybí údaje nebo už je v evidenci, je označený a nepoužije se.
-Obojí zapnete zaškrtnutím před tlačítkem **Použít**.
+Převzetí historie zapnete zaškrtnutím před tlačítkem **Použít**.
 
 Aby firma se stovkami zaměstnanců nemusela nic potvrzovat po jednom, import
 nabízí dvě volby automatického schválení. Obě jsou předem zapnuté a jde je
