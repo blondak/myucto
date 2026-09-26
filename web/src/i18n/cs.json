@@ -4551,6 +4551,7 @@
           "shared_custody": "Střídavá péče",
           "adoption": "Osvojení",
           "foster_care": "Pěstounská péče",
+          "study_start": "Zahájení soustavného studia",
           "study_continues": "Pokračující studium do 26 let",
           "other": "Jiný doložený důvod"
         },
@@ -4617,6 +4618,15 @@
           "other_caregiver_family_name": "Příjmení jiné vyživující osoby",
           "other_caregiver_birth_date": "Datum narození jiné vyživující osoby",
           "supersede_hint": "Zasahuje-li nárok do období schválené mzdové revize, uloží se změna jako nová účinná verze a původní záznam zůstane v historii."
+        },
+        "event_month": {
+          "existence_from_hint": "Den narození, osvojení, převzetí do péče nebo zahájení studia. Začne-li vyživování v průběhu měsíce, patří měsíc do nároku jen u těchto událostí.",
+          "existence_to_hint": "Den úmrtí, ukončení studia nebo dovršení 26 let. Měsíc, ve kterém vyživování skončí, patří do nároku celý.",
+          "effective_from_hint": "Nejdříve {date}. Měsíc narození, osvojení, převzetí do péče nebo zahájení studia patří do nároku celý (§ 35c odst. 10 ZDP).",
+          "effective_from_too_early": "Nárok může začít nejdříve {date}. Vyživování začíná v průběhu měsíce; ten patří do nároku jen při narození, osvojení, převzetí do péče nebo zahájení studia. Událost zvolte jako důvod uplatnění.",
+          "effective_to_hint": "Nejpozději {date}, tedy do konce měsíce, ve kterém vyživování končí.",
+          "effective_to_too_late": "Nárok může trvat nejdéle do {date}, konce měsíce, ve kterém vyživování končí.",
+          "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Při přiznání v průběhu měsíce ukončete dosavadní nárok koncem měsíce a nárok se ZTP/P zadejte od dalšího."
         }
       },
       "quick_edit": {

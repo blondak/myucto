@@ -618,6 +618,37 @@ final class JmhzReportImportServiceTest extends TestCase
         ], $claims);
     }
 
+    /**
+     * Dítě narozené v průběhu měsíce hlášení: měsíc narození do nároku patří
+     * (§ 35c odst. 10 ZDP), import ho proto nesmí odsunout na další měsíc.
+     */
+    public function testChildBornDuringTheReportedMonthIsClaimedForThatMonth(): void
+    {
+        [$employeeId] = $this->registerEmployee(withIdentifiers: true);
+        $files = [$this->file('jmhz-5.xml', JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'oic' => $this->oic,
+            'id_ppv' => $this->idPpv,
+            'children' => [[
+                'identity' => ['given_name' => 'Cyril', 'family_name' => 'Testovací', 'birth_date' => '2026-05-15'],
+                'ztp_p' => false,
+                'order' => '1',
+            ]],
+            'other_caregivers' => [],
+        ])], 2026, 5))];
+
+        $key = $this->imports->preview($this->supplierId, 'test', $files)['records'][0]['key'];
+        $result = $this->apply($files, [$key])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+
+        $dependants = $this->container->get(PayrollDependantRepository::class)
+            ->overview($this->supplierId, $employeeId, '2026-05-01')['dependants'];
+        self::assertCount(1, $dependants);
+        self::assertSame('2026-05-15', $dependants[0]['existence_from']);
+        self::assertCount(1, $dependants[0]['claims'], (string) $result['message']);
+        self::assertSame('2026-05-01', $dependants[0]['claims'][0]['effective_from']);
+        self::assertSame([], $dependants[0]['claims'][0]['blockers']);
+    }
+
     /** @return array{0:int,1:int} [employee_id, employment_id] */
     private function registerEmployee(bool $withIdentifiers): array
     {

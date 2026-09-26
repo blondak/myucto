@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\IncomeTax\ChildCreditClaimWindow;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
@@ -362,12 +363,11 @@ final class PayrollTakeoverPersonWriter
             $from = is_string($child['from']) && $child['from'] > $birthDate ? $child['from'] : $birthDate;
             // Nárok běží po celých měsících a nesmí přesahovat dobu, po kterou je dítě vedené
             // jako vyživované: vyživování se proto vede od začátku měsíce nároku (nejdřív od
-            // narození) do konce měsíce, kdy nárok ve zdroji končí.
+            // narození) do konce měsíce, kdy nárok ve zdroji končí. Měsíc narození do nároku
+            // patří (§ 35c odst. 10), jiný měsíc začatý v průběhu ne.
             $claimFrom = max(substr($from, 0, 7) . '-01', $declaredFrom);
             $existenceFrom = max($birthDate, min($from, $claimFrom));
-            if ($claimFrom < $existenceFrom) {
-                $claimFrom = (new \DateTimeImmutable(substr($existenceFrom, 0, 7) . '-01'))->modify('+1 month')->format('Y-m-d');
-            }
+            $claimFrom = max($claimFrom, ChildCreditClaimWindow::earliestFrom($birthDate, $existenceFrom, null));
             $until = is_string($child['to']) ? $this->dependantValidator->monthEnd($child['to']) : null;
             if ($until !== null && $until < $claimFrom) {
                 continue;

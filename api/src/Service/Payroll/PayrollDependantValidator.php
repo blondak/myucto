@@ -76,11 +76,16 @@ final class PayrollDependantValidator
         'other_caregiver_birth_date',
     ];
 
+    /**
+     * `adoption`, `foster_care` a `study_start` otevírají už měsíc, ve kterém
+     * vyživování začalo (§ 35c odst. 10 věta druhá), viz ChildCreditClaimWindow.
+     */
     public const CLAIM_REASONS = [
         'own_household',
         'shared_custody',
         'adoption',
         'foster_care',
+        'study_start',
         'study_continues',
         'other',
     ];
