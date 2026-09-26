@@ -7,7 +7,12 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -69,6 +74,12 @@ final readonly class SicknessSubmissionService
         private PayrollSubmissionRepository $submissionRepository,
         private JmhzSoftwareIdentification $software,
         private PayrollIsdsSubmissionService $dataBox,
+        private SicknessPayloadFactory $payloads,
+        private NempriDecisivePeriodResolver $decisivePeriods,
+        private NempriPaymentConnectionResolver $paymentConnections,
+        private PayrollTakeoverReader $takeover,
+        private PayrollHistoricalPeriodService $historical,
+        private PayrollSensitiveData $sensitiveData,
     ) {}
 
     /**
@@ -357,13 +368,15 @@ final readonly class SicknessSubmissionService
         );
 
         if ($document === SicknessDocumentKind::Nempri) {
-            if (!$kind->isSerializable()) {
-                throw new SicknessException(
-                    $kind->unsupportedReasonCode(),
-                    $kind->unsupportedReason(),
-                );
-            }
-            $payload = $this->nempriPayload($row, $kind, $context, $identity);
+            $payload = $this->nempriPayload(
+                $supplierId,
+                $environment,
+                $caseId,
+                $row,
+                $kind,
+                $context,
+                $identity,
+            );
             $xml = $this->nempriSerializer->serialize($payload);
             $this->validator->validateNempri($payload, $xml);
             $window = $this->deadlines->forNempri(
@@ -373,7 +386,15 @@ final readonly class SicknessSubmissionService
                 $this->nullableText($row['payroll_payment_date'] ?? null),
             );
         } else {
-            $payload = $this->hzupnPayload($row, $context, $identity);
+            $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::HZUPN20);
+            $payload = $this->payloads->hzupn(
+                $row,
+                $context,
+                $identity,
+                $manifest['payload_version'],
+                $this->software->productName,
+                $this->software->productVersion,
+            );
             $xml = $this->hzupnSerializer->serialize($payload);
             $this->validator->validateHzupn($payload, $xml, $incapacityFrom);
             $window = $this->deadlines->forHzupn($incapacityFrom, $incapacityTo);
@@ -397,126 +418,183 @@ final readonly class SicknessSubmissionService
     }
 
     /**
+     * Obsah věty NEMPRI. Mapování dělá čistá {@see SicknessPayloadFactory};
+     * tady se jen načte a odhalí to, co k němu potřebuje databázi: dítě nebo
+     * ošetřovanou osobu, rozhodné období z převzatých mezd a způsob výplaty
+     * mzdy.
+     *
      * @param array<string,mixed> $row
      * @param array<string,mixed> $context
      * @param array<string,mixed> $identity
      */
     private function nempriPayload(
+        int $supplierId,
+        string $environment,
+        int $caseId,
         array $row,
         SicknessBenefitKind $kind,
         array $context,
         array $identity,
     ): NempriXmlPayload {
         $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::NEMPRI25);
+        $employeeId = (int) $row['employee_id'];
+        $eventOn = (string) $row['incapacity_from'];
+        $startsClaim = !$kind->hasActions() || (bool) ($row['action_start'] ?? true);
 
-        return new NempriXmlPayload(
-            benefitKind: $kind,
-            osszCode: (int) $row['ossz_code'],
-            correction: (bool) $row['correction'],
-            decisionNumber: $this->nullableText($row['decision_number'] ?? null),
-            foreignCase: (bool) $row['foreign_case'],
-            insuredFirstName: $this->requiredIdentity($identity, 'first_name'),
-            insuredLastName: $this->requiredIdentity($identity, 'last_name'),
-            insuredBirthNumber: $this->requireBirthNumber($identity),
-            insuredPhone: null,
-            insuredEmail: null,
-            employerVariableSymbol: $this->variableSymbol($context),
-            employerIdentificationNumber: $this->nullableText(
-                $context['employer_business_id'] ?? null,
-            ),
-            employerName: (string) ($context['employer_name'] ?? ''),
-            employmentFrom: (string) ($context['start_date'] ?? ''),
-            employmentTo: $this->nullableText($context['end_date'] ?? null),
-            activityCode: $this->activityCode($context),
-            workedOnDecisiveDay: (bool) $row['worked_on_decisive_day'],
-            hoursWorked: $this->decimal($row['hours_worked'] ?? null),
-            dailyWorkingHours: $this->decimal($row['daily_working_hours'] ?? null),
-            smallScopeIncomeMinor: $row['small_scope_income_minor'] === null
-                ? null
-                : (int) $row['small_scope_income_minor'],
-            receivesPension: (bool) $row['receives_pension'],
-            pensionKind: $this->nullableText($row['pension_kind'] ?? null),
-            isStudent: (bool) $row['is_student'],
-            withinSchoolHolidays: $row['within_school_holidays'] === null
-                ? null
-                : (bool) $row['within_school_holidays'],
-            firstEmploymentFreeTime: (bool) $row['first_employment_free_time'],
-            unpaidLeave: (bool) $row['unpaid_leave'],
-            unpaidLeaveFrom: $this->nullableText($row['unpaid_leave_from'] ?? null),
-            unpaidLeaveTo: $this->nullableText($row['unpaid_leave_to'] ?? null),
-            startsMaternity: $row['starts_maternity'] === null
-                ? null
-                : (bool) $row['starts_maternity'],
-            childBirthDate: $this->nullableText($row['child_birth_date'] ?? null),
-            transferredOtherWork: (bool) $row['transferred_other_work'],
-            transferredOn: $this->nullableText($row['transferred_on'] ?? null),
-            enforcement: (bool) $row['enforcement'],
-            insolvency: (bool) $row['insolvency'],
-            additionalNote: $this->nullableText($row['additional_note'] ?? null),
-            productName: $this->software->productName,
-            productVersion: $this->software->productVersion,
-            payloadVersion: $manifest['payload_version'],
+        return $this->payloads->nempri(
+            $row,
+            $kind,
+            $context,
+            $identity,
+            $manifest['payload_version'],
+            $this->software->productName,
+            $this->software->productVersion,
+            $kind->hasApplication()
+                ? $this->caredPerson($supplierId, $employeeId, $row)
+                : null,
+            $startsClaim
+                ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context)
+                : null,
+            $this->paymentConnection($supplierId, $employeeId, $eventOn),
         );
+    }
+
+    /**
+     * Dítě nebo ošetřovaná osoba. Z evidence vyživovaných osob se bere jméno,
+     * datum narození a rodné číslo (odhalené jen pro tohle podání); osoba mimo
+     * evidenci nese jen jméno a datum narození, které účetní opsala z žádosti.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function caredPerson(int $supplierId, int $employeeId, array $row): ?NempriPerson
+    {
+        $dependantId = (int) ($row['cared_dependant_id'] ?? 0);
+        if ($dependantId > 0) {
+            $dependant = $this->cases->dependant($supplierId, $employeeId, $dependantId);
+            if ($dependant === null) {
+                throw new SicknessException(
+                    'nempri_cared_person_not_found',
+                    'Vybraná vyživovaná osoba u zaměstnance už není. Vyberte ji u případu znovu.',
+                );
+            }
+            [$first, $last] = self::splitName($dependant);
+            $ciphertext = $dependant['birth_number_ciphertext'] ?? null;
+
+            return new NempriPerson(
+                $first,
+                $last,
+                is_string($ciphertext) && $ciphertext !== ''
+                    ? $this->sensitiveData->reveal(
+                        $ciphertext,
+                        PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                        $supplierId,
+                        $dependantId,
+                        PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
+                    )
+                    : null,
+                $this->nullableText($dependant['birth_date'] ?? null),
+            );
+        }
+        $first = $this->nullableText($row['cared_first_name'] ?? null);
+        $last = $this->nullableText($row['cared_last_name'] ?? null);
+        if ($first === null && $last === null) {
+            return null;
+        }
+
+        return new NempriPerson(
+            (string) $first,
+            (string) $last,
+            null,
+            $this->nullableText($row['cared_birth_date'] ?? null),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $dependant
+     * @return array{0:string,1:string}
+     */
+    private static function splitName(array $dependant): array
+    {
+        $given = trim((string) ($dependant['given_name'] ?? ''));
+        $family = trim((string) ($dependant['family_name'] ?? ''));
+        if ($given !== '' && $family !== '') {
+            return [$given, $family];
+        }
+        // Starší záznamy mají jen celé jméno. Poslední slovo je příjmení —
+        // stejná konvence jako v evidenci osob; nesedí-li, účetní doplní
+        // jméno a příjmení zvlášť na kartě vyživované osoby.
+        $parts = preg_split('/\s+/u', trim((string) ($dependant['full_name'] ?? ''))) ?: [];
+        $last = (string) array_pop($parts);
+
+        return [implode(' ', $parts), $last];
     }
 
     /**
      * @param array<string,mixed> $row
      * @param array<string,mixed> $context
-     * @param array<string,mixed> $identity
      */
-    private function hzupnPayload(
+    private function decisivePeriod(
+        int $supplierId,
+        string $environment,
+        int $caseId,
         array $row,
         array $context,
-        array $identity,
-    ): HzupnXmlPayload {
-        $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::HZUPN20);
-        $issuedOn = $this->nullableText($row['issued_on'] ?? null);
-        if ($issuedOn === null) {
-            throw new SicknessException(
-                'hzupn_issue_date_missing',
-                'Hlášení musí nést den vystavení (dokument/datumVystaveni). Doplňte ho u případu.',
+    ): ?NempriDecisivePeriod {
+        $eventOn = (string) $row['incapacity_from'];
+        $employmentStart = SicknessPayloadFactory::employmentFrom($context);
+        [$from, $to] = NempriDecisivePeriodResolver::bounds($eventOn, $employmentStart);
+        $takeover = [];
+        if ($from <= $to) {
+            $employmentId = (int) $row['employment_id'];
+            for ($year = (int) substr($from, 0, 4); $year <= (int) substr($to, 0, 4); $year++) {
+                foreach ($this->takeover->forEmployment($supplierId, $employmentId, $year)->months as $month) {
+                    if ($month->employmentId === $employmentId) {
+                        $takeover[] = $month;
+                    }
+                }
+            }
+        }
+        $probable = $row['probable_income_czk'] ?? null;
+
+        return $this->decisivePeriods->resolve(
+            $eventOn,
+            $employmentStart,
+            $this->historical->startPeriod($supplierId),
+            $takeover,
+            $this->cases->decisiveMonths($supplierId, $environment, $caseId),
+            $probable === null || $probable === '' ? null : (int) $probable,
+        );
+    }
+
+    private function paymentConnection(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?NempriPaymentConnection {
+        $target = $this->cases->payoutTarget($supplierId, $employeeId, $onDate);
+        $plaintext = null;
+        if ($target['account'] !== null) {
+            $plaintext = $this->sensitiveData->reveal(
+                $target['account']['ciphertext'],
+                PayrollSensitiveField::BANK_ACCOUNT,
+                $supplierId,
+                $target['account']['id'],
+                PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
             );
+            $hash = bin2hex($this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::BANK_ACCOUNT,
+                $supplierId,
+            ));
+            if (!hash_equals($target['account']['hash'], $hash)) {
+                throw new \RuntimeException('Otisk výplatního účtu neodpovídá ciphertextu.');
+            }
         }
 
-        return new HzupnXmlPayload(
-            // Podání zaměstnavatele. Hlášení osoby dobrovolně nemocensky
-            // pojištěné je tentýž tiskopis, ale podává ho pojištěnec sám —
-            // aplikace ho za něj sestavovat nesmí.
-            employerReport: true,
-            personReport: false,
-            foreignCase: (bool) $row['foreign_case'],
-            confirmationNumber: $this->nullableText($row['decision_number'] ?? null),
-            osszCode: (int) $row['ossz_code'],
-            osszName: null,
-            issuedOn: $issuedOn,
-            correction: (bool) $row['correction'],
-            insuredFirstName: $this->requiredIdentity($identity, 'first_name'),
-            insuredLastName: $this->requiredIdentity($identity, 'last_name'),
-            insuredTitle: null,
-            insuredBirthNumber: $identity['identifiers']['birth_number']
-                ?? $identity['identifiers']['ecp']
-                ?? null,
-            insuredBirthDate: $this->nullableText(
-                $identity['identity']['birth_date'] ?? null,
-            ),
-            employerName: (string) ($context['employer_name'] ?? ''),
-            employerIdentificationNumber: $this->nullableText(
-                $context['employer_business_id'] ?? null,
-            ),
-            employerVariableSymbol: $this->variableSymbol($context),
-            returnedToWork: $row['returned_to_work'] === null
-                ? null
-                : (bool) $row['returned_to_work'],
-            returnReason: $this->nullableText($row['return_reason'] ?? null),
-            returnedOn: $this->nullableText($row['returned_on'] ?? null),
-            hoursWorkedLastDay: $this->decimal($row['hours_worked_last_day'] ?? null),
-            shiftHoursLastDay: $this->decimal($row['shift_hours_last_day'] ?? null),
-            workIntervals: is_array($row['work_days'] ?? null)
-                ? array_values($row['work_days'])
-                : [],
-            productName: $this->software->productName,
-            productVersion: $this->software->productVersion,
-            payloadVersion: $manifest['payload_version'],
+        return $this->paymentConnections->resolve(
+            $target['payout_method'],
+            $plaintext,
+            $target['address'],
         );
     }
 
@@ -596,86 +674,6 @@ final readonly class SicknessSubmissionService
                 'Případ mezitím někdo změnil. Načtěte ho znovu a podání připravte znovu.',
             );
         }
-    }
-
-    /** @param array<string,mixed> $context */
-    private function variableSymbol(array $context): string
-    {
-        $raw = $context['employer_variable_symbol'] ?? null;
-        $digits = preg_replace('/\D/', '', is_string($raw) ? $raw : '') ?? '';
-        if ($digits === '') {
-            throw new SicknessException(
-                'sickness_variable_symbol_missing',
-                'Firma nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení → Firma '
-                . 'a podání připravte znovu.',
-            );
-        }
-
-        // Doplnit zleva nulami NELZE: obě XSD mají variabilní symbol jako typ N
-        // s pevnou délkou 10 a vzorem `[1-9][0-9]*`, takže nula na začátku je
-        // tvrdá chyba. Symbol se proto předává tak, jak je, a neplatný odhalí
-        // validátor s vlastním důvodovým kódem.
-        return $digits;
-    }
-
-    /** @param array<string,mixed> $context */
-    private function activityCode(array $context): string
-    {
-        $code = $context['activity_code'] ?? null;
-        if (!is_string($code) || trim($code) === '') {
-            throw new SicknessException(
-                'nempri_activity_code_missing',
-                'Pracovní vztah nemá ke dni vzniku sociální události vyplněný druh činnosti. '
-                . 'NEMPRI ho vyžaduje (zamestnani/druhCinnosti) — doplňte ho v podmínkách vztahu.',
-            );
-        }
-
-        return strtoupper(trim($code));
-    }
-
-    /** @param array<string,mixed> $identity */
-    private function requiredIdentity(array $identity, string $key): string
-    {
-        $value = $identity['identity'][$key] ?? null;
-        if (!is_string($value) || $value === '') {
-            throw new SicknessException(
-                'sickness_identity_incomplete',
-                'Osoba nemá k rozhodnému dni doplněné jméno, příjmení a datum narození. '
-                . 'Bez nich ČSSZ podání nepřijme.',
-            );
-        }
-
-        return $value;
-    }
-
-    /** @param array<string,mixed> $identity */
-    private function requireBirthNumber(array $identity): string
-    {
-        $value = $identity['identifiers']['birth_number']
-            ?? $identity['identifiers']['ecp']
-            ?? null;
-        if (!is_string($value) || $value === '') {
-            throw new SicknessException(
-                'nempri_birth_number_missing',
-                'NEMPRI vyžaduje rodné číslo nebo evidenční číslo pojištěnce '
-                . '(pojistenec/rodneCislo je povinný prvek). Doplňte ho na kartě osoby.',
-            );
-        }
-
-        return $value;
-    }
-
-    /**
-     * Desetinné číslo pro XSD. DECIMAL z MariaDB přichází jako `8.00`; pro
-     * `xs:double` je to platná hodnota, takže se jen ořízne prázdný řetězec.
-     */
-    private function decimal(mixed $value): ?string
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        return (string) $value;
     }
 
     private function nullableText(mixed $value): ?string

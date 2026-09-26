@@ -40,6 +40,14 @@ enum PayrollRevealPurpose: string
     /** Registrační a evidenční podání na ČSSZ (PREZEC/REGZEC, evidence ECP/VCP, A1). */
     case SUBMISSION_CSSZ_REGISTRATION = 'submission:cssz_registration';
 
+    /**
+     * Oznámení o dávce nemocenského pojištění NEMPRI (§ 97 zákona
+     * č. 187/2006 Sb.) — rodné číslo dítěte nebo ošetřované osoby je náležitostí
+     * žádosti o dávku a výplatní účet zaměstnance náležitostí údajů o způsobu
+     * výplaty mzdy.
+     */
+    case SUBMISSION_CSSZ_SICKNESS = 'submission:cssz_sickness';
+
     /** Hromadné oznámení zaměstnavatele zdravotní pojišťovně (§ 10 zákona č. 48/1997 Sb.) — číslo pojištěnce je náležitostí věty `zmenaZamestance`. */
     case SUBMISSION_HEALTH_BULK_NOTIFICATION = 'submission:health_bulk_notification';
 
@@ -83,6 +91,7 @@ enum PayrollRevealPurpose: string
             self::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
             self::DOCUMENT_ANNUAL_SETTLEMENT,
             self::SUBMISSION_CSSZ_REGISTRATION,
+            self::SUBMISSION_CSSZ_SICKNESS,
             self::SUBMISSION_HEALTH_BULK_NOTIFICATION => true,
             default => false,
         };

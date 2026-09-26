@@ -62,6 +62,38 @@ final readonly class SicknessCaseService
         'hours_worked_last_day' => 'decimal',
         'shift_hours_last_day' => 'decimal',
         'additional_note' => 'text',
+        'action_start' => 'bool',
+        'action_continuation' => 'bool',
+        'action_end' => 'bool',
+        'application_from' => 'date',
+        'application_to' => 'date',
+        'cared_dependant_id' => 'id',
+        'cared_first_name' => 'text',
+        'cared_last_name' => 'text',
+        'cared_birth_date' => 'date',
+        'care_reason' => 'care_reason',
+        'school_name' => 'text',
+        'school_business_id' => 'text',
+        'shared_household' => 'nullable_bool',
+        'lone_caregiver' => 'nullable_bool',
+        'child_under_16' => 'nullable_bool',
+        'other_maternity_claim' => 'nullable_bool',
+        'other_parental_claim' => 'nullable_bool',
+        'other_person_s57' => 'nullable_bool',
+        'cared_personally' => 'nullable_bool',
+        'care_days' => 'periods',
+        'relationship_code' => 'code',
+        'alternation' => 'nullable_bool',
+        'paternity_reason' => 'code',
+        'maternity_care_reason' => 'code',
+        'child_order' => 'int',
+        'worked_last_day' => 'nullable_bool',
+        'planned_shifts' => 'nullable_bool',
+        'planned_shifts_worked' => 'nullable_bool',
+        'probable_income_czk' => 'int',
+        'contact_worker_name' => 'text',
+        'contact_worker_phone' => 'text',
+        'contact_worker_email' => 'text',
     ];
 
     public function __construct(
@@ -80,14 +112,38 @@ final readonly class SicknessCaseService
             $employmentId,
         );
         foreach ($rows as $index => $row) {
-            $rows[$index]['work_days'] = $this->cases->workDays(
-                $supplierId,
-                $environment,
-                (int) $row['id'],
-            );
+            $rows[$index] = $this->decorate($supplierId, $environment, $row);
         }
 
         return $rows;
+    }
+
+    /**
+     * Řádek případu doplněný o dny práce, ručně doplněné měsíce rozhodného
+     * období a rozbalené dny péče.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function decorate(int $supplierId, string $environment, array $row): array
+    {
+        $caseId = (int) $row['id'];
+        $row['work_days'] = $this->cases->workDays($supplierId, $environment, $caseId);
+        $months = [];
+        foreach ($this->cases->decisiveMonths($supplierId, $environment, $caseId) as $period => $month) {
+            $months[] = [
+                'period' => $period,
+                'income_minor' => $month['income_minor'],
+                'excluded_days' => $month['excluded_days'],
+            ];
+        }
+        $row['decisive_months'] = $months;
+        $careDays = is_string($row['care_days'] ?? null)
+            ? json_decode((string) $row['care_days'], true)
+            : null;
+        $row['care_days'] = is_array($careDays) ? $careDays : [];
+
+        return $row;
     }
 
     /**
@@ -116,7 +172,7 @@ final readonly class SicknessCaseService
             $employmentId,
             $kind->value,
             $incapacityFrom,
-            $values['incapacity_to'] === null
+            ($values['incapacity_to'] ?? null) === null
                 ? null
                 : (string) $values['incapacity_to'],
         );
@@ -130,7 +186,9 @@ final readonly class SicknessCaseService
         if ($values['ossz_code'] === null) {
             $values['ossz_code'] = $this->defaultOsszCode($context);
         }
+        $this->assertCaredDependant($supplierId, (int) $context['employee_id'], $values);
         $workDays = $this->workIntervals($input);
+        $decisiveMonths = $this->decisiveMonthsInput($input);
 
         $caseId = $this->cases->transaction(function () use (
             $supplierId,
@@ -141,6 +199,7 @@ final readonly class SicknessCaseService
             $context,
             $createdBy,
             $workDays,
+            $decisiveMonths,
         ): int {
             $id = $this->cases->insert($supplierId, $environment, [
                 'employee_id' => (int) $context['employee_id'],
@@ -155,6 +214,14 @@ final readonly class SicknessCaseService
                 $id,
                 $workDays,
             );
+            if ($decisiveMonths !== null) {
+                $this->cases->replaceDecisiveMonths(
+                    $supplierId,
+                    $environment,
+                    $id,
+                    $decisiveMonths,
+                );
+            }
 
             return $id;
         });
@@ -183,6 +250,8 @@ final readonly class SicknessCaseService
             );
         }
         $values = $this->normalize($input, false);
+        $this->assertCaredDependant($supplierId, (int) $row['employee_id'], $values);
+        $decisiveMonths = $this->decisiveMonthsInput($input);
         if ($values !== []) {
             if (!$this->cases->update(
                 $supplierId,
@@ -205,8 +274,80 @@ final readonly class SicknessCaseService
                 $this->workIntervals($input),
             );
         }
+        if ($decisiveMonths !== null) {
+            $this->cases->replaceDecisiveMonths(
+                $supplierId,
+                $environment,
+                $caseId,
+                $decisiveMonths,
+            );
+        }
 
         return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Dítě nebo ošetřovaná osoba z evidence musí patřit TÉMUŽ zaměstnanci.
+     * Cizí vyživovaná osoba by do žádosti vnesla rodné číslo někoho jiného.
+     *
+     * @param array<string,mixed> $values
+     */
+    private function assertCaredDependant(int $supplierId, int $employeeId, array $values): void
+    {
+        $dependantId = $values['cared_dependant_id'] ?? null;
+        if ($dependantId === null) {
+            return;
+        }
+        if ($this->cases->dependant($supplierId, $employeeId, (int) $dependantId) === null) {
+            throw new SicknessException(
+                'nempri_cared_person_not_found',
+                'Vybraná osoba není vyživovanou osobou tohoto zaměstnance.',
+            );
+        }
+    }
+
+    /**
+     * Ručně doplněné měsíce rozhodného období. `null` = vstup je neobsahuje
+     * a uložené měsíce se nemění.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,array{income_minor:int,excluded_days:int}>|null
+     */
+    private function decisiveMonthsInput(array $input): ?array
+    {
+        if (!array_key_exists('decisive_months', $input)) {
+            return null;
+        }
+        $raw = $input['decisive_months'] ?? [];
+        if (!is_array($raw)) {
+            throw new SicknessException(
+                'nempri_decisive_months_invalid',
+                'Měsíce rozhodného období musí být seznam.',
+            );
+        }
+        $months = [];
+        foreach ($raw as $item) {
+            $period = is_array($item) ? trim((string) ($item['period'] ?? '')) : '';
+            $income = is_array($item) ? ($item['income_minor'] ?? null) : null;
+            $excluded = is_array($item) ? ($item['excluded_days'] ?? 0) : null;
+            if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1
+                || !is_numeric($income) || (int) $income < 0
+                || !is_numeric($excluded) || (int) $excluded < 0 || (int) $excluded > 31
+            ) {
+                throw new SicknessException(
+                    'nempri_decisive_months_invalid',
+                    'Každý měsíc rozhodného období musí mít měsíc (RRRR-MM), nezáporný '
+                    . 'započitatelný příjem a 0 až 31 vyloučených dnů.',
+                );
+            }
+            $months[$period] = [
+                'income_minor' => (int) $income,
+                'excluded_days' => (int) $excluded,
+            ];
+        }
+        ksort($months, SORT_STRING);
+
+        return $months;
     }
 
     /**
@@ -283,13 +424,8 @@ final readonly class SicknessCaseService
                 'Případ dávky nemocenského pojištění nebyl nalezen.',
             );
         }
-        $row['work_days'] = $this->cases->workDays(
-            $supplierId,
-            $environment,
-            $caseId,
-        );
 
-        return $row;
+        return $this->decorate($supplierId, $environment, $row);
     }
 
     /** @return array<string,mixed> */
@@ -365,7 +501,7 @@ final readonly class SicknessCaseService
 
     private function cast(string $column, string $type, mixed $value): mixed
     {
-        if ($value === null || $value === '') {
+        if ($value === null || $value === '' || ($type === 'periods' && $value === [])) {
             if ($type === 'bool') {
                 return 0;
             }
@@ -375,6 +511,7 @@ final readonly class SicknessCaseService
 
         return match ($type) {
             'int' => (int) $value,
+            'id' => (int) $value > 0 ? (int) $value : null,
             'bool', 'nullable_bool' => $this->boolean($value) ? 1 : 0,
             'decimal' => $this->decimal($column, $value),
             'date' => $this->requireDate(
@@ -382,8 +519,53 @@ final readonly class SicknessCaseService
                 'sickness_date_invalid',
                 'Datum v případu musí být ve tvaru RRRR-MM-DD.',
             ),
+            'care_reason' => $this->careReason($value),
+            'code' => $this->codebookValue($value),
+            'periods' => $this->periodsJson($value),
             default => trim((string) $value),
         };
+    }
+
+    private function careReason(mixed $value): string
+    {
+        $reason = trim((string) $value);
+        if (!in_array($reason, NempriBenefitApplication::CARE_REASONS, true)) {
+            throw new SicknessException(
+                'nempri_care_reason_invalid',
+                'Důvod péče musí být onemocnění, karanténa, nemožnost péče o dítě, '
+                . 'nebo uzavření školy či zařízení.',
+            );
+        }
+
+        return $reason;
+    }
+
+    private function codebookValue(mixed $value): string
+    {
+        $code = strtoupper(trim((string) $value));
+        if (preg_match('/^[0-9A-Z]{1,3}$/D', $code) !== 1) {
+            throw new SicknessException(
+                'nempri_codebook_value_invalid',
+                'Kód z číselníku ČSSZ má 1 až 3 znaky 0-9 a A-Z.',
+            );
+        }
+
+        return $code;
+    }
+
+    private function periodsJson(mixed $value): string
+    {
+        if (!is_array($value)) {
+            throw new SicknessException(
+                'nempri_periods_invalid',
+                'Dny péče musí být seznam období od–do.',
+            );
+        }
+
+        return (string) json_encode(
+            $this->workIntervals(['work_days' => $value]),
+            JSON_THROW_ON_ERROR,
+        );
     }
 
     private function boolean(mixed $value): bool
