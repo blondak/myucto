@@ -18,12 +18,16 @@ import {
   type PayrollTimeOverview,
   type PayrollTimeOverviewItem,
 } from '@/api/payroll'
+import { payrollAbsenceApi, type PayrollAbsence } from '@/api/payrollAbsences'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import {
   buildPayrollGridBatch,
   formatPayrollGridHours,
   isWorkedCategory,
+  parsePayrollGridHours,
+  payrollAbsenceDays,
   payrollDayPlans,
+  payrollPlannedShifts,
   payrollEditorNextWorkday,
   payrollGridCellKey,
   payrollGridCellState,
@@ -37,7 +41,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
-import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import {
   payrollPeriodRange,
@@ -524,6 +528,27 @@ function relationLabel(type: string): string {
   return t(`payroll.people.relations.${type}`)
 }
 
+/*
+ * Hledání podle jména nebo kódu (Q8-18). Mřížka má 25 řádků na stránku
+ * a firma stovky vztahů — konkrétního člověka šlo dosud najít jen proklikem
+ * z karty. Hledá server, ať se najde i člověk z jiné stránky.
+ */
+const nameSearch = ref('')
+let nameSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+function searchArgs(): [] | [string] {
+  const value = nameSearch.value.trim()
+  return value === '' ? [] : [value]
+}
+
+watch(nameSearch, () => {
+  if (nameSearchTimer) clearTimeout(nameSearchTimer)
+  nameSearchTimer = setTimeout(() => {
+    offset.value = 0
+    void load()
+  }, 300)
+})
+
 async function load() {
   loading.value = true
   loadFailed.value = false
@@ -533,6 +558,7 @@ async function load() {
       incompleteOnly.value,
       { limit: pageSize, offset: offset.value },
       focusEmploymentId.value,
+      ...searchArgs(),
     )
     total.value = overview.value.total
     selectedEmploymentIds.value = []
@@ -1817,7 +1843,33 @@ const gridRows = computed(() => visibleItems.value.map(item => {
 }))
 type PayrollGridRow = (typeof gridRows)['value'][number]
 const gridDirtyKeys = computed(() => Object.keys(gridDrafts.value))
-const gridDirtyCount = computed(() => gridDirtyKeys.value.length)
+/*
+ * Čítač na tlačítku počítá jen buňky, které se od uloženého stavu opravdu
+ * liší. Smazaná rozepsaná hodnota už změna není — dřív tlačítko hlásilo
+ * „Uložit (21)" i po vymazání všech jednadvaceti buněk.
+ */
+const gridRowsById = computed(() => new Map(gridRows.value.map(row => [row.item.employment.id, row])))
+const gridDirtyCount = computed(() => Object.entries(gridDrafts.value).filter(([key, value]) => {
+  const [employmentId, date] = key.split('|')
+  const saved = gridRowsById.value.get(Number(employmentId))?.cells.get(date)?.minutes ?? 0
+  return value.trim() !== formatPayrollGridHours(saved)
+}).length)
+
+/** Odpracováno v řádku včetně rozepsaných buněk — ať součet sedí hned, ne až po uložení. */
+function gridRowWorked(row: PayrollGridRow): number {
+  if (!gridEditableCategory.value) return row.workedTotal
+  let total = row.workedTotal
+  for (const day of gridDays.value) {
+    const draft = gridDrafts.value[gridKey(row.item.employment.id, day.date)]
+    if (draft === undefined) continue
+    const parsed = parsePayrollGridHours(draft)
+    const saved = row.cells.get(day.date)?.minutes ?? 0
+    // Nečitelný zápis ani vymazání uloženého dne se neuloží, součet je nemění.
+    if (parsed === false || ((parsed === null || parsed === 0) && saved > 0)) continue
+    total += (parsed ?? 0) - saved
+  }
+  return total
+}
 const gridBlockedReason = computed<string | null>(() => {
   if (!canWrite.value) return t('payroll.time.grid.blocked_no_permission')
   if (gridDirtyCount.value === 0) return t('payroll.time.grid.blocked_nothing_changed')
@@ -1954,28 +2006,112 @@ function focusGridCell(row: number, column: number) {
  * hromadnou akci nepřijde — a svátky ani víkendy se neplní vůbec, protože je
  * kalendář (a v něm `CzechHolidayCalendar`) označuje jako nepracovní.
  */
-function fillWorkdays() {
+async function fillWorkdays() {
   if (gridFillBlockedReason.value) return
+  // Dny schválené nepřítomnosti (DPN, ošetřovné, dovolená…) se neplní — jinak
+  // by v tentýž den vznikla práce i nemoc. Nepřítomnosti se čtou až tady, ať
+  // přehled docházky kvůli nim nezpomalí.
+  let absenceDays = new Map<number, Set<string>>()
+  try {
+    absenceDays = payrollAbsenceDays(await loadMonthAbsences(), period.value)
+  } catch {
+    gridSaveError.value = t('payroll.time.grid.absences_failed')
+    return
+  }
   let filled = 0
+  let skippedAbsence = 0
   let withoutCalendar = 0
   const drafts = { ...gridDrafts.value }
   for (const row of gridRows.value) {
     if (row.item.month.status !== 'open') continue
     if (!row.item.calendar) withoutCalendar += 1
+    const absent = absenceDays.get(row.item.employment.id)
     for (const day of gridDays.value) {
       const cell = row.cells.get(day.date)
       if (!cell?.workday) continue
       const key = gridKey(row.item.employment.id, day.date)
       const current = drafts[key] ?? formatPayrollGridHours(cell.minutes)
       if (current !== '') continue
+      if (absent?.has(day.date)) {
+        skippedAbsence += 1
+        continue
+      }
       drafts[key] = formatPayrollGridHours(row.plannedMinutes(day.date) || GRID_FALLBACK_MINUTES)
       filled += 1
     }
   }
   gridDrafts.value = drafts
-  gridNote.value = withoutCalendar > 0
+  const note = withoutCalendar > 0
     ? t('payroll.time.grid.filled_without_calendar', { count: filled, people: withoutCalendar })
     : t('payroll.time.grid.filled', { count: filled })
+  gridNote.value = skippedAbsence > 0
+    ? `${note} ${t('payroll.time.grid.skipped_absence', { count: skippedAbsence })}`
+    : note
+}
+
+/** Schválené i neschválené nepřítomnosti měsíce, po stránkách po dvou stech. */
+async function loadMonthAbsences(): Promise<PayrollAbsence[]> {
+  const from = `${period.value}-01`
+  const to = payrollMonthDays(period.value).at(-1)?.date ?? from
+  const all: PayrollAbsence[] = []
+  for (let offset = 0, page = 0; page < 10; page += 1) {
+    const result = await payrollAbsenceApi.absencesPage(from, to, focusEmploymentId.value ?? undefined, { limit: 200, offset })
+    all.push(...result.absences)
+    offset += result.absences.length
+    if (result.absences.length === 0 || offset >= result.total) break
+  }
+  return all
+}
+
+/*
+ * Rozvrhnout směny podle kalendáře (Q8-19). Náhrada mzdy při DPN i za
+ * dovolenou se počítá z neodpracovaných směn; bez nich se nepřítomnost
+ * neschválí. Směny se zakládají po jedné (každá zvedá verzi měsíce), jen do
+ * dnů, které ještě směnu nemají, a rovnou publikované.
+ */
+async function planShifts(item: PayrollTimeOverviewItem) {
+  if (!canWrite.value || item.month.status !== 'open') return
+  const plans = payrollDayPlans(item, payrollMonthDays(period.value), GRID_FALLBACK_MINUTES)
+  const existing = new Set((item.shifts ?? []).map(shift =>
+    payrollIsoToWallTime(shift.starts_at, shift.timezone_name).slice(0, 10)))
+  const planned = payrollPlannedShifts(plans, existing)
+  if (planned.length === 0) {
+    toast.info(t('payroll.time.plan_shifts.nothing'))
+    return
+  }
+  saving.value = true
+  let monthVersion = item.month.row_version
+  let created = 0
+  const shiftZone = item.calendar?.timezone_name || 'Europe/Prague'
+  try {
+    for (const shift of planned) {
+      const result = await payrollApi.saveShift({
+        employment_id: item.employment.id,
+        calendar_id: item.calendar?.id ?? null,
+        starts_at: payrollWallTimeToIso(shift.startsAt, shiftZone),
+        ends_at: payrollWallTimeToIso(shift.endsAt, shiftZone),
+        timezone: shiftZone,
+        break_minutes: shift.breakMinutes,
+        remote_work: false,
+        standby_minutes: 0,
+        publish: true,
+        row_version: 0,
+        month_row_version: monthVersion,
+        supersedes_id: null,
+      })
+      monthVersion = result.month.row_version
+      created += 1
+    }
+    toast.success(t('payroll.time.plan_shifts.done', { count: created, name: item.employment.full_name }))
+  } catch (error: any) {
+    toast.error(t('payroll.time.plan_shifts.failed', {
+      count: created,
+      message: error?.response?.data?.error?.message ?? '',
+    }))
+  } finally {
+    saving.value = false
+    await load()
+  }
 }
 
 function previousPeriod(value: string): string {
@@ -2125,6 +2261,7 @@ async function saveGrid() {
         { limit: pageSize, offset: offset.value },
         focusEmploymentId.value,
         incompleteOnly.value,
+        ...searchArgs(),
       )
       // Odpověď dávky nese jen přehled, ne hranici historie — ta se drží
       // z načtení stránky, jinak by značka „historické" po uložení zmizela.
@@ -2259,11 +2396,38 @@ function clearApproveError() {
   approveFailures.value = []
 }
 
-onMounted(() => {
-  void load()
+/*
+ * Proklik z karty (`?employment=…` bez měsíce) otevíral zpracovávaný měsíc.
+ * U člověka, který nastoupí až později, tak stránka hlásila „vztah k firmě
+ * nepatří". Vztah se proto dohledá: začíná-li až po zobrazeném měsíci, otevře
+ * se měsíc nástupu; jinak se prázdno pojmenuje jménem, bez obvinění odkazu.
+ */
+const focusKnownName = ref<string | null>(null)
+
+async function resolveFocusMissing() {
+  focusKnownName.value = null
+  if (!focusMissing.value || focusEmploymentId.value === null) return
+  try {
+    const history = await payrollApi.timeHistory(focusEmploymentId.value, { limit: 1 })
+    focusKnownName.value = history.employment.full_name
+    const start = history.employment.actual_start_date ?? history.employment.start_date
+    const hasExplicitPeriod = payrollQueryValue(route.query, 'period') !== null
+    if (!hasExplicitPeriod && start && start.slice(0, 7) > period.value) {
+      period.value = start.slice(0, 7)
+      void router.replace({ query: { ...route.query, period: period.value } })
+      await load()
+    }
+  } catch {
+    // Vztah se nenašel ani v historii — zůstává hláška o slepém zúžení.
+  }
+}
+
+onMounted(async () => {
   // Rozsah z adresy platí hned při otevření — sdílený odkaz na historii nesmí
   // skončit u měsíční mřížky.
   if (historyVisible.value) void loadHistory()
+  await load()
+  await resolveFocusMissing()
 })
 </script>
 
@@ -2332,6 +2496,17 @@ onMounted(() => {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
           {{ t('payroll.time.reload') }}
         </button>
+        <label v-if="!historyVisible && focusEmploymentId === null" class="relative block">
+          <span class="sr-only">{{ t('payroll.time.search_label') }}</span>
+          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.search" /></svg>
+          <input
+            v-model="nameSearch"
+            type="search"
+            data-test="payroll-time-search"
+            :placeholder="t('payroll.time.search_placeholder')"
+            class="h-9 w-56 rounded-md border border-neutral-300 bg-surface pl-8 pr-3 text-sm"
+          >
+        </label>
         <label v-if="!historyVisible" class="inline-flex h-9 items-center gap-2 text-sm text-neutral-700">
           <input v-model="incompleteOnly" type="checkbox" class="rounded border-neutral-300 text-payroll-600" @change="reload">
           {{ t('payroll.time.incomplete_only') }}
@@ -2637,6 +2812,13 @@ onMounted(() => {
       @clear="clearFocus"
     />
     <PayrollFocusNotice
+      v-else-if="focusMissing && focusKnownName"
+      :name="focusKnownName"
+      named
+      empty
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
       v-else-if="focusMissing"
       :name="String(focusEmploymentId)"
       missing
@@ -2769,7 +2951,7 @@ onMounted(() => {
                 >•</span>
               </td>
               <td class="px-3 py-1 text-right font-medium text-neutral-700">
-                {{ formatPayrollMinutes(row.workedTotal) }}
+                {{ formatPayrollMinutes(gridRowWorked(row)) }}
               </td>
             </tr>
           </tbody>
@@ -2970,6 +3152,7 @@ onMounted(() => {
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
                 <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
@@ -3053,6 +3236,7 @@ onMounted(() => {
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
+                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
             <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>

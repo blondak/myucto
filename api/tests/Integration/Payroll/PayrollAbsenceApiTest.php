@@ -226,6 +226,43 @@ final class PayrollAbsenceApiTest extends TestCase
     }
 
     /**
+     * Q8-19: DPN bez rozvrhu směn skončila holou větou „vyžaduje alespoň jednu
+     * publikovanou směnu" bez cesty dál. Odpověď teď nese kód, vztah a měsíc,
+     * podle kterých aplikace pošle uživatele rozvrhnout směny.
+     */
+    public function testDpnWithoutPublishedShiftsTellsWhereToScheduleThem(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $payload = $this->absencePayload($averageId);
+        $payload['absence_type'] = 'dpn';
+        $payload['date_to'] = '2026-06-26';
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+
+        $refused = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(422, $refused->getStatusCode());
+        $error = $this->json($refused)['error'];
+        self::assertSame('absence_shifts_missing', $error['code']);
+        self::assertStringContainsString('Rozvrhnout směny podle kalendáře', $error['message']);
+        self::assertSame($this->employmentId, $error['employment_id']);
+        self::assertSame('2026-06', $error['period']);
+    }
+
+    /**
      * Dny okna náhrady vyčerpané předchozím plátcem (§ 192 ZP) musí jít zapsat
      * z API a musí se skutečně projevit ve zkráceném okně náhrady, ne jen na
      * obrazovce. Okno DPN od 2026-06-15 bez převzatých dnů končí 2026-06-28

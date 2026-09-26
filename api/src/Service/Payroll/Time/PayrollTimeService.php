@@ -64,6 +64,7 @@ final class PayrollTimeService
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         ?int $employmentId = null,
+        ?string $search = null,
     ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: přehled staví na
         // řádek několik dotazů a náhledů, takže „vypiš všechno" nesmí jít
@@ -86,6 +87,7 @@ final class PayrollTimeService
             $periodStart,
             $periodEnd,
             $employmentId,
+            $search === null ? null : mb_substr(trim($search), 0, 100),
         );
         $shifts = $this->groupByEmployment(
             $this->startingInPeriod(

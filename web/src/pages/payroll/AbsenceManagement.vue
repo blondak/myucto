@@ -745,6 +745,7 @@ const overdrawPrompt = ref<{
  * i s odkazem, kde případ doplní — a když případ nevznikl, proč.
  */
 const sicknessNotice = ref<{ text: string, warning: boolean } | null>(null)
+const shiftsMissing = ref<{ name: string, employmentId: number, period: string, message: string } | null>(null)
 
 function showSicknessNotice(outcome: PayrollAbsenceSicknessCaseOutcome | null | undefined): void {
   if (!outcome) {
@@ -773,6 +774,7 @@ async function decide(
 ) {
   const review = dpnReviews[item.id]
   saving.value = true
+  shiftsMissing.value = null
   try {
     const result = await payrollAbsenceApi.decide(item.id, {
       row_version: item.row_version,
@@ -802,6 +804,17 @@ async function decide(
       return
     }
     overdrawPrompt.value = null
+    // DPN bez rozvrhu směn: hláška s proklikem zůstane stát, toast by zmizel
+    // dřív, než uživatel pochopí, kde se směny zakládají.
+    if (payload?.code === 'absence_shifts_missing' && typeof payload.employment_id === 'number') {
+      shiftsMissing.value = {
+        name: item.full_name,
+        employmentId: payload.employment_id,
+        period: typeof payload.period === 'string' ? payload.period : item.date_from.slice(0, 7),
+        message: payload.message,
+      }
+      return
+    }
     toast.error(payload?.message || t('payroll_absence.messages.save_failed'))
   } finally {
     saving.value = false
@@ -1355,6 +1368,25 @@ onMounted(async () => {
         data-test="absence-sickness-case-link"
       >
         {{ t('payroll.sicknessCases.absenceNotice.open') }}
+      </RouterLink>
+    </section>
+
+    <section
+      v-if="shiftsMissing"
+      class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"
+      role="alert"
+      data-test="absence-shifts-missing"
+    >
+      <span class="min-w-0 flex-1">
+        <strong>{{ shiftsMissing.name }}:</strong> {{ shiftsMissing.message }}
+      </span>
+      <RouterLink
+        :to="{ path: '/payroll/time', query: { employment: String(shiftsMissing.employmentId), period: shiftsMissing.period } }"
+        :class="[btnFilled('primary'), 'whitespace-nowrap']"
+        data-test="absence-shifts-missing-link"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.calendar" /></svg>
+        {{ t('payroll_absence.shifts_missing.open') }}
       </RouterLink>
     </section>
 

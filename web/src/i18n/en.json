@@ -4147,6 +4147,8 @@
       "subtitle": "Historical working-time fund, published schedule and audited actual time for every employment.",
       "period": "Period",
       "incomplete_only": "Incomplete only",
+      "search_label": "Search employees",
+      "search_placeholder": "Search name or code…",
       "reload": "Reload",
       "add": "Add time",
       "load_failed": "Time data could not be loaded.",
@@ -4295,6 +4297,13 @@
         "long_warning": "The record lasts {hours} h, i.e. longer than 12 hours. Check that the end date is right.",
         "save_and_next": "Save and next day"
       },
+      "plan_shifts": {
+        "action": "Schedule shifts from calendar",
+        "hint": "Creates published shifts on all working days of the month from the employment's work calendar (without a calendar Monday to Friday at 8 h). Days that already have a shift are skipped. Sick-pay and vacation compensation need these shifts.",
+        "nothing": "Every working day of the month already has a shift.",
+        "done": "Shifts created: {count} ({name}).",
+        "failed": "Scheduling stopped after {count} shifts: {message}"
+      },
       "grid": {
         "title": "Monthly attendance grid",
         "subtitle": "One row per employee, one column per day. Type the hours worked into a cell — “8”, “8:30” or “7.5” all work. Exceptions (shifts across midnight, breaks, surcharge categories) stay in the row editor above.",
@@ -4324,6 +4333,8 @@
         "saved_partially": "Days saved: {saved}. Not saved: {failed} — they stay in the grid with the reason on the cell.",
         "save_failed": "The grid could not be saved.",
         "filled": "Days filled: {count}. Only empty cells were touched.",
+        "skipped_absence": "Days of approved absence skipped (sick leave, care, vacation…): {count}.",
+        "absences_failed": "The month's absences could not be loaded, so nothing was filled — days of sickness or vacation would otherwise get worked hours. Try again.",
         "filled_without_calendar": "Days filled: {count}. {people} employments have no work calendar, so Monday to Friday at eight hours was assumed — such an estimate does not know about public holidays.",
         "copied": "Days copied: {count} for {people} employees from {period}. Employees not found: {missing}. Days that do not fit this month: {skipped}.",
         "copy_failed": "The previous month could not be loaded.",
@@ -26056,6 +26067,9 @@
   },
   "payroll_absence": {
     "title": "Absence, leave and sickness",
+    "shifts_missing": {
+      "open": "Schedule shifts in attendance"
+    },
     "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
     "manual_review": "Manual review required",
     "review_notice": "Results are working papers. Before approval, verify the decisive period, qualifying time, published shifts and statutory conditions for the employee.",

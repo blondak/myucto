@@ -4147,6 +4147,8 @@
       "subtitle": "Historický pracovní fond, publikovaný plán a auditovaná skutečnost pro každý pracovní vztah.",
       "period": "Období",
       "incomplete_only": "Jen neúplné",
+      "search_label": "Hledat zaměstnance",
+      "search_placeholder": "Hledat jméno nebo kód…",
       "reload": "Obnovit",
       "add": "Přidat čas",
       "load_failed": "Docházku se nepodařilo načíst.",
@@ -4295,6 +4297,13 @@
         "long_warning": "Zápis trvá {hours} h, tedy déle než 12 hodin. Zkontrolujte, že datum konce sedí.",
         "save_and_next": "Uložit a další den"
       },
+      "plan_shifts": {
+        "action": "Rozvrhnout směny podle kalendáře",
+        "hint": "Založí publikované směny na všechny pracovní dny měsíce podle pracovního kalendáře vztahu (bez kalendáře pondělí až pátek po 8 h). Dny, které už směnu mají, přeskočí. Směny potřebuje náhrada mzdy při DPN i za dovolenou.",
+        "nothing": "Všechny pracovní dny měsíce už směnu mají.",
+        "done": "Založeno směn: {count} ({name}).",
+        "failed": "Rozvrh se zastavil po {count} směnách: {message}"
+      },
       "grid": {
         "title": "Měsíční mřížka docházky",
         "subtitle": "Řádek je zaměstnanec, sloupec den. Do buňky se píší odpracované hodiny — „8“, „8:30“ i „7,5“. Výjimky (směna přes půlnoc, přestávky, příplatkové kategorie) zůstávají v řádkovém editoru nahoře.",
@@ -4324,6 +4333,8 @@
         "saved_partially": "Uložené dny: {saved}. Neuložené: {failed} — zůstávají rozepsané i s důvodem u konkrétní buňky.",
         "save_failed": "Mřížku se nepodařilo uložit.",
         "filled": "Vyplněné dny: {count}. Přepsaly se jen prázdné buňky.",
+        "skipped_absence": "Přeskočené dny schválené nepřítomnosti (DPN, ošetřovné, dovolená…): {count}.",
+        "absences_failed": "Nepřítomnosti měsíce se nepodařilo načíst, proto se nic nevyplnilo — dny nemoci nebo dovolené by jinak dostaly odpracované hodiny. Zkuste to znovu.",
         "filled_without_calendar": "Vyplněné dny: {count}. U {people} vztahů chybí pracovní kalendář, takže se odhadlo pondělí až pátek po osmi hodinách — svátky v takovém odhadu nejsou.",
         "copied": "Zkopírované dny: {count} od {people} zaměstnanců z období {period}. Nedohledaní zaměstnanci: {missing}. Dny, které se do měsíce nevešly: {skipped}.",
         "copy_failed": "Minulý měsíc se nepodařilo načíst.",
@@ -26056,6 +26067,9 @@
   },
   "payroll_absence": {
     "title": "Absence, dovolená a DPN",
+    "shifts_missing": {
+      "open": "Rozvrhnout směny v docházce"
+    },
     "subtitle": "Evidence nepřítomností, snapshoty průměrného výdělku a auditovatelný ledger dovolené.",
     "manual_review": "Vyžaduje ruční kontrolu",
     "review_notice": "Výsledky jsou pracovní podklad. Před schválením ověřte rozhodné období, započitatelné doby, publikované směny a zákonné podmínky konkrétního zaměstnance.",

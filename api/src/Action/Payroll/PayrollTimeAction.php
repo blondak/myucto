@@ -74,6 +74,7 @@ final class PayrollTimeAction
                     )),
                     max(0, (int) ($query['offset'] ?? 0)),
                     $employmentId,
+                    self::searchQuery($query),
                 ),
                 // Měsíc, který zpracoval předchozí program, se jen OZNAČÍ.
                 // Řádky zůstávají i s neschváleným stavem — jsou podkladem pro
@@ -129,6 +130,13 @@ final class PayrollTimeAction
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);
         }
+    }
+
+    /** @param array<string,mixed> $query */
+    private static function searchQuery(array $query): ?string
+    {
+        $value = $query['q'] ?? null;
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 
     /**
@@ -396,6 +404,7 @@ final class PayrollTimeAction
                 )),
                 max(0, (int) ($query['offset'] ?? 0)),
                 self::narrowingId($query, 'employment_id'),
+                self::searchQuery($query),
             );
             return Json::ok($response, [
                 'saved' => $result['saved'],

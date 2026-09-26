@@ -32,6 +32,7 @@ use MyInvoice\Service\Payroll\Absence\PayrollLeaveInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
+use MyInvoice\Service\Payroll\Absence\PayrollAbsenceShiftsMissingException;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -245,6 +246,13 @@ final class PayrollAbsenceAction
                         $firstWorked,
                         AbsenceHolidayTreatment::CompensateSickness,
                     );
+                    if ($segments === []) {
+                        throw new PayrollAbsenceShiftsMissingException(
+                            (int) $absence['employment_id'],
+                            (string) $absence['date_from'],
+                            (string) $absence['date_to'],
+                        );
+                    }
                     $result = $this->sicknessCalculator->calculate(
                         (string) $absence['date_from'],
                         (int) $absence['average_hourly_minor'],
@@ -320,6 +328,11 @@ final class PayrollAbsenceAction
             return Json::error($response, 'leave_overdraw_confirmation_required', $e->getMessage(), 409, [
                 'balance_minutes' => $e->balanceMinutes,
                 'requested_minutes' => $e->requestedMinutes,
+            ]);
+        } catch (PayrollAbsenceShiftsMissingException $e) {
+            return Json::error($response, 'absence_shifts_missing', $e->getMessage(), 422, [
+                'employment_id' => $e->employmentId,
+                'period' => $e->period(),
             ]);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

@@ -48,11 +48,20 @@ final class PayrollTimeRepository
         string $periodStart,
         string $periodEnd,
         ?int $employmentId = null,
+        /** Hledání podle jména nebo kódu vztahu; mřížka má stovky řádků po 25. */
+        ?string $search = null,
     ): array {
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
         $narrowing = $employmentId === null ? '' : ' AND employment.id = ?';
+        $search = $search === null ? '' : trim($search);
+        $searchParams = [];
+        if ($search !== '') {
+            $narrowing .= ' AND (employee.full_name LIKE ? OR employment.code LIKE ?)';
+            $like = '%' . addcslashes($search, '%_\\') . '%';
+            $searchParams = [$like, $like];
+        }
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
                     SELECT employment.*,
@@ -103,6 +112,7 @@ final class PayrollTimeRepository
             $periodStart,
             $periodLastDay,
             ...($employmentId === null ? [] : [$employmentId]),
+            ...$searchParams,
         ]);
         return self::rows($stmt);
     }

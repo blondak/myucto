@@ -122,6 +122,64 @@ export function payrollDayPlans(
 }
 
 /**
+ * Dny schválené nepřítomnosti podle vztahu (jen v rámci `period`).
+ *
+ * Why: „Vyplnit pracovní dny" plnilo osm hodin i do dnů DPN a ošetřovného —
+ * v tentýž den tak vznikla práce i nemoc a uživatel musel buňky ručně mazat.
+ */
+export function payrollAbsenceDays(
+  absences: ReadonlyArray<{ employment_id: number; date_from: string; date_to: string; status: string }>,
+  period: string,
+): Map<number, Set<string>> {
+  const result = new Map<number, Set<string>>()
+  const days = payrollMonthDays(period)
+  for (const absence of absences) {
+    if (absence.status !== 'approved') continue
+    const set = result.get(absence.employment_id) ?? new Set<string>()
+    for (const day of days) {
+      if (day.date >= absence.date_from && day.date <= absence.date_to) set.add(day.date)
+    }
+    if (set.size > 0) result.set(absence.employment_id, set)
+  }
+  return result
+}
+
+/** Směna podle plánu dne: začátek, konec (plán + přestávka) a přestávka v minutách. */
+export interface PayrollPlannedShift {
+  date: string
+  startsAt: string
+  endsAt: string
+  breakMinutes: number
+}
+
+/**
+ * Plánované směny měsíce podle kalendáře vztahu (§ 81 ZP rozvrh pracovní doby).
+ *
+ * Why: náhrada mzdy při DPN i za dovolenou se počítá z neodpracovaných SMĚN.
+ * U měsíčně placeného se stálou pracovní dobou je nikdo po jedné nezadává —
+ * bez nich ale DPN nešla schválit. Plán se skládá z kalendáře: pracovní den
+ * s plánovanými minutami dostane směnu od `startTime`, přestávka 30 minut
+ * se přidá u směny delší než šest hodin (§ 88 ZP). Den, který už směnu má,
+ * se přeskočí.
+ */
+export function payrollPlannedShifts(
+  plans: ReadonlyMap<string, PayrollGridDayPlan>,
+  existingShiftDates: ReadonlySet<string>,
+  startTime = '08:00',
+): PayrollPlannedShift[] {
+  const start = wallTimeMinutes(startTime) ?? 8 * 60
+  const shifts: PayrollPlannedShift[] = []
+  for (const [date, plan] of [...plans.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    if (plan.kind !== 'workday' || plan.plannedMinutes <= 0 || existingShiftDates.has(date)) continue
+    const breakMinutes = plan.plannedMinutes > 6 * 60 ? 30 : 0
+    const end = start + plan.plannedMinutes + breakMinutes
+    if (end > 24 * 60) continue
+    shifts.push({ date, startsAt: wallTime(date, start), endsAt: wallTime(date, end), breakMinutes })
+  }
+  return shifts
+}
+
+/**
  * „Uložit a další den" v editoru: začátek i konec se posunou na NEJBLIŽŠÍ další
  * pracovní den téhož měsíce, oba o stejný počet dní. Směna 08:00–16:30 tak
  * zůstane osmihodinová a noční směna přes půlnoc si svůj den navíc ponechá.

@@ -9080,6 +9080,8 @@ export const payrollApi = {
     incomplete = false,
     page?: PayrollPageParams,
     employmentId?: number | null,
+    /** Hledání podle jména nebo kódu vztahu. */
+    search?: string,
   ) =>
     api.get<PayrollTimeOverview>('/payroll/time/month', {
       params: {
@@ -9087,6 +9089,7 @@ export const payrollApi = {
         incomplete: incomplete ? 1 : 0,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...(search && search.trim() !== '' ? { q: search.trim() } : {}),
       },
     }).then(response => response.data),
   /**
@@ -9135,6 +9138,7 @@ export const payrollApi = {
     page?: PayrollPageParams,
     employmentId?: number | null,
     incomplete = false,
+    search?: string,
   ) =>
     api.post<PayrollTimeBatchResult>('/payroll/time/entries/batch', payload, {
       params: {
@@ -9142,6 +9146,7 @@ export const payrollApi = {
         incomplete: incomplete ? 1 : 0,
         ...pageParams(page),
         ...(employmentId ? { employment_id: employmentId } : {}),
+        ...(search && search.trim() !== '' ? { q: search.trim() } : {}),
       },
     }).then(response => response.data),
   saveOvertimeConsent: (payload: {
