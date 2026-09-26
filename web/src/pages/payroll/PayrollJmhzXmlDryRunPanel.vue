@@ -21,11 +21,22 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { averageEarningsTarget } from './payrollRemediation'
+import {
+  jmhzBlockerLabel,
+  jmhzErrorMessage,
+  jmhzRemediationKind,
+  jmhzRemediationTarget,
+} from './jmhzBlockerRemediation'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+import PayrollJmhzDeferralList from './PayrollJmhzDeferralList.vue'
 
 const workplaceBulkDialogRun = ref<PayrollRun | null>(null)
 
-const props = defineProps<{ runs: PayrollRun[] }>()
+const props = withDefaults(defineProps<{
+  runs: PayrollRun[]
+  /** Prostředí, ve kterém se odložené vztahy doplňují opravným hlášením. */
+  environment?: 'test' | 'production'
+}>(), { environment: 'production' })
 
 interface DryRunState {
   running: boolean
@@ -34,7 +45,7 @@ interface DryRunState {
   showXml: boolean
 }
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const states = ref<Record<number, DryRunState>>({})
@@ -157,8 +168,9 @@ async function run(payrollRun: PayrollRun) {
       selectedOffice.value[id] ?? null,
     )
     states.value[id].result = result
-    if (result.status === 'blocked'
-      && result.blockers.some(blocker => blocker.entity_id !== null)
+    if ((result.status === 'blocked'
+      && result.blockers.some(blocker => blocker.entity_id !== null))
+      || (result.deferred?.employment_ids.length ?? 0) > 0
     ) {
       await ensureRemediationContext()
     }
@@ -172,12 +184,21 @@ async function run(payrollRun: PayrollRun) {
   }
 }
 
-function blockerLabel(code: string): string {
-  const key = `payroll.submissions.overview.jmhz_dry_run_blockers.${code}`
-  const translated = t(key)
-  return translated === key
-    ? t('payroll.submissions.overview.jmhz_dry_run_blockers.unknown')
-    : translated
+/**
+ * Co je špatně. Popisek z katalogu kódů; bez něj věta serveru, nikdy
+ * „neznámá blokace" s odkazem na podporu, když server příčinu zná.
+ */
+function blockerLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
+  return jmhzBlockerLabel(t, te, blocker)
+}
+
+/**
+ * Kde a jak to opravit. Česky nese podrobný krok server; v jiném jazyce se
+ * použije přeložený krok podle druhu nápravy.
+ */
+function blockerStep(blocker: PayrollJmhzXmlDryRunBlocker): string {
+  if (locale.value === 'cs' && blocker.action) return blocker.action
+  return t(`payroll.jmhz_gate.steps.${jmhzRemediationKind(blocker)}`)
 }
 
 interface BlockerGroup {
@@ -261,7 +282,6 @@ function blockerTarget(
   payrollRun?: PayrollRun,
 ): RouteLocationRaw | null {
   const periodQuery = payrollRun ? { period: payrollRun.period_start.slice(0, 7) } : {}
-  if (!te(`payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`)) return '/admin/support'
   const identity = identityTarget(blocker, entityId)
   if (identity !== null) return identity
   if (blocker.code === 'jmhz_primary_employment_unresolved') {
@@ -328,39 +348,17 @@ function blockerTarget(
     // musí mířit na Mzdové běhy, ne na kartu zaměstnance.
     return { name: 'payroll-runs', query: periodQuery }
   }
-  switch (blocker.entity_type) {
-    case 'employment':
-      return entityId === null
-        ? { name: 'payroll-people' }
-        : { name: 'payroll-people', query: { employment: String(entityId) } }
-    case 'person':
-    case 'employee':
-      return entityId === null
-        ? { name: 'payroll-people' }
-        : { name: 'payroll-people', query: { person: String(entityId) } }
-    case 'component':
-      return { name: 'payroll-components' }
-    case 'office':
-      return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
-    case 'run':
-    case 'revision':
-    case 'preparation':
-      return { name: 'payroll-runs', query: periodQuery }
-    default:
-      return null
-  }
+  // Ostatní kódy nese server s druhem nápravy (JmhzBlockerCatalog).
+  return jmhzRemediationTarget(blocker, entityId, {
+    period: payrollRun ? payrollRun.period_start.slice(0, 7) : null,
+    employments: remediationEmployments.value,
+  })
 }
 
 function blockerActionLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
-  if (!te(`payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`)) return t('nav.support')
   const codeKey = `payroll.submissions.overview.jmhz_dry_run_action_codes.${blocker.code}`
-  const codeTranslated = t(codeKey)
-  if (codeTranslated !== codeKey) return codeTranslated
-  const key = `payroll.submissions.overview.jmhz_dry_run_actions.${blocker.entity_type}`
-  const translated = t(key)
-  return translated === key
-    ? t('payroll.submissions.overview.jmhz_dry_run_actions.default')
-    : translated
+  if (te(codeKey)) return t(codeKey)
+  return t(`payroll.jmhz_gate.remediation.${jmhzRemediationKind(blocker)}`)
 }
 
 function blockerUsesSharedTarget(code: string): boolean {
@@ -498,6 +496,123 @@ function startBlockedReason(payrollRun: PayrollRun): string {
     return t('payroll.submissions.overview.jmhz_social_multiple_offices')
   }
   return ''
+}
+
+/*
+ * ─── Odložení vztahu z řádného hlášení ─────────────────────────────────────
+ *
+ * Jeden zaměstnanec s neúplnými daty nesmí zablokovat hlášení za ostatní.
+ * Účetní u nálezu na vztahu (nebo osobě) zvolí „Odložit z hlášení", uvede
+ * důvod a řádné hlášení se sestaví bez jeho formuláře. Pojistná část zůstává
+ * za všechny, formulář se doplní opravným hlášením ze seznamu odložených.
+ */
+interface DeferralDraft {
+  revision: number
+  run: PayrollRun
+  employmentId: number
+  label: string
+  concurrent: string[]
+  reason: string
+  showValidation: boolean
+  busy: boolean
+  error: string
+}
+
+const deferralDraft = ref<DeferralDraft | null>(null)
+const deferralRefresh = ref<Record<number, number>>({})
+
+/** Vztah, za který se odkládá: u nálezu na osobě její vztah v běhu. */
+function deferralEmploymentId(blocker: PayrollJmhzXmlDryRunBlocker, entityId: number): number | null {
+  if (blocker.entity_type === 'employment') return entityId
+  const own = remediationEmployments.value.filter(item => item.employee_id === entityId)
+  return own[0]?.id ?? null
+}
+
+function canDefer(blocker: PayrollJmhzXmlDryRunBlocker, entityId: number | null): boolean {
+  return canWrite.value
+    && blocker.deferrable === true
+    && entityId !== null
+    && deferralEmploymentId(blocker, entityId) !== null
+}
+
+function askDefer(payrollRun: PayrollRun, blocker: PayrollJmhzXmlDryRunBlocker, entityId: number, index: number) {
+  const revision = revisionId(payrollRun)
+  const employmentId = deferralEmploymentId(blocker, entityId)
+  if (revision === null || employmentId === null) return
+  const employment = remediationEmployments.value.find(item => item.id === employmentId)
+  const concurrent = employment === undefined
+    ? []
+    : remediationEmployments.value
+      .filter(item => item.employee_id === employment.employee_id && item.id !== employmentId)
+      .map(item => [item.full_name, personalNumberLabel(t, item.code)].filter(part => part !== '').join(' · '))
+  deferralDraft.value = {
+    revision,
+    run: payrollRun,
+    employmentId,
+    label: remediationLabel(blocker, entityId, index),
+    concurrent,
+    reason: '',
+    showValidation: false,
+    busy: false,
+    error: '',
+  }
+}
+
+const deferralReasonValid = computed(() => (deferralDraft.value?.reason.trim().length ?? 0) >= 3)
+
+async function confirmDefer() {
+  const draft = deferralDraft.value
+  if (draft === null || draft.busy || !canWrite.value) return
+  if (!deferralReasonValid.value) {
+    draft.showValidation = true
+    return
+  }
+  const result = states.value[draft.revision]?.result
+  if (!result) return
+  draft.busy = true
+  draft.error = ''
+  try {
+    await payrollApi.deferJmhzEmployment({
+      environment: 'test',
+      preparationId: result.preparation_id,
+      employmentId: draft.employmentId,
+      officeId: selectedOffice.value[draft.revision] ?? null,
+      reason: draft.reason.trim(),
+    })
+    deferralDraft.value = null
+    deferralRefresh.value = {
+      ...deferralRefresh.value,
+      [draft.revision]: (deferralRefresh.value[draft.revision] ?? 0) + 1,
+    }
+    await run(draft.run)
+  } catch (exception) {
+    draft.error = jmhzErrorMessage(t, te, locale.value, exception, 'payroll.jmhz_gate.deferral.defer_failed')
+  } finally {
+    draft.busy = false
+  }
+}
+
+/** Jména odložených vztahů v hotovém testu. */
+function deferredNames(result: PayrollJmhzXmlDryRun): string[] {
+  return (result.deferred?.employment_ids ?? []).map((employmentId) => {
+    const employment = remediationEmployments.value.find(item => item.id === employmentId)
+    return employment === undefined
+      ? t('payroll.jmhz_gate.deferral.unnamed_employment', { id: employmentId })
+      : [employment.full_name, personalNumberLabel(t, employment.code)].filter(part => part !== '').join(' · ')
+  })
+}
+
+function expectedWarning(result: PayrollJmhzXmlDryRun, finding: PayrollJmhzControlFinding): boolean {
+  return result.deferred?.expected_warning_control_ids.includes(finding.control_id) ?? false
+}
+
+/** XML jednoho dílčího balíku do schránky (pro ruční nahrání na ePortál). */
+async function copyPackageXml(xml: string) {
+  try {
+    await navigator.clipboard.writeText(xml)
+  } catch {
+    // Schránku může prohlížeč zakázat; XML zůstává dostupné pod „Zobrazit XML".
+  }
 }
 
 /** Kopírovat se nemusí podařit — schránku umí prohlížeč zakázat politikou. */
@@ -694,6 +809,11 @@ async function copyXml(payrollRun: PayrollRun) {
                     o dva sloupce doprava.
                   -->
                   <li v-for="finding in group.findings" :key="`${group.key}-${finding.control_id}-${finding.form_ordinal ?? ''}`">
+                    <span
+                      v-if="group.key === 'warnings' && expectedWarning(state(payrollRun)!.result!, finding)"
+                      class="mr-1 inline-flex whitespace-nowrap rounded-full border border-primary-500/30 bg-primary-50 px-1.5 text-xs font-medium text-primary-700"
+                      :data-test="`jmhz-controls-expected-${finding.control_id}`"
+                    >{{ t('payroll.jmhz_gate.deferral.expected_badge') }}</span>
                     {{ finding.message }}
                     <span class="font-mono text-xs opacity-75">
                       {{ finding.error_code ?? finding.control_id }}
@@ -709,6 +829,38 @@ async function copyXml(payrollRun: PayrollRun) {
                   </li>
                 </ul>
               </div>
+            </div>
+
+            <div
+              v-if="(state(payrollRun)!.result!.packages?.length ?? 0) > 1"
+              class="mt-3 rounded-lg border border-primary-500/30 bg-surface p-3 text-sm text-neutral-800"
+              data-test="jmhz-dry-run-packages"
+            >
+              <p class="font-medium">
+                {{ t('payroll.jmhz_gate.packages.title', { count: state(payrollRun)!.result!.packages!.length }) }}
+              </p>
+              <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.jmhz_gate.packages.hint') }}</p>
+              <ul class="mt-2 space-y-2">
+                <li
+                  v-for="pkg in state(payrollRun)!.result!.packages!"
+                  :key="pkg.ordinal"
+                  class="flex flex-wrap items-center justify-between gap-2"
+                  :data-test="`jmhz-dry-run-package-${pkg.ordinal}`"
+                >
+                  <span>
+                    {{ t('payroll.jmhz_gate.packages.package', { ordinal: pkg.ordinal }) }}
+                    <span class="ml-1 text-xs" :class="pkg.submittable ? 'text-success-700' : 'text-warning-700'">
+                      {{ pkg.submittable ? t('payroll.jmhz_gate.packages.valid') : t('payroll.jmhz_gate.packages.invalid', { count: pkg.blocking.length }) }}
+                    </span>
+                  </span>
+                  <button type="button" :class="btnOutline('neutral')" @click="copyPackageXml(pkg.xml)">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.copy" />
+                    </svg>
+                    {{ t('payroll.jmhz_gate.packages.copy') }}
+                  </button>
+                </li>
+              </ul>
             </div>
 
             <div class="mt-3 flex flex-wrap gap-2">
@@ -763,7 +915,8 @@ async function copyXml(payrollRun: PayrollRun) {
               >
                 <div class="flex flex-wrap items-start justify-between gap-2">
                   <div class="min-w-0 flex-1">
-                    <p class="font-medium">{{ blockerLabel(group.blocker.code) }}</p>
+                    <p class="font-medium" data-test="jmhz-dry-run-blocker-label">{{ blockerLabel(group.blocker) }}</p>
+                    <p class="mt-1 text-xs" data-test="jmhz-dry-run-blocker-step">{{ blockerStep(group.blocker) }}</p>
                     <p
                       v-if="groupLabels(group).length"
                       class="mt-1 text-xs font-semibold"
@@ -804,7 +957,57 @@ async function copyXml(payrollRun: PayrollRun) {
                     </svg>
                     {{ blockerActionLabel(group.blocker) }}
                   </RouterLink>
+                  <button
+                    v-else-if="jmhzRemediationKind(group.blocker) === 'retry' && canWrite"
+                    type="button"
+                    :class="btnOutline('warning')"
+                    data-test="jmhz-dry-run-retry"
+                    :disabled="state(payrollRun)?.running"
+                    @click="run(payrollRun)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.cycle" />
+                    </svg>
+                    {{ t('payroll.jmhz_gate.remediation.retry') }}
+                  </button>
+                  <button
+                    v-if="group.entityIds.length === 1 && canDefer(group.blocker, group.entityIds[0]!)"
+                    type="button"
+                    :class="btnOutline('neutral')"
+                    :data-test="`jmhz-dry-run-defer-${group.entityIds[0]}`"
+                    @click="askDefer(payrollRun, group.blocker, group.entityIds[0]!, 0)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.pause" />
+                    </svg>
+                    {{ t('payroll.jmhz_gate.deferral.defer') }}
+                  </button>
                 </div>
+                <details
+                  v-if="group.entityIds.length > 1 && group.entityIds.length <= 10
+                    && canDefer(group.blocker, group.entityIds[0]!)"
+                  class="mt-2"
+                  data-test="jmhz-dry-run-defer-list"
+                >
+                  <summary class="cursor-pointer font-medium underline decoration-dotted underline-offset-4">
+                    {{ t('payroll.jmhz_gate.deferral.defer_multiple', { count: group.entityIds.length }) }}
+                  </summary>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <button
+                      v-for="(entityId, index) in group.entityIds"
+                      :key="entityId"
+                      type="button"
+                      :class="btnOutline('neutral')"
+                      :data-test="`jmhz-dry-run-defer-${entityId}`"
+                      @click="askDefer(payrollRun, group.blocker, entityId, index)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.pause" />
+                      </svg>
+                      {{ remediationLabel(group.blocker, entityId, index) }}
+                    </button>
+                  </div>
+                </details>
                 <details
                   v-if="group.blocker.code !== 'jmhz_workplace_codebooks_unverified'
                     && blockerTarget(group.blocker) && group.entityIds.length > 1
@@ -863,10 +1066,104 @@ async function copyXml(payrollRun: PayrollRun) {
               </li>
             </ul>
           </div>
+          <div
+            v-if="state(payrollRun)!.result!.deferred"
+            class="mt-3 rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-900"
+            data-test="jmhz-dry-run-deferred"
+          >
+            <p class="font-medium">
+              {{ t('payroll.jmhz_gate.deferral.in_report', {
+                count: state(payrollRun)!.result!.deferred!.employment_ids.length,
+                names: deferredNames(state(payrollRun)!.result!).join(', '),
+              }) }}
+            </p>
+            <p class="mt-1 text-xs">{{ t('payroll.jmhz_gate.deferral.in_report_hint') }}</p>
+            <p
+              v-if="state(payrollRun)!.result!.deferred!.summary_excluded_employee_ids.length"
+              class="mt-1 text-xs text-warning-700"
+              data-test="jmhz-dry-run-deferred-summary"
+            >
+              {{ t('payroll.jmhz_gate.deferral.summary_excluded', {
+                count: state(payrollRun)!.result!.deferred!.summary_excluded_employee_ids.length,
+              }) }}
+            </p>
+            <p
+              v-if="state(payrollRun)!.result!.deferred!.expected_warning_control_ids.length"
+              class="mt-1 text-xs"
+              data-test="jmhz-dry-run-deferred-expected"
+            >
+              {{ t('payroll.jmhz_gate.deferral.expected_warnings', {
+                controls: state(payrollRun)!.result!.deferred!.expected_warning_control_ids.join(', '),
+              }) }}
+            </p>
+          </div>
           <p class="mt-3 text-xs text-neutral-500">
             {{ state(payrollRun)!.result!.official_submission.reason }}
           </p>
         </template>
+
+        <div
+          v-if="deferralDraft && deferralDraft.revision === payrollRun.revision_id"
+          class="mt-3 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-900"
+          data-test="jmhz-defer-form"
+        >
+          <p class="font-medium">
+            {{ t('payroll.jmhz_gate.deferral.form_title', { name: deferralDraft.label }) }}
+          </p>
+          <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+            <li>{{ t('payroll.jmhz_gate.deferral.form_obligation') }}</li>
+            <li>{{ t('payroll.jmhz_gate.deferral.form_pvpoj') }}</li>
+            <li v-if="deferralDraft.concurrent.length" data-test="jmhz-defer-form-concurrent">
+              {{ t('payroll.jmhz_gate.deferral.form_concurrent', { names: deferralDraft.concurrent.join(', ') }) }}
+            </li>
+          </ul>
+          <label class="mt-2 block text-xs font-medium" for="jmhz-defer-reason">
+            {{ t('payroll.jmhz_gate.deferral.reason_label') }}
+          </label>
+          <textarea
+            id="jmhz-defer-reason"
+            v-model="deferralDraft.reason"
+            rows="2"
+            maxlength="500"
+            class="mt-1 w-full rounded-lg border border-neutral-300 bg-surface px-2 py-1 text-sm text-neutral-900"
+            :placeholder="t('payroll.jmhz_gate.deferral.reason_placeholder')"
+            data-test="jmhz-defer-reason"
+          />
+          <p v-if="deferralDraft.showValidation && !deferralReasonValid" class="mt-1 text-xs text-danger-700">
+            {{ t('payroll.jmhz_gate.deferral.reason_required') }}
+          </p>
+          <p v-if="deferralDraft.error" class="mt-2 rounded-lg border border-danger-500/30 bg-danger-50 p-2 text-xs text-danger-700" role="alert">
+            {{ deferralDraft.error }}
+          </p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnFilled('warning')"
+              :disabled="deferralDraft.busy"
+              data-test="jmhz-defer-confirm"
+              @click="confirmDefer"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.pause" />
+              </svg>
+              {{ deferralDraft.busy ? t('common.loading') : t('payroll.jmhz_gate.deferral.confirm') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" @click="deferralDraft = null">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.x" />
+              </svg>
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+        </div>
+
+        <PayrollJmhzDeferralList
+          v-if="payrollRun.revision_id"
+          :revision-id="payrollRun.revision_id"
+          :environment="environment"
+          :can-write="canWrite"
+          :refresh-key="deferralRefresh[payrollRun.revision_id] ?? 0"
+        />
 
         <p
           v-if="state(payrollRun)?.error"

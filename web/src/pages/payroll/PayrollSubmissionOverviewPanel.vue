@@ -1373,6 +1373,7 @@ onMounted(load)
       <PayrollJmhzXmlDryRunPanel
         v-if="mode === 'jmhz'"
         :runs="jmhzApprovedRuns"
+        :environment="environment"
       />
 
       <PayrollJmhzDispatchPanel

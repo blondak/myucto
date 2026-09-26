@@ -18,6 +18,16 @@ const m = vi.hoisted(() => ({
   workplaceBulkApply: vi.fn(),
   employmentJmhzEvidenceOptions: vi.fn(() => Promise.resolve({ countries: [] })),
   searchJmhzMunicipalities: vi.fn(() => Promise.resolve([])),
+  deferrals: vi.fn(() => Promise.resolve({
+    environment: 'production',
+    run_id: 8,
+    period_start: '2026-08-01',
+    due_on: '2026-09-21',
+    overdue: false,
+    open_count: 0,
+    deferrals: [],
+  })),
+  defer: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -30,6 +40,8 @@ vi.mock('@/api/payroll', () => ({
     workplaceBulkApply: m.workplaceBulkApply,
     employmentJmhzEvidenceOptions: m.employmentJmhzEvidenceOptions,
     searchJmhzMunicipalities: m.searchJmhzMunicipalities,
+    jmhzDeferrals: m.deferrals,
+    deferJmhzEmployment: m.defer,
   },
 }))
 
@@ -305,7 +317,10 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('jmhz_dry_run_blocked')
-    expect(wrapper.text()).toContain('jmhz_dry_run_blockers.unknown')
+    // Kód bez překladu i bez věty serveru: neutrální „nález bez popisu",
+    // ne „neznámá blokace" s odkazem na podporu.
+    expect(wrapper.text()).toContain('payroll.jmhz_gate.unlabelled')
+    expect(wrapper.findAll('a[data-to]').some(link => link.attributes('data-to') === '"/admin/support"')).toBe(false)
     expect(wrapper.text()).toContain('jmhz_dry_run_blocker_occurrences')
     expect(wrapper.findAll('[data-test="jmhz-dry-run-blocker"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-test="jmhz-dry-run-technical-detail"]')).toHaveLength(2)
@@ -486,6 +501,158 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
 
     await wrapper.get(`[data-test="jmhz-dry-run-office-18"] select`).setValue('4')
     expect(wrapper.find('[data-test="jmhz-dry-run-blocked-18"]').exists()).toBe(false)
+  })
+
+  /*
+   * Jeden blokovaný zaměstnanec nesmí zastavit hlášení za ostatní: u nálezu
+   * na vztahu jde vztah odložit s povinným důvodem a test se spustí znovu.
+   */
+  it('blokovaný vztah odloží s důvodem a test spustí znovu', async () => {
+    m.context.mockResolvedValue([
+      { id: 12, employee_id: 13, code: 'DPP-13', relation_type: 'dpp', status: 'active', full_name: 'Dana Testovací' },
+    ])
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 77,
+      blockers: [{
+        code: 'jmhz_average_hourly_earning_missing',
+        entity_type: 'employment',
+        entity_id: 12,
+        attribute_ids: ['10345'],
+        reason: 'Chybí ověřený průměrný hodinový výdělek.',
+        action: 'Otevřete Mzdy → Absence a průměry a doplňte výdělek.',
+        remediation: { kind: 'averages', field: null },
+        deferrable: true,
+      }],
+      official_submission: { supported: false, reason_code: 'x', reason: 'x' },
+    })
+    m.defer.mockResolvedValue({ created: true, deferral_ids: [5], employee_id: 13, employment_ids: [12], office_id: 4, source_revision_id: 18, blocker_codes: ['jmhz_average_hourly_earning_missing'] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[], environment: 'production' },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    // Proklik vede na průměr konkrétního vztahu a čtvrtletí.
+    const targets = wrapper.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to')!))
+    expect(targets).toContain('/payroll/absences?employment=12&tab=averages&year=2026&quarter=3')
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-step"]').text()).toContain('Absence a průměry')
+
+    await wrapper.get('[data-test="jmhz-dry-run-defer-12"]').trigger('click')
+    expect(wrapper.get('[data-test="jmhz-defer-form"]').text()).toContain('Dana Testovací')
+    await wrapper.get('[data-test="jmhz-defer-confirm"]').trigger('click')
+    expect(m.defer).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('payroll.jmhz_gate.deferral.reason_required')
+
+    await wrapper.get('[data-test="jmhz-defer-reason"]').setValue('Průměr se doplní do konce měsíce.')
+    await wrapper.get('[data-test="jmhz-defer-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(m.defer).toHaveBeenCalledWith({
+      environment: 'test',
+      preparationId: 77,
+      employmentId: 12,
+      officeId: 4,
+      reason: 'Průměr se doplní do konce měsíce.',
+    })
+    expect(m.freeze).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="jmhz-defer-form"]').exists()).toBe(false)
+  })
+
+  it('firemní nález odložit nenabídne', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 77,
+      blockers: [{
+        code: 'jmhz_office_variable_symbol_missing',
+        entity_type: 'office',
+        entity_id: 4,
+        attribute_ids: ['10221'],
+        remediation: { kind: 'office', field: null },
+        deferrable: false,
+      }],
+      official_submission: { supported: false, reason_code: 'x', reason: 'x' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test^="jmhz-dry-run-defer-"]').exists()).toBe(false)
+  })
+
+  it('technickou vadu přípravy nabídne spustit znovu a ukáže větu serveru', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 77,
+      blockers: [{
+        code: 'some_internal_code_not_translated_yet',
+        entity_type: 'preparation',
+        entity_id: 77,
+        attribute_ids: [],
+        reason: 'Otisk přípravy nesouhlasí.',
+        remediation: { kind: 'retry', field: null },
+        deferrable: false,
+      }],
+      official_submission: { supported: false, reason_code: 'x', reason: 'x' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-label"]').text()).toBe('Otisk přípravy nesouhlasí.')
+    await wrapper.get('[data-test="jmhz-dry-run-retry"]').trigger('click')
+    await flushPromises()
+    expect(m.freeze).toHaveBeenCalledTimes(2)
+  })
+
+  it('u hlášení s odloženým vztahem vysvětlí očekávaná varování kontrol', async () => {
+    m.context.mockResolvedValue([
+      { id: 12, employee_id: 13, code: 'DPP-13', relation_type: 'dpp', status: 'active', full_name: 'Dana Testovací' },
+    ])
+    const warning = {
+      control_id: 12,
+      name: 'Pojistné za zaměstnance',
+      outcome: 'failed',
+      scope: 'pvpoj',
+      passability: 'passable',
+      technical: false,
+      part: 'pvpoj',
+      form_ordinal: null,
+      message: 'Pojistné za zaměstnance neodpovídá součtu součástí.',
+      attribute_ids: ['10028'],
+      error_code: 40012,
+    }
+    m.dryRun.mockResolvedValue({
+      status: 'dry_run_valid',
+      preparation_id: 77,
+      blockers: [],
+      deferred: {
+        purpose: 'deferral',
+        deferral_ids: [5],
+        employment_ids: [12],
+        employee_ids: [13],
+        summary_excluded_employee_ids: [],
+        blockers: [],
+        expected_warning_control_ids: [12],
+      },
+      xml,
+      xml_sha256: 'b'.repeat(64),
+      schema: { package_key: 'p', data_version: '1.4.3', bundle_sha256: 'c', document_sha256: 'd' },
+      controls: {
+        schema_reference: 's', catalog_key: 'k', catalog_manifest_sha256: 'e', submittable: true,
+        counts: { passed: 1, failed: 1, not_applicable: 0, not_evaluable: 0, unimplemented: 0, unverifiable: 0 },
+        deviations: [], blocking: [], warnings: [warning], coverage_gaps: [], evaluated: [],
+      },
+      official_submission: { supported: false, reason_code: 'x', reason: 'x' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-dry-run-deferred"]').text()).toContain('Dana Testovací')
+    expect(wrapper.get('[data-test="jmhz-dry-run-deferred-expected"]').text()).toContain('12')
+    expect(wrapper.find('[data-test="jmhz-controls-expected-12"]').exists()).toBe(true)
   })
 
   /** Období karty v lidském tvaru, ne strojové „2026-08". */
