@@ -22,6 +22,30 @@ export type AbsenceType =
   | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
   | 'public_function' | 'employee_obstacle_unpaid'
 
+/**
+ * Druh placené překážky v práci. Pořadí zrcadlí `payroll_absences.obstacle_kind`
+ * (kontrakt hlídá `PayrollEnumContractTest`). Sazbu náhrady a její meze nese
+ * {@link PayrollObstacleKindRule} ze serveru, tady se nic nepočítá.
+ */
+export type ObstacleKind =
+  | 'medical_examination' | 'commute_prevented_disabled' | 'own_wedding'
+  | 'child_wedding' | 'childbirth_transport' | 'death_close_relative'
+  | 'death_relative' | 'family_escort' | 'disabled_child_escort'
+  | 'coworker_funeral' | 'relocation_employer_interest' | 'job_search_redundancy'
+  | 'blood_donation' | 'employee_representation' | 'qualification_training'
+  | 'other_paid_employee' | 'downtime' | 'weather_interruption'
+  | 'other_employer_obstacle' | 'partial_unemployment'
+
+export interface PayrollObstacleKindRule {
+  kind: ObstacleKind
+  absence_type: 'employee_obstacle' | 'employer_obstacle'
+  default_rate_basis_points: number
+  min_rate_basis_points: number
+  max_rate_basis_points: number
+  requires_reason: boolean
+  statutory_basis: string
+}
+
 export interface PayrollAbsenceEmployment {
   id: number
   employee_id: number
@@ -73,6 +97,11 @@ export interface PayrollAbsence {
    * akcí ({@link payrollAbsenceApi.setSicknessWindowCarried}).
    */
   sickness_window_carried_days: number
+  /** Jen u placené překážky: druh, podle kterého se určila sazba náhrady. */
+  obstacle_kind?: ObstacleKind | null
+  /** Sazba náhrady v bazických bodech (10 000 = 100 % průměru). */
+  compensation_rate_basis_points?: number | null
+  compensation_rate_reason?: string | null
   row_version: number
 }
 
@@ -101,6 +130,10 @@ export interface AbsencePayload {
   partial_last_minutes: number | null
   average_snapshot_id: number | null
   note: string | null
+  /** Jen u `employee_obstacle` / `employer_obstacle`, jinak se neposílá. */
+  obstacle_kind?: ObstacleKind | null
+  compensation_rate_basis_points?: number | null
+  compensation_rate_reason?: string | null
 }
 
 export interface PayrollAbsencesPage {
@@ -228,6 +261,16 @@ export const payrollAbsenceApi = {
   context: () =>
     api.get<{ employments: PayrollAbsenceEmployment[] }>('/payroll/time/context')
       .then(response => response.data.employments),
+  /** Vztahy i tabulka druhů překážek s jejich sazbami (jeden požadavek). */
+  absenceContext: () =>
+    api.get<{
+      employments: PayrollAbsenceEmployment[]
+      obstacle_kinds?: PayrollObstacleKindRule[]
+    }>('/payroll/time/context')
+      .then(response => ({
+        employments: response.data.employments,
+        obstacleKinds: response.data.obstacle_kinds ?? [],
+      })),
   /**
    * Stránka nepřítomností. Server strop drží tvrdě (výchozí 50, maximum 200),
    * takže bez `limit` a `offset` bychom viděli jen první stránku a o zbytku
@@ -270,8 +313,16 @@ export const payrollAbsenceApi = {
      */
     overdraw_confirmed?: boolean
   }) =>
-    api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/decision`, payload)
-      .then(response => response.data.absence),
+    api.post<{
+      absence: PayrollAbsence
+      /**
+       * Výpočet ze schválení. U placené překážky nese `warning`
+       * `obstacle_without_published_shifts`, když náhrada nevznikla, protože
+       * na dny překážky nejsou rozvržené směny.
+       */
+      calculation?: { warning?: string | null } | null
+    }>(`/payroll/time/absences/${id}/decision`, payload)
+      .then(response => response.data),
   cancel: (id: number, rowVersion: number) =>
     api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/cancel`, {
       row_version: rowVersion,

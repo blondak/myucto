@@ -2880,7 +2880,9 @@
         },
         "top_up_responsibility_source": {
           "declared": "evidenced",
-          "statutory_default": "by law (§ 3(10) of Act No. 592/1992 Coll.)"
+          "statutory_default": "by law (§ 3(10) of Act No. 592/1992 Coll.)",
+          "derived_employer_obstacle": "derived from an approved employer-side obstacle with reduced compensation (§ 3(10) of Act No. 592/1992 Coll.)",
+          "derived_mixed_causes": "the month has both an employer-side obstacle and unpaid absence — record who pays in the statutory evidence"
         },
         "health_minimum_days": "The minimum is prorated to {applicable} calendar days ({excluded} days are not counted); the full monthly minimum is {statutory}.",
         "health_other_employers": "Other employers evidence a base of {other}, {combined} in total — the minimum is therefore assessed from the sum.",
@@ -25730,6 +25732,66 @@
       "other": "Other absence",
       "public_function": "Holding a public office (unpaid leave)",
       "employee_obstacle_unpaid": "Employee-side obstacle without wage compensation"
+    },
+    "obstacle": {
+      "kind": "Kind of obstacle",
+      "rate": "Wage compensation (% of average earnings)",
+      "rate_fixed": "The rate is set by law and cannot be changed.",
+      "rate_range": "The law allows {min} to {max} %. Give a reason for any rate other than the table rate.",
+      "rate_value": "compensation {rate} % of average",
+      "reason": "Reason for the rate / basis",
+      "reason_hint": "For example an internal regulation, collective agreement or agreement under which the compensation exceeds the statutory minimum.",
+      "reason_hint_partial_unemployment": "Name the agreement with the trade union or the internal regulation setting the compensation (§ 209(2) of the Labour Code). Without it, this is another obstacle at 100 % of average.",
+      "kind_missing": "The obstacle has no kind, so the wage compensation cannot be determined and it cannot be approved. Cancel it and record it again with a kind selected.",
+      "without_shifts": "The obstacle is approved but no wage compensation was created ({name}): there are no scheduled shifts on the obstacle days. Schedule shifts in Attendance, or enter the compensation as a payroll input.",
+      "pick_hint": {
+        "employee_obstacle": "Select the personal obstacle (doctor, wedding, death, escort…). Compensation is always 100 % of average earnings and is reported monthly as compensation for employee-side obstacles (10341). Record obstacles without compensation as \"Employee-side obstacle without wage compensation\".",
+        "employer_obstacle": "Select the employer-side obstacle: downtime (at least 80 %), bad weather or natural disaster (at least 60 %), partial unemployment (at least 60 % under an internal regulation) or other obstacle (100 %). Compensation is reported monthly as 10340."
+      },
+      "kinds": {
+        "medical_examination": "Medical examination or treatment",
+        "commute_prevented_disabled": "Commute prevented (severely disabled employee)",
+        "own_wedding": "Own wedding",
+        "child_wedding": "Child's wedding",
+        "childbirth_transport": "Taking the wife (partner) to give birth",
+        "death_close_relative": "Death of spouse, partner or child",
+        "death_relative": "Death of parent, sibling or other relative",
+        "family_escort": "Escorting a family member to the doctor",
+        "disabled_child_escort": "Escorting a disabled child to a facility",
+        "coworker_funeral": "Funeral of a co-worker",
+        "relocation_employer_interest": "Relocation in the employer's interest",
+        "job_search_redundancy": "Looking for a new job (redundancy notice)",
+        "blood_donation": "Blood or other biological material donation",
+        "employee_representation": "Trade union, works council or OSH duties",
+        "qualification_training": "Training or study required for the job",
+        "other_paid_employee": "Other paid obstacle (internal regulation)",
+        "downtime": "Downtime",
+        "weather_interruption": "Work interrupted by weather or natural disaster",
+        "other_employer_obstacle": "Other employer-side obstacle",
+        "partial_unemployment": "Partial unemployment"
+      },
+      "hints": {
+        "medical_examination": "Government Decree 590/2006, item 1: 100 % compensation only for the necessary time at the nearest contracted doctor, if it could not be done outside working hours. For part of a shift, fill in the missed hours of the first day.",
+        "commute_prevented_disabled": "Government Decree 590/2006, item 4: at most 1 day at 100 %, only for a severely disabled employee whose own vehicle journey was prevented by weather or an emergency.",
+        "own_wedding": "Government Decree 590/2006, item 5(a): 2 days off, 100 % compensation only for the day of the ceremony. Record the second day as an obstacle without compensation.",
+        "child_wedding": "Government Decree 590/2006, item 5(b): 1 day at 100 %. A parent's wedding is without compensation.",
+        "childbirth_transport": "Government Decree 590/2006, item 6(a): necessary time at 100 %. Attending the birth is without compensation.",
+        "death_close_relative": "Government Decree 590/2006, item 7(a): 2 days plus a day for the funeral at 100 %. Up to 5 further days are without compensation.",
+        "death_relative": "Government Decree 590/2006, item 7(b): 1 day for the funeral and another day if the employee arranges it, at 100 %.",
+        "family_escort": "Government Decree 590/2006, item 8(a)(1): at most 1 day at 100 % for spouse, partner, child, parent or grandparent. No compensation if the employee is entitled to care allowance.",
+        "disabled_child_escort": "Government Decree 590/2006, item 8(b): at most 6 working days a year at 100 %.",
+        "coworker_funeral": "Government Decree 590/2006, item 9: necessary time at 100 % for employees designated by the employer.",
+        "relocation_employer_interest": "Government Decree 590/2006, item 10: at most 2 days; 100 % only when relocating in the employer's interest.",
+        "job_search_redundancy": "Government Decree 590/2006, item 11(a): at most 4 days at 100 % on notice under § 52(a) to (e) of the Labour Code.",
+        "blood_donation": "§ 203(2)(d) and (e) of the Labour Code: 100 % for travel, donation and recovery within 24 hours (48 hours for other biological material).",
+        "employee_representation": "§ 203(2)(a) to (c) of the Labour Code: trade union, works council, OSH representative or union training at 100 %.",
+        "qualification_training": "§ 205 and § 232 of the Labour Code: training or study required for the agreed work and in line with the employer's needs, at 100 %.",
+        "other_paid_employee": "A paid obstacle based on an internal regulation, collective agreement or special law (sick day, personal leave). 100 % compensation; state the basis in the reason.",
+        "downtime": "§ 207(a) of the Labour Code: machine breakdown, missing materials or energy, faulty documents. At least 80 % of average if the employee was not moved to other work.",
+        "weather_interruption": "§ 207(b) of the Labour Code: work interrupted by bad weather or a natural disaster. At least 60 % of average.",
+        "other_employer_obstacle": "§ 208 of the Labour Code: other employer-side obstacles (lack of work, closed operations). 100 % of average.",
+        "partial_unemployment": "§ 209 of the Labour Code: temporary drop in sales or demand. At least 60 % only under an agreement with the union or an internal regulation; otherwise it is another obstacle at 100 %."
+      }
     },
     "status": {
       "requested": "Pending",

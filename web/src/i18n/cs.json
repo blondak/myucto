@@ -2880,7 +2880,9 @@
         },
         "top_up_responsibility_source": {
           "declared": "doloženo evidencí",
-          "statutory_default": "ze zákona (§ 3 odst. 10 z. č. 592/1992 Sb.)"
+          "statutory_default": "ze zákona (§ 3 odst. 10 z. č. 592/1992 Sb.)",
+          "derived_employer_obstacle": "odvozeno ze schválené překážky na straně zaměstnavatele se sníženou náhradou (§ 3 odst. 10 z. č. 592/1992 Sb.)",
+          "derived_mixed_causes": "v měsíci je překážka zaměstnavatele i neplacená nepřítomnost — kdo hradí, určete v zákonné evidenci"
         },
         "health_minimum_days": "Minimum se krátí na {applicable} kalendářních dnů ({excluded} dnů se nezapočítává); plné měsíční minimum je {statutory}.",
         "health_other_employers": "U jiných zaměstnavatelů je doložen základ {other}, dohromady tedy {combined} — proto se minimum posuzuje ze součtu.",
@@ -25730,6 +25732,66 @@
       "other": "Jiná absence",
       "public_function": "Výkon veřejné funkce (volno bez náhrady)",
       "employee_obstacle_unpaid": "Překážka na straně zaměstnance bez náhrady mzdy"
+    },
+    "obstacle": {
+      "kind": "Druh překážky",
+      "rate": "Náhrada mzdy (% průměrného výdělku)",
+      "rate_fixed": "Sazbu stanoví zákon, měnit ji nelze.",
+      "rate_range": "Zákon dovoluje {min} až {max} %. Jinou než tabulkovou sazbu zdůvodněte.",
+      "rate_value": "náhrada {rate} % průměru",
+      "reason": "Důvod sazby / podklad",
+      "reason_hint": "Například vnitřní předpis, kolektivní smlouva nebo dohoda, podle které je náhrada vyšší než zákonné minimum.",
+      "reason_hint_partial_unemployment": "Uveďte dohodu s odborovou organizací nebo vnitřní předpis, který výši náhrady stanoví (§ 209 odst. 2 ZP). Bez něj jde o jinou překážku se 100 % průměru.",
+      "kind_missing": "U překážky chybí druh, podle kterého se určí náhrada mzdy — schválit ji nelze. Zrušte ji a zapište znovu s vybraným druhem.",
+      "without_shifts": "Překážka je schválená, ale náhrada mzdy nevznikla ({name}): na dny překážky nejsou rozvržené směny. Rozvrhněte směny v Docházce, nebo zadejte náhradu jako mzdový vstup.",
+      "pick_hint": {
+        "employee_obstacle": "Vyberte, o jakou osobní překážku jde (lékař, svatba, úmrtí, doprovod…). Náhrada je vždy 100 % průměrného výdělku a jde do měsíčního hlášení jako náhrada za překážky na straně zaměstnance (10341). Překážky bez náhrady zapište jako „Překážka na straně zaměstnance bez náhrady mzdy“.",
+        "employer_obstacle": "Vyberte druh překážky na straně zaměstnavatele: prostoj (nejméně 80 %), nepříznivé počasí nebo živelní událost (nejméně 60 %), částečná nezaměstnanost (nejméně 60 % podle vnitřního předpisu) nebo jiná překážka (100 %). Náhrada jde do měsíčního hlášení jako 10340."
+      },
+      "kinds": {
+        "medical_examination": "Vyšetření nebo ošetření u lékaře",
+        "commute_prevented_disabled": "Znemožnění cesty do práce (těžce zdravotně postižený)",
+        "own_wedding": "Vlastní svatba",
+        "child_wedding": "Svatba dítěte",
+        "childbirth_transport": "Převoz manželky (družky) k porodu",
+        "death_close_relative": "Úmrtí manžela, druha nebo dítěte",
+        "death_relative": "Úmrtí rodiče, sourozence a dalších příbuzných",
+        "family_escort": "Doprovod rodinného příslušníka k lékaři",
+        "disabled_child_escort": "Doprovod zdravotně postiženého dítěte do zařízení",
+        "coworker_funeral": "Pohřeb spoluzaměstnance",
+        "relocation_employer_interest": "Přestěhování v zájmu zaměstnavatele",
+        "job_search_redundancy": "Vyhledání nového zaměstnání (výpověď z organizačních důvodů)",
+        "blood_donation": "Darování krve nebo jiného biologického materiálu",
+        "employee_representation": "Činnost v odborech, radě zaměstnanců nebo BOZP",
+        "qualification_training": "Školení nebo studium potřebné pro výkon práce",
+        "other_paid_employee": "Jiná placená překážka (vnitřní předpis)",
+        "downtime": "Prostoj",
+        "weather_interruption": "Přerušení práce kvůli počasí nebo živelní události",
+        "other_employer_obstacle": "Jiná překážka na straně zaměstnavatele",
+        "partial_unemployment": "Částečná nezaměstnanost"
+      },
+      "hints": {
+        "medical_examination": "NV č. 590/2006 Sb., bod 1: náhrada 100 % průměru jen za nezbytně nutnou dobu u nejbližšího smluvního lékaře, pokud to nešlo mimo pracovní dobu. Na část směny vyplňte zameškané hodiny prvního dne.",
+        "commute_prevented_disabled": "NV č. 590/2006 Sb., bod 4: nejvýše 1 den s náhradou 100 %, jen u těžce zdravotně postiženého zaměstnance, kterému počasí nebo mimořádná událost znemožnily cestu vlastním vozidlem.",
+        "own_wedding": "NV č. 590/2006 Sb., bod 5 písm. a): volno 2 dny, náhrada 100 % jen za den svatebního obřadu. Druhý den zapište jako překážku bez náhrady mzdy.",
+        "child_wedding": "NV č. 590/2006 Sb., bod 5 písm. b): 1 den s náhradou 100 %. Svatba rodiče je bez náhrady mzdy.",
+        "childbirth_transport": "NV č. 590/2006 Sb., bod 6 písm. a): nezbytně nutná doba s náhradou 100 %. Účast u porodu je bez náhrady mzdy.",
+        "death_close_relative": "NV č. 590/2006 Sb., bod 7 písm. a): 2 dny a další den na pohřeb, náhrada 100 %. Dalších až 5 dnů je bez náhrady mzdy.",
+        "death_relative": "NV č. 590/2006 Sb., bod 7 písm. b): 1 den na pohřeb a další den, pokud zaměstnanec pohřeb obstarává, náhrada 100 %.",
+        "family_escort": "NV č. 590/2006 Sb., bod 8 písm. a) bod 1: nejvýše 1 den s náhradou 100 % u manžela, druha, dítěte, rodiče a prarodiče. Má-li zaměstnanec nárok na ošetřovné, náhrada nepřísluší.",
+        "disabled_child_escort": "NV č. 590/2006 Sb., bod 8 písm. b): nejvýše 6 pracovních dnů v roce s náhradou 100 %.",
+        "coworker_funeral": "NV č. 590/2006 Sb., bod 9: nezbytně nutná doba s náhradou 100 % pro zaměstnance, které určí zaměstnavatel.",
+        "relocation_employer_interest": "NV č. 590/2006 Sb., bod 10: nejvýše 2 dny; s náhradou 100 % jen při stěhování v zájmu zaměstnavatele.",
+        "job_search_redundancy": "NV č. 590/2006 Sb., bod 11 písm. a): nejvýše 4 dny s náhradou 100 % při výpovědi podle § 52 písm. a) až e) ZP.",
+        "blood_donation": "§ 203 odst. 2 písm. d) a e) ZP: náhrada 100 % za cestu, odběr a zotavení v rámci 24 hodin (u jiného biologického materiálu 48 hodin).",
+        "employee_representation": "§ 203 odst. 2 písm. a) až c) ZP: výkon funkce v odborech, radě zaměstnanců, BOZP nebo školení odborové organizace s náhradou 100 %.",
+        "qualification_training": "§ 205 a § 232 ZP: školení nebo studium v souladu s potřebou zaměstnavatele, bez kterého nelze sjednanou práci vykonávat, s náhradou 100 %.",
+        "other_paid_employee": "Placená překážka, kterou zakládá vnitřní předpis, kolektivní smlouva nebo zvláštní zákon (sick day, osobní volno). Náhrada 100 %, podklad uveďte v důvodu.",
+        "downtime": "§ 207 písm. a) ZP: porucha stroje, výpadek surovin nebo energie, chybné podklady. Náhrada nejméně 80 % průměru, pokud zaměstnanec nebyl převeden na jinou práci.",
+        "weather_interruption": "§ 207 písm. b) ZP: přerušení práce kvůli nepříznivému počasí nebo živelní události. Náhrada nejméně 60 % průměru.",
+        "other_employer_obstacle": "§ 208 ZP: jiné překážky na straně zaměstnavatele (nedostatek práce, uzavření provozu, prostoje nad rámec § 207). Náhrada 100 % průměru.",
+        "partial_unemployment": "§ 209 ZP: dočasné omezení odbytu nebo poptávky. Náhrada nejméně 60 % jen podle dohody s odbory nebo vnitřního předpisu; bez něj jde o jinou překážku se 100 %."
+      }
     },
     "status": {
       "requested": "Ke schválení",

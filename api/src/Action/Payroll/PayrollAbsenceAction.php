@@ -78,6 +78,7 @@ final class PayrollAbsenceAction
         return Json::ok($response, [
             'employments' => $this->absences->employments($this->currentSupplierId($request)),
             'support_status' => 'manual_review',
+            'obstacle_kinds' => PayrollObstacleKind::catalog(),
         ]);
     }
 

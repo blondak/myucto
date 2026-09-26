@@ -135,6 +135,29 @@ enum PayrollObstacleKind: string
         return $this === self::PartialUnemployment || $this === self::OtherPaidEmployee;
     }
 
+    /**
+     * Tabulka pro formulář nepřítomnosti: formulář z ní předvyplní sazbu
+     * a hlídá meze, server je stejně ověří znovu ({@see \MyInvoice\Service\Payroll\PayrollAbsenceValidator}).
+     *
+     * @return list<array{kind:string,absence_type:string,default_rate_basis_points:int,min_rate_basis_points:int,max_rate_basis_points:int,requires_reason:bool,statutory_basis:string}>
+     */
+    public static function catalog(): array
+    {
+        return array_map(static function (self $kind): array {
+            [$minimum, $maximum] = $kind->rateBounds();
+
+            return [
+                'kind' => $kind->value,
+                'absence_type' => $kind->absenceType(),
+                'default_rate_basis_points' => $kind->defaultRateBasisPoints(),
+                'min_rate_basis_points' => $minimum,
+                'max_rate_basis_points' => $maximum,
+                'requires_reason' => $kind->requiresReason(),
+                'statutory_basis' => $kind->statutoryBasis(),
+            ];
+        }, self::cases());
+    }
+
     /** @return list<self> */
     public static function forAbsenceType(string $absenceType): array
     {

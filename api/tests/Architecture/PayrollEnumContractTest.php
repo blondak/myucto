@@ -474,6 +474,8 @@ final class PayrollEnumContractTest extends TestCase
 
         // Ostatní moduly
         'payrollAbsences.ts::AbsenceType' => 'db:payroll_absences.absence_type',
+        'payrollAbsences.ts::ObstacleKind'
+            => 'enum:MyInvoice\Service\Payroll\Absence\PayrollObstacleKind',
 
         'payrollDeductions.ts::DeductionAgreementStatus'
             => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementStatus',

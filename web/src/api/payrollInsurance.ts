@@ -264,8 +264,11 @@ export interface PayrollHealthBreakdown {
     /**
      * Odkud plátce doplatku pochází: `declared` = někdo ho prohlásil evidencí,
      * `statutory_default` = odvodil se ze zákona (§ 3 odst. 10 z. č. 592/1992
-     * Sb.), protože evidence nebyla potřeba. Prázdné u revizí spočítaných dřív,
-     * než klíč vznikl — tam se nezobrazuje nic.
+     * Sb.), protože evidence nebyla potřeba, `derived_employer_obstacle` =
+     * odvodil se ze schválené překážky zaměstnavatele se sníženou náhradou,
+     * `derived_mixed_causes` = překážka i neplacená nepřítomnost, plátce určí
+     * účetní. Prázdné u revizí spočítaných dřív, než klíč vznikl — tam se
+     * nezobrazuje nic.
      */
     top_up_responsibility_source: string
     top_up_employer_selection: string
