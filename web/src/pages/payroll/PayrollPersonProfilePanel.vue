@@ -35,6 +35,7 @@ import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { todayIso } from './employmentLifecycleUi'
 import { registrationItemLabel } from './registrationMissingItems'
+import { usePersonCardSaveSection } from './personCardSave'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
@@ -629,7 +630,43 @@ function hydratePayoutRules(response: PayrollPayoutRulesResponse) {
   payoutRules.value = response.rules
   payoutProposal.value = response.proposal
   payoutRuleRows.value = response.rules.map(toPayoutRuleRow)
+  rulesBaseline.value = rulesFingerprint()
 }
+
+/*
+ * Otisky pro „je co uložit". Ověření účtu a příznak ověření u pravidla se
+ * zapisují samostatnou akcí hned, takže do rozepsané práce nepatří.
+ */
+function formFingerprint(): string {
+  return JSON.stringify({
+    ...form,
+    row_version: 0,
+    accounts: form.accounts.map(({ verification_source: _source, verified_on: _on, verified_by: _by, row_version: _version, ...rest }) => rest),
+  })
+}
+
+function rulesFingerprint(): string {
+  return JSON.stringify(payoutRuleRows.value.map(({ destination_verified: _verified, row_version: _version, ...rest }) => rest))
+}
+
+const root = ref<HTMLElement | null>(null)
+const formBaseline = ref('')
+const rulesBaseline = ref('')
+const dirty = computed(() => !loading.value
+  && profile.value !== null
+  && (formFingerprint() !== formBaseline.value || rulesFingerprint() !== rulesBaseline.value))
+const { managed } = usePersonCardSaveSection({
+  key: 'profile',
+  label: () => t('payroll.people.profile.title'),
+  dirty: () => dirty.value,
+  save,
+  discard: () => {
+    if (profile.value) hydrate(profile.value)
+    payoutRuleRows.value = payoutRules.value.map(toPayoutRuleRow)
+    rulesBaseline.value = rulesFingerprint()
+  },
+  focus: () => root.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+})
 
 /**
  * Po ověření účtu se přenačte jen návrh a příznak ověření u uložených pravidel.
@@ -926,6 +963,7 @@ function hydrate(value: PayrollPersonProfile) {
       }
     }
   }
+  formBaseline.value = formFingerprint()
 }
 
 function clearPlaintextInputs() {
@@ -1116,9 +1154,10 @@ async function check() {
   }
 }
 
-async function save() {
-  if (saving.value) return
+async function save(): Promise<boolean> {
+  if (saving.value) return false
   saving.value = true
+  let succeeded = false
   try {
     const previousAccountIds = new Set(
       form.accounts.filter(account => account.id !== undefined).map(account => account.id),
@@ -1151,12 +1190,15 @@ async function save() {
     // teprve uložením karty a teprve pak na něj může pravidlo `account:<id>`
     // ukázat.
     await syncPayoutRules()
+    succeeded = true
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.people.profile.save_failed')))
   } finally {
     clearPlaintextInputs()
+    if (succeeded) formBaseline.value = formFingerprint()
     saving.value = false
   }
+  return succeeded
 }
 
 /** Ověření nového účtu zadané rovnou ve formuláři; chyba nezahazuje uloženou kartu. */
@@ -1372,7 +1414,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-profile">
+  <section ref="root" class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-profile">
     <header class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-4 py-4 sm:px-6">
       <div>
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.profile.title') }}</h2>
@@ -1403,6 +1445,7 @@ onMounted(load)
             {{ checking ? t('common.loading') : t('payroll.people.registration.a1.check') }}
           </button>
           <button
+            v-if="!managed"
             type="button"
             :class="btnFilled('primary')"
             :disabled="saving"
@@ -1415,7 +1458,7 @@ onMounted(load)
             {{ t('payroll.people.profile.save_card') }}
           </button>
         </div>
-        <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.save_scope') }}</p>
+        <p v-if="!managed" class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.save_scope') }}</p>
       </div>
     </header>
 

@@ -46,6 +46,7 @@ import {
   transitionPresentation,
 } from './employmentLifecycleUi'
 import DateInput from '@/components/ui/DateInput.vue'
+import { usePersonCardSaveSection } from './personCardSave'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -560,28 +561,29 @@ function discardChanges() {
  * jako první a `row_version` pro podmínky se bere z odpovědi, ne z propu:
  * dva zápisy za sebou by jinak druhý shodily na konflikt verzí.
  */
-async function save() {
+async function save(): Promise<boolean> {
   const form = termsForm.value
-  if (!form || busy.value || !dirty.value) return
+  if (!form || busy.value) return false
+  if (!dirty.value) return true
   const gross = inputToMinor(grossInput.value)
   if (Number.isNaN(gross)) {
     saveError.value = t('payroll.people.gross_invalid')
-    return
+    return false
   }
   if (saveMode.value === 'version' && versionEffectiveFrom.value === '') {
     saveError.value = t('payroll.people.new_terms_date_required')
-    return
+    return false
   }
   const probableEarning = inputToMinor(probableEarningInput.value)
   if (Number.isNaN(probableEarning)) {
     saveError.value = t('payroll.people.probable_earning_invalid')
-    return
+    return false
   }
   // § 355 odst. 2 ZP — částka bez odůvodnění neprojde ani serverem, ani
   // databázovou podmínkou. Ať to účetní pozná dřív než z chyby 422.
   if (probableEarning !== null && (form.probable_earning_rationale ?? '').trim() === '') {
     saveError.value = t('payroll.people.probable_earning_rationale_required')
-    return
+    return false
   }
   saveError.value = ''
   busy.value = true
@@ -617,6 +619,7 @@ async function save() {
     toast.success(saveMode.value === 'version'
       ? t('payroll.people.terms_saved')
       : t('payroll.people.terms_corrected'))
+    return true
   } catch (error) {
     const detail = (error as {
       response?: { data?: { error?: { code?: string } } }
@@ -638,10 +641,22 @@ async function save() {
       // a uživatel neměl podle čeho jednat.
       saveError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
     }
+    return false
   } finally {
     busy.value = false
   }
 }
+
+const saveBar = ref<HTMLElement | null>(null)
+const { managed } = usePersonCardSaveSection({
+  label: () => [relationLabel(), personalNumberLabel(t, props.employment.code)]
+    .filter(part => part !== '')
+    .join(' · '),
+  dirty: () => canEditTerms.value && dirty.value,
+  save,
+  discard: discardChanges,
+  focus: () => saveBar.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }),
+})
 
 /**
  * Nástup, který se prostě stal, se potvrdí jedním krokem.
@@ -1626,9 +1641,16 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         přetáhla do mezery vedle postranního pruhu. Neprůsvitné pozadí drží
         text čitelný nad poli, která pod ní při rolování projíždějí.
       -->
+      <!--
+        Na kartě osoby ukládá společná lišta dole; tady zůstává jen volba,
+        JAK změnu uložit (oprava / nová verze) a důvod — bez vlastního Uložit
+        a bez přilepení, aby se dvě lišty nepřekrývaly.
+      -->
       <div
         v-if="canEditTerms && dirty"
-        class="sticky bottom-0 z-10 mt-3 rounded-md border border-neutral-200 bg-surface px-3 py-3 shadow-[0_-2px_10px_rgba(21,19,29,0.08)]"
+        ref="saveBar"
+        class="mt-3 rounded-md border border-neutral-200 bg-surface px-3 py-3"
+        :class="managed ? 'border-warning-500/40' : 'sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(21,19,29,0.08)]'"
         data-test="terms-save-bar"
       >
         <p
@@ -1674,7 +1696,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
-            <button type="submit" :class="btnFilledSm('primary')" :disabled="busy" data-test="terms-save">
+            <button v-if="!managed" type="submit" :class="btnFilledSm('primary')" :disabled="busy" data-test="terms-save">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
               {{ busy ? t('common.saving') : t('common.save') }}
             </button>

@@ -26,6 +26,8 @@ const m = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.routerReplace, push: m.routerPush }),
+  onBeforeRouteLeave: () => {},
+  onBeforeRouteUpdate: () => {},
   RouterLink: {
     name: 'RouterLink',
     props: ['to'],

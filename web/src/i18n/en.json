@@ -4755,6 +4755,16 @@
           "ztp_p_hint": "The double amount applies from the month at whose start the entitlement to the ZTP/P card was granted. Enter the grant date on the child card and the application will split the claim accordingly."
         }
       },
+      "card_save": {
+        "title": "Saving the person card",
+        "unsaved": "Everything saved | Unsaved changes in 1 section: | Unsaved changes in {count} sections: | Unsaved changes in {count} sections:",
+        "save": "Save all",
+        "discard": "Discard changes",
+        "discard_confirm": "The card has unsaved changes ({sections}). Discard them?",
+        "collapse_confirm": "The full personal record has unsaved changes. Collapsing it discards them. Continue?",
+        "stopped": "Saving stopped at section {section}. Fix what the section points out and save again; the other edited sections remain unsaved.",
+        "statutory_defaults": "Fill in standard records (Czech resident)"
+      },
       "quick_edit": {
         "title": "Common employee details",
         "subtitle": "Name, contact, address and pay in one place.",

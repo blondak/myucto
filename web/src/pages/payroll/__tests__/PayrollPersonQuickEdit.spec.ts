@@ -5,7 +5,9 @@ import type {
   PayrollPerson,
   PayrollPersonProfile,
 } from '@/api/payroll'
+import { defineComponent, h } from 'vue'
 import { todayIso } from '@/pages/payroll/employmentLifecycleUi'
+import { providePersonCardSave, type PersonCardSaveRegistry } from '@/pages/payroll/personCardSave'
 
 const mocks = vi.hoisted(() => ({
   person: vi.fn(),
@@ -859,5 +861,40 @@ describe('PayrollPersonQuickEdit', () => {
     await wrapper.get('[data-test="reveal-sensitive"]').trigger('click')
     expect(wrapper.get('[data-test="read-birth-number"]').text()).toContain('••')
     expect(mocks.revealPersonSensitive).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('PayrollPersonQuickEdit na kartě osoby (společné Uložit)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.person.mockResolvedValue(person())
+    mocks.personProfile.mockResolvedValue(profile())
+    mocks.countries.mockResolvedValue([])
+    mocks.savePersonQuickEdit.mockResolvedValue({ profile: profile(), employment: employment() })
+  })
+
+  it('nekreslí vlastní Uložit, hlásí rozdělanou práci a uloží se přes společnou lištu', async () => {
+    let registry: PersonCardSaveRegistry | null = null
+    const Host = defineComponent({
+      setup() {
+        registry = providePersonCardSave()
+        return () => h(PayrollPersonQuickEdit, { personId: 17, canWrite: true })
+      },
+    })
+    const wrapper = mount(Host)
+    await flushPromises()
+    await wrapper.get('[data-test="start-quick-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="save-quick-edit"]').exists()).toBe(false)
+    expect(registry!.hasChanges.value).toBe(false)
+
+    await wrapper.get('[data-test="weekly-hours"]').setValue('20')
+    expect(registry!.dirtySections.value.map(section => section.label())).toEqual(['payroll.people.quick_edit.title'])
+
+    expect(await registry!.saveAll()).toBe(true)
+    await flushPromises()
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledTimes(1)
+    expect(registry!.hasChanges.value).toBe(false)
   })
 })

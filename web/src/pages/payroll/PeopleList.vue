@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -59,6 +59,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import { providePersonCardSave } from './personCardSave'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -305,7 +306,54 @@ const selectedEmploymentCount = computed(
     ?? 0,
 )
 
+/*
+ * Jedno společné Uložit pro celou kartu osoby (viz `personCardSave.ts`).
+ * Karta se zavírá, přepíná nebo opouští jen přes dotaz, pokud v ní zůstala
+ * neuložená práce — dřív tiše zmizela.
+ */
+const cardSave = providePersonCardSave()
+const selectedEmploymentStartOn = computed(() => {
+  const starts = (selectedDetail.value?.employments ?? [])
+    .filter(employment => !['archived', 'no_show'].includes(employment.status))
+    .map(employment => employment.start_date)
+    .filter((start): start is string => typeof start === 'string' && start !== '')
+    .sort()
+  return starts[0] ?? null
+})
+const unsavedSectionLabels = computed(() => cardSave.dirtySections.value.map(section => section.label()))
+
+function confirmDiscardCardChanges(): boolean {
+  if (!cardSave.hasChanges.value) return true
+  if (!window.confirm(t('payroll.people.card_save.discard_confirm', {
+    sections: unsavedSectionLabels.value.join(', '),
+  }))) return false
+  cardSave.discardAll()
+  return true
+}
+
+async function saveCard() {
+  if (!cardSave.hasChanges.value) return
+  if (await cardSave.saveAll()) return
+  const failed = cardSave.failedSection.value
+  if (failed) toast.error(t('payroll.people.card_save.stopped', { section: failed.label() }))
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (!cardSave.hasChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(() => confirmDiscardCardChanges())
+onBeforeRouteUpdate((to, from) => {
+  if (to.query.person === from.query.person) return true
+  return confirmDiscardCardChanges()
+})
+window.addEventListener('beforeunload', onBeforeUnload)
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
 function backToList() {
+  if (!confirmDiscardCardChanges()) return
   expandedId.value = null
   advancedProfileOpen.value = false
   creatingForId.value = null
@@ -736,6 +784,7 @@ watch(searchQuery, () => {
 })
 
 async function toggleDetail(person: PayrollPersonListItem) {
+  if (!confirmDiscardCardChanges()) return
   if (expandedId.value === person.id) {
     expandedId.value = null
     advancedProfileOpen.value = false
@@ -1035,7 +1084,14 @@ function updateQuickEdit(result: PayrollPersonQuickEditResponse) {
 }
 
 function toggleAdvancedProfile(event: Event) {
-  advancedProfileOpen.value = (event.currentTarget as HTMLDetailsElement).open
+  const element = event.currentTarget as HTMLDetailsElement
+  // Sbalení panel odmontuje; rozepsaná osobní evidence by tím zmizela.
+  if (!element.open && cardSave.isDirty('profile')
+    && !window.confirm(t('payroll.people.card_save.collapse_confirm'))) {
+    element.open = true
+    return
+  }
+  advancedProfileOpen.value = element.open
 }
 
 /**
@@ -1700,6 +1756,7 @@ onMounted(async () => {
         <PayrollPersonStatutoryEvidencePanel
           :person-id="expandedId"
           :can-write="auth.canWrite('payroll.person.write')"
+          :employment-start-on="selectedEmploymentStartOn"
           @saved="refreshDataGaps(expandedId)"
         />
       </div>
@@ -1823,6 +1880,48 @@ onMounted(async () => {
           @focus-statutory-evidence="focusPanel('statutory_evidence')"
         />
       </section>
+
+      <!--
+        JEDNO SPOLEČNÉ ULOŽIT pro celou kartu. Ukáže se, jen když je co
+        uložit, a jmenuje sekce s rozdělanou prací — dřív měla karta až osm
+        samostatných tlačítek a neuložená sekce při odchodu tiše zmizela.
+      -->
+      <div
+        v-if="cardSave.hasChanges.value"
+        class="sticky bottom-0 z-20 -mx-3 border-t border-warning-500/40 bg-surface px-3 py-3 shadow-[0_-2px_10px_rgba(21,19,29,0.08)] sm:-mx-4 sm:px-4"
+        role="region"
+        :aria-label="t('payroll.people.card_save.title')"
+        data-test="person-card-save-bar"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="min-w-0 text-sm text-neutral-800">
+            <span class="font-semibold">{{ t('payroll.people.card_save.unsaved', { count: unsavedSectionLabels.length }, unsavedSectionLabels.length) }}</span>
+            <span class="text-neutral-600" data-test="person-card-save-sections"> {{ unsavedSectionLabels.join(', ') }}</span>
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :disabled="cardSave.saving.value"
+              data-test="person-card-discard"
+              @click="cardSave.discardAll()"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+              {{ t('payroll.people.card_save.discard') }}
+            </button>
+            <button
+              type="button"
+              :class="[btnFilled('primary'), 'whitespace-nowrap']"
+              :disabled="cardSave.saving.value"
+              data-test="person-card-save"
+              @click="saveCard"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+              {{ cardSave.saving.value ? t('common.saving') : t('payroll.people.card_save.save') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Během editace se seznam schová — jinak by u upravované osoby svítily i ostatní. -->

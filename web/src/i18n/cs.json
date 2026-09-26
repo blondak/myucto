@@ -4755,6 +4755,16 @@
           "ztp_p_hint": "Dvojnásobek náleží od měsíce, na jehož počátku byl přiznán nárok na průkaz ZTP/P. Zapište na kartě dítěte den přiznání průkazu, aplikace pak nárok podle něj rozdělí sama."
         }
       },
+      "card_save": {
+        "title": "Uložení karty osoby",
+        "unsaved": "Vše uloženo | Neuložené změny v 1 sekci: | Neuložené změny ve {count} sekcích: | Neuložené změny v {count} sekcích:",
+        "save": "Uložit vše",
+        "discard": "Zahodit změny",
+        "discard_confirm": "Na kartě jsou neuložené změny ({sections}). Zahodit je?",
+        "collapse_confirm": "Úplná osobní evidence má neuložené změny. Sbalením se zahodí. Pokračovat?",
+        "stopped": "Uložení se zastavilo u sekce {section}. Opravte údaje, na které sekce upozorňuje, a uložte znovu; ostatní rozepsané sekce zůstaly neuložené.",
+        "statutory_defaults": "Doplnit běžné údaje (rezident ČR)"
+      },
       "quick_edit": {
         "title": "Běžné údaje zaměstnance",
         "subtitle": "Jméno, kontakt, bydliště a mzda na jednom místě.",

@@ -1117,3 +1117,32 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(current).toMatch(/15\s000/)
   })
 })
+
+describe('PayrollPersonStatutoryEvidencePanel — výchozí záznamy jedním potvrzením', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.canWrite.mockReturnValue(true)
+    resetDefaultHealthInsurerCode()
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence())
+    mocks.employerSettings.mockResolvedValue({ default_health_insurer_code: '205' })
+  })
+
+  it('u chybějící evidence nabídne doplnění pro tuto osobu od měsíce nástupu', async () => {
+    const wrapper = mount(PayrollPersonStatutoryEvidencePanel, {
+      props: { personId: 17, canWrite: true, employmentStartOn: '2020-03-15' },
+      global: { stubs: { PayrollStatutoryBulkDefaultsDialog: { name: 'PayrollStatutoryBulkDefaultsDialog', props: ['effectiveOn', 'employeeIds'], template: '<div data-test="defaults-dialog" />' } } },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="statutory-evidence-defaults"]').trigger('click')
+    const dialog = wrapper.getComponent({ name: 'PayrollStatutoryBulkDefaultsDialog' })
+    expect(dialog.props('employeeIds')).toEqual([17])
+    expect(dialog.props('effectiveOn')).toBe('2020-03-01')
+  })
+
+  it('bez oprávnění k zápisu doplnění nenabízí', async () => {
+    const wrapper = mount(PayrollPersonStatutoryEvidencePanel, { props: { personId: 17, canWrite: false } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="statutory-evidence-defaults"]').exists()).toBe(false)
+  })
+})

@@ -22,6 +22,7 @@ import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.v
 import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields.vue'
 import { addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { usePersonCardSaveSection } from './personCardSave'
 
 const props = defineProps<{
   personId: number
@@ -256,7 +257,19 @@ function hydrate(
   // Interní značka `legacy` se jako osobní číslo nenabízí (viz employmentCodeLabel).
   form.employment_code = employmentCodeLabel(employment?.code)
   originalEmploymentCode.value = form.employment_code
+  baseline.value = JSON.stringify(form)
 }
+
+const root = ref<HTMLElement | null>(null)
+const baseline = ref('')
+const dirty = computed(() => editing.value && JSON.stringify(form) !== baseline.value)
+const { managed } = usePersonCardSaveSection({
+  label: () => t('payroll.people.quick_edit.title'),
+  dirty: () => dirty.value,
+  save,
+  discard: cancelEdit,
+  focus: () => root.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+})
 
 async function load() {
   loading.value = true
@@ -556,8 +569,12 @@ function validate(): boolean {
   return true
 }
 
-async function save() {
-  if (saving.value || !profile.value || !validate()) return
+async function save(): Promise<boolean> {
+  if (saving.value || !profile.value) return false
+  if (!validate()) {
+    root.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return false
+  }
   saveError.value = ''
   saving.value = true
   try {
@@ -584,8 +601,10 @@ async function save() {
     editing.value = false
     emit('saved', result)
     toast.success(t('payroll.people.quick_edit.saved'))
+    return true
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.people.quick_edit.save_failed'))
+    return false
   } finally {
     saving.value = false
   }
@@ -596,7 +615,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-quick-edit">
+  <section ref="root" class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-quick-edit">
     <header class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-4 py-4 sm:px-6">
       <div class="min-w-0">
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.title') }}</h2>
@@ -806,6 +825,7 @@ onMounted(load)
           {{ t('common.cancel') }}
         </button>
         <button
+          v-if="!managed"
           type="submit"
           :class="btnFilled('primary')"
           :disabled="saving"

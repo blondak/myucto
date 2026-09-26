@@ -38,6 +38,8 @@ import {
   type StatutorySectionSpec,
 } from './statutoryEvidenceForm'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import { usePersonCardSaveSection } from './personCardSave'
 
 /**
  * Zákonná evidence osoby.
@@ -91,6 +93,8 @@ import DateInput from '@/components/ui/DateInput.vue'
 const props = defineProps<{
   personId: number
   canWrite: boolean
+  /** Nejdřívější nástup osoby — výchozí záznamy mají platit od něj, ne od zvoleného měsíce. */
+  employmentStartOn?: string | null
 }>()
 
 // UI-24: po uložení musí nadřazená karta přepočítat bannery chybějících údajů,
@@ -514,6 +518,41 @@ function hydrate(value: PayrollStatutoryEvidence) {
     next[section.key] = (value.sections[section.key] ?? []).map(row => ({ ...row }))
   }
   drafts.value = next
+  baseline.value = JSON.stringify(next)
+}
+
+const root = ref<HTMLElement | null>(null)
+const baseline = ref('')
+const dirty = computed(() => editing.value && JSON.stringify(drafts.value) !== baseline.value)
+const { managed } = usePersonCardSaveSection({
+  label: () => t('payroll.people.statutory_evidence.title'),
+  dirty: () => dirty.value,
+  save,
+  discard: cancel,
+  focus: () => root.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
+})
+
+/**
+ * Běžný zaměstnanec — rezident ČR v českém pojištění — nemá v zákonné
+ * evidenci co rozhodovat. Místo pěti ručních záznamů stačí jedno potvrzení
+ * v dialogu hromadného doplnění, zúženém na tuhle osobu: náhled ukáže, co
+ * přesně doplní (od data nástupu, ne od prvního dne měsíce) a u koho to
+ * nejde (cizí prvek, chybějící pojišťovna).
+ */
+const defaultsOpen = ref(false)
+const defaultsEffectiveOn = computed(() => {
+  const start = props.employmentStartOn ?? null
+  return start !== null && start < effectiveOn.value
+    ? monthStart(start)
+    : monthStart(effectiveOn.value)
+})
+const defaultsAvailable = computed(() => props.canWrite
+  && !editing.value
+  && blockers.value.length > 0)
+
+function onDefaultsApplied() {
+  void load()
+  emit('saved')
 }
 
 function addRow(section: StatutorySectionSpec) {
@@ -653,14 +692,14 @@ function cancel() {
   if (evidence.value) hydrate(evidence.value)
 }
 
-async function save() {
-  if (saving.value) return
+async function save(): Promise<boolean> {
+  if (saving.value) return false
   saveError.value = ''
   // Chyby, které formulář zná, nemá smysl posílat na server — ten by z nich
   // vrátil jednu obecnější a uživatel by hledal, které pole ji způsobilo.
   if (issues.value.length > 0) {
     saveError.value = t('payroll.people.statutory_evidence.issues_block_save')
-    return
+    return false
   }
   saving.value = true
   try {
@@ -676,6 +715,7 @@ async function save() {
     resetSectionToggles()
     toast.success(t('payroll.people.statutory_evidence.saved'))
     emit('saved')
+    return true
   } catch (exception) {
     // Server jmenuje konkrétní důvod (překryv, díra v řadě, chybějící doklad,
     // uzavřené období) — obecná hláška by ho jen zakryla.
@@ -683,6 +723,7 @@ async function save() {
       exception,
       t('payroll.people.statutory_evidence.save_failed'),
     )
+    return false
   } finally {
     saving.value = false
   }
@@ -698,7 +739,8 @@ onMounted(() => {
 
 <template>
   <details
-    class="group rounded-lg border border-payroll-500/30 bg-surface"
+    ref="root"
+    class="group scroll-mt-24 rounded-lg border border-payroll-500/30 bg-surface"
     data-test="statutory-evidence"
     :open="blockers.length > 0"
   >
@@ -1147,8 +1189,19 @@ onMounted(() => {
         -->
         <div
           v-if="canWrite"
-          class="sticky bottom-0 -mx-3 -mb-3 mt-4 flex justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
+          class="-mx-3 -mb-3 mt-4 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
+          :class="managed ? '' : 'sticky bottom-0'"
         >
+          <button
+            v-if="defaultsAvailable"
+            type="button"
+            :class="[btnFilled('success'), 'whitespace-nowrap']"
+            data-test="statutory-evidence-defaults"
+            @click="defaultsOpen = true"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.people.card_save.statutory_defaults') }}
+          </button>
           <button
             v-if="!editing"
             type="button"
@@ -1167,6 +1220,7 @@ onMounted(() => {
               @click="cancel"
             >{{ t('common.cancel') }}</button>
             <button
+              v-if="!managed"
               type="button"
               :class="btnFilled('primary')"
               :disabled="saving"
@@ -1180,5 +1234,12 @@ onMounted(() => {
         </div>
       </template>
     </div>
+    <PayrollStatutoryBulkDefaultsDialog
+      v-if="defaultsOpen"
+      :effective-on="defaultsEffectiveOn"
+      :employee-ids="[personId]"
+      @close="defaultsOpen = false"
+      @applied="onDefaultsApplied"
+    />
   </details>
 </template>
