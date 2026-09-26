@@ -13,7 +13,10 @@
 --  2. Výchozí zařazení složek, které žádný záznam zařazení nemají, doslova
 --     `PayrollComponentJmhzMappingDefaults::targetFor()` (jako 1839 a 1847).
 --     Shodu hlídají `PayrollComponentJmhzKindDefaultsMigrationTest`
---     a `PayrollComponentJmhzCreationDefaultsTest`.
+--     a `PayrollComponentJmhzCreationDefaultsTest`. Seznam kódů zahrnuje
+--     i náhrady za svátek a při překážkách (10339–10341), které do starého
+--     balíku doplňuje 1912: bez nich by tahle migrace zařadila existující
+--     složky podle druhu do úhrnu 10337 a 1912 by je pak přeskočila.
 --
 -- Když balík 1.4.2.10 ještě nainstalovaný není, neudělá se nic a převzetí
 -- i výchozí zařazení provede aplikace sama při čtení složek. Opakované
@@ -122,6 +125,9 @@ SELECT target.supplier_id,
           UNION SELECT 'NAHRADA_MZDY', '10337'
           UNION SELECT 'NAHRADA_MZDY_DOVOLENA', '10338'
           UNION SELECT 'NAHRADA_MZDY_DPN', '10342'
+          UNION SELECT 'NAHRADA_MZDY_SVATEK', '10339'
+          UNION SELECT 'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', '10340'
+          UNION SELECT 'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', '10341'
           UNION SELECT 'PRISPEVEK_DLOUHODOBA_PECE', '10418'
           UNION SELECT 'STRAVOVANI_ZDANITELNE', '10328'
                ) by_code ON by_code.code = definition.code
