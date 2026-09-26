@@ -151,19 +151,20 @@ final class PayrollAbsenceRepository
             $childbirth = $data['childbirth_date'] ?? null;
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_absences
-                    (supplier_id, employment_id, absence_type, date_from, date_to,
+                    (supplier_id, employment_id, absence_type, obstacle_kind, date_from, date_to,
                      expected_childbirth_date, childbirth_date, lone_carer,
                      childbirth_recorded_by, childbirth_recorded_at,
                      timezone_name, partial_first_minutes, partial_last_minutes, note,
-                     compensation_policy, compensation_rate_basis_points,
+                     compensation_policy, compensation_rate_basis_points, compensation_rate_reason,
                      average_snapshot_id, support_status, status, requested_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()),
-                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()),
+                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
                 $supplierId,
                 $data['employment_id'],
                 $data['absence_type'],
+                $data['obstacle_kind'] ?? null,
                 $data['date_from'],
                 $data['date_to'],
                 $data['expected_childbirth_date'] ?? null,
@@ -177,6 +178,7 @@ final class PayrollAbsenceRepository
                 $data['note'],
                 $data['compensation_policy'],
                 $data['compensation_rate_basis_points'],
+                $data['compensation_rate_reason'] ?? null,
                 $data['average_snapshot_id'],
                 'manual_review',
                 'requested',

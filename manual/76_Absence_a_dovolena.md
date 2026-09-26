@@ -167,6 +167,54 @@ bez evidované neomluvené absence ji aplikace odmítne. O tom, že jde
 o neomluvené zameškání, rozhoduje zaměstnavatel (§ 348 odst. 3), aplikace ho
 z jiných druhů nepřítomnosti neodvozuje.
 
+### Placené překážky v práci a náhrada mzdy
+
+U **překážky na straně zaměstnance s náhradou mzdy** a **překážky na straně
+zaměstnavatele** se ve formuláři vybírá **druh překážky**. Podle něj aplikace
+určí sazbu náhrady mzdy z průměrného výdělku a u každého druhu ukáže, za jakých
+podmínek a v jakém rozsahu náhrada přísluší:
+
+| Druh | Předpis | Náhrada |
+|---|---|---|
+| Lékař, svatba, úmrtí, doprovod, převoz k porodu, pohřeb spoluzaměstnance, stěhování v zájmu zaměstnavatele, hledání zaměstnání po výpovědi z organizačních důvodů | § 199 ZP, NV č. 590/2006 Sb. | 100 % |
+| Darování krve, činnost v odborech a radě zaměstnanců, školení potřebné pro práci | § 203 odst. 2, § 205 ZP | 100 % |
+| Jiná placená překážka podle vnitřního předpisu | vnitřní předpis | 100 %, podklad povinný |
+| Prostoj | § 207 písm. a) ZP | nejméně 80 % |
+| Přerušení práce kvůli počasí nebo živelní události | § 207 písm. b) ZP | nejméně 60 % |
+| Jiná překážka na straně zaměstnavatele | § 208 ZP | 100 % |
+| Částečná nezaměstnanost | § 209 ZP | nejméně 60 %, podklad povinný |
+
+Sazba se předvyplní z tabulky. U překážek na straně zaměstnance je pevná, u
+překážek zaměstnavatele ji lze zvýšit až na průměrný výdělek, ale jen s důvodem
+(vnitřní předpis, dohoda). U částečné nezaměstnanosti se vždy uvádí dohoda
+s odborovou organizací nebo vnitřní předpis, bez něj jde o jinou překážku se
+100 % průměru. Body nařízení vlády bez náhrady mzdy (účast u porodu, svatba
+rodiče, dalších pět dnů po úmrtí, stěhování bez zájmu zaměstnavatele…) se
+zapisují jako **Překážka na straně zaměstnance bez náhrady mzdy**.
+
+Schválením překážky vznikne mzdový vstup náhrady na složce **Náhrada mzdy při
+překážkách na straně zaměstnance**, resp. **na straně zaměstnavatele**. Hodiny se
+berou ze stejných rozvržených směn, o které se krátí základní mzda, svátek se
+nenahrazuje (mzda se za něj nekrátí). Na výplatní pásce má náhrada vlastní řádek
+a v měsíčním hlášení jde do náhrad za překážky na straně zaměstnance (10341),
+resp. zaměstnavatele (10340); hodiny do 10471, resp. 10472, a mezi neodpracované
+hodiny s náhradou (10276). Zrušení schválené překážky náhradu nemaže, vytvoří
+zápornou korekci ve stejném měsíci. Nejsou-li na dny překážky rozvržené směny,
+náhrada nevznikne a aplikace na to po schválení upozorní.
+
+Překážku zapsanou dříve bez druhu schválit nelze: zrušte ji a zapište znovu
+s druhem. Nepřítomnosti převzaté z předchozího mzdového programu druh nemají
+a náhradu nezakládají, tu už obsahuje převzatá mzda.
+
+**Doplatek do minima zdravotního pojištění.** Sníží-li prostoj, přerušení práce
+kvůli počasí nebo částečná nezaměstnanost vyměřovací základ pod minimum, doplatek
+hradí zaměstnavatel (§ 3 odst. 10 zákona č. 592/1992 Sb.). Mzdový běh to pozná
+ze schválené překážky sám, není-li za měsíc v zákonné evidenci zaměstnance
+zapsáno jinak. Je-li v témže měsíci i neplacené volno, neomluvená absence nebo
+jiná neplacená nepřítomnost a doplatek vznikne, běh se zastaví s kontrolou a plátce doplatku za měsíc
+určete v zákonné evidenci (Mzdy → Zaměstnanci, Zákonná evidence, zdravotní
+pojištění).
+
 ### Pracovní volno bez náhrady mzdy
 
 Vedle placené **překážky na straně zaměstnance s náhradou mzdy** eviduje agenda

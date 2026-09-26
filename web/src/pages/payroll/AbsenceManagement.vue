@@ -25,9 +25,17 @@ import {
   type AverageSnapshot,
   type LeaveEntry,
   type LeaveEntitlementCandidate,
+  type ObstacleKind,
   type PayrollAbsence,
   type PayrollAbsenceEmployment,
+  type PayrollObstacleKindRule,
 } from '@/api/payrollAbsences'
+import {
+  formatPercent,
+  obstacleRateLabel,
+  obstacleRateReasonRequired,
+  percentToBasisPoints,
+} from './absenceObstacleUi'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
@@ -165,7 +173,16 @@ const absenceForm = reactive({
   partial_last_hours: null as number | null,
   average_snapshot_id: null,
   note: null,
+  obstacle_kind: null as ObstacleKind | null,
+  obstacle_rate_percent: null as number | null,
+  obstacle_rate_reason: '',
 })
+/*
+ * Tabulka druhů placených překážek a jejich sazeb přichází se seznamem vztahů
+ * ze serveru — formulář z ní jen předvyplní sazbu a ukáže meze, rozhoduje
+ * validace na serveru.
+ */
+const obstacleRules = ref<PayrollObstacleKindRule[]>([])
 const averageForm = reactive({
   employment_id: 0,
   applicable_year: periodYear,
@@ -302,6 +319,39 @@ const needsAverage = computed(() =>
  */
 const isMaternity = computed(() => absenceForm.absence_type === 'ppm')
 const isUnpaidExcused = computed(() => UNPAID_EXCUSED_TYPES.includes(absenceForm.absence_type))
+/*
+ * Placená překážka: druh určuje, jaká náhrada mzdy přísluší (100 % u překážek
+ * zaměstnance, 80/60/100 % u zaměstnavatele) a do které kolonky měsíčního
+ * hlášení patří. Bez druhu server nepřítomnost neuloží.
+ */
+const isPaidObstacle = computed(() =>
+  absenceForm.absence_type === 'employee_obstacle' || absenceForm.absence_type === 'employer_obstacle')
+const obstacleKindOptions = computed(() => obstacleRules.value
+  .filter(rule => rule.absence_type === absenceForm.absence_type)
+  .map(rule => ({
+    value: rule.kind,
+    label: t(`payroll_absence.obstacle.kinds.${rule.kind}`),
+    secondary: obstacleRateLabel(rule),
+  })))
+const selectedObstacleRule = computed(() =>
+  obstacleRules.value.find(rule => rule.kind === absenceForm.obstacle_kind
+    && rule.absence_type === absenceForm.absence_type) ?? null)
+const obstacleRateFixed = computed(() => selectedObstacleRule.value !== null
+  && selectedObstacleRule.value.min_rate_basis_points === selectedObstacleRule.value.max_rate_basis_points)
+const obstacleReasonRequired = computed(() => obstacleRateReasonRequired(
+  selectedObstacleRule.value,
+  absenceForm.obstacle_rate_percent,
+))
+watch(() => absenceForm.absence_type, () => {
+  if (selectedObstacleRule.value === null) {
+    absenceForm.obstacle_kind = null
+    absenceForm.obstacle_rate_percent = null
+  }
+})
+watch(() => absenceForm.obstacle_kind, () => {
+  const rule = selectedObstacleRule.value
+  absenceForm.obstacle_rate_percent = rule === null ? null : rule.default_rate_basis_points / 100
+})
 const childbirthEditing = ref<number | null>(null)
 const childbirthDraft = ref('')
 
@@ -537,7 +587,9 @@ function applyQuerySelection() {
 }
 
 async function loadContext() {
-  employments.value = await payrollAbsenceApi.context()
+  const context = await payrollAbsenceApi.absenceContext()
+  employments.value = context.employments
+  obstacleRules.value = context.obstacleKinds
   applyQuerySelection()
 }
 
@@ -646,6 +698,13 @@ async function createAbsence() {
       }),
       average_snapshot_id: needsAverage.value ? absenceForm.average_snapshot_id : null,
       note: absenceForm.note,
+      ...(isPaidObstacle.value
+        ? {
+            obstacle_kind: absenceForm.obstacle_kind,
+            compensation_rate_basis_points: percentToBasisPoints(absenceForm.obstacle_rate_percent),
+            compensation_rate_reason: absenceForm.obstacle_rate_reason.trim() || null,
+          }
+        : {}),
     }
     await payrollAbsenceApi.createAbsence(payload)
     toast.success(t('payroll_absence.messages.absence_created'))
@@ -683,7 +742,7 @@ async function decide(
   const review = dpnReviews[item.id]
   saving.value = true
   try {
-    await payrollAbsenceApi.decide(item.id, {
+    const result = await payrollAbsenceApi.decide(item.id, {
       row_version: item.row_version,
       decision,
       first_day_fully_worked: review?.firstDayFullyWorked ?? false,
@@ -693,6 +752,9 @@ async function decide(
     })
     overdrawPrompt.value = null
     toast.success(t(`payroll_absence.messages.${decision}`))
+    if (result.calculation?.warning === 'obstacle_without_published_shifts') {
+      toast.warning(t('payroll_absence.obstacle.without_shifts', { name: item.full_name }))
+    }
     await loadData()
   } catch (error: any) {
     const payload = error?.response?.data?.error
@@ -789,13 +851,17 @@ async function approveSelected() {
   // který vidí konkrétní čísla, ne dávka.
   const failures: ApproveFailure[] = []
   let approved = 0
+  const withoutShifts: string[] = []
   for (const item of items) {
     try {
-      await payrollAbsenceApi.decide(item.id, {
+      const result = await payrollAbsenceApi.decide(item.id, {
         row_version: item.row_version,
         decision: 'approved',
       })
       approved += 1
+      if (result.calculation?.warning === 'obstacle_without_published_shifts') {
+        withoutShifts.push(item.full_name)
+      }
     } catch (error: any) {
       failures.push({
         absenceId: item.id,
@@ -807,6 +873,9 @@ async function approveSelected() {
   }
   approveFailures.value = failures
   if (approved > 0) toast.success(t('payroll_absence.bulk.approved', { count: approved }))
+  if (withoutShifts.length > 0) {
+    toast.warning(t('payroll_absence.obstacle.without_shifts', { name: withoutShifts.join(', ') }))
+  }
   bulkApprovalOpen.value = false
   selectedAbsenceIds.value = []
   await loadData()
@@ -1367,6 +1436,63 @@ onMounted(async () => {
               {{ t('payroll_absence.absences.unpaid_excused_hint') }}
             </p>
           </div>
+          <template v-if="isPaidObstacle">
+            <div class="sm:col-span-2" data-test="absence-obstacle">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.obstacle.kind') }}</span>
+              <SearchableSelect
+                v-model="absenceForm.obstacle_kind"
+                data-test="absence-obstacle-kind"
+                :options="obstacleKindOptions"
+                :placeholder="t('payroll_absence.select')"
+                accent="payroll"
+                :aria-label="t('payroll_absence.obstacle.kind')"
+              />
+              <p class="mt-1 text-xs text-neutral-500" data-test="absence-obstacle-hint">
+                {{ absenceForm.obstacle_kind
+                  ? t(`payroll_absence.obstacle.hints.${absenceForm.obstacle_kind}`)
+                  : t(`payroll_absence.obstacle.pick_hint.${absenceForm.absence_type}`) }}
+              </p>
+            </div>
+            <label v-if="selectedObstacleRule">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.obstacle.rate') }}</span>
+              <input
+                v-model.number="absenceForm.obstacle_rate_percent"
+                data-test="absence-obstacle-rate"
+                type="number"
+                step="0.01"
+                :min="selectedObstacleRule.min_rate_basis_points / 100"
+                :max="selectedObstacleRule.max_rate_basis_points / 100"
+                :disabled="obstacleRateFixed"
+                :class="fieldClass"
+              >
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ obstacleRateFixed
+                  ? t('payroll_absence.obstacle.rate_fixed')
+                  : t('payroll_absence.obstacle.rate_range', {
+                    min: selectedObstacleRule.min_rate_basis_points / 100,
+                    max: selectedObstacleRule.max_rate_basis_points / 100,
+                  }) }}
+              </span>
+            </label>
+            <label v-if="selectedObstacleRule && (obstacleReasonRequired || !obstacleRateFixed)">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">
+                {{ t('payroll_absence.obstacle.reason') }}<template v-if="obstacleReasonRequired"> *</template>
+              </span>
+              <input
+                v-model="absenceForm.obstacle_rate_reason"
+                data-test="absence-obstacle-reason"
+                type="text"
+                maxlength="500"
+                :required="obstacleReasonRequired"
+                :class="fieldClass"
+              >
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ absenceForm.obstacle_kind === 'partial_unemployment'
+                  ? t('payroll_absence.obstacle.reason_hint_partial_unemployment')
+                  : t('payroll_absence.obstacle.reason_hint') }}
+              </span>
+            </label>
+          </template>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.from') }}</span>
             <DateInput v-model="absenceForm.date_from" required :class="fieldClass" />
@@ -1592,6 +1718,21 @@ onMounted(async () => {
                   </dd>
                 </div>
               </template>
+              <div v-if="item.obstacle_kind" class="col-span-2" data-test="absence-obstacle-value">
+                <dt class="text-neutral-500">{{ t('payroll_absence.obstacle.kind') }}</dt>
+                <dd class="font-medium text-neutral-900">
+                  {{ t(`payroll_absence.obstacle.kinds.${item.obstacle_kind}`) }}
+                  · {{ t('payroll_absence.obstacle.rate_value', { rate: formatPercent(item.compensation_rate_basis_points ?? 10000) }) }}
+                </dd>
+                <dd v-if="item.compensation_rate_reason" class="text-xs text-neutral-500">{{ item.compensation_rate_reason }}</dd>
+              </div>
+              <div
+                v-else-if="['employee_obstacle', 'employer_obstacle'].includes(item.absence_type) && item.status === 'requested'"
+                class="col-span-2 rounded-lg bg-warning-50 p-2 text-xs text-warning-800"
+                data-test="absence-obstacle-missing"
+              >
+                {{ t('payroll_absence.obstacle.kind_missing') }}
+              </div>
               <div v-if="['dpn', 'quarantine'].includes(item.absence_type)" data-test="absence-sickness-window-carried-value">
                 <dt class="text-neutral-500">{{ t('payroll_absence.absences.sickness_window_carried_days') }}</dt>
                 <dd class="font-medium text-neutral-900">{{ item.sickness_window_carried_days }}</dd>

@@ -21,7 +21,28 @@ const m = vi.hoisted(() => ({
   recordChildbirth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   routeQuery: {} as Record<string, string>,
+  obstacleKinds: [
+    {
+      kind: 'medical_examination',
+      absence_type: 'employee_obstacle',
+      default_rate_basis_points: 10_000,
+      min_rate_basis_points: 10_000,
+      max_rate_basis_points: 10_000,
+      requires_reason: false,
+      statutory_basis: 'zp-199+nv-590-2006-bod-1',
+    },
+    {
+      kind: 'downtime',
+      absence_type: 'employer_obstacle',
+      default_rate_basis_points: 8_000,
+      min_rate_basis_points: 8_000,
+      max_rate_basis_points: 10_000,
+      requires_reason: false,
+      statutory_basis: 'zp-207-a',
+    },
+  ],
 }))
 
 vi.mock('vue-router', () => ({
@@ -31,6 +52,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/payrollAbsences', () => ({
   payrollAbsenceApi: {
     context: m.context,
+    absenceContext: async () => ({ employments: await m.context(), obstacleKinds: m.obstacleKinds }),
     absencesPage: m.absencesPage,
     averages: m.averages,
     averageSuggestion: m.averageSuggestion,
@@ -55,7 +77,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+  useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -511,6 +533,94 @@ describe('AbsenceManagement', () => {
       absence_type: 'public_function',
       average_snapshot_id: null,
     }))
+    wrapper.unmount()
+  })
+
+  /*
+   * Placená překážka: druh vybere účetní, sazba se předvyplní z tabulky
+   * serveru, jiná sazba si vyžádá důvod a vše odejde na server.
+   */
+  it('u překážky zaměstnavatele nabídne druhy strany, předvyplní sazbu a pošle ji s důvodem', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const type = wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>
+    type.vm.$emit('update:modelValue', 'employer_obstacle')
+    await flushPromises()
+
+    const kind = wrapper.findComponent('[data-test="absence-obstacle-kind"]') as VueWrapper<any>
+    expect(kind.props('options')).toEqual([
+      expect.objectContaining({ value: 'downtime', secondary: '≥ 80 %' }),
+    ])
+    expect(wrapper.get('[data-test="absence-obstacle-hint"]').text())
+      .toBe('payroll_absence.obstacle.pick_hint.employer_obstacle')
+
+    kind.vm.$emit('update:modelValue', 'downtime')
+    await flushPromises()
+    const rate = wrapper.get('[data-test="absence-obstacle-rate"]')
+    expect((rate.element as HTMLInputElement).value).toBe('80')
+    expect(wrapper.get('[data-test="absence-obstacle-hint"]').text())
+      .toBe('payroll_absence.obstacle.hints.downtime')
+    expect(wrapper.get('[data-test="absence-obstacle-reason"]').attributes('required')).toBeUndefined()
+
+    await rate.setValue('90')
+    expect(wrapper.get('[data-test="absence-obstacle-reason"]').attributes('required')).toBeDefined()
+    await wrapper.get('[data-test="absence-obstacle-reason"]').setValue('Vnitřní předpis 3/2026')
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'employer_obstacle',
+      obstacle_kind: 'downtime',
+      compensation_rate_basis_points: 9_000,
+      compensation_rate_reason: 'Vnitřní předpis 3/2026',
+    }))
+    wrapper.unmount()
+  })
+
+  it('u lékaře je sazba pevná a druh strany zaměstnavatele se nenabízí', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    ;(wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>)
+      .vm.$emit('update:modelValue', 'employee_obstacle')
+    await flushPromises()
+    const kind = wrapper.findComponent('[data-test="absence-obstacle-kind"]') as VueWrapper<any>
+    expect(kind.props('options').map((option: { value: string }) => option.value)).toEqual(['medical_examination'])
+    kind.vm.$emit('update:modelValue', 'medical_examination')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="absence-obstacle-rate"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="absence-obstacle-reason"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('schválená překážka bez směn upozorní, že náhrada nevznikla', async () => {
+    m.absencesPage.mockResolvedValue(absencesPage([absence({
+      absence_type: 'employer_obstacle',
+      obstacle_kind: 'downtime',
+      compensation_rate_basis_points: 8_000,
+    })]))
+    m.decide.mockResolvedValueOnce({
+      absence: { id: 44, status: 'approved' },
+      calculation: { warning: 'obstacle_without_published_shifts' },
+    })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    expect(wrapper.get('[data-test="absence-obstacle-value"]').text())
+      .toContain('payroll_absence.obstacle.kinds.downtime')
+    const approve = wrapper.findAll('button').find(button => button.text().includes('payroll_absence.actions.approve'))
+    await approve!.trigger('click')
+    await flushPromises()
+
+    expect(m.toastWarning).toHaveBeenCalledWith('payroll_absence.obstacle.without_shifts')
+    wrapper.unmount()
+  })
+
+  it('překážka zapsaná bez druhu řekne, proč ji nejde schválit', async () => {
+    m.absencesPage.mockResolvedValue(absencesPage([absence({ absence_type: 'employee_obstacle', obstacle_kind: null })]))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="absence-obstacle-missing"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

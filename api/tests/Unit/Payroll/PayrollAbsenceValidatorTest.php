@@ -267,6 +267,113 @@ final class PayrollAbsenceValidatorTest extends TestCase
         $this->validator()->childbirthDate($absence, '2026-02-30');
     }
 
+    /** Druh překážky určuje sazbu: strana zaměstnance 100 %, prostoj 80 %. */
+    public function testObstacleRateComesFromTheKindTable(): void
+    {
+        $doctor = $this->validator()->absence($this->obstacle('employee_obstacle', 'medical_examination'));
+        $downtime = $this->validator()->absence($this->obstacle('employer_obstacle', 'downtime'));
+        $other = $this->validator()->absence($this->obstacle('employer_obstacle', 'other_employer_obstacle'));
+
+        self::assertSame(['medical_examination', 10_000, 'average_100'], [
+            $doctor['obstacle_kind'], $doctor['compensation_rate_basis_points'], $doctor['compensation_policy'],
+        ]);
+        self::assertSame(['downtime', 8_000, 'average_custom'], [
+            $downtime['obstacle_kind'], $downtime['compensation_rate_basis_points'], $downtime['compensation_policy'],
+        ]);
+        self::assertSame(10_000, $other['compensation_rate_basis_points']);
+    }
+
+    public function testPaidObstacleWithoutKindIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Vyberte druh překážky');
+        $this->validator()->absence($this->obstacle('employer_obstacle', null));
+    }
+
+    public function testObstacleKindMustMatchTheSide(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('straně zaměstnavatele, ne zaměstnance');
+        $this->validator()->absence($this->obstacle('employee_obstacle', 'downtime'));
+    }
+
+    /** § 207 písm. a) ZP: nejméně 80 %, zvýšení jen s důvodem, nad průměr nikdy. */
+    public function testObstacleRateOverrideNeedsReasonAndStaysWithinStatutoryBounds(): void
+    {
+        $raised = $this->validator()->absence($this->obstacle('employer_obstacle', 'downtime', [
+            'compensation_rate_basis_points' => 9_000,
+            'compensation_rate_reason' => 'Vnitřní předpis č. 3/2026',
+        ]));
+        self::assertSame(9_000, $raised['compensation_rate_basis_points']);
+        self::assertSame('Vnitřní předpis č. 3/2026', $raised['compensation_rate_reason']);
+
+        foreach ([
+            [['compensation_rate_basis_points' => 9_000], 'uveďte důvod'],
+            [['compensation_rate_basis_points' => 7_000, 'compensation_rate_reason' => 'x'], '80 až 100 %'],
+            [['compensation_rate_basis_points' => 10_001, 'compensation_rate_reason' => 'x'], '80 až 100 %'],
+        ] as [$override, $message]) {
+            try {
+                $this->validator()->absence($this->obstacle('employer_obstacle', 'downtime', $override));
+                self::fail('Sazba mimo pravidla prošla: ' . json_encode($override));
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString($message, $exception->getMessage());
+            }
+        }
+    }
+
+    /** Strana zaměstnance má náhradu ze zákona 100 %, sazbu nejde snížit. */
+    public function testEmployeeObstacleRateIsFixed(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('ze zákona 100 %');
+        $this->validator()->absence($this->obstacle('employee_obstacle', 'own_wedding', [
+            'compensation_rate_basis_points' => 8_000,
+            'compensation_rate_reason' => 'Pokus',
+        ]));
+    }
+
+    /** § 209 odst. 2 ZP: bez dohody nebo vnitřního předpisu částečná nezaměstnanost neexistuje. */
+    public function testPartialUnemploymentRequiresTheInternalRegulation(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('§ 209 odst. 2 ZP');
+        $this->validator()->absence($this->obstacle('employer_obstacle', 'partial_unemployment'));
+    }
+
+    public function testObstacleFieldsAreRefusedOnOtherTypes(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jen u placené překážky');
+        $this->validator()->absence($this->obstacle('vacation', 'medical_examination'));
+    }
+
+    /** Převzatá nepřítomnost druh nenese a zapisuje se jako dřív. */
+    public function testTakeoverObstacleWithoutKindKeepsTheLegacyPolicy(): void
+    {
+        $data = $this->validator()->absence($this->obstacle('employer_obstacle', null), takeover: true);
+
+        self::assertNull($data['obstacle_kind']);
+        self::assertSame('statutory_manual_review', $data['compensation_policy']);
+        self::assertSame(10_000, $data['compensation_rate_basis_points']);
+    }
+
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
+    private function obstacle(string $type, ?string $kind, array $overrides = []): array
+    {
+        return [
+            'employment_id' => 1,
+            'absence_type' => $type,
+            'date_from' => '2026-07-15',
+            'date_to' => '2026-07-16',
+            'obstacle_kind' => $kind,
+            'average_snapshot_id' => 7,
+            ...$overrides,
+        ];
+    }
+
     /**
      * @param array<string,mixed> $overrides
      * @return array<string,mixed>

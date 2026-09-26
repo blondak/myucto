@@ -415,8 +415,9 @@ a sezónní slevu na pojistném nelze na jednom vztahu uplatnit současně.
 - **Náhrady mzdy** mají v hlášení tři údaje: za svátek, za překážky na straně
   zaměstnavatele a za překážky na straně zaměstnance. Používejte proto složky
   **Náhrada mzdy za svátek**, **Náhrada mzdy při překážkách na straně
-  zaměstnavatele** a **Náhrada mzdy při překážkách na straně zaměstnance**. Import docházky je zakládá sám
-  (návštěva lékaře a překážky na straně zaměstnavatele).
+  zaměstnavatele** a **Náhrada mzdy při překážkách na straně zaměstnance**. Schválená
+  placená překážka v absencích a import docházky (návštěva lékaře a překážky na straně
+  zaměstnavatele) je zakládají samy.
 - **Přesčas** bez příplatku za přesčas se vykáže s příplatkem za přesčas 0,
   jak vyžaduje kontrola ČSSZ.
 - **Pravděpodobný průměrný hodinový výdělek** navrhne aplikace u nového vztahu

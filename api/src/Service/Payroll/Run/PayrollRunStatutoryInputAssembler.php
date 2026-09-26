@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthIncomeAttribution;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsurerSnapshotStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthInput;
@@ -1061,6 +1062,12 @@ final class PayrollRunStatutoryInputAssembler
         $responsibility = HealthMinimumTopUpResponsibility::Employee;
         $responsibilitySource =
             HealthMinimumTopUpResponsibilitySource::StatutoryDefault;
+        $responsibilityEvidence = null;
+        if ($monthEvidence === null) {
+            [$responsibility, $responsibilitySource, $responsibilityEvidence]
+                = self::obstacleTopUpResponsibility($employments, $periodStart, $periodEnd)
+                    ?? [$responsibility, $responsibilitySource, null];
+        }
         if ($monthEvidence !== null) {
             $responsibilitySource =
                 HealthMinimumTopUpResponsibilitySource::Declared;
@@ -1143,11 +1150,11 @@ final class PayrollRunStatutoryInputAssembler
                 $responsibility,
                 $responsibility ===
                     HealthMinimumTopUpResponsibility::EmployerObstacleVerified
-                    ? $this->nullableString(
+                    ? ($responsibilityEvidence ?? $this->nullableString(
                         $monthEvidenceRow[
                             'top_up_responsibility_evidence_reference'
                         ] ?? null,
-                    )
+                    ))
                     : null,
                 $this->nullableString(
                     $monthEvidenceRow[
@@ -2162,6 +2169,87 @@ final class PayrollRunStatutoryInputAssembler
         }
 
         return $result;
+    }
+
+    /**
+     * Kdo hradí doplatek do minima ZP, když ho nikdo neprohlásil a v měsíci je
+     * překážka na straně zaměstnavatele.
+     *
+     * § 3 odst. 10 věta třetí zákona č. 592/1992 Sb.: „Pokud je vyměřovací
+     * základ nižší z důvodů překážek na straně organizace, je tento rozdíl
+     * povinen doplatit zaměstnavatel." Základ snižuje jen překážka, za kterou
+     * přísluší náhrada NIŽŠÍ než průměrný výdělek — prostoj a povětrnostní
+     * vlivy (§ 207 ZP) a částečná nezaměstnanost (§ 209 ZP). Jiná překážka
+     * podle § 208 ZP se platí průměrem a základ nesnižuje, stejně jako
+     * překážky na straně zaměstnance (vždy 100 %).
+     *
+     * Druh i sazba jsou zmrazené v absenci ({@see \MyInvoice\Service\Payroll\Absence\PayrollObstacleKind}),
+     * takže výjimka má doklad (`absence:{id}`) a nevyžaduje od účetní nic
+     * navíc. Je-li v měsíci zároveň neplacená nepřítomnost, která základ
+     * snižuje z viny zaměstnance, dělit doplatek odhadem nejde — odpovědnost
+     * se nechá neověřená a HealthMinimumResolver při nenulovém doplatku
+     * požádá o rozhodnutí v měsíční evidenci. Prohlášená měsíční evidence má
+     * vždy přednost; sem se dojde jen bez ní.
+     *
+     * @param list<mixed> $employments
+     * @return array{0:HealthMinimumTopUpResponsibility,1:HealthMinimumTopUpResponsibilitySource,2:?string}|null
+     */
+    private static function obstacleTopUpResponsibility(
+        array $employments,
+        string $periodStart,
+        string $periodEnd,
+    ): ?array {
+        $employeeCauses = [
+            'unpaid_leave', 'unexcused', 'compensatory_time_off',
+            'employee_obstacle_unpaid', 'public_function',
+        ];
+        $obstacleId = null;
+        $mixed = false;
+        foreach ($employments as $employment) {
+            $absences = is_array($employment) ? ($employment['absences'] ?? null) : null;
+            if (!is_array($absences) || !array_is_list($absences)) {
+                continue;
+            }
+            foreach ($absences as $absence) {
+                if (!is_array($absence)
+                    || !is_string($absence['date_from'] ?? null)
+                    || !is_string($absence['date_to'] ?? null)
+                    || $absence['date_from'] > $periodEnd
+                    || $absence['date_to'] < $periodStart
+                ) {
+                    continue;
+                }
+                $type = $absence['absence_type'] ?? null;
+                if (in_array($type, $employeeCauses, true)) {
+                    $mixed = true;
+                    continue;
+                }
+                $rate = $absence['compensation_rate_basis_points'] ?? null;
+                if ($type === PayrollObstacleKind::EMPLOYER_SIDE_TYPE
+                    && is_string($absence['obstacle_kind'] ?? null)
+                    && is_int($rate)
+                    && $rate < PayrollObstacleKind::FULL_RATE_BASIS_POINTS
+                    && is_int($absence['id'] ?? null)
+                ) {
+                    $obstacleId ??= $absence['id'];
+                }
+            }
+        }
+        if ($obstacleId === null) {
+            return null;
+        }
+
+        return $mixed
+            ? [
+                HealthMinimumTopUpResponsibility::Unverified,
+                HealthMinimumTopUpResponsibilitySource::DerivedMixedCauses,
+                null,
+            ]
+            : [
+                HealthMinimumTopUpResponsibility::EmployerObstacleVerified,
+                HealthMinimumTopUpResponsibilitySource::DerivedEmployerObstacle,
+                "absence:{$obstacleId}",
+            ];
     }
 
     /**

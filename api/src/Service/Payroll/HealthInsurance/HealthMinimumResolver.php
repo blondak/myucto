@@ -161,7 +161,12 @@ final class HealthMinimumResolver
             && $topUpAssignedToThisEmployer
             && $input->topUpResponsibility === HealthMinimumTopUpResponsibility::Unverified
         ) {
-            $issues[] = 'minimum_top_up_responsibility_unverified';
+            // Překážka zaměstnavatele a neplacená nepřítomnost v jednom měsíci:
+            // doplatek neplyne jen z jedné z nich a kdo ho hradí, rozhodne účetní.
+            $issues[] = $input->topUpResponsibilitySource
+                === HealthMinimumTopUpResponsibilitySource::DerivedMixedCauses
+                ? 'minimum_top_up_cause_mixed'
+                : 'minimum_top_up_responsibility_unverified';
         }
         if ($ownAssessmentBaseMinorUnits < 0) {
             $issues[] = 'negative_assessment_base_requires_period_revision';

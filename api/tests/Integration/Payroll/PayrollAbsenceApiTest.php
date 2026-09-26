@@ -624,6 +624,145 @@ final class PayrollAbsenceApiTest extends TestCase
     }
 
     /**
+     * Placená překážka na straně zaměstnavatele: mzda se za dobu prostoje
+     * zkrátí a vznikne náhrada 80 % průměru (§ 207 písm. a) ZP) na složce
+     * s kolonkou 10340. Dřív se mzda zkrátila a náhrada nevznikla vůbec.
+     *
+     * Červenec 2026: fond 22 × 480 = 10 560 minut, prostoj 13. a 14. 7.
+     * (960 minut). Mzda 42 000 × 9 600 / 10 560 = 38 182 Kč, náhrada
+     * 750 Kč/h × 16 h × 0,8 = 9 600 Kč. Zrušení překážky náhradu vrátí
+     * zápornou korekcí ve stejném měsíci.
+     */
+    public function testApprovedEmployerObstacleMaterializesReducedCompensationAndReversesIt(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $proration = $container->get(PayrollWageProrationService::class);
+        $this->workCalendar();
+        $this->insertPublishedShift('2026-07-13 06:00:00', '2026-07-13 14:30:00', 30);
+        $this->insertPublishedShift('2026-07-14 06:00:00', '2026-07-14 14:30:00', 30);
+        $averageId = $this->createApprovedAverage(3);
+
+        $absence = $this->approvedObstacle('employer_obstacle', 'downtime', '2026-07-13', '2026-07-14', $averageId);
+        self::assertSame('downtime', $absence['obstacle_kind']);
+        self::assertSame(8_000, $absence['compensation_rate_basis_points']);
+
+        $input = $this->leaveInput("leave:obstacle:{$absence['id']}:2026-07-01:original");
+        self::assertIsArray($input, 'Schválená překážka nezaložila mzdový vstup náhrady.');
+        self::assertSame(960_000, (int) $input['amount_minor']);
+        self::assertSame(16_000, (int) $input['quantity_milliunits']);
+        self::assertSame('approved', $input['status']);
+        $component = json_decode((string) $input['component_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', $component['code']);
+        $source = json_decode((string) $input['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('obstacle_compensation.v1', $source['kind']);
+        self::assertSame('zp-207-a', $source['entitlement_basis']);
+        self::assertSame(8_000, $source['rate_basis_points']);
+        self::assertSame(1_200_000, $source['full_rate_amount_minor']);
+
+        $wage = $proration->forMonth($this->supplierId, $this->employmentId, '2026-07', 4_200_000);
+        self::assertSame(['paid_obstacle' => 960], $wage['replaced_minutes_by_title']);
+        self::assertSame(3_818_200, $wage['amount_minor']);
+
+        $cancelled = $this->action->cancel(
+            $this->request('POST')->withParsedBody(['row_version' => $absence['row_version']]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        $reversal = $this->leaveInput("leave:obstacle:{$absence['id']}:2026-07-01:reversal");
+        self::assertIsArray($reversal, 'Zrušená překážka nezaložila korekci náhrady.');
+        self::assertSame(-960_000, (int) $reversal['amount_minor']);
+        self::assertSame('correction', $reversal['source_kind']);
+    }
+
+    /**
+     * Návštěva lékaře na část směny (NV č. 590/2006 Sb., bod 1): náhrada
+     * 100 % průměru jen za zameškané minuty, složka strany zaměstnance (10341).
+     */
+    public function testDoctorVisitPaysFullAverageForTheMissedPartOfTheShift(): void
+    {
+        $this->insertPublishedShift('2026-07-15 06:00:00', '2026-07-15 14:30:00', 30);
+        $averageId = $this->createApprovedAverage(3);
+
+        $absence = $this->approvedObstacle(
+            'employee_obstacle',
+            'medical_examination',
+            '2026-07-15',
+            '2026-07-15',
+            $averageId,
+            ['partial_first_minutes' => 150],
+        );
+
+        $input = $this->leaveInput("leave:obstacle:{$absence['id']}:2026-07-01:original");
+        self::assertIsArray($input);
+        // 750 Kč/h × 2,5 h = 1 875 Kč.
+        self::assertSame(187_500, (int) $input['amount_minor']);
+        $component = json_decode((string) $input['component_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', $component['code']);
+    }
+
+    /** Překážka zapsaná před zavedením druhu se neschválí — mzda by se zkrátila bez náhrady. */
+    public function testLegacyObstacleWithoutKindCannotBeApproved(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to, compensation_policy,
+                 compensation_rate_basis_points, average_snapshot_id, status)
+             VALUES (?, ?, 'employer_obstacle', '2026-06-15', '2026-06-15', 'statutory_manual_review',
+                     10000, ?, 'requested')"
+        )->execute([$this->supplierId, $this->employmentId, $averageId]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody(['row_version' => 1, 'decision' => 'approved']),
+            new Response(),
+            ['id' => (string) $id],
+        );
+
+        self::assertSame(422, $approved->getStatusCode());
+        self::assertStringContainsString('chybí druh', (string) $approved->getBody());
+    }
+
+    /**
+     * @param array<string,mixed> $extra
+     * @return array<string,mixed>
+     */
+    private function approvedObstacle(
+        string $type,
+        string $kind,
+        string $from,
+        string $to,
+        int $averageId,
+        array $extra = [],
+    ): array {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload($averageId),
+                'absence_type' => $type,
+                'obstacle_kind' => $kind,
+                'date_from' => $from,
+                'date_to' => $to,
+                ...$extra,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        return $this->json($approved)['absence'];
+    }
+
+    /**
      * Svátek uvnitř okna náhrady při DPN musí ze základní mzdy vypadnout.
      *
      * § 192 odst. 1 ZP za něj náhradu přiznává, i když na něj směna rozvržená

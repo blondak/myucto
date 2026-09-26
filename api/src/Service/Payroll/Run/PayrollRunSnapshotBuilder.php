@@ -2073,6 +2073,17 @@ final class PayrollRunSnapshotBuilder
                 ...(($row['absence_type'] ?? null) === 'ocr' ? [
                     'lone_carer' => (int) ($row['lone_carer'] ?? 0) === 1,
                 ] : []),
+                /*
+                 * Placená překážka nese druh a sazbu náhrady: z nich běh pozná,
+                 * že vyměřovací základ snížila překážka na straně zaměstnavatele,
+                 * a doplatek do minima ZP pak hradí zaměstnavatel (§ 3 odst. 10
+                 * zákona č. 592/1992 Sb.). Jen u překážky s druhem, ať se nemění
+                 * otisk ostatních ani starších překážek.
+                 */
+                ...(($row['obstacle_kind'] ?? null) !== null ? [
+                    'obstacle_kind' => (string) $row['obstacle_kind'],
+                    'compensation_rate_basis_points' => (int) $row['compensation_rate_basis_points'],
+                ] : []),
                 'id' => (int) $row['id'],
                 'absence_type' => (string) $row['absence_type'],
                 'date_from' => (string) $row['date_from'],
