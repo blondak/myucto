@@ -71,6 +71,7 @@ final class PohodaPayrollDeductions
         /** @var array<string,array{person:string,period:string}> $payslips mzda => osoba a období */
         $payslips = [];
         $firstPeriod = null;
+        $lastPeriod = null;
         /** @var array<string,true> $protectedInputs osoby s vlastními podklady pro nezabavitelnou částku */
         $protectedInputs = [];
         // Číselníky, karty a mzdy jedním průchodem souborem, srážky ze mzdy druhým -
@@ -92,6 +93,7 @@ final class PohodaPayrollDeductions
             }
             $period = sprintf('%04d-%02d', $year, $month);
             $firstPeriod = $firstPeriod === null || $period < $firstPeriod ? $period : $firstPeriod;
+            $lastPeriod = $lastPeriod === null || $period > $lastPeriod ? $period : $lastPeriod;
             $payslips[PohodaXml::text($row, 'ID')] = ['person' => PohodaXml::text($row, 'RefZAM'), 'period' => $period];
         }
         $relationCount = [];
@@ -110,7 +112,7 @@ final class PohodaPayrollDeductions
             $personalNumbers[$personId][] = PohodaPayrollPeople::personalNumber($person, $relation, $relationCount[$personId] ?? 1);
         }
 
-        /** @var array<string,array{withheld:float,periods:array<string,bool>,ids:list<string>}> $fromPayslips karta => sraženo ve mzdách */
+        /** @var array<string,array{withheld:float,periods:array<string,bool>,withheld_periods:array<string,bool>,ids:list<string>}> $fromPayslips karta => sraženo ve mzdách */
         $fromPayslips = [];
         /** @var array<string,array{row:array<string,mixed>,person:string,withheld:float,periods:array<string,bool>,ids:list<string>}> $orphans */
         $orphans = [];
@@ -123,9 +125,12 @@ final class PohodaPayrollDeductions
             $withheld = PohodaXml::num($row, 'KcSrazeno');
             $card = PohodaXml::text($row, 'RefZAMsrazky');
             if ($card !== '' && isset($byId['ZAMsrazky'][$card])) {
-                $entry = $fromPayslips[$card] ?? ['withheld' => 0.0, 'periods' => [], 'ids' => []];
+                $entry = $fromPayslips[$card] ?? ['withheld' => 0.0, 'periods' => [], 'withheld_periods' => [], 'ids' => []];
                 $entry['withheld'] += $withheld;
                 $entry['periods'][$payslip['period']] = true;
+                if ($withheld > 0) {
+                    $entry['withheld_periods'][$payslip['period']] = true;
+                }
                 $entry['ids'][] = $id;
                 $fromPayslips[$card] = $entry;
                 continue;
@@ -139,9 +144,12 @@ final class PohodaPayrollDeductions
                 PohodaXml::text($row, 'PlRozhod'),
                 PohodaXml::text($row, 'DatPoradi'),
             ]);
-            $entry = $orphans[$key] ?? ['row' => $row, 'person' => $payslip['person'], 'withheld' => 0.0, 'periods' => [], 'ids' => []];
+            $entry = $orphans[$key] ?? ['row' => $row, 'person' => $payslip['person'], 'withheld' => 0.0, 'periods' => [], 'withheld_periods' => [], 'ids' => []];
             $entry['withheld'] += $withheld;
             $entry['periods'][$payslip['period']] = true;
+            if ($withheld > 0) {
+                $entry['withheld_periods'][$payslip['period']] = true;
+            }
             $entry['ids'][] = $id;
             $orphans[$key] = $entry;
         }
@@ -149,7 +157,7 @@ final class PohodaPayrollDeductions
         $records = [];
         foreach ($byId['ZAMsrazky'] ?? [] as $id => $row) {
             $personId = PohodaXml::text($row, 'RefAg');
-            $monthly = $fromPayslips[(string) $id] ?? ['withheld' => 0.0, 'periods' => [], 'ids' => []];
+            $monthly = $fromPayslips[(string) $id] ?? ['withheld' => 0.0, 'periods' => [], 'withheld_periods' => [], 'ids' => []];
             $evidence = ['ZAMsrazky:' . $id];
             foreach ($monthly['ids'] as $monthlyId) {
                 $evidence[] = 'MZsrazky:' . $monthlyId;
@@ -166,6 +174,8 @@ final class PohodaPayrollDeductions
                 $firstPeriod,
                 $moduleStart,
                 false,
+                array_keys($monthly['withheld_periods']),
+                $lastPeriod,
             );
         }
         foreach ($orphans as $key => $entry) {
@@ -186,6 +196,8 @@ final class PohodaPayrollDeductions
                 $firstPeriod,
                 $moduleStart,
                 true,
+                array_keys($entry['withheld_periods']),
+                $lastPeriod,
             );
         }
         usort($records, static function (array $a, array $b): int {
@@ -211,6 +223,7 @@ final class PohodaPayrollDeductions
      * @param list<string> $personalNumbers
      * @param list<string> $evidence
      * @param list<string> $periods
+     * @param list<string> $withheldPeriods měsíce, ve kterých předchozí program opravdu srazil kladnou částku
      * @return array<string,mixed>
      */
     private static function record(
@@ -225,8 +238,11 @@ final class PohodaPayrollDeductions
         ?string $firstPeriod,
         ?string $moduleStart = null,
         bool $payslipOnly = false,
+        array $withheldPeriods = [],
+        ?string $lastPeriod = null,
     ): array {
         sort($periods);
+        sort($withheldPeriods);
         $class = self::classify($catalog);
         $total = PohodaXml::num($row, 'KcCelkem');
         $maintenance = PohodaXml::num($row, 'KcVyzivPuv');
@@ -292,6 +308,8 @@ final class PohodaPayrollDeductions
                 && PohodaPayrollCatalog::deduction($class['code'])['meaning'] !== 'ignore',
             'recipient' => self::recipient($row),
             'periods' => $periods,
+            'withheld_periods' => $withheldPeriods,
+            'source_last_period' => $lastPeriod,
             'evidence' => $evidence,
         ];
     }

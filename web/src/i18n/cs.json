@@ -28431,6 +28431,8 @@
       "months": "měsíců",
       "payslips": "mezd",
       "enforcement_cases": "exekučních případů",
+      "enforcement_withheld_by_source": "exekucí sražených i v posledních měsících (aktivovat přednostně)",
+      "enforcement_not_withheld_by_source": "exekucí bez srážky v posledních měsících",
       "insolvency_months": "měsíců s upozorněním na insolvenci",
       "deduction_agreements": "dohod o srážkách",
       "deduction_agreements_draft": "dohod o srážkách bez částky (návrh)",

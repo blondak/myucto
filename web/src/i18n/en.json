@@ -28431,6 +28431,8 @@
       "months": "months",
       "payslips": "payslips",
       "enforcement_cases": "garnishment cases",
+      "enforcement_withheld_by_source": "garnishments withheld in recent months (activate first)",
+      "enforcement_not_withheld_by_source": "garnishments without a deduction in recent months",
       "insolvency_months": "months flagged for insolvency",
       "deduction_agreements": "deduction agreements",
       "deduction_agreements_draft": "deduction agreements without an amount (draft)",

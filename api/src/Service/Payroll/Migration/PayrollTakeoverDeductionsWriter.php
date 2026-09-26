@@ -54,6 +54,10 @@ final class PayrollTakeoverDeductionsWriter
 
     private int $messages = 0;
     private int $pendingEvidence = 0;
+    /** @var list<string> exekuce, které zdroj v posledních měsících opravdu srážel */
+    private array $withheldBefore = [];
+    /** @var list<string> exekuce bez doložené srážky v posledních měsících */
+    private array $notWithheld = [];
     private int $recipientsWithoutAccount = 0;
     private int $dependantsWritten = 0;
     /** @var array<string,int> druh srážky bez zařazení => počet */
@@ -82,6 +86,8 @@ final class PayrollTakeoverDeductionsWriter
     ): void {
         $this->messages = 0;
         $this->pendingEvidence = 0;
+        $this->withheldBefore = [];
+        $this->notWithheld = [];
         $this->recipientsWithoutAccount = 0;
         $this->dependantsWritten = 0;
         $this->unclassified = [];
@@ -120,7 +126,7 @@ final class PayrollTakeoverDeductionsWriter
                 continue;
             }
             $this->part($protocol, $step, (string) $number, "Exekuční případ „{$title}“",
-                fn (): array => $this->enforcementCase($supplierId, $employeeId, $record, $reference, $year, $userId, $runId, $policy, $map));
+                fn (): array => $this->enforcementCase($supplierId, $employeeId, $record, $reference, $year, $userId, $runId, $policy, $map, (string) $number));
         }
 
         if ($fromAttendance > 0) {
@@ -153,6 +159,28 @@ final class PayrollTakeoverDeductionsWriter
                 . 'programu není doklad; právní titul, doručení, zařazení pohledávky i příjemce '
                 . 'ověřte proti spisu v Mzdy → Exekuce a insolvence a případ tam aktivujte.',
                 $this->pendingEvidence,
+            ));
+        }
+        if ($this->withheldBefore !== []) {
+            $protocol->count($step, 'enforcement_withheld_by_source', count($this->withheldBefore));
+            $protocol->warn($step, 'enforcement_withheld_by_source', sprintf(
+                'Exekuce, které %s v posledních měsících opravdu srážel (%d): %s. Srážet se mají dál, '
+                . 'aktivujte je proto jako první, ještě před prvním mzdovým během: v Mzdy → Exekuce '
+                . 'a insolvence u případu doplňte exekuční příkaz, soud nebo exekutora, oprávněného '
+                . 'a příjemce a případ převeďte do srážení. Bez toho běh srážku vynechá.',
+                $label,
+                count($this->withheldBefore),
+                implode('; ', array_slice($this->withheldBefore, 0, self::MESSAGE_LIMIT)),
+            ));
+        }
+        if ($this->notWithheld !== []) {
+            $protocol->count($step, 'enforcement_not_withheld_by_source', count($this->notWithheld));
+            $protocol->info($step, 'enforcement_not_withheld_by_source', sprintf(
+                'Exekuce bez srážky v posledních měsících %s (%d): %s. Může jít o nový příkaz, '
+                . 'odklad nebo doplacenou pohledávku; ověřte stav proti spisu v Mzdy → Exekuce a insolvence.',
+                $label,
+                count($this->notWithheld),
+                implode('; ', array_slice($this->notWithheld, 0, self::MESSAGE_LIMIT)),
             ));
         }
         if ($this->recipientsWithoutAccount > 0) {
@@ -191,7 +219,7 @@ final class PayrollTakeoverDeductionsWriter
      * @return array<string,int>
      */
     private function enforcementCase(int $supplierId, int $employeeId, array $record, string $reference, int $year, ?int $userId, ?int $runId,
-        PayrollTakeoverPolicy $policy, PayrollTakeoverDeductionMap $map): array
+        PayrollTakeoverPolicy $policy, PayrollTakeoverDeductionMap $map, string $number = ''): array
     {
         $from = is_string($record['valid_from']) ? $record['valid_from'] : sprintf('%04d-01-01', $year);
         $case = $this->enforcement->createCase($supplierId, $employeeId, 'enforcement', $from, $userId);
@@ -215,6 +243,17 @@ final class PayrollTakeoverDeductionsWriter
             'due_monetary_claim_verified' => false,
         ]);
         $this->pendingEvidence++;
+        // Jen zdroj, který srážky po měsících vede (`withheld_periods`); u jiného by každý
+        // případ vyšel jako „nesráženo“.
+        if ($record['target'] === 'enforcement' && array_key_exists('withheld_periods', $record)) {
+            $last = self::withheldRecently($record);
+            $case = trim($number . ' ' . $record['title']);
+            if ($last === null) {
+                $this->notWithheld[] = $case;
+            } else {
+                $this->withheldBefore[] = "{$case}, naposledy {$last}";
+            }
+        }
         $counts = ['enforcement_cases' => 1];
         if ($record['target'] === 'insolvency') {
             $counts['insolvency_months'] = $this->insolvencyAlerts($supplierId, $employeeId, $record, $userId);
@@ -224,6 +263,38 @@ final class PayrollTakeoverDeductionsWriter
         $map->put($supplierId, $reference, $caseId, $runId);
 
         return $counts;
+    }
+
+    /**
+     * Poslední měsíc, ve kterém zdroj exekuci opravdu srazil, pokud tím prokazatelně
+     * srážel až do konce převáděných dat: kladná srážka v některém ze tří posledních
+     * zpracovaných měsíců, platnost neskončila a pohledávka není doplacená (nulová celková
+     * výše = běžné výživné bez stanovené částky). Jinak `null` - nový příkaz, odklad nebo
+     * doplacená pohledávka, o které rozhodne účetní proti spisu.
+     *
+     * @param array<string,mixed> $record
+     */
+    public static function withheldRecently(array $record): ?string
+    {
+        $withheld = array_values(array_filter((array) ($record['withheld_periods'] ?? []), 'is_string'));
+        $sourceLast = $record['source_last_period'] ?? null;
+        if ($withheld === [] || !is_string($sourceLast) || preg_match('/^\d{4}-\d{2}$/', $sourceLast) !== 1) {
+            return null;
+        }
+        $last = max($withheld);
+        $monthIndex = static fn (string $period): int => (int) substr($period, 0, 4) * 12 + (int) substr($period, 5, 2);
+        if ($monthIndex($sourceLast) - $monthIndex($last) > 2) {
+            return null;
+        }
+        $validTo = $record['valid_to'] ?? null;
+        if (is_string($validTo) && $validTo < $sourceLast . '-01') {
+            return null;
+        }
+        if ((int) ($record['total_minor'] ?? 0) > 0 && (int) ($record['outstanding_minor'] ?? 0) <= 0) {
+            return null;
+        }
+
+        return $last;
     }
 
     /**

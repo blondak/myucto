@@ -271,6 +271,15 @@ příkaz, rozhodnutí o oddlužení), export nenese, a MyÚčto je bez nich vyž
 Převzatý případ proto zůstane ve stavu *přijato*, do mzdového běhu nevstoupí
 a protokol spočítá, kolik případů čeká na doložení. Doložíte je v kartě případu.
 
+Protokol případy rozdělí podle toho, jestli je PAMICA opravdu srážela. Exekuce
+s kladnou srážkou v některém ze tří posledních zpracovaných měsíců, která
+neskončila a není doplacená, vypíše zvlášť s měsícem poslední srážky: srážet
+se má dál, takže ji doložte a aktivujte ještě před prvním mzdovým během, jinak
+ji běh vynechá. Aktivace potřebuje exekuční příkaz, soud nebo exekutora,
+oprávněného a příjemce; oprávněného export z PAMICA nenese. Ostatní případy
+(nový příkaz, odklad, doplacená pohledávka) vypíše protokol jako informaci
+k ověření proti spisu.
+
 Nepřevezme se rozpad nezabavitelné částky z PAMICA (MyÚčto ho počítá vlastní
 sadou pravidel, dvojí zdroj by se rozešel), vazba dvou srážek na jeden příkaz,
 společné oddlužení manželů a vazby na spořicí produkty.
