@@ -371,6 +371,7 @@ final readonly class SicknessSubmissionService
             // Událost po skončení vztahu jen v ochranné lhůtě (§ 15); mimo ni
             // nárok z tohoto vztahu nevznikl a zaměstnavatel nic nepředává.
             $this->caseService->assertEventCovered($kind, $incapacityFrom, $context, $row);
+            $this->caseService->assertLongTermCareNotRefused($kind, $row);
             $payload = $this->nempriPayload(
                 $supplierId,
                 $environment,
