@@ -31,10 +31,12 @@ final class StereoNxAccountingPaymentsWriteTest extends TestCase
     private int $supplierId;
     private int $userId;
     private string $archive;
+    private \Psr\Container\ContainerInterface $container;
 
     protected function setUp(): void
     {
         $container = Bootstrap::buildApp()->getContainer();
+        $this->container = $container;
         $this->db = $container->get(Connection::class);
         $this->importer = $container->get(StereoNxImporter::class);
         $this->payments = $container->get(StereoNxAccountingPayments::class);
@@ -101,6 +103,31 @@ final class StereoNxAccountingPaymentsWriteTest extends TestCase
         $this->expectException(\MyInvoice\Service\Migration\StereoNx\StereoNxException::class);
         $this->expectExceptionMessage('změnil');
         $this->payments->write($plan, $this->supplierId, $this->userId);
+    }
+
+    public function testReleasedMovementKeepsReviewFlagThroughRematchAndRules(): void
+    {
+        $documents = StereoNxSourcePlan::fromTables(self::tables(), SyntheticStereoNxTables::identity(), true, true);
+        $documents['source_company_index'] = 0;
+        $this->importer->writeAccountingPartners($documents['clients'], $documents['identity'], 0, $this->supplierId);
+        $this->importer->writeAccountingDocuments($documents, $this->supplierId, $this->userId);
+        $plan = $this->payments->prepare(StereoNxBackup::open($this->archive, 0));
+        $plan['documents'] = $documents;
+        $this->payments->write($plan, $this->supplierId, $this->userId);
+        $txId = $this->scalar("SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id
+            WHERE bs.supplier_id=? AND bt.match_status='manual' AND bt.match_reason='migration_review' ORDER BY bt.id LIMIT 1");
+        self::assertGreaterThan(0, $txId);
+
+        $container = $this->container;
+        $container->get(\MyInvoice\Service\Bank\BankTransactionReleaseService::class)
+            ->release($this->supplierId, $txId, \MyInvoice\Service\Bank\BankTransactionReleaseService::MODE_UNMATCH, $this->userId);
+        $container->get(\MyInvoice\Service\Bank\StatementMatcher::class)->match($txId);
+        self::assertSame('migration_review', $this->db->pdo()->query('SELECT match_reason FROM bank_transactions WHERE id=' . $txId)->fetchColumn());
+
+        $posting = $container->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        self::assertSame('migration_review', $posting->applyRules($this->supplierId, $txId, $this->userId)['reason'] ?? null);
+        self::assertSame('migration_review', $posting->handleTransaction($txId, $this->userId)['reason'] ?? null);
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM journal_entries WHERE supplier_id=? AND source_type='bank'"));
     }
 
     public function testPaymentRejectsChangedDocumentMapHash(): void
