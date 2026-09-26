@@ -85,7 +85,8 @@ function healthInsurerTitle(code: string): string {
 
   return insurer?.name ?? t('payroll.submissions.overview.health_insurer', { code })
 }
-const period = ref(payrollWorkingPeriod())
+// Záložka ZP předává sdílené období; jinde si panel drží vlastní.
+const period = defineModel<string>('period', { default: () => payrollWorkingPeriod() })
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })

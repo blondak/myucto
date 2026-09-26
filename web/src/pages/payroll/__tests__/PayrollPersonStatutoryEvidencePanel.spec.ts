@@ -226,7 +226,6 @@ function emptyEvidence(overrides: Partial<PayrollStatutoryEvidence> = {}): Payro
       'tax_declaration_evidence_missing',
       'tax_residence_evidence_missing',
       'social_jurisdiction_evidence_missing',
-      'working_pensioner_discount_evidence_missing',
       'health_coverage_evidence_missing',
     ],
     ...overrides,
@@ -300,7 +299,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     const wrapper = await mounted()
 
     const blockers = wrapper.get('[data-test="statutory-evidence-blockers"]')
-    expect(blockers.findAll('li')).toHaveLength(5)
+    expect(blockers.findAll('li')).toHaveLength(4)
     expect(blockers.text()).toContain(
       'payroll.people.statutory_evidence.blocker.tax_declaration_evidence_missing',
     )
@@ -1010,6 +1009,15 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     // Nápověda vysvětluje, které výjimky existují a co výpočet odvodí sám.
     expect(wrapper.get('[data-test="section-health_minimum_reductions"]').text())
       .toContain('payroll.people.statutory_evidence.section_hint.health_minimum_reductions')
+  })
+
+  it('bez záznamu slevy pracujícího důchodce ukáže „neuplatňuje se“, ne chybějící údaj', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
+      .toContain('payroll.people.statutory_evidence.current_discount_not_claimed')
+    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
+      .not.toContain('payroll.people.statutory_evidence.current_missing')
   })
 
   it('neověřenou výjimku ukáže jako blokující stav', async () => {

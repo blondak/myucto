@@ -105,6 +105,28 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
     }
 
     /**
+     * Snímek podání drží rodné číslo číslicemi, živá karta s lomítkem. Jde
+     * o týž údaj, změna rodného čísla z toho vzniknout nesmí.
+     */
+    public function testBirthNumberWithAndWithoutSlashIsTheSameValue(): void
+    {
+        $builder = $this->builder();
+        $baseline = $builder->build(
+            self::IDENTITY,
+            ['birth_number' => '8001010006', 'ecp' => null, 'vcp' => null],
+            $this->profile(),
+        );
+        $current = $builder->build(
+            self::IDENTITY,
+            ['birth_number' => '800101/0006', 'ecp' => null, 'vcp' => null],
+            $this->profile(),
+        );
+
+        self::assertSame([], (new PayrollRegistrationChangeDetector())
+            ->compare($baseline, $current));
+    }
+
+    /**
      * Návrh musí říct KTERÝ údaj, ne jen že se něco stalo. Bez toho nemá
      * účetní jak ověřit, jestli je návrh pravda.
      */

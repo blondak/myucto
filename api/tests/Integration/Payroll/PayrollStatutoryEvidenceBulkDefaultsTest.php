@@ -349,7 +349,9 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         self::assertSame(0, $this->rowCount('payroll_person_social_discount_claims', $sixty));
         self::assertSame(1, $this->rowCount('payroll_person_social_discount_claims', $fiftyNine));
         self::assertSame(0, $this->rowCount('payroll_person_social_discount_claims', $unknown));
-        self::assertContains(
+        // Hromadná akce za šedesátníka „neuplatňuje se" nezapíše, ale chybějící
+        // záznam výpočet nezastaví: slevu uplatňuje zaměstnanec sám.
+        self::assertNotContains(
             'working_pensioner_discount_evidence_missing',
             $this->view($sixty)['blockers'],
         );

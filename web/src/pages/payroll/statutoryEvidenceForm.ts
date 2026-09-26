@@ -209,9 +209,13 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
     ],
   },
   {
+    // Slevu pracujícího důchodce uplatňuje zaměstnanec sám; bez záznamu se
+    // neuplatňuje a výpočet ani podání to nezastaví.
     key: 'social_discount_claims',
     kind: 'interval',
     summaryKey: 'status',
+    optional: true,
+    emptyKey: 'current_discount_not_claimed',
     fields: [
       { key: 'status', kind: 'enum', options: ['not_claimed', 'verified', 'unverified'] },
       {

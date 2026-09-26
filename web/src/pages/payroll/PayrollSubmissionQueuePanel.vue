@@ -38,6 +38,7 @@ import {
   PAYROLL_QUEUE_BATCH_SIZE,
   payrollApi,
   type PayrollRegzelEnvironment,
+  type PayrollSubmissionDetail,
   type PayrollSubmissionQueueBatchItemResult,
   type PayrollSubmissionQueueItem,
   type PayrollSubmissionQueueSort,
@@ -59,7 +60,12 @@ const { t } = useI18n()
  * Potvrzení opakování se chová stejně.
  */
 const canWrite = true
-const { submissionAgendaLabel, submissionStatusLabel, submissionKindLabel } = usePayrollLabels()
+const {
+  artifactKindLabel,
+  submissionAgendaLabel,
+  submissionStatusLabel,
+  submissionKindLabel,
+} = usePayrollLabels()
 const {
   request: sendConfirmRequest,
   confirmProductionSend,
@@ -141,6 +147,61 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+/*
+ * Co přesně odchází, musí jít ověřit přímo ve frontě: rozbalený řádek ukáže
+ * soubory podání (XML) ke stažení, jméno vede na kartu zaměstnance.
+ */
+const expandedId = ref<number | null>(null)
+const expandedDetail = ref<PayrollSubmissionDetail | null>(null)
+const expandedLoading = ref(false)
+const expandedError = ref('')
+const downloadingArtifactId = ref<number | null>(null)
+
+async function toggleDetail(item: PayrollSubmissionQueueItem): Promise<void> {
+  if (expandedId.value === item.submission_id) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = item.submission_id
+  expandedDetail.value = null
+  expandedError.value = ''
+  expandedLoading.value = true
+  try {
+    expandedDetail.value = await payrollApi.submissionDetail(item.submission_id)
+  } catch (exception) {
+    expandedError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.detail_load_failed'),
+    )
+  } finally {
+    expandedLoading.value = false
+  }
+}
+
+async function downloadArtifact(
+  artifact: PayrollSubmissionDetail['artifacts'][number],
+): Promise<void> {
+  if (!expandedDetail.value || downloadingArtifactId.value !== null) return
+  expandedError.value = ''
+  downloadingArtifactId.value = artifact.id
+  try {
+    await payrollApi.downloadSubmissionArtifact(expandedDetail.value.submission.id, artifact)
+  } catch (exception) {
+    expandedError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.artifact_download_failed'),
+    )
+  } finally {
+    downloadingArtifactId.value = null
+  }
+}
+
+function personLink(item: PayrollSubmissionQueueItem): { path: string; query: { person: string } } | null {
+  return item.subject_employee_id
+    ? { path: '/payroll/people', query: { person: String(item.subject_employee_id) } }
+    : null
 }
 
 function toggle(item: PayrollSubmissionQueueItem): void {
@@ -567,9 +628,8 @@ void load()
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
+            <template v-for="item in items" :key="item.submission_id">
             <tr
-              v-for="item in items"
-              :key="item.submission_id"
               :class="item.deadline.is_overdue ? 'bg-rose-50/50' : ''"
               data-test="queue-row"
             >
@@ -593,7 +653,15 @@ void load()
                 </div>
               </td>
               <td class="px-3 py-2 align-top text-neutral-700">
-                {{ item.subject_label ?? '—' }}
+                <RouterLink
+                  v-if="personLink(item)"
+                  :to="personLink(item)!"
+                  class="text-primary-700 hover:underline"
+                  data-test="queue-subject-link"
+                >
+                  {{ item.subject_label ?? t('payroll.submissions.queue.open_person') }}
+                </RouterLink>
+                <template v-else>{{ item.subject_label ?? '—' }}</template>
               </td>
               <td class="px-3 py-2 align-top whitespace-nowrap text-neutral-700">
                 {{ formatPeriod(item.period_start.slice(0, 7)) }}
@@ -661,6 +729,18 @@ void load()
                     </svg>
                     <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.send') }}</span>
                   </button>
+                  <button
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    :aria-expanded="expandedId === item.submission_id"
+                    data-test="queue-detail-toggle"
+                    @click="toggleDetail(item)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.eye" />
+                    </svg>
+                    <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.show_detail') }}</span>
+                  </button>
                   <!--
                     Cesta ven z podání, které úřad nepřijal. Bez ní zůstane
                     povinnost trvale nepodatelná: odeslat nejde a nové podání
@@ -684,6 +764,46 @@ void load()
                 </div>
               </td>
             </tr>
+            <tr v-if="expandedId === item.submission_id" data-test="queue-detail-row">
+              <td colspan="7" class="bg-neutral-50 px-3 py-3">
+                <p v-if="expandedLoading" class="text-sm text-neutral-500">
+                  {{ t('common.loading') }}
+                </p>
+                <p
+                  v-if="expandedError"
+                  class="mb-2 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+                  role="alert"
+                  data-test="queue-detail-error"
+                >
+                  {{ expandedError }}
+                </p>
+                <template v-if="expandedDetail">
+                  <h4 class="text-sm font-semibold text-neutral-900">
+                    {{ t('payroll.submissions.overview.detail_artifacts', { count: expandedDetail.artifacts.length }) }}
+                  </h4>
+                  <p v-if="expandedDetail.artifacts.length === 0" class="mt-2 text-sm text-neutral-500">
+                    {{ t('payroll.submissions.overview.detail_none') }}
+                  </p>
+                  <ul v-else class="mt-2 flex flex-wrap gap-2">
+                    <li v-for="artifact in expandedDetail.artifacts" :key="artifact.id">
+                      <button
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="downloadingArtifactId !== null"
+                        data-test="queue-artifact-download"
+                        @click="downloadArtifact(artifact)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.download" />
+                        </svg>
+                        <span class="whitespace-nowrap">{{ artifactKindLabel(artifact.artifact_kind) }}</span>
+                      </button>
+                    </li>
+                  </ul>
+                </template>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -716,7 +836,16 @@ void load()
               <dt class="inline text-neutral-500">
                 {{ t('payroll.submissions.queue.col_subject') }}:
               </dt>
-              <dd class="inline"> {{ item.subject_label }}</dd>
+              <dd class="inline">
+                <RouterLink
+                  v-if="personLink(item)"
+                  :to="personLink(item)!"
+                  class="text-primary-700 hover:underline"
+                >
+                  {{ item.subject_label }}
+                </RouterLink>
+                <template v-else>{{ item.subject_label }}</template>
+              </dd>
             </div>
             <div>
               <dt class="inline text-neutral-500">
@@ -756,6 +885,39 @@ void load()
             </svg>
             <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.send') }}</span>
           </button>
+          <button
+            type="button"
+            :class="[btnOutlineSm('neutral'), 'mt-2 w-full justify-center']"
+            :aria-expanded="expandedId === item.submission_id"
+            @click="toggleDetail(item)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.eye" />
+            </svg>
+            <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.show_detail') }}</span>
+          </button>
+          <div v-if="expandedId === item.submission_id" class="mt-2 text-sm">
+            <p v-if="expandedLoading" class="text-neutral-500">{{ t('common.loading') }}</p>
+            <p v-if="expandedError" class="text-danger-700" role="alert">{{ expandedError }}</p>
+            <div v-if="expandedDetail" class="flex flex-wrap gap-2">
+              <button
+                v-for="artifact in expandedDetail.artifacts"
+                :key="artifact.id"
+                type="button"
+                :class="btnOutlineSm('neutral')"
+                :disabled="downloadingArtifactId !== null"
+                @click="downloadArtifact(artifact)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.download" />
+                </svg>
+                <span class="whitespace-nowrap">{{ artifactKindLabel(artifact.artifact_kind) }}</span>
+              </button>
+              <span v-if="expandedDetail.artifacts.length === 0" class="text-neutral-500">
+                {{ t('payroll.submissions.overview.detail_none') }}
+              </span>
+            </div>
+          </div>
           <button
             v-if="canAbandon(item)"
             type="button"

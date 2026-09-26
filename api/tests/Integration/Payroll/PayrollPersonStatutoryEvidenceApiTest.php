@@ -137,7 +137,6 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
                 'tax_declaration_evidence_missing',
                 'tax_residence_evidence_missing',
                 'social_jurisdiction_evidence_missing',
-                'working_pensioner_discount_evidence_missing',
                 'health_coverage_evidence_missing',
             ],
             $body['evidence']['blockers'],

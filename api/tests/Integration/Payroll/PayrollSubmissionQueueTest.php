@@ -343,6 +343,38 @@ final class PayrollSubmissionQueueTest extends TestCase
         self::assertSame($expected, $sortedCodes);
     }
 
+    /**
+     * Registrace vede vztah jako `payroll_employment:{id}`. Fronta u ní dřív
+     * ve sloupci „Koho se týká" ukázala jen pomlčku a nevedla nikam.
+     */
+    public function testRegistrationRowNamesTheEmployeeAndLinksTheCard(): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Syntetický Zaměstnanec Fronty", "employee", 1)'
+        )->execute([$this->supplierId]);
+        $employeeId = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, end_date, is_primary)
+             VALUES (?, ?, ?, "employment", "active", "2026-07-01", "2026-07-01", NULL, 1)'
+        )->execute([$this->supplierId, $employeeId, 'QUEUE-' . bin2hex(random_bytes(3))]);
+        $employmentId = (int) $this->pdo->lastInsertId();
+
+        $submissionId = $this->seed(
+            PayrollDispatchCapabilityCatalog::canonical('PREZEC26'),
+            'ready',
+            dueOn: '2026-08-20',
+            subjectReference: "payroll_employment:{$employmentId}",
+        );
+
+        $row = $this->row($submissionId);
+        self::assertNotNull($row);
+        self::assertSame('Syntetický Zaměstnanec Fronty', $row['subject_label']);
+        self::assertSame($employeeId, $row['subject_employee_id']);
+    }
+
     private function key(): string
     {
         return 'queue-test-' . bin2hex(random_bytes(8));
@@ -366,6 +398,7 @@ final class PayrollSubmissionQueueTest extends TestCase
         string $agendaCode,
         string $status,
         string $dueOn,
+        ?string $subjectReference = null,
     ): int {
         $suffix = bin2hex(random_bytes(4));
         $this->pdo->prepare(
@@ -381,7 +414,7 @@ final class PayrollSubmissionQueueTest extends TestCase
         )->execute([
             $this->supplierId,
             $agendaCode,
-            'queue-test-' . $suffix,
+            $subjectReference ?? 'queue-test-' . $suffix,
             'queue-event-' . $suffix,
             str_repeat('c', 64),
             str_repeat('a', 64),

@@ -281,8 +281,10 @@ final readonly class OzuspojSubmissionService
             employeeFirstName: $this->requiredIdentity($identity, 'first_name'),
             employeeLastName: $this->requiredIdentity($identity, 'last_name'),
             employeeBirthDate: $this->requiredIdentity($identity, 'birth_date'),
-            employeeBirthNumber: $identity['identifiers']['birth_number']
-                ?? $identity['identifiers']['ecp'],
+            employeeBirthNumber: \MyInvoice\Service\Payroll\CzechBirthNumber::forSubmission(
+                $identity['identifiers']['birth_number']
+                    ?? $identity['identifiers']['ecp'],
+            ),
             productName: $this->software->productName,
             productVersion: $this->software->productVersion,
         );

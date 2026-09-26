@@ -1550,17 +1550,22 @@ final class PayrollSubmissionRepository
     }
 
     /**
-     * Stav posledního ověřeného protokolu každé součásti podání.
+     * Originál posledního ověřeného protokolu každé součásti podání.
      *
-     * @return array<int,string> id součásti → vzdálený stav
+     * Vrací artefakt, ne `remote_status`: ten u protokolu dílčího balíku nese
+     * SLOŽENÝ stav celého podání v okamžiku importu (po prvním balíku
+     * „zpracovává se"), ne výsledek balíku. Skládat z něj stav znovu by
+     * podání nikdy nepustilo dál než do `processing`.
+     *
+     * @return array<int,int> id součásti → id artefaktu originálu protokolu
      */
-    public function latestTrustedReceiptStatusByPart(
+    public function latestTrustedReceiptArtifactByPart(
         int $supplierId,
         string $environment,
         int $submissionId,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT part_id, remote_status
+            'SELECT part_id, artifact_id
                FROM payroll_submission_receipts
               WHERE supplier_id = ? AND environment = ? AND submission_id = ?
                 AND part_id IS NOT NULL
@@ -1569,12 +1574,12 @@ final class PayrollSubmissionRepository
               ORDER BY id',
         );
         $statement->execute([$supplierId, $environment, $submissionId]);
-        $statuses = [];
+        $artifacts = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $statuses[(int) $row['part_id']] = (string) $row['remote_status'];
+            $artifacts[(int) $row['part_id']] = (int) $row['artifact_id'];
         }
 
-        return $statuses;
+        return $artifacts;
     }
 
     private function findOutboundArtifactId(

@@ -160,7 +160,6 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
                 "income_tax:tax_declaration_evidence_missing:{$reference}",
                 "income_tax:tax_residence_evidence_missing:{$reference}",
                 "social_insurance:social_jurisdiction_evidence_missing:{$reference}",
-                "social_insurance:working_pensioner_discount_evidence_missing:{$reference}",
             ],
             $missing['net_pay']['issues'],
         );
@@ -173,7 +172,7 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
             static fn (array $row): bool =>
                 $row['code'] === 'statutory_calculation_manual_review',
         ));
-        self::assertCount(5, $statutoryRows);
+        self::assertCount(4, $statutoryRows);
         self::assertSame(
             [$this->missingEmployeeId],
             array_values(array_unique(array_column($statutoryRows, 'entity_id'))),
