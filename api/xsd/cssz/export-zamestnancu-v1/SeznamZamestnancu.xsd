@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="unqualified" attributeFormDefault="unqualified">
+	<xs:element name="ExportZamestnancu" type="ExportZamestnancuType"/>
+	<xs:complexType name="ExportZamestnancuType">
+		<xs:sequence>
+			<xs:element name="DatumGenerovani" type="xs:dateTime"/>
+			<xs:element name="Zamestnanci" type="ZamestnanciType"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ZamestnanciType">
+		<xs:sequence>
+			<xs:element name="Zamestnanec" type="ZamestnanecType" minOccurs="1" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ZamestnanecType">
+		<xs:sequence>
+			<xs:choice>
+				<xs:element name="RodneCislo" type="RodneCisloType"/>
+				<xs:element name="EvidencniCisloPojistence" type="EvidencniCisloPojistenceType"/>
+			</xs:choice>
+			<xs:element name="Prijmeni" type="xs:string"/>
+			<xs:element name="Jmeno" type="xs:string"/>
+			<xs:element name="VariabilniSymbol" type="IdType"/>
+			<xs:element name="PojistnyVztahDo" type="xs:date" minOccurs="0"/>
+			<xs:element name="KodDruhuCinnosti" type="xs:string"/>
+			<xs:element name="NazevDruhuCinnosti" type="xs:string"/>
+			<xs:element name="ZMR" type="ZMRType"/>
+			<xs:element name="IdZamestnani" type="IdType"/>
+			<xs:element name="OIC" type="IdType" minOccurs="0"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:simpleType name="RodneCisloType">
+		<xs:annotation>
+			<xs:documentation xml:lang="cs">
+        Rodné číslo bez mezer, lomítek a jiných formátovacích znaků.
+      </xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:pattern value="[0-9]{9,10}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="EvidencniCisloPojistenceType">
+		<xs:annotation>
+			<xs:documentation xml:lang="cs">
+        Evidenční číslo pojištěnce, stejný typ jako RČ, k číslu dne je připočtena hodnota 40.
+      </xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:pattern value="[0-9]{9,10}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<!-- ZMR ve vzorku: N / A -->
+	<xs:simpleType name="ZMRType">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="N"/>
+			<xs:enumeration value="A"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="IdType">
+		<xs:restriction base="xs:string">
+			<xs:pattern value="[1-9].*|0"/>
+		</xs:restriction>
+	</xs:simpleType>
+</xs:schema>

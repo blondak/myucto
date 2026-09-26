@@ -212,9 +212,11 @@ final class RegistrationImportWriter
                     $employmentId,
                     $target,
                     (string) $steps['terminate']['on'],
-                    $target === 'ended'
-                        ? 'Skončení podle importovaného odhlášení ČSSZ.'
-                        : 'Nenastoupení podle importované registrace ČSSZ.',
+                    match (true) {
+                        $target !== 'ended' => 'Nenastoupení podle importované registrace ČSSZ.',
+                        $record->isCsszExport() => 'Skončení podle konce pojistného vztahu v exportu zaměstnanců ČSSZ.',
+                        default => 'Skončení podle importovaného odhlášení ČSSZ.',
+                    },
                     $userId,
                     $ip,
                     $userAgent,

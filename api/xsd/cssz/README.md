@@ -15,3 +15,6 @@ U HZUPN20 nejde o překlep: ČSSZ publikuje balíček v1.2, ale jeho kořenové
 
 Změna URL, verze, otisku, názvu nebo relativního importu je vědomá změna
 balíčku a musí aktualizovat katalog i jeho test.
+
+Schémata exportu zaměstnanců z ePortálu ČSSZ (`export-zamestnancu-v1/`,
+`export-zamestnancu-v2/`) popisuje [`export-zamestnancu.md`](export-zamestnancu.md).

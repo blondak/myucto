@@ -127,28 +127,35 @@ final class RegistrationXmlFixtures
 
     /**
      * Export zaměstnanců z ePortálu ČSSZ (kořen `ExportZamestnancu` bez jmenného
-     * prostoru, s BOM jako originál). Hodnota `null` element vynechá.
+     * prostoru, s BOM jako originál). Hodnota `null` element vynechá; elementy
+     * jdou v pořadí schématu MPSV. Věta s `PojistnyVztahOd` je tvar exportu
+     * od 15. 10. 2026.
      *
      * @param list<array<string,string|null>> $employees
      */
     public static function csszExport(array $employees, string $generatedAt = '2026-09-20T10:15:00.123Z'): string
     {
+        $order = [
+            'RodneCislo', 'EvidencniCisloPojistence', 'Prijmeni', 'Jmeno', 'VariabilniSymbol',
+            'PojistnyVztahOd', 'PojistnyVztahDo', 'KodDruhuCinnosti', 'NazevDruhuCinnosti',
+            'KodBlizsihoUrceniCinnosti', 'NazevBlizsihoUrceniCinnosti', 'ZMR', 'IdZamestnani', 'OIC',
+        ];
         $rows = '';
         foreach ($employees as $employee) {
             $e = $employee + [
                 'RodneCislo' => null,
-                'Prijmeni' => null,
-                'Jmeno' => null,
+                'Prijmeni' => 'Testovací',
+                'Jmeno' => 'Jana',
                 'VariabilniSymbol' => '1234567890',
                 'KodDruhuCinnosti' => '1',
                 'NazevDruhuCinnosti' => 'Pracovní poměr',
                 'ZMR' => 'N',
-                'IdZamestnani' => null,
+                'IdZamestnani' => '2000000000999',
                 'OIC' => null,
             ];
             $rows .= "    <Zamestnanec>\n";
-            foreach ($e as $element => $value) {
-                if ($value !== null) {
+            foreach (array_merge(array_flip($order), $e) as $element => $value) {
+                if (is_string($value)) {
                     $rows .= "      <{$element}>" . htmlspecialchars($value, ENT_XML1) . "</{$element}>\n";
                 }
             }

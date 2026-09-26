@@ -27203,6 +27203,7 @@
         },
         "month_status": {
           "ready": "Převezme se",
+          "partial": "Převezme se částečně",
           "blocked": "Nelze převzít",
           "computed": "Počítá MyÚčto"
         },
@@ -27285,6 +27286,20 @@
         "title": "Povinnosti ke změnám",
         "completed": "Odškrtnuté povinnosti ke změnám: {count}",
         "failed": "Nepodařilo se odškrtnout"
+      },
+      "import_review": {
+        "relation_choice_label": "Druh vztahu podle smlouvy",
+        "relation_choice_hint": "Hlášení nenese druh činnosti a příjem byl ve všech měsících pod rozhodným příjmem malého rozsahu, takže podklady nerozliší DPP od DPČ malého rozsahu. Zvolte druh podle smlouvy; náhled se přepočítá.",
+        "relation_choice_for": "Druh vztahu pro: {name}",
+        "concurrent_employment": "Další vztah téže osoby",
+        "concurrent_employment_hint": "Formulář patří souběžnému vztahu téže osoby (jiné ID PPV). K existujícímu vztahu ho přiřadit nejde; vyberte i větu „Odvozeno z hlášení JMHZ“, která vztah založí.",
+        "start_estimated": "Nástup odhadnutý",
+        "start_estimated_hint": "Nástup je první hlášený měsíc, vztah mohl začít dřív. Po zápisu ho doplňte ze smlouvy na kartě osoby (pracovní vztah → Sjednané podmínky), nebo nahrajte export zaměstnanců z ePortálu ČSSZ.",
+        "start_estimated_link": "Doplnit nástup na kartě osoby",
+        "incomplete_title": "Import není úplný",
+        "incomplete_hint": "Zapsané věty zůstávají zapsané, tyto formuláře hlášení se ale nepřevzaly a jejich měsíce v převzatých mzdách chybí. Opravte je v náhledu (přiřaďte vztah, vyberte větu, která vztah založí, nebo vyřešte blokaci) a použijte znovu.",
+        "incomplete_toast": "Import není úplný: formulářů bez pracovního vztahu nebo zablokovaných {count}.",
+        "fix_in_preview": "Ukázat v náhledu"
       }
     },
     "meaning_groups": {

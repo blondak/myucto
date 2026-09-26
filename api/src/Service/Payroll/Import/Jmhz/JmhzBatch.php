@@ -42,6 +42,8 @@ final class JmhzBatch
     /** @var array<string,array{count:?int,ordinals:array<int,true>}> */
     private array $packages = [];
     private ?JmhzEmploymentHistory $history = null;
+    /** @var array<string,string> klíč vztahu => nástup doložený exportem zaměstnanců ČSSZ */
+    private array $declaredStarts = [];
 
     /**
      * @param list<JmhzBatchItem> $items
@@ -128,6 +130,22 @@ final class JmhzBatch
     public function history(): JmhzEmploymentHistory
     {
         return $this->history ??= JmhzEmploymentHistory::fromBatch($this);
+    }
+
+    /**
+     * Nástup vztahu, který dávce dokládá export zaměstnanců ČSSZ (začátek
+     * pojistného vztahu u vztahu přihlašovaného k nástupu). Má přednost před
+     * odhadem z prvního hlášeného měsíce.
+     */
+    public function declareStart(string $relationKey, string $on): void
+    {
+        $this->declaredStarts[$relationKey] = $on;
+        $this->history = null;
+    }
+
+    public function declaredStart(string $relationKey): ?string
+    {
+        return $this->declaredStarts[$relationKey] ?? null;
     }
 
     public function markConflict(string $key): void

@@ -74,6 +74,25 @@ final readonly class RegistrationRecord
         public ?array $workload = null,
         /** Poznámky k odvození věty z hlášení (co je odhad, co zkontrolovat). */
         public array $notes = [],
+        /** Evidenční číslo pojištěnce (EČP) — u cizince bez rodného čísla místo něj. */
+        public ?string $insuredPersonNumber = null,
+        /** Začátek a konec pojistného vztahu podle exportu ČSSZ (`PojistnyVztahOd`/`Do`). */
+        public ?string $insuranceFrom = null,
+        public ?string $insuranceTo = null,
+        /**
+         * Druh vztahu, když ho věta nenese kódem činnosti, ale dokládá ho řada
+         * hlášení (DPP bez účasti na pojištění). Kód činnosti má přednost.
+         */
+        public ?string $relationTypeHint = null,
+        /**
+         * Druhy vztahu, mezi kterými volí účetní v náhledu, protože je z podkladů
+         * nejde rozlišit (DPP, nebo DPČ malého rozsahu). První je výchozí.
+         *
+         * @var list<string>
+         */
+        public array $relationTypeOptions = [],
+        /** Nástup je jen odhad z prvního hlášeného měsíce — účetní ho doplní ze smlouvy. */
+        public bool $startEstimated = false,
     ) {}
 
     public function isCsszExport(): bool
@@ -105,12 +124,16 @@ final readonly class RegistrationRecord
      */
     public function relationType(): ?string
     {
-        $code = $this->activityCode;
-        if ($code === null) {
-            return null;
-        }
+        return $this->activityCode === null
+            ? $this->relationTypeHint
+            : self::relationTypeOf($this->activityCode, $this->smallScale);
+    }
+
+    /** Druh vztahu podle kódu druhu činnosti ČSSZ (10239); `null` = kód neznámý. */
+    public static function relationTypeOf(string $code, bool $smallScale = false): ?string
+    {
         if (preg_match('/^[1-9]$/D', $code) === 1) {
-            return $this->smallScale ? 'small_scale_employment' : 'employment';
+            return $smallScale ? 'small_scale_employment' : 'employment';
         }
         if (preg_match('/^[A-J]$/D', $code) === 1) {
             return 'dpc';
@@ -120,6 +143,29 @@ final readonly class RegistrationRecord
         }
 
         return $code === 'S' ? 'statutory_body' : null;
+    }
+
+    /**
+     * Začátek pojistného vztahu z exportu je dnem nástupu jen u vztahu, který
+     * se přihlašuje k nástupu. Zaměstnání malého rozsahu a DPP jsou účastny
+     * pojištění jen v měsících s rozhodným příjmem, takže začátek pojištění
+     * nástup být nemusí (pokyny MPSV k 10223).
+     */
+    public function insuranceStartIsEmploymentStart(): bool
+    {
+        return $this->insuranceFrom !== null && $this->insuredFromStartToEnd();
+    }
+
+    /** Konec pojistného vztahu z exportu je skončením vztahu (stejné výhrady jako u začátku). */
+    public function insuranceEndIsEmploymentEnd(): bool
+    {
+        return $this->insuranceTo !== null && $this->insuredFromStartToEnd();
+    }
+
+    private function insuredFromStartToEnd(): bool
+    {
+        return !$this->smallScale
+            && in_array($this->relationType(), ['employment', 'dpc', 'statutory_body'], true);
     }
 
     /** Den, ke kterému se údaje věty vztahují. */

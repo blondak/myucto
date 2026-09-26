@@ -105,6 +105,10 @@ final class PremierPayrollImportTest extends TestCase
                            JOIN payroll_employees p ON p.id = e.employee_id WHERE e.supplier_id = ? ORDER BY e.code', $supplierId), $this->explain($first));
         self::assertSame([['S', '600000']], $this->fetch("SELECT t.activity_code, t.monthly_gross_minor FROM payroll_employment_terms t
             JOIN payroll_employments e ON e.id = t.employment_id WHERE e.supplier_id = ? AND e.code = '1'", $supplierId));
+        // Jednatelka je zdaněná srážkou: `NEZD_A` bez `POD_DAN` podepsané prohlášení není.
+        self::assertSame([['not-signed']], $this->fetch("SELECT DISTINCT d.status FROM payroll_person_tax_declarations d
+            JOIN payroll_employments e ON e.employee_id = d.employee_id AND e.supplier_id = d.supplier_id
+            WHERE e.supplier_id = ? AND e.code = '1'", $supplierId), $this->explain($first));
 
         // Převzaté měsíce: evidence předchozího systému, žádné účetní zápisy.
         self::assertSame([['16', '8400000']], $this->fetch("SELECT COUNT(*), SUM(gross_minor) FROM payroll_migration_reference_totals WHERE supplier_id = ? AND source = 'other'", $supplierId));
@@ -616,7 +620,8 @@ final class PremierPayrollImportTest extends TestCase
 
     /**
      * Záloha s mzdami, kde jednatelka má v 9-11/2025 srážku 1 500 Kč (`SR_VYZI`) a v 11/2025
-     * vyloučenou dobu 5 dnů (`VYL_DND`). Syntetická data jen tohoto testu.
+     * 5 kalendářních dnů nemoci (`DNY_NEKA`; `VYL_DND` je v zálohách PREMIER vždy prázdný).
+     * Syntetická data jen tohoto testu.
      */
     private function backupWithDeductions(): PremierBackup
     {
@@ -629,7 +634,8 @@ final class PremierPayrollImportTest extends TestCase
                 $rows[$i]['SR_VYZI'] = 1500;
             }
             if ($row['INTER'] === 1 && $row['ROK'] === 2025 && $row['MESIC'] === 11) {
-                $rows[$i]['VYL_DND'] = 5;
+                $rows[$i]['DNY_NEKA'] = 5;
+                $rows[$i]['VYL_DND'] = 0;
             }
         }
         DbfWriter::write($dir . DIRECTORY_SEPARATOR . 'MZDY.DBF', $fields, $rows);

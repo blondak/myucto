@@ -19,7 +19,9 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
  *  - `workplace`: `{city:string, municipality_code:string, country_code:string}` (10229–10231),
  *  - `fund`: `{standard:string, agreed:string, weekly:string}` (10259–10261, desetinný zápis),
  *  - `eldp`: `{code:?string, insurance_days:int, excluded_days:int}` — kód první sekce ELDP
- *    a součty dnů přes sekce (10240, 10356, 10357); `null`, když formulář seznam ELDP nemá.
+ *    a součty dnů přes sekce (10240, 10356); vyloučené dny jsou úhrn 10357, a když ho
+ *    program nevyplnil, součet podpoložek (nemoc, PPM, ošetřovné, otcovská, omluvená
+ *    nepřítomnost, dávky — 10358–10536, 10473–10475); `null`, když formulář seznam ELDP nemá.
  *
  * Údaje z bloků, které měkký režim čtení smí přejít (pojištění do, pojistné, čistá mzda,
  * zdravotní pojištění, neodpracované hodiny, ELDP), se čtou tolerantně: nečitelná hodnota
@@ -99,6 +101,8 @@ final readonly class JmhzReportForm
         public ?int $leaveMillihours = null,
         /** Neodpracované hodiny pro nemoc (s náhradou i bez ní) a OČR — snižují tarif měsíční mzdy. */
         public ?int $absenceMillihours = null,
+        /** Příjem z nepojištěné činnosti (10476) — dohoda nebo malý rozsah pod rozhodným příjmem. */
+        public ?int $uninsuredIncome = null,
     ) {}
 
     /**
@@ -130,13 +134,14 @@ final readonly class JmhzReportForm
      * Úvazek podle fondu pracovní doby: sjednaný fond / stanovený fond (10260/10259)
      * a z něj týdenní pracovní doba ze stanovené týdenní doby (10261). `null`, když
      * měsíc úvazek nedokládá (stanovený fond 0 při celoměsíční nepřítomnosti,
-     * sjednaný vyšší než stanovený, chybějící údaj).
+     * sjednaný vyšší než stanovený, chybějící údaj, dohoda s „missingovou"
+     * týdenní dobou 99).
      *
      * @return array{workload_basis_points:int,weekly_hours:string}|null
      */
     public function workload(): ?array
     {
-        if ($this->fund === null) {
+        if ($this->fund === null || JmhzEmploymentHistory::weeklyMissing($this->fund['weekly'])) {
             return null;
         }
         $standard = self::milli($this->fund['standard']);

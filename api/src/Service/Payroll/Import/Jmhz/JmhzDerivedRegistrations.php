@@ -71,7 +71,18 @@ final class JmhzDerivedRegistrations
                     . '(nebo nahrajte export zaměstnanců z ePortálu ČSSZ).';
             }
             $activity = $history->activityCode($key);
-            if ($activity === null) {
+            $agreement = $activity === null ? $history->uninsuredAgreement($key) : null;
+            if ($agreement !== null) {
+                $notes[] = count($agreement['options']) > 1
+                    ? 'Hlášení nenese druh činnosti ani ELDP a vztah nebyl účasten na pojištění (bez vyměřovacího '
+                        . 'základu, bez stanovené týdenní doby, s příjmem z nepojištěné činnosti). Příjem ani v jednom '
+                        . 'měsíci nedosáhl ' . number_format(JmhzEmploymentHistory::SMALL_SCALE_LIMIT_CZK, 0, ',', ' ')
+                        . ' Kč, takže může jít o DPP i o DPČ malého rozsahu. Založí se DPP; jde-li o DPČ, zvolte '
+                        . 'druh vztahu v náhledu.'
+                    : 'Hlášení nenese druh činnosti ani ELDP, ale vztah nebyl účasten na pojištění (bez vyměřovacího '
+                        . 'základu, bez stanovené týdenní doby) a měl příjem z nepojištěné činnosti nad rozhodným '
+                        . 'příjmem malého rozsahu. Jde o dohodu o provedení práce (DPP).';
+            } elseif ($activity === null) {
                 $notes[] = 'Vztah v hlášení nemá ELDP ani druh činnosti — není účasten na pojištění, takže '
                     . 'z hlášení nejde poznat, jestli jde o dohodu, nebo zaměstnání malého rozsahu.';
             }
@@ -96,6 +107,9 @@ final class JmhzDerivedRegistrations
                 employerVariableSymbol: $first->file->variableSymbol,
                 workload: self::workload($history->months($key)),
                 notes: $notes,
+                relationTypeHint: $agreement['relation_type'] ?? null,
+                relationTypeOptions: $agreement === null || count($agreement['options']) < 2 ? [] : $agreement['options'],
+                startEstimated: $start['needs_check'],
             );
         }
 
@@ -152,13 +166,16 @@ final class JmhzDerivedRegistrations
     {
         $note = match ($start['source']) {
             JmhzEmploymentHistory::START_DATE => "Nástup {$start['on']} uvádí hlášení za {$start['period']}.",
+            JmhzEmploymentHistory::START_CSSZ_EXPORT => "Nástup {$start['on']} je začátek pojistného vztahu podle exportu zaměstnanců ČSSZ.",
             JmhzEmploymentHistory::START_INSURANCE_FROM => "Nástup {$start['on']} je začátek pojištění v hlášení za {$start['period']}.",
             default => "Nástup se odvodil z prvního hlášeného měsíce {$start['period']}.",
         };
         $notes = [$note];
         if ($start['needs_check']) {
-            $notes[] = 'Dávka nemá hlášení za dřívější měsíce, vztah tedy mohl začít už dřív. Skutečný nástup '
-                . 'zkontrolujte (pracovní smlouva, přihláška) — nebo nahrajte i hlášení za dřívější měsíce.';
+            $notes[] = "Nástup {$start['on']} je odhadnutý: dávka nemá hlášení za dřívější měsíce, vztah tedy mohl "
+                . 'začít už dřív. Doplňte skutečný nástup ze smlouvy na kartě pracovního vztahu (Mzdy → Zaměstnanci '
+                . '→ vztah → Sjednané podmínky), nebo nahrajte export zaměstnanců z ePortálu ČSSZ (od 15. 10. 2026 '
+                . 'nese začátek pojistného vztahu) či hlášení za dřívější měsíce.';
         }
 
         return $notes;

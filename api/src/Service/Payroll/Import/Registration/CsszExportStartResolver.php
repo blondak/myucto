@@ -7,18 +7,39 @@ namespace MyInvoice\Service\Payroll\Import\Registration;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzBatch;
 
 /**
- * Nástup pro větu exportu zaměstnanců ČSSZ, který export sám nenese.
+ * Nástup pro větu exportu zaměstnanců ČSSZ.
  *
- * Hledá se v platných formulářích měsíčního hlášení téže dávky se stejným
- * ID PPV. Přednost má datum nástupu z identifikace formuláře (10223), jinak
- * začátek pojištění v hlášeném měsíci (10354); z více formulářů vyhrává
- * nejdřívější datum. Začátek pojištění je jen dolní odhad: když vyjde na první
- * den nejstaršího hlášeného měsíce, mohl vztah začít i dřív.
+ * Export od 15. 10. 2026 nese začátek pojistného vztahu (`PojistnyVztahOd`);
+ * u vztahu, který se přihlašuje k nástupu, je to den nástupu a má přednost
+ * ({@see forExport()}). Dosavadní export ho nenese — pak se nástup hledá
+ * v platných formulářích měsíčního hlášení téže dávky se stejným ID PPV.
+ * Přednost má datum nástupu z identifikace formuláře (10223), jinak začátek
+ * pojištění v hlášeném měsíci (10354); z více formulářů vyhrává nejdřívější
+ * datum. Začátek pojištění je jen dolní odhad: když vyjde na první den
+ * nejstaršího hlášeného měsíce, mohl vztah začít i dřív.
  */
 final class CsszExportStartResolver
 {
     public const SOURCE_START_DATE = 'start_date';
     public const SOURCE_INSURANCE_FROM = 'insurance_from';
+    public const SOURCE_EXPORT = 'cssz_export';
+
+    /** @return array{on:string,source:string,period:string,earliest_period:string}|null */
+    public static function forExport(RegistrationRecord $record, JmhzBatch $batch): ?array
+    {
+        if ($record->insuranceStartIsEmploymentStart()) {
+            $period = substr((string) $record->insuranceFrom, 0, 7);
+
+            return [
+                'on' => (string) $record->insuranceFrom,
+                'source' => self::SOURCE_EXPORT,
+                'period' => $period,
+                'earliest_period' => $period,
+            ];
+        }
+
+        return $record->employmentIdentifier === null ? null : self::resolve($batch, $record->employmentIdentifier);
+    }
 
     /** @return array{on:string,source:string,period:string,earliest_period:string}|null */
     public static function resolve(JmhzBatch $batch, string $employmentIdentifier): ?array

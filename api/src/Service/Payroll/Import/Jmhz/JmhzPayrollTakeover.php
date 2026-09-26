@@ -114,7 +114,8 @@ final class JmhzPayrollTakeover
      * | hrubá mzda                  | `prijem/dan/zakladDane` vztahu; formulář se souhrnnými daty osoby k tomu nese i osvobozené příjmy: `zuctovanoCelkem` − Σ `zakladDane` osoby |
      * | čistá mzda, zdravotní pojištění, záloha, bonus, srážková daň | souhrnná data osoby (`mzdaCista`, `zdravPojZamestnanec`/`zdravPojZamestnavatel`, `danZalohaPoSleve`, `danBonus`, `srazenaDan`) — jen na formuláři, který je nese |
      * | vyměřovací základ, sociální pojištění | `castkaOdvodPojistneho`, `pojisteniZamestnanec`, `pojisteniZamestnavatel` vztahu |
-     * | dny účasti, vyloučené doby  | Σ `pocetDnu`, Σ `vylouceneDobyCelkem` přes sekce ELDP |
+     * | účast na důchodovém pojištění | kód ELDP nebo vyměřovací základ > 0 ({@see pensionInsurance()}) |
+ * | dny účasti, vyloučené doby  | Σ `pocetDnu` (důchodce bez ELDP: trvání pojištění v měsíci), vyloučené dny přes sekce ELDP ({@see JmhzReportForm}) |
      * | odpracované dny a hodiny    | `dnyOdpracovanePocet`, `odpracovaneHodiny/pocet`     |
      * | k výplatě                   | čistá mzda, jen když hlášení srážky nevykazuje (`srazkyZeMzdyEvidovany`) |
      *
@@ -144,7 +145,7 @@ final class JmhzPayrollTakeover
         }
         $summary = static fn (?int $value): int => $form->hasSummary ? ($value ?? 0) * 100 : 0;
         $net = $summary($form->netWage);
-        $insuranceDays = min(31, (int) ($form->eldp['insurance_days'] ?? 0));
+        [$participates, $insuranceDays] = self::pensionInsurance($item);
 
         return new PayrollMigrationReferenceTotals(
             $item->period(),
@@ -168,7 +169,7 @@ final class JmhzPayrollTakeover
                 relationshipEndDate: $row['end_date'],
                 relationType: $row['relation_type'],
                 activityCode: $activityCode,
-                pensionParticipation: $insuranceDays > 0,
+                pensionParticipation: $participates,
                 insuranceDays: $insuranceDays,
                 excludedDays: min(31, (int) ($form->eldp['excluded_days'] ?? 0)),
                 workedDaysHundredths: ($form->workedDays ?? 0) * 100,
@@ -176,6 +177,41 @@ final class JmhzPayrollTakeover
                 netPayableMinor: $form->hasSummary && $form->deductionsRecorded === false ? $net : 0,
             ),
         );
+    }
+
+    /**
+     * Účast na důchodovém pojištění v měsíci a její dny.
+     *
+     * Účast dokládá kód ELDP (10240) NEBO nenulový vyměřovací základ (10477).
+     * Počet dnů účasti nestačí: měsíc celý v dávkách (mateřská, dlouhá nemoc) má
+     * kód ELDP a nula dnů, a přesto je dobou pojištění. Poživatel starobního
+     * důchodu naopak ELDP nehlásí vůbec (MPSV), ale pojistné platí — jeho dny
+     * účasti jsou trvání pojištění v měsíci (10354–10355), které formulář nese.
+     *
+     * @return array{0:bool,1:int} [účast, dny účasti 0–31]
+     */
+    public static function pensionInsurance(JmhzBatchItem $item): array
+    {
+        $form = $item->form;
+        $days = min(31, (int) ($form->eldp['insurance_days'] ?? 0));
+        $participates = ($form->eldp['code'] ?? null) !== null || ($form->socialBase ?? 0) > 0 || $days > 0;
+        if ($participates && $days === 0 && ($form->eldp['code'] ?? null) === null) {
+            $days = self::insuranceSpanDays($item);
+        }
+
+        return [$participates, $days];
+    }
+
+    /** Dny trvání pojištění v měsíci formuláře (pojištění od–do oříznuté na měsíc). */
+    private static function insuranceSpanDays(JmhzBatchItem $item): int
+    {
+        $from = max($item->file->periodStart(), $item->form->insuranceFrom ?? $item->file->periodStart());
+        $to = min($item->file->periodEnd(), $item->form->insuranceTo ?? $item->file->periodEnd());
+        if ($from > $to) {
+            return 0;
+        }
+
+        return min(31, (int) (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to))->days + 1);
     }
 
     /**

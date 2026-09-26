@@ -29,6 +29,8 @@ final class RegistrationImportVocabulary
         'unsupported',
     ];
     public const RESULT_STATUSES = ['applied', 'failed', 'skipped'];
+    /** Výsledek použití celé dávky (`outcome`). */
+    public const APPLY_OUTCOMES = ['complete', 'incomplete'];
     public const RESULT_OPERATIONS = [
         'person_created',
         'employment_created',
@@ -55,6 +57,7 @@ final class RegistrationImportVocabulary
     /** Stav převzatého měsíce z hlášení (`takeover.months[].status`). */
     public const TAKEOVER_STATUSES = [
         JmhzTakeoverPlanner::STATUS_READY,
+        JmhzTakeoverPlanner::STATUS_PARTIAL,
         JmhzTakeoverPlanner::STATUS_BLOCKED,
         JmhzTakeoverPlanner::STATUS_COMPUTED,
     ];

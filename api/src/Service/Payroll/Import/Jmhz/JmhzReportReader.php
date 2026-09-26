@@ -425,6 +425,7 @@ final class JmhzReportReader
             unworkedMillihours: $this->lenientScaled($t('f:prubehZamestnani/f:neodpracovaneHodiny/f:hodinyNeodpracCelkem'), 3),
             leaveMillihours: $this->lenientScaled($t('f:prubehZamestnani/f:neodpracovaneHodiny/f:hodinyNeodpracDovol'), 3),
             absenceMillihours: $this->absenceMillihours($xpath, $body),
+            uninsuredIncome: $i('f:pojisteni/f:vymerovaciZaklad/f:prijemNepojistenaCinnost'),
         );
     }
 
@@ -449,10 +450,39 @@ final class JmhzReportReader
             }
             $code ??= $this->text($xpath, 'f:kod', $entry);
             $days += $this->lenientInt($this->text($xpath, 'f:pocetDnu', $entry)) ?? 0;
-            $excluded += $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:vylouceneDobyCelkem', $entry)) ?? 0;
+            $excluded += $this->excludedDays($xpath, $entry);
         }
 
         return ['code' => $code, 'insurance_days' => $days, 'excluded_days' => $excluded];
+    }
+
+    /** Podpoložky úhrnu vyloučených dob 10357 (§ 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb.). */
+    private const EXCLUDED_BREAKDOWN = ['docasNeschopnost', 'penezitaPomocMaterstvi', 'osetrovaniClenaRodiny', 'otcovska', 'vyloucenePar16'];
+    /** Vyloučené dny vykazované po důvodech (10473–10475); `vyloucenePar18` patří k nemocenskému, ne k ELDP. */
+    private const EXCLUDED_REASONS = ['omluvenaNepritomnost', 'pracovniNeschopnost', 'vyplaceniDavek'];
+
+    /**
+     * Vyloučené dny jedné sekce ELDP: úhrn 10357, když ho program vyplnil. Cizí
+     * programy ho ale často vynechávají a nesou jen podpoložky (typicky dny
+     * výplaty dávek u mateřské) — pak je úhrnem větší ze součtů obou rozpisů,
+     * které se vzájemně překrývají.
+     */
+    private function excludedDays(DOMXPath $xpath, DOMElement $entry): int
+    {
+        $total = $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:vylouceneDobyCelkem', $entry));
+        if ($total !== null) {
+            return $total;
+        }
+        $sum = function (array $elements) use ($xpath, $entry): int {
+            $days = 0;
+            foreach ($elements as $element) {
+                $days += $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:' . $element, $entry)) ?? 0;
+            }
+
+            return $days;
+        };
+
+        return max($sum(self::EXCLUDED_BREAKDOWN), $sum(self::EXCLUDED_REASONS));
     }
 
     /**

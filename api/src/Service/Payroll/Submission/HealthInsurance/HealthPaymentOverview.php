@@ -100,7 +100,7 @@ final readonly class HealthPaymentOverview
             'zp-prehled-%s-%s-revize-%d.json',
             $this->period,
             $this->insurerCode,
-            $this->revisionId,
+            $this->revisionNo,
         );
     }
 }

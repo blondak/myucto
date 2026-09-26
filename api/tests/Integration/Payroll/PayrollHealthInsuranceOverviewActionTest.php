@@ -189,8 +189,7 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             'X-Content-Type-Options',
         ));
         self::assertSame(
-            'attachment; filename="zp-prehled-2026-06-111-revize-'
-                . $this->revisionId . '.pdf"',
+            'attachment; filename="zp-prehled-2026-06-111-revize-1.pdf"',
             $response->getHeaderLine('Content-Disposition'),
         );
         $bytes = (string) $response->getBody();
@@ -323,8 +322,7 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             $response->getHeaderLine('Content-Type'),
         );
         self::assertSame(
-            'attachment; filename="zp-prehled-2026-05-205-revize-'
-                . $revisionId . '.xml"',
+            'attachment; filename="zp-prehled-2026-05-205-revize-1.xml"',
             $response->getHeaderLine('Content-Disposition'),
         );
         $bytes = (string) $response->getBody();

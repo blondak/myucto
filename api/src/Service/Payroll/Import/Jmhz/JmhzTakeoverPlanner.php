@@ -38,6 +38,8 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
 final class JmhzTakeoverPlanner
 {
     public const STATUS_READY = 'ready';
+    /** Měsíc se převezme, ale jen zčásti: některý formulář zůstal bez vztahu nebo zablokovaný. */
+    public const STATUS_PARTIAL = 'partial';
     public const STATUS_BLOCKED = 'blocked';
     public const STATUS_COMPUTED = 'computed';
     private const SAVEPOINT = 'jmhz_takeover_detail';
@@ -87,6 +89,16 @@ final class JmhzTakeoverPlanner
             $months[$period]['gross_minor'] += $total->grossMinor;
             $months[$period]['net_minor'] += $total->netMinor;
             $months[$period]['advance_tax_minor'] += $total->advanceTaxMinor;
+        }
+        foreach ($months as $period => $month) {
+            // Měsíc s převzatým úhrnem, ze kterého ale část formulářů nepřešla,
+            // nesmí vypadat jako hotový: úhrn by za firmu tiše chyběl.
+            if ($month['status'] === self::STATUS_READY && $month['blocked'] !== []) {
+                $months[$period]['status'] = self::STATUS_PARTIAL;
+                $months[$period]['reason'] = 'Převezme se jen část měsíce: ' . count($month['blocked'])
+                    . ' ' . (count($month['blocked']) === 1 ? 'formulář zůstal' : 'formuláře/ů zůstalo')
+                    . ' bez pracovního vztahu nebo zablokovaných. Doplňte je, jinak úhrn měsíce za firmu nebude úplný.';
+            }
         }
         ksort($months, SORT_STRING);
 
@@ -204,6 +216,7 @@ final class JmhzTakeoverPlanner
             }
         }
         $sources = [];
+        $terms = [];
         $candidates = [];
         foreach ($plans as $plan) {
             if (($plan['_effective'] ?? false) !== true) {
@@ -261,7 +274,8 @@ final class JmhzTakeoverPlanner
                     $byPerson[$period . '|' . $employeeId] ?? [$item],
                     (int) $employeeId,
                     $row,
-                    $key === null ? null : $batch->history()->activityCode($key),
+                    ($key === null ? null : $batch->history()->activityCode($key))
+                        ?? $this->termsActivityCode($supplierId, (int) $employmentId, $item->file->periodStart(), $terms),
                 );
             } catch (\InvalidArgumentException $e) {
                 $candidates[] = ['reason' => $e->getMessage()] + $candidate;
@@ -314,6 +328,22 @@ final class JmhzTakeoverPlanner
         }
 
         return $relations;
+    }
+
+    /**
+     * Druh činnosti ze sjednaných podmínek vztahu k měsíci, když ho hlášení
+     * nenese (vztah bez ELDP a bez 10239, typicky pracující důchodce). Bez něj
+     * by převzatý měsíc neměl kód sekce evidenčního listu.
+     *
+     * @param array<int,list<array<string,mixed>>> $cache
+     */
+    private function termsActivityCode(int $supplierId, int $employmentId, string $monthStart, array &$cache): ?string
+    {
+        $cache[$employmentId] ??= $this->jmhzLookup->termVersions($supplierId, $employmentId);
+        $covering = JmhzEvidenceTimeline::covering($cache[$employmentId], $monthStart) ?? ($cache[$employmentId][0] ?? null);
+        $code = is_array($covering) ? trim((string) ($covering['activity_code'] ?? '')) : '';
+
+        return $code === '' ? null : $code;
     }
 
     /** @param array<string,mixed> $plan */

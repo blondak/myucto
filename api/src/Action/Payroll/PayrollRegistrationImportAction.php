@@ -44,6 +44,7 @@ final class PayrollRegistrationImportAction
                 $this->environment($body),
                 $body['files'] ?? null,
                 $body['pairs'] ?? null,
+                $body['relation_types'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -81,6 +82,7 @@ final class PayrollRegistrationImportAction
                 ($body['auto_approve_changes'] ?? false) === true,
                 ($body['auto_approve_averages'] ?? false) === true,
                 ($body['apply_takeover'] ?? false) === true,
+                $body['relation_types'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -95,6 +97,8 @@ final class PayrollRegistrationImportAction
                 'opening_balances_saved' => $result['opening_balances']['saved'],
                 'averages_created' => $result['averages']['created'],
                 'takeover_months_saved' => $result['takeover']['saved'] ?? 0,
+                'outcome' => $result['outcome'],
+                'unresolved' => count($result['unresolved']),
             ],
             $ip,
             $request->getHeaderLine('User-Agent'),

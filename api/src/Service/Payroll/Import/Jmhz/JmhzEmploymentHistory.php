@@ -28,16 +28,25 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
 final class JmhzEmploymentHistory
 {
     public const START_DATE = 'start_date';
+    public const START_CSSZ_EXPORT = 'cssz_export';
     public const START_INSURANCE_FROM = 'insurance_from';
     public const START_FIRST_REPORT = 'first_report';
 
     public const END_INSURANCE_TO = 'insurance_to';
     public const END_MISSING_NEXT = 'missing_next';
 
+    /** Rozhodný příjem zaměstnání malého rozsahu (a DPČ) — pod ním není účast na pojištění. */
+    public const SMALL_SCALE_LIMIT_CZK = 4_500;
+
+    /** 10261 „missingová hodnota" — dohoda bez stanovené týdenní pracovní doby. */
+    public const WEEKLY_MISSING = '99';
+
     /** @var array<string,array<string,JmhzBatchItem>> klíč vztahu => období => formulář */
     private array $months = [];
     /** @var array<string,true> */
     private array $completePeriods = [];
+    /** @var array<string,string> */
+    private array $declaredStarts = [];
 
     public static function fromBatch(JmhzBatch $batch): self
     {
@@ -48,6 +57,10 @@ final class JmhzEmploymentHistory
                 continue;
             }
             $history->months[$key][$item->period()] = $item;
+            $declared = $batch->declaredStart($key);
+            if ($declared !== null) {
+                $history->declaredStarts[$key] = $declared;
+            }
         }
         foreach ($batch->items() as $item) {
             if ($item->file->submissionType === 'R' && $batch->packageComplete($item)) {
@@ -98,9 +111,10 @@ final class JmhzEmploymentHistory
 
     /**
      * Nástup vztahu: datum nástupu z identifikace (10223), jinak začátek
+     * pojistného vztahu z exportu zaměstnanců ČSSZ téže dávky, jinak začátek
      * pojištění v prvním hlášeném měsíci. Začátek pojištění prvního dne měsíce
      * je přesný jen tehdy, když dávka nese úplné hlášení předchozího měsíce
-     * a vztah v něm není.
+     * a vztah v něm není — jinak je nástup jen odhad (`needs_check`).
      *
      * @return array{on:string,source:string,period:string,needs_check:bool}|null
      */
@@ -110,6 +124,7 @@ final class JmhzEmploymentHistory
         if ($first === null) {
             return null;
         }
+        $exported = $this->declaredStarts[$key] ?? null;
         $declared = null;
         foreach ($this->months($key) as $item) {
             if ($item->form->startDate !== null) {
@@ -118,6 +133,9 @@ final class JmhzEmploymentHistory
         }
         if ($declared !== null) {
             return ['on' => $declared, 'source' => self::START_DATE, 'period' => $first->period(), 'needs_check' => false];
+        }
+        if ($exported !== null) {
+            return ['on' => $exported, 'source' => self::START_CSSZ_EXPORT, 'period' => $first->period(), 'needs_check' => false];
         }
         $monthStart = $first->file->periodStart();
         $from = $first->form->insuranceFrom;
@@ -226,8 +244,9 @@ final class JmhzEmploymentHistory
     }
 
     /**
-     * Druh činnosti z kódu ELDP (10240), např. „1++" ⇒ „1". Jen pro vztahy účastné
-     * na pojištění; bez ELDP druh vztahu z hlášení poznat nejde.
+     * Druh činnosti: kód z identifikace formuláře (10239), jinak z kódu ELDP
+     * (10240), např. „1++" ⇒ „1", „ZA++" ⇒ „ZA". Kód ELDP nese jen vztah účastný
+     * na pojištění; neúčastnou dohodu pozná {@see uninsuredAgreement()}.
      */
     public function activityCode(string $key): ?string
     {
@@ -236,12 +255,54 @@ final class JmhzEmploymentHistory
                 return $item->form->activityCode;
             }
             $code = $item->form->eldp['code'] ?? null;
-            if (is_string($code) && preg_match('/^([1-9A-J])\+/', $code, $match) === 1) {
+            if (is_string($code) && preg_match('/^(Z[A-C]|[1-9A-JST-Z])\+/', $code, $match) === 1) {
                 return $match[1];
             }
         }
 
         return null;
+    }
+
+    /**
+     * Dohoda bez účasti na pojištění, kterou dokládá řada měsíců, i když hlášení
+     * druh činnosti nenese: ve VŠECH měsících chybí kód ELDP, vyměřovací základ
+     * je nulový (10477) a stanovená týdenní doba je „missingová" 99 (10261), a aspoň
+     * v jednom měsíci je příjem z nepojištěné činnosti (10476). Takový vztah je
+     * DPP. Když byl příjem ve všech měsících pod rozhodným příjmem zaměstnání
+     * malého rozsahu, může jít i o DPČ malého rozsahu — pak rozhoduje účetní.
+     *
+     * @return array{relation_type:string,options:list<string>,max_income:int}|null
+     */
+    public function uninsuredAgreement(string $key): ?array
+    {
+        $months = $this->months($key);
+        if ($months === [] || $this->activityCode($key) !== null) {
+            return null;
+        }
+        $maxIncome = 0;
+        foreach ($months as $item) {
+            $form = $item->form;
+            if (($form->eldp['code'] ?? null) !== null || ($form->socialBase ?? 0) !== 0
+                || ($form->fund !== null && !self::weeklyMissing($form->fund['weekly']))
+            ) {
+                return null;
+            }
+            $maxIncome = max($maxIncome, $form->uninsuredIncome ?? 0);
+        }
+        if ($maxIncome <= 0) {
+            return null;
+        }
+
+        return [
+            'relation_type' => 'dpp',
+            'options' => $maxIncome < self::SMALL_SCALE_LIMIT_CZK ? ['dpp', 'dpc'] : ['dpp'],
+            'max_income' => $maxIncome,
+        ];
+    }
+
+    public static function weeklyMissing(string $weekly): bool
+    {
+        return preg_match('/^0*99(?:\.0+)?$/D', trim($weekly)) === 1;
     }
 
     public static function previousPeriod(string $period): string

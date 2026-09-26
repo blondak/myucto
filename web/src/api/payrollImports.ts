@@ -36,8 +36,13 @@ export type RegistrationOperation =
 export type RegistrationSubmissionType = 'R' | 'O' | 'S'
 export type RegistrationOpeningBalanceStatus = 'ready' | 'blocked' | 'unchanged'
 export type RegistrationAverageStatus = 'ready' | 'blocked' | 'exists'
-/** Převzetí měsíce z hlášení: převezme se / nejde / měsíc už počítá MyÚčto. */
-export type RegistrationTakeoverStatus = 'ready' | 'blocked' | 'computed'
+/**
+ * Převzetí měsíce z hlášení: převezme se / převezme se jen zčásti (část formulářů zůstala
+ * bez vztahu nebo zablokovaná) / nejde / měsíc už počítá MyÚčto.
+ */
+export type RegistrationTakeoverStatus = 'ready' | 'partial' | 'blocked' | 'computed'
+/** Výsledek použití: `incomplete` = některá věta selhala nebo formulář zůstal bez vztahu či zablokovaný. */
+export type RegistrationApplyOutcome = 'complete' | 'incomplete'
 
 export interface RegistrationFileInfo {
   name: string
@@ -175,6 +180,10 @@ export interface RegistrationRecord {
     end_on: string | null
     activity_code: string | null
     relation_type: RegistrationRelationType | null
+    /** Druhy vztahu, mezi kterými volí účetní (podklady je nerozliší); prázdné = bez volby. */
+    relation_type_options: RegistrationRelationType[]
+    /** Nástup je jen odhad z prvního hlášeného měsíce — doplní se ze smlouvy. */
+    start_estimated: boolean
     position_name: string | null
     has_id_ppv: boolean
   }
@@ -218,10 +227,25 @@ export interface RegistrationPreview {
   takeover: RegistrationTakeover | null
 }
 
+export interface RegistrationRelationChoice {
+  key: string
+  relation_type: RegistrationRelationType
+}
+
 export interface RegistrationPreviewPayload {
   environment: RegistrationEnvironment
   files: ImportFilePayload[]
   pairs?: RegistrationPair[]
+  /** Zvolený druh vztahu u vět s `relation_type_options`. */
+  relation_types?: RegistrationRelationChoice[]
+}
+
+export interface RegistrationUnresolvedForm {
+  key: string
+  file: string
+  period: string
+  label: string
+  reason: string
 }
 
 export interface RegistrationApplyPayload extends RegistrationPreviewPayload {
@@ -263,8 +287,13 @@ export interface RegistrationApplyResult {
     employee_id: number | null
     employment_id: number | null
     operations: (RegistrationResultOperation | string)[]
+    /** Založený vztah má jen odhadnutý nástup (jen věty registrací). */
+    start_estimated?: boolean
   }[]
   summary: { applied: number; failed: number; skipped: number }
+  outcome: RegistrationApplyOutcome
+  /** Platné formuláře hlášení, které po zápisu zůstaly bez vztahu nebo zablokované. */
+  unresolved: RegistrationUnresolvedForm[]
   opening_balances: {
     saved: number
     skipped: { employee_id: number; employee_name: string; year: number; reason: string }[]

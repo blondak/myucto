@@ -275,25 +275,38 @@ souboru nic nezaloží podruhé.
 
 **Export zaměstnanců z ePortálu ČSSZ.** Záložka přijme i soubor, který
 stáhnete na ePortálu ČSSZ jako přehled zaměstnanců (kořen `ExportZamestnancu`).
-V náhledu se zobrazí jako **Export zaměstnanců ČSSZ**. Každá věta nese jméno,
-rodné číslo, OIČ, ID zaměstnání, druh činnosti, příznak zaměstnání malého
-rozsahu a variabilní symbol zaměstnavatele. Datum nástupu v exportu není.
+V náhledu se zobrazí jako **Export zaměstnanců ČSSZ**. Import zná oba tvary
+exportu, pro které MPSV zveřejnilo schéma, a soubor proti schématu ověří:
+dosavadní tvar a tvar platný od 15. 10. 2026, který u každé věty nese začátek
+pojistného vztahu. Soubor, který schématu neodpovídá, se nepřevezme ani zčásti.
+Každá věta nese jméno, rodné číslo (u cizince bez rodného čísla evidenční
+číslo pojištěnce, EČP), OIČ, ID zaměstnání, druh činnosti, příznak zaměstnání
+malého rozsahu, variabilní symbol zaměstnavatele, případně konec pojistného
+vztahu; nový tvar navíc začátek pojistného vztahu a bližší určení činnosti.
 
+- **Nástup.** Začátek pojistného vztahu z nového tvaru exportu je nástupem
+  vztahu. Neplatí to u zaměstnání malého rozsahu a u DPP: ty jsou pojištěné
+  jen v měsících s rozhodným příjmem, takže začátek pojištění dnem nástupu
+  být nemusí. U nich (a u dosavadního tvaru exportu) se nástup vezme
+  z měsíčního hlášení v dávce: nejdřívější datum nástupu z formulářů, a když
+  ho formuláře nenesou, nejdřívější začátek pojištění v hlášeném měsíci.
+  Vyjde-li nástup na první den nejstaršího nahraného měsíce, náhled
+  upozorní, že pojištění mohlo začít dřív. Skutečný nástup pak ověřte podle
+  smlouvy a případně ho opravte na kartě vztahu.
+- **Konec pojistného vztahu.** Nový vztah se k tomuto dni rovnou ukončí.
+  U vztahu, který už evidujete a který trvá, náhled jen upozorní; skončení
+  zapíšete na kartě vztahu nebo nahrajete odhlášení či hlášení.
+- **EČP.** Osoba bez rodného čísla se hledá podle EČP. Při založení se EČP
+  nepřevezme, doplňte ho na kartě osoby.
 - U osoby, kterou už evidujete, import doplní chybějící OIČ a ID zaměstnání.
   Druh činnosti a druh vztahu jen porovná; nesoulad ohlásí varováním
   a podmínky vztahu nemění. Vztah, který je zatím jen naplánovaný, import
   aktivuje, protože ID zaměstnání v exportu dokládá přihlášení u ČSSZ.
-  Nástupem je plánovaný nástup vztahu, a když chybí, datum z měsíčního
-  hlášení v dávce. Vztah s nástupem v budoucnu zůstane naplánovaný.
-- Osobu, kterou v evidenci nemáte, založí i s pracovním vztahem jen tehdy,
-  když v téže dávce nahrajete měsíční hlášení JMHZ s formulářem stejného ID
-  zaměstnání. Nástupem je nejdřívější datum nástupu z formulářů, a když ho
-  formuláře nenesou, nejdřívější začátek pojištění v hlášeném měsíci. Vyjde-li
-  nástup na první den nejstaršího nahraného měsíce, náhled upozorní, že
-  pojištění mohlo začít dřív. Skutečný nástup pak ověřte podle smlouvy
-  a případně ho opravte na kartě vztahu.
-- Bez měsíčního hlášení je věta nové osoby zablokovaná. Nahrajte k exportu
-  hlášení nebo přihlášku REGZEC.
+  Vztah s nástupem v budoucnu zůstane naplánovaný.
+- Osobu, kterou v evidenci nemáte, založí i s pracovním vztahem, když export
+  nese začátek pojistného vztahu, nebo když v téže dávce nahrajete měsíční
+  hlášení JMHZ s formulářem stejného ID zaměstnání. Jinak je věta nové osoby
+  zablokovaná; nahrajte k exportu hlášení nebo přihlášku REGZEC.
 - Variabilní symbol ve větě se porovná s variabilními symboly vašich mzdových
   účtáren. Když nesouhlasí, věta je zablokovaná jako export jiného
   zaměstnavatele. Pokud žádná účtárna variabilní symbol vyplněný nemá,
@@ -312,19 +325,39 @@ jediného zaměstnavatele a náhled upozorní, že VS je potřeba doplnit.
 Náhled u každé věty ukáže období a spárovaný pracovní vztah. Formulář se páruje
 podle ID zaměstnání, OIČ a u formuláře bez identifikátorů podle jména a data
 narození. Větu bez jednoznačné shody přiřadíte ručně výběrem vztahu a náhled se
-přepočítá. Z formuláře se převezme pracoviště, úvazek podle fondu pracovní doby,
-prohlášení poplatníka, uplatňované slevy a vyživované děti podle období, ve
-kterém platily. Opravné a stornovací podání se skládá s řádným podle pořadí.
+přepočítá. Vztah, který má v evidenci jiné ID zaměstnání než formulář, je jiný
+vztah: jako možná shoda se nenabízí a ruční přiřazení k němu import odmítne
+(převzaté měsíce formuláře by jinak přepsaly jeho vlastní). Z formuláře se
+převezme pracoviště, úvazek podle fondu pracovní doby, prohlášení poplatníka,
+uplatňované slevy a vyživované děti podle období, ve kterém platily. Opravné
+a stornovací podání se skládá s řádným podle pořadí.
+
+**Další vztah téže osoby (souběh).** Když formulář nese OIČ osoby, kterou už
+evidujete, ale ID zaměstnání, které žádný její vztah nemá, a její ostatní vztahy
+mají ID zaměstnání jiné, jde o další, souběžný vztah, typicky dohodu vedle
+pracovního poměru. Náhled u formuláře ukáže operaci **Založit vztah**
+s vysvětlením a vztah založí věta **Odvozeno z hlášení JMHZ** (jako vedlejší,
+ne hlavní vztah osoby). Vyberte obojí najednou; při zápisu se formuláře
+k novému vztahu spárují samy.
 
 **Zaměstnanci, které dokládají jen hlášení.** Když pro vztah z hlášení nemáte
 registraci ani export zaměstnanců, náhled nabídne větu **Odvozeno z hlášení
 JMHZ**, která osobu i s vztahem založí:
 
-- nástupem je datum nástupu z formuláře, jinak začátek pojištění v prvním
-  hlášeném měsíci; když dávka nemá hlášení za dřívější měsíce, náhled
-  upozorní, že vztah mohl začít už dřív,
-- druh činnosti se vezme z kódu ELDP; vztah bez ELDP (dohoda, zaměstnání
-  malého rozsahu) import nezaloží a založíte ho ručně,
+- nástupem je datum nástupu z formuláře, jinak začátek pojistného vztahu
+  z exportu zaměstnanců v téže dávce, jinak začátek pojištění v prvním
+  hlášeném měsíci. Když dávka nemá hlášení za dřívější měsíce, je nástup jen
+  odhad: náhled ho označí **Nástup odhadnutý** a výsledek u založeného vztahu
+  nabídne odkaz na kartu osoby, kde nástup doplníte ze smlouvy (pracovní
+  vztah → Sjednané podmínky),
+- druh vztahu se vezme z druhu činnosti ve formuláři, jinak z kódu ELDP.
+  Formulář bez obojího, který ve všech měsících nemá vyměřovací základ ani
+  stanovenou týdenní pracovní dobu (hodnota 99) a nese příjem z nepojištěné
+  činnosti, je dohoda o provedení práce. Když příjem v žádném měsíci
+  nedosáhl rozhodného příjmu zaměstnání malého rozsahu (4 500 Kč), může jít
+  i o DPČ malého rozsahu: věta nabídne volbu **Druh vztahu podle smlouvy**
+  a náhled se po volbě přepočítá. Jiný vztah bez ELDP import nezaloží
+  a založíte ho ručně,
 - formulář, který nese jméno a datum narození, založí osobu pod jejím jménem;
   formulář jen s OIČ a ID zaměstnání založí osobu se zástupným jménem
   **Doplňte**. Jméno, rodné číslo, adresu a zdravotní pojišťovnu pak doplňte
@@ -359,9 +392,26 @@ z PAMICA nebo PREMIER:
 - skončení vztahu, když pojištění končí před koncem měsíce nebo vztah
   v řádném hlášení dalšího měsíce chybí.
 
+Účast na důchodovém pojištění v převzatém měsíci dokládá kód ELDP nebo
+nenulový vyměřovací základ: měsíc celý v dávkách (mateřská, dlouhá nemoc) je
+dobou účasti, i když má nula dnů, a pracující důchodce, za kterého se ELDP
+nehlásí, má dny účasti podle trvání pojištění v měsíci. Vyloučené dny se
+převezmou z úhrnu, a když ho program nevyplnil, z jeho podpoložek. Druh
+činnosti, který hlášení nenese, se doplní ze sjednaných podmínek vztahu.
+
 Zdravotní vyměřovací základ a výši srážek hlášení nenese, v převzatých mzdách
 zůstávají nulové. Měsíc, který už je u vztahu převzatý z jiného zdroje, se
-z hlášení nepřebírá. Opakovaný import nic nezdvojí. Když vztah podle hlášení
+z hlášení nepřebírá. Opakovaný import nic nezdvojí. Měsíc, ze kterého se
+převezme jen část formulářů (zbytek zůstal bez pracovního vztahu nebo je
+zablokovaný), je v přehledu označený **Převezme se částečně** i se seznamem
+formulářů, které chybí.
+
+**Neúplný import.** Když po použití v dávce zůstane platný formulář hlášení bez
+pracovního vztahu nebo zablokovaný, případně některá věta selže, výsledek
+ohlásí **Import není úplný** se seznamem formulářů a důvodem. Zapsané věty
+zůstávají zapsané; tlačítkem **Ukázat v náhledu** přejdete k formuláři,
+opravíte ho (přiřadíte vztah, vyberete větu, která vztah založí) a použijete
+znovu. Když vztah podle hlášení
 v posledních měsících neodpracoval žádnou hodinu, náhled doporučí zaevidovat
 dlouhodobou nepřítomnost (mateřskou, rodičovskou).
 

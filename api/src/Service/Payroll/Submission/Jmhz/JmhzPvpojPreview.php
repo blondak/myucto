@@ -93,7 +93,7 @@ final readonly class JmhzPvpojPreview
         return sprintf(
             'jmhz-pvpoj-preview-%s-revize-%d-uctarna-%d.json',
             $this->period,
-            $this->revisionId,
+            $this->revisionNo,
             $this->office['office_id'],
         );
     }

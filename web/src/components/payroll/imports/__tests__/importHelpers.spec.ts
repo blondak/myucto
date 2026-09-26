@@ -15,7 +15,12 @@ import {
   buildAttendanceLinks,
   buildPersonsPayload,
   buildRegistrationPairs,
+  buildRelationChoices,
   chunk,
+  hasTakeoverItem,
+  pruneRelationChoices,
+  recordNeedsRelationChoice,
+  setRelationChoice,
   creatablePersonKeys,
   hasReadyItem,
   isRegistrationApplicable,
@@ -193,7 +198,16 @@ describe('měsíční hlášení JMHZ', () => {
     prepared_on: null,
     effective_on: '2026-03-01',
     person: { full_name: 'Testovací Jana', first_name: null, last_name: null, birth_date: null, birth_number_masked: null, has_oic: false },
-    employment: { start_on: null, end_on: null, activity_code: null, relation_type: null, position_name: null, has_id_ppv: false },
+    employment: {
+      start_on: null,
+      end_on: null,
+      activity_code: null,
+      relation_type: null,
+      relation_type_options: [],
+      start_estimated: false,
+      position_name: null,
+      has_id_ppv: false,
+    },
     match: { status: 'not_found', matched_by: null, employee_id: null, employee_name: null, employment_id: null, employment_code: null, candidates: [] },
     operation: 'pair_required',
     changes: [],
@@ -246,6 +260,39 @@ describe('měsíční hlášení JMHZ', () => {
     expect(registrationNeedsPairSelect(matchedManual, {})).toBe(true)
     expect(registrationNeedsPairSelect(refused, { 'f:4': 5 })).toBe(true)
     expect(registrationNeedsPairSelect(jmhz('r:1', { document_type: 'PREZEC26' }), {})).toBe(false)
+  })
+
+  it('formulář dalšího vztahu téže osoby jde vybrat a výběr vztahu nenabízí', () => {
+    const concurrent = jmhz('f:5', {
+      operation: 'create_employment',
+      match: { status: 'new', matched_by: null, employee_id: 50, employee_name: 'Testovací Jana', employment_id: null, employment_code: null, candidates: [] },
+    })
+    expect(isRegistrationApplicable(concurrent)).toBe(true)
+    expect(registrationNeedsPairSelect(concurrent, {})).toBe(false)
+  })
+
+  it('volbu DPP/DPČ nabídne jen věta s víc druhy a volbu mimo nabídku zahodí', () => {
+    const derived = jmhz('d:1', {
+      document_type: 'JMHZ_DERIVED',
+      operation: 'create_employment',
+      employment: { ...jmhz('x').employment, relation_type: 'dpp', relation_type_options: ['dpp', 'dpc'] },
+    })
+    expect(recordNeedsRelationChoice(derived)).toBe(true)
+    expect(recordNeedsRelationChoice(jmhz('f:1'))).toBe(false)
+
+    let choices = setRelationChoice({}, derived, 'dpc')
+    expect(buildRelationChoices(choices)).toEqual([{ key: 'd:1', relation_type: 'dpc' }])
+    expect(setRelationChoice(choices, derived, 'dpp'), 'Výchozí druh se neposílá.').toEqual({})
+    expect(setRelationChoice({}, derived, 'employment'), 'Druh mimo nabídku se nepřijme.').toEqual({})
+
+    choices = { 'd:1': 'dpc', 'd:2': 'dpc' }
+    expect(pruneRelationChoices(choices, [derived])).toEqual({ 'd:1': 'dpc' })
+  })
+
+  it('převzetí historie jde zapnout i u měsíce převzatého jen částečně', () => {
+    expect(hasTakeoverItem([{ status: 'blocked' }, { status: 'partial' }])).toBe(true)
+    expect(hasTakeoverItem([{ status: 'blocked' }, { status: 'computed' }])).toBe(false)
+    expect(hasReadyItem([{ status: 'partial' }]), 'Počáteční stavy a průměry „částečně" neznají.').toBe(false)
   })
 
   it('převzetí historie je výchozí jen s připravenou položkou a vědomé vypnutí se drží', () => {
