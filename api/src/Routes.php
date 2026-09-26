@@ -387,6 +387,9 @@ final class Routes
         $app->get  ('/api/admin/diagnostics/bundle/preview',  [DiagnosticsAction::class, 'preview']);
         $app->get  ('/api/admin/diagnostics/bundle/download', [DiagnosticsAction::class, 'download']);
         $app->post ('/api/admin/diagnostics/bundle',          [DiagnosticsAction::class, 'create']);
+        // Šifrování mzdového archivu a rotace klíče: akce z kontrol Diagnostiky.
+        $app->post ('/api/admin/diagnostics/payroll-archive/reencrypt', [\MyInvoice\Action\Admin\PayrollArchiveEncryptionAction::class, 'reencrypt']);
+        $app->post ('/api/admin/diagnostics/payroll-archive/rewrap',    [\MyInvoice\Action\Admin\PayrollArchiveEncryptionAction::class, 'rewrap']);
 
         $app->get   ('/api/admin/roles',                    [RoleAdminAction::class, 'list']);
         $app->get   ('/api/admin/roles/permissions',        [RoleAdminAction::class, 'permissions']);

@@ -284,6 +284,25 @@ final class PayrollArchiveReencryptionServiceTest extends TestCase
         self::assertSame(0, $this->service->countLegacy($this->supplierId)['total']);
     }
 
+    /**
+     * Přeskočené soubory (osiřelé) nesmí spotřebovat dávku. Jinak by dávkování
+     * z Diagnostiky stálo na týchž souborech a k ostatním se nikdy nedostalo.
+     */
+    public function testSkippedFilesDoNotConsumeTheBatch(): void
+    {
+        foreach (['x', 'y', 'z'] as $suffix) {
+            $this->writeLegacy('%PDF-1.4 sirotek ' . $suffix);
+        }
+        $key = $this->writeLegacy('%PDF-1.4 evidovany');
+        $this->insertDocument($key, $this->employeeId);
+
+        $report = $this->service->run($this->supplierId, false, false, false, 1);
+
+        self::assertSame(1, $report['counts'][Reencryption::STATUS_ENCRYPTED], json_encode($report));
+        self::assertSame(3, $report['counts'][Reencryption::STATUS_ORPHAN_SKIPPED] + $report['remaining']);
+        self::assertFileDoesNotExist($this->legacyPath($key));
+    }
+
     /** Podadresáře subjektů, dočasné a cizí soubory nejsou legacy plaintext. */
     public function testScanIgnoresEncryptedLayoutTemporaryAndForeignFiles(): void
     {

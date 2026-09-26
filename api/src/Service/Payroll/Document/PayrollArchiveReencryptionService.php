@@ -55,6 +55,14 @@ final class PayrollArchiveReencryptionService
     public const STATUS_FAILED = 'failed';
     public const STATUS_GONE = 'gone';
 
+    private const WRITE_STATUSES = [
+        self::STATUS_ENCRYPTED,
+        self::STATUS_WOULD_ENCRYPT,
+        self::STATUS_ERASED_PURGED,
+        self::STATUS_WOULD_PURGE,
+        self::STATUS_FAILED,
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollDocumentStorage $storage,
@@ -119,6 +127,10 @@ final class PayrollArchiveReencryptionService
         $items = [];
         $processed = 0;
         $remaining = 0;
+        // Limit počítá jen soubory, na které se sahalo (zápis nebo jeho
+        // pokus). Přeskočené soubory by jinak při dávkování z UI zabraly
+        // celou dávku a každý další běh by stál na týchž souborech.
+        $spent = 0;
 
         foreach ($this->suppliers($supplierId) as $id) {
             // Klíče se nejdřív sesbírají: generátor nad adresářem, ze kterého
@@ -126,7 +138,7 @@ final class PayrollArchiveReencryptionService
             // přeskakoval nebo vracel dvakrát.
             $keys = iterator_to_array($this->storage->legacyPlaintextKeys($id), false);
             foreach ($keys as $key) {
-                if ($limit !== null && $processed >= $limit) {
+                if ($limit !== null && $spent >= $limit) {
                     ++$remaining;
                     continue;
                 }
@@ -141,6 +153,9 @@ final class PayrollArchiveReencryptionService
                 );
                 ++$counts[$item['status']];
                 $items[] = $item;
+                if (in_array($item['status'], self::WRITE_STATUSES, true)) {
+                    ++$spent;
+                }
             }
         }
 

@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Document\PayrollArchiveDiagnostics;
 use MyInvoice\Service\System\DiagnosticsBundleOptions;
 use MyInvoice\Service\System\DiagnosticsBundleService;
 use MyInvoice\Service\System\DiagnosticsLogReader;
@@ -34,6 +35,7 @@ final class DiagnosticsAction
         private readonly DiagnosticsBundleService $bundle,
         private readonly DiagnosticsLogReader $logs,
         private readonly ActivityLogger $activity,
+        private readonly PayrollArchiveDiagnostics $payrollArchive,
     ) {}
 
     /** GET /api/admin/diagnostics */
@@ -43,7 +45,7 @@ final class DiagnosticsAction
             return $err;
         }
 
-        return Json::ok($response, $this->environment->report());
+        return Json::ok($response, $this->payrollArchive->appendTo($this->environment->report()));
     }
 
     /** GET /api/admin/diagnostics/bundle/preview */
