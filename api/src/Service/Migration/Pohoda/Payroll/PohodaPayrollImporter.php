@@ -712,7 +712,7 @@ final class PohodaPayrollImporter
     }
 
     /**
-     * Náhrady mzdy za dovolenou, lékaře a překážky na straně zaměstnavatele v měsíci, který
+     * Náhrady mzdy za dovolenou, lékaře, placené volno a překážky na straně zaměstnavatele v měsíci, který
      * počítá MyÚčto. Sešit nese jen hodiny (náhradu v něm PAMICA nemá jako mzdovou složku),
      * takže bez tohoto kroku by běh vyplatil jen krácenou základní mzdu. Počítá se stejně jako
      * u importu docházky: hodiny × převzatý průměr × sazba, u překážek sazba, se kterou
@@ -737,6 +737,9 @@ final class PohodaPayrollImporter
                     // mzdy ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter::recurringWage()}),
                     // takže vztah bez něj je ten, kterému PAMICA za svátek platila náhradu (`V02`).
                     holidayWithoutMonthlyWage: true,
+                    // `V03` mimo lékaře je v PAMICA „Placené volno" ({@see PohodaPayrollCatalog::absence()}):
+                    // placená překážka, za kterou PAMICA platí průměr (`KcPlacV`).
+                    paidEmployeeObstacle: true,
                 );
             } catch (\InvalidArgumentException|\DomainException $e) {
                 $protocol->warn(self::STEP_PEOPLE, 'absence_compensation_failed',

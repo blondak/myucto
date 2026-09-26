@@ -320,6 +320,31 @@ final class AttendanceAbsenceCompensationTest extends TestCase
         self::assertArrayNotHasKey('holiday_hours', $this->inputs($monthly), 'Měsíční mzda se za svátek nekrátí, náhrada nevzniká.');
     }
 
+    /**
+     * Placené volno (§ 199 ZP) jen na výslovnou žádost volajícího, jehož zdroj hodiny vede
+     * jako placené: 6 h × 250 Kč × 100 %. Bez ní zůstává mezi hodinami bez náhrady.
+     */
+    public function testPaidEmployeeObstacleOnlyWhenAsked(): void
+    {
+        $employmentId = $this->employment('NAH-PV1');
+        $this->approvedAverage($employmentId);
+        $importId = $this->writtenBatch($employmentId, ['worked_hours' => 162_000, 'fund_hours' => 168_000, 'obstacle_employee_hours' => 6_000]);
+
+        $plain = $this->materializer->materializeFromBatch($this->supplierId, $importId, $this->userId);
+        self::assertSame(['obstacle_employee_hours'], array_column($plain['skipped'], 'meaning'));
+        self::assertSame([], $this->inputs($employmentId));
+
+        $paid = $this->materializer->materializeFromBatch($this->supplierId, $importId, $this->userId, paidEmployeeObstacle: true);
+        self::assertSame([], $paid['skipped'], (string) json_encode($paid, JSON_UNESCAPED_UNICODE));
+        $input = $this->inputs($employmentId)['obstacle_employee_hours'] ?? null;
+        self::assertIsArray($input);
+        self::assertSame('NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', $input['component_code']);
+        self::assertSame(150_000, (int) $input['amount_minor']);
+        $trace = json_decode((string) $input['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(100, $trace['rate_percent']);
+        self::assertSame('zp-199-1+nv-590-2006', $trace['entitlement_basis']);
+    }
+
     private function monthlyWageRecurring(int $employmentId): void
     {
         $this->service(PayrollComponentRepository::class)->ensureDefaults($this->supplierId);
