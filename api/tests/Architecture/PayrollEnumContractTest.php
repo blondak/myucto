@@ -252,10 +252,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
         'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
-        // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
-        // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
-        // které si výpočet odvodí z druhu vztahu. Klient tu čtvrtou hodnotu
-        // nesmí nabízet — proto se páruje sloupec, ne enum.
+        // Sloupec z migrace 1403 do výpočtu daně už nevstupuje (§ 6 odst. 4
+        // písm. b) ZDP rozhoduje úhrnem příjmů, ne účastí na pojištění), ale
+        // API ho dál nese a historie změn ho vypisuje.
         'payroll.ts::PayrollOtherWithholdingEligibility'
             => 'db:payroll_employment_terms.other_withholding_eligibility',
         // Stejný důvod jako výše: PHP enum SocialEmployerRateCategory má navíc
@@ -761,7 +760,6 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind::class,
         \MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment::class,
-        \MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCorrectionTreatment::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind::class,

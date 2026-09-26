@@ -15,7 +15,6 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use PDO;
 use UnexpectedValueException;
 
@@ -547,24 +546,13 @@ final class PayrollStatutoryEvidenceBulkDefaults
             foreach ($this->rows(
                 "SELECT employment.id, employment.employee_id, employment.relation_type,
                         COALESCE(employment.actual_start_date, employment.start_date) AS start_on,
-                        employment.end_date,
-                        (SELECT term.other_withholding_eligibility
-                           FROM payroll_employment_terms term
-                          WHERE term.supplier_id = employment.supplier_id
-                            AND term.employment_id = employment.id
-                            AND term.effective_from <= GREATEST(?, COALESCE(
-                                employment.actual_start_date, employment.start_date, ?))
-                            AND (term.effective_to IS NULL
-                                 OR term.effective_to >= GREATEST(?, COALESCE(
-                                    employment.actual_start_date, employment.start_date, ?)))
-                          ORDER BY term.effective_from DESC, term.id DESC
-                          LIMIT 1) AS other_withholding_eligibility
+                        employment.end_date
                    FROM payroll_employments employment
                   WHERE employment.supplier_id = ? AND employment.employee_id IN ({$in})
                     AND employment.status NOT IN ('archived', 'no_show')
                     AND (employment.end_date IS NULL OR employment.end_date >= ?)
                   ORDER BY employment.employee_id, employment.id",
-                [$monthStart, $monthStart, $monthStart, $monthStart, $supplierId, ...$chunk, $monthStart],
+                [$supplierId, ...$chunk, $monthStart],
             ) as $row) {
                 $employments[(int) $row['employee_id']][] = $row;
             }
@@ -819,12 +807,9 @@ final class PayrollStatutoryEvidenceBulkDefaults
      * srážku (§ 6 odst. 4 ZDP). Zařazení do skupiny rozhoduje výpočet daně
      * ({@see MonthlyEmploymentIncomeTaxCalculator::withholdingGroupWithoutSignedDeclaration()}),
      * ne kopie jeho pravidel; srážka pak nastane jen při úhrnu pod rozhodnou
-     * částkou, což se z evidence předem poznat nedá — proto „riziko".
-     *
-     * Převod sloupce `other_withholding_eligibility` na výčet je zrcadlo
-     * PayrollRunStatutoryInputAssembler::otherWithholdingEligibility(), která
-     * je soukromá a potřebuje celý snímek vztahu. Náhled z něj bere jen
-     * příznak rizika, ne vstup výpočtu.
+     * částkou, což se z evidence předem poznat nedá — proto „riziko". Podle
+     * § 6 odst. 4 písm. b) ho nese každý druh vztahu, pracovní poměr
+     * s měsícem pod rozhodnou částkou stejně jako dohoda.
      *
      * @param list<array<string,mixed>> $employments
      * @return list<int>
@@ -838,21 +823,12 @@ final class PayrollStatutoryEvidenceBulkDefaults
             } catch (UnexpectedValueException) {
                 continue;
             }
-            $eligibility = OtherWithholdingEligibility::Automatic;
-            if ($kind->requiresOtherWithholdingStatement()) {
-                $eligibility = match ($employment['other_withholding_eligibility'] ?? null) {
-                    'eligible' => OtherWithholdingEligibility::EligibleVerified,
-                    'ineligible' => OtherWithholdingEligibility::IneligibleVerified,
-                    default => OtherWithholdingEligibility::Unverified,
-                };
-            }
             $group = $this->taxCalculator->withholdingGroupWithoutSignedDeclaration(
                 new EmploymentRelationshipTaxInput(
                     'employment:' . (int) $employment['id'],
                     "supplier:{$supplierId}",
                     $kind,
                     [],
-                    $eligibility,
                 ),
             );
             if ($group !== null) {

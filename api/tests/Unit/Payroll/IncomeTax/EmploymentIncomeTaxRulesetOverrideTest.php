@@ -9,7 +9,6 @@ use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
@@ -81,7 +80,6 @@ final class EmploymentIncomeTaxRulesetOverrideTest extends TestCase
                 'synthetic-payer',
                 EmploymentRelationshipKind::Dpp,
                 [new IncomeTaxComponent('synthetic-income', 1_500_000)],
-                OtherWithholdingEligibility::Automatic,
             )],
             declarations: [$this->declaration(TaxDeclarationStatus::NotSigned)],
             residence: $this->residence(TaxResidence::CzechResident),
@@ -253,7 +251,6 @@ final class EmploymentIncomeTaxRulesetOverrideTest extends TestCase
             'synthetic-payer',
             EmploymentRelationshipKind::Employment,
             [new IncomeTaxComponent('synthetic-income', $amountMinorUnits)],
-            OtherWithholdingEligibility::Automatic,
         );
     }
 

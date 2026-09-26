@@ -376,9 +376,12 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         $people = $this->byEmployee($preview['people']);
         self::assertTrue($people[$dpp]['unsigned_declaration_withholding_risk']);
         self::assertSame([$this->employmentOf($dpp)], $people[$dpp]['withholding_employment_ids']);
-        self::assertFalse($people[$employment]['unsigned_declaration_withholding_risk']);
+        // § 6 odst. 4 písm. b) ZDP: pracovní poměr s měsícem pod rozhodnou
+        // částkou se bez prohlášení sráží taky. Dřív tu stálo assertFalse —
+        // náhled pracovní poměr za rizikový nepovažoval.
+        self::assertTrue($people[$employment]['unsigned_declaration_withholding_risk']);
         self::assertSame(
-            [$dpp],
+            [$dpp, $employment, $insured],
             array_column($preview['unsigned_declaration_withholding_risk'], 'employee_id'),
         );
         self::assertSame(

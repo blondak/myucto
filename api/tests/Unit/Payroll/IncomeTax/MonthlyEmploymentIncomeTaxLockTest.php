@@ -10,7 +10,6 @@ use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxResult;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxChildClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
@@ -225,46 +224,19 @@ final class MonthlyEmploymentIncomeTaxLockTest extends TestCase
             'annual_bonus_threshold_met' => false,
         ],
         /*
-         * ZMĚNĚNO PROTI PŮVODNÍMU ZÁMKU, a to vědomě — není to posun peněz
-         * refaktoringem, ale oprava zařazení.
+         * ZMĚNĚNO PROTI PŮVODNÍMU ZÁMKU DVAKRÁT, pokaždé vědomě jako oprava
+         * zařazení, ne posun peněz refaktoringem.
          *
          * Scénář je člen orgánu — nerezident, 4 000 Kč, bez prohlášení
-         * poplatníka a BEZ prohlášení plátce o zařazení podle § 6 odst. 4
-         * (`OtherWithholdingEligibility::Automatic`). Výpočet ho tiše zdaňoval
-         * zálohou jen proto, že šlo o nerezidenta; u rezidenta ve stejné situaci
-         * vrací ruční posouzení, protože sjednanou odměnu proti rozhodné částce
-         * nezná. Od 1. 1. 2026 (zák. č. 360/2025 Sb., čl. VI body 24 a 25) není
-         * důvod obě situace rozlišovat — odměna člena orgánu — fyzické osoby
-         * vypadla z § 22 odst. 1 písm. g) bodu 6 do bodu 15, který § 36 odst. 1
-         * nevyjmenovává. Podrobné odůvodnění se zdroji je v `candidateGroup()`.
+         * poplatníka. Původně ho výpočet tiše zdaňoval zálohou jen proto, že
+         * šlo o nerezidenta; od 1. 1. 2026 (zák. č. 360/2025 Sb., čl. VI body
+         * 24 a 25) se posuzuje jako rezident, odůvodnění je v `candidateGroup()`.
+         * Pak výpočet čekal na „prohlášení plátce o zařazení“ a bez něj vracel
+         * ruční posouzení. § 6 odst. 4 písm. b) ZDP ale rozhoduje jen úhrnem
+         * příjmů od plátce v měsíci: 4 000 < 4 500 → srážka 15 % = 600 Kč
+         * (§ 36 odst. 2 písm. m)).
          */
         'nonresident-statutory-body' => [
-            'status' => 'manual-review',
-            'issues' => ['other-withholding-eligibility-unverified'],
-            'advance_base' => null,
-            'rounded_base' => null,
-            'low_rate_base' => null,
-            'high_rate_base' => null,
-            'tax_before_credits' => null,
-            'non_refundable_credits' => null,
-            'tax_after_credits' => null,
-            'tax_bonus' => null,
-            'withholding_base' => 0,
-            'withholding_tax' => 0,
-            'claimed_non_refundable' => 0,
-            'applied_non_refundable' => 0,
-            'claimed_child' => 0,
-            'applied_child' => 0,
-            'regimes' => ['manual-review'],
-            'annual_bonus_threshold_met' => false,
-        ],
-        /*
-         * NOVÝ scénář — týž člověk, ale s doloženým zařazením podle § 6 odst. 4
-         * písm. b). Srážka 15 % ze 4 000 Kč = 600 Kč, sazba podle § 36 odst. 2
-         * písm. m). Zámek tím nepřichází o pokrytou peněžní cestu, kterou měl
-         * záznam výš.
-         */
-        'nonresident-statutory-body-withholding' => [
             'status' => 'calculated',
             'issues' => [],
             'advance_base' => 0,
@@ -502,20 +474,6 @@ final class MonthlyEmploymentIncomeTaxLockTest extends TestCase
                 declarations: [self::declaration(TaxDeclarationStatus::NotSigned)],
                 residence: self::residence(TaxResidence::NonResident),
             ),
-            'nonresident-statutory-body-withholding' => new MonthlyEmploymentIncomeTaxInput(
-                calculationDate: '2026-08-31',
-                employeeReference: 'synthetic-employee',
-                relationships: [
-                    self::relationship(
-                        'director',
-                        EmploymentRelationshipKind::StatutoryBody,
-                        400_000,
-                        OtherWithholdingEligibility::EligibleVerified,
-                    ),
-                ],
-                declarations: [self::declaration(TaxDeclarationStatus::NotSigned)],
-                residence: self::residence(TaxResidence::NonResident),
-            ),
             'nonresident-taxpayer-credit-only' => new MonthlyEmploymentIncomeTaxInput(
                 calculationDate: '2026-08-31',
                 employeeReference: 'synthetic-employee',
@@ -577,17 +535,12 @@ final class MonthlyEmploymentIncomeTaxLockTest extends TestCase
         string $reference,
         EmploymentRelationshipKind $kind,
         int $amountMinorUnits,
-        OtherWithholdingEligibility $eligibility = OtherWithholdingEligibility::Automatic,
     ): EmploymentRelationshipTaxInput {
         return new EmploymentRelationshipTaxInput(
             $reference,
             'synthetic-payer',
             $kind,
             [new IncomeTaxComponent('synthetic-income', $amountMinorUnits)],
-            $eligibility,
-            $eligibility === OtherWithholdingEligibility::Automatic
-                ? null
-                : 'synthetic-classification-evidence',
         );
     }
 

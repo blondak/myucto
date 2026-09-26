@@ -35,10 +35,14 @@ listu; samy nedokládají podepsané prohlášení poplatníka ani nárok na sle
 
 **Pracovněprávní vztah** nabízí pracovní poměr, dohodu o provedení práce, dohodu
 o pracovní činnosti a smlouvu o výkonu funkce (§ 59 ZOK). Rozhoduje o režimu zdanění:
-srážkovou daní ze samostatného základu (§ 6 odst. 4 ZDP) se daní **pouze** dohoda
-o provedení práce do ročního limitu bez podepsaného prohlášení. Odměna člena
-statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP a daní se vždy zálohou,
-i když je nízká; pojistné se u ní řídí rozhodným příjmem stejně jako u zaměstnance.
+srážkovou daň ze samostatného základu (§ 6 odst. 4 písm. a) ZDP) tahle rekapitulace
+spočítá **jen** u dohody o provedení práce pod rozhodnou částkou bez podepsaného
+prohlášení. Podle § 6 odst. 4 písm. b) ZDP se ale bez prohlášení sráží i u každého
+jiného vztahu, včetně pracovního poměru a odměny člena statutárního orgánu, když
+hrubý příjem za měsíc nedosáhne rozhodné částky pro účast na nemocenském pojištění
+(pro rok 2026 je to 4 500 Kč). Takový měsíc rekapitulace spočítá zálohou a upozorní
+na něj; správný výpočet udělá sekce [Mzdy](75_Uplne_mzdy.md). Pojistné se u odměny
+člena statutárního orgánu řídí rozhodným příjmem stejně jako u zaměstnance.
 
 U smlouvy o výkonu funkce formulář předvyplní typ poplatníka **jednatel/společník**
 (kontace 522/366). Předvyplní jej, ale nevynutí — jinou kombinaci lze uložit, jen na

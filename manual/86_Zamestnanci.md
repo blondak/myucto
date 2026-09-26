@@ -442,24 +442,26 @@ uložení to ale nikde neblokuje, blokátorem se to stane až při uzamčení vs
 mzdového běhu. V nabídce se objeví jen aktivní účtárny; deaktivovaná účtárna,
 kterou vztah drží, v ní zůstává, aby ji úprava podmínek tiše nezměnila.
 
-U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
-společníka pro vlastní společnost přibývá v podmínkách pole **Účast na
-nemocenském pojištění z odměny**. Rozhoduje o tom, jak se odměna zdaní, když
-zaměstnanec nepodepsal prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních
-z příjmů):
+Jestli se příjem zaměstnance, který nepodepsal prohlášení k dani, zdaní zálohou,
+nebo srážkovou daní, určuje aplikace sama podle § 6 odst. 4 zákona o daních
+z příjmů. Na kartě vztahu se na to nic nevyplňuje:
 
-- **Zakládá účast** — sjednaná odměna dosahuje rozhodné částky, takže se sráží
-  zálohová daň v každém měsíci.
-- **Nezakládá účast** — měsíce, ve kterých odměna rozhodné částky nedosáhne
-  (pro rok 2026 je to 4 500 Kč), se daní srážkovou daní 15 % ze samostatného
-  základu; ostatní měsíce zálohou.
-- **Neurčeno** — výchozí stav. Aplikace odpověď neodhaduje, protože za zařazení
-  ručí plátce daně, a zákonný výpočet skončí ručním posouzením, dokud ji někdo
-  nedoplní.
+- **Dohoda o provedení práce** — srážková daň 15 %, když úhrn odměn z dohod
+  u vás za měsíc nedosáhne rozhodné částky pro DPP (pro rok 2026 je to
+  12 000 Kč). Srazí se bez ohledu na další příjmy, které od vás zaměstnanec
+  v tom měsíci má.
+- **Každý jiný vztah** (pracovní poměr, zaměstnání malého rozsahu, DPČ, odměna
+  člena statutárního orgánu, práce společníka) — srážková daň 15 %, když úhrn
+  všech těchto příjmů od vás za měsíc nedosáhne rozhodné částky pro účast na
+  nemocenském pojištění (pro rok 2026 je to 4 500 Kč). Rozhoduje skutečně
+  zúčtovaný příjem v měsíci, ne sjednaná mzda ani to, jestli vztah zakládá
+  účast na pojištění. Souběžné vztahy se sčítají; příjem z DPP se do úhrnu
+  přičte jen tehdy, když sám srážkou nešel.
+- Příjem **přesně na rozhodné částce** se už daní zálohou.
+- S **podepsaným prohlášením** se daní vždy zálohou.
 
-U pracovního poměru, zaměstnání malého rozsahu a dohody o provedení práce se
-pole nenabízí — tam zařazení plyne přímo z druhu vztahu a aplikace si ho odvodí
-sama.
+Základ srážkové daně i daň se zaokrouhlují na celé koruny dolů. Sražená daň je
+konečná; do ročního zúčtování nevstupuje.
 
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
 strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení

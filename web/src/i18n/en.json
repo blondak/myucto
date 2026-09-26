@@ -2382,7 +2382,7 @@
       "declaration_hint": "Records the state “not signed”. Without a signed declaration neither the taxpayer credit nor other credits apply. Turn this on only when you know the declarations really were not signed.",
       "declaration_on": "This does not create a signature. When the employee signs the declaration, record it on their card.",
       "withholding_title": "Withholding tax risk ({count})",
-      "withholding_hint": "For these people an unsigned declaration may switch taxation to withholding tax (typically an agreement with low income). Review them before writing.",
+      "withholding_hint": "Without a signed declaration, withholding tax applies in any month where the total income from you stays below the decisive amount. This applies to every relationship type, including regular employment, not just agreements. Review them before writing.",
       "and_more": "and {count} more",
       "person_fallback": "Person no. {id}",
       "apply": "Fill in data ({count} people)",
@@ -2862,7 +2862,7 @@
         "withholding_groups_title": "Withholding tax groups",
         "withholding_group": {
           "dpp": "Agreements to complete a job",
-          "other": "Other small-scale work"
+          "other": "Other income below the decisive amount"
         },
         "issues": {
           "disability-credit-conflict": "Disability credit claims conflict with each other.",
@@ -4963,8 +4963,6 @@
       "social_mode": "Social insurance participation",
       "health_mode": "Health insurance participation",
       "tax_regime_label": "Tax regime",
-      "other_withholding_eligibility_label": "Sickness insurance participation from this remuneration",
-      "other_withholding_eligibility_hint": "Decides how the income is taxed without a signed tax declaration (Income Tax Act, § 6 (4)(b)). If the agreed remuneration establishes sickness insurance participation, tax advance applies every month. If it does not, months where the remuneration stays below the decisive amount (CZK 4,500 in 2026) are taxed by 15 % withholding tax and the rest by tax advance. Until this is answered, the statutory calculation ends in manual review.",
       "foreign_country": "Foreign legislation country",
       "a1_certificate_until": "A1 certificate valid until",
       "tax_declaration": "Taxpayer's tax declaration",
@@ -5375,9 +5373,9 @@
         "manual_review": "Manual review"
       },
       "other_withholding_eligibility": {
-        "unverified": "Not stated — calculation ends in manual review",
-        "eligible": "Does not participate — withholding tax below the decisive amount",
-        "ineligible": "Participates — tax advance every month"
+        "unverified": "Participation from remuneration not stated",
+        "eligible": "Remuneration does not establish participation",
+        "ineligible": "Remuneration establishes participation"
       },
       "checklist_status": {
         "pending": "Open",

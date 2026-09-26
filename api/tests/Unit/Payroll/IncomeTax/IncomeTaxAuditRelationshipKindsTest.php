@@ -9,7 +9,6 @@ use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditClaim;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
@@ -33,62 +32,68 @@ use PHPUnit\Framework\TestCase;
 final class IncomeTaxAuditRelationshipKindsTest extends TestCase
 {
     /**
-     * @return iterable<string,array{EmploymentRelationshipKind,OtherWithholdingEligibility,int,TaxRegime,int,int}>
-     *   kind, eligibility, hrubý příjem (haléře), režim, srážková daň, záloha po slevách
+     * @return iterable<string,array{EmploymentRelationshipKind,int,TaxRegime,int,int}>
+     *   kind, hrubý příjem (haléře), režim, srážková daň, záloha po slevách
      */
     public static function unsignedCases(): iterable
     {
         // § 6 odst. 4 písm. a): DPP 10 000 < 12 000 → 15 % srážka ze základu 10 000 = 1 500.
         yield 'DPP 10 000 Kč bez prohlášení' => [
-            EmploymentRelationshipKind::Dpp, OtherWithholdingEligibility::Automatic,
+            EmploymentRelationshipKind::Dpp,
             1_000_000, TaxRegime::Withholding, 150_000, 0,
         ];
         // Přesně na rozhodné částce už účast vzniká → záloha 15 % z 12 000 = 1 800.
         yield 'DPP 12 000 Kč bez prohlášení (hranice)' => [
-            EmploymentRelationshipKind::Dpp, OtherWithholdingEligibility::Automatic,
+            EmploymentRelationshipKind::Dpp,
             1_200_000, TaxRegime::Advance, 0, 180_000,
         ];
         // 11 999,50: základ se zaokrouhlí dolů na 11 999, daň 1 799,85 → dolů 1 799.
         yield 'DPP 11 999,50 Kč bez prohlášení (dvojí zaokrouhlení dolů)' => [
-            EmploymentRelationshipKind::Dpp, OtherWithholdingEligibility::Automatic,
+            EmploymentRelationshipKind::Dpp,
             1_199_950, TaxRegime::Withholding, 179_900, 0,
         ];
         // § 6 odst. 4 písm. b): DPČ 4 000 < 4 500 → srážka 600.
-        yield 'DPČ 4 000 Kč bez prohlášení, plátce potvrdil zařazení' => [
-            EmploymentRelationshipKind::Dpc, OtherWithholdingEligibility::EligibleVerified,
+        yield 'DPČ 4 000 Kč bez prohlášení' => [
+            EmploymentRelationshipKind::Dpc,
             400_000, TaxRegime::Withholding, 60_000, 0,
         ];
-        // DPČ 4 500 = rozhodná částka → účast → záloha 675.
+        // DPČ 4 500 = rozhodná částka → záloha 675.
         yield 'DPČ 4 500 Kč bez prohlášení (hranice)' => [
-            EmploymentRelationshipKind::Dpc, OtherWithholdingEligibility::EligibleVerified,
+            EmploymentRelationshipKind::Dpc,
             450_000, TaxRegime::Advance, 0, 67_500,
         ];
         // Jednatel 3 000 Kč bez prohlášení → srážka 450.
         yield 'jednatel 3 000 Kč bez prohlášení' => [
-            EmploymentRelationshipKind::StatutoryBody, OtherWithholdingEligibility::EligibleVerified,
+            EmploymentRelationshipKind::StatutoryBody,
             300_000, TaxRegime::Withholding, 45_000, 0,
         ];
         // Jednatel 30 000 Kč bez prohlášení → záloha 4 500 (bez slevy).
         yield 'jednatel 30 000 Kč bez prohlášení' => [
-            EmploymentRelationshipKind::StatutoryBody, OtherWithholdingEligibility::IneligibleVerified,
+            EmploymentRelationshipKind::StatutoryBody,
             3_000_000, TaxRegime::Advance, 0, 450_000,
         ];
-        // Zaměstnání malého rozsahu 4 000 Kč bez prohlášení → srážka 600 (automaticky).
+        // Zaměstnání malého rozsahu 4 000 Kč bez prohlášení → srážka 600.
         yield 'zaměstnání malého rozsahu 4 000 Kč bez prohlášení' => [
-            EmploymentRelationshipKind::SmallScaleEmployment, OtherWithholdingEligibility::Automatic,
+            EmploymentRelationshipKind::SmallScaleEmployment,
             400_000, TaxRegime::Withholding, 60_000, 0,
         ];
-        // Pracovní poměr se vždy daní zálohou, i 4 000 Kč.
+        // OPRAVENO: dřív tu stálo „pracovní poměr se vždy daní zálohou, i 4 000 Kč“
+        // a test tu chybu držel. § 6 odst. 4 písm. b) ZDP se ale na druh vztahu
+        // neptá, jen na úhrn příjmů od plátce v měsíci pod rozhodnou částkou
+        // (2026: 4 500 Kč). Pracovní poměr 4 000 Kč bez prohlášení → srážka 600.
         yield 'pracovní poměr 4 000 Kč bez prohlášení' => [
-            EmploymentRelationshipKind::Employment, OtherWithholdingEligibility::Automatic,
-            400_000, TaxRegime::Advance, 0, 60_000,
+            EmploymentRelationshipKind::Employment,
+            400_000, TaxRegime::Withholding, 60_000, 0,
+        ];
+        yield 'pracovní poměr 4 500 Kč bez prohlášení (hranice)' => [
+            EmploymentRelationshipKind::Employment,
+            450_000, TaxRegime::Advance, 0, 67_500,
         ];
     }
 
     #[DataProvider('unsignedCases')]
     public function testRegimeAndAmountsWithoutDeclaration(
         EmploymentRelationshipKind $kind,
-        OtherWithholdingEligibility $eligibility,
         int $grossMinor,
         TaxRegime $regime,
         int $withholdingTaxMinor,
@@ -97,7 +102,7 @@ final class IncomeTaxAuditRelationshipKindsTest extends TestCase
         $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
             calculationDate: '2026-08-31',
             employeeReference: 'synthetic-employee',
-            relationships: [$this->relationship('vztah', $kind, $grossMinor, $eligibility)],
+            relationships: [$this->relationship('vztah', $kind, $grossMinor)],
             declarations: [$this->declaration(TaxDeclarationStatus::NotSigned)],
             residence: $this->residence(TaxResidence::CzechResident),
         ));
@@ -178,12 +183,10 @@ final class IncomeTaxAuditRelationshipKindsTest extends TestCase
     }
 
     /**
-     * NÁLEZ K OVĚŘENÍ DAŇOVÝM PORADCEM: odměna člena orgánu, který je daňový
-     * NErezident, podléhá podle § 22 odst. 1 písm. g) bod 6 a § 36 odst. 1
-     * písm. a) bod 1 ZDP srážkové dani 15 % bez ohledu na výši i prohlášení.
-     * Kód s prohlášením plátce „nezpůsobilý" (nebo bez prohlášení plátce u
-     * DPČ/jednatele s Automatic) zdaní odměnu ZÁLOHOU. Test dokumentuje
-     * současné chování.
+     * Odměna nerezidentního člena orgánu — fyzické osoby se od 1. 1. 2026
+     * nesráží podle § 36 odst. 1 (zák. č. 360/2025 Sb., čl. VI body 24 a 25),
+     * posuzuje se jako u rezidenta: 30 000 Kč rozhodnou částku § 6 odst. 4
+     * písm. b) dosahuje, takže záloha.
      */
     public function testNonResidentStatutoryBodyIsCurrentlyTaxedByAdvanceNotSection36Withholding(): void
     {
@@ -194,7 +197,6 @@ final class IncomeTaxAuditRelationshipKindsTest extends TestCase
                 'jednatel',
                 EmploymentRelationshipKind::StatutoryBody,
                 3_000_000,
-                OtherWithholdingEligibility::IneligibleVerified,
             )],
             declarations: [$this->declaration(TaxDeclarationStatus::NotSigned)],
             residence: $this->residence(TaxResidence::NonResident),
@@ -243,17 +245,12 @@ final class IncomeTaxAuditRelationshipKindsTest extends TestCase
         string $reference,
         EmploymentRelationshipKind $kind,
         int $amountMinorUnits,
-        OtherWithholdingEligibility $eligibility = OtherWithholdingEligibility::Automatic,
     ): EmploymentRelationshipTaxInput {
         return new EmploymentRelationshipTaxInput(
             $reference,
             'synthetic-payer',
             $kind,
             [new IncomeTaxComponent('synthetic-income', $amountMinorUnits)],
-            $eligibility,
-            $eligibility === OtherWithholdingEligibility::Automatic
-                ? null
-                : 'synthetic-classification-evidence',
         );
     }
 

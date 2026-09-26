@@ -9,7 +9,6 @@ use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
-use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEvidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
@@ -104,7 +103,6 @@ final class WithholdingTaxBaseRoundingTest extends TestCase
                     'synthetic-payer',
                     EmploymentRelationshipKind::Dpp,
                     [new IncomeTaxComponent('synthetic-income', $amountMinorUnits)],
-                    OtherWithholdingEligibility::Automatic,
                 ),
             ],
             declarations: [new TaxDeclarationEvidence(

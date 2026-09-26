@@ -97,14 +97,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
                     $issues[] = 'prior-period-tax-correction-requires-revision';
                 }
             }
-            $classification = $this->candidateGroup(
-                $relationship,
-                $signed,
-            );
-            $groups[$index] = $classification['group'];
-            if ($classification['issue'] !== null) {
-                $issues[] = $classification['issue'];
-            }
+            $groups[$index] = $this->candidateGroup($relationship, $signed);
         }
 
         $creditResolution = $this->resolveCredits($input, $declaration, $policy);
@@ -149,30 +142,16 @@ final class MonthlyEmploymentIncomeTaxCalculator
             );
         }
 
-        $groupTotals = ['dpp' => 0, 'other' => 0];
-        foreach ($groups as $index => $group) {
-            if ($group !== null) {
-                $groupTotals[$group] = TaxIntegerMath::add(
-                    $groupTotals[$group],
-                    $bases[$index],
-                );
-            }
-        }
+        $withheldGroups = $this->withheldGroups($groups, $bases, $policy);
 
         $relationships = [];
         $advanceBase = 0;
         $withholdingBases = ['dpp' => 0, 'other' => 0];
         foreach ($input->relationships as $index => $relationship) {
-            $group = $groups[$index];
-            $regime = $this->regime(
-                $signed,
-                $group,
-                $group === null ? 0 : $groupTotals[$group],
-                $policy,
-            );
-            if ($regime === TaxRegime::Advance) {
+            $group = $withheldGroups[$index];
+            if ($group === null) {
                 $advanceBase = TaxIntegerMath::add($advanceBase, $bases[$index]);
-            } elseif ($group !== null) {
+            } else {
                 $withholdingBases[$group] = TaxIntegerMath::add(
                     $withholdingBases[$group],
                     $bases[$index],
@@ -182,8 +161,8 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 $relationship->relationshipReference,
                 $relationship->kind,
                 $bases[$index],
-                $regime,
-                $regime === TaxRegime::Withholding ? $group : null,
+                $group === null ? TaxRegime::Advance : TaxRegime::Withholding,
+                $group,
             );
         }
 
@@ -290,48 +269,22 @@ final class MonthlyEmploymentIncomeTaxCalculator
     }
 
     /**
-     * Zařazení vztahu do skupiny zvláštní sazby daně podle § 6 odst. 4 ZDP.
+     * Písmeno § 6 odst. 4 ZDP, podle kterého se vztah posuzuje pro srážku;
+     * `null` = srážka nepřipadá v úvahu, protože poplatník u plátce podepsal
+     * prohlášení k dani.
+     *
+     * Zařazení určuje jen druh vztahu (DPP → písm. a), ostatní → písm. b)).
+     * O tom, jestli se opravdu srazí, rozhoduje až úhrn příjmů od téhož plátce
+     * v měsíci proti rozhodné částce, viz {@see self::withheldGroups()}.
      *
      * DAŇOVÁ REZIDENCE do zařazení nevstupuje a parametr tu proto není — od
      * 1. 1. 2026 je to jediné správné chování, viz odůvodnění se zdroji uvnitř
      * metody. Kdyby ho sem někdo vracel, musí nejdřív přečíst to odůvodnění.
-     *
-     * @return array{group:?string,issue:?string}
      */
     private function candidateGroup(
         EmploymentRelationshipTaxInput $relationship,
         bool $signed,
-    ): array {
-        if (
-            $relationship->kind === EmploymentRelationshipKind::Dpp
-            && $relationship->otherWithholdingEligibility
-                !== OtherWithholdingEligibility::Automatic
-        ) {
-            return [
-                'group' => null,
-                'issue' => 'relationship-tax-classification-conflict',
-            ];
-        }
-        if (
-            $relationship->kind === EmploymentRelationshipKind::Employment
-            && $relationship->otherWithholdingEligibility
-                === OtherWithholdingEligibility::EligibleVerified
-        ) {
-            return [
-                'group' => null,
-                'issue' => 'relationship-tax-classification-conflict',
-            ];
-        }
-        if (
-            $relationship->kind === EmploymentRelationshipKind::SmallScaleEmployment
-            && $relationship->otherWithholdingEligibility
-                === OtherWithholdingEligibility::IneligibleVerified
-        ) {
-            return [
-                'group' => null,
-                'issue' => 'relationship-tax-classification-conflict',
-            ];
-        }
+    ): ?string {
         /*
          * ODMĚNA ČLENA ORGÁNU PRÁVNICKÉ OSOBY — NEREZIDENTA se od 1. 1. 2026
          * posuzuje STEJNĚ jako u rezidenta, tedy touhle metodou dál beze změny.
@@ -343,9 +296,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
          * ukládal zvláštní sazbu 15 % (35 % podle písm. c) mimo EU/EHP a mimo
          * smluvní státy) a § 38h odst. 5 zálohu výslovně vylučoval — srazilo se
          * tedy VŽDY, bez ohledu na výši odměny i na prohlášení poplatníka.
-         * Kód to nedělal: kombinaci s `EligibleVerified` hlásil jako rozpor
-         * zařazení a zbylé dvě zdanil zálohou. Nález N-07 auditu mzdového modulu
-         * (private/MZDY-AUDIT.md) mířil právě sem.
+         * Nález N-07 auditu mzdového modulu (private/MZDY-AUDIT.md) mířil sem.
          *
          * ── Co se změnilo od 1. 1. 2026 ───────────────────────────────────────
          * Zákon č. 360/2025 Sb. (doprovodný zákon k jednotnému měsíčnímu hlášení
@@ -375,15 +326,12 @@ final class MonthlyEmploymentIncomeTaxCalculator
          *
          * ── Co z toho plyne pro tenhle kód ────────────────────────────────────
          * Nerezidentní člen orgánu je od 2026 poplatníkem jako každý jiný:
-         *   - odměna ≥ rozhodné částky nebo podepsané prohlášení → ZÁLOHA
+         *   - úhrn ≥ rozhodné částky nebo podepsané prohlášení → ZÁLOHA
          *     (§ 38h odst. 2, sazby 15 % a 23 %),
-         *   - odměna pod rozhodnou částkou BEZ prohlášení a s potvrzeným
-         *     zařazením plátce → SRÁŽKA 15 % podle § 6 odst. 4 písm. b) ZDP
-         *     ve spojení s § 36 odst. 2 písm. m). § 6 odst. 4 žádnou podmínku
-         *     daňové rezidence nemá a 35 % se ho netýká (stojí na odst. 2).
-         * Právě tuhle druhou možnost stará zvláštní větev nerezidentovi upírala:
-         * `EligibleVerified` končilo rozporem zařazení a `Automatic` zálohou.
-         * Proto jsou obě větve zrušené a rezidence do zařazení nevstupuje.
+         *   - úhrn pod rozhodnou částkou BEZ prohlášení → SRÁŽKA 15 % podle
+         *     § 6 odst. 4 písm. b) ZDP ve spojení s § 36 odst. 2 písm. m).
+         *     § 6 odst. 4 žádnou podmínku daňové rezidence nemá a 35 % se ho
+         *     netýká (stojí na odst. 2).
          *
          * ── Co tím NENÍ vyřešeno ──────────────────────────────────────────────
          * Přechodná ustanovení (čl. VII zákona č. 360/2025 Sb.) nechávají pro
@@ -395,76 +343,99 @@ final class MonthlyEmploymentIncomeTaxCalculator
          * zákona), takže srážka podle § 6 odst. 4 skončí úplně.
          */
         if ($signed) {
-            return ['group' => null, 'issue' => null];
+            return null;
         }
 
-        return match ($relationship->otherWithholdingEligibility) {
-            OtherWithholdingEligibility::EligibleVerified => [
-                'group' => 'other',
-                'issue' => null,
-            ],
-            OtherWithholdingEligibility::IneligibleVerified => [
-                'group' => null,
-                'issue' => null,
-            ],
-            OtherWithholdingEligibility::Unverified => [
-                'group' => null,
-                'issue' => 'other-withholding-eligibility-unverified',
-            ],
-            // `Automatic` = „zařaď to podle druhu vztahu". Kde to podle druhu
-            // vztahu zařadit nejde, je jediná bezpečná odpověď ruční posouzení;
-            // které druhy to jsou, ví enum vztahu, protože se podle toho řídí
-            // i sestavovač vstupů (PayrollRunStatutoryInputAssembler). Kdyby
-            // pravidlo žilo na dvou místech, rozešlo by se: sestavovač by
-            // poslal `Automatic` u vztahu, který vyžaduje prohlášení plátce,
-            // a výpočet by ho zařadil beze slova.
-            OtherWithholdingEligibility::Automatic => [
-                'group' => $relationship->kind->automaticWithholdingGroup(),
-                'issue' => $relationship->kind->requiresOtherWithholdingStatement()
-                    ? 'other-withholding-eligibility-unverified'
-                    : null,
-            ],
-        };
+        /*
+         * Písmeno b) se ptá jen na „úhrnnou výši nedosahující u téhož plátce
+         * daně za kalendářní měsíc rozhodné částky“. Druh vztahu, sjednaná
+         * mzda ani účast na nemocenském pojištění v něm nejsou. Do 9/2026 tu
+         * pracovní poměr končil vždy zálohou a DPČ, jednatel a společník
+         * potřebovali „prohlášení plátce o účasti na pojištění“ — obojí byl
+         * výklad, který zákon nemá: pracovní poměr s měsíčním příjmem 2 397 Kč
+         * bez prohlášení se sráží (15 % dolů → 359 Kč), ne zálohuje (základ
+         * nahoru na 2 400 → 360 Kč).
+         */
+        return $relationship->kind->withholdingGroup();
     }
 
     /**
      * Skupina zvláštní sazby, do které by vztah spadl BEZ podepsaného
      * prohlášení poplatníka — tatáž pravidla jako výpočet, jen bez částky.
      *
-     * `null` = srážka nepřipadá v úvahu (záloha), nebo zařazení není
-     * jednoznačné a výpočet by ho poslal do ručního posouzení. Skupina ještě
-     * neznamená srážku: ta nastane, jen když úhrn ve skupině nedosáhne
-     * rozhodné částky ({@see self::regime()}), a to se z evidence předem
-     * poznat nedá. Slouží náhledu hromadného doplnění evidence, aby účetní
-     * věděla, u koho má „nepodepsal" daňový dopad navíc.
+     * Skupina ještě neznamená srážku: ta nastane, jen když úhrn příjmů od
+     * plátce v měsíci nedosáhne rozhodné částky ({@see self::withheldGroups()}),
+     * a to se z evidence předem poznat nedá. Slouží náhledu hromadného
+     * doplnění evidence, aby účetní věděla, u koho má „nepodepsal" daňový
+     * dopad navíc. Podle § 6 odst. 4 písm. b) je to každý vztah; `null`
+     * zůstává pro případ, že srážka skončí (§ 36 odst. 2 písm. m) od
+     * 1. 1. 2027 ruší zákon č. 360/2025 Sb.).
      */
     public function withholdingGroupWithoutSignedDeclaration(
         EmploymentRelationshipTaxInput $relationship,
     ): ?string {
-        return $this->candidateGroup($relationship, false)['group'];
+        return $this->candidateGroup($relationship, false);
     }
 
-    private function regime(
-        bool $signed,
-        ?string $group,
-        int $groupBase,
+    /**
+     * Skupina srážky pro každý vztah, nebo `null`, když se daní zálohou.
+     *
+     * § 6 odst. 4 ZDP (znění zák. č. 470/2024 Sb. od 1. 1. 2025) rozeznává
+     * dva samostatné základy:
+     *   a) příjmy z DPP, jejichž úhrn u téhož plátce za měsíc nedosáhne
+     *      rozhodné částky pro DPP,
+     *   b) příjmy v úhrnné výši nedosahující u téhož plátce za měsíc
+     *      rozhodné částky pro účast na nemocenském pojištění.
+     *
+     * Souběh DPP s dalším vztahem u téhož plátce řeší pokyn GFŘ D-59 (k § 6
+     * odst. 4 a § 38h): DPP do její rozhodné částky se srazí podle písm. a)
+     * „bez ohledu na tyto další příjmy“, takže do úhrnu písm. b) nevstupuje.
+     * Když úhrn z DPP rozhodnou částku písm. a) dosáhne, jde podle téhož
+     * pokynu do jednoho základu pro zálohu „všechny příjmy plynoucí
+     * poplatníkovi od téhož plátce daně“ — proto se DPP mimo písm. a) přičítá
+     * do úhrnu písm. b) a ten pak rozhodnou částku dosáhne taky.
+     *
+     * Test je ostrý („nedosáhne“, „nedosahující“): příjem PŘESNĚ na rozhodné
+     * částce zakládá účast na nemocenském pojištění (§ 7a z. č. 187/2006 Sb.
+     * „aspoň ve výši“) a daní se zálohou. Obě hranice tak na sebe navazují
+     * bez díry i bez překryvu.
+     *
+     * @param array<int,?string> $groups kandidátní skupina podle {@see self::candidateGroup()}
+     * @param array<int,int> $bases
+     * @return array<int,?string>
+     */
+    private function withheldGroups(
+        array $groups,
+        array $bases,
         EmploymentIncomeTaxPolicy2026 $policy,
-    ): TaxRegime {
-        if ($signed || $group === null) {
-            return TaxRegime::Advance;
+    ): array {
+        $dppTotal = 0;
+        foreach ($groups as $index => $group) {
+            if ($group === 'dpp') {
+                $dppTotal = TaxIntegerMath::add($dppTotal, $bases[$index]);
+            }
         }
-        // § 6 odst. 4 ZDP (znění zák. č. 470/2024 Sb. od 1. 1. 2025): srážka platí,
-        // jen když úhrn rozhodné částky NEDOSÁHNE. Test je proto ostrý — příjem
-        // PŘESNĚ na rozhodné částce zakládá účast na nemocenském pojištění
-        // (§ 7a z. č. 187/2006 Sb. „aspoň ve výši“) a daní se zálohou, ne srážkou.
-        // Obě hranice tak na sebe navazují bez díry i bez překryvu.
-        $threshold = $group === 'dpp'
-            ? $policy->money('dpp.withholding.threshold')
-            : $policy->money('other.withholding.threshold');
+        $dppWithheld = $dppTotal < $policy->money('dpp.withholding.threshold');
 
-        return $groupBase < $threshold
-            ? TaxRegime::Withholding
-            : TaxRegime::Advance;
+        $letterBTotal = 0;
+        foreach ($groups as $index => $group) {
+            if ($group === 'other' || ($group === 'dpp' && !$dppWithheld)) {
+                $letterBTotal = TaxIntegerMath::add($letterBTotal, $bases[$index]);
+            }
+        }
+        $letterBWithheld = $letterBTotal < $policy->money('other.withholding.threshold');
+
+        $withheld = [];
+        foreach ($groups as $index => $group) {
+            $withheld[$index] = match (true) {
+                $group === null => null,
+                $group === 'dpp' && $dppWithheld => 'dpp',
+                $letterBWithheld => 'other',
+                default => null,
+            };
+        }
+
+        return $withheld;
     }
 
     /**

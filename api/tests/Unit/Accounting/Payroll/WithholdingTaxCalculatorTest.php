@@ -140,29 +140,73 @@ final class WithholdingTaxCalculatorTest extends TestCase
     }
 
     /**
-     * Typ pracovněprávního vztahu → důvod srážky. Whitelist, ne negace: výčet
-     * `payroll_employees.employment_type` roste (1156 hpp/dpp/dpc, 1302 statutory_body)
-     * a jediná hodnota, která zakládá srážku, je DPP.
-     *
-     * Odměna člena statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP ze
-     * smlouvy o výkonu funkce (§ 59 ZOK) a daní se VŽDY zálohou, i když je nízká —
-     * § 6 odst. 4 na ni nedopadá. Kdyby tu byla podmínka „všechno kromě pracovního
-     * poměru", spadl by výkon funkce pod limitem do samostatného základu daně a
-     * poplatník by přišel o slevy i o roční zúčtování.
+     * Typ pracovněprávního vztahu → důvod srážky, kterou rekapitulace umí
+     * SPOČÍTAT. Je to jen DPP (§ 6 odst. 4 písm. a) ZDP): u ní pod rozhodnou
+     * částkou nevzniká pojistné, takže srážková větev bez pojistného sedí.
+     * Písmeno b) dopadá i na ostatní vztahy, ale vedle pojistného řízeného
+     * sjednanou částkou — ten výpočet rekapitulace nedělá, jen upozorní
+     * ({@see testLetterBNoticeCoversEveryNonDppRelationship()}).
      */
     public function testWithholdingReasonIsWhitelistedPerEmploymentType(): void
     {
         self::assertSame(W::REASON_DPP, W::reasonForEmploymentType('dpp'));
         self::assertNull(W::reasonForEmploymentType('hpp'));
         self::assertNull(W::reasonForEmploymentType('dpc'));
-        self::assertNull(
-            W::reasonForEmploymentType('statutory_body'),
-            'Výkon funkce (§ 59 ZOK) se daní zálohou — § 6/4 ZDP je jen o DPP.',
-        );
+        self::assertNull(W::reasonForEmploymentType('statutory_body'));
         self::assertNull(
             W::reasonForEmploymentType('cokoliv_noveho'),
-            'Neznámý typ nesmí do srážkového režimu spadnout sám od sebe.',
+            'Neznámý typ nesmí do srážkové větve DPP spadnout sám od sebe.',
         );
+    }
+
+    /**
+     * § 6 odst. 4 písm. b) ZDP (znění od 1. 1. 2025): bez prohlášení a pod
+     * rozhodnou částkou pro účast na nemocenském pojištění se sráží u KAŽDÉHO
+     * druhu vztahu. Rekapitulace to nepočítá, ale nesmí o tom mlčet — dřív tu
+     * pracovní poměr i odměna jednatele šly tiše zálohou.
+     */
+    public function testLetterBNoticeCoversEveryNonDppRelationship(): void
+    {
+        $c = self::EXCLUSIVE + ['sickness_participation_threshold' => 4500];
+
+        foreach (['hpp', 'dpc', 'statutory_body'] as $type) {
+            $notice = W::letterBNotice($type, 4499.99, $c, false);
+            self::assertNotNull($notice, $type);
+            self::assertStringContainsString('§ 6 odst. 4 písm. b)', $notice);
+        }
+        // Na rozhodné částce už ne („nedosahující“ je ostře menší).
+        self::assertNull(W::letterBNotice('hpp', 4500.0, $c, false));
+        // Podepsané prohlášení srážku vylučuje.
+        self::assertNull(W::letterBNotice('hpp', 3000.0, $c, true));
+        // DPP má vlastní písmeno a) a srážku rekapitulace spočítá sama.
+        self::assertNull(W::letterBNotice('dpp', 3000.0, $c, false));
+        // Starší znění § 6 odst. 4 (do 2024) tahle oprava neověřovala a nemění.
+        self::assertNull(W::letterBNotice(
+            'hpp',
+            3000.0,
+            $this->c + ['sickness_participation_threshold' => 4000],
+            false,
+        ));
+    }
+
+    /**
+     * Legacy cesta měří písmeno b) ročními konstantami, mzdový běh rulesetem.
+     * Obě čísla musí být táž rozhodná částka, jinak dostane tatáž odměna jiný
+     * režim podle toho, kudy se počítala.
+     */
+    public function testLetterBThresholdMatchesThePayrollRuleset(): void
+    {
+        foreach ([2025, 2026] as $year) {
+            $ruleset = \MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets::provider()
+                ->forDate(PayrollRulesetDomain::IncomeTax, $year . '-01-01');
+            $threshold = $ruleset->parameters['other.withholding.threshold']->value;
+            self::assertIsInt($threshold);
+            self::assertSame(
+                $threshold,
+                (int) round(((float) TaxConstants::forYear($year)['sickness_participation_threshold']) * 100),
+                "Rozhodná částka § 6 odst. 4 písm. b) pro rok {$year}.",
+            );
+        }
     }
 
     /** Autorský honorář do limitu (§ 7/6) — prohlášení tu roli nehraje. */

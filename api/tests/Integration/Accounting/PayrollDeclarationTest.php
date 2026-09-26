@@ -472,19 +472,20 @@ final class PayrollDeclarationTest extends TestCase
 
     // ── § 59 ZOK: smlouva o výkonu funkce (migrace 1302) ─────────────────────
     //
-    // Odměna člena statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP —
-    // NENÍ to příjem z dohody o provedení práce, takže § 6 odst. 4 (srážková daň do
-    // limitu) na ni nedopadá a daní se VŽDY zálohou. Účast na nemocenském se naopak
-    // řídí týmž rozhodným příjmem jako u ostatních (§ 6 odst. 1 z. 187/2006 ve spojení
-    // s § 5 písm. a) bodem 20), takže se výpočet pojistného nemění.
+    // Odměna člena statutárního orgánu je příjem podle § 6 odst. 1 písm. c) ZDP.
+    // Písmeno a) § 6 odst. 4 (DPP) na ni nedopadá, písmeno b) ano: bez prohlášení
+    // a pod rozhodnou částkou se sráží, jako u každého jiného vztahu. Zjednodušená
+    // rekapitulace písmeno b) nepočítá (pojistné se u něj řídí sjednanou částkou,
+    // kterou z jedné hrubé částky nezná), jen na něj upozorní. Účast na nemocenském
+    // se řídí týmž rozhodným příjmem jako u ostatních (§ 6 odst. 1 z. 187/2006 ve
+    // spojení s § 5 písm. a) bodem 20), takže se výpočet pojistného nemění.
 
     /**
-     * KRITICKÉ: nízká odměna za výkon funkce se daní ZÁLOHOU, ne srážkou.
+     * Nízká odměna za výkon funkce bez prohlášení nesmí projít větví DPP (bez
+     * pojistného) a rekapitulace musí říct, že patří pod § 6 odst. 4 písm. b).
      *
-     * Kdyby se nová hodnota chytila do větve DPP, dostal by člen statutárního orgánu
-     * samostatný základ daně: bez slev, mimo roční zúčtování a bez pojistného. Tady se
-     * proto netestují jen částky, ale i to, že náhled srážkovou větev VŮBEC nepoužil —
-     * částky samotné by to neprozradily, 15 % ze 4 000 Kč vyjde v obou režimech 600 Kč.
+     * Dřív tu test tvrdil, že se „VŽDY daní zálohou“ a § 6 odst. 4 na výkon funkce
+     * nedopadá — to písmeno b) vyvrací. Upozornění je to, co bez opravy chybělo.
      */
     public function testStatutoryBodyLowRemunerationIsTaxedByAdvanceNotWithholding(): void
     {
@@ -499,11 +500,17 @@ final class PayrollDeclarationTest extends TestCase
         );
 
         self::assertArrayNotHasKey('withholding', $preview,
-            'Výkon funkce nesmí projít srážkovou větví — § 6/4 ZDP je jen o DPP.');
-        self::assertSame(600, (int) $preview['breakdown']['advance_tax_withheld'],
-            'Daní se zálohou i u nízké odměny.');
+            'Výkon funkce nesmí projít větví DPP — ta nezná pojistné.');
+        self::assertSame(600, (int) $preview['breakdown']['advance_tax_withheld']);
         self::assertGreaterThan(0, (int) $preview['breakdown']['employee_deductions'],
-            'Srážkový režim by pojistné vynuloval — zálohový ho odvádí.');
+            'Srážkový režim DPP by pojistné vynuloval.');
+        self::assertNotEmpty(
+            array_filter(
+                $preview['warnings'],
+                static fn (string $w): bool => str_contains($w, '§ 6 odst. 4 písm. b)'),
+            ),
+            'Rekapitulace musí upozornit, že měsíc patří pod srážkovou daň podle písm. b).',
+        );
 
         // Kontrast na TÉŽE částce: DPP srážkovou větví projde, výkon funkce ne.
         $dppId = $this->employee(

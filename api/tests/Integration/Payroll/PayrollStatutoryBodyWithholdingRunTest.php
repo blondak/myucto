@@ -12,24 +12,21 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Odměna jednatele projde mzdovým během až do konce.
  *
- * Sestavovač zákonných vstupů posílal u odměny jednatele, u DPČ a u společníka
- * konajícího práci pro s. r. o. natvrdo zařazení `automatic`, které výpočet daně
- * u těchhle vztahů neumí použít — chybí mu odpověď na otázku, jestli sjednaná
- * odměna zakládá účast na nemocenském pojištění (§ 6 odst. 4 písm. b) ZDP).
- * Každý takový vztah proto skončil na `other-withholding-eligibility-unverified`,
- * celý zákonný balík spadl do ručního posouzení a běh dostal blokující validaci
- * `statutory_calculation_manual_review`. Přebít ji nešlo: override pracuje nad
- * validacemi řádků, tohle byl issue zákonného balíku.
+ * Sestavovač zákonných vstupů dřív u odměny jednatele, u DPČ a u společníka
+ * konajícího práci pro s. r. o. chtěl „prohlášení plátce“, jestli sjednaná
+ * odměna zakládá účast na nemocenském pojištění, a bez něj celý zákonný balík
+ * spadl do ručního posouzení. § 6 odst. 4 písm. b) ZDP se na účast neptá,
+ * rozhoduje jen úhrn příjmů od téhož plátce v měsíci proti rozhodné částce.
  *
  * Tenhle test jede celou cestu (uzamčení vstupů → výpočet → uložení validací)
- * proti databázi a hlídá obojí: že běh s vyplněným prohlášením plátce doběhne,
- * i že bez něj dál poctivě padá do ručního posouzení.
+ * proti databázi a hlídá, že běh doběhne bez ohledu na uložené prohlášení.
  */
 #[Group('integration')]
 final class PayrollStatutoryBodyWithholdingRunTest extends TestCase
@@ -123,9 +120,16 @@ final class PayrollStatutoryBodyWithholdingRunTest extends TestCase
         }
     }
 
-    public function testDirectorRemunerationAtDecisiveAmountCompletesTheRun(): void
+    /**
+     * Uložené „prohlášení plátce o účasti na pojištění“ (sloupec z migrace
+     * 1403) nesmí výsledek ovlivnit ani zablokovat. Dřív bez něj běh padal do
+     * ručního posouzení a s ním rozhodoval o záloze či srážce; § 6 odst. 4
+     * písm. b) ZDP ale rozhoduje jen úhrnem příjmů od plátce v měsíci.
+     */
+    #[DataProvider('storedPayerStatements')]
+    public function testDirectorRemunerationAtDecisiveAmountCompletesTheRun(string $stored): void
     {
-        $this->statePayerStatement('eligible');
+        $this->statePayerStatement($stored);
 
         $statutory = $this->calculateRun();
 
@@ -146,39 +150,12 @@ final class PayrollStatutoryBodyWithholdingRunTest extends TestCase
         );
     }
 
-    /**
-     * Druhá větev prohlášení musí projít taky — sjednaná odměna účast na
-     * nemocenském pojištění zakládá, takže se daní zálohou vždy.
-     */
-    public function testDirectorParticipatingInSicknessInsuranceCompletesTheRunToo(): void
+    /** @return iterable<string,array{string}> */
+    public static function storedPayerStatements(): iterable
     {
-        $this->statePayerStatement('ineligible');
-
-        $statutory = $this->calculateRun();
-
-        self::assertSame('calculated', $statutory['result']['statutory']['status']);
-        self::assertNotContains(
-            'statutory_calculation_manual_review',
-            $statutory['validation_codes'],
-        );
-    }
-
-    /**
-     * Bez prohlášení plátce se nic neuhodne. Kdyby tahle půlka chyběla, prošel
-     * by i kód, který zařazení tiše dopočítá z výše odměny — a plátce daně by
-     * se o rozhodnutí, za které ručí, nedozvěděl.
-     */
-    public function testDirectorWithoutPayerStatementStillBlocksTheRun(): void
-    {
-        $this->statePayerStatement('unverified');
-
-        $statutory = $this->calculateRun();
-
-        self::assertSame('manual_review', $statutory['result']['statutory']['status']);
-        self::assertContains(
-            'statutory_calculation_manual_review',
-            $statutory['validation_codes'],
-        );
+        yield 'nezakládá účast' => ['eligible'];
+        yield 'zakládá účast' => ['ineligible'];
+        yield 'nevyplněno' => ['unverified'];
     }
 
     /** @return array{result:array<string,mixed>,validation_codes:list<string>} */

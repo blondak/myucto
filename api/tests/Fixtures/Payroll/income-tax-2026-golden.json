@@ -1,18 +1,18 @@
 [
   {
-    "id": "unsigned-dpp-and-other-withholding",
+    "id": "unsigned-dpp-withheld-dpc-summed-with-employment",
     "declaration": "not-signed",
     "residence": "czech-resident",
     "relationships": [
       {"reference": "dpp", "kind": "dpp", "amount_minor": 1199900},
-      {"reference": "dpc", "kind": "dpc", "amount_minor": 449900, "other_withholding_eligible": true},
+      {"reference": "dpc", "kind": "dpc", "amount_minor": 449900},
       {"reference": "employment", "kind": "employment", "amount_minor": 2000000}
     ],
-    "advance_base_minor": 2000000,
-    "advance_tax_minor": 300000,
-    "withholding_base_minor": 1649800,
-    "withholding_tax_minor": 247300,
-    "relationship_regimes": ["withholding", "withholding", "advance"]
+    "advance_base_minor": 2449900,
+    "advance_tax_minor": 367500,
+    "withholding_base_minor": 1199900,
+    "withholding_tax_minor": 179900,
+    "relationship_regimes": ["withholding", "advance", "advance"]
   },
   {
     "id": "signed-declaration-makes-agreements-advance",

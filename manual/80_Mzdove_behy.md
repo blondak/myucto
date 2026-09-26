@@ -164,7 +164,9 @@ se nezapisují a platí až od dalšího měsíce. Chybějící prohlášení po
 zapíše jako **nepodepsané** jen po zaškrtnutí volby **Zapsat chybějící
 prohlášení jako nepodepsané**, která je výchozím stavem vypnutá. Náhled u ní
 jmenovitě vypíše osoby, kterým by nepodepsané prohlášení mohlo přepnout
-zdanění na srážkovou daň. Zápis probíhá osobu po osobě stejnou cestou jako
+zdanění na srážkovou daň. Týká se to každého druhu vztahu, i pracovního poměru:
+bez prohlášení se sráží v každém měsíci, kdy příjem od vás nedosáhne rozhodné
+částky (§ 6 odst. 4 ZDP). Zápis probíhá osobu po osobě stejnou cestou jako
 karta osoby; výsledek ukáže doplněné, přeskočené a neúspěšné osoby s důvodem.
 
 Spočítaný běh počítá ze zmrazeného snímku vstupů, samotný přepočet proto
