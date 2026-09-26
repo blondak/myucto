@@ -211,19 +211,51 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame([], $this->itemsOfSource($overview, 'checklist'));
     }
 
-    public function testDocumentedRegistrationSilencesTheReminder(): void
+    /**
+     * Podání zakládá povinnost pod referencí
+     * `payroll_employment_registration:{vztah}` (viz
+     * `PayrollRegistrationSubmissionService::sourceEventReference`). Přehled
+     * dřív hledal `payroll_employment:{vztah}` a odeslanou registraci
+     * připomínal dál.
+     */
+    public function testSubmittedRegistrationSilencesTheReminder(): void
     {
         $this->checklistItem('social_jmhz_registration', '2026-08-03');
         $this->obligation(
             'PREZEC26',
             'payroll_employment_registration',
-            'payroll_employment:' . $this->employmentId,
+            'payroll_employment_registration:' . $this->employmentId,
             '2026-08-03',
+            'submitted',
         );
 
         $overview = $this->service->overview($this->supplierId, 'production');
 
         self::assertSame([], $this->itemsOfSource($overview, 'checklist'));
+    }
+
+    /**
+     * Připravená, ale neodeslaná odhláška u pojišťovny povinnost nesplnila —
+     * lhůta § 10 zákona č. 48/1997 Sb. dál běží a přehled ji musí hlásit.
+     */
+    public function testPreparedHealthDeregistrationStillReminds(): void
+    {
+        $this->checklistItem('health_insurance_deregistration', '2026-08-10');
+        $this->obligation(
+            'ZPOZNAM',
+            'payroll_health_notification',
+            'payroll_health_notification:' . $this->employmentId . ':employment_end:2026-08-02',
+            '2026-08-02',
+            'prepared',
+        );
+
+        $items = $this->itemsOfSource(
+            $this->service->overview($this->supplierId, 'production'),
+            'checklist',
+        );
+
+        self::assertCount(1, $items);
+        self::assertSame('overdue', $items[0]['phase']);
     }
 
     public function testDeadlineBeyondTheHorizonIsNotReported(): void
@@ -261,6 +293,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
         string $sourceEventType,
         string $sourceEventReference,
         string $periodStart,
+        string $status,
     ): void {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -271,13 +304,14 @@ final class PayrollDeadlineOverviewTest extends TestCase
                  source_event_reference, source_event_hash, request_fingerprint,
                  idempotency_key_hash)
              VALUES (?, "production", ?, "employment", ?, ?, ?, "regular",
-                     "vrep_apep", "open", ?, ?, ?, ?, UNHEX(?))',
+                     "vrep_apep", ?, ?, ?, ?, ?, UNHEX(?))',
         )->execute([
             $this->supplierId,
             $agendaCode,
             'employment:' . $this->employmentId,
             $periodStart,
             $periodStart,
+            $status,
             $sourceEventType,
             $sourceEventReference,
             str_repeat('a', 64),
