@@ -20,6 +20,7 @@ import type {
   RegistrationOpeningBalance,
   RegistrationPair,
   RegistrationRecord,
+  RegistrationRelationChoice,
   RegistrationRelationType,
 } from '@/api/payrollImports'
 
@@ -207,6 +208,52 @@ export function registrationNeedsPairSelect(record: RegistrationRecord, pairs: R
 
 export function hasReadyItem(items: { status: string }[]): boolean {
   return items.some(item => item.status === 'ready')
+}
+
+/** Převzatý měsíc jde převzít i „částečně" — převezme se, co je spárované. */
+export function hasTakeoverItem(months: { status: string }[]): boolean {
+  return months.some(month => month.status === 'ready' || month.status === 'partial')
+}
+
+// ─── Registrace: volba druhu vztahu ───────────────────────────────────────────
+
+export type RegistrationRelationChoiceMap = Record<string, RegistrationRelationType>
+
+/** Věta nabízí volbu, jen když podklady druh vztahu nerozliší (DPP / DPČ malého rozsahu). */
+export function recordNeedsRelationChoice(record: RegistrationRecord): boolean {
+  return (record.employment.relation_type_options ?? []).length > 1
+}
+
+export function setRelationChoice(
+  choices: RegistrationRelationChoiceMap,
+  record: RegistrationRecord,
+  relationType: string,
+): RegistrationRelationChoiceMap {
+  const next = { ...choices }
+  const options = record.employment.relation_type_options ?? []
+  if (options.includes(relationType as RegistrationRelationType) && relationType !== options[0]) {
+    next[record.key] = relationType as RegistrationRelationType
+  } else {
+    delete next[record.key]
+  }
+  return next
+}
+
+export function buildRelationChoices(choices: RegistrationRelationChoiceMap): RegistrationRelationChoice[] {
+  return Object.entries(choices).map(([key, relationType]) => ({ key, relation_type: relationType }))
+}
+
+/** Po novém náhledu zůstanou jen volby u vět, které je pořád nabízejí. */
+export function pruneRelationChoices(
+  choices: RegistrationRelationChoiceMap,
+  records: RegistrationRecord[],
+): RegistrationRelationChoiceMap {
+  const byKey = new Map(records.map(record => [record.key, record]))
+  const next: RegistrationRelationChoiceMap = {}
+  for (const [key, relationType] of Object.entries(choices)) {
+    if ((byKey.get(key)?.employment.relation_type_options ?? []).includes(relationType)) next[key] = relationType
+  }
+  return next
 }
 
 /**

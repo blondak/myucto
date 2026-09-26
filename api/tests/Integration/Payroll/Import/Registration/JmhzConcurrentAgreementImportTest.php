@@ -4,16 +4,24 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
+use MyInvoice\Action\Payroll\PayrollRegistrationImportAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportLookup;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Unit\Payroll\Import\Registration\JmhzReportFixtures;
 use MyInvoice\Tests\Unit\Payroll\Import\Registration\RegistrationXmlFixtures;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Souběh pracovního poměru a dohody téže osoby v importu měsíčních hlášení.
@@ -193,6 +201,82 @@ final class JmhzConcurrentAgreementImportTest extends TestCase
         $types = array_column($this->container->get(RegistrationImportLookup::class)->employments($this->supplierId, $employeeId), 'relation_type');
         sort($types);
         self::assertSame(['dpc', 'employment'], $types);
+    }
+
+    /**
+     * Scénář celého toku přes HTTP akci: náhled → volba druhu vztahu → použití
+     * s převzetím historie → převzatý rok osoby, ze kterého čte evidenční list
+     * i převzatý běh ({@see PayrollTakeoverReader}).
+     */
+    public function testScenarioThroughActionIntoTakeoverYear(): void
+    {
+        [$employeeId, $hppId] = $this->registerEmployee();
+        $files = $this->reports();
+        $action = $this->container->get(PayrollRegistrationImportAction::class);
+
+        $preview = $action->preview($this->request(['environment' => 'test', 'files' => $files]), new Response());
+        if ($preview->getStatusCode() === 403) {
+            self::markTestSkipped('Mzdový modul není v téhle instalaci licencovaný.');
+        }
+        self::assertSame(200, $preview->getStatusCode(), (string) $preview->getBody());
+        $records = $this->json($preview)['records'];
+        $derivedKey = $this->derived($records, self::PPV_DPP)['key'];
+        $keys = array_column(array_filter($records, static fn (array $r): bool => $r['selectable']), 'key');
+
+        $applied = $action->apply($this->request([
+            'environment' => 'test',
+            'files' => $files,
+            'keys' => $keys,
+            'evidence_confirmed' => true,
+            'apply_takeover' => true,
+            'relation_types' => [['key' => $derivedKey, 'relation_type' => 'dpp']],
+        ]), new Response());
+        self::assertSame(200, $applied->getStatusCode(), (string) $applied->getBody());
+        $result = $this->json($applied);
+        self::assertSame('complete', $result['outcome'], $this->dump($result['unresolved']));
+
+        $year = $this->container->get(PayrollTakeoverReader::class)->forEmployee($this->supplierId, $employeeId, 2026);
+        $dppMonths = array_values(array_filter($year->months, static fn ($month): bool => $month->employmentId !== $hppId));
+        $hppMonths = $year->forEmployment($hppId);
+        self::assertCount(3, $hppMonths);
+        self::assertCount(3, $dppMonths);
+        foreach ($hppMonths as $month) {
+            self::assertSame('employment', $month->relationType);
+            self::assertTrue($month->pensionParticipation);
+            self::assertSame(4_000_000, $month->grossMinor);
+        }
+        foreach ($dppMonths as $month) {
+            self::assertSame('dpp', $month->relationType);
+            self::assertFalse($month->pensionParticipation, 'DPP pod limitem není účastna na důchodovém pojištění.');
+            self::assertSame(0, $month->insuranceDays);
+            self::assertSame(self::DPP_INCOME * 100, $month->grossMinor);
+        }
+        self::assertSame(
+            4_000_000 + self::DPP_INCOME * 100,
+            $year->personMonthTotals('2026-01', $employeeId)['gross_minor'],
+            'Hrubé příjmy osoby za měsíc sečtou pracovní poměr i dohodu.',
+        );
+    }
+
+    /** @param array<string,mixed> $body */
+    private function request(array $body): ServerRequestInterface
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/payroll/imports/registrations/apply')
+            ->withParsedBody($body)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+    }
+
+    /** @return array<string,mixed> */
+    private function json(ResponseInterface $response): array
+    {
+        $response->getBody()->rewind();
+        $decoded = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+
+        return $decoded;
     }
 
     /** @return array{0:int,1:int} [employee_id, employment_id] */

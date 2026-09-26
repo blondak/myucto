@@ -29,6 +29,8 @@ final class RegistrationImportVocabulary
         'unsupported',
     ];
     public const RESULT_STATUSES = ['applied', 'failed', 'skipped'];
+    /** Výsledek použití celé dávky (`outcome`). */
+    public const APPLY_OUTCOMES = ['complete', 'incomplete'];
     public const RESULT_OPERATIONS = [
         'person_created',
         'employment_created',

@@ -25,21 +25,27 @@ import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, 
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
 import {
   buildRegistrationPairs,
+  buildRelationChoices,
   filesFingerprint,
   filesToPayload,
   formatHours,
   hasReadyItem,
+  hasTakeoverItem,
   isRegistrationApplicable,
   minutesToHours,
   openingBalanceTotals,
   pruneRegistrationPairs,
   pruneRegistrationSelection,
+  pruneRelationChoices,
+  recordNeedsRelationChoice,
   registrationApplyBlock,
   registrationNeedsPairSelect,
   resolveHistoryToggle,
   selectableRegistrationKeys,
   setRegistrationPair,
+  setRelationChoice,
   type RegistrationPairMap,
+  type RegistrationRelationChoiceMap,
 } from './importHelpers'
 
 const props = defineProps<{
@@ -57,6 +63,7 @@ const preview = ref<RegistrationPreview | null>(null)
 const previewFingerprint = ref('')
 const selected = ref<string[]>([])
 const pairs = ref<RegistrationPairMap>({})
+const relationChoices = ref<RegistrationRelationChoiceMap>({})
 const evidenceConfirmed = ref(false)
 const applyOpenings = ref(false)
 const applyAverages = ref(false)
@@ -85,7 +92,7 @@ const averagesReady = computed(() => hasReadyItem(averages.value))
 const takeover = computed(() => preview.value?.takeover ?? null)
 const takeoverMonths = computed(() => takeover.value?.months ?? [])
 const takeoverRelations = computed(() => takeover.value?.relations ?? [])
-const takeoverReady = computed(() => hasReadyItem(takeoverMonths.value) || takeoverRelations.value.length > 0)
+const takeoverReady = computed(() => hasTakeoverItem(takeoverMonths.value) || takeoverRelations.value.length > 0)
 const showTakeoverWages = computed(() => takeoverMonths.value.length > 0 || takeoverRelations.value.length > 0)
 const showTakeover = computed(() => openingBalances.value.length > 0 || averages.value.length > 0 || showTakeoverWages.value)
 const historySelected = computed(() =>
@@ -133,6 +140,7 @@ watch(fingerprint, value => {
     preview.value = null
     selected.value = []
     pairs.value = {}
+    relationChoices.value = {}
     evidenceConfirmed.value = false
     openingsTouched.value = false
     averagesTouched.value = false
@@ -151,15 +159,18 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
   try {
     const current = fingerprint.value
     const pairList = buildRegistrationPairs(pairs.value)
+    const choiceList = buildRelationChoices(relationChoices.value)
     const payload = {
       environment: environment.value,
       files: await filesToPayload(files.value),
       ...(pairList.length > 0 ? { pairs: pairList } : {}),
+      ...(choiceList.length > 0 ? { relation_types: choiceList } : {}),
     }
     const response = await payrollImportsApi.previewRegistrations(payload)
     preview.value = response
     previewFingerprint.value = current
     pairs.value = pruneRegistrationPairs(pairs.value, response.records, response.employment_options ?? [])
+    relationChoices.value = pruneRelationChoices(relationChoices.value, response.records)
     const wanted = [...selected.value, ...(options.select ?? []).filter(key => !selected.value.includes(key))]
     selected.value = pruneRegistrationSelection(wanted, response.records)
     // Předvýběr jen u čerstvého náhledu; po zápisu se znovu vybírá vědomě.
@@ -167,7 +178,7 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
     applyOpenings.value = resolveHistoryToggle(applyOpenings.value, openingsTouched.value, hasReadyItem(response.opening_balances ?? []))
     applyAverages.value = resolveHistoryToggle(applyAverages.value, averagesTouched.value, hasReadyItem(response.averages ?? []))
     applyTakeover.value = resolveHistoryToggle(applyTakeover.value, takeoverTouched.value,
-      hasReadyItem(response.takeover?.months ?? []) || (response.takeover?.relations.length ?? 0) > 0)
+      hasTakeoverItem(response.takeover?.months ?? []) || (response.takeover?.relations.length ?? 0) > 0)
   } catch (err) {
     error.value = apiErrorMessage(err, t('payroll_imports.registration.preview_failed'))
   } finally {
@@ -193,10 +204,13 @@ async function runApply() {
       auto_approve_changes: keys.length > 0 && autoApproveChanges.value,
       auto_approve_averages: applyAverages.value && averagesReady.value && autoApproveAverages.value,
       apply_takeover: applyTakeover.value && takeoverReady.value,
+      relation_types: buildRelationChoices(relationChoices.value),
     })
     result.value = response
     const summary = response.summary
-    if (keys.length === 0) {
+    if (response.outcome === 'incomplete' && response.unresolved.length > 0) {
+      toast.warning(t('payroll_imports.registration.import_review.incomplete_toast', { count: response.unresolved.length }))
+    } else if (keys.length === 0) {
       toast.success(t('payroll_imports.registration.takeover_applied', {
         months: response.takeover?.saved ?? 0,
         saved: response.opening_balances.saved,
@@ -221,6 +235,30 @@ async function pairRecord(record: RegistrationRecord, value: string) {
   pairs.value = setRegistrationPair(pairs.value, record.key, employmentId)
   // Náhled se přepočítá se spárováním — mění se operace věty i počáteční stavy.
   await runPreview({ keepResult: true, select: employmentId === null ? [] : [record.key] })
+}
+
+async function chooseRelation(record: RegistrationRecord, value: string) {
+  relationChoices.value = setRelationChoice(relationChoices.value, record, value)
+  // Druh vztahu mění plán věty (podmínky, druh činnosti) — náhled se přepočítá.
+  await runPreview({ keepResult: true, select: [record.key] })
+}
+
+function relationChoiceValue(record: RegistrationRecord): string {
+  return relationChoices.value[record.key] ?? record.employment.relation_type ?? ''
+}
+
+/** Formulář, který dokládá další (souběžný) vztah téže osoby a čeká na jeho založení. */
+function isConcurrentEmployment(record: RegistrationRecord): boolean {
+  return isJmhz(record) && record.operation === 'create_employment'
+}
+
+function recordAnchor(key: string): string {
+  return `registration-record-${key.replace(/[^0-9a-z]/gi, '-')}`
+}
+
+function focusRecord(key: string) {
+  const row = document.getElementById(recordAnchor(key)) ?? document.getElementById(`${recordAnchor(key)}-card`)
+  row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 function toggle(key: string) {
@@ -323,6 +361,7 @@ function submissionClass(type: RegistrationSubmissionType): string {
 
 function takeoverStatusClass(status: RegistrationOpeningBalanceStatus | RegistrationAverageStatus | RegistrationTakeoverStatus): string {
   if (status === 'ready') return 'bg-success-50 text-success-700'
+  if (status === 'partial') return 'bg-warning-50 text-warning-700'
   if (status === 'blocked') return 'bg-danger-50 text-danger-600'
   return 'bg-neutral-100 text-neutral-600'
 }
@@ -477,7 +516,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="record in records" :key="record.key" class="align-top" :class="record.blocker ? 'bg-danger-50/40' : ''">
+              <tr v-for="record in records" :id="recordAnchor(record.key)" :key="record.key" class="align-top" :class="record.blocker ? 'bg-danger-50/40' : ''">
                 <td class="px-3 py-2">
                   <input v-if="isRegistrationApplicable(record)" type="checkbox" :checked="selected.includes(record.key)" :disabled="!canWrite"
                     :aria-label="t('payroll_imports.registration.select_record', { name: recordName(record) })" @change="toggle(record.key)">
@@ -512,6 +551,10 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                         <option v-for="option in employmentOptions.filter(item => !candidateIds(record).has(item.employment_id))" :key="option.employment_id" :value="String(option.employment_id)">{{ option.label }}</option>
                       </optgroup>
                     </select>
+                    <p v-if="isConcurrentEmployment(record)" data-testid="registration-concurrent-hint" class="mt-1 max-w-xs rounded-md bg-payroll-50 px-2 py-1 text-xs text-payroll-700">
+                      <span class="font-medium">{{ t('payroll_imports.registration.import_review.concurrent_employment') }}.</span>
+                      {{ t('payroll_imports.registration.import_review.concurrent_employment_hint') }}
+                    </p>
                   </template>
                   <template v-else>
                     <p class="font-medium text-neutral-900">{{ record.person.full_name }}</p>
@@ -523,7 +566,20 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                 <td class="px-3 py-2 text-xs text-neutral-600">
                   <p>{{ t('payroll_imports.registration.start_on', { date: dateText(record.employment.start_on) }) }}</p>
                   <p v-if="record.employment.end_on">{{ t('payroll_imports.registration.end_on', { date: dateText(record.employment.end_on) }) }}</p>
-                  <p v-if="record.employment.relation_type">{{ t(`payroll_imports.relation_types.${record.employment.relation_type}`) }}</p>
+                  <p v-if="record.employment.relation_type && !recordNeedsRelationChoice(record)">{{ t(`payroll_imports.relation_types.${record.employment.relation_type}`) }}</p>
+                  <label v-if="recordNeedsRelationChoice(record)" class="mt-1 block max-w-xs">
+                    <span class="block text-[11px] font-medium text-neutral-700">{{ t('payroll_imports.registration.import_review.relation_choice_label') }}</span>
+                    <select :class="SELECT_CLASS" class="mt-0.5" data-testid="registration-relation-choice" :value="relationChoiceValue(record)" :disabled="!canWrite || busy !== null"
+                      :aria-label="t('payroll_imports.registration.import_review.relation_choice_for', { name: record.person.full_name })"
+                      @change="chooseRelation(record, ($event.target as HTMLSelectElement).value)">
+                      <option v-for="option in record.employment.relation_type_options" :key="option" :value="option">{{ t(`payroll_imports.relation_types.${option}`) }}</option>
+                    </select>
+                    <span class="mt-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.registration.import_review.relation_choice_hint') }}</span>
+                  </label>
+                  <template v-if="record.employment.start_estimated">
+                    <span data-testid="registration-start-estimated" class="mt-1 inline-block whitespace-nowrap rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.registration.import_review.start_estimated') }}</span>
+                    <p class="mt-0.5 max-w-xs text-[11px] text-neutral-500">{{ t('payroll_imports.registration.import_review.start_estimated_hint') }}</p>
+                  </template>
                   <p v-if="record.employment.position_name" class="text-neutral-500">{{ record.employment.position_name }}</p>
                   <span v-if="record.employment.has_id_ppv" class="mt-1 inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-600">{{ t('payroll_imports.registration.has_id_ppv') }}</span>
                 </td>
@@ -571,7 +627,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
         </div>
 
         <div v-if="records.length" class="space-y-2 p-3 md:hidden">
-          <article v-for="record in records" :key="record.key" class="rounded-lg border p-3 text-sm"
+          <article v-for="record in records" :id="`${recordAnchor(record.key)}-card`" :key="record.key" class="rounded-lg border p-3 text-sm"
             :class="record.blocker ? 'border-danger-500/30 bg-danger-50/40' : 'border-neutral-200 bg-neutral-50'">
             <div class="flex items-start gap-3">
               <input v-if="isRegistrationApplicable(record)" type="checkbox" class="mt-1" :checked="selected.includes(record.key)" :disabled="!canWrite"
@@ -597,8 +653,25 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                   <option value="">{{ t('payroll_imports.registration.pair.placeholder') }}</option>
                   <option v-for="option in employmentOptions" :key="option.employment_id" :value="String(option.employment_id)">{{ option.label }}</option>
                 </select>
+                <p v-if="isConcurrentEmployment(record)" class="mt-2 rounded-md bg-payroll-50 px-2 py-1 text-xs text-payroll-700">
+                  <span class="font-medium">{{ t('payroll_imports.registration.import_review.concurrent_employment') }}.</span>
+                  {{ t('payroll_imports.registration.import_review.concurrent_employment_hint') }}
+                </p>
                 <p v-if="!isJmhz(record)" class="mt-2 text-xs text-neutral-600">
                   {{ t('payroll_imports.registration.start_on', { date: dateText(record.employment.start_on) }) }}<template v-if="record.employment.end_on"> · {{ t('payroll_imports.registration.end_on', { date: dateText(record.employment.end_on) }) }}</template>
+                </p>
+                <label v-if="recordNeedsRelationChoice(record)" class="mt-2 block">
+                  <span class="block text-xs font-medium text-neutral-700">{{ t('payroll_imports.registration.import_review.relation_choice_label') }}</span>
+                  <select :class="SELECT_CLASS" class="mt-0.5" :value="relationChoiceValue(record)" :disabled="!canWrite || busy !== null"
+                    :aria-label="t('payroll_imports.registration.import_review.relation_choice_for', { name: record.person.full_name })"
+                    @change="chooseRelation(record, ($event.target as HTMLSelectElement).value)">
+                    <option v-for="option in record.employment.relation_type_options" :key="option" :value="option">{{ t(`payroll_imports.relation_types.${option}`) }}</option>
+                  </select>
+                  <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll_imports.registration.import_review.relation_choice_hint') }}</span>
+                </label>
+                <p v-if="record.employment.start_estimated" class="mt-2 text-xs text-warning-700">
+                  <span class="font-medium">{{ t('payroll_imports.registration.import_review.start_estimated') }}:</span>
+                  {{ t('payroll_imports.registration.import_review.start_estimated_hint') }}
                 </p>
                 <ul v-if="record.changes.length" class="mt-2 space-y-1 text-xs">
                   <li v-for="change in record.changes" :key="change.field">
@@ -898,6 +971,24 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
 
     <section v-if="result" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-testid="registration-result">
       <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.registration.result_title') }}</h3>
+      <div v-if="result.outcome === 'incomplete' && result.unresolved.length" role="alert" data-testid="registration-result-incomplete"
+        class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+        <p class="font-semibold">{{ t('payroll_imports.registration.import_review.incomplete_title') }}</p>
+        <p class="mt-0.5 text-xs">{{ t('payroll_imports.registration.import_review.incomplete_hint') }}</p>
+        <ul class="mt-2 divide-y divide-danger-500/20">
+          <li v-for="item in result.unresolved" :key="`u-${item.key}`" class="flex flex-wrap items-start justify-between gap-2 py-1.5">
+            <div class="min-w-0">
+              <p class="font-medium">{{ item.label }} · {{ formatPeriod(item.period) }}</p>
+              <p class="text-xs">{{ item.reason }}</p>
+              <p class="truncate text-[11px] text-danger-600/80" :title="item.file">{{ item.file }}</p>
+            </div>
+            <button v-if="recordByKey.has(item.key)" type="button" :class="btnOutlineSm('warning')" class="whitespace-nowrap" @click="focusRecord(item.key)">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.search" /></svg>
+              {{ t('payroll_imports.registration.import_review.fix_in_preview') }}
+            </button>
+          </li>
+        </ul>
+      </div>
       <template v-if="result.results.length">
         <p class="mt-1 text-sm text-neutral-600">{{ t('payroll_imports.registration.result_summary', result.summary) }}</p>
         <ul class="mt-3 divide-y divide-neutral-100 rounded-lg border border-neutral-200">
@@ -909,6 +1000,11 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
               <div v-if="item.operations.length" class="mt-1 flex flex-wrap gap-1">
                 <span v-for="operation in item.operations" :key="operation" class="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-600">{{ operationLabel(operation) }}</span>
               </div>
+              <p v-if="item.start_estimated && item.employee_id" data-testid="registration-result-start-estimated" class="mt-1 text-xs text-warning-700">
+                <span class="font-medium">{{ t('payroll_imports.registration.import_review.start_estimated') }}.</span>
+                {{ t('payroll_imports.registration.import_review.start_estimated_hint') }}
+                <RouterLink :to="{ name: 'payroll-person', params: { id: item.employee_id } }" class="ml-1 font-medium text-payroll-600 hover:underline">{{ t('payroll_imports.registration.import_review.start_estimated_link') }}</RouterLink>
+              </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <RouterLink v-if="item.employee_id" :to="{ name: 'payroll-person', params: { id: item.employee_id } }" class="text-xs text-payroll-600 hover:underline">{{ t('payroll_imports.common.open_person') }}</RouterLink>

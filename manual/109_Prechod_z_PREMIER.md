@@ -154,7 +154,9 @@ a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se do
   narození, trvalá a kontaktní adresa, kontakty, druh vztahu (pracovní
   poměr, DPP, DPČ, jednatel), nástup, skončení, týdenní pracovní doba
   a sjednaná mzda včetně jejích změn. V zákonné evidenci osoby doplní daňovou
-  rezidenci, prohlášení poplatníka po měsících, historii zdravotních
+  rezidenci, prohlášení poplatníka po měsících (podepsané je jen v měsících,
+  kde ho PREMIER vede jako podepsané; měsíce zdaněné srážkou mají prohlášení
+  nepodepsané), historii zdravotních
   pojišťoven podle oznámení pojišťovnám, příslušnost k sociálnímu pojištění
   a slevu pracujícího důchodce. Doplňuje se jen to, co v MyÚčtu chybí. Vztah
   se stejným osobním číslem a jménem, který ve firmě už je, převod převezme
@@ -181,7 +183,8 @@ a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se do
 - **Zpracované mzdy.** Každý měsíc do konce převáděného roku se uloží jako
   převzatá mzda předchozího systému: hrubý příjem, vyměřovací základy,
   pojistné zaměstnance i zaměstnavatele, záloha a srážková daň, daňový bonus,
-  čistá mzda, částka k výplatě a doby pojištění. Z nich vznikne převzatý
+  čistá mzda, částka k výplatě a doby pojištění včetně vyloučených dob
+  (kalendářní dny nemoci a neplaceného volna). Z nich vznikne převzatý
   mzdový běh, evidenční list důchodového pojištění za rok přechodu
   a srovnávací sestava převzatých mezd. Měsíce od začátku vedení mezd
   v MyÚčtu se nepřebírají, ty počítá MyÚčto.

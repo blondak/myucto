@@ -27156,6 +27156,7 @@
         },
         "month_status": {
           "ready": "Will be taken over",
+          "partial": "Taken over partially",
           "blocked": "Cannot take over",
           "computed": "Calculated by MyÚčto"
         },
@@ -27238,6 +27239,20 @@
         "title": "Change obligations",
         "completed": "Change obligations checked off: {count}",
         "failed": "Could not check off"
+      },
+      "import_review": {
+        "relation_choice_label": "Employment type per contract",
+        "relation_choice_hint": "The reports carry no activity code and the income stayed below the small-scale threshold in every month, so the data cannot tell an agreement to perform work (DPP) from a small-scale agreement to perform work activity (DPČ). Choose the type according to the contract; the preview is recalculated.",
+        "relation_choice_for": "Employment type for: {name}",
+        "concurrent_employment": "Another employment of the same person",
+        "concurrent_employment_hint": "The form belongs to a concurrent employment of the same person (different employment ID). It cannot be assigned to the existing employment; also select the record “Derived from JMHZ reports” that creates it.",
+        "start_estimated": "Start date estimated",
+        "start_estimated_hint": "The start date is the first reported month; the employment may have started earlier. After applying, fill it in from the contract on the person card (employment → Agreed terms), or upload the employee export from the ČSSZ ePortal.",
+        "start_estimated_link": "Fill in the start on the person card",
+        "incomplete_title": "The import is incomplete",
+        "incomplete_hint": "Applied records stay applied, but these report forms were not taken over and their months are missing from the taken-over payroll. Fix them in the preview (assign an employment, select the record that creates it, or resolve the block) and apply again.",
+        "incomplete_toast": "The import is incomplete: {count} forms were left without an employment or blocked.",
+        "fix_in_preview": "Show in preview"
       }
     },
     "meaning_groups": {
