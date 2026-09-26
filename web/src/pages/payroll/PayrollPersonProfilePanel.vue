@@ -499,7 +499,7 @@ const payoutAccountOptions = computed<{ value: number; label: string; secondary?
  * a pravidlo „zbytek čisté mzdy". Dřív zůstala hotovost 100 % i pravidlo
  * „Hotově" a karta s výplatou na účet vyplácela dál hotově.
  */
-function onPayoutMethodChange(method: PayrollPayoutMethod) {
+function onPayoutMethodChange(method: PayrollPayoutMethod | null) {
   const accounts = form.accounts.filter(account => account.is_active && !account.deleted)
   if (method === 'bank') {
     form.cash_allocation_basis_points = 0
@@ -1782,7 +1782,7 @@ onMounted(load)
                   {{ t('payroll.people.profile.verify_on_save') }}
                 </label>
                 <div v-if="row.verify_on_save" class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <label :class="labelClass">{{ t('payroll.people.profile.verification_source_label') }}<SearchableSelect :model-value="row.verify_source ?? 'employee_confirmation'" class="mt-1" :options="verificationSourceOptions" :clearable="false" accent="payroll" @update:model-value="row.verify_source = $event" /></label>
+                  <label :class="labelClass">{{ t('payroll.people.profile.verification_source_label') }}<SearchableSelect :model-value="row.verify_source ?? 'employee_confirmation'" class="mt-1" :options="verificationSourceOptions" :clearable="false" accent="payroll" @update:model-value="row.verify_source = $event ?? 'employee_confirmation'" /></label>
                   <label :class="labelClass">{{ t('payroll.people.profile.verified_on') }} <RequiredMark /><DateInput :model-value="row.verify_on ?? todayIso()" required :class="inputClass" @update:model-value="row.verify_on = $event" /></label>
                 </div>
               </div>
