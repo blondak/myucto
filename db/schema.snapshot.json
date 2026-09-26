@@ -885,6 +885,7 @@
         "1899_journal_red_storno.sql",
         "1900_invoice_rounding_mode.sql",
         "1901_payroll_external_jmhz_submissions.sql",
+        "1902_payroll_jmhz_deferrals.sql",
         "1905_payroll_component_jmhz_catalog_1_4_2_10_package.sql",
         "1906_payroll_transport_attempt_possibly_delivered.sql",
         "1912_payroll_component_jmhz_compensation_detail_mappings.sql",
@@ -892,7 +893,12 @@
         "1919_payroll_sickness_case_benefit_application.sql",
         "1920_payroll_eldp_corrective_and_post_termination.sql",
         "1923_payroll_employment_terminations.sql",
-        "1924_payroll_employment_survivors.sql"
+        "1924_payroll_employment_survivors.sql",
+        "1925_payroll_enforcement_fee_revenue_account.sql",
+        "1926_payroll_enforcement_exit_and_insolvency_handover.sql",
+        "1928_payroll_small_statutory_gaps.sql",
+        "1929_payroll_travel_and_accident_insurance_posting.sql",
+        "1931_payroll_key_rewrap_trigger_guard.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -6086,7 +6092,7 @@
                 "reversed_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "source_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item') NOT NULL DEFAULT 'manual'",
+                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
@@ -7348,7 +7354,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
-                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other') NOT NULL",
+                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid') NOT NULL",
                 "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "childbirth_date": "date NULL DEFAULT NULL",
                 "childbirth_recorded_at": "datetime NULL DEFAULT NULL",
@@ -8039,6 +8045,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "advance_minor": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "advance_settlement": "enum('payroll','cash') NOT NULL DEFAULT 'payroll'",
                 "approved_at": "datetime NULL DEFAULT NULL",
                 "approved_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "arrival_at_utc": "datetime NOT NULL",
@@ -9182,6 +9189,8 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "accident_insurance_credit_account": "varchar(16) NOT NULL DEFAULT '379'",
+                "accident_insurance_debit_account": "varchar(16) NOT NULL DEFAULT '548'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "default_health_insurer_code": "varchar(8) NULL DEFAULT NULL",
                 "default_office_id": "bigint(20) unsigned NOT NULL",
@@ -9191,6 +9200,7 @@
                 "employment_gross_credit_account": "varchar(10) NOT NULL DEFAULT '331'",
                 "employment_gross_debit_account": "varchar(10) NOT NULL DEFAULT '521'",
                 "enforcement_deductions_credit_account": "varchar(16) NOT NULL DEFAULT '379'",
+                "enforcement_fee_revenue_credit_account": "varchar(16) NOT NULL DEFAULT ''",
                 "health_insurance_credit_account": "varchar(10) NOT NULL DEFAULT '336'",
                 "income_tax_credit_account": "varchar(10) NOT NULL DEFAULT '342'",
                 "non_deductible_benefit_debit_account": "varchar(16) NOT NULL DEFAULT '528'",
@@ -9790,7 +9800,7 @@
                 "recipient_institution_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "recipient_verified": "tinyint(1) NOT NULL DEFAULT 0",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
-                "status": "enum('received','withhold_and_hold','remit','deferred_no_withholding','deferred_hold','paid','stopped') NOT NULL DEFAULT 'received'",
+                "status": "enum('received','withhold_and_hold','remit','deferred_no_withholding','deferred_hold','paid','stopped','ended_at_payer') NOT NULL DEFAULT 'received'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
@@ -9982,10 +9992,11 @@
                 "claim_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "decision_event_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "entry_kind": "enum('withheld','held','released_for_remittance','remitted','released_to_employee','employer_fee','adjustment') NOT NULL",
+                "entry_kind": "enum('withheld','held','released_for_remittance','remitted','released_to_employee','employer_fee','adjustment','released_to_administrator') NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key_hash": "binary(32) NOT NULL",
                 "month_result_id": "bigint(20) unsigned NOT NULL",
+                "recipient_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -9994,6 +10005,7 @@
                 "fk_payroll_enforcement_ledger_claim": "BTREE (supplier_id, claim_id)",
                 "idx_payroll_enforcement_ledger_case": "BTREE (supplier_id, case_id, month_result_id, id)",
                 "idx_payroll_enforcement_ledger_decision_event": "BTREE (supplier_id, decision_event_id)",
+                "idx_payroll_enforcement_ledger_recipient_account": "BTREE (supplier_id, recipient_account_id)",
                 "uq_payroll_enforcement_ledger_calculation_entry": "UNIQUE BTREE (supplier_id, month_result_id, calculation_entry_key)",
                 "uq_payroll_enforcement_ledger_id": "UNIQUE BTREE (supplier_id, id)",
                 "uq_payroll_enforcement_ledger_idempotency": "UNIQUE BTREE (supplier_id, idempotency_key_hash)"
@@ -10003,12 +10015,14 @@
                 "fk_payroll_enforcement_ledger_case": "(supplier_id, case_id) -> payroll_enforcement_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_enforcement_ledger_claim": "(supplier_id, claim_id) -> payroll_enforcement_claims (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_enforcement_ledger_decision_event": "(supplier_id, decision_event_id) -> payroll_enforcement_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_enforcement_ledger_recipient_account": "(supplier_id, recipient_account_id) -> payroll_institution_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_payroll_enforcement_ledger_result": "(supplier_id, month_result_id) -> payroll_enforcement_month_results (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "chk_payroll_enforcement_ledger_amount": "`entry_kind` = 'adjustment' and `amount_minor_units` <> 0 or `entry_kind` <> 'adjustment' and `amount_minor_units` > 0",
-                "chk_payroll_enforcement_ledger_decision_event": "`entry_kind` = 'released_for_remittance' and `decision_event_id` is not null or `entry_kind` <> 'released_for_remittance' and `decision_event_id` is null",
-                "chk_payroll_enforcement_ledger_owner": "`entry_kind` = 'employer_fee' and `case_id` is null and `claim_id` is null or `entry_kind` = 'released_for_remittance' and `case_id` is not null and `claim_id` is not null or `entry_kind` in ('withheld','held','remitted','released_to_employee') and (`case_id` is null and `claim_id` is null or `case_id` is not null and `claim_id` is not null) or `entry_kind` = 'adjustment' and (`claim_id` is null or `case_id` is not null)"
+                "chk_payroll_enforcement_ledger_decision_event": "`entry_kind` in ('released_for_remittance','released_to_administrator') and `decision_event_id` is not null or `entry_kind` not in ('released_for_remittance','released_to_administrator') and `decision_event_id` is null",
+                "chk_payroll_enforcement_ledger_owner": "`entry_kind` = 'employer_fee' and `case_id` is null and `claim_id` is null or `entry_kind` in ('released_for_remittance','released_to_administrator') and `case_id` is not null and `claim_id` is not null or `entry_kind` in ('withheld','held','remitted','released_to_employee') and (`case_id` is null and `claim_id` is null or `case_id` is not null and `claim_id` is not null) or `entry_kind` = 'adjustment' and (`claim_id` is null or `case_id` is not null)",
+                "chk_payroll_enforcement_ledger_recipient_account": "`entry_kind` = 'released_to_administrator' and `recipient_account_id` is not null or `entry_kind` <> 'released_to_administrator' and `recipient_account_id` is null"
             }
         },
         "payroll_enforcement_month_results": {
@@ -10138,6 +10152,48 @@
             },
             "checks": {
                 "chk_payroll_enforcement_recipient_instruction_hash": "`source_document_sha256` regexp '^[0-9a-f]{64}$'"
+            }
+        },
+        "payroll_enforcement_termination_notices": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "case_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "due_on": "date NOT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "employment_ended_on": "date NOT NULL",
+                "employment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "new_payer_name": "varchar(255) NULL DEFAULT NULL",
+                "new_payer_reference": "varchar(128) NULL DEFAULT NULL",
+                "outbox_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "revision_no": "int(10) unsigned NOT NULL",
+                "sent_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "sent_channel": "enum('isds','post','personal','other') NULL DEFAULT NULL",
+                "sent_on": "date NULL DEFAULT NULL",
+                "snapshot_hash": "char(64) NOT NULL",
+                "snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_enforcement_termination_notice_outbox": "BTREE (supplier_id, outbox_id)",
+                "idx_payroll_enforcement_termination_notice_employee": "BTREE (supplier_id, employee_id, employment_ended_on)",
+                "uq_payroll_enforcement_termination_notice_revision": "UNIQUE BTREE (supplier_id, case_id, revision_no)",
+                "uq_payroll_enforcement_termination_notice_tenant_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_enforcement_termination_notice_case": "(supplier_id, case_id) -> payroll_enforcement_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_enforcement_termination_notice_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_enforcement_termination_notice_outbox": "(supplier_id, outbox_id) -> submission_outbox (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_enforcement_termination_notice_due": "`due_on` >= `employment_ended_on`",
+                "chk_payroll_enforcement_termination_notice_sent": "`sent_on` is null = (`sent_channel` is null)"
             }
         },
         "payroll_enforcement_xmlzam_dispatches": {
@@ -11177,6 +11233,93 @@
             },
             "checks": {
                 "chk_jmhz_control_parameter_hash": "`row_hash` regexp '^[0-9a-f]{64}$'"
+            }
+        },
+        "payroll_jmhz_deferral_submissions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "completed_at": "datetime(6) NULL DEFAULT NULL",
+                "correction_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "deferral_id": "bigint(20) unsigned NOT NULL",
+                "environment": "enum('production','test') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "regular_submission_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_jmhz_deferral_submission_correction": "BTREE (supplier_id, environment, correction_submission_id)",
+                "idx_payroll_jmhz_deferral_submission_regular": "BTREE (supplier_id, environment, regular_submission_id)",
+                "uq_payroll_jmhz_deferral_submission": "UNIQUE BTREE (supplier_id, deferral_id, environment, regular_submission_id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_jmhz_deferral_submission_correction": "(supplier_id, environment, correction_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_submission_deferral": "(supplier_id, deferral_id) -> payroll_jmhz_deferrals (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_submission_regular": "(supplier_id, environment, regular_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_jmhz_deferral_submission_completion": "`correction_submission_id` is null = (`completed_at` is null)"
+            }
+        },
+        "payroll_jmhz_deferrals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "active_key": "varchar(64) NULL DEFAULT NULL STORED GENERATED COLLATE ascii_bin AS (if(`status` = 'active',concat(`source_revision_id`,':',`employment_id`),NULL))",
+                "blocker_codes_json": "text NOT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "decided_environment": "enum('production','test') NOT NULL",
+                "decided_preparation_id": "bigint(20) unsigned NOT NULL",
+                "decided_snapshot_fingerprint": "char(64) NOT NULL COLLATE ascii_bin",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "office_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "period_start": "date NOT NULL",
+                "reason": "varchar(500) NOT NULL",
+                "revoke_reason": "varchar(500) NULL DEFAULT NULL",
+                "revoked_at": "datetime(6) NULL DEFAULT NULL",
+                "revoked_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "run_id": "bigint(20) unsigned NOT NULL",
+                "source_revision_id": "bigint(20) unsigned NOT NULL",
+                "status": "enum('active','revoked') NOT NULL DEFAULT 'active'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_jmhz_deferral_creator": "BTREE (created_by)",
+                "fk_payroll_jmhz_deferral_employee": "BTREE (supplier_id, employee_id)",
+                "fk_payroll_jmhz_deferral_employment": "BTREE (supplier_id, employment_id)",
+                "fk_payroll_jmhz_deferral_office": "BTREE (supplier_id, office_id)",
+                "fk_payroll_jmhz_deferral_preparation": "BTREE (supplier_id, decided_environment, decided_preparation_id)",
+                "fk_payroll_jmhz_deferral_revision": "BTREE (supplier_id, source_revision_id, run_id)",
+                "fk_payroll_jmhz_deferral_revoker": "BTREE (revoked_by)",
+                "idx_payroll_jmhz_deferral_revision": "BTREE (supplier_id, source_revision_id, status)",
+                "idx_payroll_jmhz_deferral_run": "BTREE (supplier_id, run_id, period_start)",
+                "uq_payroll_jmhz_deferral_active": "UNIQUE BTREE (supplier_id, active_key)",
+                "uq_payroll_jmhz_deferral_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_jmhz_deferral_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_office": "(supplier_id, office_id) -> payroll_offices (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_preparation": "(supplier_id, decided_environment, decided_preparation_id) -> payroll_jmhz_preparation_snapshots (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_revision": "(supplier_id, source_revision_id, run_id) -> payroll_run_revisions (supplier_id, id, run_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_deferral_revoker": "(revoked_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "blocker_codes_json": "json_valid(`blocker_codes_json`)",
+                "chk_payroll_jmhz_deferral_fingerprint": "`decided_snapshot_fingerprint` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_jmhz_deferral_period": "dayofmonth(`period_start`) = 1",
+                "chk_payroll_jmhz_deferral_reason": "char_length(trim(`reason`)) >= 3",
+                "chk_payroll_jmhz_deferral_revocation": "`status` = 'active' and `revoked_at` is null and `revoked_by` is null and `revoke_reason` is null or `status` = 'revoked' and `revoked_at` is not null and `revoked_by` is not null and `revoke_reason` is not null and char_length(trim(`revoke_reason`)) >= 3"
             }
         },
         "payroll_jmhz_dictionary_attributes": {
@@ -20223,7 +20366,7 @@
                 "agenda_code": "varchar(48) NOT NULL COLLATE ascii_bin",
                 "artifact_filename": "varchar(255) NOT NULL",
                 "artifact_id": "bigint(20) unsigned NOT NULL",
-                "artifact_kind": "enum('payroll_submission','tax_submission','document','payroll_xmlzam') NOT NULL",
+                "artifact_kind": "enum('payroll_submission','tax_submission','document','payroll_xmlzam','payroll_enforcement_notice') NOT NULL",
                 "artifact_sha256": "char(64) NOT NULL COLLATE ascii_bin",
                 "artifact_validated_at": "datetime NULL DEFAULT NULL",
                 "artifact_validation_status": "enum('passed','failed','skipped') NULL DEFAULT NULL",
@@ -22307,7 +22450,7 @@
         "trg_payroll_agenda_matrix_delete": "BEFORE DELETE ON payroll_agenda_matrix #c281a3c0db68ee78d89824cce465e3a3cd612956",
         "trg_payroll_agenda_matrix_update": "BEFORE UPDATE ON payroll_agenda_matrix #c281a3c0db68ee78d89824cce465e3a3cd612956",
         "trg_payroll_annual_revision_immutable_delete": "BEFORE DELETE ON payroll_annual_document_revisions #ea06c85fb4a327aead9380c455d7916b9ca2e6fc",
-        "trg_payroll_annual_revision_immutable_update": "BEFORE UPDATE ON payroll_annual_document_revisions #d75c3546a2aca7b5559b0820948745b8beb4a15a",
+        "trg_payroll_annual_revision_immutable_update": "BEFORE UPDATE ON payroll_annual_document_revisions #527ba3f834d5a8514f4fb0e614c8fbe0d7cc8f25",
         "trg_payroll_annual_revision_validate_insert": "BEFORE INSERT ON payroll_annual_document_revisions #0355b1d1a68541bc5f8e8815900c1607603acd61",
         "trg_payroll_annual_source_immutable_delete": "BEFORE DELETE ON payroll_annual_document_sources #4d7571173b1dbfcab8b3b9e58f89130b051a5c35",
         "trg_payroll_annual_source_immutable_update": "BEFORE UPDATE ON payroll_annual_document_sources #da8b4f47d357c6f0a3edfb8437f6c4e12ea45d45",
@@ -22336,7 +22479,7 @@
         "trg_payroll_eldp_source_no_delete": "BEFORE DELETE ON payroll_eldp_statement_sources #995c47bc84a185b7cafd427e389573533dcfe94b",
         "trg_payroll_eldp_source_no_update": "BEFORE UPDATE ON payroll_eldp_statement_sources #995c47bc84a185b7cafd427e389573533dcfe94b",
         "trg_payroll_eldp_statement_no_delete": "BEFORE DELETE ON payroll_eldp_statements #dacf7a9f56631992c89b4b18e5fee2cc554070de",
-        "trg_payroll_eldp_statement_no_update": "BEFORE UPDATE ON payroll_eldp_statements #dacf7a9f56631992c89b4b18e5fee2cc554070de",
+        "trg_payroll_eldp_statement_no_update": "BEFORE UPDATE ON payroll_eldp_statements #b730d75d6bcf9a1abe19c6a196da64e0b4f66d8a",
         "trg_payroll_employer_policy_audit_delete": "BEFORE DELETE ON payroll_employer_policy_audit #ae59a20a8b7b69e4fa04541aa3f3c7cdc17a657e",
         "trg_payroll_employer_policy_audit_update": "BEFORE UPDATE ON payroll_employer_policy_audit #ae59a20a8b7b69e4fa04541aa3f3c7cdc17a657e",
         "trg_payroll_employer_policy_delete": "BEFORE DELETE ON payroll_employer_policies #38d999f00b1e7b81cacb3702a0db6a5aa6e0b47a",
@@ -22345,7 +22488,7 @@
         "trg_payroll_employment_dimension_overlap_insert": "BEFORE INSERT ON payroll_employment_dimensions #dbae99b1d572a31f9f87fadc5fc06820c8d56685",
         "trg_payroll_employment_dimension_overlap_update": "BEFORE UPDATE ON payroll_employment_dimensions #341b7e09183a217d6a60bab0133e9549771fa692",
         "trg_payroll_employment_exit_revision_immutable_delete": "BEFORE DELETE ON payroll_employment_exit_revisions #a7eaca0803b1fb70774badfc2965619ec05309c8",
-        "trg_payroll_employment_exit_revision_immutable_update": "BEFORE UPDATE ON payroll_employment_exit_revisions #731dd5a94c678c643961cb4604ddc7642dbb1da8",
+        "trg_payroll_employment_exit_revision_immutable_update": "BEFORE UPDATE ON payroll_employment_exit_revisions #e7e2cbca9a624ec1fc27e19f6f9f3520ea7938e4",
         "trg_payroll_employment_exit_revision_validate_insert": "BEFORE INSERT ON payroll_employment_exit_revisions #ffea48981e4a3a064eb8b084de43b71f964c0368",
         "trg_payroll_employment_external_id_environment_guard": "BEFORE UPDATE ON payroll_employment_external_ids #c70b442f1d9bb7c729ad66017fcb2a5cdf18f119",
         "trg_payroll_enforcement_allocation_consistency_insert": "BEFORE INSERT ON payroll_enforcement_allocations #40aca4646c0e1668aef2af8210d92cd5df53035f",
@@ -22364,10 +22507,10 @@
         "trg_payroll_enforcement_claim_immutable_delete": "BEFORE DELETE ON payroll_enforcement_claims #6f43ec0bb2cef76f48e206b78e1aed6fbe0ae492",
         "trg_payroll_enforcement_claim_mutable_update": "BEFORE UPDATE ON payroll_enforcement_claims #8635b781cd2d659d4644ecf5aba42df55dba924a",
         "trg_payroll_enforcement_claim_priority_insert": "BEFORE INSERT ON payroll_enforcement_claims #0aa4f6e07439e36f4557adc3b4dfe36873cc6253",
-        "trg_payroll_enforcement_event_document_insert": "BEFORE INSERT ON payroll_enforcement_events #87fceced6713b20873dca865466ae9dcb317cba5",
+        "trg_payroll_enforcement_event_document_insert": "BEFORE INSERT ON payroll_enforcement_events #06c99c7ed0f3323fa4f2a256ab0be2bc8fc85280",
         "trg_payroll_enforcement_event_immutable_delete": "BEFORE DELETE ON payroll_enforcement_events #3907d4b0a2cfc4005520a07eadb291232e58d239",
         "trg_payroll_enforcement_event_immutable_update": "BEFORE UPDATE ON payroll_enforcement_events #e70d8dfaa5344f374197a46c03f9a824232e90eb",
-        "trg_payroll_enforcement_ledger_consistency_insert": "BEFORE INSERT ON payroll_enforcement_ledger #324c2f3fa478f8b23becad609026a69cf276e9a5",
+        "trg_payroll_enforcement_ledger_consistency_insert": "BEFORE INSERT ON payroll_enforcement_ledger #d3e4547cf186345951134083495b61740d206b85",
         "trg_payroll_enforcement_ledger_immutable_delete": "BEFORE DELETE ON payroll_enforcement_ledger #db12f4171cb9f6caa100e6f79297b6b17d1abae2",
         "trg_payroll_enforcement_ledger_immutable_update": "BEFORE UPDATE ON payroll_enforcement_ledger #c133ef4bfb2c53e1a091f8c3dfdd336f2f3e77d2",
         "trg_payroll_enforcement_recipient_instruction_immutable_delete": "BEFORE DELETE ON payroll_enforcement_recipient_instructions #b0404a1140c3eefa9e88cc0f133c2df05ec93197",
@@ -22385,13 +22528,17 @@
         "trg_payroll_insolvency_instruction_immutable_update": "BEFORE UPDATE ON payroll_insolvency_payment_instructions #a17b01edaace837b493a72a82ed10cd36336ba86",
         "trg_payroll_insolvency_instruction_insert": "BEFORE INSERT ON payroll_insolvency_payment_instructions #03047ce06f8f43b4675c3b66fd051f643d40d8f6",
         "trg_payroll_institution_account_payment_insert": "BEFORE INSERT ON payroll_institution_accounts #67e6b260c5cd764aa5e048895254a0db02c07f3b",
-        "trg_payroll_institution_account_payment_update": "BEFORE UPDATE ON payroll_institution_accounts #5d73edb9c15ca0fce80fffb9d1ccfdb49c834b70",
+        "trg_payroll_institution_account_payment_update": "BEFORE UPDATE ON payroll_institution_accounts #ba7180844e6825c5e2f44613ae93db7eca2cd9e9",
         "trg_payroll_jmhz_codebook_delete": "BEFORE DELETE ON payroll_jmhz_codebooks #b3c14a14b8470cee0701016c011a1e97e5d6cda4",
         "trg_payroll_jmhz_codebook_entry_delete": "BEFORE DELETE ON payroll_jmhz_codebook_entries #e21e678e5a0cd0b46fd94c8aeccdbd37ba9235ee",
         "trg_payroll_jmhz_codebook_entry_insert": "BEFORE INSERT ON payroll_jmhz_codebook_entries #36b30d660d7568182b42ceda1e14ad0e5d5acdf1",
         "trg_payroll_jmhz_codebook_entry_update": "BEFORE UPDATE ON payroll_jmhz_codebook_entries #9e11d9b1688816d14c7e81ea203a93e9a2b22d51",
         "trg_payroll_jmhz_codebook_insert": "BEFORE INSERT ON payroll_jmhz_codebooks #df8e63256b9761b56653a5c74d6c5768e2a34b76",
         "trg_payroll_jmhz_codebook_update": "BEFORE UPDATE ON payroll_jmhz_codebooks #8dc20e3174f39196ca41be25f41cf328aeded844",
+        "trg_payroll_jmhz_deferral_no_delete": "BEFORE DELETE ON payroll_jmhz_deferrals #b08fad330ac9a19f7087d3d6cf90aa8ef49b7804",
+        "trg_payroll_jmhz_deferral_submission_no_delete": "BEFORE DELETE ON payroll_jmhz_deferral_submissions #189f18f533e9be7bb1a43748684fb96fe48c2979",
+        "trg_payroll_jmhz_deferral_submission_update_guard": "BEFORE UPDATE ON payroll_jmhz_deferral_submissions #6a717eb59a4195db2b1082708ef8375cb1f0badf",
+        "trg_payroll_jmhz_deferral_update_guard": "BEFORE UPDATE ON payroll_jmhz_deferrals #97031273d75aaf070f151be239cb5e00ecf27a62",
         "trg_payroll_jmhz_dictionary_attribute_delete": "BEFORE DELETE ON payroll_jmhz_dictionary_attributes #148e6bd97bd096e403c8faece081900b31feb467",
         "trg_payroll_jmhz_dictionary_attribute_insert": "BEFORE INSERT ON payroll_jmhz_dictionary_attributes #351b563d1f2c56e494a8c9ddd093d89bbcd3f106",
         "trg_payroll_jmhz_dictionary_attribute_update": "BEFORE UPDATE ON payroll_jmhz_dictionary_attributes #d511e9cb96df1f7d93cd421a01ae87eaf75c6100",
@@ -22399,22 +22546,22 @@
         "trg_payroll_jmhz_eldp_claim_no_delete": "BEFORE DELETE ON payroll_jmhz_eldp_idempotency_claims #4586f66e9abf4e8da46723e92134e24cf2e69388",
         "trg_payroll_jmhz_eldp_insert_guard": "BEFORE INSERT ON payroll_jmhz_eldp_evidence_snapshots #60a7c1a4c422ba52ab258514cc93e02950826060",
         "trg_payroll_jmhz_eldp_no_delete": "BEFORE DELETE ON payroll_jmhz_eldp_evidence_snapshots #824fc40324050245f93667995d6ee020e5d4d454",
-        "trg_payroll_jmhz_eldp_no_update": "BEFORE UPDATE ON payroll_jmhz_eldp_evidence_snapshots #824fc40324050245f93667995d6ee020e5d4d454",
+        "trg_payroll_jmhz_eldp_no_update": "BEFORE UPDATE ON payroll_jmhz_eldp_evidence_snapshots #a8eed1917b8f711e0c467635b42dfa24fb35d28b",
         "trg_payroll_jmhz_employer_annual_no_delete": "BEFORE DELETE ON payroll_jmhz_employer_annual_evidence #977d7b5c8a5eee1350d9adb16fef1bf93e2518af",
         "trg_payroll_jmhz_employer_annual_no_update": "BEFORE UPDATE ON payroll_jmhz_employer_annual_evidence #e611d604125691ccb356e46581656c9508fcd791",
         "trg_payroll_jmhz_employer_annual_validate_insert": "BEFORE INSERT ON payroll_jmhz_employer_annual_evidence #fd31c57253b6775fa18114cd6805d220a00c7386",
         "trg_payroll_jmhz_form_outcome_delete": "BEFORE DELETE ON payroll_jmhz_protocol_form_outcomes #3c1c074e7e6a5a7a275402289eadaa4223c44cec",
-        "trg_payroll_jmhz_form_outcome_update": "BEFORE UPDATE ON payroll_jmhz_protocol_form_outcomes #3c1c074e7e6a5a7a275402289eadaa4223c44cec",
+        "trg_payroll_jmhz_form_outcome_update": "BEFORE UPDATE ON payroll_jmhz_protocol_form_outcomes #0c8d4cf58936a864864455549ea338a2758cf923",
         "trg_payroll_jmhz_ordinary_claim_bind_once": "BEFORE UPDATE ON payroll_jmhz_ordinary_evidence_idempotency_claims #307a53d59ab953ae017738b75a46e08b6a49f60b",
         "trg_payroll_jmhz_ordinary_claim_no_delete": "BEFORE DELETE ON payroll_jmhz_ordinary_evidence_idempotency_claims #de9c8869d64dd6ad1fd1fd100cc9d4b0d113bf0c",
         "trg_payroll_jmhz_ordinary_insert_guard": "BEFORE INSERT ON payroll_jmhz_ordinary_evidence_snapshots #de4cbc11030b0236525fa31f255cc5237758f224",
         "trg_payroll_jmhz_ordinary_no_delete": "BEFORE DELETE ON payroll_jmhz_ordinary_evidence_snapshots #8c7b98c6135b21ad398d9e8f76e7a7cf9fb95e78",
-        "trg_payroll_jmhz_ordinary_no_update": "BEFORE UPDATE ON payroll_jmhz_ordinary_evidence_snapshots #8c7b98c6135b21ad398d9e8f76e7a7cf9fb95e78",
+        "trg_payroll_jmhz_ordinary_no_update": "BEFORE UPDATE ON payroll_jmhz_ordinary_evidence_snapshots #c1bc022097132a88bfb1f1ceead929bdacbbb18c",
         "trg_payroll_jmhz_preparation_claim_bind_once": "BEFORE UPDATE ON payroll_jmhz_preparation_idempotency_claims #7d3170f1a27d6c86b37d227abcb4d15627c61c82",
         "trg_payroll_jmhz_preparation_claim_no_delete": "BEFORE DELETE ON payroll_jmhz_preparation_idempotency_claims #ee21f4393103b1512fa78a4643e97ef73dd4a184",
         "trg_payroll_jmhz_preparation_insert_guard": "BEFORE INSERT ON payroll_jmhz_preparation_snapshots #e8850f26882b61c88f1f989fa906f96af7e967d6",
         "trg_payroll_jmhz_preparation_no_delete": "BEFORE DELETE ON payroll_jmhz_preparation_snapshots #d828464527f92b3578620b72c67230ef4514f61d",
-        "trg_payroll_jmhz_preparation_no_update": "BEFORE UPDATE ON payroll_jmhz_preparation_snapshots #d828464527f92b3578620b72c67230ef4514f61d",
+        "trg_payroll_jmhz_preparation_no_update": "BEFORE UPDATE ON payroll_jmhz_preparation_snapshots #995391af282f06781835b805c7fb8494d60ce4b5",
         "trg_payroll_jmhz_spec_package_delete": "BEFORE DELETE ON payroll_jmhz_spec_packages #1a92bf9651a1e536713e6c44318d9d0e482d627c",
         "trg_payroll_jmhz_spec_package_update": "BEFORE UPDATE ON payroll_jmhz_spec_packages #cdeead39e1a671b3cffe82ea84822a0bb1b9a10b",
         "trg_payroll_jmhz_work_month_insert_guard": "BEFORE INSERT ON payroll_jmhz_work_month_revisions #7620c593e53bd06c332dc9330658d139197b9df7",
@@ -22432,7 +22579,7 @@
         "trg_payroll_payment_allocation_immutable_update": "BEFORE UPDATE ON payroll_payment_allocations #c6f10e6e291fa1d85029ca198a20d40aee07ef4f",
         "trg_payroll_payment_allocation_validate_insert": "BEFORE INSERT ON payroll_payment_allocations #ec2d0e68a99d61d680aca5dbc40eadbb3c577276",
         "trg_payroll_payment_batch_immutable_delete": "BEFORE DELETE ON payroll_payment_batches #a164412bec531e80f0610129a77bcddae3e6a61f",
-        "trg_payroll_payment_batch_immutable_update": "BEFORE UPDATE ON payroll_payment_batches #6e14312b9a6ad486d40fdfd4d2e89d4cb8589005",
+        "trg_payroll_payment_batch_immutable_update": "BEFORE UPDATE ON payroll_payment_batches #ccae10e99630aec0c8f0ccfc77b6e9dcafbb6ec5",
         "trg_payroll_payment_export_grant_consume_update": "BEFORE UPDATE ON payroll_payment_export_download_grants #febf59c015eed9afaa0747de54c8ca69757d4dfd",
         "trg_payroll_payment_export_grant_validate_insert": "BEFORE INSERT ON payroll_payment_export_download_grants #00ce7cc12078e0f647bb15092fe9353ec9a8d06b",
         "trg_payroll_payment_export_immutable_delete": "BEFORE DELETE ON payroll_payment_exports #0808da0d603b0fed845f98268cc17d72bbebc605",
@@ -22441,7 +22588,7 @@
         "trg_payroll_payment_export_key_immutable_update": "BEFORE UPDATE ON payroll_payment_export_idempotency_keys #8b78bba253d3415d5cd0d726c890ad7f521bb0f7",
         "trg_payroll_payment_export_validate_insert": "BEFORE INSERT ON payroll_payment_exports #7b8e0bff9e4e51f27f80bf9f8782870f624becb9",
         "trg_payroll_payment_item_immutable_delete": "BEFORE DELETE ON payroll_payment_items #8066178d95ad4e345c48d679747aa23b107f0dc1",
-        "trg_payroll_payment_item_immutable_update": "BEFORE UPDATE ON payroll_payment_items #8023d0c0b317eef67c1a57d8790b02eba4e5f6c3",
+        "trg_payroll_payment_item_immutable_update": "BEFORE UPDATE ON payroll_payment_items #0ff42159e07895f7697e9e66c70631308b2df995",
         "trg_payroll_payment_liability_immutable_delete": "BEFORE DELETE ON payroll_payment_liabilities #3ce12f5b0e9bd58383e7843a24e82a8647dd2686",
         "trg_payroll_payment_liability_immutable_update": "BEFORE UPDATE ON payroll_payment_liabilities #7a575d8226c126ed74b94159803384ad4cdb0590",
         "trg_payroll_payment_liability_validate_insert": "BEFORE INSERT ON payroll_payment_liabilities #f5b6b7a391de7f1396f831ef8cc617fe11df3c00",
@@ -22453,7 +22600,7 @@
         "trg_payroll_period_export_immutable_delete": "BEFORE DELETE ON payroll_period_exports #1e6b17b60a5786d5701ee58cf39da611f4217604",
         "trg_payroll_period_export_immutable_update": "BEFORE UPDATE ON payroll_period_exports #0ccfff8f291ee8ef6830dff9ba6bb78074719eab",
         "trg_payroll_person_account_verify_insert": "BEFORE INSERT ON payroll_person_accounts #6147724eff1f25711ac5bfed220c06c55c462b4d",
-        "trg_payroll_person_account_verify_update": "BEFORE UPDATE ON payroll_person_accounts #d5f0d239012ad57d77ddcf845c181ffc40061e59",
+        "trg_payroll_person_account_verify_update": "BEFORE UPDATE ON payroll_person_accounts #001fe2ad2a7bd2ecd1da62cf202b73283ca389d1",
         "trg_payroll_person_external_id_environment_guard": "BEFORE UPDATE ON payroll_person_external_ids #af8de9a1c2529f825142dd4c892039d9b8bdcd22",
         "trg_payroll_posting_allocation_immutable_delete": "BEFORE DELETE ON payroll_posting_allocations #5394163ef10aeda53152293e681a2dc030ebf46f",
         "trg_payroll_posting_allocation_immutable_update": "BEFORE UPDATE ON payroll_posting_allocations #0f70ab03cac5eb180c9619fef3b8453bb694df53",
@@ -22466,16 +22613,16 @@
         "trg_payroll_qualification_document_immutable_delete": "BEFORE DELETE ON payroll_production_qualification_documents #4b2c890049256b19ba646f0924b940ab4c84b45b",
         "trg_payroll_qualification_document_immutable_update": "BEFORE UPDATE ON payroll_production_qualification_documents #4b2c890049256b19ba646f0924b940ab4c84b45b",
         "trg_payroll_registration_a1_profile_immutable_delete": "BEFORE DELETE ON payroll_registration_a1_profiles #9b641e140ac84862ad621c1f476d91274d8e4157",
-        "trg_payroll_registration_a1_profile_immutable_update": "BEFORE UPDATE ON payroll_registration_a1_profiles #d1d90a1f4a33f8e27ad5f026ea09808bcbe7bddf",
+        "trg_payroll_registration_a1_profile_immutable_update": "BEFORE UPDATE ON payroll_registration_a1_profiles #6442bbb9ce16fc1119493176cd2f17812a526ad0",
         "trg_payroll_registration_a2_evidence_insert_guard": "BEFORE INSERT ON payroll_registration_a2_evidence_ledger #b46e72f7a54fba44b6f8595a6d6730c5dec7228a",
         "trg_payroll_registration_a2_evidence_no_delete": "BEFORE DELETE ON payroll_registration_a2_evidence_ledger #cc1904ecfa161aadfff29d434b8e4deebc783948",
         "trg_payroll_registration_a2_evidence_no_update": "BEFORE UPDATE ON payroll_registration_a2_evidence_ledger #ed85219d7654bda89d3c063b0d26c17d8a0adacf",
         "trg_payroll_registration_event_immutable_delete": "BEFORE DELETE ON payroll_registration_event_snapshots #742aa3d622b40b000cf2f3e560bffff63764fcb6",
-        "trg_payroll_registration_event_immutable_update": "BEFORE UPDATE ON payroll_registration_event_snapshots #df9fa16d03100c6d544a4b3093cbddbd00215332",
+        "trg_payroll_registration_event_immutable_update": "BEFORE UPDATE ON payroll_registration_event_snapshots #6a62e06a34d96997116df079c9e1db1c91de6abd",
         "trg_payroll_registration_identity_snapshot_no_delete": "BEFORE DELETE ON payroll_registration_identity_snapshots #07d02fba4819d4946e311cc58808245c4f589829",
-        "trg_payroll_registration_identity_snapshot_no_update": "BEFORE UPDATE ON payroll_registration_identity_snapshots #07d02fba4819d4946e311cc58808245c4f589829",
+        "trg_payroll_registration_identity_snapshot_no_update": "BEFORE UPDATE ON payroll_registration_identity_snapshots #9eadb9456fc6f4a0e643980c9abbdcf924c8d597",
         "trg_payroll_regzel_snapshot_immutable_delete": "BEFORE DELETE ON payroll_regzel_payload_snapshots #9fdcaaf8743fe15bbffa14777837ba84bfae518b",
-        "trg_payroll_regzel_snapshot_immutable_update": "BEFORE UPDATE ON payroll_regzel_payload_snapshots #9fdcaaf8743fe15bbffa14777837ba84bfae518b",
+        "trg_payroll_regzel_snapshot_immutable_update": "BEFORE UPDATE ON payroll_regzel_payload_snapshots #9fd362ce4fde31000ef6512dc97704f1faa0ff13",
         "trg_payroll_ruleset_audit_delete": "BEFORE DELETE ON payroll_ruleset_audit #e81bdc8c78c1cacd9c9e7ee7e5906e4a4f30862b",
         "trg_payroll_ruleset_audit_update": "BEFORE UPDATE ON payroll_ruleset_audit #e81bdc8c78c1cacd9c9e7ee7e5906e4a4f30862b",
         "trg_payroll_ruleset_update": "BEFORE UPDATE ON payroll_rulesets #01fd257af72f28eb238a666c3b8dc95351a1d55c",
@@ -22507,7 +22654,7 @@
         "trg_payroll_statutory_result_immutable_delete": "BEFORE DELETE ON payroll_statutory_results #6f2e6a72238c393d1571a40872bf5d21c71eb981",
         "trg_payroll_statutory_result_immutable_update": "BEFORE UPDATE ON payroll_statutory_results #423369fe977a50fd6067dbd31a4ca71be82cb05c",
         "trg_payroll_submission_artifact_delete": "BEFORE DELETE ON payroll_submission_artifacts #858ae593e0366f46c26ac6e7f83df02c66121020",
-        "trg_payroll_submission_artifact_update": "BEFORE UPDATE ON payroll_submission_artifacts #858ae593e0366f46c26ac6e7f83df02c66121020",
+        "trg_payroll_submission_artifact_update": "BEFORE UPDATE ON payroll_submission_artifacts #8d253ab23c1013b4a682733bcb1ee5a69fed011d",
         "trg_payroll_submission_correlation_update": "BEFORE UPDATE ON payroll_submissions #64784a582bc6061a73b0df2eae450ec2e71cb280",
         "trg_payroll_submission_deadline_delete": "BEFORE DELETE ON payroll_submission_deadlines #a1e6b4e2251f623b1fe8daf5e532f2ba70f959dc",
         "trg_payroll_submission_deadline_update": "BEFORE UPDATE ON payroll_submission_deadlines #a1e6b4e2251f623b1fe8daf5e532f2ba70f959dc",
@@ -22545,10 +22692,10 @@
         "trg_xmlzam_dispatch_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_dispatches #6692e91d658a0a3ca622c34c5e7c05cafba1baaa",
         "trg_xmlzam_dispatch_outbox_guard": "BEFORE INSERT ON payroll_enforcement_xmlzam_dispatches #16b10fbba63944b75a0c055c7495cd131ac1ceb4",
         "trg_xmlzam_request_no_delete": "BEFORE DELETE ON payroll_enforcement_xmlzam_requests #21811a7977de0b6d4dee7141fafb03070dfe0a1a",
-        "trg_xmlzam_request_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_requests #dba00e2b31b1153eb7b1669f226ea954ceb33ef9",
+        "trg_xmlzam_request_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_requests #9e1ce81c3011560f9cf922807130b008f579bc09",
         "trg_xmlzam_request_source_guard": "BEFORE INSERT ON payroll_enforcement_xmlzam_requests #1526bc47cdc088e1080156d93599cb18e67f8eff",
         "trg_xmlzam_response_no_delete": "BEFORE DELETE ON payroll_enforcement_xmlzam_responses #7d7e3c0bff2c899bfeca374b3f6c0a05eda0fa52",
-        "trg_xmlzam_response_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_responses #7fd19a29d338d8d6849e2d6dfa5bba2d40948e46",
+        "trg_xmlzam_response_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_responses #2dd42c78be1084399de6e1070c815fa49e9ad98e",
         "trg_xmlzam_response_source_guard": "BEFORE INSERT ON payroll_enforcement_xmlzam_responses #93a80c537d22f0d4e1c58a0cd4bc49ff9898a706"
     },
     "routines": {
