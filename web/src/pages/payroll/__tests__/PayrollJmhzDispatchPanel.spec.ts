@@ -34,8 +34,17 @@ vi.mock('vue-i18n', () => ({
     params ? `${key}:${JSON.stringify(params)}` : key }),
 }))
 vi.mock('@/api/errors', () => ({
-  apiErrorMessage: (error: unknown, fallback = '') =>
-    error instanceof Error ? error.message : fallback,
+  apiErrorMessage: (error: unknown, fallback = '') => {
+    const message = (error as { response?: { data?: { error?: { message?: string } } } })
+      ?.response?.data?.error?.message
+    if (typeof message === 'string') return message
+    return error instanceof Error ? error.message : fallback
+  },
+  apiErrorCode: (error: unknown) => {
+    const code = (error as { response?: { data?: { error?: { code?: string } } } })
+      ?.response?.data?.error?.code
+    return typeof code === 'string' ? code : ''
+  },
 }))
 
 import PayrollJmhzDispatchPanel from '../PayrollJmhzDispatchPanel.vue'
@@ -129,7 +138,7 @@ describe('PayrollJmhzDispatchPanel', () => {
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'production')
-    expect(m.freezeSubmission).toHaveBeenCalledWith(55, 99, 'production', 3)
+    expect(m.freezeSubmission).toHaveBeenCalledWith(55, 99, 'production', 3, false)
     expect(m.enqueueIsds).toHaveBeenCalledWith(66, 'production')
     expect(m.gatewayStart).toHaveBeenCalledWith(77)
     expect(assign).not.toHaveBeenCalled()
@@ -186,13 +195,52 @@ describe('PayrollJmhzDispatchPanel', () => {
     await flushPromises()
 
     expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'test')
-    expect(m.freezeSubmission).toHaveBeenCalledWith(55, null, 'test', 3)
+    expect(m.freezeSubmission).toHaveBeenCalledWith(55, null, 'test', 3, false)
     expect(m.sendTransport).toHaveBeenCalledWith(
       66,
       '12345678',
       'test',
       expect.any(String),
     )
+  })
+
+  /**
+   * Kontrola 290: hlášení po splatnosti se slevou. Zmrazení se neodmítne
+   * natvrdo, ale čeká na vědomé potvrzení účetní. Potvrzení pošle totéž
+   * zmrazení znovu s `confirmLateDiscount` a pokračuje zvoleným kanálem.
+   */
+  it('u slevy po lhůtě se zeptá na potvrzení a po něm zmrazí a odešle', async () => {
+    m.freezeSubmission.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'jmhz_submission_late_discount_confirmation_required',
+        message: 'Hlášení se podává po lhůtě (2026-08-20) a uplatňuje slevu.',
+      } } },
+    })
+    m.sendTransport.mockResolvedValue({
+      attempt: { id: 77, status: 'awaiting_protocol' },
+      acknowledgement: null,
+      settled: false,
+      report: null,
+    })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'production', previews: [preview], obligations: [obligation()] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-yes-7:3"]').trigger('click')
+    await flushPromises()
+
+    const confirm = wrapper.get('[data-test="jmhz-late-discount-7:3"]')
+    expect(confirm.text()).toContain('Hlášení se podává po lhůtě (2026-08-20) a uplatňuje slevu.')
+    expect(m.sendTransport).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="jmhz-late-discount-7:3-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.freezeSubmission).toHaveBeenLastCalledWith(55, 99, 'production', 3, true)
+    expect(m.sendTransport).toHaveBeenCalledWith(66, '12345678', 'production', expect.any(String))
+    expect(wrapper.find('[data-test="jmhz-late-discount-7:3"]').exists()).toBe(false)
   })
 
   it('v testovacím prostředí pošle do obálky testovací VS účtárny', async () => {

@@ -57,6 +57,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 // stránce se čte jako dvě různá data.
 import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/composables/useFormat'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
+import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 
 const { t } = useI18n()
@@ -467,6 +468,8 @@ const STATUS_TONES: Record<PayrollJmhzTransportStatus, string> = {
   completed: 'bg-success-100 text-success-700',
   failed: 'bg-danger-100 text-danger-700',
   expired: 'bg-danger-100 text-danger-700',
+  // Nevíme, jestli ČSSZ zprávu má; rozhoduje člověk, proto výstražná.
+  possibly_delivered: 'bg-warning-100 text-warning-800',
 }
 
 function statusTone(status: PayrollJmhzTransportStatus): string {
@@ -1921,8 +1924,12 @@ onMounted(loadVariableSymbols)
                       ? t('payroll.submissions.transport.reverify.running')
                       : t('payroll.submissions.transport.reverify.action') }}
                   </button>
+                  <!--
+                    Pokus „možná doručeno" je jediná stopa, že požadavek odešel;
+                    server jeho smazání odmítne, tlačítko se proto nenabízí.
+                  -->
                   <button
-                    v-if="canWrite"
+                    v-if="canWrite && attempt.status !== 'possibly_delivered'"
                     type="button"
                     :data-test="`transport-delete-${attempt.id}`"
                     :class="btnOutlineSm('danger')"
@@ -2050,6 +2057,23 @@ onMounted(loadVariableSymbols)
                 <p v-if="attempt.error_message" class="mt-1">{{ attempt.error_message }}</p>
               </div>
 
+              <!--
+                Požadavek odešel, odpověď nepřišla. Postup je tady celý: kde
+                protokol hledat, jak ho načíst a teprve pak vědomé potvrzení
+                opakování se stejným GUID.
+              -->
+              <PayrollPossiblyDeliveredNotice
+                v-if="attempt.status === 'possibly_delivered'"
+                class="mt-3"
+                :environment="environment"
+                :submission-id="attempt.submission_id"
+                :error-code="attempt.error_code"
+                :correlation-reference="attempt.correlation_reference"
+                :can-write="canWrite"
+                @import-protocol="pickProtocolFile"
+                @confirmed="load()"
+              />
+
               <p
                 v-if="canReverify(attempt)"
                 class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
@@ -2171,6 +2195,13 @@ onMounted(loadVariableSymbols)
                         </span>
                       </div>
                       <p class="mt-1 font-medium">{{ error.message }}</p>
+                      <p
+                        v-if="error.original_at_cssz"
+                        class="mt-2 rounded-md border border-warning-300 bg-warning-50 p-2 text-xs text-warning-900"
+                        :data-test="`transport-report-original-${attempt.id}-${index}`"
+                      >
+                        {{ t('payroll.transport_delivery.protocol_original_at_cssz') }}
+                      </p>
                       <template v-if="error.control">
                         <p class="mt-2 text-neutral-800">{{ error.control.name }}</p>
                         <p v-if="error.control.detail" class="mt-1 text-xs text-neutral-600">
@@ -2390,6 +2421,13 @@ onMounted(loadVariableSymbols)
                   </span>
                 </div>
                 <p class="mt-1 font-medium">{{ error.message }}</p>
+                <p
+                  v-if="error.original_at_cssz"
+                  class="mt-2 rounded-md border border-warning-300 bg-warning-50 p-2 text-xs text-warning-900"
+                  :data-test="`transport-imported-original-${entry.protocol.id}-${index}`"
+                >
+                  {{ t('payroll.transport_delivery.protocol_original_at_cssz') }}
+                </p>
                 <template v-if="error.control">
                   <p class="mt-2 text-neutral-800">{{ error.control.name }}</p>
                   <p v-if="error.control.detail" class="mt-1 text-xs text-neutral-600">

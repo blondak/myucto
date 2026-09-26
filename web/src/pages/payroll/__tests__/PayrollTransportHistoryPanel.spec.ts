@@ -419,6 +419,42 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.get('[data-test="transport-attempt-5"]').text()).toContain('503')
   })
 
+  /**
+   * Pokus „možná doručeno": u pokusu stojí celý postup (kde hledat protokol,
+   * tlačítko Načíst protokol, potvrzení opakování), smazání se nenabízí a
+   * načtení protokolu otevře výběr souboru téže obrazovky.
+   */
+  it('u pokusu „možná doručeno" nabídne dohledání protokolu a potvrzení, ne smazání', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        id: 6,
+        submission_id: 71,
+        status: 'possibly_delivered',
+        submission_status: 'ready',
+        correlation_reference: null,
+        sent_at: null,
+        error_code: 'jmhz_vrep_response_lost',
+        error_message: 'Požadavek na VREP odešel, ale odpověď nedorazila.',
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="possibly-delivered-71"]')
+    expect(notice.text()).toContain('payroll.transport_delivery.possibly_where')
+    expect(notice.find('[data-test="possibly-delivered-confirm-open-71"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-delete-6"]').exists()).toBe(false)
+
+    const input = wrapper.get('[data-test="transport-import-input"]').element as HTMLInputElement
+    const click = vi.spyOn(input, 'click')
+    await notice.get('[data-test="possibly-delivered-import-71"]').trigger('click')
+    expect(click).toHaveBeenCalled()
+  })
+
   it('selhané načtení nikdy nevykreslí jako „nic neodesláno"', async () => {
     m.jmhzTransportHistory.mockRejectedValue({
       response: { data: { error: { message: 'Databáze je nedostupná.' } } },
