@@ -57,29 +57,54 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
     private const EARLIEST_DAYS_BEFORE_START = 8;
 
     /**
-     * Nenastoupení: osm dnů od původně předpokládaného nástupu. Tutéž lhůtu
-     * (§ 17 odst. 5) už nese `EmployerRegistrationDeadlinePolicy` jako
-     * `noShowNotificationDueOn`; tady se jen počítá pro konkrétní vztah.
+     * Nenastoupení zaměstnance: nejpozději do osmi dnů od předpokládaného dne
+     * nástupu (§ 19 odst. 4 zákona č. 323/2025 Sb.). Nezaměňovat s § 17
+     * odst. 5, který stejnou lhůtu ukládá ZAMĚSTNAVATELI přihlášenému do
+     * evidence zaměstnavatelů, když nenastoupil nikdo — to počítá
+     * `EmployerRegistrationDeadlinePolicy::noShowNotificationDueOn`.
      */
     private const NO_SHOW_NOTIFICATION_DAYS = 8;
 
+    /**
+     * Zákonný podklad jednotlivých lhůt, ověřený proti konsolidovanému znění
+     * zákona č. 323/2025 Sb. účinnému od 1. 7. 2026:
+     *
+     *  - přihlášení: § 19 odst. 1 písm. a) — před nástupem, nejdříve 8 dnů předem,
+     *  - doplnění údajů po částečném přihlášení: § 19 odst. 2 věta poslední —
+     *    do 8 dnů od nástupu,
+     *  - nenastoupení: § 19 odst. 4 — do 8 dnů od předpokládaného nástupu,
+     *  - změna evidovaného údaje (A3): § 19 odst. 5 — do 8 dnů ode dne,
+     *    kdy se zaměstnavatel o změně dozvěděl,
+     *  - odhlášení při skončení (A2): § 19 odst. 6 písm. a) — do 8 dnů ode
+     *    dne skončení zaměstnání.
+     *
+     * Do otisku rulesetu tahle mapa NEVSTUPUJE. Otisk je součástí otisku
+     * požadavku na evidovanou povinnost, takže oprava citace by u už
+     * založených povinností vyrobila nový požadavek se stejným klíčem.
+     *
+     * @var array<string,string>
+     */
+    public const LEGAL_BASIS = [
+        'registration' => '§ 19 odst. 1 písm. a) zákona č. 323/2025 Sb.',
+        'after_pre_registration' => '§ 19 odst. 2 zákona č. 323/2025 Sb.',
+        'no_show' => '§ 19 odst. 4 zákona č. 323/2025 Sb.',
+        'change' => '§ 19 odst. 5 zákona č. 323/2025 Sb.',
+        'termination' => '§ 19 odst. 6 písm. a) zákona č. 323/2025 Sb.',
+    ];
+
+    /**
+     * Zdroje ZMRAŽENÉ v otisku rulesetu verze v1 — beze změny, protože otisk
+     * nese evidovaná povinnost (viz {@see self::LEGAL_BASIS}). Citace
+     * `no_show_law` a poznámka „Paragraf k doložení" jsou překonané:
+     * nenastoupení upravuje § 19 odst. 4 a navazující odhlášení § 19 odst. 6
+     * písm. a). Platné citace drží {@see self::LEGAL_BASIS}; přepsat je sem
+     * lze jen spolu s novým identifikátorem rulesetu.
+     */
     private const SOURCES = [
         'law' => '323/2025 Sb. § 19 odst. 1',
         'no_show_law' => '323/2025 Sb. § 17 odst. 5',
         'cssz_document' =>
             'Metodika PREZEC 1.4 — částečné přihlášení před nástupem',
-        /*
-         * Navazující oznámení REGZEC A2 až A8 a doplnění plné registrace po
-         * předregistraci: osm kalendářních dnů od události.
-         *
-         * ZDROJ JE SLABŠÍ NEŽ U OSTATNÍCH a je to tak napsané schválně.
-         * Konkrétní paragraf pro tuhle lhůtu se v zákoně dohledat nepodařilo;
-         * opírá se o leták ČSSZ k předregistraci a registraci a o potvrzení
-         * účetní, která agendu vede. Osm dnů odpovídá lhůtě u nenastoupení
-         * (§ 17 odst. 5) i obecné osmidenní lhůtě u hlásitelných změn
-         * (§ 19 odst. 5), takže to není odhad z ničeho — ale dokud nebude
-         * doložený paragraf, nesmí se to tvářit jako zákonná citace.
-         */
         'follow_up_document' =>
             'Leták ČSSZ „Předregistrace a registrace zaměstnance" '
             . '(private/Mzdy/podklady/JMHZ_predregistrace_a_registrace.pdf); '
@@ -180,6 +205,12 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         );
     }
 
+    /**
+     * Navazující oznámení REGZEC A2 až A8: osm kalendářních dnů od rozhodné
+     * skutečnosti. Pro odhlášení při skončení (A2) je to § 19 odst. 6
+     * písm. a), pro změnu údaje (A3) § 19 odst. 5, pro nenastoupení (A8)
+     * § 19 odst. 4 — viz {@see self::LEGAL_BASIS}.
+     */
     public function forFollowUp(
         int $actionCode,
         string $effectiveOn,

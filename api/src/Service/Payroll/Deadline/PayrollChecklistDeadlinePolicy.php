@@ -61,7 +61,10 @@ final class PayrollChecklistDeadlinePolicy
     /** § 38k odst. 4 zákona č. 586/1992 Sb. — do 30 dnů po vstupu do zaměstnání. */
     private const TAX_DECLARATION_DAYS = 30;
 
-    /** REGZEC A2–A8: do 8 dnů od rozhodné skutečnosti (zák. č. 323/2025 Sb.). */
+    /**
+     * REGZEC A2–A8: do 8 dnů od rozhodné skutečnosti — odhlášení § 19 odst. 6
+     * písm. a), změna § 19 odst. 5 zák. č. 323/2025 Sb.
+     */
     private const REGISTRATION_FOLLOW_UP_DAYS = 8;
 
     /** Navazující hlášení ČSSZ modul odvozuje až od účinnosti REGZEC. */
