@@ -763,6 +763,8 @@ export interface PayrollStatutoryEvidence {
   frozen_runs: PayrollStatutoryEvidenceFrozenRun[]
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
   other_employer_bases: PayrollStatutoryEvidenceRow[]
+  /** Co z evidence plyne bez vlastního řádku (sleva na poplatníka z podpisu prohlášení). */
+  derived?: { taxpayer_credit: boolean }
   /**
    * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
    * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.

@@ -254,8 +254,28 @@ function scopePeers(
   return rowsOf(section).filter(other => statutoryText(other, scopeKey) === scope)
 }
 
+/**
+ * Sleva na poplatníka vzniká podpisem prohlášení (server: TaxpayerCreditEntitlement),
+ * ne řádkem nároku. Přehled slev ji proto ukáže i bez řádku — jinak by svítilo
+ * „Žádná sleva" u zaměstnance, kterému ji mzda uplatní.
+ */
+function derivedTaxpayerCredit(section: StatutorySectionSpec): boolean {
+  return section.key === 'tax_credit_claims'
+    && evidence.value?.derived?.taxpayer_credit === true
+    && !effectiveRows(section).some(row => statutoryText(row, 'credit_kind') === 'taxpayer')
+}
+
 function summaryLabel(section: StatutorySectionSpec): string {
   const rows = effectiveRows(section)
+  if (derivedTaxpayerCredit(section)) {
+    return [
+      t('payroll.people.statutory_evidence.derived_taxpayer_credit'),
+      ...rows.map(row => t(
+        `payroll.people.statutory_evidence.option.${section.summaryKey}.`
+        + statutoryText(row, section.summaryKey),
+      )),
+    ].join(', ')
+  }
   if (rows.length === 0) {
     return t(section.optional === true
       ? `payroll.people.statutory_evidence.${section.emptyKey ?? 'current_none_claimed'}`
