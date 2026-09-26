@@ -337,7 +337,11 @@ if ($source === $configuredDb) {
     fail('Zdroj nesmí být databáze z cfg.php.');
 }
 
-$processes = (int) ($options['processes'] ?? min(4, max(2, (int) (getenv('NUMBER_OF_PROCESSORS') ?: 4))));
+$availableProcessors = (int) (getenv('NUMBER_OF_PROCESSORS') ?: 0);
+$defaultProcesses = $availableProcessors > 0
+    ? min(12, max(2, (int) floor($availableProcessors * 0.75)))
+    : 4;
+$processes = (int) ($options['processes'] ?? $defaultProcesses);
 if ($processes < 2 || $processes > 16) {
     fail('--processes musí být mezi 2 a 16.');
 }
