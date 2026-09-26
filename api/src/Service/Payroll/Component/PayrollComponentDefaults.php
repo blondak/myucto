@@ -111,6 +111,15 @@ final class PayrollComponentDefaults
                 ['PRIPLATEK_NOCNI', 'Příplatek za noční práci', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PRIPLATEK_VIKEND', 'Příplatek za práci v sobotu a v neděli', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PRIPLATEK_ZTIZENE_PROSTREDI', 'Příplatek za práci ve ztíženém pracovním prostředí', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                // Odměna za pracovní pohotovost (§ 140 ZP). Není mzdou za práci
+                // ani příplatkem § 114 až § 118, proto druh `allowance` a v JMHZ
+                // vlastní atribut 10343 mimo mzdu zúčtovanou 10328. Zdaňuje se,
+                // je vyměřovacím základem obou pojistných a podléhá exekučním
+                // srážkám jako příjem postavený naroveň mzdě
+                // ({@see \MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeKind::StandbyRemuneration}).
+                // Průměrný výdělek ji zahrnuje stejně jako příplatky; kdo to má
+                // sjednané jinak, přeřadí to na složce.
+                ['ODMENA_POHOTOVOST', 'Odměna za pracovní pohotovost', 'allowance', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Dovolená není odpracovaná doba ani část základní mzdy: za dobu

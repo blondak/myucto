@@ -168,6 +168,8 @@ final class PayrollRuleParameterCatalog
             'surcharge.overtime.rate' => 'Sazba příplatku za práci přesčas',
             'surcharge.overtime.time_off_months' =>
                 'Lhůta pro poskytnutí náhradního volna za práci přesčas v kalendářních měsících',
+            'surcharge.standby.basis' => 'Základ odměny za pracovní pohotovost',
+            'surcharge.standby.rate' => 'Minimální sazba odměny za pracovní pohotovost',
             'surcharge.weekend.basis' => 'Základ příplatku za práci v sobotu a v neděli',
             'surcharge.weekend.rate' => 'Sazba příplatku za práci v sobotu a v neděli',
             'wage_compensation.compensation_rate' => 'Sazba náhrady mzdy z redukovaného průměrného výdělku',

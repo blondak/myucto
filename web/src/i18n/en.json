@@ -6472,6 +6472,11 @@
         "fixed_hint": "The amount for every worked hour of that kind. The statutory minimum still applies: if the agreed amount is lower, overtime, public holidays and difficult environments are paid at the statutory minimum and the difference is visible on the payslip.",
         "fixed_invalid": "The fixed amount must be positive and at most CZK 1,000 per hour.",
         "fixed_statutory_note": "For a fixed amount the statutory minimum is derived from each person's own average earnings, so it cannot be shown here in advance.",
+        "standby": {
+          "label": "Standby pay (% of average earnings)",
+          "hint": "Calculated from the standby minutes entered on shifts in Time & attendance and added to payroll when the month is approved. Empty = statutory minimum of {rate} %.",
+          "invalid": "Under Section 140 of the Labour Code, standby pay must be at least {rate} % of average earnings (and at most 500 %)."
+        },
         "agreement_reference": "Agreement reference (contract, collective agreement)",
         "note": "Note",
         "saved": "Surcharge policy saved.",

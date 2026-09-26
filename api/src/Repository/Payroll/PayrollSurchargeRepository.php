@@ -238,9 +238,9 @@ final class PayrollSurchargeRepository
                      night_rate_bp, weekend_rate_bp, difficult_environment_rate_bp,
                      overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
                      night_fixed_hourly_minor, weekend_fixed_hourly_minor,
-                     difficult_environment_fixed_hourly_minor,
+                     difficult_environment_fixed_hourly_minor, standby_rate_bp,
                      agreement_reference, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -259,6 +259,7 @@ final class PayrollSurchargeRepository
                 $data['night_fixed_hourly_minor'] ?? null,
                 $data['weekend_fixed_hourly_minor'] ?? null,
                 $data['difficult_environment_fixed_hourly_minor'] ?? null,
+                $data['standby_rate_bp'] ?? null,
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
                 $userId,
@@ -340,6 +341,7 @@ final class PayrollSurchargeRepository
                         night_fixed_hourly_minor = ?,
                         weekend_fixed_hourly_minor = ?,
                         difficult_environment_fixed_hourly_minor = ?,
+                        standby_rate_bp = ?,
                         agreement_reference = ?,
                         note = ?,
                         row_version = row_version + 1
@@ -359,6 +361,7 @@ final class PayrollSurchargeRepository
                 $data['night_fixed_hourly_minor'] ?? null,
                 $data['weekend_fixed_hourly_minor'] ?? null,
                 $data['difficult_environment_fixed_hourly_minor'] ?? null,
+                $data['standby_rate_bp'] ?? null,
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
                 $supplierId,

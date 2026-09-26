@@ -6472,6 +6472,11 @@
         "fixed_hint": "Částka za každou odpracovanou hodinu daného druhu. Zákonné minimum platí dál: je-li sjednaná částka nižší, vyplatí se u přesčasu, svátku a ztíženého prostředí zákonné minimum a rozdíl je vidět na výplatní pásce.",
         "fixed_invalid": "Pevná částka musí být kladná a nejvýše 1 000 Kč za hodinu.",
         "fixed_statutory_note": "Zákonné minimum se u pevné částky počítá z průměrného výdělku konkrétního člověka, takže ho tady nelze zobrazit předem.",
+        "standby": {
+          "label": "Odměna za pracovní pohotovost (% průměrného výdělku)",
+          "hint": "Počítá se z minut pohotovosti zadaných u směn v Docházce a do mzdy se promítne při schválení měsíce. Prázdné pole = zákonné minimum {rate} %.",
+          "invalid": "Odměna za pracovní pohotovost musí být podle § 140 ZP nejméně {rate} % průměrného výdělku (a nejvýše 500 %)."
+        },
         "agreement_reference": "Odkaz na sjednání (smlouva, kolektivní smlouva)",
         "note": "Poznámka",
         "saved": "Zásada příplatků byla uložena.",

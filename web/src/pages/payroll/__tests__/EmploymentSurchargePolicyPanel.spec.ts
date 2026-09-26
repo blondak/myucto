@@ -340,6 +340,41 @@ describe('EmploymentSurchargePolicyPanel', () => {
     expect(payrollApi.employmentSurchargePolicies).toHaveBeenCalledTimes(2)
   })
 
+  it('sjednaná odměna za pohotovost jde v bázových bodech, pod 10 % se neuloží', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue({
+      ...response(),
+      standby: { section: '§ 140', component_code: 'ODMENA_POHOTOVOST', statutory_rate_basis_points: 1000 },
+    })
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
+
+    await wrapper.find('[data-test="surcharge-policy-standby-rate"]').setValue('5')
+    const save = wrapper.get('[data-test="surcharge-policy-save"]')
+    expect(save.attributes('disabled')).toBeDefined()
+    expect(save.attributes('title')).toContain('payroll.people.surcharge_policy.standby.invalid')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.createEmploymentSurchargePolicy).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="surcharge-policy-standby-invalid"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="surcharge-policy-standby-rate"]').setValue('15')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.createEmploymentSurchargePolicy).toHaveBeenCalledWith(10, expect.objectContaining({
+      standby_rate_bp: 1500,
+    }))
+  })
+
+  it('prázdná odměna za pohotovost znamená zákonné minimum a posílá se jako null', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.createEmploymentSurchargePolicy).toHaveBeenCalledWith(10, expect.objectContaining({
+      standby_rate_bp: null,
+    }))
+  })
+
   it('bez práva zápisu je přidání zašedlé a důvod je vidět', async () => {
     const wrapper = await mountPanel(false)
 

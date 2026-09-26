@@ -458,8 +458,11 @@ final class PayrollSurchargeInputMaterializer
      * kdežto u § 117 (základ je minimální mzda) ji vůbec nepotřebuje. Kdyby se
      * fail-closed dělal tady, nešel by spočítat ani příplatek za ztížené
      * prostředí zaměstnanci, kterému průměr ještě nikdo nezjistil.
+     *
+     * Veřejná, protože z téhož průměru se počítá i odměna za pracovní
+     * pohotovost ({@see PayrollStandbyInputMaterializer}).
      */
-    private function averageHourlyMinor(
+    public function averageHourlyMinor(
         int $supplierId,
         int $employmentId,
         string $periodStart,

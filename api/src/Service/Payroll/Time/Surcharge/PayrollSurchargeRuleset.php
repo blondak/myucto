@@ -51,6 +51,25 @@ final class PayrollSurchargeRuleset
         return $rate;
     }
 
+    /**
+     * Zákonná minimální sazba odměny za pracovní pohotovost (§ 140 ZP) jako
+     * podíl průměrného výdělku. Pohotovost není příplatek § 114 až § 118,
+     * proto nemá vlastní {@see PayrollSurchargeKind}, sazba ale bydlí vedle nich.
+     */
+    public function standbyRate(): DecimalRate
+    {
+        $value = $this->raw('surcharge.standby.rate');
+        if ($value->type !== 'decimal_rate' || !is_string($value->value)) {
+            throw new LogicException('Ruleset neobsahuje desetinnou sazbu surcharge.standby.rate.');
+        }
+        $rate = DecimalRate::fromString($value->value);
+        if ($rate->numerator <= 0) {
+            throw new LogicException('Sazba surcharge.standby.rate musí být kladná.');
+        }
+
+        return $rate;
+    }
+
     public function basis(PayrollSurchargeKind $kind): PayrollSurchargeBasis
     {
         $key = $kind->rulesetBasisKey();

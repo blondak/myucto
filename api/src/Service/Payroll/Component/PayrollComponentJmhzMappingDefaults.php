@@ -75,6 +75,9 @@ final class PayrollComponentJmhzMappingDefaults
         // Příplatek za ztížené pracovní prostředí vlastní detailní uzel v JMHZ
         // nemá, zůstává tedy na sběrném součtu příplatků.
         'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
+        // Odměna za pracovní pohotovost (§ 140 ZP) má v hlášení vlastní blok
+        // `odmeny/pohotovost` mimo mzdu zúčtovanou.
+        'ODMENA_POHOTOVOST' => '10343',
         /*
          * Zdanitelná část stravování: nepeněžní plnění, které je součástí hrubé mzdy
          * a vstupuje do vyměřovacích základů na sociální i zdravotní pojištění, takže

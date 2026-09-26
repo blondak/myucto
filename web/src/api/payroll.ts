@@ -2119,6 +2119,8 @@ export interface PayrollEmploymentSurchargePolicy
   night_rate_bp: number | null
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
+  /** Sjednaná sazba odměny za pracovní pohotovost § 140 ZP (migrace 1926); null = zákonné minimum. */
+  standby_rate_bp?: number | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2135,6 +2137,7 @@ export interface PayrollEmploymentSurchargePolicyPayload
   night_rate_bp: number | null
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
+  standby_rate_bp?: number | null
   agreement_reference: string | null
   note: string | null
 }
@@ -2156,6 +2159,7 @@ export interface PayrollEmploymentSurchargePolicyUpdatePayload
   night_rate_bp: number | null
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
+  standby_rate_bp?: number | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2189,6 +2193,12 @@ export interface PayrollEmploymentSurchargePolicies {
     difficult_environment_factors: number | null
   }
   kinds: PayrollSurchargeKindInfo[]
+  /** Odměna za pracovní pohotovost § 140 ZP — zákonné minimum ze sady pravidel. */
+  standby?: {
+    section: string
+    component_code: string
+    statutory_rate_basis_points: number
+  }
   ruleset_id: string
 }
 
