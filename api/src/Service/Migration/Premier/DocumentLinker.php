@@ -141,6 +141,7 @@ final class DocumentLinker
                 }
             }
         }
+        $byInter = [PremierDocuments::ISSUED => self::byInvoiceInter($issued, $series), PremierDocuments::PURCHASE => self::byInvoiceInter($purchases, $series)];
         foreach ($documents->paymentLinks() as $rowInter => $targets) {
             $row = $ctx->journal->row($rowInter);
             if ($row === null || $row['year'] !== $ctx->year) {
@@ -148,13 +149,7 @@ final class DocumentLinker
             }
             foreach ($targets as $t) {
                 $isIssued = $t['direction'] === PremierDocuments::ISSUED;
-                $docId = null;
-                foreach ($isIssued ? $issued : $purchases as $key => $id) {
-                    if (str_ends_with($key, '|' . $t['inter']) && isset($series[strstr($key, '|', true)])) {
-                        $docId = $id;
-                        break;
-                    }
-                }
+                $docId = $byInter[$isIssued ? PremierDocuments::ISSUED : PremierDocuments::PURCHASE][(string) $t['inter']] ?? null;
                 if ($docId === null) {
                     continue;
                 }
@@ -225,6 +220,27 @@ final class DocumentLinker
     private function docIndex(int $supplierId, string $kind): array
     {
         return $this->map->all($supplierId, $kind);
+    }
+
+    /**
+     * INTER faktury → id dokladu: první klíč mapy (v jejím pořadí) s řadou faktur a INTER
+     * za posledním `|`.
+     *
+     * @param array<string,int> $map {@see docIndex()}
+     * @param array<string,mixed> $series řady faktur
+     * @return array<string,int>
+     */
+    private static function byInvoiceInter(array $map, array $series): array
+    {
+        $out = [];
+        foreach ($map as $key => $id) {
+            $key = (string) $key;
+            $last = strrpos($key, '|');
+            if ($last !== false && isset($series[strstr($key, '|', true)])) {
+                $out[substr($key, $last + 1)] ??= $id;
+            }
+        }
+        return $out;
     }
 
     /**

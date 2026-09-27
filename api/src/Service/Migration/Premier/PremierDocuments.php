@@ -44,23 +44,37 @@ final class PremierDocuments
     /** @var array<string,string> řada → druh (`invoice` / `advance`) podle číselníku řad */
     private array $seriesKind = [];
 
+    /** Sloupce hlavičky faktury, které převod čte ({@see build()}, {@see PartnerImporter::documentSnapshot()}). */
+    private const HEADER_COLUMNS = [
+        'INTER', 'DOKLAD', 'CISLO', 'DATUM_VYS', 'DATUM_USK', 'DATUM_SPL', 'DATUM_DPH', 'DATUM_KVY', 'MENA', 'M_KURS', 'KURS',
+        'POPIS', 'POZNAMKA', 'VS', 'VARIABL', 'CISLO_PF', 'K_SYMBOL', 'UCET_ODB', 'FORMA', 'STORNO_FA',
+        'CISLO_ODB', 'NAZEV_ODB', 'NAZEV_OD2', 'DIC_ODB', 'DIC_EU', 'ID_PAR', 'ICO_ODB', 'ULICE_ODB', 'MESTO_ODB', 'PSC_ODB', 'STAT_ODB',
+    ];
+
+    /** Sloupce položky faktury, které převod čte ({@see prepareItems()}). */
+    private const ITEM_COLUMNS = [
+        'FAKTURA', 'POL_SORT', 'PORDER', 'CENA', 'CENA_DPH', 'TEXT', 'TEXT_2', 'MNOZSTVI', 'MJ', 'SAZBA_DPH', 'KOD_DPH', 'UC_S', 'UC_SA', 'UC_D', 'UC_DA',
+    ];
+
     /**
      * @param list<array<string,mixed>> $issued `FA_OUT`
      * @param list<array<string,mixed>> $purchases `FA_IN`
-     * @param list<array<string,mixed>> $issuedItems `POLOZKY`
-     * @param list<array<string,mixed>> $purchaseItems `POLOZ_IN`
-     * @param list<array<string,mixed>> $links `VAZBY`
-     * @param list<array<string,mixed>> $seriesRows `DOKLAD` (číselník řad s typem `TOK`)
+     * @param iterable<array<string,mixed>> $issuedItems `POLOZKY`
+     * @param iterable<array<string,mixed>> $purchaseItems `POLOZ_IN`
+     * @param iterable<array<string,mixed>> $links `VAZBY`
+     * @param iterable<array<string,mixed>> $seriesRows `DOKLAD` (číselník řad s typem `TOK`)
+     * @param array<string,string>|null $series řady všech faktur zálohy → směr, když `$issued`/`$purchases` nejsou úplné
      */
     public function __construct(
         private readonly array $issued,
         private readonly array $purchases,
-        array $issuedItems,
-        array $purchaseItems,
-        array $links,
-        array $seriesRows,
+        iterable $issuedItems,
+        iterable $purchaseItems,
+        iterable $links,
+        iterable $seriesRows,
         private readonly PremierJournal $journal,
         private readonly PremierVat $vat,
+        ?array $series = null,
     ) {
         foreach ([[self::ISSUED, $issuedItems], [self::PURCHASE, $purchaseItems]] as [$dir, $rows]) {
             foreach ($rows as $r) {
@@ -72,13 +86,7 @@ final class PremierDocuments
                 ?: ((int) ($a['PORDER'] ?? 0) <=> (int) ($b['PORDER'] ?? 0)));
         }
         unset($list);
-        foreach ($issued as $h) {
-            $this->series[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = self::ISSUED;
-        }
-        foreach ($purchases as $h) {
-            $this->series[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = self::PURCHASE;
-        }
-        unset($this->series['']);
+        $this->series = $series ?? self::seriesOf($issued, $purchases);
         foreach ($seriesRows as $s) {
             $code = strtoupper(trim((string) ($s['DOKLAD'] ?? '')));
             // Typ řady 10 / 11 = přijaté / vydané zálohové listy (výzvy k platbě).
@@ -98,18 +106,89 @@ final class PremierDocuments
         }
     }
 
-    public static function fromBackup(PremierBackup $backup, PremierJournal $journal, PremierVat $vat): self
+    /**
+     * Faktury zálohy jen se sloupci, které převod čte. S rokem převodu se vynechají doklady
+     * účtované až v dalších letech ({@see accountingYear()}) - {@see forYear()} je nevrátí;
+     * jejich řady ale zůstávají (vazby úhrad z roku převodu na ně vedou).
+     */
+    public static function fromBackup(PremierBackup $backup, PremierJournal $journal, PremierVat $vat, ?int $year = null): self
     {
+        $columns = array_flip(self::HEADER_COLUMNS);
+        $headers = [self::ISSUED => [], self::PURCHASE => []];
+        $kept = [self::ISSUED => [], self::PURCHASE => []];
+        $series = [];
+        foreach ([self::ISSUED => 'FA_OUT', self::PURCHASE => 'FA_IN'] as $dir => $table) {
+            foreach ($backup->rows($table) as $h) {
+                $series[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = $dir;
+                if ($year !== null) {
+                    $docYear = self::accountingYear($h, $journal);
+                    if ($docYear === null || $docYear > $year) {
+                        continue;
+                    }
+                }
+                $headers[$dir][] = array_intersect_key($h, $columns);
+                $kept[$dir][(int) ($h['INTER'] ?? 0)] = true;
+            }
+        }
+        unset($series['']);
+        $items = static function (string $table, string $dir) use ($backup, $kept, $year): \Generator {
+            $columns = array_flip(self::ITEM_COLUMNS);
+            foreach ($backup->rows($table) as $r) {
+                if ($year === null || isset($kept[$dir][(int) ($r['FAKTURA'] ?? 0)])) {
+                    yield array_intersect_key($r, $columns);
+                }
+            }
+        };
         return new self(
-            $backup->all('FA_OUT'),
-            $backup->all('FA_IN'),
-            $backup->all('POLOZKY'),
-            $backup->all('POLOZ_IN'),
-            $backup->all('VAZBY'),
-            $backup->all('DOKLAD'),
+            $headers[self::ISSUED],
+            $headers[self::PURCHASE],
+            $items('POLOZKY', self::ISSUED),
+            $items('POLOZ_IN', self::PURCHASE),
+            $backup->rows('VAZBY'),
+            $backup->rows('DOKLAD'),
             $journal,
             $vat,
+            $series,
         );
+    }
+
+    /**
+     * Rok, do kterého doklad patří, stejně jako v {@see build()}: datum zápisu v deníku,
+     * nezaúčtovaný podle data plnění. `null` = doklad, který {@see build()} nesloží.
+     *
+     * @param array<string,mixed> $h
+     */
+    private static function accountingYear(array $h, PremierJournal $journal): ?int
+    {
+        $inter = (int) ($h['INTER'] ?? 0);
+        $series = strtoupper(trim((string) ($h['DOKLAD'] ?? '')));
+        if ($inter <= 0 || $series === '' || trim((string) ($h['CISLO'] ?? '')) === '') {
+            return null;
+        }
+        $issue = self::date($h['DATUM_VYS'] ?? null) ?? self::date($h['DATUM_USK'] ?? null);
+        if ($issue === null) {
+            return null;
+        }
+        $accounting = $journal->firstLinkedDate($series, $inter) ?? self::date($h['DATUM_USK'] ?? null) ?? $issue;
+        return (int) substr($accounting, 0, 4);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $issued
+     * @param list<array<string,mixed>> $purchases
+     * @return array<string,string>
+     */
+    private static function seriesOf(array $issued, array $purchases): array
+    {
+        $out = [];
+        foreach ($issued as $h) {
+            $out[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = self::ISSUED;
+        }
+        foreach ($purchases as $h) {
+            $out[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = self::PURCHASE;
+        }
+        unset($out['']);
+        return $out;
     }
 
     /** @return array<string,string> řady faktur (`VF`, `PF`, zálohové listy…) → směr */

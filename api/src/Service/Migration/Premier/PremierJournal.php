@@ -20,19 +20,45 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
  * let v záloze ({@see openingBalances()}). Zápisy na 701 (firma převedená do PREMIER
  * uprostřed života) se berou jako počáteční stavy, zápisy na 702 a 710 se přeskakují -
  * rok uzavírá průvodce uzávěrkou MyÚčta.
+ *
+ * **Paměť:** deník nese všechny roky zálohy. Plný řádek (asi 40 údajů) drží jen rok
+ * převodu; řádky ostatních let jen úzký tvar (číslované pole {@see NARROW_KEYS}) - na
+ * počáteční stavy, měnu účtu, vazby faktur minulých let a počáteční stav banky stačí.
+ * Metody vracejí řádek ostatních let rozbalený na klíče {@see NARROW_KEYS}.
  */
 final class PremierJournal
 {
     public const OPENING_ACCOUNT = '701';
     private const CLOSING_ACCOUNTS = ['702', '710'];
 
-    /** @var list<array<string,mixed>> všechny řádky deníku s účinkem, podle data */
+    /** Klíče řádku mimo rok převodu, v pořadí úzkého tvaru. */
+    public const NARROW_KEYS = ['inter', 'date', 'year', 'kind', 'md', 'dal', 'amount', 'currency', 'amount_foreign', 'line_kind', 'vat_code', 'vat_rate'];
+
+    private const N_INTER = 0;
+    private const N_DATE = 1;
+    private const N_YEAR = 2;
+    private const N_KIND = 3;
+    private const N_MD = 4;
+    private const N_DAL = 5;
+    private const N_AMOUNT = 6;
+    private const N_CURRENCY = 7;
+    private const N_FOREIGN = 8;
+    /** Pořadí řádku v záloze - páruje úzký tvar s plným řádkem roku převodu. */
+    private const N_SEQ = 12;
+
+    /** Rok převodu (plné řádky); null = plné řádky všech let. */
+    private ?int $focusYear = null;
+
+    /** @var list<list<mixed>> všechny řádky deníku s účinkem v úzkém tvaru, podle data */
     private array $rows = [];
 
-    /** @var array<int,array<string,mixed>> INTER → řádek */
+    /** @var array<int,array<string,list<array<mixed>>>> rok → druh (`regular`, `opening`, `closing`) → řádky podle data */
+    private array $byYear = [];
+
+    /** @var array<int,array<mixed>> INTER → řádek */
     private array $byInter = [];
 
-    /** @var array<string,list<array<string,mixed>>> „SB_KOD|SBORNIK" → řádky dokladu ve sborníku */
+    /** @var array<string,list<array<mixed>>> „SB_KOD|SBORNIK" → řádky dokladu ve sborníku */
     private array $byDocument = [];
 
     /** @var array<string,array{account:string,number:string,bank:string,iban:string,currency:string,label:string}> bankovní řady deníku */
@@ -41,8 +67,13 @@ final class PremierJournal
     /** @var array<int,list<string>> INTER řádku deníku → faktury, které hradí („směr|INTER faktury") */
     private array $paymentTargets = [];
 
-    public function __construct(PremierBackup $backup)
+    /** @var array<int,array<string,list<array<string,mixed>>>> rok → zápisy ({@see documents()}) */
+    private array $documentsCache = [];
+
+    /** @param int|null $year rok převodu - jen jeho řádky se drží celé */
+    public function __construct(PremierBackup $backup, ?int $year = null)
     {
+        $this->focusYear = $year;
         $this->load($backup->rows('PUB_UCTO'));
         $this->loadBankSeries($backup->rows('DOKL_PU'));
     }
@@ -51,9 +82,10 @@ final class PremierJournal
      * @param iterable<array<string,mixed>> $rows řádky ve tvaru `PUB_UCTO` (testy)
      * @param iterable<array<string,mixed>> $seriesRows číselník řad `DOKL_PU`
      */
-    public static function fromRows(iterable $rows, iterable $seriesRows = []): self
+    public static function fromRows(iterable $rows, iterable $seriesRows = [], ?int $year = null): self
     {
         $self = (new \ReflectionClass(self::class))->newInstanceWithoutConstructor();
+        $self->focusYear = $year;
         $self->load($rows);
         $self->loadBankSeries($seriesRows);
         return $self;
@@ -67,11 +99,11 @@ final class PremierJournal
     {
         $votes = ['CZK' => 0];
         foreach ($this->rows as $r) {
-            if ($r['md'] !== $account && $r['dal'] !== $account) {
+            if ($r[self::N_MD] !== $account && $r[self::N_DAL] !== $account) {
                 continue;
             }
-            $foreign = $r['currency'] !== '' && $r['currency'] !== 'CZK' && abs($r['amount_foreign']) >= 0.005;
-            $key = $foreign ? $r['currency'] : 'CZK';
+            $foreign = $r[self::N_CURRENCY] !== '' && $r[self::N_CURRENCY] !== 'CZK' && abs($r[self::N_FOREIGN]) >= 0.005;
+            $key = $foreign ? $r[self::N_CURRENCY] : 'CZK';
             $votes[$key] = ($votes[$key] ?? 0) + 1;
         }
         arsort($votes);
@@ -86,67 +118,92 @@ final class PremierJournal
      */
     public function linkedRows(string $sbKod, int $sbornik): array
     {
-        return $this->byDocument[strtoupper($sbKod) . '|' . $sbornik] ?? [];
+        return array_map(self::wide(...), $this->byDocument[strtoupper($sbKod) . '|' . $sbornik] ?? []);
+    }
+
+    /** Nejdřívější datum řádků navázaných na doklad sborníku ({@see linkedRows()}), nebo null. */
+    public function firstLinkedDate(string $sbKod, int $sbornik): ?string
+    {
+        $first = null;
+        foreach ($this->byDocument[strtoupper($sbKod) . '|' . $sbornik] ?? [] as $r) {
+            $date = array_is_list($r) ? $r[self::N_DATE] : $r['date'];
+            $first = $first === null ? $date : min($first, $date);
+        }
+        return $first;
     }
 
     /** @param iterable<array<string,mixed>> $rows */
     private function load(iterable $rows): void
     {
+        $full = [];
+        $seq = 0;
         foreach ($rows as $r) {
             $row = self::normalize($r);
             if ($row === null) {
                 continue;
             }
-            $this->rows[] = $row;
-            $this->byInter[$row['inter']] = $row;
+            $narrow = [
+                $row['inter'], $row['date'], $row['year'], $row['kind'], $row['md'], $row['dal'], $row['amount'],
+                $row['currency'], $row['amount_foreign'], $row['line_kind'], $row['vat_code'], $row['vat_rate'], $seq,
+            ];
+            if ($this->focusYear === null || $row['year'] === $this->focusYear) {
+                $full[$seq] = $row;
+                $kept = $row;
+            } else {
+                $kept = $narrow;
+            }
+            $seq++;
+            $this->rows[] = $narrow;
+            $this->byInter[$row['inter']] = $kept;
             if ($row['sb_kod'] !== '' && $row['sbornik'] > 0 && $row['kind'] !== 'closing') {
-                $this->byDocument[$row['sb_kod'] . '|' . $row['sbornik']][] = $row;
+                $this->byDocument[$row['sb_kod'] . '|' . $row['sbornik']][] = $kept;
             }
         }
-        usort($this->rows, static fn (array $a, array $b): int => ($a['date'] <=> $b['date']) ?: ($a['inter'] <=> $b['inter']));
+        usort($this->rows, static fn (array $a, array $b): int => ($a[self::N_DATE] <=> $b[self::N_DATE]) ?: ($a[self::N_INTER] <=> $b[self::N_INTER]));
+        foreach ($this->rows as $n) {
+            $this->byYear[$n[self::N_YEAR]][$n[self::N_KIND]][] = $full[$n[self::N_SEQ]] ?? $n;
+        }
     }
 
     /** @return list<array<string,mixed>> řádky roku (bez počátečních a uzávěrkových) */
     public function year(int $year): array
     {
-        return array_values(array_filter($this->rows, static fn (array $r): bool => $r['year'] === $year && $r['kind'] === 'regular'));
+        return $this->yearRows($year, 'regular');
     }
 
     /** @return list<array<string,mixed>> zápisy počátečních stavů roku (701), jsou-li v deníku */
     public function openingRows(int $year): array
     {
-        return array_values(array_filter($this->rows, static fn (array $r): bool => $r['year'] === $year && $r['kind'] === 'opening'));
+        return $this->yearRows($year, 'opening');
     }
 
     public function closingRowCount(int $year): int
     {
-        return count(array_filter($this->rows, static fn (array $r): bool => $r['year'] === $year && $r['kind'] === 'closing'));
+        return count($this->byYear[$year]['closing'] ?? []);
     }
 
     public function row(int $inter): ?array
     {
-        return $this->byInter[$inter] ?? null;
+        return isset($this->byInter[$inter]) ? self::wide($this->byInter[$inter]) : null;
     }
 
     public function firstYear(): ?int
     {
-        return $this->rows === [] ? null : $this->rows[0]['year'];
+        return $this->rows === [] ? null : $this->rows[0][self::N_YEAR];
     }
 
     public function hasRowsBefore(int $year): bool
     {
-        return $this->rows !== [] && $this->rows[0]['year'] < $year;
+        return $this->rows !== [] && $this->rows[0][self::N_YEAR] < $year;
     }
 
     /** @return list<string> kódy účtů (šestimístné z PREMIER), na které účtuje rok včetně počátečních stavů */
     public function accountsUsed(int $year): array
     {
         $used = [];
-        foreach ($this->rows as $r) {
-            if ($r['year'] === $year && $r['kind'] !== 'closing') {
-                $used[$r['md']] = true;
-                $used[$r['dal']] = true;
-            }
+        foreach ([...$this->yearRows($year, 'regular'), ...$this->yearRows($year, 'opening')] as $r) {
+            $used[$r['md']] = true;
+            $used[$r['dal']] = true;
         }
         unset($used['']);
         $codes = array_map('strval', array_keys($used));
@@ -166,12 +223,17 @@ final class PremierJournal
      */
     public function documents(int $year): array
     {
+        if (isset($this->documentsCache[$year])) {
+            return $this->documentsCache[$year];
+        }
         $out = [];
         foreach ($this->groups($year) as $key => $rows) {
             foreach ($this->splitByMovement($key, $rows) as $part => $partRows) {
                 $out[$part] = $partRows;
             }
         }
+        // Kroky převodu čtou zápisy roku čtyřikrát; drží se jen jeden rok.
+        $this->documentsCache = [$year => $out];
         return $out;
     }
 
@@ -210,6 +272,7 @@ final class PremierJournal
      */
     public function usePaymentLinks(array $links): void
     {
+        $this->documentsCache = [];
         $this->paymentTargets = [];
         foreach ($links as $inter => $targets) {
             foreach ($targets as $t) {
@@ -353,16 +416,16 @@ final class PremierJournal
     {
         $out = [];
         foreach ($this->rows as $r) {
-            if ($r['year'] >= $year || $r['kind'] === 'closing') {
+            if ($r[self::N_YEAR] >= $year || $r[self::N_KIND] === 'closing') {
                 continue;
             }
-            foreach ([[$r['md'], 1], [$r['dal'], -1]] as [$code, $sign]) {
+            foreach ([[$r[self::N_MD], 1], [$r[self::N_DAL], -1]] as [$code, $sign]) {
                 $class = (string) substr((string) $code, 0, 1);
                 if ($class === '' || $class === '7' || $class > '7') {
                     continue;
                 }
                 $target = in_array($class, ['5', '6'], true) ? $resultAccount : (string) $code;
-                $out[$target] = ($out[$target] ?? 0.0) + $sign * $r['amount'];
+                $out[$target] = ($out[$target] ?? 0.0) + $sign * $r[self::N_AMOUNT];
             }
         }
         foreach ($out as $code => $v) {
@@ -440,6 +503,24 @@ final class PremierJournal
             $v -= $r['amount'];
         }
         return round($v, 2);
+    }
+
+    /** @return list<array<string,mixed>> řádky roku daného druhu podle data */
+    private function yearRows(int $year, string $kind): array
+    {
+        $rows = $this->byYear[$year][$kind] ?? [];
+        return $this->focusYear === null || $year === $this->focusYear ? $rows : array_map(self::wide(...), $rows);
+    }
+
+    /**
+     * Řádek s klíči: plný řádek beze změny, úzký tvar rozbalený na {@see NARROW_KEYS}.
+     *
+     * @param array<mixed> $r
+     * @return array<string,mixed>
+     */
+    private static function wide(array $r): array
+    {
+        return array_is_list($r) ? array_combine(self::NARROW_KEYS, array_slice($r, 0, count(self::NARROW_KEYS))) : $r;
     }
 
     /**

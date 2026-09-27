@@ -114,6 +114,9 @@ final class PayrollImporter
         $this->pensionersWithoutDiscount = [];
         $this->openSickness = [];
         $this->timeEvidenceSkipped = 0;
+        if ($ctx->payroll === null && !$ctx->backup->hasRows('PERSONAL') && !$ctx->backup->hasRows('MZDY')) {
+            return;
+        }
         $payroll = $ctx->payroll ?? PremierPayroll::fromBackup($ctx->backup);
         if (!$payroll->hasData()) {
             return;

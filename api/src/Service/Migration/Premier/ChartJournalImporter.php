@@ -111,7 +111,7 @@ final class ChartJournalImporter
     {
         $p = $ctx->protocol;
         $year = $ctx->year;
-        $existing = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY);
+        $existing = $this->map->all($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY, $year . '|');
         $legacy = self::legacyBankDocuments($ctx, $existing);
         if ($legacy > 0) {
             // Starší verze skládala bankovní výpis do jednoho zápisu za den. Nové zápisy po
@@ -124,7 +124,7 @@ final class ChartJournalImporter
         $ctx->period = $period;
         if ($period['locked']) {
             $p->info(self::STEP_JOURNAL, 'year_locked', "Rok {$year} je v MyÚčtu už uzavřený, deník se do něj znovu nenahrává.", ['year' => $year]);
-            $this->rememberEntries($ctx);
+            $this->rememberEntries($ctx, $existing);
             $p->finish(self::STEP_JOURNAL);
             return;
         }
@@ -326,11 +326,15 @@ final class ChartJournalImporter
         return count($legacy);
     }
 
-    /** Při uzavřeném roce se aspoň naplní mapa zápisů z dřívějšího převodu (vazby dokladů). */
-    private function rememberEntries(PremierContext $ctx): void
+    /**
+     * Při uzavřeném roce se aspoň naplní mapa zápisů z dřívějšího převodu (vazby dokladů).
+     *
+     * @param array<string,int> $existing mapa zápisů roku
+     */
+    private function rememberEntries(PremierContext $ctx, array $existing): void
     {
         $prefix = $ctx->year . '|';
-        foreach ($this->map->all($ctx->supplierId, PremierImportRepository::KIND_JOURNAL_ENTRY) as $key => $id) {
+        foreach ($existing as $key => $id) {
             if (str_starts_with((string) $key, $prefix) && $key !== $prefix . 'PS') {
                 $ctx->entries[substr((string) $key, strlen($prefix))] = $id;
             }

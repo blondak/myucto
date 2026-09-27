@@ -187,15 +187,14 @@ final class PremierImporter
         }
         $protocol->finish(self::STEP_PREFLIGHT);
 
-        $journal = new PremierJournal($backup);
+        $journal = new PremierJournal($backup, $year);
         $vat = PremierVat::fromBackup($backup);
-        $documents = PremierDocuments::fromBackup($backup, $journal, $vat);
+        $documents = PremierDocuments::fromBackup($backup, $journal, $vat, $year);
         $journal->usePaymentLinks($documents->paymentLinks());
         $ctx = new PremierContext($supplierId, $userId, $backup, $year, $journal, $vat, $dryRun, $protocol);
         $ctx->runId = $runId;
         $ctx->progress = $progress;
         $ctx->smallAssets = PremierSmallAssets::fromBackup($backup);
-        $ctx->payroll = PremierPayroll::fromBackup($backup);
 
         $pdo = $this->db->pdo();
         // Zkouška nanečisto uvnitř cizí transakce (testy) jede přes savepoint.
