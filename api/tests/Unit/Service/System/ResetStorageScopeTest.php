@@ -1,0 +1,88 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Service\System;
+
+use MyInvoice\Service\System\ResetStorageScope;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * `reset.php` dřív mazal celé `storage/documents`, `invoices` a `purchase-invoices`.
+ * Na stroji, kde úložiště sdílí víc databází, tím smazal soubory všech instancí.
+ */
+final class ResetStorageScopeTest extends TestCase
+{
+    private string $root;
+
+    protected function setUp(): void
+    {
+        $this->root = sys_get_temp_dir() . '/reset-scope-' . bin2hex(random_bytes(4));
+        foreach (['documents/sup-1/ab', 'documents/sup-10', 'documents/sup-7', 'invoices/sup-1/2026-09', 'purchase-invoices/supplier-1', 'purchase-invoices/sources', 'supplier-logos'] as $dir) {
+            mkdir($this->root . '/' . $dir, 0777, true);
+        }
+        file_put_contents($this->root . '/documents/sup-1/ab/a.pdf', 'x');
+        file_put_contents($this->root . '/documents/sup-10/b.pdf', 'x');
+        file_put_contents($this->root . '/invoices/sup-1/2026-09/f.pdf', 'x');
+        file_put_contents($this->root . '/purchase-invoices/supplier-1/p.pdf', 'x');
+        file_put_contents($this->root . '/supplier-logos/sup-1.png', 'x');
+        file_put_contents($this->root . '/supplier-logos/sup-10.png', 'x');
+    }
+
+    protected function tearDown(): void
+    {
+        ResetStorageScope::remove($this->root);
+    }
+
+    public function testPlanTouchesOnlyOwnSuppliers(): void
+    {
+        $plan = ResetStorageScope::plan($this->root, [1, 10], false);
+
+        self::assertEqualsCanonicalizing([
+            $this->root . '/documents/sup-1',
+            $this->root . '/documents/sup-10',
+            $this->root . '/invoices/sup-1',
+            $this->root . '/purchase-invoices/supplier-1',
+        ], $plan['own']);
+        self::assertSame([$this->root . '/documents/sup-7'], $plan['foreign']);
+    }
+
+    public function testLogosOnlyOnFullReset(): void
+    {
+        $plan = ResetStorageScope::plan($this->root, [1], true);
+
+        self::assertContains($this->root . '/supplier-logos/sup-1.png', $plan['own']);
+        self::assertContains($this->root . '/supplier-logos/sup-10.png', $plan['foreign']);
+        self::assertNotContains($this->root . '/supplier-logos/sup-1.png', ResetStorageScope::plan($this->root, [1], false)['own']);
+    }
+
+    public function testRemoveDeletesOnlyTheGivenTenant(): void
+    {
+        self::assertSame(1, ResetStorageScope::remove($this->root . '/documents/sup-1'));
+
+        self::assertDirectoryDoesNotExist($this->root . '/documents/sup-1');
+        self::assertFileExists($this->root . '/documents/sup-10/b.pdf');
+        self::assertDirectoryExists($this->root . '/documents/sup-7');
+    }
+
+    public function testSupplierIdParsing(): void
+    {
+        self::assertSame(12, ResetStorageScope::supplierIdOf('sup-12'));
+        self::assertSame(12, ResetStorageScope::supplierIdOf('supplier-12'));
+        self::assertSame(12, ResetStorageScope::supplierIdOf('sup-12.png'));
+        self::assertNull(ResetStorageScope::supplierIdOf('sources'));
+        self::assertNull(ResetStorageScope::supplierIdOf('sup-12-old'));
+    }
+
+    public function testResetScriptUsesTheScope(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 4) . '/bin/reset.php');
+
+        self::assertStringContainsString('ResetStorageScope::plan(', $source);
+        self::assertDoesNotMatchRegularExpression(
+            "/RuntimePaths::storage\\('(documents|invoices|purchase-invoices)'\\)/",
+            $source,
+            'reset.php nesmí mazat celou oblast úložiště, jen adresáře firem této databáze.',
+        );
+    }
+}
