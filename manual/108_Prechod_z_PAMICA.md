@@ -1,9 +1,10 @@
 # 108. Přechod z PAMICA
 
-**Cesta: `Systém → Přechod z PAMICA`**
+**Cesta: `Systém → Přechod z PAMICA (i SQL)`**
 
 Průvodce převede personalistiku a mzdy z datového souboru mzdového programu
-PAMICA do firmy v MyÚčtu, i do firmy, která účetnictví z POHODY nepřevádí.
+PAMICA, nebo z databáze PAMICA SQL, do firmy v MyÚčtu, i do firmy, která
+účetnictví z POHODY nepřevádí.
 Stejnou cestou se převádí i mzdy z **POHODA Mzdy** — je to tentýž mzdový
 modul STORMWARE se stejným formátem dat. Účetnictví tento průvodce nepřevádí,
 to je samostatná kapitola [Přechod z POHODY](107_Prechod_z_POHODY.md).
@@ -22,9 +23,18 @@ mzdové vstupy, proto navíc vyžaduje zápis mzdových vstupů
 ### 108.1.1 Exportní nástroj
 
 V prvním kroku průvodce ukáže tlačítkem *Zobrazit exportní nástroj* soubory
-nástroje `Export-Pamica.cmd` (spouštěč) a `Export-Pamica.ps1` (vlastní
-exportní skript). Stáhněte oba, nebo tlačítkem *Stáhnout vše (ZIP)* jako
-`pamica-export.zip`; oba soubory musí ležet ve stejné složce.
+nástroje ve dvou skupinách:
+
+| Soubor | K čemu slouží |
+|---|---|
+| `Export-Pamica.cmd`, `Export-Pamica.ps1` | export z datového souboru PAMICA (`Mzdy*.mdb`) |
+| `Export-PamicaSQL.cmd`, `Export-PamicaSQL.ps1` | export z databáze PAMICA SQL (§ 108.1.4) |
+| `pamica-sql.example.json` | vzor konfigurace připojení k SQL Serveru |
+| `PohodaSql-Common.ps1` | společné připojení k SQL Serveru; spouští ho `Export-PamicaSQL` |
+
+Stáhněte soubory zvlášť, nebo tlačítkem *Stáhnout vše (ZIP)* jako
+`pamica-export.zip`; soubory musí ležet ve stejné složce. `Export-PamicaSQL`
+potřebuje vedle sebe i `Export-Pamica.ps1`, zápis exportu je společný.
 
 Na rozdíl od POHODY nemá PAMICA XML rozhraní pro komunikaci s běžícím
 programem. Nástroj proto čte přímo datový soubor `Mzdy*.mdb` — stejně jako
@@ -85,6 +95,38 @@ Mzdy**, použije se místo tohoto nástroje `Export-PohodaMdb.cmd` popsaný
 v [§ 107.1.4](107_Prechod_z_POHODY.md#10714-majetek-z-datoveho-souboru) — vzniklý
 `91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce; sám o sobě je
 formátem shodný s exportem z PAMICA.
+
+### 108.1.4 Export z PAMICA SQL
+
+PAMICA SQL má tytéž tabulky jako datový soubor, jen v databázi na Microsoft SQL
+Serveru. `Export-PamicaSQL.cmd` z ní vytvoří **stejný ZIP** jako
+`Export-Pamica.cmd` (`pamica_export_<datum>.zip` se složkami `<IČO>_<rok>`
+a souhrnem vedle). Posílá jen dotazy `SELECT` přes šifrované spojení jen pro
+čtení; PAMICA může během exportu běžet.
+
+1. Rozbalte `pamica-export.zip` do jedné složky na počítači s Windows, ze
+   kterého je vidět SQL Server. Stačí Windows PowerShell 5.1.
+2. Zkopírujte vzor `pamica-sql.example.json` jako `pamica-sql.json` vedle
+   skriptu a vyplňte server, port a přihlášení. Klíče jsou stejné jako
+   u POHODA SQL ([§ 107.1.6](107_Prechod_z_POHODY.md#10716-cesta-3-export-z-pohoda-sql)).
+   Bez souboru se nástroj na všechno zeptá, heslo skrytě.
+3. Spusťte `Export-PamicaSQL.cmd` dvojklikem. Když v konfiguraci chybí
+   databáze, nástroj nabídne databáze na serveru, které mají zaměstnance,
+   pracovní poměry a zpracované mzdy (tabulky `ZAM`, `ZAMpomer` a `MZ`),
+   a mzdovou databázi vyberete číslem. Rozhoduje obsah databáze, ne její název.
+4. Vzniklý `pamica_export_<datum>.zip` nahrajte do průvodce beze změny.
+
+| Parametr | Význam |
+|---|---|
+| `-Config` | jiný konfigurační soubor než `pamica-sql.json` vedle skriptu |
+| `-Databaze` | mzdová databáze; přebije `database` z konfigurace |
+| `-Rok` | omezí export na zadané roky; bez něj se vyexportují všechny roky v datech |
+| `-Ico` | IČO firmy, když se ho nepodaří určit z dat |
+
+Uživateli SQL stačí role `db_datareader` v mzdové databázi. Výchozí ovladač
+je součástí Windows; jen při volbě `"driver": "odbc"` nainstalujte
+[Microsoft ODBC Driver for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server).
+Soubor `pamica-sql.json` s heslem po exportu smažte.
 
 ## 108.2 Co převod přenese
 

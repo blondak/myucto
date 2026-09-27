@@ -1,0 +1,11 @@
+{
+  "_napoveda": "Vzor pro Export-PohodaSQL. Zkopírujte jako pohoda-sql.json vedle skriptu a vyplňte. Prázdný user = přihlášení účtem Windows, prázdný port = výchozí instance nebo pojmenovaná instance přes SQL Browser, prázdná database = výběr agendy ze seznamu. Prázdné heslo se zeptá skrytě. driver: sqlclient (součást Windows) nebo odbc.",
+  "host": "SERVER\\POHODA",
+  "port": null,
+  "database": "StwPh_12345678_2026",
+  "user": "",
+  "password": "",
+  "trustServerCertificate": true,
+  "driver": "sqlclient",
+  "odbcDriver": "ODBC Driver 18 for SQL Server"
+}

@@ -74,6 +74,7 @@ function agendaCompany(agenda: { ico: string; company: string }): string {
 }
 const exportHelpItems = computed(() => list('export_help_items'))
 const mdbHelpItems = computed(() => list('mdb_help_items'))
+const sqlHelpItems = computed(() => list('sql_help_items'))
 const fileHelpItems = computed(() => list('file_help_items'))
 
 const selectedYears = ref<number[]>([])
@@ -86,11 +87,29 @@ const confirmIdentifiers = ref(false)
 const approveTakenOver = ref(true)
 const toolOpen = ref(false)
 const toolFiles = ref<PohodaToolFile[] | null>(null)
-const toolGroups = computed(() => [
-  { key: 'xml', names: ['Export-Pohoda.cmd', 'Export-Pohoda.ps1', 'Export-PohodaMdb.cmd', 'Export-PohodaMdb.ps1'] },
-  // Převodník účetnictví volá Export-PohodaMdb.ps1 pro majetek a mzdy, bez něj skončí chybou.
-  { key: 'mdb', names: ['Export-PohodaMdbAccounting.cmd', 'Export-PohodaMdbAccounting.ps1', 'Export-PohodaMdb.ps1'] },
-].map(group => ({ ...group, files: (toolFiles.value ?? []).filter(file => group.names.includes(file.name)) })))
+const TOOL_GROUPS: Record<PohodaSystem, { key: string; names: string[] }[]> = {
+  pohoda: [
+    { key: 'xml', names: ['Export-Pohoda.cmd', 'Export-Pohoda.ps1', 'Export-PohodaMdb.cmd', 'Export-PohodaMdb.ps1'] },
+    // Převodník účetnictví volá Export-PohodaMdb.ps1 pro majetek a mzdy, bez něj skončí chybou.
+    { key: 'mdb', names: ['Export-PohodaMdbAccounting.cmd', 'Export-PohodaMdbAccounting.ps1', 'Pohoda-Common.ps1', 'Export-PohodaMdb.ps1'] },
+    // Export z POHODA SQL zapisuje stejně jako převod MDB, proto potřebuje tytéž podpůrné skripty.
+    { key: 'sql', names: ['Export-PohodaSQL.cmd', 'Export-PohodaSQL.ps1', 'pohoda-sql.example.json', 'Pohoda-Common.ps1', 'PohodaSql-Common.ps1', 'Export-PohodaMdb.ps1'] },
+  ],
+  pamica: [
+    { key: 'mdb', names: ['Export-Pamica.cmd', 'Export-Pamica.ps1'] },
+    { key: 'sql', names: ['Export-PamicaSQL.cmd', 'Export-PamicaSQL.ps1', 'pamica-sql.example.json', 'PohodaSql-Common.ps1', 'Export-Pamica.ps1'] },
+  ],
+}
+const toolGroups = computed(() => TOOL_GROUPS[props.system]
+  .map(group => ({ ...group, files: group.names.flatMap(name => (toolFiles.value ?? []).filter(file => file.name === name)) })))
+// Hlavní skript skupiny je ten se stejným jménem jako spouštěcí .cmd; ostatní .ps1 jsou podpůrné.
+function toolRole(group: { names: string[] }, name: string): string {
+  if (name === 'Export-PohodaMdb.cmd') return 'tool_role_optional'
+  if (name === 'Export-PohodaMdb.ps1') return 'tool_role_shared'
+  if (name.endsWith('.json')) return 'tool_role_config'
+  if (name.endsWith('.cmd')) return 'tool_role_launcher'
+  return group.names.includes(name.replace(/\.ps1$/, '.cmd')) ? 'tool_role_script' : 'tool_role_shared'
+}
 const toolLoading = ref(false)
 const toolDownloading = ref<string | null>(null)
 
@@ -363,7 +382,7 @@ const actions = computed<ActionItem[]>(() => {
         <p class="mb-4 text-sm text-neutral-500">{{ tt('upload_hint') }}</p>
 
         <div class="mb-5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm" data-testid="pohoda-export-help">
-          <div :class="props.system === 'pohoda' ? 'grid gap-5 lg:grid-cols-2' : ''">
+          <div :class="props.system === 'pohoda' ? 'grid gap-5 lg:grid-cols-2 xl:grid-cols-3' : 'grid gap-5 lg:grid-cols-2'">
             <div>
               <h3 class="mb-2 font-medium text-neutral-700">{{ tt('export_help_title') }}</h3>
               <ol class="list-decimal space-y-1 pl-5 text-neutral-600">
@@ -382,8 +401,19 @@ const actions = computed<ActionItem[]>(() => {
                 {{ tt('mdb_driver_architecture') }}
               </p>
             </div>
+            <div data-testid="pohoda-sql-help">
+              <h3 class="mb-2 font-medium text-neutral-700">{{ tt('sql_help_title') }}</h3>
+              <ol class="list-decimal space-y-1 pl-5 text-neutral-600">
+                <li v-for="(item, i) in sqlHelpItems" :key="i">{{ item }}</li>
+              </ol>
+              <p class="mt-2 text-neutral-600">{{ tt('sql_help_requirements') }}</p>
+              <p class="mt-2 text-neutral-600">
+                {{ tt('sql_driver_hint') }}
+                <a href="https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server" target="_blank" rel="noopener noreferrer" class="font-medium text-primary-700 underline hover:no-underline">{{ tt('sql_driver_link') }}</a>
+              </p>
+            </div>
           </div>
-          <p v-if="props.system === 'pohoda'" class="mt-3 font-medium text-neutral-700">{{ tt('export_auto_detect') }}</p>
+          <p class="mt-3 font-medium text-neutral-700">{{ tt('export_auto_detect') }}</p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button v-if="props.system === 'pohoda'" type="button" :class="btnOutline('primary')" :disabled="toolDownloading !== null" data-testid="pohoda-tools-download" @click="downloadTool(null)">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
@@ -399,7 +429,7 @@ const actions = computed<ActionItem[]>(() => {
             <p v-if="toolLoading" class="text-neutral-400">{{ tt('tool_loading') }}</p>
             <template v-else-if="toolFiles">
               <p v-if="!toolFiles.length" class="text-neutral-500">{{ tt('tool_empty') }}</p>
-              <div v-else-if="props.system === 'pohoda'" class="mb-3 grid gap-3 lg:grid-cols-2">
+              <div v-else class="mb-3 grid gap-3 lg:grid-cols-2" :class="toolGroups.length > 2 ? 'xl:grid-cols-3' : ''">
                 <section v-for="group in toolGroups" :key="group.key" class="min-w-0 rounded-md border border-neutral-200 p-3" :data-testid="`pohoda-tool-group-${group.key}`">
                   <h4 class="font-medium text-neutral-800">{{ tt(`tool_group_${group.key}_title`) }}</h4>
                   <p class="mt-1 text-sm text-neutral-600">{{ tt(`tool_group_${group.key}_hint`) }}</p>
@@ -412,7 +442,7 @@ const actions = computed<ActionItem[]>(() => {
                       <div class="min-w-0 flex-1">
                         <span class="break-all font-mono text-sm">{{ f.name }}</span>
                         <span class="ml-2 text-xs text-neutral-500">{{ formatBytes(f.size) }}</span>
-                        <p class="mt-1 text-xs text-neutral-500">{{ tt(f.name === 'Export-PohodaMdb.cmd' ? 'tool_role_optional' : f.name === 'Export-PohodaMdb.ps1' ? 'tool_role_shared' : f.name.endsWith('.cmd') ? 'tool_role_launcher' : 'tool_role_script') }}</p>
+                        <p class="mt-1 text-xs text-neutral-500">{{ tt(toolRole(group, f.name)) }}</p>
                       </div>
                       <button type="button" :class="[btnOutlineSm('neutral'), 'shrink-0']" :disabled="toolDownloading !== null" @click="downloadTool(f.name)">
                         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
@@ -422,15 +452,6 @@ const actions = computed<ActionItem[]>(() => {
                   </ul>
                 </section>
               </div>
-              <ul v-else class="mb-3 divide-y divide-neutral-100">
-                <li v-for="f in toolFiles" :key="f.name" class="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <span><span class="font-mono">{{ f.name }}</span><span class="ml-2 text-xs text-neutral-500">{{ formatBytes(f.size) }}</span></span>
-                  <button type="button" :class="btnOutlineSm('neutral')" :disabled="toolDownloading !== null" @click="downloadTool(f.name)">
-                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-                    {{ tt('tool_download') }}
-                  </button>
-                </li>
-              </ul>
               <div v-if="toolFiles.length" class="flex flex-wrap gap-2">
                 <button type="button" :class="btnOutline('primary')" :disabled="toolDownloading !== null" data-testid="pohoda-tool-zip" @click="downloadTool(null)">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>

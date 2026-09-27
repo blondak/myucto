@@ -189,10 +189,11 @@ $PamicaTables = [ordered]@{
 
 # Čistě systémové sloupce, které se nevytahují: kdo záznam označil, výběr v seznamu,
 # ruční pořadí a zámky. Datum založení a uložení zůstává - podle něj jde poznat pořadí podání.
+# SQL Server má navíc vypočtené sloupce NullCheck_* (unikátnost s NULL), v MDB nejsou.
 $PamicaSkipColumns = @('Oznacil', 'Ucetni', 'Creator', 'Sel', 'UsrOrder')
 
 function Test-PamicaSkipColumn([string]$Name) {
-    return ($PamicaSkipColumns -contains $Name) -or ($Name -match '^Lock\d*$') -or ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$')
+    return ($PamicaSkipColumns -contains $Name) -or ($Name -match '^Lock\d*$') -or ($Name -like 'NullCheck_*') -or ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$')
 }
 
 # --- atributová data podání -------------------------------------------------
@@ -319,13 +320,28 @@ function Open-PamicaSource([string]$Mdb) {
     return $null
 }
 
+<#
+    Tabulky zdroje. SQL Server (SqlClient i ODBC) se ptá INFORMATION_SCHEMA: GetSchema
+    vrací u SqlClient BASE TABLE a TABLE_SCHEMA, u ODBC TABLE a TABLE_SCHEM.
+#>
 function Get-PamicaTables($Conn) {
-    return @($Conn.GetSchema('Tables') | Where-Object { $_.TABLE_TYPE -eq 'TABLE' } | ForEach-Object { $_.TABLE_NAME })
+    if ($Conn -is [System.Data.OleDb.OleDbConnection]) {
+        return @($Conn.GetSchema('Tables') | Where-Object { $_.TABLE_TYPE -eq 'TABLE' } | ForEach-Object { $_.TABLE_NAME })
+    }
+    $rows = Get-PamicaRows $Conn "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = 'dbo'"
+    return @($rows.Rows | ForEach-Object { [string]$_[0] })
+}
+
+function New-PamicaCommand($Conn, [string]$Sql) {
+    $cmd = $Conn.CreateCommand()
+    $cmd.CommandText = $Sql
+    # SQL Server: velké tabulky se čtou déle než výchozích 30 s.
+    if ($Conn -isnot [System.Data.OleDb.OleDbConnection]) { $cmd.CommandTimeout = 600 }
+    return $cmd
 }
 
 function Get-PamicaRows($Conn, [string]$Sql) {
-    $cmd = $Conn.CreateCommand()
-    $cmd.CommandText = $Sql
+    $cmd = New-PamicaCommand $Conn $Sql
     $table = New-Object System.Data.DataTable
     $r = $cmd.ExecuteReader()
     try { $table.Load($r) } finally { $r.Close() }
@@ -337,8 +353,7 @@ function Get-PamicaColumns($Conn, [string]$Table) {
 }
 
 function Get-PamicaScalar($Conn, [string]$Sql) {
-    $cmd = $Conn.CreateCommand()
-    $cmd.CommandText = $Sql
+    $cmd = New-PamicaCommand $Conn $Sql
     return $cmd.ExecuteScalar()
 }
 
@@ -380,7 +395,8 @@ function Write-PamicaValue($Writer, [string]$Name, $Value) {
         # Datum bez času jako dřív; čas se připojí jen tam, kde ho PAMICA vede (okamžik podání).
         'DateTime' { if ($Value.TimeOfDay.Ticks -eq 0) { $Value.ToString('yyyy-MM-dd') } else { $Value.ToString('yyyy-MM-ddTHH:mm:ss') } }
         'Boolean'  { if ($Value) { '1' } else { '0' } }
-        'Decimal'  { $Value.ToString([Globalization.CultureInfo]::InvariantCulture) }
+        # Bez koncových nul (100.0000 i 100 => 100): stejný výstup z MDB i SQL Serveru v každé verzi PowerShellu.
+        'Decimal'  { $Value.ToString('0.############################', [Globalization.CultureInfo]::InvariantCulture) }
         'Double'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
         'Single'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
         default    { Get-PamicaXmlText ([string]$Value) }
@@ -420,6 +436,13 @@ function Export-PamicaYear($Conn, [string]$Cil, [string]$Ico, [int]$Rok, [string
             $sql = "SELECT * FROM [$name]"
             if ($def.Kde) {
                 $kde = $def.Kde
+                # Stejně jako Export-PohodaMdb.ps1: MZdavky bez sloupce Rok (agenda POHODY) se omezí přes mzdu.
+                if ($name -eq 'MZdavky' -and $present -notcontains 'Rok') {
+                    if ($present -notcontains 'RefAg' -or (Get-PamicaColumns $Conn 'MZ') -notcontains 'Rok') {
+                        throw "Tabulka MZdavky neobsahuje Rok ani použitelnou vazbu RefAg na MZ.ID; nelze ji bezpečně omezit na rok $Rok."
+                    }
+                    $kde = 'RefAg IN (SELECT ID FROM [MZ] WHERE Rok = {rok})'
+                }
                 if ($def.KdeNebo -and $present -contains $def.KdeNebo[0]) { $kde = "($kde) OR ($($def.KdeNebo[1]))" }
                 $sql += ' WHERE ' + ($kde -replace '\{rok\}', [string]$Rok)
             }
@@ -454,62 +477,15 @@ function Export-PamicaYear($Conn, [string]$Cil, [string]$Ico, [int]$Rok, [string
     return [pscustomobject]@{ Pocty = $counts; Bloby = $blobs }
 }
 
-# --- spuštění (při načtení do testu se neprovede) ---
-if ($MyInvocation.InvocationName -eq '.') { return }
-
-if ($env:OS -ne 'Windows_NT') {
-    Write-Host 'Skript běží jen na Windows.' -ForegroundColor Red
-    exit 1
-}
-
-Write-Host 'Export mezd z PAMICY. Než budete pokračovat, PAMICU zavřete - ze souboru se jen čte, ale otevřený program ho může zamykat.' -ForegroundColor Yellow
-
-if (-not $Mdb) {
-    $nalezene = Find-PamicaMdb
-    if ($nalezene.Count -eq 0) {
-        Write-Host 'Datový soubor PAMICY (Mzdy*.mdb) se nenašel. Zadejte ho parametrem -Mdb, cestu najdete v PAMICE v Soubor - Databáze.' -ForegroundColor Red
-        exit 1
-    }
-    if ($nalezene.Count -gt 1) {
-        Write-Host 'Datových souborů PAMICY je víc, vyberte jeden parametrem -Mdb:' -ForegroundColor Yellow
-        foreach ($f in $nalezene) { Write-Host "  $f" }
-        exit 1
-    }
-    $Mdb = $nalezene[0]
-}
-$Mdb = (Resolve-Path -LiteralPath $Mdb).Path
-Write-Host "Datový soubor: $Mdb"
-
-if (-not $Vystup) { $Vystup = $PSScriptRoot }
-New-Item -ItemType Directory -Force $Vystup | Out-Null
-$Vystup = (Resolve-Path -LiteralPath $Vystup).Path
-
-$probe = Open-PamicaSource $Mdb
-if ($null -eq $probe -and [Environment]::Is64BitProcess) {
-    # Ovladač Accessu bývá jen 32bitový (instaluje ho 32bitová PAMICA) - zkusíme 32bitový PowerShell.
-    $ps32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $ps32)) {
-        Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
-        exit 1
-    }
-    Write-Host 'Ovladač pro .mdb v 64bitovém PowerShellu chybí, spouštím 32bitový...'
-    $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
-    $args32 = "-Mdb {0} -Vystup {1}" -f (& $q $Mdb), (& $q $Vystup)
-    if ($Rok) { $args32 += ' -Rok ' + (($Rok | ForEach-Object { [string]$_ }) -join ',') }
-    if ($Ico) { $args32 += ' -Ico ' + (& $q $Ico) }
-    & $ps32 -NoProfile -ExecutionPolicy Bypass -Command ("& {0} {1}" -f (& $q $PSCommandPath), $args32)
-    exit $LASTEXITCODE
-}
-if ($null -eq $probe) {
-    Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
-    exit 1
-}
-$conn = $probe
-
-try {
+<#
+    Export mezd z otevřeného spojení (datový soubor MDB nebo SQL Server) do ZIPu
+    pamica_export_<datum>.zip ve složce $Vystup, se souhrnem vedle. $Zdroj pojmenuje
+    zdroj v hláškách, $ZdrojPopis je první řádek souhrnu o zdroji. Vrací cestu k ZIPu.
+#>
+function Invoke-PamicaExport($conn, [string]$Zdroj, [string]$ZdrojPopis, [string]$Ico, [int[]]$Rok, [string]$Vystup) {
     $existing = Get-PamicaTables $conn
     if ($existing -notcontains 'MZ' -or $existing -notcontains 'ZAM') {
-        throw "V $Mdb nejsou mzdové tabulky (ZAM, MZ) - není to datový soubor PAMICY."
+        throw "V $Zdroj nejsou mzdové tabulky (ZAM, MZ) - nejsou to mzdy PAMICY."
     }
 
     if (-not $Ico) { $Ico = Get-PamicaIco $conn $existing }
@@ -533,13 +509,19 @@ try {
     New-Item -ItemType Directory -Force $stage | Out-Null
 
     $zam = [int](Get-PamicaScalar $conn 'SELECT COUNT(*) FROM [ZAM]')
-    $pomery = [int](Get-PamicaScalar $conn 'SELECT COUNT(*) FROM [ZAMpomer]')
-    $nastup = Get-PamicaScalar $conn 'SELECT MIN(DatNast) FROM [ZAMpomer] WHERE DatNast IS NOT NULL'
-    $odchod = Get-PamicaScalar $conn 'SELECT MAX(DatOdch) FROM [ZAMpomer] WHERE DatOdch IS NOT NULL'
+    # Pracovní poměry jsou v samostatné tabulce jen v PAMICA; agenda POHODY s mzdami ji nemá.
+    $pomery = 0
+    $nastup = $null
+    $odchod = $null
+    if ($existing -contains 'ZAMpomer') {
+        $pomery = [int](Get-PamicaScalar $conn 'SELECT COUNT(*) FROM [ZAMpomer]')
+        $nastup = Get-PamicaScalar $conn 'SELECT MIN(DatNast) FROM [ZAMpomer] WHERE DatNast IS NOT NULL'
+        $odchod = Get-PamicaScalar $conn 'SELECT MAX(DatOdch) FROM [ZAMpomer] WHERE DatOdch IS NOT NULL'
+    }
 
     $souhrn = New-Object System.Collections.Generic.List[string]
     $souhrn.Add("Export mezd z PAMICY")
-    $souhrn.Add("Datový soubor: $Mdb")
+    $souhrn.Add($ZdrojPopis)
     $souhrn.Add("Program: $program")
     $souhrn.Add("IČO: $Ico")
     $souhrn.Add("Vytvořeno: " + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
@@ -615,6 +597,63 @@ try {
     Write-Host ''
     Write-Host "Souhrn: $souhrnPath"
     Write-Host "Nahrajte do MyÚčta soubor: $zip" -ForegroundColor Cyan
+    return $zip
+}
+
+# --- spuštění (při načtení do testu se neprovede) ---
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+if ($env:OS -ne 'Windows_NT') {
+    Write-Host 'Skript běží jen na Windows.' -ForegroundColor Red
+    exit 1
+}
+
+Write-Host 'Export mezd z PAMICY. Než budete pokračovat, PAMICU zavřete - ze souboru se jen čte, ale otevřený program ho může zamykat.' -ForegroundColor Yellow
+
+if (-not $Mdb) {
+    $nalezene = Find-PamicaMdb
+    if ($nalezene.Count -eq 0) {
+        Write-Host 'Datový soubor PAMICY (Mzdy*.mdb) se nenašel. Zadejte ho parametrem -Mdb, cestu najdete v PAMICE v Soubor - Databáze.' -ForegroundColor Red
+        exit 1
+    }
+    if ($nalezene.Count -gt 1) {
+        Write-Host 'Datových souborů PAMICY je víc, vyberte jeden parametrem -Mdb:' -ForegroundColor Yellow
+        foreach ($f in $nalezene) { Write-Host "  $f" }
+        exit 1
+    }
+    $Mdb = $nalezene[0]
+}
+$Mdb = (Resolve-Path -LiteralPath $Mdb).Path
+Write-Host "Datový soubor: $Mdb"
+
+if (-not $Vystup) { $Vystup = $PSScriptRoot }
+New-Item -ItemType Directory -Force $Vystup | Out-Null
+$Vystup = (Resolve-Path -LiteralPath $Vystup).Path
+
+$probe = Open-PamicaSource $Mdb
+if ($null -eq $probe -and [Environment]::Is64BitProcess) {
+    # Ovladač Accessu bývá jen 32bitový (instaluje ho 32bitová PAMICA) - zkusíme 32bitový PowerShell.
+    $ps32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $ps32)) {
+        Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Ovladač pro .mdb v 64bitovém PowerShellu chybí, spouštím 32bitový...'
+    $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $args32 = "-Mdb {0} -Vystup {1}" -f (& $q $Mdb), (& $q $Vystup)
+    if ($Rok) { $args32 += ' -Rok ' + (($Rok | ForEach-Object { [string]$_ }) -join ',') }
+    if ($Ico) { $args32 += ' -Ico ' + (& $q $Ico) }
+    & $ps32 -NoProfile -ExecutionPolicy Bypass -Command ("& {0} {1}" -f (& $q $PSCommandPath), $args32)
+    exit $LASTEXITCODE
+}
+if ($null -eq $probe) {
+    Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
+    exit 1
+}
+$conn = $probe
+
+try {
+    $null = Invoke-PamicaExport $conn $Mdb "Datový soubor: $Mdb" $Ico $Rok $Vystup
 } catch {
     # Uživateli stačí věta, co je špatně; výpis volání by ho jen zmátl.
     Write-Host ''

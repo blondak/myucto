@@ -220,10 +220,11 @@ $PohodaDmSources = @{
 
 # Čistě systémové sloupce, které se nevytahují: kdo záznam označil, výběr v seznamu,
 # ruční pořadí a zámky. Datum založení a uložení zůstává - podle něj jde poznat pořadí podání.
+# POHODA SQL má navíc vypočtené sloupce NullCheck_* (unikátnost s NULL), v MDB nejsou.
 $PohodaMdbSkipColumns = @('Oznacil', 'Ucetni', 'Creator', 'Sel', 'UsrOrder')
 
 function Test-PohodaSkipColumn([string]$Name) {
-    return ($PohodaMdbSkipColumns -contains $Name) -or ($Name -match '^Lock\d*$') -or ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$')
+    return ($PohodaMdbSkipColumns -contains $Name) -or ($Name -match '^Lock\d*$') -or ($Name -like 'NullCheck_*') -or ($Name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$')
 }
 
 # --- atributová data podání -------------------------------------------------
@@ -333,16 +334,28 @@ function Open-PohodaSource([string]$Mdb, [string]$SqlServer, [string]$Databaze) 
     throw 'Zadejte datový soubor (-Mdb) nebo databázi POHODA SQL (-SqlServer a -Databaze).'
 }
 
+<#
+    Tabulky zdroje. SQL Server (SqlClient i ODBC) se ptá INFORMATION_SCHEMA: GetSchema
+    vrací u SqlClient BASE TABLE a TABLE_SCHEMA, u ODBC TABLE a TABLE_SCHEM.
+#>
 function Get-PohodaTables($Conn) {
     if ($Conn -is [System.Data.OleDb.OleDbConnection]) {
         return @($Conn.GetSchema('Tables') | Where-Object { $_.TABLE_TYPE -eq 'TABLE' } | ForEach-Object { $_.TABLE_NAME })
     }
-    return @($Conn.GetSchema('Tables') | Where-Object { $_.TABLE_TYPE -eq 'BASE TABLE' } | ForEach-Object { $_.TABLE_NAME })
+    $rows = Get-PohodaRows $Conn "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = 'dbo'"
+    return @($rows.Rows | ForEach-Object { [string]$_[0] })
+}
+
+function New-PohodaMdbCommand($Conn, [string]$Sql) {
+    $cmd = $Conn.CreateCommand()
+    $cmd.CommandText = $Sql
+    # SQL Server: velké tabulky se čtou déle než výchozích 30 s.
+    if ($Conn -isnot [System.Data.OleDb.OleDbConnection]) { $cmd.CommandTimeout = 600 }
+    return $cmd
 }
 
 function Get-PohodaRows($Conn, [string]$Sql) {
-    $cmd = $Conn.CreateCommand()
-    $cmd.CommandText = $Sql
+    $cmd = New-PohodaMdbCommand $Conn $Sql
     $table = New-Object System.Data.DataTable
     $r = $cmd.ExecuteReader()
     try { $table.Load($r) } finally { $r.Close() }
@@ -380,7 +393,8 @@ function Write-PohodaValue($Writer, [string]$Name, $Value) {
         # Datum bez času jako dřív; čas se připojí jen tam, kde ho zdroj vede (okamžik podání).
         'DateTime' { if ($Value.TimeOfDay.Ticks -eq 0) { $Value.ToString('yyyy-MM-dd') } else { $Value.ToString('yyyy-MM-ddTHH:mm:ss') } }
         'Boolean'  { if ($Value) { '1' } else { '0' } }
-        'Decimal'  { $Value.ToString([Globalization.CultureInfo]::InvariantCulture) }
+        # Bez koncových nul (100.0000 i 100 => 100): stejný výstup z MDB i SQL Serveru v každé verzi PowerShellu.
+        'Decimal'  { $Value.ToString('0.############################', [Globalization.CultureInfo]::InvariantCulture) }
         'Double'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
         'Single'   { $Value.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
         default    { Get-PohodaXmlText ([string]$Value) }
@@ -404,8 +418,7 @@ function Export-PohodaMdbGroup($Conn, [string]$Group, [string]$Cil, [string]$Ico
     $keyRows = 0
     foreach ($t in $def.Klic) {
         if ($existing -contains $t) {
-            $cmd = $Conn.CreateCommand()
-            $cmd.CommandText = "SELECT COUNT(*) FROM [$t]"
+            $cmd = New-PohodaMdbCommand $Conn "SELECT COUNT(*) FROM [$t]"
             $keyRows += [int]$cmd.ExecuteScalar()
         }
     }
@@ -542,15 +555,41 @@ function Export-PohodaMdbData([string]$Mdb, [string]$SqlServer, [string]$Databaz
         throw 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine pro tuto verzi PowerShellu.'
     }
     try {
-        foreach ($g in $Skupiny) {
-            $soubor = $PohodaMdbGroups[$g].Soubor
-            $file = Join-Path $Cil $soubor
-            $result = Export-PohodaMdbGroup $conn $g $file $Ico $Rok
-            $souhrnPath = Join-Path $Cil ($soubor -replace '\.xml$', '-souhrn.txt')
-            Write-PohodaMdbSummary $souhrnPath $g $result
-            [pscustomobject]@{ Skupina = $g; Soubor = $soubor; Zaznamu = $result.Zaznamu; Pocty = $result.Pocty; Chybejici = $result.Chybejici; Bloby = $result.Bloby }
-        }
+        Export-PohodaMdbGroups $conn $Cil $Ico $Rok $Skupiny
     } finally { $conn.Close() }
+}
+
+<#
+    Skupiny z už otevřeného spojení (datový soubor nebo POHODA SQL) do složky agendy
+    včetně souhrnů. Vrací řádek za skupinu pro Write-PohodaMdbGroupReport.
+#>
+function Export-PohodaMdbGroups($Conn, [string]$Cil, [string]$Ico, [string]$Rok, [string[]]$Skupiny) {
+    foreach ($g in $Skupiny) {
+        $soubor = $PohodaMdbGroups[$g].Soubor
+        $file = Join-Path $Cil $soubor
+        $result = Export-PohodaMdbGroup $Conn $g $file $Ico $Rok
+        $souhrnPath = Join-Path $Cil ($soubor -replace '\.xml$', '-souhrn.txt')
+        Write-PohodaMdbSummary $souhrnPath $g $result
+        [pscustomobject]@{ Skupina = $g; Soubor = $soubor; Zaznamu = $result.Zaznamu; Pocty = $result.Pocty; Chybejici = $result.Chybejici; Bloby = $result.Bloby }
+    }
+}
+
+<# Výpis výsledku skupiny do konzole. #>
+function Write-PohodaMdbGroupReport($Row) {
+    if ($Row.Zaznamu -gt 0) {
+        Write-Host ("  {0,-8} {1,-16} {2,8} záznamů" -f $Row.Skupina, $Row.Soubor, $Row.Zaznamu) -ForegroundColor Green
+        foreach ($t in $Row.Pocty.Keys) {
+            Write-Host ("      {0,-22} {1,8}" -f $t, $Row.Pocty[$t])
+        }
+        foreach ($b in $Row.Bloby.Keys) {
+            Write-Host ("      {0,-28} přečteno {1,6}, nečitelné {2,6}" -f $b, $Row.Bloby[$b].Read, $Row.Bloby[$b].Unreadable)
+        }
+    } else {
+        Write-Host ("  {0,-8} ve zdroji nic není" -f $Row.Skupina) -ForegroundColor Yellow
+    }
+    if ($Row.Chybejici.Count -gt 0) {
+        Write-Host ("      chybí tabulky: " + ($Row.Chybejici -join ', ')) -ForegroundColor Yellow
+    }
 }
 
 # --- samostatné spuštění (při načtení z Export-Pohoda.ps1 se neprovede) ---
@@ -588,19 +627,6 @@ if (-not $rok -and $Skupiny -contains 'mzdy') {
 
 Write-Host "Výstup: $Vystup"
 foreach ($row in (Export-PohodaMdbData $Mdb $SqlServer $Databaze $Vystup $ico $rok $Skupiny)) {
-    if ($row.Zaznamu -gt 0) {
-        Write-Host ("  {0,-8} {1,-16} {2,8} záznamů" -f $row.Skupina, $row.Soubor, $row.Zaznamu) -ForegroundColor Green
-        foreach ($t in $row.Pocty.Keys) {
-            Write-Host ("      {0,-22} {1,8}" -f $t, $row.Pocty[$t])
-        }
-        foreach ($b in $row.Bloby.Keys) {
-            Write-Host ("      {0,-28} přečteno {1,6}, nečitelné {2,6}" -f $b, $row.Bloby[$b].Read, $row.Bloby[$b].Unreadable)
-        }
-    } else {
-        Write-Host ("  {0,-8} v datovém souboru nic není" -f $row.Skupina) -ForegroundColor Yellow
-    }
-    if ($row.Chybejici.Count -gt 0) {
-        Write-Host ("      chybí tabulky: " + ($row.Chybejici -join ', ')) -ForegroundColor Yellow
-    }
+    Write-PohodaMdbGroupReport $row
 }
 Write-Host 'Hotovo. Soubory přidejte do ZIP exportu ke složce agendy (IČO_rok), nebo spusťte znovu Export-Pohoda.ps1.' -ForegroundColor Cyan

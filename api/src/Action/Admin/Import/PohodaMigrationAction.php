@@ -70,12 +70,18 @@ final class PohodaMigrationAction extends AbstractMigrationAction
     /**
      * Exportní nástroje po programech. POHODA se exportuje přes XML rozhraní, PAMICA nemá
      * XML rozhraní a čte se přímo z mzdového datového souboru, takže má vlastní skript.
+     * Obojí má i variantu pro SQL Server; `*.example.json` jsou vzory konfigurace připojení.
      */
     private const TOOL_DIRS = [
         'pohoda' => '/tools/pohoda-export',
         'pamica' => '/tools/pamica-export',
     ];
-    private const TOOL_FILE_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.(ps1|cmd)$/';
+    /** Soubory z jiné složky, které nástroj potřebuje vedle sebe (připojení k SQL Serveru je společné). */
+    private const TOOL_SHARED_FILES = [
+        'pamica' => ['/tools/pohoda-export/PohodaSql-Common.ps1'],
+    ];
+    // JSON jen jako vzor (*.example.json): vyplněná konfigurace s heslem se nikdy nevystaví.
+    private const TOOL_FILE_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}(\.ps1|\.cmd|\.example\.json)$/';
 
     public function __construct(
         ImportJobRepository $jobs,
@@ -422,7 +428,11 @@ final class PohodaMigrationAction extends AbstractMigrationAction
     {
         $dir = self::TOOL_DIRS[$variant] ?? self::TOOL_DIRS['pohoda'];
         $out = [];
-        foreach (glob(Bootstrap::rootDir() . $dir . '/*') ?: [] as $path) {
+        $paths = glob(Bootstrap::rootDir() . $dir . '/*') ?: [];
+        foreach (self::TOOL_SHARED_FILES[$variant] ?? [] as $shared) {
+            $paths[] = Bootstrap::rootDir() . $shared;
+        }
+        foreach ($paths as $path) {
             $name = basename($path);
             if (is_file($path) && preg_match(self::TOOL_FILE_PATTERN, $name) === 1) {
                 $out[$name] = $path;

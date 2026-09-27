@@ -1,13 +1,14 @@
 # 107. Přechod z POHODY
 
-**Cesta: `Systém → Přechod z POHODA`**
+**Cesta: `Systém → Přechod z POHODA (i SQL)`**
 
 Průvodce převede vybrané účetní roky z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
-s XML, který připravíte jednou ze dvou cest: exportem přes XML rozhraní POHODY,
-nebo místním převodem kopie datového souboru MDB na Windows. Nástroje stáhnete
-přímo z průvodce. Zdrojová data jen čtou, v POHODĚ nic nemění.
+s XML, který připravíte jednou ze tří cest: exportem přes XML rozhraní POHODY,
+místním převodem kopie datového souboru MDB na Windows, nebo exportem přímo
+z databáze POHODA SQL. Nástroje stáhnete přímo z průvodce. Zdrojová data jen
+čtou, v POHODĚ nic nemění.
 
-Průvodce obě varianty ZIP automaticky rozpozná. Následuje stejný náhled,
+Průvodce všechny varianty ZIP automaticky rozpozná. Následuje stejný náhled,
 zkouška nanečisto a převod. Samotný MDB ani původní zálohu POHODY na server
 nenahrávejte.
 
@@ -40,6 +41,9 @@ nástroje:
 | `Export-Pohoda.ps1` | vlastní exportní skript |
 | `Export-PohodaMdbAccounting.cmd`, `Export-PohodaMdbAccounting.ps1` | převod účetnictví z kopie MDB do ZIP s XML bez spouštění XML exportu POHODY |
 | `Export-PohodaMdb.cmd`, `Export-PohodaMdb.ps1` | majetek a mzdy z datového souboru POHODY (XML export je neobsahuje) |
+| `Export-PohodaSQL.cmd`, `Export-PohodaSQL.ps1` | účetnictví, majetek a mzdy z databáze POHODA SQL do stejného ZIP s XML jako převod MDB |
+| `pohoda-sql.example.json` | vzor konfigurace připojení k SQL Serveru pro `Export-PohodaSQL` |
+| `Pohoda-Common.ps1`, `PohodaSql-Common.ps1` | podpůrné skripty převodu MDB a POHODA SQL; spouštějí je hlavní nástroje |
 
 Stáhněte každý soubor zvlášť, nebo všechny najednou tlačítkem *Stáhnout vše (ZIP)*
 jako `pohoda-export.zip`. Všechny soubory musí ležet ve stejné složce.
@@ -48,7 +52,8 @@ Balíček rozbalte na počítači s Windows. Nástroje běží v PowerShellu 5.1
 který je součástí Windows 10 a 11. Pro první cestu je potřeba nainstalovaná
 POHODA, kterou exportér spouští v režimu XML komunikace z příkazového řádku.
 Pro druhou cestu potřebujete kopii MDB a ovladač Microsoft Access Database
-Engine (ACE).
+Engine (ACE). Pro třetí cestu stačí síťový přístup k SQL Serveru s POHODOU,
+ovladač je součástí Windows.
 
 ### 107.1.2 Cesta 1: export XML přes POHODU
 
@@ -141,7 +146,7 @@ v 32bitovém.
 
 Tato cesta čte datový soubor přímo a vynechává postupné exportní požadavky
 na XML rozhraní POHODY. Hodí se, když máte datový soubor MDB a export přes
-POHODU trvá dlouho. Pro POHODA SQL použijte první cestu.
+POHODU trvá dlouho. Databázi POHODA SQL převede cesta 3 (107.1.6).
 
 1. V POHODĚ ověřte firmu a účetní rok, které chcete převést. Připravte
    odpovídající datový soubor `.mdb`. Zavřete POHODU u všech uživatelů
@@ -168,6 +173,87 @@ POHODU trvá dlouho. Pro POHODA SQL použijte první cestu.
 Převod MDB běží na Windows, následný import ZIP funguje stejně i na serveru
 s Linuxem. Server pro tuto cestu nepotřebuje ovladač Access ani přístup
 k původnímu MDB. Mzdy se nadále převádějí samostatným průvodcem
+[Přechod z PAMICA](108_Prechod_z_PAMICA.md).
+
+### 107.1.6 Cesta 3: export z POHODA SQL
+
+POHODA SQL ukládá každou účetní jednotku a rok do vlastní databáze na Microsoft
+SQL Serveru, pojmenované `StwPh_<IČO>_<rok>`. Tabulky jsou stejné jako
+v datovém souboru MDB, proto `Export-PohodaSQL.cmd` vytvoří **stejný ZIP jako
+převod MDB** v cestě 2: `89_ucetnictvi_mdb.xml` s účetnictvím, `90_majetek.xml`
+a `91_mzdy.xml`, se stejnými kontrolami IČO a roku a se souhrny vedle souborů.
+Nástroj posílá jen dotazy `SELECT` přes šifrované spojení jen pro čtení
+(`ApplicationIntent=ReadOnly`). Do databáze nic nezapisuje.
+
+1. Rozbalte celý `pohoda-export.zip` do jedné složky na počítači s Windows,
+   ze kterého je vidět SQL Server s POHODOU. Stačí Windows PowerShell 5.1,
+   který je součástí Windows 10 a 11.
+2. Zkopírujte vzor `pohoda-sql.example.json` jako `pohoda-sql.json` vedle
+   skriptu a vyplňte připojení. Bez tohoto souboru se nástroj na všechno
+   zeptá sám.
+3. Spusťte `Export-PohodaSQL.cmd` dvojklikem. Když v konfiguraci chybí
+   databáze, nástroj nabídne seznam agend na serveru (IČO, rok a název firmy
+   z registru agend POHODY) a agendu vyberete číslem. Před exportem potvrdíte
+   IČO a rok, které agenda uvádí.
+4. Vedle skriptu vznikne složka `<IČO>_<rok>` a ZIP `<IČO>_<rok>.zip`. ZIP
+   nahrajte do průvodce beze změny, nerozbalený.
+
+Konfigurace `pohoda-sql.json` (hodnoty ve vzoru jsou fiktivní):
+
+```json
+{
+  "host": "SERVER\\POHODA",
+  "port": null,
+  "database": "StwPh_12345678_2026",
+  "user": "",
+  "password": "",
+  "trustServerCertificate": true,
+  "driver": "sqlclient",
+  "odbcDriver": "ODBC Driver 18 for SQL Server"
+}
+```
+
+| Klíč | Význam |
+|---|---|
+| `host` | server, případně s pojmenovanou instancí (`SERVER\POHODA`; v JSON se zpětné lomítko píše dvakrát) |
+| `port` | TCP port; prázdné nebo `null` = výchozí 1433, u pojmenované instance ho zjistí služba SQL Browser |
+| `database` | databáze agendy `StwPh_<IČO>_<rok>`; prázdné = výběr ze seznamu |
+| `user`, `password` | přihlášení SQL; prázdný `user` = přihlášení účtem Windows. Prázdné heslo se nástroj zeptá skrytě |
+| `trustServerCertificate` | `true` = certifikát serveru se neověřuje (výchozí, POHODA SQL mívá certifikát podepsaný sám sebou) |
+| `driver` | `sqlclient` (výchozí, součást Windows), nebo `odbc` |
+| `odbcDriver` | jen pro `odbc`: název ovladače, výchozí `ODBC Driver 18 for SQL Server` |
+
+Na klíč, který v souboru chybí, se nástroj zeptá: server, port, uživatele,
+heslo (skrytě, nikam se nevypisuje) a důvěru v certifikát. Soubor
+`pohoda-sql.json` s heslem po exportu smažte.
+
+| Parametr | Význam |
+|---|---|
+| `-Config` | jiný konfigurační soubor než `pohoda-sql.json` vedle skriptu |
+| `-Databaze` | databáze agendy; přebije `database` z konfigurace |
+| `-Ico`, `-Rok` | vyberou agendu ze seznamu bez dotazu a ověří ji proti údajům agendy |
+| `-Vystup` | složka pro výsledek; bez něj složka skriptu |
+| `-BezZip` | nevytvářet ZIP |
+
+**Uživatel SQL.** Nástroj potřebuje jen čtení. Doporučujeme založit samostatný
+login s rolí `db_datareader` v databázi agendy. Aby nástroj nabídl u agend i
+názvy firem, přidejte ho se stejnou rolí i do databáze `StwPh_sys`:
+
+```sql
+CREATE LOGIN myucto_export WITH PASSWORD = '<silné heslo>';
+USE [StwPh_12345678_2026];
+CREATE USER myucto_export FOR LOGIN myucto_export;
+ALTER ROLE db_datareader ADD MEMBER myucto_export;
+```
+
+**Ovladač.** Výchozí ovladač SqlClient je součástí Windows a nic se
+neinstaluje. Když se k serveru nepřipojí (typicky kvůli verzi TLS), zvolte
+v konfiguraci `"driver": "odbc"` a nainstalujte
+[Microsoft ODBC Driver for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server).
+Výsledek je s oběma ovladači stejný.
+
+Soubory `90_majetek.xml` a `91_mzdy.xml` jsou stejné jako u datového souboru
+(107.1.4). Mzdy z programu PAMICA SQL popisuje
 [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
 ## 107.2 Co převod přenese
