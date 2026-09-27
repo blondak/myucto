@@ -150,6 +150,12 @@ export interface PohodaStartParams {
   /** Mzdy: OIČ a ID PPV z PAMICA pocházejí z protokolů ČSSZ, převod je smí uložit. */
   confirm_identifiers?: boolean
   approve_taken_over?: boolean
+  /**
+   * Mzdy: začátek vedení mezd leží před měsíci zpracovanými PAMICA (kontrola `payroll_start_behind_takeover`).
+   * `advance` = posunout ho za poslední zpracovaný měsíc a převést, `keep` = vědomě ponechat.
+   * Ostrý převod bez rozhodnutí backend odmítne.
+   */
+  start_decision?: 'advance' | 'keep'
 }
 
 export interface PohodaToolFile {

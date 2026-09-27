@@ -28699,7 +28699,17 @@
       "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé."
     },
     "other_wizard_hint": "Export obsahuje ještě další agendy, které tenhle průvodce nepřevádí (počet: {n}). Účetnictví převeďte v sekci Přechod z POHODA, mzdy v sekci Přechod z PAMICA.",
-    "payroll_approve_taken_over": "Převzatou docházku a mzdové vstupy rovnou schválit. Měsíce z PAMICA už proběhly a jsou podané; jako neschválené koncepty by nad nimi mzdový běh nešel spustit ani uzavřít. Pozor: spuštěný běh si měsíc spočítá znovu podle vlastní legislativní sady, takže výsledek se nemusí do koruny trefit do toho, co už bylo podané. Bez zaškrtnutí zůstanou podklady ke kontrole a schválíte je ručně v Mzdy → Vstupy a Mzdy → Docházka."
+    "payroll_approve_taken_over": "Převzatou docházku a mzdové vstupy rovnou schválit. Měsíce z PAMICA už proběhly a jsou podané; jako neschválené koncepty by nad nimi mzdový běh nešel spustit ani uzavřít. Pozor: spuštěný běh si měsíc spočítá znovu podle vlastní legislativní sady, takže výsledek se nemusí do koruny trefit do toho, co už bylo podané. Bez zaškrtnutí zůstanou podklady ke kontrole a schválíte je ručně v Mzdy → Vstupy a Mzdy → Docházka.",
+    "payroll_start": {
+      "title": "Začátek vedení mezd v MyÚčtu je {from}, PAMICA ale zpracovala mzdy až do {last}.",
+      "hint": "Bez posunu začátku by převod vzal měsíce {from} až {last} jako měsíce, které počítá MyÚčto: vznikly by v nich vstupy náhrad za nepřítomnost z docházky a dohody o srážkách, přestože je předchozí program už zpracoval a podal.",
+      "advance": "Posunout začátek na {period} a převést",
+      "advance_hint": "Doporučeno. Měsíce do {last} se převezmou jako zpracované předchozím programem, MyÚčto začne počítat od {period}.",
+      "keep": "Převést bez posunu začátku",
+      "keep_hint": "Jen pokud má MyÚčto měsíce {from} až {last} vědomě spočítat znovu.",
+      "keep_confirm": "Potvrzuji, že MyÚčto bude měsíce {from} až {last} počítat samo, i když je PAMICA už zpracovala.",
+      "keep_confirm_first": "Převod bez posunu začátku vedení mezd nejdřív potvrďte."
+    }
   },
   "credit_cards": {
     "title": "Kreditní karty",

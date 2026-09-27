@@ -192,6 +192,21 @@ const preflightGroups = computed(() => {
   return [...groups.entries()].map(([year, messages]) => ({ year, messages }))
 })
 const preflightErrors = computed(() => preflightGroups.value.flatMap(g => g.messages).filter(m => m.level === 'error'))
+// Mzdy: začátek vedení mezd leží před měsíci, které PAMICA zpracovala. Výchozí volba je
+// posunout ho a převést; převod bez posunu jde jen s potvrzením (backend ho jinak odmítne).
+const startBehind = computed(() => {
+  if (kind.value !== 'payroll') return null
+  const m = preflightGroups.value.flatMap(g => g.messages).find(x => x.code === 'payroll_start_behind_takeover')
+  const c = m?.context
+  if (!c || typeof c.from !== 'string' || typeof c.to !== 'string' || typeof c.last !== 'string') return null
+  return { from: monthLabel(c.from), to: monthLabel(c.to), last: monthLabel(c.last) }
+})
+const startDecision = ref<'advance' | 'keep'>('advance')
+const keepStartConfirmed = ref(false)
+const startDecisionBlocked = computed(() => startBehind.value !== null && startDecision.value === 'keep' && !keepStartConfirmed.value)
+function monthLabel(period: string): string {
+  return /^\d{4}-\d{2}/.test(period) ? `${period.slice(5, 7)}/${period.slice(0, 4)}` : period
+}
 // Stejná práva jako na backendu: mzdy zakládají osoby a vstupy už ve zkoušce nanečisto,
 // ostrý převod účetnictví zapisuje deník a nastavení firmy.
 const missingRights = computed(() => {
@@ -202,12 +217,14 @@ const missingRights = computed(() => {
 })
 const rightsMessage = computed(() => tt(kind.value === 'payroll' ? 'payroll_rights_missing' : 'rights_missing', { rights: missingRights.value.join(', ') }))
 const payrollRightsBlocked = computed(() => kind.value === 'payroll' && missingRights.value.length > 0)
-const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0 || payrollRightsBlocked.value)
+const blocked = computed(() => selectedYears.value.length === 0 || preflightErrors.value.length > 0 || payrollRightsBlocked.value
+  || startDecisionBlocked.value)
 // Tlačítko je zakázané i během běžící úlohy; důvodem pak není kontrola před převodem.
 const blockedReason = computed(() => jobRunning.value && !blocked.value
   ? tt(jobMode.value === 'import' ? 'import_running' : 'dry_run_running')
   : selectedYears.value.length === 0 ? tt('choose_year_first')
-    : payrollRightsBlocked.value ? rightsMessage.value : tt('preflight_blocked'))
+    : payrollRightsBlocked.value ? rightsMessage.value
+      : startDecisionBlocked.value && preflightErrors.value.length === 0 ? tt('payroll_start.keep_confirm_first') : tt('preflight_blocked'))
 const importDone = computed(() => jobMode.value === 'import' && !jobRunning.value && jobSucceeded.value
   && jobRuns.value.length > 0 && jobRuns.value.every(r => r.mode === 'import'))
 // Roky jobu, které se po chybě nebo zrušení předchozího roku nespustily.
@@ -226,6 +243,11 @@ watch(selectedYears, () => {
   confirmed.value = false
 })
 watch(kind, () => {
+  dryRunPassed.value = false
+  confirmed.value = false
+})
+// Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd.
+watch([startDecision, keepStartConfirmed], () => {
   dryRunPassed.value = false
   confirmed.value = false
 })
@@ -268,6 +290,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     years: [...selectedYears.value],
     kind: kind.value,
     ...(kind.value === 'payroll' ? { confirm_identifiers: confirmIdentifiers.value, approve_taken_over: approveTakenOver.value } : {}),
+    ...(startBehind.value !== null ? { start_decision: startDecision.value } : {}),
   })
 }
 
@@ -553,6 +576,30 @@ const actions = computed<ActionItem[]>(() => {
             <input v-model="approveTakenOver" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-approve-taken-over" />
             <span class="text-sm text-neutral-700">{{ tt('payroll_approve_taken_over') }}</span>
           </label>
+
+          <fieldset v-if="startBehind" class="mb-5 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm" data-testid="pohoda-start-decision">
+            <legend class="sr-only">{{ tt('payroll_start.title', startBehind) }}</legend>
+            <p class="font-medium text-warning-700">{{ tt('payroll_start.title', startBehind) }}</p>
+            <p class="mt-1 text-warning-700">{{ tt('payroll_start.hint', startBehind) }}</p>
+            <label class="mt-3 flex cursor-pointer items-start gap-3">
+              <input v-model="startDecision" type="radio" value="advance" class="mt-1 border-neutral-300 text-primary-600" data-testid="pohoda-start-advance" />
+              <span>
+                <span class="font-medium text-neutral-800">{{ tt('payroll_start.advance', { period: startBehind.to }) }}</span>
+                <span class="block text-neutral-600">{{ tt('payroll_start.advance_hint', { period: startBehind.to, last: startBehind.last }) }}</span>
+              </span>
+            </label>
+            <label class="mt-2 flex cursor-pointer items-start gap-3">
+              <input v-model="startDecision" type="radio" value="keep" class="mt-1 border-neutral-300 text-primary-600" data-testid="pohoda-start-keep" />
+              <span>
+                <span class="font-medium text-neutral-800">{{ tt('payroll_start.keep') }}</span>
+                <span class="block text-neutral-600">{{ tt('payroll_start.keep_hint', startBehind) }}</span>
+              </span>
+            </label>
+            <label v-if="startDecision === 'keep'" class="mt-2 ml-7 flex cursor-pointer items-start gap-3">
+              <input v-model="keepStartConfirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-start-keep-confirm" />
+              <span class="text-neutral-700">{{ tt('payroll_start.keep_confirm', startBehind) }}</span>
+            </label>
+          </fieldset>
 
           <p v-if="!selectedYears.length" class="mb-5 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="pohoda-no-year-selected">{{ tt('choose_year_first') }}</p>
           <div v-for="g in preflightGroups" :key="g.year" class="mb-5" :data-testid="`pohoda-preflight-${g.year}`">

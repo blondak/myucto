@@ -28699,7 +28699,17 @@
       "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice."
     },
     "other_wizard_hint": "The export contains further agendas this wizard does not migrate (count: {n}). Migrate accounting under Migration from POHODA and payroll under Migration from PAMICA.",
-    "payroll_approve_taken_over": "Approve the taken-over attendance and payroll inputs right away. PAMICA months have already been processed and filed; as unapproved drafts they would block starting and closing a payroll run. Note: a started run recalculates the month with its own rule set, so the result may not match what was already filed to the last crown. Leave it unchecked to review and approve them manually under Payroll → Inputs and Payroll → Attendance."
+    "payroll_approve_taken_over": "Approve the taken-over attendance and payroll inputs right away. PAMICA months have already been processed and filed; as unapproved drafts they would block starting and closing a payroll run. Note: a started run recalculates the month with its own rule set, so the result may not match what was already filed to the last crown. Leave it unchecked to review and approve them manually under Payroll → Inputs and Payroll → Attendance.",
+    "payroll_start": {
+      "title": "Payroll in MyÚčto starts in {from}, but PAMICA has processed payroll up to {last}.",
+      "hint": "Without moving the start, the transfer would treat {from} to {last} as months calculated by MyÚčto: absence compensation inputs from attendance and deduction agreements would be created in them, although the previous program already processed and filed them.",
+      "advance": "Move the start to {period} and transfer",
+      "advance_hint": "Recommended. Months up to {last} are taken over as processed by the previous program; MyÚčto calculates from {period}.",
+      "keep": "Transfer without moving the start",
+      "keep_hint": "Only if MyÚčto should deliberately recalculate {from} to {last}.",
+      "keep_confirm": "I confirm that MyÚčto will calculate {from} to {last} itself, although PAMICA has already processed them.",
+      "keep_confirm_first": "Confirm the transfer without moving the payroll start first."
+    }
   },
   "credit_cards": {
     "title": "Credit cards",
