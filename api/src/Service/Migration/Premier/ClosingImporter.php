@@ -59,6 +59,12 @@ final class ClosingImporter
             $p->finish(self::STEP);
             return;
         }
+        if ($p->hasDifferences()) {
+            // Přijatý rozdíl znamená, že převedený rok nesedí na PREMIER - uzávěrka by ho zabetonovala.
+            $p->warn(self::STEP, 'closing_skipped_differences', "Rok {$ctx->year} se neuzavírá, převod skončil s přijatými rozdíly. Po jejich dořešení rok uzavřete průvodcem uzávěrky.");
+            $p->finish(self::STEP);
+            return;
+        }
         $pdo = $this->db->pdo();
         $pdo->exec('SAVEPOINT premier_closing');
         try {

@@ -228,7 +228,7 @@ final class JournalImporter
             $entryDate = $isOpening ? $period['starts_on'] : (string) ($first['Datum'] ?? '');
             $documentDate = $isOpening ? null : (((string) ($first['DatPlnDPH'] ?? '')) ?: null);
             if ($entryDate === '') {
-                $p->error(self::STEP, 'entry_outside_period', sprintf(
+                $p->difference(self::STEP, 'entry_outside_period', sprintf(
                     'Doklad %s nemá datum zápisu — nepřenesen.',
                     trim((string) ($first['Doklad'] ?? ''))
                 ), ['year' => $year, 'document_no' => trim((string) ($first['Doklad'] ?? ''))]);

@@ -426,6 +426,28 @@ abstract class AbstractMigrationAction
             static fn (string $key): bool => !RequestAuthorization::allows($request, $key, AccessLevel::WRITE)));
     }
 
+    /**
+     * `accept_differences` z těla spuštění převodu: ostrý převod přijme rozdíly, na kterých
+     * selhala zkouška nanečisto ({@see \MyInvoice\Service\Migration\MoneyS3\ImportProtocol::difference()}).
+     * Zkouška nanečisto rozdíly nepřijímá nikdy.
+     *
+     * @param array<string,mixed> $body
+     * @return bool|null `null` = hodnota není ano/ne
+     */
+    public static function acceptDifferences(array $body, string $mode): ?bool
+    {
+        if (($body['accept_differences'] ?? null) === null) {
+            return false;
+        }
+        $value = filter_var($body['accept_differences'], FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        return $value === null ? null : $value && $mode === 'import';
+    }
+
+    protected static function invalidAcceptDifferences(Response $response): Response
+    {
+        return Json::error($response, 'invalid_accept_differences', 'Přijetí rozdílů převodu čeká hodnotu ano, nebo ne.', 422);
+    }
+
     protected static function userId(Request $request): int
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

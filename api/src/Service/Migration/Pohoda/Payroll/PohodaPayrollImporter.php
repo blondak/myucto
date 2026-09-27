@@ -282,10 +282,11 @@ final class PohodaPayrollImporter
      * @param bool $approveTakenOver převzatá docházka a mzdové vstupy se rovnou schválí (viz {@see approveTakenOverInputs()})
      * @param ?string $startDecision rozhodnutí k začátku vedení mezd, který leží před měsíci zpracovanými
      *        PAMICA ({@see self::START_ADVANCE} / {@see self::START_KEEP}); ostrý převod bez něj skončí chybou
+     * @param bool $acceptDifferences ostrý převod přijme měsíce, které se nepřevedly ({@see ImportProtocol::difference()})
      */
-    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false, ?string $startDecision = null): ImportProtocol
+    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false, ?string $startDecision = null, bool $acceptDifferences = false): ImportProtocol
     {
-        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import', $acceptDifferences);
         $protocol->set('kind', 'payroll');
         $preflight = $this->preflight($supplierId, $file, $year);
         $protocol->set('preflight', $preflight);
@@ -584,7 +585,7 @@ final class PohodaPayrollImporter
                         $created, $skipped > 0 ? ", přeskočeno řádků {$skipped}" : '',
                     ), ['period' => $period]);
                 } catch (\InvalidArgumentException|\DomainException|PohodaException $e) {
-                    $protocol->error(self::STEP_MONTHS, 'payroll_month_failed', "{$period}: " . $e->getMessage(), ['period' => $period]);
+                    $protocol->difference(self::STEP_MONTHS, 'payroll_month_failed', "{$period}: " . $e->getMessage(), ['period' => $period]);
                 }
             }
             $protocol->finish(self::STEP_MONTHS);

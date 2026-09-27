@@ -206,7 +206,7 @@ final class ChartJournalImporter
             $entryDate = $isOpening ? $period['starts_on'] : (PohodaXml::date($first, 'date') ?? '');
             $documentDate = $isOpening ? null : PohodaXml::date($first, 'dateTax');
             if ($entryDate === '') {
-                $p->error(self::STEP_JOURNAL, 'entry_without_date', "Doklad {$number} nemá datum zápisu - nepřenesen.", ['document_no' => $number]);
+                $p->difference(self::STEP_JOURNAL, 'entry_without_date', "Doklad {$number} nemá datum zápisu - nepřenesen.", ['document_no' => $number]);
                 continue;
             }
             // Agenda POHODY vede i doklady po konci roku (výpisy a faktury ledna až srpna

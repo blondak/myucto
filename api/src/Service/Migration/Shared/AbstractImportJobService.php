@@ -219,12 +219,15 @@ abstract class AbstractImportJobService
     /**
      * Běh převodu z více roků: vybrané roky jdou vzestupně, každý s vlastním záznamem běhu
      * a protokolem ({@see runYear()}). Rok, který skončí chybou nebo zrušením, zastaví
-     * i roky po něm (stavěly by na neúplném základu). Výsledný stav jobu je nejhorší ze
+     * i roky po něm (stavěly by na neúplném základu). Rok s přijatými rozdíly končí
+     * `completed_with_warnings` a další roky běží. Zkouška nanečisto převádí každý rok
+     * samostatně, takže rok, který selhal jen na rozdílech k přijetí, další roky nezastaví:
+     * účetní tak uvidí rozdíly všech roků najednou. Výsledný stav jobu je nejhorší ze
      * stavů roků; job se jím rovnou uzavře.
      *
      * @param list<int> $planYears roky vzestupně
      * @param list<string> $steps kroky převodu jednoho roku
-     * @param callable(int,array{created:int,skipped:int,failed:int}):array{status:string,year:int,run_id:?int,error:?string} $runYear
+     * @param callable(int,array{created:int,skipped:int,failed:int}):array{status:string,year:int,run_id:?int,error:?string,acceptable_only?:bool} $runYear
      *        převod roku s daným pořadím; druhý argument přebírá odkazem
      * @return string výsledný stav
      */
@@ -253,7 +256,7 @@ abstract class AbstractImportJobService
             }
             $result = $runYear($index, $totals);
             $results[] = $result;
-            if (in_array($result['status'], ['failed', 'cancelled'], true)) {
+            if (in_array($result['status'], ['failed', 'cancelled'], true) && !($dryRun && ($result['acceptable_only'] ?? false))) {
                 $rest = array_slice($planYears, $index + 1);
                 if ($rest !== []) {
                     $this->jobs->appendLog($jobId, sprintf('Rok %d skončil %s, roky %s se nespouštějí.',
@@ -279,7 +282,7 @@ abstract class AbstractImportJobService
      * @param list<string> $steps
      * @param array{created:int,skipped:int,failed:int} $totals MĚNÍ SE: počty za celý job
      * @param callable():array{run_id:int,log:string,kind:string,import:callable(?callable,?callable):object,journal?:callable(array<string,mixed>):array<string,mixed>} $start
-     * @return array{status:string,year:int,run_id:?int,error:?string}
+     * @return array{status:string,year:int,run_id:?int,error:?string,acceptable_only?:bool}
      */
     protected function runYear(int $jobId, array $params, int $supplierId, int $index, array $planYears, array $steps, array &$totals, callable $start): array
     {
@@ -332,6 +335,7 @@ abstract class AbstractImportJobService
                 'year' => $year,
                 'run_id' => $runId,
                 'error' => $status === 'failed' ? "Převod roku {$year} nedoběhl nebo nesedí rekonciliace - podrobnosti v protokolu #{$runId}." : null,
+                'acceptable_only' => (bool) ($result['acceptable_only'] ?? false),
             ];
         } catch (\Throwable $e) {
             $message = $this->failureMessage($e, sprintf('převod %s %s firmy %d, rok %d selhal', static::UPLOAD_NOUN, $token, $supplierId, $year), static::RUN_FAILED);

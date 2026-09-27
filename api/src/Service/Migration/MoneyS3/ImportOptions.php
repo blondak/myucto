@@ -23,6 +23,7 @@ final class ImportOptions
      * @param bool $confirmedIco uživatel výslovně potvrdil, že záloha patří firmě, i když to IČO ověřit nejde
      * @param int|null $fromYear první převáděný účetní rok; starší roky zálohy (a jejich doklady) se vynechají
      * @param string $disposalYearTax daňový odpis majetku v roce vyřazení (half|none)
+     * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -33,6 +34,7 @@ final class ImportOptions
         public readonly bool $confirmedIco = false,
         public readonly ?int $fromYear = null,
         public readonly string $disposalYearTax = self::DISPOSAL_YEAR_TAX_HALF,
+        public readonly bool $acceptDifferences = false,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -65,6 +67,6 @@ final class ImportOptions
             'confirmed_ico' => $this->confirmedIco,
             'from_year' => $this->fromYear,
             'disposal_year_tax' => $this->disposalYearTax,
-        ];
+        ] + ($this->acceptDifferences && !$this->isDryRun() ? ['accept_differences' => true] : []);
     }
 }

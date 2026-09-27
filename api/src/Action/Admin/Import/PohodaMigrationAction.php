@@ -256,6 +256,10 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         if (!in_array($kind, ['accounting', 'payroll'], true)) {
             return Json::error($response, 'invalid_kind', 'Neznámý druh převodu.', 422);
         }
+        $acceptDifferences = self::acceptDifferences($body, $mode);
+        if ($acceptDifferences === null) {
+            return self::invalidAcceptDifferences($response);
+        }
         $startDecision = $body['start_decision'] ?? null;
         if ($startDecision === '' || $kind !== 'payroll') {
             $startDecision = null;
@@ -313,12 +317,14 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             // Začátek vedení mezd před měsíci zpracovanými PAMICA: posunout a převést, nebo vědomě ponechat.
             // Bez rozhodnutí ostrý převod skončí chybou ({@see PohodaPayrollImporter::run()}).
             'start_decision' => $startDecision,
+            // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
+            'accept_differences' => $acceptDifferences,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;
         }
         $this->spawnWorker($jobId);
-        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind],
+        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind] + ($acceptDifferences ? ['accept_differences' => true] : []),
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);

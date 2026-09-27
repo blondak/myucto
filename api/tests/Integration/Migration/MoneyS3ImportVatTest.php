@@ -206,6 +206,34 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
             array_map(static fn (array $r): array => [(int) $r[0], (string) $r[1], (string) $r[2], $r[3]], $stmt->fetchAll(PDO::FETCH_NUM)));
     }
 
+    /**
+     * Přijatá FP25002 se sazbou DPH, kterou číselník nezná, se nepřevede a ostatní faktury kroku
+     * ano. Zkouška nanečisto selže jen na rozdílu k přijetí, ostrý převod s přijetím rozdílů
+     * doběhne s upozorněním a rozdíl vypíše v `accepted_differences`.
+     */
+    public function testUnknownVatRateSkipsOnlyThatDocument(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/rate.lz', SyntheticAgenda::filesWithUnknownVatRate());
+        $messages = static fn (ImportProtocol $p): array => array_merge(...array_column($p->toArray()['steps'], 'messages'));
+
+        $dry = $this->importer->run($supplierId, $this->userId, Ms3Backup::extract($this->tmp . '/rate.lz', $this->tmp . '/rate-dry'),
+            new ImportOptions(ImportOptions::MODE_DRY_RUN, true));
+        $unknown = array_values(array_filter($messages($dry), static fn (array $m): bool => $m['code'] === 'unknown_vat_rate'));
+        self::assertCount(1, $unknown, $this->explain($dry));
+        self::assertSame(['FP25002', 17.0, true], [$unknown[0]['context']['document_no'], $unknown[0]['context']['rate'], $unknown[0]['acceptable'] ?? false]);
+        self::assertSame('failed', $dry->status());
+        self::assertTrue($dry->toArray()['acceptable_only'], $this->explain($dry));
+
+        $live = $this->importer->run($supplierId, $this->userId, Ms3Backup::extract($this->tmp . '/rate.lz', $this->tmp . '/rate-live'),
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_HALF, true));
+        self::assertSame('completed_with_warnings', $live->status(), $this->explain($live));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP25002'"));
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP25001'"), $this->explain($live));
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = 'FV24001'"));
+        self::assertContains('unknown_vat_rate', array_column($live->toArray()['accepted_differences'], 'code'));
+    }
+
     /** Vydaná faktura v tuzemském přenesení (19Ř25_S) nese příznak na hlavičce; daň se nemění. */
     public function testDomesticReverseSaleIsFlagged(): void
     {

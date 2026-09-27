@@ -230,7 +230,7 @@ final class InvoiceImporter
         }
         $number = $this->freeNumber('invoices', $ctx->supplierId, $doc['numbers'] ?? [$doc['number']], (int) substr($doc['issue'], 0, 4));
         if ($number === null) {
-            $p->error($step, 'number_taken', "Číslo dokladu {$label} už ve firmě má jiný doklad, nepřevzat.", ['document_no' => $label]);
+            $p->warn($step, 'number_taken', "Číslo dokladu {$label} už ve firmě má jiný doklad, nepřevzat.", ['document_no' => $label]);
             return null;
         }
         $review = $reasons !== [];
@@ -276,7 +276,7 @@ final class InvoiceImporter
             if ((string) $e->getCode() !== '23000') {
                 throw $e;
             }
-            $p->error($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
+            $p->warn($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
             return null;
         }
         $rows = [];
@@ -412,7 +412,7 @@ final class InvoiceImporter
         $vendorId = $this->partners->resolvePartner($ctx, $snapshot);
         $number = $this->freeNumber('purchase_invoices', $ctx->supplierId, $doc['numbers'] ?? [$doc['series'] . $doc['number'] . '/' . $doc['year']], $doc['year']);
         if ($number === null) {
-            $p->error($step, 'number_taken', "Číslo dokladu {$label} už ve firmě má jiný doklad, nepřevzat.", ['document_no' => $label]);
+            $p->warn($step, 'number_taken', "Číslo dokladu {$label} už ve firmě má jiný doklad, nepřevzat.", ['document_no' => $label]);
             return null;
         }
         $vendorNumber = mb_substr($doc['vendor_number'] !== '' ? $doc['vendor_number'] : $number['number'], 0, 50);
@@ -475,7 +475,7 @@ final class InvoiceImporter
             if ((string) $e->getCode() !== '23000') {
                 throw $e;
             }
-            $p->error($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
+            $p->warn($step, 'insert_conflict', "Doklad {$label} koliduje s existujícím dokladem firmy (stejné číslo nebo variabilní symbol), nepřevzat.", ['document_no' => $label]);
             return null;
         }
         $rows = [];
@@ -563,7 +563,7 @@ final class InvoiceImporter
             }
             $rateId = $this->rateId((float) $item['rate'], $taxDate);
             if ($rateId === null) {
-                $ctx->protocol->error($step, 'unknown_vat_rate', sprintf(
+                $ctx->protocol->difference($step, 'unknown_vat_rate', sprintf(
                     'Doklad %s: sazba DPH %s %% není v číselníku sazeb, nepřevzat. Založte ji v Nastavení → Číselníky → DPH sazby a převod zopakujte.',
                     $label, rtrim(rtrim(number_format((float) $item['rate'], 2, ',', ''), '0'), ',')
                 ), ['document_no' => $label, 'rate' => $item['rate']]);

@@ -146,6 +146,10 @@ final class PremierMigrationAction extends AbstractMigrationAction
         if (!ImportYears::validBody($body)) {
             return Json::error($response, 'invalid_year', 'Roky převodu musí být seznam roků.', 422);
         }
+        $acceptDifferences = self::acceptDifferences($body, $mode);
+        if ($acceptDifferences === null) {
+            return self::invalidAcceptDifferences($response);
+        }
         $years = ImportYears::fromParams($body);
         if ($years === []) {
             return Json::error($response, 'invalid_year', 'Vyberte aspoň jeden rok převodu.', 422);
@@ -182,12 +186,14 @@ final class PremierMigrationAction extends AbstractMigrationAction
             'years' => $years,
             'year' => $years[0],
             'ico' => $supplierIco,
+            // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
+            'accept_differences' => $acceptDifferences,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;
         }
         $this->spawnWorker($jobId);
-        $this->logger->log('import.premier_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years],
+        $this->logger->log('import.premier_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years] + ($acceptDifferences ? ['accept_differences' => true] : []),
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);

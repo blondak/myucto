@@ -85,7 +85,7 @@ final class HistoricalYearCloser
             }
             if ($status !== 'match') {
                 $results[] = $row + ['status' => 'mismatch', 'message' => $takeover['message'] ?? null];
-                $p->error(self::STEP, 'closing_mismatch', "Konečné stavy roku {$year} nesedí na počáteční stavy roku {$next} z Money — rok zůstává otevřený.", ['year' => $year]);
+                $p->warn(self::STEP, 'closing_mismatch', "Konečné stavy roku {$year} nesedí na počáteční stavy roku {$next} z Money — rok zůstává otevřený.", ['year' => $year]);
                 $blocked = true;
                 continue;
             }

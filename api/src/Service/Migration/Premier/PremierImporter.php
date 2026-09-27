@@ -163,10 +163,11 @@ final class PremierImporter
     /**
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
+     * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      */
-    public function run(int $supplierId, int $userId, PremierBackup $backup, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null): ImportProtocol
+    public function run(int $supplierId, int $userId, PremierBackup $backup, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $acceptDifferences = false): ImportProtocol
     {
-        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import', $acceptDifferences);
         $protocol->set('agenda', [
             'ico' => $backup->ico,
             'year' => $year,
@@ -240,7 +241,7 @@ final class PremierImporter
                     $protocol->fail($key);
                     break;
                 }
-                if (in_array($key, self::CRITICAL_STEPS, true) && $this->stepFailed($protocol, $key)) {
+                if (in_array($key, self::CRITICAL_STEPS, true) && $protocol->blocks($key)) {
                     $protocol->fail($key);
                     break;
                 }
@@ -306,15 +307,6 @@ final class PremierImporter
         $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $ctx->period['starts_on'] . '.');
     }
 
-    private function stepFailed(ImportProtocol $protocol, string $key): bool
-    {
-        foreach ($protocol->toArray()['steps'] as $s) {
-            if ($s['key'] === $key) {
-                return $s['status'] === 'error';
-            }
-        }
-        return false;
-    }
 
     private function transactional(callable $fn): void
     {

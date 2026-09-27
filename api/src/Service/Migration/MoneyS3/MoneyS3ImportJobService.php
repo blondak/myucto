@@ -103,6 +103,7 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
                 (bool) ($params['confirm_ico'] ?? false),
                 (int) ($params['from_year'] ?? 0) > 0 ? (int) $params['from_year'] : null,
                 (string) ($params['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
+                (bool) ($params['accept_differences'] ?? false),
             );
             $agenda = (array) ($meta['agenda'] ?? []);
             $runId = $this->runs->startRun($supplierId, $jobId, $mode, [

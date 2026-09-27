@@ -210,7 +210,7 @@ final class MoneyS3Importer
         ?AgendaInfo $agenda = null,
         ?array $journalPreview = null,
     ): ImportProtocol {
-        $protocol = new ImportProtocol($options->mode);
+        $protocol = new ImportProtocol($options->mode, $options->acceptDifferences);
         $agenda ??= AgendaInfo::fromBackup($backup);
         $protocol->set('agenda', $agenda->toArray());
         $protocol->set('options', $options->toArray());
@@ -293,7 +293,7 @@ final class MoneyS3Importer
                     $protocol->fail($key);
                     break;
                 }
-                if (in_array($key, self::CRITICAL_STEPS, true) && $this->stepFailed($protocol, $key)) {
+                if (in_array($key, self::CRITICAL_STEPS, true) && $protocol->blocks($key)) {
                     $protocol->fail($key);
                     break;
                 }
@@ -357,15 +357,6 @@ final class MoneyS3Importer
         $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $starts[0] . '.');
     }
 
-    private function stepFailed(ImportProtocol $protocol, string $key): bool
-    {
-        foreach ($protocol->toArray()['steps'] as $s) {
-            if ($s['key'] === $key) {
-                return $s['status'] === 'error';
-            }
-        }
-        return false;
-    }
 
     private function transactional(callable $fn): void
     {

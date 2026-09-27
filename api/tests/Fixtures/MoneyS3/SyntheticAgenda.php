@@ -811,6 +811,22 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které přijatá FP25002 nese sazbu DPH 17 %, kterou číselník sazeb nezná.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithUnknownVatRate(): array
+    {
+        $files = self::files();
+        $rows = array_map(
+            static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25002' ? ['SazbaDPH2' => 17.0] + $r : $r,
+            iterator_to_array(Ms3Table::fromString($files['ROK.002/PFaktury.DAT'], 'PFAKTURY')->rows(), false),
+        );
+        $files['ROK.002/PFaktury.DAT'] = Ms3FixtureWriter::table(self::PURCHASE_FIELDS, $rows);
+        return $files;
+    }
+
+    /**
      * Agenda se mzdami v roce 2025, jak je nese mzdový modul Money: mzdové doklady
      * (`KnihZav`, `IntDokl` s `MZTyp`, `MZRok`, `MZMesic`, `MZDI_Zauct`) za leden až březen
      * a jejich řádky v deníku, měsíční úhrn daně (`VYUCDPFO`) a zbytek čitelných mezd

@@ -159,13 +159,14 @@ final class PohodaImporter
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
      * @param list<int> $skipYears roky po roce agendy, které se nepřevádějí
+     * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      */
-    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = []): ImportProtocol
+    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false): ImportProtocol
     {
         if ($skipYears !== []) {
             $skipYears = array_values(array_intersect(ChartJournalImporter::laterYears($export), $skipYears));
         }
-        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
+        $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import', $acceptDifferences);
         $protocol->set('agenda', [
             'ico' => $export->ico,
             'year' => $export->year,
@@ -239,7 +240,7 @@ final class PohodaImporter
                     $protocol->fail($key);
                     break;
                 }
-                if (in_array($key, self::CRITICAL_STEPS, true) && $this->stepFailed($protocol, $key)) {
+                if (in_array($key, self::CRITICAL_STEPS, true) && $protocol->blocks($key)) {
                     $protocol->fail($key);
                     break;
                 }
@@ -310,15 +311,6 @@ final class PohodaImporter
         $ctx->protocol->info(self::STEP_ACCOUNTING_MODE, 'double_entry', 'Podvojné účetnictví od ' . $ctx->period['starts_on'] . '.');
     }
 
-    private function stepFailed(ImportProtocol $protocol, string $key): bool
-    {
-        foreach ($protocol->toArray()['steps'] as $s) {
-            if ($s['key'] === $key) {
-                return $s['status'] === 'error';
-            }
-        }
-        return false;
-    }
 
     private function transactional(callable $fn): void
     {

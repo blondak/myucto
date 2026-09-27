@@ -110,7 +110,7 @@ final class InvoiceImporter
             }
             $number = $this->freeNumber('purchase_invoices', $ctx->supplierId, $docNo, $year);
             if ($number === null) {
-                $p->error(self::STEP_PURCHASE, 'number_taken', "Číslo dokladu {$docNo} ({$year}) už ve firmě má jiný doklad, faktura nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                $p->warn(self::STEP_PURCHASE, 'number_taken', "Číslo dokladu {$docNo} ({$year}) už ve firmě má jiný doklad, faktura nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
             $snapshot = [
@@ -123,7 +123,12 @@ final class InvoiceImporter
                 'country' => trim((string) ($r['D_Stat'] ?? '')),
             ];
             $vendorId = $this->codebooks->resolvePartner($ctx, $snapshot);
-            $amounts = $this->amounts($ctx, self::STEP_PURCHASE, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
+            try {
+                $amounts = $this->amounts($ctx, self::STEP_PURCHASE, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
+            } catch (MoneyS3Exception $e) {
+                $this->skipUnknownRate($ctx, self::STEP_PURCHASE, $docNo, $year, $e);
+                continue;
+            }
             $class = self::classify($r, false, $amounts['vat']);
             $review = $class['reasons'] !== [];
             if ($review && self::historicalUnposted($ctx, $year, 'FP', $docNo)) {
@@ -140,7 +145,12 @@ final class InvoiceImporter
                 } else {
                     // Samovyměření se vykazuje ke dni z interního dokladu (datum uplatnění DPH).
                     $taxDate = $selfAssessment['date'] ?? $taxDate;
-                    [$amounts, $class] = $this->applySelfAssessment($selfAssessment, $amounts, $class, $taxDate);
+                    try {
+                        [$amounts, $class] = $this->applySelfAssessment($selfAssessment, $amounts, $class, $taxDate);
+                    } catch (MoneyS3Exception $e) {
+                        $this->skipUnknownRate($ctx, self::STEP_PURCHASE, $docNo, $year, $e);
+                        continue;
+                    }
                     $reverseCharge = true;
                     $p->count(self::STEP_PURCHASE, 'self_assessed');
                 }
@@ -203,7 +213,7 @@ final class InvoiceImporter
                 if ((string) $e->getCode() !== '23000') {
                     throw $e;
                 }
-                $p->error(self::STEP_PURCHASE, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                $p->warn(self::STEP_PURCHASE, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
             $items = [];
@@ -272,7 +282,7 @@ final class InvoiceImporter
             }
             $number = $this->freeNumber('invoices', $ctx->supplierId, $docNo, $year);
             if ($number === null) {
-                $p->error(self::STEP_ISSUED, 'number_taken', "Číslo faktury {$docNo} ({$year}) už ve firmě má jiný doklad, faktura nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                $p->warn(self::STEP_ISSUED, 'number_taken', "Číslo faktury {$docNo} ({$year}) už ve firmě má jiný doklad, faktura nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
             $snapshot = [
@@ -285,7 +295,12 @@ final class InvoiceImporter
                 'country' => trim((string) ($r['O_Stat'] ?? $r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
-            $amounts = $this->amounts($ctx, self::STEP_ISSUED, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
+            try {
+                $amounts = $this->amounts($ctx, self::STEP_ISSUED, $docNo, $r, self::date($r, ['PlnenoDPH']) ?? $issue);
+            } catch (MoneyS3Exception $e) {
+                $this->skipUnknownRate($ctx, self::STEP_ISSUED, $docNo, $year, $e);
+                continue;
+            }
             $class = self::classify($r, true, $amounts['vat']);
             $review = $class['reasons'] !== [];
             if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
@@ -332,7 +347,7 @@ final class InvoiceImporter
                 if ((string) $e->getCode() !== '23000') {
                     throw $e;
                 }
-                $p->error(self::STEP_ISSUED, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                $p->warn(self::STEP_ISSUED, 'insert_conflict', "Faktura {$docNo} ({$year}) koliduje s existujícím dokladem firmy, nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
             $clients[$clientId] = $clientId;
@@ -386,7 +401,7 @@ final class InvoiceImporter
             }
             $number = $this->freeNumber('invoices', $ctx->supplierId, $docNo, $year);
             if ($number === null) {
-                $p->error(self::STEP_ISSUED, 'number_taken', "Číslo pohledávky {$docNo} ({$year}) už ve firmě má jiný doklad, pohledávka nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
+                $p->warn(self::STEP_ISSUED, 'number_taken', "Číslo pohledávky {$docNo} ({$year}) už ve firmě má jiný doklad, pohledávka nepřevzata.", ['document_no' => $docNo, 'year' => $year]);
                 continue;
             }
             $taxDate = self::date($r, ['DatPln', 'DatUcPr']) ?? $issue;
@@ -404,6 +419,14 @@ final class InvoiceImporter
                 $items[] = ['base' => $total, 'vat' => 0.0, 'rate' => 0.0];
             }
             if ($items === []) {
+                continue;
+            }
+            try {
+                foreach ($items as $i => $item) {
+                    $items[$i]['rate_id'] = $this->rateId($item['rate'], $taxDate);
+                }
+            } catch (MoneyS3Exception $e) {
+                $this->skipUnknownRate($ctx, self::STEP_ISSUED, $docNo, $year, $e);
                 continue;
             }
             $base = round(array_sum(array_column($items, 'base')), 2);
@@ -447,12 +470,10 @@ final class InvoiceImporter
                 bookedBy: $ctx->userId > 0 ? $ctx->userId : null,
                 vatClassificationCode: $resolved['code'],
             ));
-            // Sazba se páruje až po zápisu hlavičky, položku po položce - chybějící sazba
-            // shodí běh výjimkou ve stejném okamžiku jako dřív.
             foreach ($items as $i => $item) {
                 $this->writer->insertIssuedItem(
                     $id,
-                    self::issuedItem($r, $item['base'], $item['vat'], $this->rateId($item['rate'], $taxDate), $item['rate'], $resolved['code']),
+                    self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $resolved['code']),
                     $i,
                 );
             }
@@ -963,7 +984,23 @@ final class InvoiceImporter
     private function rateId(float $rate, string $date): int
     {
         return $this->rates->find($rate, $date)
-            ?? throw new MoneyS3Exception('unknown_vat_rate', 'Sazba DPH ' . $rate . ' % není v číselníku sazeb.');
+            ?? throw new MoneyS3Exception('unknown_vat_rate', 'Sazba DPH ' . $rate . ' % není v číselníku sazeb.', ['rate' => $rate]);
+    }
+
+    /**
+     * Doklad se sazbou DPH, kterou číselník firmy nezná, se nepřevede a ostatní doklady
+     * kroku ano - jako u POHODY a PREMIER. Jiná výjimka letí dál.
+     */
+    private function skipUnknownRate(ImportContext $ctx, string $step, string $docNo, int $year, MoneyS3Exception $e): void
+    {
+        if ($e->errorCode !== 'unknown_vat_rate') {
+            throw $e;
+        }
+        $rate = (float) ($e->context['rate'] ?? 0);
+        $ctx->protocol->difference($step, 'unknown_vat_rate', sprintf(
+            'Doklad %s (%d): sazba DPH %s %% není v číselníku sazeb firmy, nepřevzat. Založte ji v Nastavení → Číselníky → DPH sazby a převod zopakujte.',
+            $docNo, $year, rtrim(rtrim(number_format($rate, 2, ',', ''), '0'), ','),
+        ), ['document_no' => $docNo, 'year' => $year, 'rate' => $rate]);
     }
 
     /**

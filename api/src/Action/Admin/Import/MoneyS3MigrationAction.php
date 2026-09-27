@@ -239,6 +239,10 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
         $mode = (string) ($body['mode'] ?? ImportOptions::MODE_DRY_RUN);
         $firstPeriodStart = trim((string) ($body['first_period_start'] ?? ''));
         $fromYear = (int) ($body['from_year'] ?? 0);
+        $acceptDifferences = self::acceptDifferences($body, $mode);
+        if ($acceptDifferences === null) {
+            return self::invalidAcceptDifferences($response);
+        }
         try {
             $options = new ImportOptions(
                 $mode,
@@ -249,6 +253,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
                 filter_var($body['confirm_ico'] ?? false, FILTER_VALIDATE_BOOL),
                 $fromYear > 0 ? $fromYear : null,
                 (string) ($body['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
+                $acceptDifferences,
             );
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 422);
@@ -280,6 +285,8 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             'confirm_ico' => $options->confirmedIco,
             'from_year' => $options->fromYear,
             'disposal_year_tax' => $options->disposalYearTax,
+            // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
+            'accept_differences' => $options->acceptDifferences,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;

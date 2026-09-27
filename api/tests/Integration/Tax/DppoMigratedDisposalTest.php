@@ -91,17 +91,21 @@ final class DppoMigratedDisposalTest extends TestCase
         $supplierId = $this->supplier();
         $protocol = $this->importer->run($supplierId, $this->userId, Ms3Backup::extract($this->tmp . '/agenda.lz', $this->tmp . '/x'),
             new ImportOptions(ImportOptions::MODE_IMPORT, false, null, [], []));
-        // Jediná chyba smí být neuzavřený rok 2024: přidané vyřazení chybí v počátečních
-        // stavech 2025 syntetické agendy a pro přiznání 2024 uzávěrka potřeba není.
+        // Chyba žádná, neuzavřený rok 2024 je jen upozornění: přidané vyřazení chybí
+        // v počátečních stavech 2025 syntetické agendy a pro přiznání 2024 uzávěrka potřeba není.
         $errors = [];
+        $warnings = [];
         foreach ($protocol->toArray()['steps'] as $step) {
             foreach ($step['messages'] as $m) {
                 if ($m['level'] === 'error') {
                     $errors[] = $m['code'];
+                } elseif ($m['level'] === 'warning') {
+                    $warnings[] = $m['code'];
                 }
             }
         }
-        self::assertSame(['closing_mismatch'], $errors);
+        self::assertSame([], $errors);
+        self::assertContains('closing_mismatch', $warnings);
 
         $data = $this->provider->gather($supplierId, 2024);
         $rows = array_column($data['disposals'], null, 'inventory_number');

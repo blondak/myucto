@@ -79,6 +79,24 @@ final class AbstractImportJobServiceTest extends TestCase
         self::assertSame(3 * 2, (int) $job['total_items']);
     }
 
+    /**
+     * Zkouška nanečisto převádí roky samostatně: rok, který selhal jen na rozdílech k přijetí,
+     * další roky nezastaví. Ostrý převod bez přijetí rozdílů za takovým rokem skončí.
+     */
+    public function testDryRunContinuesAfterYearWithAcceptableDifferencesOnly(): void
+    {
+        $jobId = $this->job(['mode' => 'dry_run', 'years' => [2021, 2022, 2023]]);
+        $this->service->outcomes = [2022 => 'acceptable'];
+        $this->service->run($jobId);
+        self::assertSame([2021, 2022, 2023], $this->service->ran);
+        self::assertSame('failed', $this->jobs->findById($jobId)['status']);
+
+        $this->service->ran = [];
+        $jobId = $this->job(['mode' => 'import', 'years' => [2021, 2022, 2023]]);
+        $this->service->run($jobId);
+        self::assertSame([2021, 2022], $this->service->ran);
+    }
+
     public function testSourceErrorIsShownAndUnexpectedErrorIsGeneric(): void
     {
         $jobId = $this->job(['mode' => 'dry_run', 'years' => [2021, 2022]]);
@@ -176,13 +194,13 @@ final class FakeImportJobService extends AbstractImportJobService
 
                                 public function status(): string
                                 {
-                                    return $this->status;
+                                    return $this->status === 'acceptable' ? 'failed' : $this->status;
                                 }
 
                                 /** @return array<string,mixed> */
                                 public function toArray(): array
                                 {
-                                    return ['failure' => null, 'steps' => [
+                                    return ['failure' => null, 'acceptable_only' => $this->status === 'acceptable', 'steps' => [
                                         ['key' => 'journal', 'counts' => ['entries' => 3, 'existing' => 1], 'messages' => [['level' => 'error'], ['level' => 'warning']]],
                                     ]];
                                 }

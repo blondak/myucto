@@ -169,7 +169,7 @@ final class PremierImportJobService extends AbstractImportJobService
                     'log' => ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . " agendy IČO {$agenda['ico']}, rok {$year}.",
                     'kind' => 'accounting',
                     'import' => fn (?callable $progress, ?callable $cancel): object
-                        => $this->importer->run($supplierId, $userId, $backup, $year, $dryRun, $runId, $progress, $cancel),
+                        => $this->importer->run($supplierId, $userId, $backup, $year, $dryRun, $runId, $progress, $cancel, (bool) ($params['accept_differences'] ?? false)),
                 ];
             });
     }
