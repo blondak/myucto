@@ -26275,6 +26275,7 @@
     "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
     "manual_review": "Manual review required",
     "review_notice": "Results are working papers. Before approval, verify the decisive period, qualifying time, published shifts and statutory conditions for the employee.",
+    "approval_warning_open": "Open and fix",
     "empty": {
       "no_employments_title": "No employees yet",
       "no_employments_message": "Absences, average earnings and the leave ledger are all tracked per employment. Create an employee and their employment in People, then come back here.",

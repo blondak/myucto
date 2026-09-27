@@ -385,6 +385,31 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /* C-22: DPN přes odpracované dny a schválený běh — schválení musí říct, co opravit. */
+  it('po schválení ukáže varování o docházce a schváleném běhu s proklikem', async () => {
+    m.decide.mockResolvedValue({
+      absence: { id: 44, status: 'approved' },
+      sickness_case: null,
+      warnings: [
+        { code: 'absence_overlaps_worked_time', message: 'Na 8. 9. je zapsaná odpracovaná doba.', path: '/payroll/time?employment=48&period=2026-09' },
+        { code: 'absence_in_approved_run', message: 'Mzdový běh za 9/2026 je už schválený.', path: '/payroll/runs?period=2026-09' },
+      ],
+    })
+    const wrapper = mount(AbsenceManagement, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
+    await checks[0].setValue(true)
+    await checks[1].setValue(true)
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.actions.approve'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="absence-approval-warning-absence_overlaps_worked_time"]').text()).toContain('8. 9.')
+    expect(wrapper.find('[data-test="absence-approval-warning-absence_in_approved_run"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('když případ dávky nevznikl, řekne proč', async () => {
     m.decide.mockResolvedValue({
       absence: { id: 44, status: 'approved' },

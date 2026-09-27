@@ -21,6 +21,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
+use MyInvoice\Service\Payroll\Absence\PayrollAbsenceApprovalWarnings;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\AverageEarningBatchConflictException;
@@ -71,6 +72,7 @@ final class PayrollAbsenceAction
         private readonly AverageEarningBatchService $averageBatch,
         private readonly PayrollObstacleInputMaterializer $obstacleInputs,
         private readonly SicknessCaseFromAbsenceService $sicknessCases,
+        private readonly PayrollAbsenceApprovalWarnings $approvalWarnings,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -160,6 +162,7 @@ final class PayrollAbsenceAction
         $supplierId = $this->currentSupplierId($request);
         $body = $this->body($request);
         $id = (int) ($args['id'] ?? 0);
+        $decision = '';
         try {
             $version = $this->requiredNonNegativeInt($body['row_version'] ?? null, 'row_version');
             $decision = (string) ($body['decision'] ?? '');
@@ -345,6 +348,9 @@ final class PayrollAbsenceAction
             'absence' => $absence,
             'calculation' => $calculation,
             'sickness_case' => $sicknessCase,
+            'warnings' => $decision === 'approved'
+                ? $this->approvalWarnings->forApproved($supplierId, $absence)
+                : [],
         ]);
     }
 

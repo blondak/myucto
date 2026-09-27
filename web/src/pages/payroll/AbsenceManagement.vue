@@ -809,6 +809,12 @@ const overdrawPrompt = ref<{
  */
 const sicknessNotice = ref<{ text: string, warning: boolean } | null>(null)
 const shiftsMissing = ref<{ name: string, employmentId: number, period: string, message: string } | null>(null)
+/** Co po schválení opravit jinde: docházka přes dny nepřítomnosti, schválený běh (C-22). */
+const approvalWarnings = ref<Array<{ name: string, code: string, message: string, path: string }>>([])
+
+function collectApprovalWarnings(item: PayrollAbsence, result: { warnings?: Array<{ code: string, message: string, path: string }> } | null | undefined) {
+  return (result?.warnings ?? []).map(warning => ({ name: item.full_name, ...warning }))
+}
 
 function showSicknessNotice(outcome: PayrollAbsenceSicknessCaseOutcome | null | undefined): void {
   if (!outcome) {
@@ -848,6 +854,7 @@ async function decide(
       ...(overdrawConfirmed ? { overdraw_confirmed: true } : {}),
     })
     showSicknessNotice(result?.sickness_case)
+    approvalWarnings.value = collectApprovalWarnings(item, result)
     overdrawPrompt.value = null
     toast.success(t(`payroll_absence.messages.${decision}`))
     if (result.calculation?.warning === 'obstacle_without_published_shifts') {
@@ -961,6 +968,7 @@ async function approveSelected() {
   const failures: ApproveFailure[] = []
   let approved = 0
   const withoutShifts: string[] = []
+  const warnings: typeof approvalWarnings.value = []
   for (const item of items) {
     try {
       const result = await payrollAbsenceApi.decide(item.id, {
@@ -968,6 +976,7 @@ async function approveSelected() {
         decision: 'approved',
       })
       approved += 1
+      warnings.push(...collectApprovalWarnings(item, result))
       if (result.calculation?.warning === 'obstacle_without_published_shifts') {
         withoutShifts.push(item.full_name)
       }
@@ -981,6 +990,7 @@ async function approveSelected() {
     }
   }
   approveFailures.value = failures
+  approvalWarnings.value = warnings
   if (approved > 0) toast.success(t('payroll_absence.bulk.approved', { count: approved }))
   if (withoutShifts.length > 0) {
     toast.warning(t('payroll_absence.obstacle.without_shifts', { name: withoutShifts.join(', ') }))
@@ -1436,6 +1446,22 @@ onMounted(async () => {
         data-test="absence-sickness-case-link"
       >
         {{ t('payroll.sicknessCases.absenceNotice.open') }}
+      </RouterLink>
+    </section>
+
+    <section
+      v-for="(warning, index) in approvalWarnings"
+      :key="`${warning.code}-${index}`"
+      class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800"
+      role="alert"
+      :data-test="`absence-approval-warning-${warning.code}`"
+    >
+      <span class="min-w-0 flex-1">
+        <strong>{{ warning.name }}:</strong> {{ warning.message }}
+      </span>
+      <RouterLink :to="warning.path" :class="[btnOutline('warning'), 'whitespace-nowrap']">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+        {{ t('payroll_absence.approval_warning_open') }}
       </RouterLink>
     </section>
 

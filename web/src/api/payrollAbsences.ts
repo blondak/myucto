@@ -15,6 +15,8 @@ export interface PayrollAbsenceDecisionResult {
    */
   calculation?: { warning?: string | null } | null
   sickness_case?: PayrollAbsenceSicknessCaseOutcome | null
+  /** Co je po schválení potřeba opravit jinde (docházka, schválený běh). */
+  warnings?: Array<{ code: string, message: string, path: string }>
 }
 
 /**

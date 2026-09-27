@@ -26275,6 +26275,7 @@
     "subtitle": "Evidence nepřítomností, snapshoty průměrného výdělku a auditovatelný ledger dovolené.",
     "manual_review": "Vyžaduje ruční kontrolu",
     "review_notice": "Výsledky jsou pracovní podklad. Před schválením ověřte rozhodné období, započitatelné doby, publikované směny a zákonné podmínky konkrétního zaměstnance.",
+    "approval_warning_open": "Otevřít a opravit",
     "empty": {
       "no_employments_title": "Zatím tu nemáte žádného zaměstnance",
       "no_employments_message": "Nepřítomnosti, průměrný výdělek i ledger dovolené se vedou k pracovnímu vztahu. Založte zaměstnance a jeho pracovní vztah v evidenci osob a vraťte se sem.",
