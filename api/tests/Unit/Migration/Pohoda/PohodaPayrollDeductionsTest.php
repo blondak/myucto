@@ -107,8 +107,12 @@ final class PohodaPayrollDeductionsTest extends TestCase
 
         $monthly = self::single($orphans, 'S07');
         self::assertSame('voluntary', $monthly['target']);
-        self::assertSame('other', $monthly['deduction_kind']);
+        self::assertSame('imported', $monthly['deduction_kind']);
         self::assertTrue($monthly['carried_by_attendance'], 'Srážku z měsíčního sešitu zapisuje import docházky.');
+
+        // Trvalá obecná srážka z karty, kterou předchozí program ve mzdách nestrhl, je dohoda.
+        self::assertSame('other', $byReference['pamica:zamsrazky:6']['deduction_kind']);
+        self::assertSame([], $byReference['pamica:zamsrazky:6']['periods']);
 
         // Podklady pro nezabavitelnou částku se jen počítají, převést se nedají.
         self::assertSame(1, $result['protected_amount_inputs']);
@@ -132,6 +136,9 @@ final class PohodaPayrollDeductionsTest extends TestCase
             static fn (array $row): bool => str_starts_with((string) $row['reference'], 'pamica:mzsrazky:'),
         )), 'S07');
         self::assertFalse($monthly['carried_by_attendance']);
+        // Druh je stejný jako u téže srážky, kterou v počítaných měsících zakládá import docházky.
+        self::assertSame('imported', $monthly['deduction_kind']);
+        self::assertSame('imported', $fromSheet['deduction_kind']);
         $last = end($monthly['periods']);
         self::assertSame((new \DateTimeImmutable($last . '-01'))->format('Y-m-t'), $monthly['valid_to']);
 
@@ -168,6 +175,7 @@ final class PohodaPayrollDeductionsTest extends TestCase
         $row('sMZsrazky', ['ID' => 3, 'Cislo' => 'S10', 'Nazev' => 'Penzijní připojištění']);
         $row('sMZsrazky', ['ID' => 4, 'Cislo' => 'S07', 'Nazev' => 'Srážka zadaná částkou']);
         $row('sMZsrazky', ['ID' => 5, 'Cislo' => 'S05', 'Nazev' => 'Deponovaná částka zákonné srážky', 'JeDepon' => 1]);
+        $row('sMZsrazky', ['ID' => 6, 'Cislo' => 'S08', 'Nazev' => 'Splátka půjčky']);
 
         $row('ZAM', ['ID' => 1, 'OsCislo' => '1001', 'Jmeno' => 'Jana', 'Prijmeni' => 'Testovací']);
         $row('ZAM', ['ID' => 2, 'OsCislo' => '1002', 'Jmeno' => 'Petr', 'Prijmeni' => 'Zkušební']);
@@ -192,6 +200,8 @@ final class PohodaPayrollDeductionsTest extends TestCase
             'KcMesic' => 500, 'PlFirma' => 'Penzijní společnost Zkušební']);
         // Trvalá srážka, kterou nese i měsíční sešit převodu.
         $row('ZAMsrazky', ['ID' => 5, 'RefAg' => 2, 'RefSlozka' => 4, 'DatOd' => '2026-01-01', 'KcMesic' => 300]);
+        // Trvalá srážka z karty, kterou předchozí program ve mzdách zatím nestrhl.
+        $row('ZAMsrazky', ['ID' => 6, 'RefAg' => 2, 'RefSlozka' => 6, 'DatOd' => '2026-09-01', 'KcMesic' => 1000]);
 
         $row('MZsrazky', ['ID' => 1, 'RefAg' => 11, 'RefZAMsrazky' => 1, 'RefSlozka' => 1, 'KcSrazeno' => 2500]);
         $row('MZsrazky', ['ID' => 2, 'RefAg' => 12, 'RefZAMsrazky' => 1, 'RefSlozka' => 1, 'KcSrazeno' => 2500]);
