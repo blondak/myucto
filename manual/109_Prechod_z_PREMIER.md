@@ -256,7 +256,9 @@ upozorněními a chybami a rekonciliací převáděného roku, obdobně jako
 u přechodu z POHODY, viz [§ 107.5](107_Prechod_z_POHODY.md#1075-rekonciliace-a-protokol).
 Obratová předvaha MyÚčta se porovná s předvahou spočtenou přímo z deníku
 PREMIER na haléř, včetně počátečních stavů. Protokol zkoušky nanečisto
-z přehledu pod průvodcem smažete, protokol ostrého převodu zůstává.
+z přehledu pod průvodcem smažete, protokol ostrého převodu zůstává. Co je
+v protokolu chyba, upozornění a rozdíl k přijetí a jak rozdíly přijmout, popisuje
+[§ 103.5.1](103_Prechod_z_Money_S3.md#10351-chyby-upozorneni-a-rozdily-k-prijeti).
 
 **Úpravy základu daně.** Výsledek hospodaření, odpisy a nedaňové účty spočte
 MyÚčto z převedených dat samo. Ruční úpravy, které účetní zadala do přiznání
@@ -315,8 +317,8 @@ právnických osob, nebo rok celý zamčený v PREMIERu v „Zamykání period".
 - Uzavření knih zaúčtuje zápis na 702 a 710 a otevření dalšího roku převezme
   počáteční stavy z převodu (musí sedět účet po účtu).
 
-Uzávěrka proběhne jen tehdy, když převod roku skončil bez chyb a předchozí
-rok je uzavřený. Když by musela zaúčtovat cokoli navíc nebo něco nesouhlasí,
+Uzávěrka proběhne jen tehdy, když převod roku skončil bez chyb a bez
+přijatých rozdílů a předchozí rok je uzavřený. Když by musela zaúčtovat cokoli navíc nebo něco nesouhlasí,
 celá se vrátí, rok zůstane otevřený a protokol řekne proč. Uzavřete ho pak
 ručně v Účetnictví → Uzávěrka. Rok, který v PREMIERu uzavřený není (typicky
 běžný rok), zůstává otevřený.

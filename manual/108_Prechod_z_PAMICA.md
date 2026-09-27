@@ -400,6 +400,10 @@ platného data narození nebo neznámý kód pojišťovny), protokol vypíše a 
 mzdy v daném měsíci zůstanou nespárované; po doplnění osoby v evidenci
 převod spusťte znovu.
 
+Měsíc, který se nepodařilo převést, je v protokolu rozdíl k přijetí: ostatní
+měsíce se převedou a ostrý převod jde po zkoušce nanečisto spustit i s ním,
+viz [§ 103.5.1](103_Prechod_z_Money_S3.md#10351-chyby-upozorneni-a-rozdily-k-prijeti).
+
 ## 108.10 Kontrola převzatých mezd
 
 **Cesta: `Mzdy → Importy → Kontrola převzetí`**

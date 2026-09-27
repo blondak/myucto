@@ -278,6 +278,34 @@ spárování. Spárovaná faktura dostane stav uhrazeno.
 Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
 nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
+### 103.5.1 Chyby, upozornění a rozdíly k přijetí
+
+Zprávy protokolu mají tři váhy. Platí stejně pro převod z Money S3, POHODY,
+PAMICA i PREMIER.
+
+| Váha | Co znamená | Příklady |
+|---|---|---|
+| **Chyba** | Převod nesmí pokračovat, účetnictví by bylo rozbité nebo neúplné v základu. Ostrý převod se nespustí. | kontrola před převodem (jiné IČO, zápisy v období, uzavřené období, soubor), účet mimo osnovu, deník, ve kterém MD ≠ D, obraty nebo počáteční stavy předvahy nesedí (K2), koncepty v deníku, neočekávaná chyba |
+| **Upozornění** | Převod doběhne, protokol jen oznamuje, co je potřeba dořešit. | číslo dokladu je ve firmě obsazené jiným dokladem, doklad koliduje s existujícím, konečné stavy roku nesedí na počáteční stavy dalšího roku (rok zůstane otevřený), zaokrouhlovací rozdíl předvahy |
+| **Rozdíl k přijetí** | Část dat se nepřevedla nebo převod nesedí na zdrojový program, zbytek je v pořádku. Bez přijetí se chová jako chyba. | doklad se sazbou DPH, kterou číselník nezná, zápis bez data, měsíc mezd, který se nepřevedl, předvaha proti zdroji nad korunu (K1), rozvaha (K3), doklady proti deníku (K4) |
+
+**Zaokrouhlení předvahy.** Liší-li se obratová předvaha MyÚčta od zdroje
+na každém účtu nejvýše o 1,00 Kč, jde o zaokrouhlení dokladů ve zdrojovém
+programu. Protokol ho vypíše jako upozornění se seznamem účtů a částek
+a kontrola K1 platí. Větší rozdíl na kterémkoli účtu je rozdíl k přijetí.
+
+**Přijetí rozdílů.** Když zkouška nanečisto selže jen na rozdílech k přijetí,
+průvodce je pod protokolem vypíše a nabídne zaškrtávátko *Převést i přes
+rozdíly*. Teprve po jeho zaškrtnutí jde přejít k ostrému převodu. Ostrý převod
+pak rozdíly zapíše jako upozornění, skončí stavem *dokončeno s upozorněními*
+a protokol je vypíše v samostatné sekci přijatých rozdílů (kód, účty nebo čísla
+dokladů a částky). Doklady, které se nepřevedly, doplňte ručně, nebo příčinu
+opravte a spusťte převod znovu; opakovaný převod doplní jen to, co chybí.
+
+Při přijatých rozdílech se automatika účtování po převodu obnoví stejně jako
+po převodu bez chyb. Převod více roků pokračuje dalšími roky. Převod z PREMIER
+rok s přijatými rozdíly neuzavírá ([§ 109.6.1](109_Prechod_z_PREMIER.md#10961-uzaverka-uzavrenych-roku)).
+
 ## 103.6 Uzávěrka historických let
 
 Money převáděné roky uzavřelo, převod je ale naveze otevřené. Průvodce je pak

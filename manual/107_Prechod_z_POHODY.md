@@ -399,6 +399,11 @@ Doklad, ke kterému v deníku POHODY není zápis se stejným číslem, protokol
 vypíše jako doklad bez zápisu. Takový doklad není zaúčtovaný. Zaúčtujte ho
 ručně nebo hromadně v Účetnictví → Doúčtovat doklady.
 
+Co je v protokolu chyba, upozornění a rozdíl k přijetí (například doklad se
+sazbou DPH, kterou číselník nezná, nebo zápis bez data) a jak rozdíly přijmout
+a převést i s nimi, popisuje
+[§ 103.5.1](103_Prechod_z_Money_S3.md#10351-chyby-upozorneni-a-rozdily-k-prijeti).
+
 Úhradu faktury páruje převod podle likvidace, kterou POHODA u faktury drží:
 číslo bankovního nebo pokladního dokladu a datum úhrady. Mezi pohyby se
 stejným číslem rozhoduje datum. Nejednoznačnou úhradu převod nespáruje
