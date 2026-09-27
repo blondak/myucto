@@ -170,6 +170,22 @@ final class BankDocumentNumberTest extends BankPostingTestCase
         self::assertSame('SYNTH-BV-0042', $this->documentNo($entryId), 'Přeúčtování převzatého zápisu číslo zdroje nemění.');
     }
 
+    /** Převod ze Stereo NX vede deník v mapě jako `accounting_journal`; platí pro něj totéž. */
+    public function testStereoNxTakenOverEntryKeepsSourceDocumentNumber(): void
+    {
+        $tx = $this->transaction($this->statement(), -74.00, ['posted_at' => self::YEAR . '-10-12']);
+        $entryId = $this->legacyEntry($tx, 'SYNTH-NX-0043', self::YEAR . '-10-12');
+        $this->db->pdo()->prepare(
+            "INSERT INTO stereo_nx_import_map (supplier_id, source_ico, source_company_index, kind, source_key, source_hash, target_id)
+             VALUES (?, '00000019', 1, 'accounting_journal', ?, ?, ?)"
+        )->execute([$this->supplierId, 'synth-' . $entryId, str_repeat('0', 64), $entryId]);
+
+        self::assertTrue((new BankDocumentNumber($this->db))->isTakenOver($this->supplierId, $entryId));
+        $result = (new BankDocumentNumberBackfill($this->db))->run($this->supplierId, self::YEAR . '-01-01', true);
+        self::assertNotContains($entryId, array_column($result['changes'], 'entry_id'));
+        self::assertSame('SYNTH-NX-0043', $this->documentNo($entryId));
+    }
+
     public function testDeactivatedAccountKeepsItsSeries(): void
     {
         $tx = $this->transaction($this->statement(), -12.00, ['posted_at' => self::YEAR . '-02-03']);

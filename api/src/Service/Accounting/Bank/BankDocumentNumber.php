@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -40,9 +41,6 @@ final class BankDocumentNumber
      */
     public const SOURCE_TYPES = ['bank', 'card_settlement'];
 
-    /** Mapy převodů z jiných účetních programů; zápis v nich nese číslo dokladu zdroje. */
-    private const TAKEOVER_MAPS = ['money_s3_import_map', 'pohoda_import_map', 'premier_import_map'];
-
     private const LEGACY_PREFIX = 'BANK-';
 
     private SupplierBankAccountRepository $accounts;
@@ -65,23 +63,16 @@ final class BankDocumentNumber
      * s číslem dokladu zdroje a teprve pak zápis naváže na převzatý pohyb (source_id),
      * takže podle zdroje ho od vlastního bankovního zápisu nerozlišíš. Číslo dokladu
      * převzatého zápisu je vazba na doklad v původním programu a nepřečíslovává se.
+     * Pravidlo drží {@see TakenOverRecord}; tady jen kvůli dosavadním volajícím.
      */
     public static function takenOverSql(string $alias): string
     {
-        return '(' . implode(' OR ', array_map(
-            static fn (string $map): string => "EXISTS (SELECT 1 FROM {$map} tom
-                WHERE tom.supplier_id = {$alias}.supplier_id AND tom.kind = 'journal_entry' AND tom.target_id = {$alias}.id)",
-            self::TAKEOVER_MAPS,
-        )) . ')';
+        return TakenOverRecord::journalEntrySql($alias);
     }
 
     public function isTakenOver(int $supplierId, int $entryId): bool
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::takenOverSql('je') . ' FROM journal_entries je WHERE je.id = ? AND je.supplier_id = ?'
-        );
-        $stmt->execute([$entryId, $supplierId]);
-        return (bool) $stmt->fetchColumn();
+        return (new TakenOverRecord($this->db))->isJournalEntry($supplierId, $entryId);
     }
 
     public static function isValidSeries(mixed $series): bool
