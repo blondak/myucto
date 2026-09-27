@@ -50,6 +50,8 @@ import { appIsoDate } from '@/utils/date'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
+import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
@@ -97,6 +99,20 @@ const route = useRoute() as ReturnType<typeof useRoute> | undefined
 const routedPeriod = route?.query?.period
 // Záložka ZP předává období sdílené s přehledem o platbě a hlášeními.
 const period = defineModel<string>('period', { default: '' })
+/*
+ * Prostředí podání pojišťovně sdílené se zbytkem stránky podání. Oznámení
+ * a přehled se dřív sestavovaly natvrdo do ostrého provozu, i když účetní
+ * na vývojové instalaci pracovala v Testu, a ve frontě pak čekaly s aktivním
+ * „Odeslat". Výběr hlídá `SubmissionEnvironmentPolicy` (mimo vývoj produkce).
+ */
+const environment = defineModel<'production' | 'test'>('environment', { default: 'production' })
+useSubmissionEnvironment(environment)
+watch(environment, () => {
+  prepared.value = null
+  preparedBulk.value = null
+  isdsResult.value = null
+  isdsBulkResult.value = null
+})
 if (period.value === '') {
   period.value = typeof routedPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedPeriod)
     ? routedPeriod
@@ -337,6 +353,7 @@ async function prepare() {
     prepared.value = await payrollHealthNotificationApi.preparePaymentOverview(
       prepareRevisionId.value,
       prepareInsurer.value,
+      environment.value,
     )
   } catch (exception) {
     // Konkrétní věta ze serveru, ne „nepodařilo se". Doména jich vydává celou
@@ -365,6 +382,7 @@ async function prepareBulk() {
     preparedBulk.value = await payrollHealthNotificationApi.prepareBulkNotification(
       period.value,
       prepareBulkInsurer.value,
+      environment.value,
     )
   } catch (exception) {
     prepareBulkError.value = serverErrorMessage(
@@ -406,7 +424,7 @@ async function enqueueIsds() {
   const result = prepared.value
   if (!result || !canQueueIsds.value) return
   const confirmed = await confirmProductionSend(
-    'production',
+    environment.value,
     t('payroll.production_send.health_overview', { insurer: result.insurer_code }),
   )
   if (!confirmed) return
@@ -444,7 +462,7 @@ async function enqueueBulkIsds() {
   const result = preparedBulk.value
   if (!result || !canQueueBulkIsds.value) return
   const confirmed = await confirmProductionSend(
-    'production',
+    environment.value,
     t('payroll.production_send.health_bulk', { insurer: result.insurer_code }),
   )
   if (!confirmed) return
@@ -1141,9 +1159,16 @@ onMounted(() => {
       class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
       data-test="health-notifications-prepare"
     >
-      <h3 class="text-lg font-semibold text-neutral-900">
-        {{ t('payroll.health_notifications.prepare.title') }}
-      </h3>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <h3 class="text-lg font-semibold text-neutral-900">
+          {{ t('payroll.health_notifications.prepare.title') }}
+        </h3>
+        <EnvironmentSwitch
+          v-model="environment"
+          data-test="health-prepare-environment"
+          :aria-label="t('payroll.regzel.environment.label')"
+        />
+      </div>
       <p class="mt-1 max-w-3xl text-sm text-neutral-500">
         {{ t('payroll.health_notifications.prepare.description') }}
       </p>
@@ -1275,7 +1300,7 @@ onMounted(() => {
             v-else-if="!isdsResult.transport.automatic && isdsResult.transport.channel === 'mobile_key'"
             class="mt-2"
             :outbox-id="isdsResult.outbox_id"
-            environment="production"
+            :environment="environment"
             @sent="mobileKeySent"
           />
           <a
@@ -1357,9 +1382,16 @@ onMounted(() => {
       class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
       data-test="health-notifications-prepare-bulk"
     >
-      <h3 class="text-lg font-semibold text-neutral-900">
-        {{ t('payroll.health_notifications.prepare_bulk.title') }}
-      </h3>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <h3 class="text-lg font-semibold text-neutral-900">
+          {{ t('payroll.health_notifications.prepare_bulk.title') }}
+        </h3>
+        <EnvironmentSwitch
+          v-model="environment"
+          data-test="health-prepare-bulk-environment"
+          :aria-label="t('payroll.regzel.environment.label')"
+        />
+      </div>
       <p class="mt-1 max-w-3xl text-sm text-neutral-500">
         {{ t('payroll.health_notifications.prepare_bulk.description') }}
       </p>
@@ -1506,7 +1538,7 @@ onMounted(() => {
             v-else-if="!isdsBulkResult.transport.automatic && isdsBulkResult.transport.channel === 'mobile_key'"
             class="mt-2"
             :outbox-id="isdsBulkResult.outbox_id"
-            environment="production"
+            :environment="environment"
             @sent="bulkMobileKeySent"
           />
           <a

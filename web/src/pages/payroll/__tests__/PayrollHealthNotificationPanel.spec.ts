@@ -52,6 +52,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: (permission: string) => permission === 'payroll.submissions',
+    submissionTestEnvironmentAllowed: true,
   }),
 }))
 
@@ -527,7 +528,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await prepareButton!.trigger('click')
     await flushPromises()
 
-    expect(m.prepare).toHaveBeenCalledWith(12, '111')
+    expect(m.prepare).toHaveBeenCalledWith(12, '111', 'production')
 
     const result = wrapper.find('[data-test="health-prepare-result"]')
     expect(result.exists()).toBe(true)
@@ -1026,7 +1027,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
     await flushPromises()
 
-    expect(m.prepareBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111')
+    expect(m.prepareBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111', 'production')
 
     const result = wrapper.find('[data-test="health-prepare-bulk-result"]')
     expect(result.exists()).toBe(true)
@@ -1208,8 +1209,22 @@ describe('PayrollHealthNotificationPanel — oznámení přímo z karty zaměstn
     await flushPromises()
 
     expect(m.registerPeriod).toHaveBeenCalledWith('2026-10')
-    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111')
+    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'production')
     expect(m.duties).toHaveBeenLastCalledWith('2026-10', expect.objectContaining({ insurer_code: '111' }))
+  })
+
+  /*
+   * Na vývojové instalaci s přepnutým Testem se HOZ sestavovalo do ostrého
+   * provozu a ve frontě čekalo s aktivním „Odeslat" (C-15).
+   */
+  it('HOZ sestaví v prostředí zvoleném na stránce podání', async () => {
+    mount(PayrollHealthNotificationPanel, {
+      props: { environment: 'test' },
+      global: { provide: { [routeLocationKey as symbol]: { query: { period: '2026-10', insurer: '111', hoz: '1' } } } },
+    })
+    await flushPromises()
+
+    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'test')
   })
 
   it('bez hoz=1 pojišťovnu jen předvybere a nic nesestavuje', async () => {

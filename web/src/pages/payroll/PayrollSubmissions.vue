@@ -450,7 +450,10 @@ onMounted(loadInboxBadge)
       nezávisí, proto stojí mimo společný skeleton.
     -->
     <template v-else-if="activeTab === 'health'">
-      <PayrollHealthNotificationPanel v-model:period="healthPeriod" />
+      <PayrollHealthNotificationPanel
+        v-model:period="healthPeriod"
+        v-model:environment="environment"
+      />
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
         v-model:period="healthPeriod"
