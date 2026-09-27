@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -217,6 +218,9 @@ final class BankPostingBackfill
                  WHERE bt.source = 'statement'
                    AND bt.match_status <> 'ignored'
                    AND " . \MyInvoice\Service\Bank\BankTransactionPostingScope::noMigrationReviewSql('bt') . "
+                   -- Pohyb se zápisem převzatým z jiného programu zaúčtoval zdroj; dávka
+                   -- ho nedorovnává ani nepřeúčtovává ({@see TakenOverRecord}).
+                   AND NOT " . TakenOverRecord::liveBankEntrySql((string) $supplierId, 'bt.id') . "
                    AND (
                        " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql() . "
                        OR EXISTS (SELECT 1 FROM invoice_payments ip

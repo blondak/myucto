@@ -18,6 +18,7 @@ use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Accounting\Card\CardClearingRegime;
 use MyInvoice\Service\Accounting\Card\CardSettlementService;
@@ -106,6 +107,16 @@ final class BankPostingService
         private readonly ?CardClearingRegime $cardRegime = null,
         private readonly ?CardSettlementService $cardSettlement = null,
     ) {}
+
+    /**
+     * Pohyb má živý bankovní zápis převzatý z jiného účetního programu. Párování, alokaci
+     * ani zápis takového pohybu automatika nesrovnává a nepřepisuje: zaúčtoval ho zdroj
+     * a převedený deník musí s jeho deníkem souhlasit ({@see TakenOverRecord}).
+     */
+    private function hasTakenOverBankEntry(int $supplierId, int $txId): bool
+    {
+        return (new TakenOverRecord($this->db))->hasLiveBankEntry($supplierId, $txId);
+    }
 
     /**
      * Nasměruje bankovní nohu ('221') na dedikovanou analytiku vlastního účtu
@@ -355,6 +366,11 @@ final class BankPostingService
         }
         if ($this->skipPayrollPayment($supplierId, $txId)) {
             return ['action' => 'skipped', 'reason' => 'payroll_payment'];
+        }
+        // Převzatý zápis zůstává, jak ho zaúčtoval zdroj: žádné dorovnání alokace, přepis
+        // ani přerazítkování dimenzí. Vědomá oprava jde ručním přeúčtováním pohybu.
+        if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
+            return ['action' => 'skipped', 'reason' => 'taken_over'];
         }
         $amount = (float) $tx['amount'];
         $absCents = (int) round(abs($amount) * 100.0);
@@ -1767,6 +1783,9 @@ final class BankPostingService
         }
         if ($this->policy !== null && $this->policy->levelFor($supplierId, OperationType::BANK_PAYMENT_MATCHED) === 'off') {
             return ['action' => 'skipped', 'reason' => 'policy_off'];
+        }
+        if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
+            return ['action' => 'skipped', 'reason' => 'taken_over'];
         }
         $this->normalizeRoundingFullPurchase($supplierId, $txId);
         $this->normalizeRoundingFullInvoice($supplierId, $txId);
@@ -4003,6 +4022,9 @@ final class BankPostingService
      */
     public function normalizeRoundingFullInvoice(int $supplierId, int $txId): bool
     {
+        if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
+            return false;
+        }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             "SELECT bt.id, bt.source, bt.amount, bt.currency AS tx_currency, bt.match_status,
@@ -4099,6 +4121,9 @@ final class BankPostingService
         if ($live === null || ($live['reversed_by'] ?? null) !== null) {
             throw new PostingException('document_not_posted', 'Pohyb nemá živý zápis, který by se dal přepsat.');
         }
+        if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
+            throw new PostingException('taken_over', 'Zápis převzatý z jiného účetního programu se automaticky nepřepisuje.');
+        }
         $build = $this->buildMatched($supplierId, $tx);
         $lines = $this->withBankAnalytic($supplierId, $tx, $build['lines']);
 
@@ -4116,6 +4141,10 @@ final class BankPostingService
 
     public function normalizeRoundingFullPurchase(int $supplierId, int $txId): bool
     {
+        // Úhrada pohybu převzatého z jiného programu je saldo zdroje, ne haléřový zbytek.
+        if ($this->hasTakenOverBankEntry($supplierId, $txId)) {
+            return false;
+        }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             "SELECT bt.id, bt.source, bt.amount, bt.currency AS tx_currency, bt.match_status, bt.posted_at,
