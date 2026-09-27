@@ -88,6 +88,23 @@ const unsentPeriods = computed(() => {
   return [...periods].sort()
 })
 
+/*
+ * Registrace (A1/A2/A3), které předchozí program připravil, ale ČSSZ je
+ * nedostala (C-4). U JMHZ upozornění s návodem bylo, u registrací ne, takže
+ * neodeslaná přihláška nebo odhláška zůstala bez povšimnutí v seznamu.
+ */
+const unsentRegistrations = computed(() => registrations.value.filter(item => item.status !== 'sent'))
+
+const UNSENT_PEOPLE_PREVIEW = 5
+
+function unsentPeople(item: PayrollJmhzExternalSubmission): PayrollJmhzExternalSubmissionPerson[] {
+  return (item.people ?? []).slice(0, UNSENT_PEOPLE_PREVIEW)
+}
+
+function unmatchedCount(item: PayrollJmhzExternalSubmission): number {
+  return Math.max(0, item.form_count - item.matched_forms)
+}
+
 function typeLabel(item: PayrollJmhzExternalSubmission): string {
   if (item.document_kind === 'registration') return t('payroll.external_jmhz.type.registration')
   return t(`payroll.external_jmhz.type.${item.submission_type ?? 'R'}`)
@@ -302,6 +319,58 @@ onMounted(async () => {
       >
         {{ t('payroll.external_jmhz.open_migration') }}
       </RouterLink>
+    </div>
+
+    <div
+      v-for="item in unsentRegistrations"
+      :key="`unsent-registration-${item.id}`"
+      class="m-4 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
+      role="status"
+      data-test="external-jmhz-unsent-registration"
+    >
+      <p class="font-medium">
+        {{ t('payroll.external_jmhz.unsent_registration.title', {
+          actions: actionEntries(item).map(entry => entry.count > 1 ? `${actionLabel(entry.action)} × ${entry.count}` : actionLabel(entry.action)).join(', '),
+          date: formatDate(item.filled_at ?? item.submitted_at),
+        }) }}
+      </p>
+      <p class="mt-1">
+        <template v-for="(person, index) in unsentPeople(item)" :key="index">
+          <span v-if="index > 0">, </span>
+          <RouterLink
+            v-if="person.employee_id"
+            :to="personTarget(person)"
+            class="font-medium underline"
+          >{{ personLabel(person) }}</RouterLink>
+          <span v-else class="italic">{{ personLabel(person) }}</span>
+          <span v-if="person.effective_on"> ({{ person.action }} {{ formatDate(person.effective_on) }})</span>
+        </template>
+        <span v-if="item.form_count > unsentPeople(item).length">
+          {{ t('payroll.external_jmhz.more_people', { count: item.form_count - unsentPeople(item).length }) }}
+        </span>
+      </p>
+      <p class="mt-1">{{ t('payroll.external_jmhz.unsent_registration.hint') }}</p>
+      <p v-if="unmatchedCount(item) > 0" class="mt-1" data-test="external-jmhz-unsent-registration-unmatched">
+        {{ t('payroll.external_jmhz.unsent_registration.unmatched', { count: unmatchedCount(item) }) }}
+      </p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          :class="[btnOutline('warning'), 'whitespace-nowrap']"
+          :data-test="`external-jmhz-unsent-registration-detail-${item.id}`"
+          @click="openDetail(item.id)"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+          {{ t('payroll.external_jmhz.unsent_registration.open_detail') }}
+        </button>
+        <RouterLink
+          :to="{ name: 'payroll-people' }"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+          {{ t('payroll.external_jmhz.unsent_registration.open_people') }}
+        </RouterLink>
+      </div>
     </div>
 
     <template

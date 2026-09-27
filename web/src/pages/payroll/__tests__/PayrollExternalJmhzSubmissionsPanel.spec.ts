@@ -120,6 +120,40 @@ describe('PayrollExternalJmhzSubmissionsPanel', () => {
     expect(wrapper.find('[data-test="external-jmhz-group-monthly-2026-02"]').exists()).toBe(true)
   })
 
+  it('na neodeslanou registraci upozorní se jmény, proklikem a vysvětlením nespárovaných osob', async () => {
+    m.list.mockResolvedValue({ environment: 'production', items: [
+      registration(),
+      registration({
+        id: 21,
+        status: 'not_sent',
+        submitted_at: null,
+        form_count: 3,
+        matched_forms: 1,
+        actions: { A1: 3 },
+        people: [
+          { employee_id: 5, employment_id: 50, name: 'Syntetická Nástupní', code: 'S5', action: 'A1', effective_on: '2026-09-15' },
+          { employee_id: null, employment_id: null, name: null, code: null, action: 'A1', effective_on: '2026-09-01' },
+          { employee_id: null, employment_id: null, name: null, code: null, action: 'A1', effective_on: '2026-09-02' },
+        ],
+      }),
+    ] })
+    m.detail.mockResolvedValue({ ...registration({ id: 21 }), forms: [] })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const warnings = wrapper.findAll('[data-test="external-jmhz-unsent-registration"]')
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].text()).toContain('payroll.external_jmhz.action.A1 × 3')
+    expect(warnings[0].text()).toContain('Syntetická Nástupní')
+    expect(warnings[0].find('a[data-to*="\\"person\\":\\"5\\""]').exists()).toBe(true)
+    expect(warnings[0].get('[data-test="external-jmhz-unsent-registration-unmatched"]').text()).toContain('2')
+
+    await wrapper.get('[data-test="external-jmhz-unsent-registration-detail-21"]').trigger('click')
+    await flushPromises()
+    expect(m.detail).toHaveBeenCalledWith(21, 'production')
+  })
+
   it('detail ukáže všechny formuláře s osobou, akcí a účinností; odkaz z dohlášení ho otevře rovnou', async () => {
     m.query = { external: '20' }
     m.list.mockResolvedValue({ environment: 'production', items: [registration()] })

@@ -11428,6 +11428,13 @@
       "open_migration": "Open the PAMICA migration",
       "missing_title": "The report for {period} has not been filed",
       "missing_hint": "The previous payroll program processed this month, but the submission history holds no JMHZ report for it. MyÚčto does not calculate taken-over months, so it will not prepare the report: file it from the previous program. If it was already sent, repeat the migration with a new export or upload the sent report (XML) in Payroll → Imports and the status will be filled in.",
+      "unsent_registration": {
+        "title": "Registration from the previous program not sent: {actions} (prepared {date})",
+        "hint": "ČSSZ did not receive this registration and the deadline for the registration or deregistration keeps running. Send it from the previous program, or file it from MyÚčto on the person card in the ČSSZ registration panel. If it was already sent, repeat the migration with a new export and the status will be filled in.",
+        "unmatched": "{count} forms did not match any employment in MyÚčto. Typically this is a start entered in the previous program after the export: the person is missing in MyÚčto or has an employment with a different start date. The detail shows the employment from the previous program; check the person in Employees and create them if needed.",
+        "open_detail": "Show forms",
+        "open_people": "Open employees"
+      },
       "unsent_title": "The previous program did not send the report for {period}",
       "unsent_hint": "PAMICA prepared the report, but ČSSZ never received it. Send it from the previous program (MyÚčto does not calculate months before payroll started in MyÚčto). If it has been sent since, repeat the PAMICA migration with a new export and the status will be updated.",
       "col_source": "Source",

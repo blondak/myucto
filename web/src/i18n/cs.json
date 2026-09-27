@@ -11430,6 +11430,13 @@
       "unsent_hint": "PAMICA hlášení připravila, ale ČSSZ ho nedostala. Odešlete ho z předchozího programu (měsíce před začátkem vedení mezd MyÚčto nepočítá). Když už odešlo, převod z PAMICA zopakujte s novým exportem, stav se doplní.",
       "missing_title": "Hlášení za {period} nebylo podáno",
       "missing_hint": "Měsíc zpracoval předchozí mzdový program, ale v historii podání za něj žádné hlášení JMHZ není. MyÚčto převzatý měsíc nepočítá, takže hlášení nepřipraví: podejte ho z předchozího programu. Když už odešlo, zopakujte převod s novým exportem nebo nahrajte odeslané hlášení (XML) v Mzdy → Importy, stav se doplní.",
+      "unsent_registration": {
+        "title": "Registrace od předchozího programu neodeslána: {actions} (připraveno {date})",
+        "hint": "ČSSZ tuto registraci nedostala a lhůta pro přihlášku nebo odhlášku běží dál. Odešlete ji z předchozího programu, nebo ji podejte z MyÚčta na kartě osoby v panelu Registrace ČSSZ. Když už odešla, zopakujte převod s novým exportem, stav se doplní.",
+        "unmatched": "{count} formulářů se nespárovalo s žádným vztahem v MyÚčtu. Typicky jde o nástup zadaný v předchozím programu až po exportu: osoba v MyÚčtu chybí, nebo má vztah s jiným datem nástupu. V detailu najdete vztah z předchozího programu; osobu zkontrolujte v Zaměstnancích a případně ji založte.",
+        "open_detail": "Zobrazit formuláře",
+        "open_people": "Otevřít zaměstnance"
+      },
       "col_source": "Zdroj",
       "col_result": "Výsledek",
       "col_guid": "GUID podání",
