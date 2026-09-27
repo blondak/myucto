@@ -55,6 +55,22 @@ final class PayrollMonthlyFundService
         return $this->compute($supplierId, $employmentId, $period)['holidays'] ?? null;
     }
 
+    /**
+     * Fond, který pokrývá sjednaná MĚSÍČNÍ mzda: {@see minutes()} a k tomu svátky
+     * v jinak pracovní dny ({@see holidayMinutes()}). Měsíční mzda se za svátek
+     * nekrátí (§ 115 odst. 3 ZP), takže svátek je hodinami, které zaplatila — její
+     * hodinová hodnota je proto částka / tento fond. Jediný zdroj pro krácení
+     * měsíční mzdy za nepřítomnost i pro dosaženou mzdu za přesčas (§ 114 odst. 1);
+     * stejný fond hlásí 10259/10260 a počítají s ním jiné mzdové programy.
+     * `null` = vztah nemá pro období pracovní kalendář.
+     */
+    public function wageFundMinutes(int $supplierId, int $employmentId, string $period): ?int
+    {
+        $computed = $this->compute($supplierId, $employmentId, $period);
+
+        return $computed === null ? null : $computed['fund'] + $computed['holidays'];
+    }
+
     /** @return array{fund:int,holidays:int}|null */
     private function compute(int $supplierId, int $employmentId, string $period): ?array
     {

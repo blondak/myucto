@@ -309,6 +309,55 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(4_200_000, $wageSnapshot['monthly_base_minor']);
     }
 
+    /**
+     * Měsíční mzda pokrývá i svátek (§ 115 odst. 3 ZP), takže její hodinová
+     * hodnota se dělí fondem VČETNĚ svátku — týmž, ze kterého se krátí za
+     * nepřítomnost. Červenec 2026: 23 pracovních dnů (6. 7. svátek) = 184 h.
+     * Dosažená mzda 42 000 Kč / 184 h × 2 h = 456,52 Kč (z 176 h by to bylo 477,27).
+     */
+    public function testAchievedOvertimeWageUsesFundIncludingHoliday(): void
+    {
+        $this->workCalendar('2026-06-01');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year, applicable_quarter,
+                 revision_no, source_kind, decisive_from, decisive_to,
+                 gross_earnings_minor, longer_period_allocated_minor,
+                 worked_minutes, worked_days, average_hourly_minor,
+                 support_status, status, ruleset_id, ruleset_hash,
+                 input_hash, input_trace)
+             VALUES (?, ?, 2026, 3, 1, "actual", "2026-04-01", "2026-06-30",
+                     1000000, 0, 6000, 21, 20000,
+                     "supported", "approved", "synthetic-2026",
+                     REPEAT("a", 64), UNHEX(SHA2("synthetic", 256)), "{}")'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $averageSnapshotId = (int) $this->db->pdo()->lastInsertId();
+
+        $saved = $this->action->save(
+            $this->request('PUT')->withParsedBody([
+                'period' => '2026-07',
+                'rows' => [[
+                    'employment_id' => $this->employmentId,
+                    'employment_row_version' => 1,
+                    'base_amount_minor' => 4_200_000,
+                    'overtime_mode' => 'hours',
+                    'overtime_hours_milli' => 2_000,
+                    'overtime_amount_minor' => null,
+                    'overtime_average_snapshot_id' => $averageSnapshotId,
+                    'overtime_average_snapshot_version' => 1,
+                    'bonus_amount_minor' => 0,
+                    'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+                ]],
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
+        self::assertIsArray($items);
+        self::assertSame(45_652, $items[0]['overtime_wage_minor']);
+    }
+
     /** Sjednaná vyšší sazba se musí propsat i do rychlého zadání. */
     public function testHourlyOvertimeUsesAgreedSurchargeRate(): void
     {

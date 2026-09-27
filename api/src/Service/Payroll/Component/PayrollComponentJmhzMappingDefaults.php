@@ -90,6 +90,7 @@ final class PayrollComponentJmhzMappingDefaults
         // Náhrady mzdy zúčtované; náhrada při DPN má vlastní detailní uzel.
         'NAHRADA_MZDY' => '10337',
         'NAHRADA_MZDY_DOVOLENA' => '10338',
+        'NAHRADA_MZDY_DOVOLENA_VYROVNANI' => '10338',
         'NAHRADA_MZDY_SVATEK' => '10339',
         'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL' => '10340',
         'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC' => '10341',

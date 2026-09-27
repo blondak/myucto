@@ -348,6 +348,82 @@ final class PayrollWageProrationImportSummaryTest extends TestCase
         self::assertSame('absence_pending_decision', $result['reason']);
     }
 
+    /**
+     * Měsíční mzda pokrývá i svátek (§ 115 odst. 3 ZP), takže se krátí poměrem
+     * k fondu VČETNĚ svátku. Červenec 2026 má 23 pracovních dnů, z toho pondělí
+     * 6. 7. je svátek: odpracovává se 176 h, měsíční mzda kryje 184 h
+     * (11 040 minut). 48 h dovolené: 40 000 x (11 040 - 2 880)/11 040 =
+     * 29 565,21 → 29 566 Kč. Z fondu bez svátku by vyšlo 29 091 Kč.
+     */
+    public function testSummaryMonthWithHolidayProratesAgainstFundIncludingHoliday(): void
+    {
+        $this->importSummaryMonth(
+            ['fund_hours' => 184_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000],
+            '2026-07-01',
+        );
+
+        $result = $this->proration->forImportSummary(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-07',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(11_040, $result['fund_minutes']);
+        self::assertSame(['vacation' => 2_880], $result['replaced_minutes_by_title']);
+        self::assertSame(2_956_600, $result['amount_minor']);
+    }
+
+    /**
+     * Totéž na směnové cestě: 16 h neplaceného volna v červenci 2026 dává
+     * 40 000 x 10 080/11 040 = 36 521,73 → 36 522 Kč (z fondu bez svátku
+     * 36 364 Kč). Neplacené volno přes svátek (6. 7.) svátek nezahrnuje —
+     * ten zůstává zaplacený měsíční mzdou.
+     */
+    public function testShiftMonthWithHolidayProratesAgainstFundIncludingHoliday(): void
+    {
+        $this->datedAbsence('unpaid_leave', '2026-07-06', '2026-07-08');
+        $this->publishedShift('2026-07-07');
+        $this->publishedShift('2026-07-08');
+
+        $result = $this->proration->forMonth(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-07',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(11_040, $result['fund_minutes']);
+        self::assertSame(['unpaid' => 960], $result['replaced_minutes_by_title']);
+        self::assertSame(3_652_200, $result['amount_minor']);
+    }
+
+    /**
+     * Svátek v okně náhrady při DPN platí náhrada (§ 192 odst. 1 ZP), takže
+     * v době kryté mzdou nezůstane. Nemoc 1. až 10. 7. 2026 bez směn (měsíc ze
+     * souhrnu): osm rozvržených dnů včetně svátku 6. 7. = 3 840 minut.
+     * 40 000 x (11 040 - 3 840)/11 040 = 26 086,95 → 26 087 Kč.
+     */
+    public function testHolidayInsideSicknessWindowIsNotPaidTwice(): void
+    {
+        $this->importSummaryMonth(['fund_hours' => 184_000, 'worked_hours' => 120_000], '2026-07-01');
+        $absenceId = $this->datedAbsence('dpn', '2026-07-01', '2026-07-10');
+        $this->sicknessEvent($absenceId);
+
+        $result = $this->proration->forImportSummary(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-07',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(['sickness_compensation' => 3_840], $result['replaced_minutes_by_title']);
+        self::assertSame(2_608_700, $result['amount_minor']);
+    }
+
     private function datedAbsence(
         string $type,
         string $from,
@@ -437,22 +513,22 @@ final class PayrollWageProrationImportSummaryTest extends TestCase
     }
 
     /** @param array<string,int> $values millihodiny podle významu */
-    private function importSummaryMonth(array $values): void
+    private function importSummaryMonth(array $values, string $periodStart = '2026-06-01'): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_time_months
                 (supplier_id, employment_id, period_start, status, work_source, revision_no)
-             VALUES (?, ?, "2026-06-01", "open", "import_summary", 1)'
-        )->execute([$this->supplierId, $this->employmentId]);
+             VALUES (?, ?, ?, "open", "import_summary", 1)'
+        )->execute([$this->supplierId, $this->employmentId, $periodStart]);
         $timeMonthId = (int) $pdo->lastInsertId();
 
         $pdo->prepare(
             'INSERT INTO payroll_attendance_imports
                 (supplier_id, period_start, source_system, content_sha256,
                  files_json, rules_json, person_count, metric_count, created_by)
-             VALUES (?, "2026-06-01", "giriton", ?, "[]", "{}", 1, 1, ?)'
-        )->execute([$this->supplierId, random_bytes(32), $this->userId]);
+             VALUES (?, ?, "giriton", ?, "[]", "{}", 1, 1, ?)'
+        )->execute([$this->supplierId, $periodStart, random_bytes(32), $this->userId]);
         $importId = (int) $pdo->lastInsertId();
 
         $pdo->prepare(
@@ -460,11 +536,12 @@ final class PayrollWageProrationImportSummaryTest extends TestCase
                 (supplier_id, time_month_id, time_month_revision_no, employment_id,
                  period_start, attendance_import_id, values_json, worked_days,
                  sources_json, content_sha256, created_by)
-             VALUES (?, ?, 1, ?, "2026-06-01", ?, ?, 20, "{}", ?, ?)'
+             VALUES (?, ?, 1, ?, ?, ?, ?, 20, "{}", ?, ?)'
         )->execute([
             $this->supplierId,
             $timeMonthId,
             $this->employmentId,
+            $periodStart,
             $importId,
             (string) json_encode($values),
             str_repeat('a', 64),

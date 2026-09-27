@@ -61,6 +61,16 @@ písm. p) zákona o daních z příjmů jen náhrada do výše minimálního zá
 nároku, takže sjednanou vyšší náhradu podle § 192 odst. 3 zadej jako běžnou
 zdanitelnou složku.
 
+Proplacenou nebo **vrácenou náhradu za dovolenou** zadanou přímo částkou nese
+složka `NAHRADA_MZDY_DOVOLENA_VYROVNANI` (Proplacená / vrácená náhrada za
+dovolenou). Vyčerpal-li zaměstnanec dovolenou, na kterou mu právo nevzniklo,
+srazí se mu náhrada za ni (§ 147 odst. 1 písm. e) zákoníku práce): zadej ji
+**zápornou částkou** v měsíci, kdy se srážka provádí. Sníží hrubou mzdu, základ
+daně i pojistného a v měsíčním hlášení náhrady za dovolenou (10338). Mzdový
+běh ji přijme, pokud úhrn vztahu v měsíci zůstane nezáporný; jiná záporná
+částka nebo částka za jiný měsíc patří do opravy původního běhu. Tuto složku
+zakládá i převod z PAMICA (složky J07 a J10).
+
 Zákonné příplatky podle § 114 až § 118 mají vlastní složky
 `PRIPLATEK_PRESCAS`, `PRIPLATEK_SVATEK`, `PRIPLATEK_NOCNI`,
 `PRIPLATEK_VIKEND` a `PRIPLATEK_ZTIZENE_PROSTREDI`. **Nezadávají se ručně ani

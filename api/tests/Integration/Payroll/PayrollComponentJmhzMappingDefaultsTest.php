@@ -136,6 +136,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'STRAVOVANI_ZDANITELNE' => '10328',
             'NAHRADA_MZDY' => '10337',
             'NAHRADA_MZDY_DOVOLENA' => '10338',
+            'NAHRADA_MZDY_DOVOLENA_VYROVNANI' => '10338',
             // Náhrady s vlastní kolonkou hlášení: za svátek, překážky na
             // straně zaměstnavatele a zaměstnance.
             'NAHRADA_MZDY_SVATEK' => '10339',

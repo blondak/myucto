@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
+use MyInvoice\Service\Payroll\Absence\VacationCompensationReturn;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthIncomeAttribution;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsurerSnapshotStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthInput;
@@ -1813,6 +1814,7 @@ final class PayrollRunStatutoryInputAssembler
             $relationshipReference,
             $absences,
         );
+        $domainTotal = $this->domainTotal($inputs, 'social_insurance');
         $result = [];
         foreach ($inputs as $input) {
             if (!$this->assertCurrentNonNegativeComponent(
@@ -1821,6 +1823,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
                 $relationshipReference,
                 $periodStart,
+                $domainTotal,
             )) {
                 continue;
             }
@@ -1872,6 +1875,7 @@ final class PayrollRunStatutoryInputAssembler
             $relationshipReference,
             $absences,
         );
+        $domainTotal = $this->domainTotal($inputs, 'health_insurance');
         $result = [];
         foreach ($inputs as $input) {
             if (!$this->assertCurrentNonNegativeComponent(
@@ -1880,6 +1884,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
                 $relationshipReference,
                 $periodStart,
+                $domainTotal,
             )) {
                 continue;
             }
@@ -1931,6 +1936,7 @@ final class PayrollRunStatutoryInputAssembler
             $relationshipReference,
             $absences,
         );
+        $domainTotal = $this->domainTotal($inputs, 'income_tax');
         $result = [];
         foreach ($inputs as $input) {
             $component = $this->object($input['component'] ?? null);
@@ -1966,6 +1972,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
                 $relationshipReference,
                 $periodStart,
+                $domainTotal,
             )) {
                 $usable = false;
             }
@@ -2096,6 +2103,27 @@ final class PayrollRunStatutoryInputAssembler
         };
     }
 
+    /**
+     * Úhrn částek vztahu, které vstupují do základu domény. Záporná vrácená
+     * náhrada za dovolenou projde jen tehdy, když ho nestáhne pod nulu.
+     *
+     * @param list<array<string,mixed>> $inputs
+     */
+    private function domainTotal(array $inputs, string $domain): int
+    {
+        $total = 0;
+        foreach ($inputs as $input) {
+            $amount = $this->integer($input['amount_minor'] ?? null);
+            if ($amount !== null
+                && self::entersDomainBase($this->object($input['component'] ?? null) ?? [], $domain)
+            ) {
+                $total += $amount;
+            }
+        }
+
+        return $total;
+    }
+
     /** @param array<string,mixed> $input */
     private function assertCurrentNonNegativeComponent(
         array $input,
@@ -2103,6 +2131,7 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $relationshipReference,
         string $periodStart,
+        int $domainTotal,
     ): bool {
         $valid = true;
         $sourcePeriod = $input['source_period_start'] ?? null;
@@ -2125,8 +2154,12 @@ final class PayrollRunStatutoryInputAssembler
             );
             return false;
         }
+        $component = $this->object($input['component'] ?? null) ?? [];
         if ($amount < 0
-            && self::entersDomainBase($this->object($input['component'] ?? null), $domain)
+            && self::entersDomainBase($component, $domain)
+            // Vrácená náhrada za dovolenou (§ 147 odst. 1 písm. e) ZP) je
+            // zápornou částkou TOHOTO měsíce, ne opravou minulého.
+            && !(VacationCompensationReturn::mayBeNegative($component['code'] ?? null) && $domainTotal >= 0)
         ) {
             $this->issue(
                 $domain,

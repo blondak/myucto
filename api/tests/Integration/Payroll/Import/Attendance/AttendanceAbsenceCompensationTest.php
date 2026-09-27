@@ -224,7 +224,9 @@ final class AttendanceAbsenceCompensationTest extends TestCase
     }
 
     /**
-     * 42 000 Kč × (10 560 − 3 030) / 10 560 = 29 948,86 Kč → 29 949 Kč.
+     * Červenec 2026: odpracovává se 176 h, měsíční mzda ale kryje i svátek 6. 7.
+     * (§ 115 odst. 3 ZP), takže se krátí z fondu 184 h = 11 040 minut.
+     * 42 000 Kč × (11 040 − 3 030) / 11 040 = 30 472,83 Kč → 30 473 Kč.
      * Nahrazeno: dovolená 960, lékař + překážka 630, nemoc 1 440 minut.
      */
     public function testQuickInputBaseIsProratedFromImportSummary(): void
@@ -235,12 +237,12 @@ final class AttendanceAbsenceCompensationTest extends TestCase
         $row = $this->quickRow($employmentId);
 
         self::assertFalse($row['base_requires_entry']);
-        self::assertSame(2_994_900, $row['base_amount_minor']);
+        self::assertSame(3_047_300, $row['base_amount_minor']);
         self::assertSame([
-            'fund_minutes' => 10_560,
+            'fund_minutes' => 11_040,
             'replaced_minutes' => 3_030,
             'replaced_minutes_by_title' => ['vacation' => 960, 'sickness_compensation' => 1_440, 'paid_obstacle' => 630],
-            'amount_minor' => 2_994_900,
+            'amount_minor' => 3_047_300,
         ], $row['base_proration']);
     }
 
@@ -275,7 +277,7 @@ final class AttendanceAbsenceCompensationTest extends TestCase
     /**
      * Fond z podkladů se svátkem v jinak pracovní den (6. 7. 2026): 176 + 8 = 184 h,
      * stejně jako fond měsíčního hlášení. Je to týž rozvrh, krácení proto proběhne
-     * a počítá se z fondu kalendáře (bez svátku) jako u souhrnu bez svátku.
+     * a počítá se z téhož fondu včetně svátku jako u souhrnu, který svátek neuvádí.
      */
     public function testQuickInputAcceptsImportedFundIncludingHoliday(): void
     {
@@ -288,8 +290,8 @@ final class AttendanceAbsenceCompensationTest extends TestCase
         $row = $this->quickRow($employmentId);
 
         self::assertFalse($row['base_requires_entry'], (string) ($row['base_proration_unsupported_reason'] ?? ''));
-        self::assertSame(2_994_900, $row['base_amount_minor']);
-        self::assertSame(10_560, $row['base_proration']['fund_minutes']);
+        self::assertSame(3_047_300, $row['base_amount_minor']);
+        self::assertSame(11_040, $row['base_proration']['fund_minutes']);
     }
 
     /**

@@ -35,16 +35,16 @@ use InvalidArgumentException;
  * ── Svátek ──────────────────────────────────────────────────────────────────
  *
  * Svátek, který připadne na obvyklý pracovní den, měsíční mzdu nekrátí
- * (§ 115 odst. 3 ZP — žádná mzda „neušla"). DO FONDU PROTO NEVSTUPUJE: fond je
- * skutečná odpracovávaná povinnost měsíce a jen z ní smí plynout hodinová
- * hodnota sjednané měsíční částky. Přičíst svátek do jmenovatele by tuhle
- * hodnotu naředilo a zaměstnanec by za tutéž zameškanou hodinu přišel o míň,
- * než kolik za ni dostal náhradou.
+ * (§ 115 odst. 3 ZP — žádná mzda „neušla"): měsíční mzda ho pokrývá, takže
+ * DO FONDU VSTUPUJE ({@see \MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService::wageFundMinutes()}).
+ * Poměr krácení je neodpracovaná doba / fond včetně svátků — tak krátí i jiné
+ * mzdové programy a tentýž fond hlásí 10259/10260. Svátek mimo nepřítomnost
+ * zůstává v době kryté mzdou, takže se za něj nic nesráží.
  *
- * Svátek uvnitř okna náhrady při DPN se přesto MEZI NAHRAZENÉ MINUTY počítá:
- * náhrada za něj podle § 192 odst. 1 ZP náleží, takže tatáž doba nesmí zůstat
- * i v základní mzdě. Nahrazené minuty proto mohou fond o svátky přesáhnout —
- * pak v základní mzdě nezbývá nic a zbytek už kryje sama náhrada.
+ * Svátek uvnitř okna náhrady při DPN se MEZI NAHRAZENÉ MINUTY počítá: náhrada
+ * za něj podle § 192 odst. 1 ZP náleží, takže tatáž doba nesmí zůstat i
+ * v základní mzdě. Volající předává fond, ve kterém je, takže nahrazené minuty
+ * fond běžně nepřesáhnou; přesah se přesto nezáporně ořízne.
  *
  * ── Zaokrouhlení ────────────────────────────────────────────────────────────
  *
@@ -82,9 +82,8 @@ final class MonthlyWageProration
             $replaced += $minutes;
         }
 
-        // Svátek proplacený náhradou při DPN ve fondu není, ale mezi nahrazenými
-        // minutami ano — přesah je tedy legitimní stav, ne chyba dat. Že vstup
-        // dává smysl, ověřuje volající; tady zbývá jen nezáporný zbytek.
+        // Že vstup dává smysl (nahrazené minuty v mezích fondu), ověřuje
+        // volající; tady zbývá jen nezáporný zbytek.
         $retained = max(0, $fundMinutes - $replaced);
         // Celý měsíc odpracovaný: sjednaná částka se vrací beze změny. Průchod
         // zlomkem by u ní byl jen příležitost k haléřovému posunu.

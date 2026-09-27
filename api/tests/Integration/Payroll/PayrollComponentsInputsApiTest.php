@@ -268,6 +268,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NAHRADA_KONKURENCNI_DOLOZKA',
             'NAHRADA_MZDY',
             'NAHRADA_MZDY_DOVOLENA',
+            'NAHRADA_MZDY_DOVOLENA_VYROVNANI',
             'NAHRADA_MZDY_DPN',
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC',
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL',

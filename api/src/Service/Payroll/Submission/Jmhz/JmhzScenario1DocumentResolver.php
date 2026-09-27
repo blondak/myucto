@@ -73,6 +73,11 @@ final class JmhzScenario1DocumentResolver
         '10329',
         '10330',
         '10331',
+        // Náhrady mzdy celkem a za dovolenou: vrácená náhrada za dovolenou
+        // (§ 147 odst. 1 písm. e) ZP) v měsíci bez čerpání dá záporný součet,
+        // datový slovník ani XSD (celé nezáporné číslo) ho nepřipouští.
+        '10337',
+        '10338',
         '10344',
     ];
 

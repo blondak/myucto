@@ -68,6 +68,25 @@ final readonly class DeductionAgreementTerms
     }
 
     /**
+     * Patří srážka do příznaku JMHZ 10116 („Srážky na základě nařízeného soudního
+     * nebo správního výkonu rozhodnutí, konkursu nebo dohody o srážkách z příjmu")?
+     *
+     * Pokyny MPSV k vyplnění měsíčního hlášení 1.4.13: „Uvede se ANO, pokud
+     * zaměstnavatel provádí z příjmu zaměstnance srážky na základě nařízeného
+     * soudního nebo správního výkonu rozhodnutí, konkursu nebo dohody o srážkách
+     * z příjmu uzavřené podle občanského zákoníku, jinak NE." Srážku příspěvku
+     * zaměstnance na závodní stravování (§ 236 ZP) vedou tytéž pokyny jako
+     * samostatný druh (10352, vedle dohody podle OZ 10350), do 10116 tedy nepatří;
+     * nepatří tam ani srážky ze zákona podle § 147 odst. 1 ZP (ani výkon
+     * rozhodnutí, ani dohoda). Výkon rozhodnutí a insolvence řeší exekuční
+     * evidence mimo tuto třídu.
+     */
+    public static function reportedAsWageDeduction(string $deductionKind, string $legalBasis): bool
+    {
+        return !self::isStatutory($legalBasis) && $deductionKind !== 'meal';
+    }
+
+    /**
      * Pásmo 1–9 je rezervované pro zákonné a exekuční pořadí, které se řeší
      * mimo tuto tabulku (modul exekucí). Pořadí uvnitř `DeductionPriorityResolver`
      * ale samo o sobě NIC nezaručuje — exekuce se počítá v jiném kroku pipeline.

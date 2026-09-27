@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
+use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
@@ -404,8 +405,24 @@ final class JmhzOrdinaryEvidenceBuilder
          * pohledávka i insolvenční režim jsou fakt v datech. Částky JMHZ
          * nechce a čistá mzda 10344 se vykazuje před srážkami, takže tenhle
          * příznak je všechno, co se o srážkách hlásí.
+         *
+         * Ne každá evidovaná srážka je ale srážkou podle 10116: srážka za
+         * závodní stravování a srážky ze zákona (§ 147 odst. 1 ZP) do něj
+         * nepatří ({@see DeductionAgreementTerms::reportedAsWageDeduction()}).
+         * Pro kontrolu „sraženo bez titulu" dál platí všechny evidované tituly.
          */
-        $deductionsRecorded = $agreements !== []
+        $reportableAgreements = array_filter(
+            $agreements,
+            static fn (mixed $agreement): bool => is_array($agreement)
+                && DeductionAgreementTerms::reportedAsWageDeduction(
+                    (string) ($agreement['deduction_kind'] ?? ''),
+                    (string) ($agreement['legal_basis'] ?? 'agreement'),
+                ),
+        );
+        $titled = $agreements !== []
+            || $claims !== []
+            || $insolvency['mode'] !== 'none';
+        $deductionsRecorded = $reportableAgreements !== []
             || $claims !== []
             || $insolvency['mode'] !== 'none';
         // Kontroluje se osoba, za jejíž vztah se evidence potvrzuje. Ostatní
@@ -441,7 +458,7 @@ final class JmhzOrdinaryEvidenceBuilder
             $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazený výsledek srážek není úplný.');
         }
         $resultHasDeductions = $deductions !== [] || $net['deducted_minor_units'] !== 0;
-        if ($resultHasDeductions && !$deductionsRecorded) {
+        if ($resultHasDeductions && !$titled) {
             // Sražené peníze bez evidovaného titulu jsou rozpor: buď chybí
             // dohoda/exekuce ve vstupu, nebo se srazilo něco, co nikdo
             // nenařídil. Ani jedno se nesmí vykázat jako „bez srážek".
@@ -451,7 +468,6 @@ final class JmhzOrdinaryEvidenceBuilder
                 ['reason' => 'missing_title'],
             );
         }
-        $deductionsRecorded = $deductionsRecorded || $resultHasDeductions;
         $resultEnforcement = $this->object($resultPerson['enforcement'] ?? null, 'result.enforcement');
         $enforcementInput = $this->object($resultEnforcement['input'] ?? null, 'result.enforcement.input');
         $enforcementResult = $this->object($resultEnforcement['result'] ?? null, 'result.enforcement.result');
