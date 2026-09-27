@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Absence\VacationCompensationReturn;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceText;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 
@@ -134,6 +135,12 @@ final class PohodaPayrollCatalog
         }
         if ($number === 'J11') {
             return $component('compensation');
+        }
+        // „Proplacená / vrácená dovolená" zadaná částkou; vrácená (přečerpaná dovolená,
+        // § 147 odst. 1 písm. e) ZP) je v PAMICA záporná a snižuje hrubou mzdu měsíce.
+        // Vlastní standardní složka, na které běh zápornou částku přijme.
+        if (in_array($number, ['J07', 'J10'], true)) {
+            return ['meaning' => 'component', 'kind' => 'compensation', 'code' => VacationCompensationReturn::SETTLEMENT_CODE, 'header' => 'Proplacená / vrácená náhrada za dovolenou (Kč)'];
         }
         // Odstupné má v MyÚčtu vlastní složku (bez pojistného, JMHZ jako odstupné). Měsíc,
         // který počítá MyÚčto, ho bez ní nevyplatí; převzatý měsíc ho má v úhrnech PAMICA.

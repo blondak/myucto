@@ -138,6 +138,12 @@ final class PayrollComponentDefaults
                 // odpracovanou dobou není; zahrnout ji by znamenalo počítat
                 // průměr z průměru.
                 ['NAHRADA_MZDY_DOVOLENA', 'Náhrada mzdy za dovolenou', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Proplacená nebo vrácená náhrada za dovolenou zadaná částkou,
+                // mimo čerpání z knihy dovolené (převod z jiného programu, PAMICA
+                // J07/J10). Vrácení (§ 147 odst. 1 písm. e) ZP) je záporná částka
+                // běžného měsíce ({@see \MyInvoice\Service\Payroll\Absence\VacationCompensationReturn}).
+                // Klasifikace i kolonka 10338 jako u náhrady za dovolenou.
+                ['NAHRADA_MZDY_DOVOLENA_VYROVNANI', 'Proplacená / vrácená náhrada za dovolenou', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Náhrady mzdy s vlastní kolonkou měsíčního hlášení: za svátek
                 // (§ 115 odst. 3 ZP, 10339), při překážkách na straně
                 // zaměstnavatele (§ 207 až § 210 ZP, 10340) a na straně

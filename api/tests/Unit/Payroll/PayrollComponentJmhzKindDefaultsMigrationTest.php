@@ -30,6 +30,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1847_payroll_component_jmhz_stravovani_mapping.sql',
         '1905_payroll_component_jmhz_compensation_detail_mappings.sql',
         '1926_payroll_standby_rate.sql',
+        '1931_payroll_component_vacation_settlement_mapping.sql',
     ];
 
     /**
@@ -38,7 +39,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
      *
      * @var list<string>
      */
-    private const AFTER_PACKAGE_TRANSITION = ['ODMENA_POHOTOVOST'];
+    private const AFTER_PACKAGE_TRANSITION = ['ODMENA_POHOTOVOST', 'NAHRADA_MZDY_DOVOLENA_VYROVNANI'];
 
     private const PACKAGE_TRANSITION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
 

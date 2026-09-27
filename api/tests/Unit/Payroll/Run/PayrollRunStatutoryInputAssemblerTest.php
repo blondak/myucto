@@ -1516,4 +1516,60 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             self::assertContains($domain . '|negative_component_requires_revision', $keys);
         }
     }
+
+    /**
+     * Vrácená náhrada za dovolenou (§ 147 odst. 1 písm. e) ZP) je záporná
+     * částka TOHOTO měsíce: snižuje hrubou mzdu, základ daně i pojistného.
+     * Vyrovnání dovolené při skončení ji zakládá na NAHRADA_MZDY_DOVOLENA,
+     * převod z PAMICA (J10) na NAHRADA_MZDY_DOVOLENA_VYROVNANI. Dřív shodila
+     * všechny tři domény a běh nešel spočítat.
+     */
+    public function testReturnedVacationCompensationIsACurrentMonthNegative(): void
+    {
+        foreach (['NAHRADA_MZDY_DOVOLENA', 'NAHRADA_MZDY_DOVOLENA_VYROVNANI'] as $code) {
+            $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+                $this->snapshotWithSecondInput($code, -343_100),
+            );
+
+            $codes = array_map(static fn ($issue): string => $issue->code, $bundle->issues);
+            self::assertNotContains('negative_component_requires_revision', $codes, $code);
+        }
+    }
+
+    /** Vrácení větší než všechno ostatní by dalo záporný základ — to je věc opravy. */
+    public function testReturnedVacationCompensationBelowZeroTotalStillBlocks(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->snapshotWithSecondInput('NAHRADA_MZDY_DOVOLENA_VYROVNANI', -4_600_000),
+        );
+
+        $keys = array_map(
+            static fn ($issue): string => $issue->domain . '|' . $issue->code,
+            $bundle->issues,
+        );
+        foreach (['social_insurance', 'health_insurance', 'income_tax'] as $domain) {
+            self::assertContains($domain . '|negative_component_requires_revision', $keys);
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function snapshotWithSecondInput(string $code, int $amountMinor): array
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][] = [
+            'id' => 421,
+            'amount_minor' => $amountMinor,
+            'source_period_start' => null,
+            'component' => [
+                'code' => $code,
+                'tax_treatment' => 'included',
+                'social_participation_treatment' => 'included',
+                'social_treatment' => 'included',
+                'health_participation_treatment' => 'included',
+                'health_treatment' => 'included',
+            ],
+        ];
+
+        return $snapshot;
+    }
 }

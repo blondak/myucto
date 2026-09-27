@@ -86,6 +86,20 @@ final class PohodaPayrollHolidayAndPremiumsTest extends TestCase
         self::assertSame(30000.0, $this->row('6001')['Odstupné (Kč)'] ?? null);
     }
 
+    /**
+     * Vrácená dovolená (J10 se zápornou částkou, § 147 odst. 1 písm. e) ZP) jde na
+     * standardní složku, na které mzdový běh zápornou částku přijme. Dřív ji převod
+     * zahodil a ve mzdě chyběla.
+     */
+    public function testReturnedVacationGoesToTheSettlementComponent(): void
+    {
+        $column = $this->month()['columns']['Proplacená / vrácená náhrada za dovolenou (Kč)'] ?? null;
+
+        self::assertSame('component', $column['meaning'] ?? null);
+        self::assertSame('NAHRADA_MZDY_DOVOLENA_VYROVNANI', $column['code'] ?? null);
+        self::assertSame(-1500.0, $this->row('6001')['Proplacená / vrácená náhrada za dovolenou (Kč)'] ?? null);
+    }
+
     /** @return array<string,mixed> */
     private function month(): array
     {
@@ -124,6 +138,7 @@ final class PohodaPayrollHolidayAndPremiumsTest extends TestCase
         $row('sMZslozky', ['ID' => 4, 'Cislo' => 'P04', 'Nazev' => 'Příplatek za práci v sobotu a neděli']);
         $row('sMZslozky', ['ID' => 5, 'Cislo' => 'P03', 'Nazev' => 'Příplatek za práci ve svátek']);
         $row('sMZslozky', ['ID' => 6, 'Cislo' => 'D06', 'Nazev' => 'Odstupné (s výpočtem)']);
+        $row('sMZslozky', ['ID' => 7, 'Cislo' => 'J10', 'Nazev' => 'Proplacená / vrácená dovolená (hod.)']);
         $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
         $plan = [];
         for ($day = 1; $day <= 31; $day++) {
@@ -145,6 +160,8 @@ final class PohodaPayrollHolidayAndPremiumsTest extends TestCase
         $row('MZslozky', ['ID' => 12, 'RefAg' => 10, 'RefSlozka' => 4, 'KcMzda' => 300, 'PocHodin' => 0]);
         $row('MZslozky', ['ID' => 13, 'RefAg' => 10, 'RefSlozka' => 5, 'KcMzda' => 200, 'PocHodin' => 0]);
         $row('MZslozky', ['ID' => 14, 'RefAg' => 10, 'RefSlozka' => 6, 'KcMzda' => 30000, 'PocHodin' => 0]);
+        // Vrácená dovolená: PAMICA ji vede zápornou částkou (Hodnota2 = vrácené hodiny).
+        $row('MZslozky', ['ID' => 15, 'RefAg' => 10, 'RefSlozka' => 7, 'KcMzda' => -1500, 'Hodnota1' => -1500, 'Hodnota2' => 8, 'PocHodin' => 0]);
         // Hodinová mzda: svátek jako náhrada V02, odpracováno 160 h bez svátku.
         $row('MZ', ['ID' => 20, 'RefZAM' => 2, 'RefPomer' => 2, 'Rok' => 2026, 'RelMes' => 7, 'HodFond' => 184, 'DnyFond2' => 23,
             'TUvazek' => 40, 'HodOdpra' => 160, 'DnyStSv' => 1, 'RefPoj' => 1, 'KcHrubaM' => 33000, 'KcCistaM' => 25000,
