@@ -217,7 +217,7 @@ jobs:
       - name: pnpm install + build
         working-directory: web
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           pnpm install --frozen-lockfile
           pnpm build
