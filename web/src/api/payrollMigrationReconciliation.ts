@@ -11,7 +11,7 @@ import type { TakeoverCheck } from './payrollTakeover'
  * `other` je obecný zdroj tabulkového importu — převzaté mzdy nejsou vázané na
  * PAMICU, pojmenované zdroje jsou jen ty s vlastním feederem v aplikaci.
  */
-export type PayrollMigrationSource = 'pamica' | 'pohoda' | 'money_s3' | 'other' | 'jmhz'
+export type PayrollMigrationSource = 'pamica' | 'pohoda' | 'money_s3' | 'other' | 'stereo_nx' | 'jmhz'
 
 /**
  * Stav porovnání jedné částky. `reference_missing` / `calculated_missing` NENÍ
