@@ -419,12 +419,12 @@ const COLUMNS: ColumnDef[] = [
   { key: 'status', labelKey: 'accounting.journal.status_col' },
   { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
-  { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
-  { key: 'created_at', labelKey: 'accounting.journal.created_at', defaultHidden: true },
+  { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id' },
+  { key: 'created_at', labelKey: 'accounting.journal.created_at' },
   { key: 'updated_at', labelKey: 'accounting.journal.col_updated_at', defaultHidden: true },
-  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
-  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
-  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
+  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown' },
+  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts' },
+  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts' },
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
