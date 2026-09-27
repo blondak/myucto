@@ -462,7 +462,37 @@ export interface EnforcementTerminationNoticeOverview {
   blocked_reason: string | null
 }
 
+export type EnforcementBulkMissing = 'claims' | 'order_issued_on' | 'priority_date' | 'legal_parties'
+
+export interface EnforcementBulkReadiness {
+  case_id: number
+  row_version: number
+  employee_id: number
+  employee_name: string
+  case_key: string
+  effective_from: string
+  claim_count: number
+  missing: EnforcementBulkMissing[]
+  legal_message: string | null
+  decision_document_id: number | null
+}
+
+export interface EnforcementBulkResult {
+  case_id: number
+  status: 'activated' | 'failed'
+  message: string | null
+}
+
 export const payrollEnforcementApi = {
+  /** Případy čekající na ověření a co jim chybí pro hromadné zahájení srážek. */
+  bulkReadiness: () =>
+    api.get<{ items: EnforcementBulkReadiness[] }>('/payroll/enforcement/bulk-activation')
+      .then(response => response.data.items),
+  bulkActivate: (items: Array<{ case_id: number, row_version: number }>) =>
+    api.post<{ results: EnforcementBulkResult[] }>('/payroll/enforcement/bulk-activation', {
+      items,
+      confirm_verified: true,
+    }).then(response => response.data.results),
   /**
    * Stránka seznamu případů. Filtr i stránkování drží server — bez `limit` se
    * neposílá „všechno", ale serverový strop, a o zbytku by výpis mlčel.

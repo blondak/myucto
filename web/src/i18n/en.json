@@ -9102,6 +9102,28 @@
       "title": "Deductions and enforcement",
       "subtitle": "Controlled evidence, claim priority, withheld amounts and remittance tracking.",
       "security_hint": "Case numbers, bank accounts and legal documents belong in secure documents. This page only uses internal identifiers and verified facts.",
+      "bulk": {
+        "title": "Awaiting verification: {count} cases, ready to start deductions: {ready}",
+        "hint": "The payroll run does not deduct for a case in the Received state. For ready cases, one confirmation verifies the claims and evidence and starts the deductions; the decision is the order from which the court or executor was recorded. For the others the missing data is listed with a link to the case.",
+        "expand": "Show cases",
+        "collapse": "Hide cases",
+        "ready_title": "Ready to start deductions ({count})",
+        "toggle_all": "Select all / none",
+        "effective": "effective from {date}",
+        "confirm": "For the selected cases I have verified the order: the enforceable title, delivery to the payer, the due amount of the claim and its priority.",
+        "activate": "Verify and start deductions ({count})",
+        "incomplete_title": "Mandatory data missing ({count})",
+        "open_case": "Complete in the case",
+        "done": "Deductions started: {activated}, not started: {failed}.",
+        "failed": "Bulk verification failed.",
+        "load_failed": "Cases awaiting verification could not be loaded.",
+        "missing": {
+          "claims": "no claim",
+          "order_issued_on": "claim order issue date missing",
+          "priority_date": "claim priority date missing",
+          "legal_parties": "documented court or executor, beneficiary and recipient instruction missing (Legal facts)"
+        }
+      },
       "load_failed": "Deduction cases could not be loaded.",
       "detail_failed": "The case detail could not be loaded.",
       "save_failed": "The change could not be saved.",

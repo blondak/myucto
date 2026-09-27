@@ -43,6 +43,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EnforcementLegalFacts from '@/pages/payroll/EnforcementLegalFacts.vue'
+import EnforcementBulkActivationPanel from '@/components/payroll/EnforcementBulkActivationPanel.vue'
 import EnforcementTerminationNoticePanel from '@/pages/payroll/EnforcementTerminationNoticePanel.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
@@ -1244,6 +1245,17 @@ watch([employeeFilter, statusFilter], () => {
   void load()
 })
 
+/** Proklik z hromadného ověření: zúží seznam na osobu a otevře případ. */
+async function openCaseFromBulk(caseId: number, employeeId: number) {
+  if (employeeFilter.value !== employeeId) {
+    employeeFilter.value = employeeId
+    await nextTick()
+  }
+  await load()
+  const target = cases.value.find((item) => item.id === caseId)
+  if (target && expandedId.value !== caseId) await selectCase(target)
+}
+
 onMounted(async () => {
   await load()
   if (initialCaseId === null) return
@@ -1268,6 +1280,12 @@ onMounted(async () => {
     <section class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       {{ t('payroll.enforcement.security_hint') }}
     </section>
+
+    <EnforcementBulkActivationPanel
+      :can-write="canWrite"
+      @open-case="openCaseFromBulk"
+      @activated="load"
+    />
 
     <!--
       Lidé a účty se načítají „měkce" (chyba nepotopí výpis případů). Když ale

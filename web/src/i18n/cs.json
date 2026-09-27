@@ -9102,6 +9102,28 @@
       "title": "Srážky a exekuce",
       "subtitle": "Řízená evidence podkladů, pořadí pohledávek, sražených částek a jejich odeslání.",
       "security_hint": "Čísla řízení, bankovní účty a právní dokumenty patří do zabezpečených dokumentů. Tato obrazovka pracuje jen s interními identifikátory a ověřenými skutečnostmi.",
+      "bulk": {
+        "title": "Čeká na ověření: {count} případů, připraveno k zahájení srážek: {ready}",
+        "hint": "Případ ve stavu Přijato mzdový běh nesráží. U připravených případů jedním potvrzením ověříte pohledávky a evidenci a zahájíte srážení; rozhodnutím je usnesení, ze kterého je zapsaný soud nebo exekutor. U ostatních je uvedeno, co chybí, a proklik do případu.",
+        "expand": "Zobrazit případy",
+        "collapse": "Skrýt případy",
+        "ready_title": "Připraveno k zahájení srážek ({count})",
+        "toggle_all": "Vybrat vše / nic",
+        "effective": "účinnost od {date}",
+        "confirm": "U vybraných případů jsem ověřil(a) usnesení: exekuční titul, doručení plátci mzdy, splatnost a výši pohledávky a její pořadí.",
+        "activate": "Ověřit a zahájit srážení ({count})",
+        "incomplete_title": "Chybí povinné údaje ({count})",
+        "open_case": "Doplnit v případu",
+        "done": "Srážení zahájeno: {activated}, nezahájeno: {failed}.",
+        "failed": "Hromadné ověření se nepodařilo.",
+        "load_failed": "Případy čekající na ověření se nepodařilo načíst.",
+        "missing": {
+          "claims": "chybí pohledávka",
+          "order_issued_on": "chybí datum vydání usnesení u pohledávky",
+          "priority_date": "chybí datum pořadí pohledávky",
+          "legal_parties": "chybí doložený soud nebo exekutor, oprávněný a instrukce příjemce (Právní skutečnosti)"
+        }
+      },
       "load_failed": "Případy srážek se nepodařilo načíst.",
       "detail_failed": "Detail případu se nepodařilo načíst.",
       "save_failed": "Změnu se nepodařilo uložit.",

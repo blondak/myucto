@@ -96,6 +96,7 @@ use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollWageStatementAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
+use MyInvoice\Action\Payroll\PayrollEnforcementBulkActivationAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementFactsAction;
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
@@ -866,6 +867,8 @@ final class Routes
                 [PayrollDeductionAgreementAction::class, 'transition'],
             );
             $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
+            $g->get('/enforcement/bulk-activation', [PayrollEnforcementBulkActivationAction::class, 'readiness']);
+            $g->post('/enforcement/bulk-activation', [PayrollEnforcementBulkActivationAction::class, 'activate']);
             $g->get('/enforcement/cooperation/candidates', [PayrollXmlzamCooperationAction::class, 'candidates']);
             $g->get('/enforcement/cooperation/requests/{id:[0-9]+}', [PayrollXmlzamCooperationAction::class, 'detail']);
             $g->post('/enforcement/cooperation/requests/import', [PayrollXmlzamCooperationAction::class, 'import']);

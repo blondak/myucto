@@ -3020,6 +3020,69 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame('evidence_incomplete', $this->errorCode($blocked));
     }
 
+    /**
+     * Převzaté exekuce čekají na ověření a běh sráží 0 Kč (C-9). Hromadné
+     * ověření zahájí srážení u případu s doloženými stranami a instrukcí
+     * příjemce; případ bez nich nechá čekat a řekne proč.
+     */
+    public function testBulkActivationStartsOnlyDocumentedCases(): void
+    {
+        $service = new \MyInvoice\Service\Payroll\Garnishment\EnforcementBulkActivationService(
+            $this->db,
+            $this->repository,
+            $this->lifecycle,
+        );
+        $ready = PayrollTimeValue::int($this->createCase($this->employeeId)['id'] ?? null, 'id');
+        $this->recordDocumentedRecipient($ready);
+        $this->repository->addClaim($this->supplierId, $ready, [
+            'legal_basis' => 'statutory',
+            'category' => 'non_priority',
+            'outstanding_minor_units' => 100_000,
+            'maintenance_weight_minor_units' => null,
+            'first_payer_delivered_on' => '2026-05-20',
+            'order_issued_on' => '2026-05-19',
+            'legal_title_verified' => false,
+            'order_or_notice_delivered' => false,
+            'priority_classification_verified' => false,
+            'agreement_verified' => false,
+            'due_monetary_claim_verified' => false,
+        ]);
+        $incomplete = PayrollTimeValue::int($this->createCase($this->employeeId)['id'] ?? null, 'id');
+        $this->repository->addClaim($this->supplierId, $incomplete, [
+            'legal_basis' => 'statutory',
+            'category' => 'non_priority',
+            'outstanding_minor_units' => 50_000,
+            'maintenance_weight_minor_units' => null,
+            'first_payer_delivered_on' => '2026-05-20',
+            'order_issued_on' => null,
+            'legal_title_verified' => false,
+            'order_or_notice_delivered' => false,
+            'priority_classification_verified' => false,
+            'agreement_verified' => false,
+            'due_monetary_claim_verified' => false,
+        ]);
+
+        $readiness = [];
+        foreach ($service->readiness($this->supplierId) as $row) {
+            $readiness[$row['case_id']] = $row;
+        }
+        self::assertSame([], $readiness[$ready]['missing']);
+        self::assertContains('order_issued_on', $readiness[$incomplete]['missing']);
+        self::assertContains('legal_parties', $readiness[$incomplete]['missing']);
+
+        $results = $service->activate($this->supplierId, [
+            ['case_id' => $ready, 'row_version' => $readiness[$ready]['row_version']],
+            ['case_id' => $incomplete, 'row_version' => $readiness[$incomplete]['row_version']],
+        ], $this->userId);
+
+        self::assertSame(['activated', 'failed'], array_column($results, 'status'));
+        $status = $this->db->pdo()->prepare('SELECT status FROM payroll_enforcement_cases WHERE id = ?');
+        $status->execute([$ready]);
+        self::assertSame('withhold_and_hold', $status->fetchColumn());
+        $status->execute([$incomplete]);
+        self::assertSame('received', $status->fetchColumn());
+    }
+
     private function createCase(int $employeeId, ?int $supplierId = null): array
     {
         $request = $this->request(
