@@ -2334,7 +2334,7 @@ final class PayrollQuickInputRepository
                     1_000,
                 ));
 
-        $fundMinutes = $this->fund->minutes($supplierId, $employmentId, $period);
+        $fundMinutes = $this->fund->wageFundMinutes($supplierId, $employmentId, $period);
         if ($fundMinutes === null) {
             throw new \DomainException(
                 'Dosaženou mzdu za práci přesčas nelze určit: pracovní vztah nemá '

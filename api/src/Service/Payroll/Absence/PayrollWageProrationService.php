@@ -210,7 +210,7 @@ final class PayrollWageProrationService
             return self::unsupported('absence_exceeds_work_fund');
         }
 
-        return self::prorated($monthlyGrossMinor, $fundMinutes, $byTitle);
+        return $this->prorated($supplierId, $employmentId, $period, $monthlyGrossMinor, $fundMinutes, $byTitle);
     }
 
     /**
@@ -296,7 +296,7 @@ final class PayrollWageProrationService
             return self::unsupported('absence_exceeds_work_fund');
         }
 
-        return self::prorated($monthlyGrossMinor, $fundMinutes, $byTitle);
+        return $this->prorated($supplierId, $employmentId, $period, $monthlyGrossMinor, $fundMinutes, $byTitle);
     }
 
     /**
@@ -629,9 +629,20 @@ final class PayrollWageProrationService
      *   replaced_minutes_by_title:array<string,int>,amount_minor:?int,trace:?array<string,mixed>
      * }
      */
-    private static function prorated(int $monthlyGrossMinor, int $fundMinutes, array $byTitle): array
-    {
-        $result = MonthlyWageProration::calculate($monthlyGrossMinor, $fundMinutes, $byTitle);
+    private function prorated(
+        int $supplierId,
+        int $employmentId,
+        string $period,
+        int $monthlyGrossMinor,
+        int $fundMinutes,
+        array $byTitle,
+    ): array {
+        // Kontroly výše stojí na odpracovávaném fondu (bez svátků), krácení na
+        // fondu, který měsíční mzda pokrývá — včetně svátků (§ 115 odst. 3 ZP),
+        // stejně jako dosažená mzda za přesčas a fond v měsíčním hlášení.
+        $wageFundMinutes = $fundMinutes
+            + ($this->fund->holidayMinutes($supplierId, $employmentId, $period) ?? 0);
+        $result = MonthlyWageProration::calculate($monthlyGrossMinor, $wageFundMinutes, $byTitle);
 
         return [
             'supported' => true,

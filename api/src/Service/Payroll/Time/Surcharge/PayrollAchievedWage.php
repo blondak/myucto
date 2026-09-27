@@ -31,7 +31,9 @@ use MyInvoice\Service\Payroll\Calculation\RoundingMode;
  * zaplacená není a dosažená mzda za ni je `měsíční mzda / fond hodin období`.
  * Fond se bere z pracovního kalendáře vztahu, ne z paušálních 160 nebo 174
  * hodin: v měsíci s 20 pracovními dny a v měsíci s 23 je to rozdíl přes 10 %
- * a paušál by ho tiše rozpustil.
+ * a paušál by ho tiše rozpustil. Svátky v jinak pracovní dny do něj patří —
+ * měsíční mzda je pokrývá (§ 115 odst. 3), viz
+ * {@see \MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService::wageFundMinutes()}.
  *
  * Bez kalendáře se dosažená mzda určit NEDÁ a odhad se nedělá — viz
  * {@see PayrollSurchargeException} a zásada fail-closed celé této skupiny tříd.

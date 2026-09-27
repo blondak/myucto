@@ -76,9 +76,12 @@ překážku. Dobu krytou dávkou nemocenského pojištění a neplacené volno
 zaměstnavatel neplatí. Každá naplánovaná hodina je tak vyplacena právě jednou.
 
 Svátek, který připadl na obvyklý pracovní den, měsíční mzdu **nekrátí**
-(§ 115 odst. 3 zákoníku práce) a do fondu se proto nezapočítává. Výjimkou je
-svátek v době nemoci: za ten náleží náhrada podle § 192 odst. 1, takže se z
-základní mzdy odečte, aby nebyl zaplacen dvakrát.
+(§ 115 odst. 3 zákoníku práce): měsíční mzda ho pokrývá, a proto je součástí
+fondu, ze kterého se krátí. Například v červenci 2026 (svátek 6. 7.) se
+odpracovává 176 hodin, ale mzda se krátí poměrem k fondu 184 hodin. Stejný
+fond platí pro dosaženou mzdu za přesčas a hlásí se v měsíčním hlášení.
+Výjimkou je svátek v době nemoci: za ten náleží náhrada podle § 192 odst. 1,
+takže se ze základní mzdy odečte, aby nebyl zaplacen dvakrát.
 
 Když si aplikace jistá není, **žádnou částku nenabídne** a vyžádá ruční zadání:
 chybí pracovní kalendář, o absenci v měsíci se ještě nerozhodlo, nemoc nemá

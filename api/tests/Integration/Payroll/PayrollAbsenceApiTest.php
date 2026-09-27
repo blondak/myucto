@@ -665,8 +665,9 @@ final class PayrollAbsenceApiTest extends TestCase
      * zkrátí a vznikne náhrada 80 % průměru (§ 207 písm. a) ZP) na složce
      * s kolonkou 10340. Dřív se mzda zkrátila a náhrada nevznikla vůbec.
      *
-     * Červenec 2026: fond 22 × 480 = 10 560 minut, prostoj 13. a 14. 7.
-     * (960 minut). Mzda 42 000 × 9 600 / 10 560 = 38 182 Kč, náhrada
+     * Červenec 2026: fond měsíční mzdy 23 × 480 = 11 040 minut (včetně svátku
+     * 6. 7., § 115 odst. 3 ZP), prostoj 13. a 14. 7. (960 minut). Mzda
+     * 42 000 × 10 080 / 11 040 = 38 348 Kč, náhrada
      * 750 Kč/h × 16 h × 0,8 = 9 600 Kč. Zrušení překážky náhradu vrátí
      * zápornou korekcí ve stejném měsíci.
      */
@@ -698,7 +699,7 @@ final class PayrollAbsenceApiTest extends TestCase
 
         $wage = $proration->forMonth($this->supplierId, $this->employmentId, '2026-07', 4_200_000);
         self::assertSame(['paid_obstacle' => 960], $wage['replaced_minutes_by_title']);
-        self::assertSame(3_818_200, $wage['amount_minor']);
+        self::assertSame(3_834_800, $wage['amount_minor']);
 
         $cancelled = $this->action->cancel(
             $this->request('POST')->withParsedBody(['row_version' => $absence['row_version']]),
@@ -803,13 +804,13 @@ final class PayrollAbsenceApiTest extends TestCase
      * Svátek uvnitř okna náhrady při DPN musí ze základní mzdy vypadnout.
      *
      * § 192 odst. 1 ZP za něj náhradu přiznává, i když na něj směna rozvržená
-     * není. Kdyby zůstal i v základní mzdě, byl by zaplacený dvakrát. Fond ho
-     * naopak neobsahuje — mzda se za svátek jinak nekrátí (§ 115 odst. 3 ZP) —
-     * takže nahrazené minuty jsou širší než fond o právě ten svátek.
+     * není. Kdyby zůstal i v základní mzdě, byl by zaplacený dvakrát. Mimo
+     * nemoc ho měsíční mzda pokrývá (§ 115 odst. 3 ZP), takže je ve fondu, ze
+     * kterého se krátí.
      *
-     * Červenec 2026 má 23 rozvržených dnů; 6. 7. je svátek, takže fond je
-     * 22 x 480 = 10 560 minut. Nemoc 6. až 7. 7. vezme 960 minut (svátek
-     * i směnu), zbývá 9 600 a 42 000 x 9 600/10 560 = 38 181,81 → 38 182 Kč.
+     * Červenec 2026 má 23 rozvržených dnů včetně svátku 6. 7., fond měsíční
+     * mzdy je 23 x 480 = 11 040 minut. Nemoc 6. až 7. 7. vezme 960 minut
+     * (svátek i směnu), zbývá 10 080 a 42 000 x 10 080/11 040 = 38 347,82 → 38 348 Kč.
      */
     public function testHolidayInsideSicknessLeavesTheBaseWageByTheObligationFund(): void
     {
@@ -845,9 +846,9 @@ final class PayrollAbsenceApiTest extends TestCase
         $result = $proration->forMonth($this->supplierId, $this->employmentId, '2026-07', 4_200_000);
 
         self::assertTrue($result['supported']);
-        self::assertSame(10_560, $result['fund_minutes']);
+        self::assertSame(11_040, $result['fund_minutes']);
         self::assertSame(['sickness_compensation' => 960], $result['replaced_minutes_by_title']);
-        self::assertSame(3_818_200, $result['amount_minor']);
+        self::assertSame(3_834_800, $result['amount_minor']);
     }
 
     private function workCalendar(): void
