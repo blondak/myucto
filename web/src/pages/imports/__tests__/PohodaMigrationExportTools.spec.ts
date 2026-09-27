@@ -63,7 +63,7 @@ describe('Přechod z POHODA: export z POHODA SQL', () => {
     expect(help.text()).toContain('pohoda.sql_help_title')
     expect(help.text()).toContain('pohoda.sql_help_requirements')
     expect(help.get('a').attributes('href')).toBe('https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server')
-    expect(wrapper.get('[data-testid="pohoda-mdb-help"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="pohoda-mdb-help"]').exists()).toBe(true)
   })
 
   it('nabídne skupinu nástrojů SQL se vzorem konfigurace a podpůrnými skripty', async () => {
