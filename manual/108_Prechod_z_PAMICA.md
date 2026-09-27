@@ -188,6 +188,27 @@ Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Po�
 stavy kumulací převod zapíše jen tehdy, když má firma začátek vedení mezd
 nastavený; jiný než navržený začátek nastavte ještě před převodem.
 
+**Začátek vedení mezd před zpracovanými měsíci.** Firma, která už v MyÚčtu
+je (například po dřívějším převodu nebo resetu dat s ponecháním nastavení
+firmy), může mít začátek vedení mezd dřív, než končí měsíce zpracované
+v PAMICA. Převod by pak tyto měsíce bral jako měsíce, které počítá MyÚčto:
+vznikly by v nich vstupy náhrad za nepřítomnost z docházky a dohody
+o srážkách, přestože je PAMICA už zpracovala a podala. Kontrola před převodem
+to proto ohlásí a nabídne dvě volby:
+
+- **Posunout začátek na MM/RRRR a převést** (výchozí): začátek se před
+  převodem posune na měsíc po posledním uzavřeném měsíci exportu a měsíce
+  do něj se převezmou jako zpracované předchozím programem. Protokol posun
+  zapíše.
+- **Převést bez posunu začátku**: jen pokud má MyÚčto tyto měsíce vědomě
+  spočítat znovu. Volbu je třeba potvrdit zaškrtnutím.
+
+Ostrý převod bez jedné z voleb se nespustí a protokol řekne proč. Zkouška
+nanečisto proběhne vždy a ukáže, co zvolená možnost udělá. Má-li MyÚčto
+v dotčených měsících už vlastní mzdový běh, posun se nenabízí: kontrola
+jen upozorní, ať se měsíce nepočítají dvakrát. Běh pak zrušte, nebo převod
+nechte bez posunu.
+
 Počáteční stavy ročních kumulací (sociální vyměřovací základ, základ
 a záloha daně, uplatněné slevy, bonus, srážková daň) převod zapíše za měsíce
 roku před začátkem vedení mezd v MyÚčtu, jen za souvislou řadu měsíců
