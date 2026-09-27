@@ -302,7 +302,7 @@ final class PohodaPayrollDeductions
             // ten má v exportu hodnotu 1 i u srážek, které deponované nejsou, takže
             // žádný signál nenese.
             'deferred' => $class['deferred'],
-            'deduction_kind' => $class['target'] === 'voluntary' ? $class['kind'] : null,
+            'deduction_kind' => $class['target'] === 'voluntary' ? self::sheetKind((string) $class['kind'], $periods) : null,
             /*
              * Dobrovolná srážka, kterou nese měsíční sešit převodu: import docházky z ní
              * dělá dohodu o srážkách za každý převedený měsíc, takže druhý zápis by ji
@@ -373,6 +373,20 @@ final class PohodaPayrollDeductions
         }
 
         return 'other';
+    }
+
+    /**
+     * Obecná srážka, kterou předchozí program strhával ve mzdách (sloupec srážek
+     * měsíčního sešitu, např. S07), je `imported` i v převzatých měsících: v měsících
+     * počítaných MyÚčtem ji s tímtéž druhem zakládá import docházky
+     * ({@see PohodaPayrollCatalog::deduction()}) a dohoda podle OZ za ní doložená není
+     * v žádném z nich. Trvalá srážka z karty, která se ve mzdách neobjevila, zůstává `other`.
+     *
+     * @param list<string> $periods
+     */
+    private static function sheetKind(string $kind, array $periods): string
+    {
+        return $kind === 'other' && $periods !== [] ? 'imported' : $kind;
     }
 
     /**
