@@ -158,6 +158,8 @@ async function load(reset = true) {
       include_vat_breakdown: tbl.isVisible('vat_breakdown'),
       include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
       include_dimensions: tbl.isVisible('dimensions'),
+      include_notes: tbl.isVisible('note'),
+      include_documents: tbl.isVisible('documents'),
     })
     if (seq !== loadSeq) return
     entries.value = reset ? r.items : [...entries.value, ...r.items]
@@ -426,6 +428,8 @@ const COLUMNS: ColumnDef[] = [
   { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown' },
   { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts' },
   { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts' },
+  { key: 'note', labelKey: 'accounting.journal.col_note', defaultHidden: true },
+  { key: 'documents', labelKey: 'accounting.journal.col_documents', defaultHidden: true },
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
 ]
 const tbl = useTablePrefs('journal', COLUMNS)
@@ -447,7 +451,7 @@ function onListScroll(event: Event) {
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240
     && !loading.value && !loadingMore.value && page.value < totalPages.value) void load(false)
 }
-watch(() => [tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (entries.value.length) load() })
+watch(() => [tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions'), tbl.isVisible('note'), tbl.isVisible('documents')], () => { if (entries.value.length) load() })
 function postingAccounts(entry: JournalEntry, side: 'debit' | 'credit'): string {
   return [...new Set(entry.posting_lines?.filter(line => line.side === side).map(line => line.account_code) ?? [])].join(', ') || '—'
 }
@@ -462,6 +466,8 @@ function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: str
     debit_accounts: postingAccounts(entry, 'debit'),
     credit_accounts: postingAccounts(entry, 'credit'),
     dimensions: entry.dimension_labels?.join(' · ') || '—',
+    note: entry.note_preview || '—',
+    documents: entry.document_count ? String(entry.document_count) : '—',
   }
   return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
@@ -1111,6 +1117,16 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td v-else-if="c.key === 'vat_breakdown'" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')" class="px-3 py-2"><VatBreakdownCell :rows="e.vat_breakdown" :currency="e.source_currency || 'CZK'" /></td>
                 <td v-else-if="c.key === 'debit_accounts'" :data-custom-color="!!colors.color('debit_accounts')" :style="colors.cellStyle('debit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'debit') }}</td>
                 <td v-else-if="c.key === 'credit_accounts'" :data-custom-color="!!colors.color('credit_accounts')" :style="colors.cellStyle('credit_accounts')" class="px-3 py-2 font-mono text-xs">{{ postingAccounts(e, 'credit') }}</td>
+                <td v-else-if="c.key === 'note'" :data-custom-color="!!colors.color('note')" :style="colors.cellStyle('note')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.note_preview || undefined">
+                  <template v-if="e.note_preview">{{ e.note_preview }}<span v-if="(e.note_count ?? 0) > 1" class="ml-1 text-neutral-400">+{{ (e.note_count ?? 0) - 1 }}</span></template>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
+                <td v-else-if="c.key === 'documents'" :data-custom-color="!!colors.color('documents')" :style="colors.cellStyle('documents')" class="px-3 py-2 whitespace-nowrap text-xs">
+                  <span v-if="e.document_count" class="inline-flex items-center gap-1 text-neutral-600" :title="t('accounting.journal.col_documents_hint', { n: e.document_count })">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>{{ e.document_count }}
+                  </span>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
                 <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
                 </template>
                 <td class="w-8"></td>

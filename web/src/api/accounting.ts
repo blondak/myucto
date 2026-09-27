@@ -188,6 +188,11 @@ export interface JournalEntry {
   vat_breakdown?: Array<{ rate: number; base: number; vat: number }>
   source_currency?: string | null
   dimension_labels?: string[]
+  /** Připnutá, jinak nejnovější poznámka zápisu (jen s include_notes). */
+  note_preview?: string | null
+  note_count?: number
+  /** Přílohy zápisu + navázané dokumenty z úložiště (jen s include_documents). */
+  document_count?: number
   _warnings?: Array<'entry_date_outside_document_year'>
 }
 
@@ -520,6 +525,8 @@ export interface JournalFilters {
   include_vat_breakdown?: boolean
   include_posting_accounts?: boolean
   include_dimensions?: boolean
+  include_notes?: boolean
+  include_documents?: boolean
   sort_key?: string
   sort_dir?: 'asc' | 'desc'
   document_no?: string
@@ -1988,6 +1995,8 @@ export const accountingApi = {
     if (filters?.include_vat_breakdown) params.include_vat_breakdown = 1
     if (filters?.include_posting_accounts) params.include_posting_accounts = 1
     if (filters?.include_dimensions) params.include_dimensions = 1
+    if (filters?.include_notes) params.include_notes = 1
+    if (filters?.include_documents) params.include_documents = 1
     if (filters?.sort_key) params.sort_key = filters.sort_key
     if (filters?.sort_dir) params.sort_dir = filters.sort_dir
     if (filters?.document_no) params.document_no = filters.document_no

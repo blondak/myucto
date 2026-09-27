@@ -19,6 +19,7 @@ use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\JournalListExtras;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
@@ -107,6 +108,7 @@ final class JournalAction
         private readonly LoggerInterface $log,
         private readonly DimensionService $dimensions,
         private readonly DimensionListSummaryRepository $dimensionSummaries,
+        private readonly JournalListExtras $listExtras,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -141,6 +143,11 @@ final class JournalAction
             ? $this->journal->linesForEntries($entryIds, $supplierId)
             : [];
         $dimensionLabels = $includeDimensions ? $this->dimensionSummaries->forJournalEntries($supplierId, $entryIds) : [];
+        // Poznámka a počet dokumentů jen pro zapnuté sloupce, jedním dotazem za stránku.
+        $includeNotes = ($q['include_notes'] ?? null) === '1';
+        $includeDocuments = ($q['include_documents'] ?? null) === '1';
+        $notes = $includeNotes ? $this->listExtras->notes($supplierId, $entryIds) : [];
+        $documentCounts = $includeDocuments ? $this->listExtras->documentCounts($supplierId, $entryIds) : [];
         $vatBySource = [];
         if ($includeVat) {
             foreach (['invoice', 'purchase_invoice'] as $source) {
@@ -163,6 +170,13 @@ final class JournalAction
             }
             if ($includeDimensions) {
                 $item['dimension_labels'] = $dimensionLabels[(int) $item['id']] ?? [];
+            }
+            if ($includeNotes) {
+                $item['note_preview'] = $notes[(int) $item['id']]['preview'] ?? null;
+                $item['note_count'] = $notes[(int) $item['id']]['count'] ?? 0;
+            }
+            if ($includeDocuments) {
+                $item['document_count'] = $documentCounts[(int) $item['id']] ?? 0;
             }
         }
         unset($item);
