@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 
 /**
  * Případ dávky ze schválené absence.
@@ -53,6 +54,7 @@ final readonly class SicknessCaseFromAbsenceService
         private PayrollAbsenceRepository $absences,
         private SicknessCaseService $caseService,
         private SicknessDeadlinePolicy $deadlines,
+        private ?PayrollSicknessRepository $sicknessEvents = null,
     ) {}
 
     public static function benefitKindFor(string $absenceType): ?SicknessBenefitKind
@@ -156,6 +158,15 @@ final readonly class SicknessCaseFromAbsenceService
             ];
             if ($kind === SicknessBenefitKind::Ose && ($absence['lone_carer'] ?? false)) {
                 $input['lone_caregiver'] = true;
+            }
+            // NEMPRI „pracoval v den vzniku" je totéž potvrzení, které účetní
+            // dala při schválení DPN (první směna celá odpracována). Dřív se
+            // případ zakládal s false a XML hlásilo, že v ten den nepracoval.
+            $workedFirstDay = $kind === SicknessBenefitKind::Nem
+                ? $this->sicknessEvents?->firstDayFullyWorkedForAbsence($supplierId, $caseAbsenceId)
+                : null;
+            if ($workedFirstDay !== null) {
+                $input['worked_on_decisive_day'] = $workedFirstDay;
             }
             $created = $this->caseService->create(
                 $supplierId,

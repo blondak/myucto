@@ -80,6 +80,23 @@ final class PayrollSicknessRepository
             ?? throw new \RuntimeException('Výpočet náhrady DPN nebyl nalezen.');
     }
 
+    /**
+     * Potvrzení „první plánovaná směna byla celá odpracována" u schválené
+     * neschopnosti; `null`, když k absenci výpočet náhrady není.
+     */
+    public function firstDayFullyWorkedForAbsence(int $supplierId, int $absenceId): ?bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT first_day_fully_worked FROM payroll_sickness_events
+              WHERE supplier_id = ? AND absence_id = ?
+              ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $absenceId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? null : (bool) $value;
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $id): ?array
     {

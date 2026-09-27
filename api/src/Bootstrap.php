@@ -177,6 +177,11 @@ final class Bootstrap
                     'awaitingRuns',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService::class),
                 ),
+            \MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService::class =>
+                \DI\autowire()->constructorParameter(
+                    'sicknessEvents',
+                    \DI\get(\MyInvoice\Repository\Payroll\PayrollSicknessRepository::class),
+                ),
             \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::class =>
                 \DI\autowire()->constructorParameter(
                     'predecessorGaps',

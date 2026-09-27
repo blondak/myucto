@@ -116,6 +116,27 @@ final class PayrollSicknessFullFlowTest extends TestCase
     }
 
     /**
+     * C-24: potvrzení „první směna celá odpracována" u schválené DPN se musí
+     * propsat do případu jako „pracoval v den vzniku"; dřív NEMPRI hlásilo false.
+     */
+    public function testWorkedFirstDayFromApprovalReachesCase(): void
+    {
+        $person = $this->sicknessPerson(8, 'Petr Odpracovaný');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-26', (int) $average['id'], [
+            'first_day_fully_worked' => true,
+            'insurance_eligibility_confirmed' => true,
+            'conflicting_benefit_excluded' => true,
+        ]);
+        self::assertSame('created', $approved['sickness_case']['outcome'], json_encode($approved['sickness_case']) ?: '');
+
+        $case = $this->service(SicknessCaseService::class)
+            ->requireCase($this->supplierId, self::ENVIRONMENT, (int) $approved['sickness_case']['case_id']);
+        self::assertTrue((bool) $case['worked_on_decisive_day']);
+    }
+
+    /**
      * Případ zapsaný ručně k neschopnosti do 14 dnů: dávka z ní neplyne
      * (§ 26 odst. 1 zák. č. 187/2006 Sb.), hlídač termínů k ní NEMPRI ani HZUPN
      * neukáže a NEMPRI se připravit nedá.
