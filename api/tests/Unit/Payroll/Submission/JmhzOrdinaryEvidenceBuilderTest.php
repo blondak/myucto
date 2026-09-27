@@ -260,6 +260,36 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * 10116 podle pokynů MPSV 1.4.13: výkon rozhodnutí, konkurs nebo dohoda
+     * o srážkách podle OZ. Srážka za závodní stravování (§ 236 ZP) je v pokynech
+     * samostatný druh (10352) a srážka ze zákona (§ 147 odst. 1 ZP) dohodou není;
+     * dřív obě daly ANO.
+     */
+    public function testMealAndStatutoryDeductionsAreNotReportedIn10116(): void
+    {
+        foreach ([
+            'obědy' => [['deduction_kind' => 'meal'], false],
+            '§ 147' => [['deduction_kind' => 'advance', 'legal_basis' => 'zp_147_1_c'], false],
+            'dohoda podle OZ' => [['deduction_kind' => 'other'], true],
+        ] as $label => [$agreement, $expected]) {
+            $source = $this->source();
+            $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertIsArray($input);
+            $input['people'][0]['deduction_agreements'] = [['id' => 5, 'title' => 'Syntetická srážka'] + $agreement];
+            $this->replaceInput($source, $input);
+            $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertIsArray($result);
+            $result['people'][0]['statutory']['net_pay']['deducted_minor_units'] = 64_100;
+            $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+            $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+            $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+
+            self::assertSame($expected, $snapshot->payload['attribute_values']['10116'], $label);
+        }
+    }
+
+    /**
      * Revize se dvěma osobami zmrazí evidenci za KAŽDÝ vztah zvlášť.
      *
      * Bez opravy tady builder skončil `jmhz_ordinary_evidence_scope_unsupported`
