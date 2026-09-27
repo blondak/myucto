@@ -19,7 +19,7 @@ import {
 } from '@/api/payrollTakeoverRuns'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -312,10 +312,10 @@ async function discard() {
           <table class="mt-2 w-full text-sm">
             <thead>
               <tr class="text-left text-xs uppercase text-neutral-500">
-                <th class="py-1">{{ t('payroll.runs.takeover.column_kind') }}</th>
-                <th class="py-1">{{ t('payroll.runs.takeover.column_who') }}</th>
-                <th class="py-1 text-right">{{ t('payroll.runs.takeover.column_amount') }}</th>
-                <th class="py-1">{{ t('payroll.runs.takeover.column_paid_on') }}</th>
+                <th class="py-1 pr-3">{{ t('payroll.runs.takeover.column_kind') }}</th>
+                <th class="py-1 px-3">{{ t('payroll.runs.takeover.column_who') }}</th>
+                <th class="py-1 px-3 text-right">{{ t('payroll.runs.takeover.column_amount') }}</th>
+                <th class="py-1 pl-3">{{ t('payroll.runs.takeover.column_paid_on') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -324,16 +324,16 @@ async function discard() {
                 :key="item.id"
                 class="border-t border-neutral-100"
               >
-                <td class="py-1">{{ t(`payroll.runs.takeover.kind.${item.evidence_kind}`) }}</td>
-                <td class="py-1">
+                <td class="py-1 pr-3">{{ t(`payroll.runs.takeover.kind.${item.evidence_kind}`) }}</td>
+                <td class="py-1 px-3">
                   {{ (item.employee_name ?? item.external_person_ref)
                     || t('payroll.runs.takeover.whole_company') }}
                 </td>
-                <td class="py-1 text-right tabular-nums">
+                <td class="py-1 px-3 text-right tabular-nums whitespace-nowrap">
                   {{ money(item.amount_minor, item.currency_code) }}
                 </td>
-                <td class="py-1">
-                  <span v-if="item.paid_on">{{ item.paid_on }}</span>
+                <td class="py-1 pl-3 whitespace-nowrap">
+                  <span v-if="item.paid_on">{{ formatDate(item.paid_on) }}</span>
                   <span v-else class="text-neutral-500">
                     {{ t('payroll.runs.takeover.no_payment_date') }}
                   </span>
