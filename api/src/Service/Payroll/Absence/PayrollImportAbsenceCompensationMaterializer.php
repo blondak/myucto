@@ -60,6 +60,7 @@ final class PayrollImportAbsenceCompensationMaterializer
         'doctor_hours' => 'zp-199-1+nv-590-2006',
         'obstacle_employer_hours' => 'zp-207-209',
         'holiday_hours' => 'zp-115-3',
+        'obstacle_employee_hours' => 'zp-199-1+nv-590-2006',
     ];
 
     /**
@@ -70,6 +71,14 @@ final class PayrollImportAbsenceCompensationMaterializer
      */
     private const HOLIDAY = ['holiday_hours' => 'NAHRADA_MZDY_SVATEK'];
     private const HOLIDAY_PERCENT = 100;
+
+    /**
+     * Placená překážka na straně zaměstnance (§ 199 ZP, NV č. 590/2006 Sb.): náhrada ve výši
+     * průměrného výdělku. Obecný import ji zapnout nemůže — souhrn hodin neříká, o jakou
+     * překážku jde, a část z nich náhradu nemá. Zapíná ji volající, jehož zdroj hodiny
+     * vede výslovně jako placené volno (převod z PAMICA: `V03` mimo lékaře).
+     */
+    private const PAID_EMPLOYEE_OBSTACLE = ['obstacle_employee_hours' => 'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC'];
 
     public const NOT_COMPUTED = [
         'sick_hours' => 'Náhradu mzdy při DPN nejde z měsíčního součtu hodin ověřit (okno prvních 14 dnů, redukce průměru, dny nemoci). Zadejte ji ručně podle rozhodnutí o DPN.',
@@ -108,6 +117,7 @@ final class PayrollImportAbsenceCompensationMaterializer
         ?int $userId,
         ?ImportAbsenceCompensationRates $rates = null,
         bool $holidayWithoutMonthlyWage = false,
+        bool $paidEmployeeObstacle = false,
     ): array {
         $rates ??= ImportAbsenceCompensationRates::defaults();
         $batch = $this->imports->batch($supplierId, $importId);
@@ -144,6 +154,7 @@ final class PayrollImportAbsenceCompensationMaterializer
                     $rates,
                     $userId,
                     $holidayWithoutMonthlyWage,
+                    $paidEmployeeObstacle,
                 ));
             } catch (PayrollInputConflictException|PayrollInputCancellationException|\InvalidArgumentException|\DomainException $e) {
                 $report['skipped'][] = [
@@ -197,6 +208,7 @@ final class PayrollImportAbsenceCompensationMaterializer
         ImportAbsenceCompensationRates $rates,
         ?int $userId,
         bool $holidayWithoutMonthlyWage = false,
+        bool $paidEmployeeObstacle = false,
     ): array {
         $outcome = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'cancelled' => 0, 'skipped' => [], 'warnings' => []];
         $periodStart = $period . '-01';
@@ -212,6 +224,9 @@ final class PayrollImportAbsenceCompensationMaterializer
         }
         $values = $summary['values'];
         foreach (self::NOT_COMPUTED as $meaning => $reason) {
+            if ($paidEmployeeObstacle && isset(self::PAID_EMPLOYEE_OBSTACLE[$meaning])) {
+                continue;
+            }
             if (($values[$meaning] ?? 0) > 0) {
                 $outcome['skipped'][] = ['employment_id' => $employmentId, 'meaning' => $meaning, 'reason' => $reason];
             }
@@ -223,6 +238,9 @@ final class PayrollImportAbsenceCompensationMaterializer
         $components = self::COMPONENTS;
         if ($holidayWithoutMonthlyWage && !$this->hasMonthlyWage($supplierId, $employmentId, $periodStart)) {
             $components += self::HOLIDAY;
+        }
+        if ($paidEmployeeObstacle) {
+            $components += self::PAID_EMPLOYEE_OBSTACLE;
         }
         foreach ($components as $meaning => $code) {
             $millihours = $values[$meaning] ?? 0;
@@ -263,7 +281,9 @@ final class PayrollImportAbsenceCompensationMaterializer
                 $outcome['warnings'][] = ['employment_id' => $employmentId, 'meaning' => $meaning, 'message' => self::DOCTOR_NOTICE];
             }
 
-            $percent = isset(self::HOLIDAY[$meaning]) ? self::HOLIDAY_PERCENT : $rates->percentFor($meaning);
+            $percent = isset(self::HOLIDAY[$meaning]) || isset(self::PAID_EMPLOYEE_OBSTACLE[$meaning])
+                ? self::HOLIDAY_PERCENT
+                : $rates->percentFor($meaning);
             $amount = LeaveCompensationCalculator::calculateMinutes($average['average_hourly_minor'], $minutes, $percent);
             $componentId = $this->componentId($supplierId, $code, $periodStart);
             if ($existing !== null) {

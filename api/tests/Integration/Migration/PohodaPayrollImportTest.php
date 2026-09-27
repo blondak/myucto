@@ -406,6 +406,27 @@ final class PohodaPayrollImportTest extends TestCase
         $values = json_decode((string) $summary->fetchColumn(), true) ?: [];
         self::assertArrayNotHasKey('sick_hours', $values, json_encode($values));
         self::assertSame([], PayrollJmhzWorkMonthSummaryBuilder::importHoursRequiringDates($values));
+
+        // Měsíc počítá MyÚčto: náhrada mzdy při DPN má zmrazený výpočet a schválený vstup,
+        // jinak by ji běh nevyplatil a krácení měsíční mzdy by skončilo v ruční kontrole.
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_SICKNESS)['sickness_compensations'] ?? 0, $this->explain($protocol));
+        $event = $this->db->pdo()->prepare(
+            "SELECT event.first_day_fully_worked, event.compensation_minor FROM payroll_sickness_events event
+               JOIN payroll_absences absence ON absence.id = event.absence_id
+              WHERE absence.supplier_id = ? AND absence.employment_id = ?"
+        );
+        $event->execute([$supplierId, $employment['id']]);
+        $sickness = $event->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($sickness, $this->explain($protocol));
+        self::assertSame(0, (int) $sickness['first_day_fully_worked']);
+        $input = "SELECT SUM(i.amount_minor) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+                   WHERE i.supplier_id = ? AND i.employment_id = ? AND c.code = 'NAHRADA_MZDY_DPN' AND i.status = 'approved' AND i.period_start = '2026-03-01'";
+        self::assertSame((int) $sickness['compensation_minor'], $this->scalar($input, [$supplierId, $employment['id']]));
+        self::assertGreaterThan(0, (int) $sickness['compensation_minor']);
+
+        // Opakovaný převod výpočet nezdvojí.
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true);
+        self::assertArrayNotHasKey('sickness_compensations', self::stepCounts($again, PohodaPayrollImporter::STEP_SICKNESS), $this->explain($again));
     }
 
     /**
@@ -640,6 +661,47 @@ final class PohodaPayrollImportTest extends TestCase
         $protocol = $this->importer->run($takenOver, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(0, $attendanceAgreements($takenOver), $this->explain($protocol));
+    }
+
+    /**
+     * Opakovaný převod měsíce, který počítá MyÚčto, se změněným exportem: pracovní měsíce
+     * z dřívější dávky se samy znovu otevřou (nový souhrn by se jinak nezapsal) a schválený
+     * vstup složky, kterou nová dávka už nevede, se zruší - jinak by zůstal vedle nových
+     * a mzda by ho vyplatila. Bez ručního SQL.
+     */
+    public function testRepeatedImportOfCountedMonthReopensWorkMonthsAndCancelsSupersededInputs(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $jana = $this->employment($supplierId, '1001');
+        $bonus = "SELECT COUNT(*) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+                   WHERE i.supplier_id = ? AND i.employment_id = ? AND i.period_start = '2026-02-01' AND c.code LIKE 'PAM_O01%' AND i.status = ?";
+        self::assertSame(1, $this->scalar($bonus, [$supplierId, $jana['id'], 'approved']), $this->explain($first));
+        $months = "SELECT COUNT(*) FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-02-01' AND status = 'approved'";
+        self::assertSame(1, $this->scalar($months, [$supplierId, $jana['id']]));
+
+        // PAMICA únorovou odměnu zrušila: sešit února se změní, leden zůstává.
+        $changedDir = $this->tmp . '/changed/' . basename(dirname($file));
+        mkdir($changedDir, 0755, true);
+        $changed = $changedDir . '/' . basename($file);
+        $xml = (string) file_get_contents($file);
+        $without = preg_replace('~<MZslozky><ID>112</ID>.*?</MZslozky>~s', '', $xml, 1);
+        self::assertNotSame($xml, $without);
+        file_put_contents($changed, $without);
+
+        $again = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS);
+        self::assertSame(1, $counts['superseded_inputs'] ?? 0, $this->explain($again));
+        self::assertGreaterThanOrEqual(1, $counts['work_months_reopened'] ?? 0, $this->explain($again));
+        self::assertSame(0, $this->scalar($bonus, [$supplierId, $jana['id'], 'approved']), $this->explain($again));
+        self::assertSame(1, $this->scalar($bonus, [$supplierId, $jana['id'], 'cancelled']));
+        self::assertSame(1, $this->scalar($months, [$supplierId, $jana['id']]), 'Nový souhrn se zapsal a schválil znovu.');
+        $january = "SELECT COUNT(*) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+                     WHERE i.supplier_id = ? AND i.employment_id = ? AND i.period_start = '2026-01-01' AND c.code LIKE 'PAM_O01%' AND i.status = 'approved'";
+        self::assertSame(1, $this->scalar($january, [$supplierId, $jana['id']]), 'Nezměněný měsíc převod nechá být.');
     }
 
     /** Izolovaná firma se zapnutými mzdami a výchozí účtárnou (stejně jako test importu docházky). */

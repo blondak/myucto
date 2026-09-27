@@ -274,7 +274,7 @@ final class PayrollPersonCreateValidator
      * zůstává tak JEDEN validátor. Co se sem nevejde do vzoru, projde s plným
      * úvazkem a shodí to až on, se svou hláškou.
      */
-    private static function workloadBasisPoints(mixed $weeklyHours): int
+    public static function workloadBasisPoints(mixed $weeklyHours): int
     {
         if ((!is_string($weeklyHours) && !is_int($weeklyHours))
             || preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', (string) $weeklyHours, $parts) !== 1

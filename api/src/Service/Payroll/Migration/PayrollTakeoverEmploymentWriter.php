@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Absence\AverageEarningResult;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringComponentValidator;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
@@ -451,6 +452,8 @@ final class PayrollTakeoverEmploymentWriter
             if (!$empty($desired['workload_basis_points'] ?? null)) {
                 $changes['workload_basis_points'] = (int) $desired['workload_basis_points'];
             }
+        } elseif (($workload = self::defaultedWorkloadCorrection($current, $desired)) !== null) {
+            $changes['workload_basis_points'] = $workload;
         }
         $place = trim((string) ($current['work_place'] ?? ''));
         if (!$empty($desired['jmhz_workplace_municipality_code'] ?? null) && !$empty($desired['work_place'] ?? null)
@@ -471,6 +474,40 @@ final class PayrollTakeoverEmploymentWriter
         }
 
         return $counts;
+    }
+
+    /**
+     * Úvazek, který zdroj dokládá, místo úvazku dosazeného při založení vztahu.
+     *
+     * Úvazek nemá prázdnou hodnotu: založení osoby ho dopočítá jako podíl týdenní doby
+     * a zákonných 40 h ({@see PayrollPersonCreateValidator::workloadBasisPoints()}).
+     * U zaměstnavatele s kratší stanovenou dobou (§ 79 odst. 2 ZP, třeba 37,5 h ve
+     * třísměnném režimu) tak plný úvazek 37,5 h vyjde jako 93,75 % a hlášení by
+     * uvádělo stanovenou týdenní dobu 40 h (10261) a fond ze 40 h (10259). Opraví se
+     * jen úvazek, který je pořád ten dosazený, u shodné týdenní doby — úvazek, který
+     * někdo změnil, se nepřepisuje.
+     *
+     * @param array<string,mixed> $current
+     * @param array<string,?string> $desired
+     */
+    public static function defaultedWorkloadCorrection(array $current, array $desired): ?int
+    {
+        $desiredWorkload = $desired['workload_basis_points'] ?? null;
+        $desiredWeekly = $desired['weekly_hours'] ?? null;
+        $currentWeekly = $current['weekly_hours'] ?? null;
+        if (!is_numeric($desiredWorkload) || !is_numeric($desiredWeekly) || !is_numeric($currentWeekly)) {
+            return null;
+        }
+        $desiredWorkload = (int) $desiredWorkload;
+        $currentWorkload = (int) ($current['workload_basis_points'] ?? 10_000);
+        if ($desiredWorkload < 1 || $desiredWorkload > 10_000 || $desiredWorkload === $currentWorkload
+            || (int) round((float) $desiredWeekly * 100) !== (int) round((float) $currentWeekly * 100)
+            || $currentWorkload !== PayrollPersonCreateValidator::workloadBasisPoints(sprintf('%.2f', (float) $currentWeekly))
+        ) {
+            return null;
+        }
+
+        return $desiredWorkload;
     }
 
     /**

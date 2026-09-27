@@ -209,11 +209,31 @@ převod opraví předpis měsíční mzdy, který zapsal dřívější převod; 
 upravený účetní nemění.
 
 **Měsíce, které počítá MyÚčto.** Za měsíce od začátku vedení mezd převod
-z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, překážky
-na straně zaměstnavatele (sazbou, kterou platila PAMICA) a za svátek u mzdy
-za hodiny nebo úkol. Svátek v jinak pracovní den u měsíční mzdy převod vede
-zvlášť, ne mezi odpracovanými hodinami. Náhradu mzdy při nemoci, placené volno
-a vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+z hodin docházky rovnou spočítá náhrady mzdy za dovolenou, lékaře, placené
+volno (ve výši průměru), překážky na straně zaměstnavatele (sazbou, kterou
+platila PAMICA) a za svátek u mzdy za hodiny nebo úkol. Svátek v jinak pracovní
+den u měsíční mzdy převod vede zvlášť, ne mezi odpracovanými hodinami.
+
+**Náhrada mzdy při nemoci.** U převzaté dočasné pracovní neschopnosti, která
+zasahuje do měsíců počítaných MyÚčtem, převod spočítá náhradu mzdy stejně
+jako schválení v `Mzdy → Nepřítomnosti`: okno prvních 14 dnů, redukovaný
+průměr ze schváleného průměru čtvrtletí, ve kterém nemoc začala. Dobu měří
+rozvrhem pracovního kalendáře (měsíc ze souhrnu docházky směny nemá). Náhrada
+vznikne jen za dny od začátku vedení mezd, dřívější dny zaplatila PAMICA.
+První den nemoci bere převod jako neodpracovaný; když ho zaměstnanec celý
+odpracoval, opravte nepřítomnost v `Mzdy → Nepřítomnosti`. Nepřítomnost
+bez schváleného průměru protokol vypíše; po doplnění průměru převod
+zopakujte. Vrácenou dovolenou zadejte ručně v `Mzdy → Vstupy`.
+
+**Opakovaný převod** téhož exportu nic nezmění. Když se sešit měsíce, který
+počítá MyÚčto, od dřívějšího převodu změnil (nový export nebo novější verze
+převodu), převod ho převede znovu: pracovní měsíce se souhrnem z dřívější
+dávky sám znovu otevře, zapíše nový souhrn a mzdové vstupy dřívější dávky,
+které nová dávka už nevede (třeba složka, kterou nová verze převodu vede
+jinak), zruší. Protokol vypíše počty i kódy zrušených složek. Měsíc, jehož
+mzdový běh už má zamčené vstupy, převod znovu nepřevede a vypíše ho:
+neschválený běh nejdřív zrušte v `Mzdy → Mzdové běhy`, schválený měsíc převod
+nepřepisuje.
 
 **Zařazení složek do JMHZ.** Plnění, které svou složku v číselníku má, jde na
 ni: zdanitelná část stravování na *Zdanitelná část stravování*, odměna za
@@ -250,6 +270,15 @@ podruhé.
 příkaz, rozhodnutí o oddlužení), export nenese, a MyÚčto je bez nich vyžaduje.
 Převzatý případ proto zůstane ve stavu *přijato*, do mzdového běhu nevstoupí
 a protokol spočítá, kolik případů čeká na doložení. Doložíte je v kartě případu.
+
+Protokol případy rozdělí podle toho, jestli je PAMICA opravdu srážela. Exekuce
+s kladnou srážkou v některém ze tří posledních zpracovaných měsíců, která
+neskončila a není doplacená, vypíše zvlášť s měsícem poslední srážky: srážet
+se má dál, takže ji doložte a aktivujte ještě před prvním mzdovým během, jinak
+ji běh vynechá. Aktivace potřebuje exekuční příkaz, soud nebo exekutora,
+oprávněného a příjemce; oprávněného export z PAMICA nenese. Ostatní případy
+(nový příkaz, odklad, doplacená pohledávka) vypíše protokol jako informaci
+k ověření proti spisu.
 
 Nepřevezme se rozpad nezabavitelné částky z PAMICA (MyÚčto ho počítá vlastní
 sadou pravidel, dvojí zdroj by se rozešel), vazba dvou srážek na jeden příkaz,

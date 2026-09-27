@@ -19,6 +19,8 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRepeatedMonth;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverSicknessCompensation;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
@@ -36,7 +38,10 @@ use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
  * akce průvodce, i pro export, ve kterém jsou jen mzdy.
  *
  * **Opakovaný převod** měsíc, který už prošel (období a otisk sešitu v mapě převodu),
- * přeskočí; import dávky je navíc idempotentní sám (otisk dávky).
+ * přeskočí; import dávky je navíc idempotentní sám (otisk dávky). Měsíc, který počítá
+ * MyÚčto a jehož sešit se od dřívějšího převodu změnil, převede znovu: otevře pracovní
+ * měsíce z dřívější dávky a zruší její vstupy, které nová dávka nenese
+ * ({@see PayrollTakeoverRepeatedMonth}), pokud měsíc nemá běh se zamčenými vstupy.
  * **Zkouška nanečisto** běží celá v jedné transakci, která se na konci vrátí.
  */
 final class PohodaPayrollImporter
@@ -66,6 +71,8 @@ final class PohodaPayrollImporter
         private readonly PayrollMigrationModuleSetup $moduleSetup,
         private readonly PohodaPayrollJmhzWriter $jmhz,
         private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
+        private readonly PayrollTakeoverRepeatedMonth $repeatedMonth,
+        private readonly PayrollTakeoverSicknessCompensation $sicknessCompensation,
     ) {}
 
     /**
@@ -440,6 +447,30 @@ final class PohodaPayrollImporter
                     }
                     continue;
                 }
+                // Dávky dřívějších převodů téhož měsíce (jiný otisk sešitu). U měsíce, který
+                // počítá MyÚčto, by jejich schválené pracovní měsíce a vstupy nové dávce
+                // překážely ({@see PayrollTakeoverRepeatedMonth}).
+                $previousBatches = [];
+                foreach ($done as $doneKey => $doneBatch) {
+                    if (str_starts_with((string) $doneKey, $period . '|')) {
+                        $previousBatches[] = (int) $doneBatch;
+                    }
+                }
+                $repeated = $previousBatches !== [] && self::countedByModule($period, $moduleStart);
+                if ($repeated) {
+                    $locking = $this->repeatedMonth->lockingRun($supplierId, $period);
+                    if ($locking !== null) {
+                        $protocol->count(self::STEP_MONTHS, 'repeated_months_locked');
+                        $protocol->warn(self::STEP_MONTHS, 'repeated_month_locked', sprintf(
+                            '%s: převod měsíce se nezopakoval, protože mzdový běh už má zamčené vstupy (stav %s). '
+                            . 'Neschválený běh zrušte v Mzdy → Mzdové běhy a převod spusťte znovu; schválený měsíc převod nepřepisuje.',
+                            $period,
+                            $locking['status'],
+                        ), ['period' => $period, 'run_id' => $locking['id']]);
+                        continue;
+                    }
+                    $this->repeatedMonth->reopenWorkMonths($supplierId, $period, $previousBatches, $userOrNull, 'PAMICA', $protocol, self::STEP_MONTHS);
+                }
                 try {
                     $preview = $this->attendance->preview($supplierId, $period, [$workbook], null, $profileId);
                     $created = 0;
@@ -472,6 +503,10 @@ final class PohodaPayrollImporter
                         $this->approveTakenOverInputs($supplierId, $userOrNull, $period, (int) ($applied['inputs']['import_id'] ?? 0), $protocol);
                     }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
+                    if ($repeated) {
+                        $this->repeatedMonth->supersedeInputs($supplierId, $period, $previousBatches,
+                            (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), 'PAMICA', $protocol, self::STEP_MONTHS);
+                    }
                     if (self::countedByModule($period, $moduleStart)) {
                         $compensationBatches[$period] = (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0);
                     }
@@ -563,6 +598,13 @@ final class PohodaPayrollImporter
                     $protocol,
                     self::STEP_SICKNESS,
                 );
+                // Náhrada mzdy při DPN za dny od začátku vedení mezd. Až po zápisu případů:
+                // okno § 192 ZP potřebuje dny vyčerpané předchozím plátcem.
+                $sicknessStart = $this->sickness->startPeriod($supplierId);
+                if ($sicknessStart !== null) {
+                    $this->sicknessCompensation->compensate($supplierId, $sicknessStart, $userOrNull,
+                        PohodaPayrollTakeover::policy(), $protocol, self::STEP_SICKNESS);
+                }
                 $protocol->finish(self::STEP_SICKNESS);
             }
 
@@ -712,7 +754,7 @@ final class PohodaPayrollImporter
     }
 
     /**
-     * Náhrady mzdy za dovolenou, lékaře a překážky na straně zaměstnavatele v měsíci, který
+     * Náhrady mzdy za dovolenou, lékaře, placené volno a překážky na straně zaměstnavatele v měsíci, který
      * počítá MyÚčto. Sešit nese jen hodiny (náhradu v něm PAMICA nemá jako mzdovou složku),
      * takže bez tohoto kroku by běh vyplatil jen krácenou základní mzdu. Počítá se stejně jako
      * u importu docházky: hodiny × převzatý průměr × sazba, u překážek sazba, se kterou
@@ -737,6 +779,9 @@ final class PohodaPayrollImporter
                     // mzdy ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter::recurringWage()}),
                     // takže vztah bez něj je ten, kterému PAMICA za svátek platila náhradu (`V02`).
                     holidayWithoutMonthlyWage: true,
+                    // `V03` mimo lékaře je v PAMICA „Placené volno" ({@see PohodaPayrollCatalog::absence()}):
+                    // placená překážka, za kterou PAMICA platí průměr (`KcPlacV`).
+                    paidEmployeeObstacle: true,
                 );
             } catch (\InvalidArgumentException|\DomainException $e) {
                 $protocol->warn(self::STEP_PEOPLE, 'absence_compensation_failed',

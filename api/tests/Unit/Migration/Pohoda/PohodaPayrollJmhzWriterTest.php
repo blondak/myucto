@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Migration\Pohoda;
 
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollJmhzWriter;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -64,6 +65,32 @@ final class PohodaPayrollJmhzWriterTest extends TestCase
             10234 => '41101', 10239 => '1', 10502 => '1', 10528 => 'Praha', 10529 => '554782', 10527 => 'Sklad Sever',
         ]));
         self::assertSame([], PohodaPayrollJmhzWriter::registrationTerms([10234 => 'abc', 10529 => '55478', 10528 => 'Praha', 10502 => '12']));
+    }
+
+    /**
+     * Plný úvazek 37,5 h u zaměstnavatele v třísměnném režimu: založení osoby ho
+     * dopočítalo ze 40 h jako 93,75 %, podané hlášení (10259 = 10260 = 172,5,
+     * 10261 = 37,5) dokládá 100 %. Úvazek, který někdo změnil, zůstane.
+     */
+    public function testWorkloadDefaultedAtCreationIsCorrectedFromSubmittedReport(): void
+    {
+        $desired = ['weekly_hours' => '37.50', 'workload_basis_points' => '10000'];
+        self::assertSame(10_000, PayrollTakeoverEmploymentWriter::defaultedWorkloadCorrection(
+            ['weekly_hours' => '37.50', 'workload_basis_points' => 9375],
+            $desired,
+        ));
+        self::assertNull(PayrollTakeoverEmploymentWriter::defaultedWorkloadCorrection(
+            ['weekly_hours' => '37.50', 'workload_basis_points' => 9000],
+            $desired,
+        ), 'Úvazek změněný ručně se nepřepisuje.');
+        self::assertNull(PayrollTakeoverEmploymentWriter::defaultedWorkloadCorrection(
+            ['weekly_hours' => '30.00', 'workload_basis_points' => 7500],
+            $desired,
+        ), 'Jiná týdenní doba není oprava úvazku.');
+        self::assertNull(PayrollTakeoverEmploymentWriter::defaultedWorkloadCorrection(
+            ['weekly_hours' => '37.50', 'workload_basis_points' => 9375],
+            ['weekly_hours' => '37.50', 'workload_basis_points' => '9375'],
+        ));
     }
 
     /** @param list<array<string,mixed>> $children */

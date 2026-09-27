@@ -258,6 +258,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      */
     private const STATUTORY_WEEKLY_MINUTES = 2400;
 
+    /** § 79 odst. 2 písm. a) zákoníku práce: 37,5 h týdně. */
+    private const SHORTEST_STATUTORY_WEEKLY_MINUTES = 2250;
+
     /** Pokyny MPSV k 10261: „missingová hodnota 99", viz weeklyWorkMissingValue(). */
     private const WEEKLY_WORK_MISSING_VALUE = '99';
 
@@ -291,13 +294,26 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * nulový byl (kalendář se u nich nepočítá), stanovený se dřív navrhoval
      * plný. Jde o návrh: potvrzení účetní dovolí výjimečně zapsat dobu ze
      * smlouvy o výkonu funkce.
+     *
+     * Týdenní základ je stanovená týdenní doba vztahu (viz statedWeeklyHours()),
+     * pokud leží v rozmezí § 79 odst. 1 a 2 (37,5 až 40 h) — profese v třísměnném
+     * nebo nepřetržitém režimu má fond z 37,5 h, ne ze 40 h. Mimo to rozmezí
+     * (vztah bez vyplněného úvazku, stanovená doba zkrácená kolektivní smlouvou)
+     * zůstává zákonných 40 h.
      */
-    private function standardFundSuggestion(string $periodStart, string $relationType): string
+    private function standardFundSuggestion(string $periodStart, string $relationType, ?string $statedWeeklyHours = null): string
     {
         if (!self::requiresShiftCalendar($relationType)) {
             return '0';
         }
-        $daily = (int) (self::STATUTORY_WEEKLY_MINUTES / 5);
+        $weeklyMinutes = self::STATUTORY_WEEKLY_MINUTES;
+        if ($statedWeeklyHours !== null && is_numeric($statedWeeklyHours)) {
+            $stated = (int) round((float) $statedWeeklyHours * 60);
+            if ($stated >= self::SHORTEST_STATUTORY_WEEKLY_MINUTES && $stated <= self::STATUTORY_WEEKLY_MINUTES) {
+                $weeklyMinutes = $stated;
+            }
+        }
+        $daily = (int) ($weeklyMinutes / 5);
         $month = $this->fund->month(
             substr($periodStart, 0, 7),
             array_fill_keys([1, 2, 3, 4, 5], $daily),
@@ -400,11 +416,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type']),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours']),
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
-                    : $employment['weekly_hours'],
+                    : $employment['stated_weekly_hours'],
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => self::minutesSuggestion($worked['minutes']),
                 'worked_days' => $worked['days'],
@@ -524,11 +540,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type']),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours']),
                 'agreed_fund_hours' => $agreedSuggestion,
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
-                    : $employment['weekly_hours'],
+                    : $employment['stated_weekly_hours'],
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => $workedSuggestion,
                 'worked_days' => $worked['worked_days'],
@@ -1203,7 +1219,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                     employment.start_date, employment.actual_start_date, employment.end_date,
                     terms.id AS term_id, terms.row_version AS term_row_version,
                     terms.effective_from AS term_effective_from,
-                    terms.effective_to AS term_effective_to, terms.weekly_hours
+                    terms.effective_to AS term_effective_to, terms.weekly_hours,
+                    terms.workload_basis_points
                FROM payroll_employments employment
                LEFT JOIN payroll_employment_terms terms
                  ON terms.supplier_id = employment.supplier_id
@@ -1225,6 +1242,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         }
         $termVersions = [];
         $weeklyHours = [];
+        $statedWeeklyHours = [];
         foreach ($rows as $termRow) {
             if ($termRow['term_id'] === null) {
                 continue;
@@ -1237,10 +1255,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'weekly_hours' => $termRow['weekly_hours'] === null
                     ? null
                     : (string) $termRow['weekly_hours'],
+                'workload_basis_points' => $termRow['workload_basis_points'] === null
+                    ? null
+                    : (int) $termRow['workload_basis_points'],
             ];
             $termVersions[] = $term;
             $weeklyHours[json_encode($term['weekly_hours'], JSON_THROW_ON_ERROR)] =
                 $term['weekly_hours'];
+            $stated = self::statedWeeklyHours($term['weekly_hours'], $term['workload_basis_points']);
+            $statedWeeklyHours[json_encode($stated, JSON_THROW_ON_ERROR)] = $stated;
         }
         $termValuesConsistent = count($weeklyHours) <= 1;
         return [
@@ -1256,6 +1279,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 : null,
             'weekly_hours' => $termVersions !== [] && $termValuesConsistent
                 ? $termVersions[0]['weekly_hours']
+                : null,
+            'stated_weekly_hours' => $termVersions !== [] && $termValuesConsistent && count($statedWeeklyHours) === 1
+                ? array_values($statedWeeklyHours)[0]
                 : null,
             'term_values_consistent' => $termValuesConsistent,
             'term_versions' => $termVersions,
@@ -1653,6 +1679,38 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * uvádějí u dohod a přijatá hlášení jiných systémů i u jednatele.
      * Zaměstnání malého rozsahu je pracovní poměr, tam patří skutečná doba.
      */
+    /**
+     * Stanovená týdenní pracovní doba (10261) z podmínek vztahu.
+     *
+     * 10261 je doba podle § 79 zákoníku práce, tedy plná doba zaměstnavatele pro
+     * daný režim — ne kratší pracovní doba sjednaná podle § 80. Zaměstnanec na
+     * poloviční úvazek u zaměstnavatele se 40 h týdně má 10261 = 40, jeho
+     * kratší doba se projeví jen ve sjednaném fondu 10260. Stejně to čte import
+     * přijatých hlášení ({@see \MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm::workload()}),
+     * který sjednanou týdenní dobu dopočítává jako 10261 × 10260 / 10259.
+     *
+     * Podmínky vedou sjednanou týdenní dobu a úvazek (podíl sjednané a stanovené
+     * doby), stanovená je tedy sjednaná / úvazek. Plný úvazek vrací sjednanou
+     * dobu beze změny — dřívější chování pro vztahy bez vyplněného úvazku.
+     */
+    public static function statedWeeklyHours(?string $weeklyHours, ?int $workloadBasisPoints): ?string
+    {
+        if ($weeklyHours === null || !is_numeric($weeklyHours)) {
+            return $weeklyHours;
+        }
+        if ($workloadBasisPoints === null || $workloadBasisPoints <= 0 || $workloadBasisPoints >= 10_000) {
+            return $weeklyHours;
+        }
+        $centihours = (int) round((float) $weeklyHours * 100);
+        $stated = (int) round($centihours * 10_000 / $workloadBasisPoints);
+        $whole = intdiv($stated, 100);
+        $fraction = $stated % 100;
+
+        return $fraction === 0
+            ? (string) $whole
+            : rtrim(sprintf('%d.%02d', $whole, $fraction), '0');
+    }
+
     private static function weeklyWorkMissingValue(mixed $relationType): bool
     {
         return in_array(
