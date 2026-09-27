@@ -84,6 +84,73 @@ describe('useMigrationWizard', () => {
     expect(wizard().dryRunPassed.value).toBe(false)
   })
 
+  it('zkouška, která selhala jen na rozdílech k přijetí, pustí ostrý převod až po zaškrtnutí a pošle accept_differences', async () => {
+    const difference = { level: 'error' as const, code: 'unknown_vat_rate', text: 'Doklad FP1 nepřevzat.', context: { document_no: 'FP1' }, acceptable: true }
+    const runs: Run[] = [
+      { id: 21, job_id: 7, mode: 'dry_run', status: 'completed_with_warnings', agenda_year: 2024, protocol: { acceptable_only: false, steps: [] } },
+      { id: 22, job_id: 7, mode: 'dry_run', status: 'failed', agenda_year: 2025, protocol: { acceptable_only: true, steps: [
+        { key: 'purchase_invoices', messages: [difference, { level: 'warning', code: 'number_taken', text: 'Obsazené číslo.', context: {} }] },
+      ] } },
+    ]
+    const client = api(runs)
+    const { wizard } = mountWizard(true, client)
+    await flushPromises()
+    m.fetchImportJob.mockResolvedValue({ id: 7, status: 'failed', processed: 1, total_items: 1 })
+    wizard().upload.value = { token: 'tok', agendas: [] }
+
+    await wizard().start('dry_run', { mode: 'dry_run' })
+
+    expect(wizard().dryRunPassed.value).toBe(false)
+    expect(wizard().differencesAcceptable.value).toBe(true)
+    expect(wizard().differences.value).toEqual([{ ...difference, step: 'purchase_invoices', runId: 22 }])
+    expect(wizard().canGoTo(4)).toBe(false)
+
+    wizard().acceptDifferences.value = true
+    expect(wizard().canGoTo(4)).toBe(true)
+
+    client.start.mockResolvedValue({ job_id: 8, status: 'queued', mode: 'import' })
+    await wizard().start('import', { mode: 'import' })
+    expect(client.start).toHaveBeenLastCalledWith('tok', { mode: 'import', accept_differences: true })
+  })
+
+  it('tvrdá chyba v kterémkoli roce přijetí rozdílů nenabídne', async () => {
+    const runs: Run[] = [
+      { id: 31, job_id: 7, mode: 'dry_run', status: 'failed', agenda_year: 2024, protocol: { acceptable_only: false, steps: [] } },
+      { id: 32, job_id: 7, mode: 'dry_run', status: 'failed', agenda_year: 2025, protocol: { acceptable_only: true, steps: [] } },
+    ]
+    const client = api(runs)
+    const { wizard } = mountWizard(true, client)
+    await flushPromises()
+    m.fetchImportJob.mockResolvedValue({ id: 7, status: 'failed', processed: 1, total_items: 1 })
+    wizard().upload.value = { token: 'tok', agendas: [] }
+
+    await wizard().start('dry_run', { mode: 'dry_run' })
+    wizard().acceptDifferences.value = true
+
+    expect(wizard().differencesAcceptable.value).toBe(false)
+    expect(wizard().canGoTo(4)).toBe(false)
+    await wizard().start('import', { mode: 'import' })
+    expect(client.start).toHaveBeenLastCalledWith('tok', { mode: 'import' })
+  })
+
+  it('u převodu jednoho běhu bere přijatelnost rozdílů z jeho protokolu', async () => {
+    const client = api([{ id: 4, job_id: 7, mode: 'dry_run', status: 'failed', agenda_year: 0, protocol: { acceptable_only: true, steps: [
+      { key: 'reconciliation', messages: [{ level: 'error', code: 'reconciliation_failed', text: 'Rok 2025 nesedí (K4).', context: { year: 2025 }, acceptable: true }] },
+    ] } }])
+    const { wizard } = mountWizard(false, client)
+    await flushPromises()
+    m.fetchImportJob.mockResolvedValue({ id: 7, status: 'failed', processed: 1, total_items: 1 })
+    wizard().upload.value = { token: 'tok', agendas: [] }
+
+    await wizard().start('dry_run', { mode: 'dry_run' })
+
+    expect(wizard().differencesAcceptable.value).toBe(true)
+    expect(wizard().differences.value.map(d => d.code)).toEqual(['reconciliation_failed'])
+    wizard().resetUpload()
+    expect(wizard().differencesAcceptable.value).toBe(false)
+    expect(wizard().differences.value).toEqual([])
+  })
+
   it('po obnovení stránky čeká na zpracování nahraného souboru a pak přejde na náhled', async () => {
     vi.useFakeTimers()
     sessionStorage.setItem('test.migration.token', 'tok')

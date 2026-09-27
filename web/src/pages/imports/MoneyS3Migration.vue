@@ -12,6 +12,7 @@ import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
+import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 import MoneyS3BatchWizard from '@/components/migration/MoneyS3BatchWizard.vue'
 
 /**
@@ -54,6 +55,7 @@ const reportBusy = ref<number | null>(null)
 
 const {
   currentStep, upload, file, job, jobMode, run, runs, busy, cancelling, confirmed, dryRunPassed,
+  differencesAcceptable, differences, acceptDifferences, canImport,
   uploadPercent, processing, deletingRun, jobRunning, percent,
   canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
 } = useMigrationWizard<MoneyS3Upload, MoneyS3UploadPending, MoneyS3Run, MoneyS3StartParams>({
@@ -117,9 +119,9 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'continue', label: t('money_s3.continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: blocked, disabledReason: t('money_s3.preflight_blocked'), run: () => { currentStep.value = 3 } },
     { key: 'new', label: t('money_s3.new_upload'), icon: 'x', tier: 'secondary', variant: 'neutral', run: resetUpload },
   ]
-  if (currentStep.value === 3) return dryRunPassed.value && !jobRunning.value
+  if (currentStep.value === 3) return (dryRunPassed.value || differencesAcceptable.value) && !jobRunning.value
     ? [
-        { key: 'next', label: t('money_s3.continue'), icon: 'check', tier: 'primary', variant: 'primary', run: () => { currentStep.value = 4 } },
+        { key: 'next', label: t('money_s3.continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: !canImport.value, disabledReason: t('money_s3.differences.accept_first'), run: () => { currentStep.value = 4 } },
         { key: 'rerun', label: t('money_s3.dry_run_again'), icon: 'cycle', tier: 'secondary', variant: 'neutral', run: () => { void start('dry_run') } },
       ]
     : [
@@ -292,6 +294,7 @@ const actions = computed<ActionItem[]>(() => {
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false"
           counts-key="money_s3.job_counts" background-hint-key="money_s3.background_hint" running-key="money_s3.dry_run_running" />
         <MoneyS3Protocol v-if="run && run.mode === 'dry_run'" :run="run" />
+        <MigrationDifferences v-if="differencesAcceptable && !jobRunning" v-model="acceptDifferences" :differences="differences" prefix="money_s3" />
       </template>
 
       <template v-else>
@@ -304,6 +307,9 @@ const actions = computed<ActionItem[]>(() => {
           <input v-model="confirmIco" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="confirm-ico" />
           <span class="text-sm text-warning-700">{{ t('money_s3.ico_confirm') }}</span>
         </label>
+        <p v-if="!importDone && !jobRunning && !dryRunPassed && acceptDifferences" class="my-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="money-s3-accepting-differences">
+          {{ t('money_s3.differences.import_note', { count: differences.length }) }}
+        </p>
         <p v-if="!importDone && !jobRunning && missingRights.length" class="my-4 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600">
           {{ t('money_s3.rights_missing', { rights: missingRights.join(', ') }) }}
         </p>

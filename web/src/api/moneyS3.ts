@@ -82,7 +82,16 @@ export interface MoneyS3Step {
   key: string
   status: 'ok' | 'warning' | 'error' | 'running'
   counts: Record<string, number>
-  messages: { level: 'error' | 'warning' | 'info'; code: string; text: string; context: Record<string, unknown> }[]
+  /** `acceptable` = rozdíl k přijetí: bez přijetí chyba, s přijetím (ostrý převod) upozornění. */
+  messages: { level: 'error' | 'warning' | 'info'; code: string; text: string; context: Record<string, unknown>; acceptable?: boolean }[]
+}
+
+/** Rozdíl, který ostrý převod vědomě přijal (sekce `accepted_differences` protokolu). */
+export interface AcceptedDifference {
+  step: string
+  code: string
+  text: string
+  context: Record<string, unknown>
 }
 
 /** Doklad, jehož rozdíl proti deníku je už ve zdrojovém programu (převod ho převzal věrně). */
@@ -116,6 +125,9 @@ export interface MoneyS3ProtocolData {
   failure: string | null
   error?: string
   steps: MoneyS3Step[]
+  /** Převod selhal JEN na rozdílech k přijetí. */
+  acceptable_only?: boolean
+  accepted_differences?: AcceptedDifference[]
   agenda?: MoneyS3Agenda
   reconciliation?: MoneyS3ReconciliationYear[]
   closing?: MoneyS3ClosingYear[]
@@ -167,6 +179,8 @@ export interface MoneyS3StartParams {
   confirm_ico?: boolean
   /** První převáděný účetní rok; starší roky zálohy se vynechají. */
   from_year?: number | null
+  /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
+  accept_differences?: boolean
 }
 
 const BASE = '/admin/imports/money-s3'

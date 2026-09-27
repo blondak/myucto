@@ -27981,6 +27981,13 @@
     "import_title": "Live transfer",
     "import_confirm": "I understand: the transfer writes the journal, address book, invoices, cash and bank from the agenda {company} into this company, switches it to double-entry bookkeeping and closes historical years. Repeating the transfer duplicates nothing.",
     "import_confirm_first": "Confirm first that you understand the impact of the transfer.",
+    "differences": {
+      "title": "The dry run failed only on acceptable differences ({count})",
+      "hint": "The migration found only differences that do not break the accounts: a document that was not migrated, or a result that does not match the source program. Everything else is fine. Fix the differences in the source and repeat the dry run, or run the migration with them and resolve them in MyÚčto. Accepted differences stay in the migration protocol.",
+      "accept": "Migrate despite the differences. I will resolve the listed documents and differences manually.",
+      "accept_first": "First tick “Migrate despite the differences”, or fix the differences and repeat the dry run.",
+      "import_note": "The live migration accepts the differences from the dry run ({count}). It finishes with warnings and the differences stay in the protocol."
+    },
     "rights_missing": "The live transfer writes the journal, changes company settings and closes years. You are missing write permission: {rights}. Ask the company administrator.",
     "ico_confirm": "I confirm the backup is this company's agenda. The company ID cannot be verified because it is missing in the backup or in the company.",
     "ico_confirm_first": "Confirm first that the backup belongs to this company.",
@@ -28017,7 +28024,8 @@
     "level": {
       "error": "Error",
       "warning": "Warning",
-      "info": "Info"
+      "info": "Info",
+      "difference": "Acceptable difference"
     },
     "steps": {
       "preflight": "Pre-transfer check",
@@ -28426,6 +28434,13 @@
     "import_title": "Live transfer",
     "import_confirm": "I understand: the transfer writes the journal, address book, invoices, internal tax documents, cash and bank of {years} from the agenda {company} into this company and switches it to double-entry bookkeeping. The years are transferred in ascending order. Repeating the transfer duplicates nothing.",
     "import_confirm_first": "Confirm first that you understand the impact of the transfer.",
+    "differences": {
+      "title": "The dry run failed only on acceptable differences ({count})",
+      "hint": "The migration found only differences that do not break the accounts: a document that was not migrated, or a result that does not match the source program. Everything else is fine. Fix the differences in the source and repeat the dry run, or run the migration with them and resolve them in MyÚčto. Accepted differences stay in the migration protocol.",
+      "accept": "Migrate despite the differences. I will resolve the listed documents and differences manually.",
+      "accept_first": "First tick “Migrate despite the differences”, or fix the differences and repeat the dry run.",
+      "import_note": "The live migration accepts the differences from the dry run ({count}). It finishes with warnings and the differences stay in the protocol."
+    },
     "rights_missing": "The live transfer writes the journal and changes company settings. You are missing write permission: {rights}. Ask the company administrator.",
     "import_start": "Start transfer",
     "import_running": "Transfer in progress",
@@ -28460,7 +28475,8 @@
     "level": {
       "error": "Error",
       "warning": "Warning",
-      "info": "Info"
+      "info": "Info",
+      "difference": "Acceptable difference"
     },
     "steps": {
       "preflight": "Pre-transfer check",
@@ -30356,6 +30372,13 @@
     "import_title": "Live migration",
     "import_confirm": "I understand: the migration writes the journal, address book, invoices, VAT documents outside invoices, bank, assets and employees with payroll of {years} from agenda {company} into the company and switches it to double-entry bookkeeping. The years are migrated in ascending order. Repeating the migration will not duplicate anything.",
     "import_confirm_first": "Confirm you understand the impact of the migration first.",
+    "differences": {
+      "title": "The dry run failed only on acceptable differences ({count})",
+      "hint": "The migration found only differences that do not break the accounts: a document that was not migrated, or a result that does not match the source program. Everything else is fine. Fix the differences in the source and repeat the dry run, or run the migration with them and resolve them in MyÚčto. Accepted differences stay in the migration protocol.",
+      "accept": "Migrate despite the differences. I will resolve the listed documents and differences manually.",
+      "accept_first": "First tick “Migrate despite the differences”, or fix the differences and repeat the dry run.",
+      "import_note": "The live migration accepts the differences from the dry run ({count}). It finishes with warnings and the differences stay in the protocol."
+    },
     "rights_missing": "The live migration writes the accounting journal and changes company settings. You are missing write permission: {rights}. Ask your company administrator.",
     "import_start": "Start migration",
     "import_running": "Migration in progress",
@@ -30390,7 +30413,8 @@
     "level": {
       "error": "Error",
       "warning": "Warning",
-      "info": "Info"
+      "info": "Info",
+      "difference": "Acceptable difference"
     },
     "steps": {
       "preflight": "Pre-migration check",

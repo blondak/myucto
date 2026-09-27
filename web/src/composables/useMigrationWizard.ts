@@ -4,12 +4,53 @@ import { cancelImportJob, fetchImportJob, type FileImportJob } from '@/api/impor
 import type { ChunkedUploadProgress } from '@/api/chunkedUpload'
 import { useToast } from '@/composables/useToast'
 
+/** Zpráva protokolu; `acceptable` = rozdíl k přijetí (ostrý převod ho smí vědomě přijmout). */
+export interface MigrationWizardMessage {
+  level: 'error' | 'warning' | 'info'
+  code: string
+  text: string
+  context: Record<string, unknown>
+  acceptable?: boolean
+}
+
+/** Protokol běhu v rozsahu, který průvodce čte pro rozdíly k přijetí. */
+export interface MigrationWizardProtocol {
+  /** Zkouška selhala JEN na rozdílech k přijetí. */
+  acceptable_only?: boolean
+  steps: { key: string; messages: MigrationWizardMessage[] }[]
+}
+
 /** Běh převodu tak, jak ho průvodce potřebuje (protokol v přehledu běhů). */
 export interface MigrationWizardRun {
   id: number
   job_id: number | null
   mode: 'dry_run' | 'import'
   status: string
+  protocol?: MigrationWizardProtocol | null
+}
+
+/** Rozdíl k přijetí ze zkoušky nanečisto: krok, zpráva a rok běhu (u jobu víc roků). */
+export interface MigrationWizardDifference extends MigrationWizardMessage {
+  step: string
+  runId: number
+}
+
+/**
+ * Zkouška nanečisto selhala jen na rozdílech k přijetí: každý běh buď prošel, nebo selhal
+ * s `acceptable_only` (žádná chyba, žádné přerušení), a aspoň jeden rozdíl je.
+ */
+export function differencesOnly(runs: MigrationWizardRun[]): boolean {
+  if (!runs.length) return false
+  const passed = (status: string) => status === 'completed' || status === 'completed_with_warnings'
+  return runs.every(r => passed(r.status) || (r.status === 'failed' && r.protocol?.acceptable_only === true))
+    && runs.some(r => r.status === 'failed')
+}
+
+/** Rozdíly k přijetí z protokolů běhů v pořadí běhů a kroků. */
+export function collectDifferences(runs: MigrationWizardRun[]): MigrationWizardDifference[] {
+  return runs.flatMap(r => (r.protocol?.steps ?? []).flatMap(step => step.messages
+    .filter(m => m.acceptable === true && m.level === 'error')
+    .map(m => ({ ...m, step: step.key, runId: r.id }))))
 }
 
 /** Průběh jobu, který soubor na pozadí zpracovává (krok a kolik z kolika). */
@@ -93,6 +134,11 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
   const cancelling = ref(false)
   const confirmed = ref(false)
   const dryRunPassed = ref(false)
+  // Zkouška selhala jen na rozdílech k přijetí; ostrý převod je smí vědomě přijmout.
+  const differencesAcceptable = ref(false)
+  const differences = ref<MigrationWizardDifference[]>([])
+  const acceptDifferences = ref(false)
+  const canImport = computed(() => dryRunPassed.value || (differencesAcceptable.value && acceptDifferences.value))
   // Nahrávání po částech (procenta) a následné zpracování souboru serverem na pozadí.
   const uploadPercent = ref<number | null>(null)
   const processing = ref(false)
@@ -132,7 +178,13 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
     if (busy.value || jobRunning.value || step === currentStep.value) return false
     if (step === 1) return true
     if (step === 2 || step === 3) return upload.value !== null
-    return dryRunPassed.value && upload.value !== null
+    return canImport.value && upload.value !== null
+  }
+
+  function clearDifferences(): void {
+    differencesAcceptable.value = false
+    differences.value = []
+    acceptDifferences.value = false
   }
 
   function goTo(step: number): void {
@@ -198,6 +250,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
           upload.value = result
           options.onReady?.(result)
           dryRunPassed.value = false
+          clearDifferences()
           confirmed.value = false
           run.value = null
           currentStep.value = 2
@@ -255,6 +308,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
     run.value = null
     jobRuns.value = []
     dryRunPassed.value = false
+    clearDifferences()
     confirmed.value = false
     writeToken(null)
     currentStep.value = 1
@@ -263,8 +317,10 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
   async function start(mode: 'dry_run' | 'import', params: TStart): Promise<void> {
     if (!upload.value) return
     busy.value = true
+    // Ostrý převod po zkoušce, která selhala jen na rozdílech, je přijme (uživatel to zaškrtl).
+    const accepting = mode === 'import' && !dryRunPassed.value && differencesAcceptable.value && acceptDifferences.value
     try {
-      const started = await api.start(upload.value.token, params)
+      const started = await api.start(upload.value.token, accepting ? { ...(params as object), accept_differences: true } as TStart : params)
       jobMode.value = mode
       run.value = null
       jobRuns.value = []
@@ -299,6 +355,10 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
     }
     if (jobMode.value === 'dry_run') {
       dryRunPassed.value = ok
+      const finished = options.multiYear ? jobRuns.value : (run.value ? [run.value] : [])
+      differencesAcceptable.value = !ok && differencesOnly(finished)
+      differences.value = differencesAcceptable.value ? collectDifferences(finished) : []
+      acceptDifferences.value = false
     } else if (jobMode.value === 'import' && ok) {
       // Server nahraný soubor po úspěšném převodu smazal (nebo si ho drží pro další roky).
       writeToken(null)
@@ -384,6 +444,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
 
   return {
     currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
+    differencesAcceptable, differences, acceptDifferences, canImport, clearDifferences,
     uploadPercent, processing, processingProgress, processingSlow, loadError, deletingRun, jobRunning, jobSucceeded, percent,
     canGoTo, goTo, onFile, doUpload, resetUpload, retryUpload, abandonUpload, start, cancel, showRun, deleteRun, loadRuns, errorMessage, writeToken,
   }

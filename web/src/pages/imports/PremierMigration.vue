@@ -10,6 +10,7 @@ import { ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
+import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 
 /**
  * Průvodce převodem z PREMIER: záloha dat (Správce → Záloha dat, F11) → náhled agend
@@ -42,6 +43,7 @@ const selectedYears = ref<number[]>([])
 
 const {
   currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
+  differencesAcceptable, differences, acceptDifferences, canImport, clearDifferences,
   uploadPercent, processing, deletingRun, jobRunning, jobSucceeded, percent,
   canGoTo, goTo, onFile, doUpload, resetUpload, start: startJob, cancel, showRun, deleteRun,
 } = useMigrationWizard<PremierUpload, PremierUploadPending, PremierRun, PremierStartParams>({
@@ -98,6 +100,7 @@ function statusClass(status: string): string {
 
 watch(selectedYears, () => {
   dryRunPassed.value = false
+  clearDifferences()
   confirmed.value = false
 })
 
@@ -114,9 +117,9 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'continue', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: blocked.value, disabledReason: blockedReason.value, run: () => { currentStep.value = 3 } },
     { key: 'new', label: tt('new_upload'), icon: 'x', tier: 'secondary', variant: 'neutral', run: resetUpload },
   ]
-  if (currentStep.value === 3) return dryRunPassed.value && !jobRunning.value
+  if (currentStep.value === 3) return (dryRunPassed.value || differencesAcceptable.value) && !jobRunning.value
     ? [
-        { key: 'next', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', run: () => { currentStep.value = 4 } },
+        { key: 'next', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: !canImport.value, disabledReason: tt('differences.accept_first'), run: () => { currentStep.value = 4 } },
         { key: 'rerun', label: tt('dry_run_again'), icon: 'cycle', tier: 'secondary', variant: 'neutral', run: () => { void start('dry_run') } },
       ]
     : [
@@ -274,6 +277,7 @@ const actions = computed<ActionItem[]>(() => {
               <div class="border-t border-neutral-200 p-4"><MoneyS3Protocol :run="r" prefix="premier" /></div>
             </details>
           </div>
+          <MigrationDifferences v-if="differencesAcceptable && !jobRunning" v-model="acceptDifferences" :differences="differences" prefix="premier" />
         </template>
       </template>
 
@@ -283,6 +287,9 @@ const actions = computed<ActionItem[]>(() => {
           <input v-model="confirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="premier-confirm" />
           <span class="text-sm text-warning-700">{{ tt('import_confirm', { company: ownAgenda?.company ?? '', years: yearsLabel }) }}</span>
         </label>
+        <p v-if="!importDone && !jobRunning && !dryRunPassed && acceptDifferences" class="my-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="premier-accepting-differences">
+          {{ tt('differences.import_note', { count: differences.length }) }}
+        </p>
         <p v-if="!importDone && !jobRunning && missingRights.length" class="my-4 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="premier-rights-missing">
           {{ rightsMessage }}
         </p>

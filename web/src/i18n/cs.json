@@ -27981,6 +27981,13 @@
     "import_title": "Ostrý převod",
     "import_confirm": "Rozumím: převod zapíše do firmy deník, adresář, faktury, pokladnu a banku z agendy {company}, přepne ji do podvojného účetnictví a historické roky uzavře. Opakovaný převod nic nezdvojí.",
     "import_confirm_first": "Nejdřív potvrďte, že rozumíte dopadu převodu.",
+    "differences": {
+      "title": "Zkouška nanečisto selhala jen na rozdílech k přijetí ({count})",
+      "hint": "Převod narazil jen na rozdíly, které účetnictví nerozbíjejí: doklad, který se nepřevedl, nebo výsledek, který nesedí na zdrojový program. Všechno ostatní je v pořádku. Rozdíly můžete opravit ve zdroji a zkoušku zopakovat, nebo převod spustit i s nimi a dořešit je v MyÚčtu. Přijaté rozdíly zůstanou v protokolu převodu.",
+      "accept": "Převést i přes rozdíly. Uvedené doklady a rozdíly dořeším ručně.",
+      "accept_first": "Nejdřív zaškrtněte „Převést i přes rozdíly“, nebo rozdíly opravte a zkoušku zopakujte.",
+      "import_note": "Ostrý převod přijme rozdíly ze zkoušky nanečisto ({count}). Doběhne s upozorněním a rozdíly zůstanou v protokolu."
+    },
     "rights_missing": "Ostrý převod zapisuje účetní deník, mění nastavení firmy a uzavírá roky. Chybí vám oprávnění k zápisu: {rights}. Požádejte správce firmy.",
     "ico_confirm": "Potvrzuji, že záloha je agenda této firmy. IČO nejde ověřit, protože chybí v záloze nebo ve firmě.",
     "ico_confirm_first": "Nejdřív potvrďte, že záloha patří této firmě.",
@@ -28017,7 +28024,8 @@
     "level": {
       "error": "Chyba",
       "warning": "Upozornění",
-      "info": "Informace"
+      "info": "Informace",
+      "difference": "Rozdíl k přijetí"
     },
     "steps": {
       "preflight": "Kontrola před převodem",
@@ -28426,6 +28434,13 @@
     "import_title": "Ostrý převod",
     "import_confirm": "Rozumím: převod zapíše do firmy deník, adresář, faktury, interní daňové doklady, pokladnu a banku roků {years} z agendy {company} a přepne ji do podvojného účetnictví. Roky se převádějí vzestupně. Opakovaný převod nic nezdvojí.",
     "import_confirm_first": "Nejdřív potvrďte, že rozumíte dopadu převodu.",
+    "differences": {
+      "title": "Zkouška nanečisto selhala jen na rozdílech k přijetí ({count})",
+      "hint": "Převod narazil jen na rozdíly, které účetnictví nerozbíjejí: doklad, který se nepřevedl, nebo výsledek, který nesedí na zdrojový program. Všechno ostatní je v pořádku. Rozdíly můžete opravit ve zdroji a zkoušku zopakovat, nebo převod spustit i s nimi a dořešit je v MyÚčtu. Přijaté rozdíly zůstanou v protokolu převodu.",
+      "accept": "Převést i přes rozdíly. Uvedené doklady a rozdíly dořeším ručně.",
+      "accept_first": "Nejdřív zaškrtněte „Převést i přes rozdíly“, nebo rozdíly opravte a zkoušku zopakujte.",
+      "import_note": "Ostrý převod přijme rozdíly ze zkoušky nanečisto ({count}). Doběhne s upozorněním a rozdíly zůstanou v protokolu."
+    },
     "rights_missing": "Ostrý převod zapisuje účetní deník a mění nastavení firmy. Chybí vám oprávnění k zápisu: {rights}. Požádejte správce firmy.",
     "import_start": "Spustit převod",
     "import_running": "Převod běží",
@@ -28460,7 +28475,8 @@
     "level": {
       "error": "Chyba",
       "warning": "Upozornění",
-      "info": "Informace"
+      "info": "Informace",
+      "difference": "Rozdíl k přijetí"
     },
     "steps": {
       "preflight": "Kontrola před převodem",
@@ -30356,6 +30372,13 @@
     "import_title": "Ostrý převod",
     "import_confirm": "Rozumím: převod zapíše do firmy deník, adresář, faktury, doklady s DPH mimo faktury, banku, majetek a zaměstnance se mzdami roků {years} z agendy {company} a přepne ji do podvojného účetnictví. Roky se převádějí vzestupně. Opakovaný převod nic nezdvojí.",
     "import_confirm_first": "Nejdřív potvrďte, že rozumíte dopadu převodu.",
+    "differences": {
+      "title": "Zkouška nanečisto selhala jen na rozdílech k přijetí ({count})",
+      "hint": "Převod narazil jen na rozdíly, které účetnictví nerozbíjejí: doklad, který se nepřevedl, nebo výsledek, který nesedí na zdrojový program. Všechno ostatní je v pořádku. Rozdíly můžete opravit ve zdroji a zkoušku zopakovat, nebo převod spustit i s nimi a dořešit je v MyÚčtu. Přijaté rozdíly zůstanou v protokolu převodu.",
+      "accept": "Převést i přes rozdíly. Uvedené doklady a rozdíly dořeším ručně.",
+      "accept_first": "Nejdřív zaškrtněte „Převést i přes rozdíly“, nebo rozdíly opravte a zkoušku zopakujte.",
+      "import_note": "Ostrý převod přijme rozdíly ze zkoušky nanečisto ({count}). Doběhne s upozorněním a rozdíly zůstanou v protokolu."
+    },
     "rights_missing": "Ostrý převod zapisuje účetní deník a mění nastavení firmy. Chybí vám oprávnění k zápisu: {rights}. Požádejte správce firmy.",
     "import_start": "Spustit převod",
     "import_running": "Převod běží",
@@ -30390,7 +30413,8 @@
     "level": {
       "error": "Chyba",
       "warning": "Upozornění",
-      "info": "Informace"
+      "info": "Informace",
+      "difference": "Rozdíl k přijetí"
     },
     "steps": {
       "preflight": "Kontrola před převodem",

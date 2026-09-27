@@ -12,6 +12,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
+import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 import { formatBytes } from '@/components/documents/docFormat'
 
 /**
@@ -95,6 +96,7 @@ const toolDownloading = ref<string | null>(null)
 
 const {
   currentStep, upload, file, job, jobMode, run, jobRuns, runs, busy, cancelling, confirmed, dryRunPassed,
+  differencesAcceptable, differences, acceptDifferences, canImport, clearDifferences,
   uploadPercent, processing, processingProgress, processingSlow, loadError, deletingRun, jobRunning, jobSucceeded, percent,
   canGoTo, goTo, onFile, doUpload, resetUpload, retryUpload, abandonUpload, start: startJob, cancel, showRun, deleteRun, errorMessage,
 } = useMigrationWizard<PohodaUpload, PohodaUploadPending, PohodaRun, PohodaStartParams>({
@@ -240,15 +242,18 @@ function statusClass(status: string): string {
 
 watch(selectedYears, () => {
   dryRunPassed.value = false
+  clearDifferences()
   confirmed.value = false
 })
 watch(kind, () => {
   dryRunPassed.value = false
+  clearDifferences()
   confirmed.value = false
 })
 // Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd.
 watch([startDecision, keepStartConfirmed], () => {
   dryRunPassed.value = false
+  clearDifferences()
   confirmed.value = false
 })
 
@@ -305,9 +310,9 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'continue', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: blocked.value, disabledReason: blockedReason.value, run: () => { currentStep.value = 3 } },
     { key: 'new', label: tt('new_upload'), icon: 'x', tier: 'secondary', variant: 'neutral', run: resetUpload },
   ]
-  if (currentStep.value === 3) return dryRunPassed.value && !jobRunning.value
+  if (currentStep.value === 3) return (dryRunPassed.value || differencesAcceptable.value) && !jobRunning.value
     ? [
-        { key: 'next', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', run: () => { currentStep.value = 4 } },
+        { key: 'next', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: !canImport.value, disabledReason: tt('differences.accept_first'), run: () => { currentStep.value = 4 } },
         { key: 'rerun', label: tt('dry_run_again'), icon: 'cycle', tier: 'secondary', variant: 'neutral', run: () => { void start('dry_run') } },
       ]
     : [
@@ -647,6 +652,7 @@ const actions = computed<ActionItem[]>(() => {
               <div class="border-t border-neutral-200 p-4"><MoneyS3Protocol :run="r" prefix="pohoda" /></div>
             </details>
           </div>
+          <MigrationDifferences v-if="differencesAcceptable && !jobRunning" v-model="acceptDifferences" :differences="differences" prefix="pohoda" />
         </template>
       </template>
 
@@ -656,6 +662,9 @@ const actions = computed<ActionItem[]>(() => {
           <input v-model="confirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-confirm" />
           <span class="text-sm text-warning-700">{{ tt(kind === 'payroll' ? 'payroll_import_confirm' : 'import_confirm', { company: (selectedAgendas[0] ?? ownAgendas[0])?.company ?? '', years: yearsLabel }) }}</span>
         </label>
+        <p v-if="!importDone && !jobRunning && !dryRunPassed && acceptDifferences" class="my-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="pohoda-accepting-differences">
+          {{ tt('differences.import_note', { count: differences.length }) }}
+        </p>
         <p v-if="!importDone && !jobRunning && missingRights.length" class="my-4 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="pohoda-rights-missing">
           {{ rightsMessage }}
         </p>

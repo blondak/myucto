@@ -1,7 +1,7 @@
 import { api } from './client'
 import { createMigrationApi } from './migrationApi'
 import { downloadApiFile } from '@/utils/downloadFile'
-import type { MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
+import type { AcceptedDifference, MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
 
 /**
  * Průvodce „Přechod z POHODA": XML export agendy vytvořený exportním nástrojem,
@@ -118,6 +118,9 @@ export interface PohodaProtocolData {
   failure: string | null
   error?: string
   steps: MoneyS3Step[]
+  /** Převod selhal JEN na rozdílech k přijetí. */
+  acceptable_only?: boolean
+  accepted_differences?: AcceptedDifference[]
   agenda?: { ico: string; year: number; program: string; exported_at: string | null; dir: string; skipped_years?: number[] }
   /** Job víc roků: roky jobu vzestupně a pořadí tohoto roku. */
   job_years?: { years: number[]; index: number; dry_run_isolated: boolean }
@@ -156,6 +159,8 @@ export interface PohodaStartParams {
    * Ostrý převod bez rozhodnutí backend odmítne.
    */
   start_decision?: 'advance' | 'keep'
+  /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
+  accept_differences?: boolean
 }
 
 export interface PohodaToolFile {

@@ -1,5 +1,5 @@
 import { createMigrationApi } from './migrationApi'
-import type { MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
+import type { AcceptedDifference, MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
 
 /**
  * Průvodce „Přechod z PREMIER": záloha dat (iZIP/iCAB) vytvořená přímo v programu
@@ -75,6 +75,9 @@ export interface PremierProtocolData {
   failure: string | null
   error?: string
   steps: MoneyS3Step[]
+  /** Převod selhal JEN na rozdílech k přijetí. */
+  acceptable_only?: boolean
+  accepted_differences?: AcceptedDifference[]
   agenda?: { ico: string; dic: string; company: string; year: number; dir: string }
   /** Job víc roků: roky jobu vzestupně a pořadí tohoto roku. */
   job_years?: { years: number[]; index: number; dry_run_isolated: boolean }
@@ -101,6 +104,8 @@ export interface PremierStartParams {
   mode: 'dry_run' | 'import'
   /** Vybrané roky; převádějí se vzestupně, každý s vlastním během a protokolem. */
   years: number[]
+  /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
+  accept_differences?: boolean
 }
 
 export const PREMIER_BASE = '/admin/imports/premier'

@@ -38,6 +38,7 @@ function wizard(messages: unknown[]) {
     busy: ref(false), cancelling: ref(false), confirmed: ref(false), dryRunPassed: ref(false), uploadPercent: ref(null),
     processing: ref(false), processingProgress: ref(null), processingSlow: ref(false), loadError: ref(null), deletingRun: ref(null),
     jobRunning: ref(false), jobSucceeded: ref(false), percent: ref(0),
+    differencesAcceptable: ref(false), differences: ref([]), acceptDifferences: ref(false), canImport: ref(false), clearDifferences: () => {},
     upload: ref({
       token: 'synthetic', supplier_ico: '12345678', default_year: 2026, preflight: {},
       agendas: [{ ico: '12345678', company: '', year: 2026, has_payroll: true, has_accounting: false, files: [], counts: {}, payroll: { employees: 2, months: 8 } }],
