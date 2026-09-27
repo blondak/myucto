@@ -143,9 +143,22 @@ final class StereoNxPayrollWriterTest extends TestCase
         $before = $this->rows();
         $this->assertError('payroll_period_collision', fn () => $this->writer->write($plan, $this->supplierId));
         self::assertSame($before, $this->rows());
-        $this->db->pdo()->prepare("UPDATE payroll_migration_reference_totals SET source = 'other' WHERE supplier_id = ?")
+    }
+
+    public function testMonthTakenOverFromAnotherSourceIsSkippedNotAdded(): void
+    {
+        $plan = $this->plan();
+        $this->writer->write($plan, $this->supplierId);
+        $this->db->pdo()->prepare('DELETE FROM stereo_nx_import_map WHERE supplier_id = ? AND kind = ?')
+            ->execute([$this->supplierId, 'payroll_month']);
+        $this->db->pdo()->prepare("UPDATE payroll_migration_reference_totals SET source = 'jmhz' WHERE supplier_id = ?")
             ->execute([$this->supplierId]);
-        $this->assertError('payroll_period_collision', fn () => $this->writer->write($plan, $this->supplierId));
+        $before = $this->rows();
+        $result = $this->writer->write($plan, $this->supplierId);
+        self::assertSame(0, $result['counts']['historical_payroll_created']);
+        self::assertSame(1, $result['counts']['historical_payroll_skipped']);
+        self::assertSame(['payroll_period_other_source'], array_column($result['warnings'], 'code'));
+        self::assertSame($before, $this->rows());
     }
 
     public function testMapCannotPointToAnotherSuppliersEmploymentOrMonth(): void

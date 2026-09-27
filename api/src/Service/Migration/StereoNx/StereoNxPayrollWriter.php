@@ -117,7 +117,16 @@ final class StereoNxPayrollWriter
                 $counts['historical_payroll_existing']++;
                 continue;
             }
-            $this->assertNoCollision($supplierId, $employeeId, $employmentId, $period, $reference);
+            $collision = $this->reconciliation->takeoverCollisionSource($supplierId, $employmentId, self::SOURCE, $period, $reference);
+            if ($collision !== null && $collision !== self::SOURCE) {
+                // Stejně jako import hlášení JMHZ: druhý zdroj by se k převzatému měsíci přičetl.
+                $counts['historical_payroll_skipped']++;
+                self::warning($warnings, 'payroll_period_other_source',
+                    'Některé měsíce už jsou u pracovního vztahu převzaté z jiného zdroje (např. z hlášení JMHZ). '
+                    . 'Mzdy ze Stereo NX se za ně nepřevzaly, aby se nesečetly.');
+                continue;
+            }
+            $this->assertNoCollision($supplierId, $employeeId, $employmentId, $period, $collision !== null);
             if (!is_array($record['facts'] ?? null) || !is_array($record['amounts'] ?? null)) {
                 throw new StereoNxException('payroll_plan_invalid', 'Chybí ověřené údaje mzdového měsíce.');
             }
@@ -142,9 +151,9 @@ final class StereoNxPayrollWriter
         }
     }
 
-    private function assertNoCollision(int $supplierId, int $employeeId, int $employmentId, string $period, string $reference): void
+    private function assertNoCollision(int $supplierId, int $employeeId, int $employmentId, string $period, bool $unmappedOwnMonth): void
     {
-        if ($this->reconciliation->hasTakeoverCollision($supplierId, $employmentId, self::SOURCE, $period, $reference)
+        if ($unmappedOwnMonth
             || in_array($period, $this->reconciliation->calculatedPeriods($supplierId, (int) substr($period, 0, 4), $employeeId), true)) {
             throw new StereoNxException('payroll_period_collision', 'Období už obsahuje jinou převzatou nebo vypočtenou mzdu.');
         }
