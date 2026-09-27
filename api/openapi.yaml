@@ -9641,6 +9641,8 @@ paths:
         - { in: query, name: include_vat_breakdown, description: "1 = doplnit rozpad DPH zdrojových faktur jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: include_posting_accounts, description: "1 = doplnit účetní řádky s účty MD/Dal jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: include_dimensions, description: "1 = doplnit štítky dimenzí řádků deníku jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: include_notes, description: "1 = doplnit náhled poznámky zápisu (note_preview, note_count) jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: include_documents, description: "1 = doplnit počet dokumentů zápisu (document_count) jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
         - { in: query, name: document_no, description: Částečná shoda čísla dokladu, schema: { type: string, maxLength: 50 } }
         - { in: query, name: period_id, schema: { type: integer } }
@@ -25535,6 +25537,9 @@ components:
         source_currency: { type: [string, "null"], description: "Jen s include_vat_breakdown=1; měna zdrojové faktury." }
         posting_lines: { type: array, description: "Jen s include_posting_accounts=1; řádky zápisu s účty MD/Dal.", items: { $ref: '#/components/schemas/JournalLine' } }
         dimension_labels: { type: array, description: "Jen s include_dimensions=1 a při zapnutých dimenzích; souhrn hodnot z řádků zápisu.", items: { type: string } }
+        note_preview: { type: string, nullable: true, description: "Jen s include_notes=1; připnutá, jinak nejnovější poznámka zápisu, zkrácená na 200 znaků." }
+        note_count: { type: integer, description: "Jen s include_notes=1; počet poznámek zápisu." }
+        document_count: { type: integer, description: "Jen s include_documents=1; přílohy zápisu a navázané dokumenty z úložiště." }
         automation:
           type: [object, "null"]
           allOf:
