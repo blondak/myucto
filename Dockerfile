@@ -75,7 +75,7 @@ RUN install-php-extensions \
 
 # PHP runtime config
 RUN { \
-        echo 'memory_limit = 256M'; \
+        echo 'memory_limit = 512M'; \
         echo 'upload_max_filesize = 50M'; \
         echo 'post_max_size = 55M'; \
         echo 'max_execution_time = 60'; \

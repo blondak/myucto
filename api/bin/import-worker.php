@@ -77,6 +77,36 @@ fwrite($stdout, "Starting import worker for job #{$jobId} (source: {$source})\n"
 set_time_limit(0);
 ignore_user_abort(true);
 
+// Fatální chyba (typicky vyčerpaná paměť) obejde try/catch níže i v service a job by
+// zůstal ve stavu running, dokud ho po čtvrthodině neuklidí reapStale() — do té doby
+// UI hlásí „Převod už běží". Otevřenou transakci (zkouška nanečisto) je nutné vrátit,
+// jinak by se s ní vrátil i zápis chyby do jobu.
+register_shutdown_function(static function () use ($pdo, $jobs, $jobId, $stderr): void {
+    $error = error_get_last();
+    if ($error === null || !in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        return;
+    }
+    $limit = (string) ini_get('memory_limit');
+    ini_set('memory_limit', '-1');
+    $message = str_contains($error['message'], 'Allowed memory size')
+        ? "Převod spadl na nedostatek paměti serveru (memory_limit {$limit}). Kontaktujte podporu."
+        : 'Převod spadl na neočekávané chybě serveru. Kontaktujte podporu.';
+    fwrite($stderr, "Fatal error in job #{$jobId}: {$error['message']} in {$error['file']}:{$error['line']}\n");
+    try {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $stmt = $pdo->prepare('SELECT status FROM import_jobs WHERE id = ?');
+        $stmt->execute([$jobId]);
+        if (in_array($stmt->fetchColumn(), ['queued', 'running'], true)) {
+            $jobs->appendLog($jobId, $message);
+            $jobs->markFailed($jobId, $message);
+        }
+    } catch (\Throwable $e) {
+        fwrite($stderr, "Job #{$jobId}: zápis pádu do jobu selhal: {$e->getMessage()}\n");
+    }
+});
+
 try {
     if ($source === 'idoklad') {
         $container->get(IdokladImportService::class)->run($jobId);
