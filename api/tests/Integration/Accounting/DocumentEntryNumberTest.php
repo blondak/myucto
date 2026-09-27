@@ -77,6 +77,22 @@ final class DocumentEntryNumberTest extends BankPostingTestCase
         self::assertSame(0, $backfill->run($this->supplierId, false)['changed'], 'Druhý běh nemá co měnit.');
     }
 
+    /** Zápis převzatý z jiného programu nese číslo dokladu zdroje (i prázdné) a nedoplňuje se. */
+    public function testBackfillLeavesTakenOverEntryNumberAsTheSourceHadIt(): void
+    {
+        $client = $this->client('Odběratel převzatý');
+        $entry = $this->post('invoice', $this->saleInvoice('FV-DOCNO-6', $client, 100.0), '311', '602', 100.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE journal_entries SET document_no = NULL WHERE id = ?')->execute([$entry]);
+        $pdo->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'journal_entry', 'synth|ZAP-6', ?)")
+            ->execute([$this->supplierId, $entry]);
+
+        $result = (new DocumentEntryNumberBackfill($this->db))->run($this->supplierId, true);
+
+        self::assertNotContains($entry, array_column($result['changes'], 'entry_id'));
+        self::assertNull($this->documentNo($entry));
+    }
+
     /** @param array<string,mixed> $meta */
     private function post(string $type, int $id, string $debit, string $credit, float $amount, array $meta = []): int
     {

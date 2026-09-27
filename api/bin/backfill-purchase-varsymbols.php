@@ -13,6 +13,9 @@ declare(strict_types=1);
  * Skript je idempotentní — ensureVarsymbol() v repo vrátí stávající hodnotu
  * pokud varsymbol už nastavený je. Bezpečné pouštět opakovaně.
  *
+ * Doklad převzatý z jiného účetního programu (TakenOverRecord) se vynechá: nese údaje
+ * zdroje a převod je nedoplňuje.
+ *
  * Použití:
  *   php api/bin/backfill-purchase-varsymbols.php           # dry-run (jen vypíše)
  *   php api/bin/backfill-purchase-varsymbols.php --apply   # skutečně zapíše
@@ -28,11 +31,12 @@ $pdo  = $container->get(\MyInvoice\Infrastructure\Database\Connection::class)->p
 $repo = $container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class);
 
 $stmt = $pdo->query(
-    "SELECT id, supplier_id, vendor_invoice_number, total_with_vat, status, issue_date, paid_at
-       FROM purchase_invoices
-      WHERE varsymbol IS NULL
-        AND status != 'cancelled'
-      ORDER BY supplier_id, issue_date, id"
+    "SELECT pi.id, pi.supplier_id, pi.vendor_invoice_number, pi.total_with_vat, pi.status, pi.issue_date, pi.paid_at
+       FROM purchase_invoices pi
+      WHERE pi.varsymbol IS NULL
+        AND pi.status != 'cancelled'
+        AND NOT " . \MyInvoice\Service\Accounting\TakenOverRecord::documentSql('purchase_invoice', 'pi') . "
+      ORDER BY pi.supplier_id, pi.issue_date, pi.id"
 );
 $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 

@@ -19,6 +19,9 @@ use PDO;
  * kterém bylo uzavřeno. Zámek data (locked_until) doplnění nebrání — číslo dokladu je
  * metadata zápisu, částky podaných přiznání se tím nemění.
  *
+ * Zápis převzatý z jiného účetního programu ({@see TakenOverRecord}) nese číslo dokladu
+ * zdroje, i prázdné, a nedoplňuje se: číslo je vazba na doklad v původním programu.
+ *
  * Idempotentní: mění jen zápisy s prázdným číslem, pro které doklad číslo má.
  */
 final class DocumentEntryNumberBackfill
@@ -46,7 +49,8 @@ final class DocumentEntryNumberBackfill
                  WHERE je.source_type IN ('" . implode("', '", DocumentEntryNumber::SOURCE_TYPES) . "')
                    AND je.source_id IS NOT NULL
                    AND (je.document_no IS NULL OR TRIM(je.document_no) = '')
-                   AND p.status = 'open'";
+                   AND p.status = 'open'
+                   AND NOT " . TakenOverRecord::journalEntrySql('je');
         $params = [];
         if ($supplierId !== null) {
             $sql .= ' AND je.supplier_id = ?';

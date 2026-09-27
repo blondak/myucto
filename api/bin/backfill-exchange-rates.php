@@ -14,6 +14,9 @@ declare(strict_types=1);
  *   - purchase_invoices.exchange_rate + exchange_rate_date + exchange_rate_source='cnb'
  *   - invoices.exchange_rate + exchange_rate_date
  *
+ * Doklad převzatý z jiného účetního programu (TakenOverRecord) se vynechá: kurz a jeho
+ * přepočet určil zdroj a kurz ČNB by se od převzatého zaúčtování rozešel.
+ *
  * Použití:
  *   php api/bin/backfill-exchange-rates.php           # dry-run
  *   php api/bin/backfill-exchange-rates.php --apply   # zápis
@@ -42,6 +45,7 @@ $piRows = $pdo->query(
       WHERE pi.exchange_rate IS NULL
         AND cur.code != 'CZK'
         AND pi.status != 'cancelled'
+        AND NOT " . \MyInvoice\Service\Accounting\TakenOverRecord::documentSql('purchase_invoice', 'pi') . "
       ORDER BY pi.supplier_id, pi.issue_date, pi.id"
 )->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -54,6 +58,7 @@ $invRows = $pdo->query(
       WHERE i.exchange_rate IS NULL
         AND cur.code != 'CZK'
         AND i.status NOT IN ('cancelled', 'draft')
+        AND NOT " . \MyInvoice\Service\Accounting\TakenOverRecord::documentSql('invoice', 'i') . "
       ORDER BY i.supplier_id, i.issue_date, i.id"
 )->fetchAll(\PDO::FETCH_ASSOC);
 
