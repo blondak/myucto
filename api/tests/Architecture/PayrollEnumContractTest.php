@@ -494,6 +494,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentCertificateDeductionSourceKind'
             => 'const:MyInvoice\Service\Payroll\Document\EmploymentCertificateDeduction::SOURCE_KINDS',
 
+        'payrollEnforcement.ts::EnforcementBulkMissing'
+            => 'const:MyInvoice\Service\Payroll\Garnishment\EnforcementBulkActivationService::MISSING',
         'payrollEnforcement.ts::EnforcementCaseStatus'
             => 'enum:MyInvoice\Service\Payroll\Garnishment\EnforcementCaseStatus',
         'payrollEnforcement.ts::EnforcementCaseCommand'

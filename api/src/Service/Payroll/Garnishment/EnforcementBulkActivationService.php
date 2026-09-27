@@ -26,6 +26,9 @@ use PDO;
  */
 final readonly class EnforcementBulkActivationService
 {
+    /** Co může případu chybět k zahájení srážení (klientský union `EnforcementBulkMissing`). */
+    public const MISSING = ['claims', 'order_issued_on', 'priority_date', 'legal_parties'];
+
     public function __construct(
         private Connection $db,
         private PayrollEnforcementRepository $repository,
