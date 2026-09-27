@@ -137,10 +137,12 @@ final class DynamicRolesMigrationTest extends TestCase
         );
         self::assertSame('system_key IS NULL', GlobalSeedTables::RESET_PARTIAL['roles'] ?? null);
         self::assertStringContainsString('GlobalSeedTables::RESET_PARTIAL', $source);
-        self::assertStringContainsString(
-            "'roles', 'role_permissions', 'user_suppliers'",
-            $source,
-        );
+        self::assertStringContainsString('GlobalSeedTables::resetKeepUsersSupplier(', $source);
+        $keepMode = GlobalSeedTables::resetKeepUsersSupplier(false);
+        foreach (['roles', 'role_permissions', 'user_suppliers'] as $table) {
+            self::assertContains($table, $keepMode['keep']);
+            self::assertArrayNotHasKey($table, $keepMode['partial']);
+        }
     }
 
     private function sql(): string

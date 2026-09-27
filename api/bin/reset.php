@@ -11,6 +11,22 @@ declare(strict_types=1);
  *   php api/bin/reset.php --yes --keep-cache   # ponechá ARES/VIES cache
  *   php api/bin/reset.php --keep-users-supplier # ponechá účet(y) + dodavatele + jeho konfiguraci,
  *                                               # smaže jen byznys data (klienti, doklady, banka…)
+ *   php api/bin/reset.php --skip-files          # soubory v storage/ nechá být
+ *   php api/bin/reset.php --force-files         # smaže soubory firem i ve sdíleném úložišti
+ *
+ * --keep-users-supplier zachová vše, co je konfigurací firmy: historii plátcovství DPH,
+ *       režim a období účetnictví, osnovu a předkontace, nastavení mezd (stav modulu,
+ *       zaměstnavatelská politika, účtárny, mzdové složky), podepisování a napojení.
+ *       Zařazení KAŽDÉ tabulky (ponechat / smazat) drží
+ *       GlobalSeedTables::RESET_KEEP_USERS_SUPPLIER(_WIPES); nová tabulka bez zařazení
+ *       shodí guard ResetKeepUsersSupplierClassificationTest.
+ *
+ * SOUBORY: storage/ může sdílet víc databází (dev stroj bez MYINVOICE_DATA_DIR). Reset
+ *       proto maže jen adresáře sup-N / supplier-N firem z resetované databáze
+ *       (ResetStorageScope::TENANT_AREAS, při úplném resetu i loga). Najde-li adresář
+ *       firmy, kterou databáze nezná, úložiště je sdílené a vlastní id může patřit
+ *       i jiné databázi: soubory pak NEMAŽE, dokud nedostane --force-files. Na stroji
+ *       s víc instancemi nastav každé vlastní MYINVOICE_DATA_DIR.
  *
  * DYNAMICKÉ mazání: vymaže VŠECHNY tabulky kromě keep-listu (viz níže $keep),
  *       takže nezaostává za schématem — nové tabulky (vč. secretů: IMAP hesla,
@@ -51,13 +67,17 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Config\CfgLocalWriter;
+use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Service\System\GlobalSeedTables;
+use MyInvoice\Service\System\ResetStorageScope;
 
 $args = array_flip(array_slice($argv, 1));
 $autoYes   = isset($args['--yes']) || isset($args['-y']);
 $keepCache = isset($args['--keep-cache']);
 $keepUsersSupplier = isset($args['--keep-users-supplier']);
 $dryRun    = isset($args['--dry-run']);
+$skipFiles  = isset($args['--skip-files']);
+$forceFiles = isset($args['--force-files']);
 
 $rootDir = Bootstrap::rootDir();
 
@@ -93,8 +113,8 @@ echo "\n";
 
 if ($keepUsersSupplier) {
     echo "Režim: --keep-users-supplier — ZACHOVÁ uživatele, dodavatele a jeho konfiguraci\n";
-    echo "       (měny, číslování, podepisování, e-mail/banka config, číselníky,\n";
-    echo "        účtovou osnovu, předkontace a nastavení účetnictví).\n";
+    echo "       (měny, číslování, podepisování, e-mail/banka config, číselníky, historii\n";
+    echo "        plátcovství DPH, režim a období účetnictví, osnovu, předkontace, nastavení mezd).\n";
     echo "       Smaže BYZNYS data: klienti, doklady, banka, dokumenty, kniha jízd, recurring…\n\n";
 }
 
@@ -122,61 +142,18 @@ if (!$autoYes && !$dryRun) {
 $keep = GlobalSeedTables::resetKeep($keepCache);
 $partial = GlobalSeedTables::RESET_PARTIAL;
 
-// --keep-users-supplier: zachovej účet(y) + dodavatele + jeho KONFIGURACI (měny, číslování,
-// podepisování, e-mail/banka config, číselníky), smaž jen BYZNYS data (klienti, doklady,
-// banka, dokumenty, kniha jízd, recurring, importy, daňová podání…). „Start fresh" se
-// zachovaným přihlášením a firmou — netřeba znovu setup. Užitečné i pro úklid duplicitních
-// sample dat, která vznikla bez evidence (issue #162).
+// --keep-users-supplier: zachovej účet(y) + dodavatele + jeho KONFIGURACI (DPH v čase,
+// režim a období účetnictví, osnova, předkontace, nastavení mezd, podepisování, napojení),
+// smaž jen BYZNYS data. „Start fresh" se zachovaným přihlášením a firmou — netřeba znovu
+// setup. Užitečné i pro úklid duplicitních sample dat, která vznikla bez evidence (#162).
+// Zařazení každé tabulky drží GlobalSeedTables::RESET_KEEP_USERS_SUPPLIER(_WIPES).
 if ($keepUsersSupplier) {
-    $keep = array_merge($keep, [
-        // Účet a přihlášení
-        'users', 'sessions', 'trusted_devices', 'login_otps',
-        // Dynamické role musí zůstat spolu s uživateli a per-firma override
-        'roles', 'role_permissions', 'user_suppliers',
-        // Identita dodavatele + měny + číslování dokladů
-        'supplier', 'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
-        // API tokeny (PAT)
-        'api_tokens',
-        // Podepisování PDF (konfigurace + klíče)
-        'signing_profiles', 'signing_credentials', 'signing_settings',
-        'signature_role_profiles', 'signature_user_profiles', 'signature_document_overrides',
-        'pdf_signature_output_settings',
-        // E-mail / bankovní avíza (konfigurace, NE zpracované zprávy)
-        'bank_email_imap_settings', 'bank_email_account_mappings', 'email_templates', 'email_profiles',
-        // Vlastní bankovní účty — konfigurace, ne pohyby. Bez nich by
-        // bank_email_account_mappings (výše) ukazovalo na neexistující účty a firma
-        // by po resetu neměla kam účtovat banku (analytic_suffix, viz 1109).
-        'supplier_bank_accounts',
-        // ÚČETNÍ KONFIGURACE. Účtová osnova musí přežít spolu se supplierem: firma si
-        // v `supplier.accounting_mode` nese double_entry, ale ChartOfAccountsSeeder se
-        // volá jen z aktivace účetnictví / změny režimu — ne per-request. Bez osnovy by
-        // tenhle režim skončil se zapnutým účetnictvím a prázdným účtovým rozvrhem.
-        'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
-        'auto_posting_policy', 'expense_classification_rules',
-        'journal_entry_templates', 'journal_entry_template_lines',
-        'bank_posting_rules', 'bank_rule_templates',
-        // Per-supplier číselníky
-        'expense_categories', 'revenue_categories', 'trip_categories',
-        // Daňové profily VČETNĚ vazebních tabulek — samotné tax_profiles bez dětí
-        // by zůstaly jako neúplný profil (děti, manžel/ka, činnosti).
-        'tax_profiles', 'tax_profile_activities', 'tax_profile_children',
-        'tax_profile_child_months', 'tax_profile_spouse_claims',
-        // POZOR: sklady, stromy kategorií a pokladny se ZÁMĚRNĚ NEZACHOVÁVAJÍ, i když
-        // vypadají jako konfigurace. Jsou to kontejnery byznys dat, která tenhle režim
-        // maže (skladové karty a pohyby, pokladní doklady), takže by zůstaly prázdné —
-        // a hlavně: `sample_data_entries` se maže, takže sklad z ukázkových dat by přežil
-        // BEZ evidence. Sample generátor pak padal na `uq_wh_supplier_code`
-        // („Duplicate entry '1-HLAVNI'") a purge už ten sirotek neuměl uklidit.
-    ]);
-    // vat_classifications + bank_email_notice_providers jsou konfigurace → ponech CELÉ.
-    unset($partial['vat_classifications'], $partial['bank_email_notice_providers']);
-    $keep[] = 'vat_classifications';
-    $keep[] = 'bank_email_notice_providers';
-    // Předkontace jsou taky konfigurace — v tomhle režimu ponech i tenant override
-    // (např. přesměrování 501 → 501.900 ze seedu analytik), ne jen globální seed.
-    unset($partial['posting_rules']);
-    $keep[] = 'posting_rules';
+    ['keep' => $keep, 'partial' => $partial] = GlobalSeedTables::resetKeepUsersSupplier($keepCache);
 }
+
+// Firmy TÉTO databáze. Soubory se mažou jen v jejich adresářích (sup-N / supplier-N),
+// protože storage/ může sdílet víc databází (dev stroj bez MYINVOICE_DATA_DIR).
+$ownSupplierIds = array_map('intval', $pdo->query('SELECT id FROM supplier')->fetchAll(\PDO::FETCH_COLUMN));
 
 $allTables = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
 $versionedTables = array_fill_keys(
@@ -251,12 +228,16 @@ if (!$dryRun) {
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
 }
 
-// Značky „ukázka už byla založena" (vzor importu docházky, ukázkové napojení integrací)
-// zůstávají se supplierem, ale ukázky samotné reset smazal. Bez vynulování by se po
-// resetu už nikdy znovu nezaložily.
+// Značky „ukázka už byla založena" zůstávají se supplierem. Vynulovat se smí jen ta,
+// jejíž ukázku reset smazal; jinak by se ukázka, kterou si uživatel vědomě smazal,
+// vrátila (vzor importu docházky i ukázkové napojení jsou konfigurace a zůstávají).
 if ($keepUsersSupplier) {
     $markers = $pdo->query("SHOW COLUMNS FROM supplier LIKE '%\\_sample\\_seeded\\_at'")->fetchAll(\PDO::FETCH_COLUMN);
     foreach ($markers as $column) {
+        $sampleTable = GlobalSeedTables::SAMPLE_MARKERS[$column] ?? null;
+        if ($sampleTable !== null && in_array($sampleTable, $keep, true)) {
+            continue;
+        }
         if ($dryRun) {
             echo "  RESET    supplier.{$column}\n";
             continue;
@@ -266,13 +247,34 @@ if ($keepUsersSupplier) {
     }
 }
 
-// PDF cache + storage cleanup — vč. přijaté faktury archive + XSD (necháváme)
+// Soubory firem: jen adresáře sup-N / supplier-N firem TÉTO databáze (viz ResetStorageScope).
+$storagePlan = ResetStorageScope::plan(RuntimePaths::storage(), $ownSupplierIds, !$keepUsersSupplier);
+echo "\n[reset] Soubory firem v " . RuntimePaths::storage() . ":\n";
+if ($skipFiles) {
+    echo "  --skip-files: soubory se nemažou.\n";
+} elseif ($storagePlan['foreign'] !== [] && !$forceFiles) {
+    echo "  ! Úložiště obsahuje " . count($storagePlan['foreign']) . " adresářů firem, které tahle databáze nezná\n";
+    echo "    (sdílí ho jiná instance, nebo zbytky starších resetů). Soubory se NEMAŽOU,\n";
+    echo "    jiná databáze může mít firmu se stejným id. Nastav vlastní MYINVOICE_DATA_DIR,\n";
+    echo "    nebo po kontrole spusť znovu s --force-files (smaže jen firmy této databáze).\n";
+} else {
+    foreach ($storagePlan['own'] as $path) {
+        if ($dryRun) {
+            echo "  · $path\n";
+            continue;
+        }
+        $count = ResetStorageScope::remove($path);
+        echo "  ✓ $path ($count souborů)\n";
+    }
+    if ($storagePlan['own'] === []) {
+        echo "  (žádné)\n";
+    }
+}
+
+// Cache se po smazání přegenerují, sdílet je nevadí.
 $dirs = [
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices'),
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('purchase-invoices'),  // archive PDF dodavatelů (fáze 1)
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('documents'),          // sekce Dokumenty (soubory, náhledy, joby)
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('cache/mpdf'),
-    \MyInvoice\Infrastructure\Config\RuntimePaths::storage('cache/twig'),
+    RuntimePaths::storage('cache/mpdf'),
+    RuntimePaths::storage('cache/twig'),
 ];
 echo $dryRun ? "\n[reset] DRY-RUN — cache adresáře by se vyčistily:\n" : "\n[reset] Čistím cache adresáře…\n";
 foreach ($dirs as $d) {

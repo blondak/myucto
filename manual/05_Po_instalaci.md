@@ -54,6 +54,15 @@ php api/bin/recompute-stats.php      # přepočítá agregované statistiky
 > jejich smazání by je totiž nikdo nevrátil, protože je seedují migrace a ty jsou
 > evidované jako proběhlé.
 >
+> `reset.php --keep-users-supplier` navíc ponechá účty, firmy a jejich konfiguraci
+> (historii plátcovství DPH, režim a období účetnictví, účtovou osnovu a předkontace,
+> nastavení mezd, podepisování a napojení) a smaže jen doklady a další data.
+>
+> Soubory v `storage/` maže reset jen ve složkách firem z resetované databáze. Když
+> úložiště obsahuje složky firem, které databáze nezná (sdílí ho jiná instance),
+> soubory nechá být, dokud ho nespustíte s `--force-files`. Na stroji s více
+> instancemi nastavte každé vlastní `MYINVOICE_DATA_DIR`.
+>
 > Kdyby přesto číselník sazeb členských států kdykoli zmizel, vrátí ho
 > `php api/bin/migrate.php` — má na to sebeopravný krok. Poznáte to podle toho, že
 > import i vystavení odmítnou každý doklad se sazbou vyšší než 0 %.
