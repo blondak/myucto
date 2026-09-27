@@ -19,6 +19,10 @@ namespace MyInvoice\Service\Migration\Pohoda;
 final class PohodaXml
 {
     private static int $passes = 0;
+    /** @var array<string,string> */
+    private static array $keys = [];
+    /** @var array<string,string> */
+    private static array $attributeKeys = [];
 
     /**
      * @return \Generator<int,array<string,mixed>>
@@ -268,11 +272,25 @@ final class PohodaXml
         return $out;
     }
 
+    /**
+     * Jméno elementu jako klíč pole sdílený všemi záznamy. Klíč z DOM je pokaždé nový
+     * řetězec, takže tisíce řádků o stovce sloupců by nesly tisíckrát tatáž jména.
+     */
+    private static function key(string $name): string
+    {
+        return self::$keys[$name] ??= $name;
+    }
+
+    private static function attributeKey(string $name): string
+    {
+        return self::$attributeKeys[$name] ??= '@' . $name;
+    }
+
     private static function toArray(\DOMElement $el): array|string
     {
         $out = [];
         foreach ($el->attributes ?? [] as $attr) {
-            $out['@' . $attr->localName] = $attr->value;
+            $out[self::attributeKey($attr->localName)] = $attr->value;
         }
         $text = '';
         $hasChildren = false;
@@ -280,7 +298,7 @@ final class PohodaXml
         foreach ($el->childNodes as $child) {
             if ($child instanceof \DOMElement) {
                 $hasChildren = true;
-                $key = $child->localName;
+                $key = self::key($child->localName);
                 $value = self::toArray($child);
                 if (!array_key_exists($key, $out)) {
                     $out[$key] = $value;

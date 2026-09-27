@@ -138,7 +138,8 @@ final class PohodaPayrollPeople
             $period = sprintf('%04d-%02d', $year, $month);
             $transferStart = $transferStart === null || $period < $transferStart ? $period : $transferStart;
             $relationKey = PohodaXml::text($mz, 'RefPomer');
-            $payslips[$relationKey][$period][] = $mz;
+            // Ze mzdy se dál čte jen příznak prohlášení (`first_signed`); celý řádek má stovky sloupců.
+            $payslips[$relationKey][$period][] = array_intersect_key($mz, ['Prohlas' => true]);
             // Účast na nemocenském pojištění: příznak mzdy, případně sražené pojistné zaměstnance.
             $socialParticipation[$relationKey] = ($socialParticipation[$relationKey] ?? false)
                 || self::bool(PohodaXml::text($mz, 'JeSocPP')) || PohodaXml::num($mz, 'KcSoc') > 0;

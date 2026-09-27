@@ -311,7 +311,7 @@ final class PohodaPayrollImporter
         }
         $protocol->finish(self::STEP_PREFLIGHT);
 
-        $converter = PohodaPayrollConverter::read($file);
+        $converter = PohodaPayrollConverter::read($file, $year);
         $protocol->set('agenda', ['ico' => $converter->ico, 'year' => $year, 'program' => 'POHODA Mzdy', 'exported_at' => null, 'dir' => basename(dirname($file))]);
         $userOrNull = $userId > 0 ? $userId : null;
 
@@ -354,7 +354,30 @@ final class PohodaPayrollImporter
             // Jen uzavřené měsíce. Rozpracovaný měsíc (export uprostřed září nese
             // září i říjen s několika výstupními mzdami) by se jinak převzal jako
             // hotový a MyÚčto by ho už nespočítalo.
-            $months = array_map($converter->month(...), $converter->closedPeriods($year));
+            // Sešity měsíců se tady projdou jen kvůli souhrnům (sloupce profilu, vynechané údaje,
+            // srážky bez druhu); řádky si nedrží, měsíc se znovu složí až při převodu.
+            $periods = $converter->closedPeriods($year);
+            $months = [];
+            /** @var array<string,int> $componentInputs kód složky => vstupy s částkou */
+            $componentInputs = [];
+            foreach ($periods as $period) {
+                $month = $converter->month($period);
+                foreach ($month['columns'] as $header => $meta) {
+                    if ($meta['meaning'] !== 'component') {
+                        continue;
+                    }
+                    $code = (string) ($meta['code'] ?? '');
+                    foreach ($month['rows'] as $row) {
+                        $value = $row[$header] ?? null;
+                        if (is_numeric($value) && abs((float) $value) > 0.0) {
+                            $componentInputs[$code] = ($componentInputs[$code] ?? 0) + 1;
+                        }
+                    }
+                }
+                unset($month['rows']);
+                $months[] = $month;
+            }
+            unset($month);
             $open = $converter->openPeriods($year);
             if ($open !== []) {
                 $protocol->count(self::STEP_PREFLIGHT, 'open_months', count($open));
@@ -396,19 +419,8 @@ final class PohodaPayrollImporter
                     $unclassified[$component['code']] = 0;
                 }
             }
-            foreach ($months as $month) {
-                foreach ($month['columns'] as $header => $meta) {
-                    $code = (string) ($meta['code'] ?? '');
-                    if ($meta['meaning'] !== 'component' || !array_key_exists($code, $unclassified)) {
-                        continue;
-                    }
-                    foreach ($month['rows'] as $row) {
-                        $value = $row[$header] ?? null;
-                        if (is_numeric($value) && abs((float) $value) > 0.0) {
-                            $unclassified[$code]++;
-                        }
-                    }
-                }
+            foreach ($unclassified as $code => $inputs) {
+                $unclassified[$code] = $componentInputs[(string) $code] ?? 0;
             }
             if ($unclassified !== []) {
                 arsort($unclassified);
@@ -468,15 +480,15 @@ final class PohodaPayrollImporter
                     implode(', ', $list),
                 ));
             }
-            foreach ($months as $index => $month) {
+            foreach ($periods as $index => $period) {
                 if ($shouldCancel !== null && $shouldCancel()) {
                     $protocol->fail('cancelled');
                     break;
                 }
                 if ($progress !== null) {
-                    $progress(self::STEP_MONTHS, $index, count($months));
+                    $progress(self::STEP_MONTHS, $index, count($periods));
                 }
-                $period = $month['period'];
+                $month = $converter->month($period);
                 $workbook = PohodaPayrollConverter::workbook($month);
                 // Otisk dat měsíce, ne souboru: XLSX nese časová razítka a byl by pokaždé jiný.
                 $key = $period . '|' . hash('sha256', (string) json_encode([$month['columns'], $month['rows']], JSON_UNESCAPED_UNICODE));
@@ -576,6 +588,9 @@ final class PohodaPayrollImporter
                 }
             }
             $protocol->finish(self::STEP_MONTHS);
+            // Mzdy a položky roku už nikdo nečte, stačí den exportu.
+            $exportedOn = $converter->exportedOn;
+            unset($converter, $months, $month, $workbook);
 
             // Údaje osob a vztahů, které sešity měsíců nenesou (adresa, OIČ, skončení,
             // podaná hlášení, počáteční stavy). Až po mzdách: osoby a vztahy už existují.
@@ -586,7 +601,7 @@ final class PohodaPayrollImporter
                 }
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
-                $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $converter->exportedOn);
+                $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn);
                 // Náhrady mzdy z hodin docházky až po osobách: stojí na průměrném výdělku,
                 // který zapisuje teprve tenhle krok.
                 // Souhrn měsíce nese dávku, která ho zapsala naposledy se změnou. Opakovaný
@@ -615,6 +630,8 @@ final class PohodaPayrollImporter
                     $confirmIdentifiers, $protocol, self::STEP_JMHZ);
                 $protocol->finish(self::STEP_JMHZ);
             }
+            // Podání a údaje osob jsou zapsané; další kroky čtou soubor samy.
+            unset($jmhz, $records);
 
             // Trvalé srážky, exekuce a insolvence z karet zaměstnanců. Až po osobách:
             // exekuční případ i dohoda o srážkách visí na zaměstnanci, který už musí být

@@ -81,6 +81,44 @@ final class PohodaPayrollExportTest extends TestCase
         self::assertSame(['2026-02' => 2], $converter->openPeriods(2026));
     }
 
+    /**
+     * Převodník načtený jen pro převáděný rok drží mzdy a položky toho roku, období ale zná
+     * ze všech let exportu: poslední zpracovaný měsíc a rozpracované měsíce musí vyjít stejně
+     * jako při načtení všech let a sešity roku bajtově stejně.
+     */
+    public function testConverterForOneYearMatchesAllYears(): void
+    {
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $xml = (string) file_get_contents($file);
+        $earlier = '<MZ><ID>91</ID><RefZAM>1</RefZAM><RefPomer>1</RefPomer><Rok>2025</Rok><RelMes>12</RelMes><HodFond>168</HodFond>'
+            . '<HodOdpra>168</HodOdpra><TUvazek>40</TUvazek><RefPoj>1</RefPoj><KcHrubaM>40000</KcHrubaM><KcCistaM>31000</KcCistaM></MZ>'
+            . '<MZslozky><ID>191</ID><RefAg>91</RefAg><RefSlozka>1</RefSlozka><KcMzda>40000</KcMzda><Hodnota1>40000</Hodnota1></MZslozky>'
+            . '<MZneprit><ID>92</ID><RefAg>91</RefAg><RefSlozka>1</RefSlozka><HodPrac>8</HodPrac><DatZac>2025-12-22</DatZac><DatKon>2025-12-22</DatKon></MZneprit>';
+        $position = strpos($xml, '<MZ>');
+        self::assertIsInt($position);
+        $xml = substr_replace($xml, $earlier, $position, 0);
+        file_put_contents($file, str_replace('<mdbExport ', '<mdbExport created="2026-02-15T10:00:00" ', $xml));
+
+        $all = PohodaPayrollConverter::read($file);
+        $year = PohodaPayrollConverter::read($file, 2026);
+
+        self::assertSame(['2025-12', '2026-01', '2026-02'], $year->periods());
+        self::assertSame($all->periods(), $year->periods());
+        self::assertSame($all->closedPeriods(), $year->closedPeriods());
+        self::assertSame('2026-01', max($year->closedPeriods()));
+        self::assertSame($all->closedPeriods(2026), $year->closedPeriods(2026));
+        self::assertSame($all->openPeriods(), $year->openPeriods());
+        self::assertSame($all->openPeriods(2026), $year->openPeriods(2026));
+        self::assertSame($all->employees(), $year->employees());
+        foreach (['2026-01', '2026-02'] as $period) {
+            self::assertSame(serialize($all->month($period)), serialize($year->month($period)), $period);
+        }
+        self::assertSame(1, $all->month('2025-12')['totals']['rows']);
+
+        $this->expectException(\LogicException::class);
+        $year->month('2025-12');
+    }
+
     public function testOpenPeriodRule(): void
     {
         self::assertTrue(PohodaPayrollConverter::openPeriod('2026-09', '2026-09-26'));

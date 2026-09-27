@@ -73,8 +73,14 @@ final class PohodaPayrollJmhzReportsTest extends TestCase
         ]], $reports[0]['summary']);
         self::assertSame(['1', '2'], array_column($reports[0]['forms'], 'relation_key'));
         self::assertSame([null, null], array_column($reports[0]['forms'], 'error'));
-        self::assertCount(2, $reports[0]['report']->forms);
-        self::assertSame('O', $reports[2]['report']->submissionType);
+        self::assertContainsOnlyInstancesOf(JmhzReportForm::class, array_column($reports[0]['forms'], 'form'));
+        // Pořadí formuláře se počítá v rámci podání, ne přes všechny položky souboru.
+        foreach ($reports as $report) {
+            self::assertSame(range(1, count($report['forms'])), array_map(
+                static fn (array $form): int => $form['form']->position,
+                $report['forms'],
+            ));
+        }
     }
 
     public function testFormFromAttributesMapsLikeUploadedReport(): void

@@ -56,8 +56,26 @@ final class PohodaPayrollConverter
 
     /** @var array<string,array<string,array<string,mixed>>> tabulka => ID => řádek (číselníky, osoby, vztahy) */
     private array $byId = [];
-    /** @var array<string,list<array<string,mixed>>> období `Y-m` => řádky MZ */
+    /** Sloupce `MZ`, které čte skládání sešitu ({@see self::month()}, {@see self::holidayHours()}). */
+    private const MZ_COLUMNS = ['ID', 'Rok', 'RelMes', 'RefZAM', 'RefPomer', 'RefPoj', 'KcPrum', 'KcPrumU', 'TUvazek',
+        'DnyFond2', 'HodFond', 'HodOdpra', 'DnyStSv', 'KcHrubaM', 'KcCistaM'];
+
+    /** Sloupce položek mezd, které čte skládání sešitu. */
+    private const ITEM_COLUMNS = [
+        'MZslozky' => ['RefAg', 'RefSlozka', 'KcMzda', 'PocHodin', 'Hodnota1'],
+        'MZneprit' => ['RefAg', 'RefSlozka', 'HodPrac', 'KcNahr', 'DatZac', 'DatKon'],
+        'MZsrazky' => ['RefAg', 'RefSlozka', 'KcSrazeno'],
+        'MZdoch' => ['RefAg', 'Hodin1', 'Hodin2', 'Hodin3', 'Hodin4', 'Hodin5', 'Hodin6', 'Hodin7', 'Hodin8', 'Hodin9', 'Hodin10',
+            'Hodin11', 'Hodin12', 'Hodin13', 'Hodin14', 'Hodin15', 'Hodin16', 'Hodin17', 'Hodin18', 'Hodin19', 'Hodin20',
+            'Hodin21', 'Hodin22', 'Hodin23', 'Hodin24', 'Hodin25', 'Hodin26', 'Hodin27', 'Hodin28', 'Hodin29', 'Hodin30', 'Hodin31'],
+    ];
+
+    /** Rok, pro který se načetly mzdy a položky; `null` = všechny. */
+    private ?int $year = null;
+    /** @var array<string,list<array<string,mixed>>> období `Y-m` => řádky MZ (jen sloupce {@see self::MZ_COLUMNS}) */
     private array $mz = [];
+    /** @var array<string,int> období `Y-m` => počet mezd, za všechny roky exportu */
+    private array $payslips = [];
     /** @var array<string,array<string,list<array<string,mixed>>>> tabulka => ID mzdy => řádky položek */
     private array $items = [];
     /** @var array<string,int> ID osoby => počet vztahů */
@@ -71,26 +89,51 @@ final class PohodaPayrollConverter
      */
     private function __construct(public readonly string $ico, public readonly ?string $exportedOn = null) {}
 
-    public static function read(string $file): self
+    /**
+     * @param ?int $year rok, jehož měsíce se budou skládat ({@see self::month()}); mzdy ostatních
+     *        let se jen spočítají po obdobích (stačí na {@see self::periods()} a spol.).
+     *        `null` = všechny roky
+     */
+    public static function read(string $file, ?int $year = null): self
     {
         if (!is_file($file)) {
             throw new PohodaException('payroll_missing', 'Export neobsahuje mzdy (91_mzdy.xml).');
         }
         $info = PohodaXml::packInfo($file);
         $self = new self(preg_replace('/\D/', '', $info['ico']) ?? '', self::exportDate($info['created'] ?? ''));
+        $self->year = $year;
         $byId = ['sMZslozky', 'sMZneprit', 'sMZsrazky', 'sMzPoj', 'sSTR', 'PracMista', 'ZAM', 'ZAMpomer'];
         $items = ['MZslozky', 'MZneprit', 'MZsrazky', 'MZdoch'];
         $byIdTables = array_fill_keys($byId, true);
+        $mzColumns = array_fill_keys(self::MZ_COLUMNS, true);
+        $itemColumns = array_map(static fn (array $columns): array => array_fill_keys($columns, true), self::ITEM_COLUMNS);
         // Jeden průchod souborem pro všechny tabulky: každý průchod 50MB exportu stojí
-        // sekundy a tabulek je dvanáct.
+        // sekundy a tabulek je dvanáct. Mzdy a jejich položky (tisíce řádků o desítkách až
+        // stovkách sloupců) se drží jen se sloupci, které čte skládání sešitu.
         foreach (PohodaXml::scan($file, [...$byId, 'MZ', ...$items]) as $table => $row) {
             if (isset($byIdTables[$table])) {
                 $self->byId[$table][PohodaXml::text($row, 'ID')] = $row;
             } elseif ($table === 'MZ') {
-                $period = sprintf('%04d-%02d', (int) PohodaXml::text($row, 'Rok'), (int) PohodaXml::text($row, 'RelMes'));
-                $self->mz[$period][] = $row;
+                $rowYear = (int) PohodaXml::text($row, 'Rok');
+                $period = sprintf('%04d-%02d', $rowYear, (int) PohodaXml::text($row, 'RelMes'));
+                $self->payslips[$period] = ($self->payslips[$period] ?? 0) + 1;
+                if ($year === null || $rowYear === $year) {
+                    $self->mz[$period][] = array_intersect_key($row, $mzColumns);
+                }
             } else {
-                $self->items[$table][PohodaXml::text($row, 'RefAg')][] = $row;
+                $self->items[$table][PohodaXml::text($row, 'RefAg')][] = array_intersect_key($row, $itemColumns[$table]);
+            }
+        }
+        if ($year !== null) {
+            // Položky mezd ostatních let (tabulky položek rok nenesou, pozná se až podle mzdy).
+            $loaded = [];
+            foreach ($self->mz as $rows) {
+                foreach ($rows as $mz) {
+                    $loaded[PohodaXml::text($mz, 'ID')] = true;
+                }
+            }
+            foreach ($self->items as $table => $byPayslip) {
+                $self->items[$table] = array_intersect_key($byPayslip, $loaded);
             }
         }
         foreach ($self->byId['ZAMpomer'] ?? [] as $relation) {
@@ -102,13 +145,14 @@ final class PohodaPayrollConverter
             $self->numberUse[$number] = ($self->numberUse[$number] ?? 0) + 1;
         }
         ksort($self->mz);
+        ksort($self->payslips);
         return $self;
     }
 
     /** @return list<string> období `Y-m`, pro která jsou v exportu mzdy (i rozpracované) */
     public function periods(?int $year = null): array
     {
-        return array_values(array_filter(array_keys($this->mz), static fn (string $p): bool => $year === null || str_starts_with($p, $year . '-')));
+        return array_values(array_filter(array_keys($this->payslips), static fn (string $p): bool => $year === null || str_starts_with($p, $year . '-')));
     }
 
     /**
@@ -134,7 +178,7 @@ final class PohodaPayrollConverter
         $open = [];
         foreach ($this->periods($year) as $period) {
             if (self::openPeriod($period, $this->exportedOn)) {
-                $open[$period] = count($this->mz[$period] ?? []);
+                $open[$period] = $this->payslips[$period] ?? 0;
             }
         }
         return $open;
@@ -178,6 +222,9 @@ final class PohodaPayrollConverter
      */
     public function month(string $period): array
     {
+        if ($this->year !== null && !str_starts_with($period, $this->year . '-')) {
+            throw new \LogicException("Mzdy za {$period} se nečetly, převodník je načtený jen pro rok {$this->year}.");
+        }
         $columns = [];
         $column = static function (string $header, string $meaning, ?string $unit, ?string $kind = null, ?string $code = null) use (&$columns): void {
             $columns[$header] ??= ['meaning' => $meaning, 'unit' => $unit, 'kind' => $kind, 'code' => $code];

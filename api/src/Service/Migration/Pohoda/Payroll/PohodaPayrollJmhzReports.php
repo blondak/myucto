@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzAttributeDocument;
-use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportFile;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportReader;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportFileException;
@@ -39,7 +38,6 @@ final class PohodaPayrollJmhzReports
      *   source_key:string, id:string, corrected_source_key:?string, type:string, year:int, month:int, period:string,
      *   sent:bool, state:string, filled_at:string, submitted_at:?string, accepted_at:?string, guid:?string,
      *   header:array<string,string>, summary:list<array<string,int|string>>, delivery:?array<string,string>,
-     *   report:JmhzReportFile,
      *   forms:list<array{item_id:string, relation_key:string, person_key:string, item:array<string,string>,
      *     attributes:list<array<string,int|string>>, form:?JmhzReportForm, error:?string}>
      * }>
@@ -62,15 +60,8 @@ final class PohodaPayrollJmhzReports
         if ($headers === []) {
             return [];
         }
-        $items = [];
-        foreach (PohodaXml::records($file, 'MHitems') as $row) {
-            $parent = PohodaXml::text($row, 'RefAg');
-            if (isset($headers[$parent])) {
-                $items[$parent][] = $row;
-            }
-        }
-
-        $out = [];
+        /** @var array<string,array{month:int,type:string,guid:?string,filled:string,summary:list<array<string,int|string>>,header:array<string,int|string>}> $meta */
+        $meta = [];
         foreach ($headers as $id => $row) {
             $month = (int) PohodaXml::text($row, 'RelMesic');
             if ($month < 1 || $month > 12) {
@@ -79,40 +70,54 @@ final class PohodaPayrollJmhzReports
             $summary = PohodaXml::attributes($row, 'DataAll');
             $guid = self::guid(self::first($summary, 10001));
             $type = self::TYPES[PohodaXml::text($row, 'RelTyp')] ?? 'R';
-            $submitted = self::moment(PohodaXml::text($row, 'DatPod'));
-            $filled = $submitted ?? self::moment(PohodaXml::text($row, 'DatSave')) ?? self::moment(PohodaXml::text($row, 'DatCreate'))
+            $filled = self::moment(PohodaXml::text($row, 'DatPod')) ?? self::moment(PohodaXml::text($row, 'DatSave')) ?? self::moment(PohodaXml::text($row, 'DatCreate'))
                 ?? sprintf('%04d-%02d-01T00:00:00', $year, $month);
-            $refId = PohodaXml::text($row, 'RefID');
-            $header = ['guid' => $guid ?? '00000000-0000-0000-0000-000000000000', 'type' => $type, 'year' => $year, 'month' => $month, 'filled_at' => $filled];
-
-            $forms = [];
-            $parsed = [];
-            $position = 0;
-            foreach ($items[$id] ?? [] as $item) {
-                $position++;
-                $attributes = PohodaXml::attributes($item, 'Data');
-                $form = null;
-                $error = null;
-                if ($attributes === []) {
-                    $error = 'Položka hlášení nemá obsah (v exportu chybí atributy formuláře).';
-                } else {
-                    try {
-                        $form = $reader->formFromDocument(JmhzAttributeDocument::form($header, $attributes), $position);
-                        $parsed[] = $form;
-                    } catch (RegistrationImportFileException $e) {
-                        $error = $e->getMessage();
-                    }
-                }
-                $forms[] = [
-                    'item_id' => PohodaXml::text($item, 'ID'),
-                    'relation_key' => PohodaXml::text($item, 'RefPomer'),
-                    'person_key' => PohodaXml::text($item, 'RefZAM'),
-                    'item' => self::columns($item, ['Data']),
-                    'attributes' => $attributes,
-                    'form' => $form,
-                    'error' => $error,
-                ];
+            $meta[$id] = [
+                'month' => $month, 'type' => $type, 'guid' => $guid, 'filled' => $filled, 'summary' => $summary,
+                'header' => ['guid' => $guid ?? '00000000-0000-0000-0000-000000000000', 'type' => $type, 'year' => $year, 'month' => $month, 'filled_at' => $filled],
+            ];
+        }
+        // Položka se rozloží na formulář hned při čtení: syrový řádek (všechny atributy
+        // podání) by jinak ležel v paměti za celý rok vedle svého rozloženého obrazu.
+        /** @var array<string,list<array<string,mixed>>> $forms hlášení => formuláře v pořadí ze souboru */
+        $forms = [];
+        foreach (PohodaXml::records($file, 'MHitems') as $item) {
+            $parent = PohodaXml::text($item, 'RefAg');
+            if (!isset($meta[$parent])) {
+                continue;
             }
+            $position = count($forms[$parent] ?? []) + 1;
+            $attributes = PohodaXml::attributes($item, 'Data');
+            $form = null;
+            $error = null;
+            if ($attributes === []) {
+                $error = 'Položka hlášení nemá obsah (v exportu chybí atributy formuláře).';
+            } else {
+                try {
+                    $form = $reader->formFromDocument(JmhzAttributeDocument::form($meta[$parent]['header'], $attributes), $position);
+                } catch (RegistrationImportFileException $e) {
+                    $error = $e->getMessage();
+                }
+            }
+            $forms[$parent][] = [
+                'item_id' => PohodaXml::text($item, 'ID'),
+                'relation_key' => PohodaXml::text($item, 'RefPomer'),
+                'person_key' => PohodaXml::text($item, 'RefZAM'),
+                'item' => self::columns($item, ['Data']),
+                'attributes' => $attributes,
+                'form' => $form,
+                'error' => $error,
+            ];
+        }
+
+        $out = [];
+        foreach ($headers as $id => $row) {
+            if (!isset($meta[$id])) {
+                continue;
+            }
+            ['month' => $month, 'type' => $type, 'guid' => $guid, 'filled' => $filled, 'summary' => $summary] = $meta[$id];
+            $submitted = self::moment(PohodaXml::text($row, 'DatPod'));
+            $refId = PohodaXml::text($row, 'RefID');
 
             $out[] = [
                 'source_key' => 'MH:' . $id,
@@ -131,21 +136,9 @@ final class PohodaPayrollJmhzReports
                 'header' => self::columns($row, ['DataAll']),
                 'summary' => $summary,
                 'delivery' => $deliveries[$id] ?? null,
-                'report' => new JmhzReportFile(
-                    submissionGuid: $header['guid'],
-                    submissionType: $type,
-                    year: $year,
-                    month: $month,
-                    filledAt: $filled,
-                    packageOrdinal: null,
-                    packageCount: null,
-                    vendor: self::PROGRAM,
-                    lenient: false,
-                    warnings: [],
-                    forms: $parsed,
-                ),
-                'forms' => $forms,
+                'forms' => $forms[$id] ?? [],
             ];
+            unset($forms[$id]);
         }
         usort($out, static fn (array $a, array $b): int => [$a['period'], $a['filled_at'], (int) $a['id']] <=> [$b['period'], $b['filled_at'], (int) $b['id']]);
 
@@ -194,13 +187,14 @@ final class PohodaPayrollJmhzReports
     {
         $out = [];
         $tables = ['RegZAM' => 'RegZAMitems', 'PredRegZAM' => 'PredRegZAMitems'];
-        // Registrace i předregistrace s větami jedním průchodem souborem.
+        // Registrace i předregistrace s větami jedním průchodem souborem. Věta se rozloží
+        // hned při čtení, syrové řádky všech let by jinak ležely v paměti vedle rozložených.
         $rows = [];
         foreach (PohodaXml::scan($file, [...array_keys($tables), ...array_values($tables)]) as $table => $row) {
             if (isset($tables[$table])) {
                 $rows[$table][PohodaXml::text($row, 'ID')] = $row;
             } else {
-                $rows[$table][PohodaXml::text($row, 'RefAg')][] = $row;
+                $rows[$table][PohodaXml::text($row, 'RefAg')][] = self::sentence($row);
             }
         }
         foreach ($tables as $headerTable => $itemTable) {
@@ -210,25 +204,7 @@ final class PohodaPayrollJmhzReports
             }
             $items = $rows[$itemTable] ?? [];
             foreach ($headers as $id => $row) {
-                $sentences = [];
-                foreach ($items[$id] ?? [] as $item) {
-                    $attributes = PohodaXml::attributes($item, 'Data');
-                    $values = [];
-                    foreach ($attributes as $attribute) {
-                        if ($attribute['order'] === 0 && !isset($values[$attribute['id']])) {
-                            $values[$attribute['id']] = $attribute['value'];
-                        }
-                    }
-                    $sentences[] = [
-                        'item_id' => PohodaXml::text($item, 'ID'),
-                        'relation_key' => PohodaXml::text($item, 'RefPomer'),
-                        'person_key' => PohodaXml::text($item, 'RefZAM'),
-                        'type' => PohodaXml::text($item, 'RelTyp'),
-                        'item' => self::columns($item, ['Data']),
-                        'attributes' => $attributes,
-                        'values' => $values,
-                    ];
-                }
+                $sentences = $items[$id] ?? [];
                 $submitted = self::moment(PohodaXml::text($row, 'DatPod'));
                 $out[] = [
                     'source_key' => $headerTable . ':' . $id,
@@ -247,6 +223,32 @@ final class PohodaPayrollJmhzReports
         usort($out, static fn (array $a, array $b): int => [(string) $a['filled_at'], $a['source_key']] <=> [(string) $b['filled_at'], $b['source_key']]);
 
         return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $item řádek `RegZAMitems` / `PredRegZAMitems`
+     * @return array{item_id:string, relation_key:string, person_key:string, type:string, item:array<string,string>,
+     *   attributes:list<array<string,int|string>>, values:array<int,string>}
+     */
+    private static function sentence(array $item): array
+    {
+        $attributes = PohodaXml::attributes($item, 'Data');
+        $values = [];
+        foreach ($attributes as $attribute) {
+            if ($attribute['order'] === 0 && !isset($values[$attribute['id']])) {
+                $values[$attribute['id']] = $attribute['value'];
+            }
+        }
+
+        return [
+            'item_id' => PohodaXml::text($item, 'ID'),
+            'relation_key' => PohodaXml::text($item, 'RefPomer'),
+            'person_key' => PohodaXml::text($item, 'RefZAM'),
+            'type' => PohodaXml::text($item, 'RelTyp'),
+            'item' => self::columns($item, ['Data']),
+            'attributes' => $attributes,
+            'values' => $values,
+        ];
     }
 
     /**
