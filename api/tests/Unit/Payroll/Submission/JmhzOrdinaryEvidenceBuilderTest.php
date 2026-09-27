@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Garnishment\ClaimCategory;
+use MyInvoice\Service\Payroll\Garnishment\DeductionClaim;
+use MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceException;
@@ -282,6 +285,57 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
             $result['people'][0]['statutory']['net_pay']['deducted_minor_units'] = 64_100;
             $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
             $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+            $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+
+            self::assertSame($expected, $snapshot->payload['attribute_values']['10116'], $label);
+        }
+    }
+
+    /**
+     * 10116 = zaměstnavatel v měsíci srážky PROVÁDÍ (pokyny MPSV k MH 1.4.13).
+     * Zahájené insolvenční řízení bez exekuce nic nesráží a dohodu pozastaví
+     * (§ 109 odst. 1 písm. c) a d) IZ); dřív samotný režim `alert_only` dal ANO.
+     * Aktivní exekuce s nulovou srážkou (nezabavitelné minimum) i schválené
+     * oddlužení zůstávají ANO.
+     */
+    public function testOnlyDeductionsActuallyPerformedInTheMonthAreReportedIn10116(): void
+    {
+        $claim = (new DeductionClaim(
+            'claim:1',
+            DeductionLegalBasis::Statutory,
+            ClaimCategory::NonPriority,
+            1_000_000,
+            '2026-06-01',
+            legalTitleVerified: true,
+            orderOrNoticeDelivered: true,
+            orderIssuedOn: '2026-05-20',
+            priorityClassificationVerified: true,
+        ))->toCanonicalArray();
+        foreach ([
+            'insolvence zahájena, bez exekuce' => ['alert_only', [], [], false],
+            'insolvence zahájena, dohoda pozastavena' => ['alert_only', [], [['deduction_kind' => 'other']], false],
+            'insolvence zahájena, exekuce se deponuje' => ['alert_only', [$claim], [], true],
+            'neaktivní pohledávka' => ['none', [['active' => false] + $claim], [], false],
+            'aktivní exekuce, srážka 0 (nezabavitelné minimum)' => ['none', [$claim], [], true],
+            'schválené oddlužení' => ['approved_standard', [], [], true],
+        ] as $label => [$mode, $claims, $agreements, $expected]) {
+            $source = $this->source();
+            $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            self::assertIsArray($input);
+            self::assertIsArray($result);
+            $input['people'][0]['enforcement_evidence']['insolvency']['mode'] = $mode;
+            $input['people'][0]['enforcement_evidence']['claims'] = $claims;
+            $input['people'][0]['deduction_agreements'] = array_map(
+                static fn (array $agreement): array => ['id' => 5, 'title' => 'Syntetická srážka'] + $agreement,
+                $agreements,
+            );
+            $result['people'][0]['enforcement']['input']['insolvency']['mode'] = $mode;
+            $result['people'][0]['enforcement']['input']['claims'] = $claims;
+            $result['people'][0]['enforcement']['result']['insolvency_applied'] = $mode !== 'none';
+            $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+            $this->replaceInput($source, $input);
 
             $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
 

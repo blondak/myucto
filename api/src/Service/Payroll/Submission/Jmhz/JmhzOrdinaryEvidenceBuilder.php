@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
+use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -410,8 +411,39 @@ final class JmhzOrdinaryEvidenceBuilder
          * závodní stravování a srážky ze zákona (§ 147 odst. 1 ZP) do něj
          * nepatří ({@see DeductionAgreementTerms::reportedAsWageDeduction()}).
          * Pro kontrolu „sraženo bez titulu" dál platí všechny evidované tituly.
+         *
+         * Pokyny MPSV k MH 1.4.13 (10116): „Uvede se ANO, pokud zaměstnavatel
+         * PROVÁDÍ z příjmu zaměstnance srážky na základě nařízeného soudního
+         * nebo správního výkonu rozhodnutí, konkursu nebo dohody o srážkách
+         * z příjmu uzavřené podle občanského zákoníku, jinak NE." Rozhoduje
+         * tedy, že se v měsíci sráží, ne že titul existuje:
+         *
+         * - Exekuční pohledávky se do zmrazené revize dostávají jen ze stavů,
+         *   ve kterých se sráží (`withhold_and_hold`, `remit`, `deferred_hold`;
+         *   výběr v PayrollEnforcementRepository). Doručená exekuce (`received`)
+         *   ještě srážena není a odklad bez srážení (`deferred_no_withholding`,
+         *   § 266 o. s. ř., § 54 exekučního řádu) výkon pozastavuje — obojí je
+         *   NE, pokud se přesto něco nesrazilo. Aktivní pohledávka, u které
+         *   v měsíci vyšla nulová srážka (příjem pod nezabavitelnou částkou),
+         *   zůstává ANO: výkon rozhodnutí plátce provádí dál (srážku každý
+         *   měsíc počítá, § 282 o. s. ř.), jen tentokrát bez výsledné částky.
+         * - Samotné zahájené insolvenční řízení (`alert_only`) žádnou srážku
+         *   nezakládá: sráží se jen dosavadní exekuce (deponují se, § 109
+         *   odst. 1 písm. c) IZ) a dohody se neprovádějí vůbec (písm. d)).
+         *   ANO je proto jen s aktivní exekucí nebo skutečnou srážkou.
+         *   Schválené oddlužení (§ 406 odst. 3 písm. d) IZ) sráží pro
+         *   insolvenčního správce vždy.
+         *
+         * Zápočtový list (§ 313 odst. 1 písm. d) ZP) hlásí naopak i doručené,
+         * dosud nesrážené exekuce — tam jde o pokračující pohledávky, které
+         * přebírá další plátce mzdy, ne o srážky provedené v měsíci
+         * ({@see \MyInvoice\Service\Payroll\Document\EmploymentExitSnapshotBuilder}).
          */
-        $reportableAgreements = array_filter(
+        $mode = InsolvencyMode::tryFrom($insolvency['mode']);
+        if ($mode === null) {
+            $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazená exekuční evidence není úplná.');
+        }
+        $reportableAgreements = $mode->depositsEnforcementDeductions() ? [] : array_filter(
             $agreements,
             static fn (mixed $agreement): bool => is_array($agreement)
                 && DeductionAgreementTerms::reportedAsWageDeduction(
@@ -419,12 +451,16 @@ final class JmhzOrdinaryEvidenceBuilder
                     (string) ($agreement['legal_basis'] ?? 'agreement'),
                 ),
         );
+        $withholdingClaims = array_filter(
+            $claims,
+            static fn (mixed $claim): bool => is_array($claim) && ($claim['active'] ?? null) === true,
+        );
         $titled = $agreements !== []
             || $claims !== []
-            || $insolvency['mode'] !== 'none';
+            || $mode !== InsolvencyMode::None;
         $deductionsRecorded = $reportableAgreements !== []
-            || $claims !== []
-            || $insolvency['mode'] !== 'none';
+            || $withholdingClaims !== []
+            || $mode->redirectsPaymentToAdministrator();
         // Kontroluje se osoba, za jejíž vztah se evidence potvrzuje. Ostatní
         // osoby revize mají vlastní evidenci a vlastní kontrolu, takže se
         // nevyžaduje, aby byla v revizi osoba jediná.
@@ -532,10 +568,12 @@ final class JmhzOrdinaryEvidenceBuilder
             $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Výsledek srážek není úplný.');
         }
 
+        // `insolvency_applied` je u `alert_only` true i bez jediné sražené
+        // koruny (jen říká, že se případné exekuční srážky deponují), proto
+        // sám o sobě ANO nedává; srážku doloží alokace nebo sražená částka.
         return $deductionsRecorded
             || $withheld !== 0
-            || $enforcementResult['allocations'] !== []
-            || $enforcementResult['insolvency_applied'] !== false;
+            || $enforcementResult['allocations'] !== [];
     }
 
     private function scenarioSelector(): JmhzScenarioSelectorResolver
