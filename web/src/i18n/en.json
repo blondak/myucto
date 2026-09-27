@@ -5737,6 +5737,7 @@
       "reopen": "Reopen",
       "start_date": "From",
       "end_date": "To",
+      "ends_on": "Ends {date}",
       "accounting": "Payroll / insurance posting",
       "employment_status": {
         "planned": "Planned",
@@ -6034,7 +6035,8 @@
           "death_deduction_agreements_active": "The employee has {count} active deduction agreements. The employer's claims end with death (Section 328(2) Labour Code) — end them in Deduction agreements."
         },
         "a2_prefill": "Prefill from termination",
-        "a2_prefill_hint": "Fills in the termination reason, net average and severance from the Termination record. Check the pension insurance periods.",
+        "a2_prefill_hint": "Fills in the termination date and reason, net average and severance from the Termination record. Check the pension insurance periods.",
+        "a2_net_average_missing": "The net average was not prefilled: {reason} Fill it in manually.",
         "a2_prefill_missing": "Fill in how the employment ended in the Termination section first."
       },
       "wage_statement": {
@@ -6167,7 +6169,7 @@
           "unknown": "The check could not be evaluated conclusively. Complete the evidence or contact an administrator.",
           "employment_not_found": "The employment relationship was not found.",
           "employment_not_ended": "The employment relationship has no end date yet.",
-          "employment_end_in_future": "The employment end date is in the future.",
+          "employment_end_in_future": "The employment ends in the future. The employment record and the confirmation for the Labour Office are issued at termination (Section 313 of the Labour Code) and cover data up to the last day, so prepare them on the end date or later. Deregistration A2 can be approved from the end date.",
           "actual_start_date_missing": "The actual start date is missing.",
           "employment_interval_invalid": "The start and end dates do not form a valid interval.",
           "birth_date_missing": "The personal profile is missing the date of birth.",

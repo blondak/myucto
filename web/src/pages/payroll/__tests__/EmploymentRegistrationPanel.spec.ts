@@ -1236,6 +1236,42 @@ describe('EmploymentRegistrationPanel', () => {
     expect((wrapper.get('[data-test="registration-a2-settlement-amount"]').element as HTMLInputElement).value).toBe('130440')
   })
 
+  /*
+   * C-19: předvyplnění mlčky vynechalo den skončení i odpověď „ne" na úmrtí
+   * (kterou varianta OST vyžaduje) a čistý průměr zůstal prázdný bez vysvětlení.
+   */
+  it('prefills the A2 end date and death answer and explains a missing net average', async () => {
+    const wrapper = mount(EmploymentRegistrationPanel, {
+      props: {
+        employmentId: 5,
+        personId: 9,
+        canWrite: true,
+        terminationEndDate: '2026-10-31',
+        a2Prefill: {
+          ended_by_death: false,
+          average_net_note: 'Zaměstnanec uplatňuje daňové zvýhodnění na dítě.',
+          unemployment: {
+            mode: 'provided',
+            employment_type: '1',
+            termination_reason: '4',
+            average_net_earnings: null,
+          },
+        },
+      },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+
+    await wrapper.get('[data-test="registration-a2-prefill-button"]').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="registration-event-effective-on"]').element as HTMLInputElement).value)
+      .toBe('31. 10. 2026')
+    expect((wrapper.get('[data-test="registration-a2-ended-by-death"]').element as HTMLSelectElement).value).toBe('no')
+    expect(wrapper.find('[data-test="registration-a2-net-average-note"]').exists()).toBe(true)
+  })
+
   it('keeps the A2 prefill disabled without a termination record', async () => {
     const wrapper = mountPanel()
     await flushPromises()

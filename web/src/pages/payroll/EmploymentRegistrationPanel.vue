@@ -56,6 +56,8 @@ const props = defineProps<{
   canWrite: boolean
   /** Podklady A2 odvozené ze záznamu „Skončení vztahu" na kartě vztahu. */
   a2Prefill?: PayrollTerminationA2Prefill | null
+  /** Den skončení vztahu z karty (předvyplní skutečné datum skončení v A2). */
+  terminationEndDate?: string | null
   /** Zvýší se po každém uložení kmenových dat osoby nebo vztahu (UI-26). */
   masterDataVersion?: number
 }>()
@@ -1542,6 +1544,21 @@ function deltaPayload(): Record<string, unknown> {
   return { [deltaField.value]: deltaValue.value.trim() }
 }
 
+/** Proč se čistý průměr nepředvyplnil (typicky daňové zvýhodnění na dítě). */
+const a2NetAverageNote = ref('')
+
+/**
+ * Varianta odhlášky podle druhu činnosti, zrcadlo
+ * `PayrollRegistrationBusinessMatrix::variantFor()`. Bez vyplněného druhu
+ * činnosti (převzatý vztah bez profilu A1) je to běžná varianta OST.
+ */
+function a2VariantIsOst(activityCode: string | null | undefined, detailCode: string | null | undefined): boolean {
+  if (!activityCode) return true
+  if (activityCode === '10') return false
+  if (['11', '12', '13', '14', 'M'].includes(activityCode)) return false
+  return !(/^[1-9]$/.test(activityCode) && detailCode === '2')
+}
+
 /**
  * Předvyplnění odhlášky A2 ze záznamu o skončení na kartě vztahu. Důvod
  * skončení se tak zadává jen jednou; schválení A2 jiný kód stejně odmítne.
@@ -1550,9 +1567,16 @@ function deltaPayload(): Record<string, unknown> {
 async function applyA2Prefill(): Promise<void> {
   const prefill = props.a2Prefill
   if (!prefill) return
-  // Příznak úmrtí se posílá jen u varianty A2-OST; jinde musí zůstat prázdný,
-  // proto se předvyplní jen kladná hodnota.
+  // Den skončení je týž jako na kartě vztahu; dřív ho účetní opisovala (C-19).
+  if (props.terminationEndDate) effectiveOn.value = props.terminationEndDate
+  // Příznak úmrtí se posílá jen u varianty A2-OST (povinně ano/ne); jinde musí
+  // zůstat prázdný. Dřív se předvyplnilo jen „ano", takže u běžné odhlášky
+  // zůstalo „Nevyplňovat" a schválení ho pak vyžadovalo.
   if (prefill.ended_by_death) endedByDeath.value = 'yes'
+  else if (a2VariantIsOst(a1Form.value.employment.activity_code, a1Form.value.employment.relationship_detail_code)) {
+    endedByDeath.value = 'no'
+  }
+  a2NetAverageNote.value = prefill.average_net_note ?? ''
   const unemployment = prefill.unemployment
   if (unemployment === null) {
     unemploymentMode.value = 'omit'
@@ -4039,7 +4063,7 @@ async function copyXml(): Promise<void> {
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.ended_by_death') }}
-              <select v-model="endedByDeath" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900">
+              <select v-model="endedByDeath" data-test="registration-a2-ended-by-death" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900">
                 <option value="omit">{{ t('payroll.people.registration.event.not_applicable') }}</option>
                 <option value="no">{{ t('common.no') }}</option>
                 <option value="yes">{{ t('common.yes') }}</option>
@@ -4064,6 +4088,11 @@ async function copyXml(): Promise<void> {
             <label class="block text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.average_net_earnings') }}
               <input v-model="averageNetEarnings" inputmode="numeric" maxlength="10" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-xs" />
+              <span
+                v-if="a2NetAverageNote && averageNetEarnings === ''"
+                class="mt-1 block font-normal text-warning-700"
+                data-test="registration-a2-net-average-note"
+              >{{ t('payroll.people.termination.a2_net_average_missing', { reason: a2NetAverageNote }) }}</span>
             </label>
             <fieldset class="rounded-lg border border-neutral-200 bg-surface p-3">
               <legend class="px-1 text-xs font-medium text-neutral-700">

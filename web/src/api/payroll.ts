@@ -6035,6 +6035,8 @@ export interface PayrollTerminationSurvivor {
 
 export interface PayrollTerminationA2Prefill {
   ended_by_death: boolean
+  /** Proč server čistý průměr nespočítal (pole zůstane k ručnímu doplnění). */
+  average_net_note?: string | null
   unemployment: null | {
     mode: 'provided'
     employment_type: '1'

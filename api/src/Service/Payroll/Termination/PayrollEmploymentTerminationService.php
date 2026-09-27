@@ -690,7 +690,7 @@ final class PayrollEmploymentTerminationService
 
     /**
      * @param array<string,mixed> $employment
-     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string} $average
+     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string} $average
      * @return array<string,mixed>
      */
     private function leaveSettlement(
@@ -797,7 +797,7 @@ final class PayrollEmploymentTerminationService
     /**
      * @param array<string,mixed> $employment
      * @param array<string,mixed>|null $record
-     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string} $average
+     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string} $average
      * @return array<string,mixed>
      */
     private function severance(
@@ -933,7 +933,7 @@ final class PayrollEmploymentTerminationService
      *
      * @param array<string,mixed> $employment
      * @param array<string,mixed>|null $record
-     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string} $average
+     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string} $average
      * @return array<string,mixed>
      */
     private function death(int $supplierId, array $employment, ?array $record, array $average): array
@@ -1007,7 +1007,7 @@ final class PayrollEmploymentTerminationService
      * a schválení pak hlídá, že kód důvodu sedí na záznam.
      *
      * @param array<string,mixed> $employment
-     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string} $average
+     * @param array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string} $average
      * @param array<string,mixed> $severance
      * @return array<string,mixed>|null
      */
@@ -1049,12 +1049,20 @@ final class PayrollEmploymentTerminationService
             }
         }
 
-        return ['ended_by_death' => false, 'unemployment' => $unemployment];
+        return [
+            'ended_by_death' => false,
+            'average_net_note' => $average['monthly_net'] === null
+                ? ($average['net_error'] ?? ($average['snapshot'] === null
+                    ? 'Chybí schválený průměrný výdělek pro čtvrtletí skončení.'
+                    : $average['error']))
+                : null,
+            'unemployment' => $unemployment,
+        ];
     }
 
     /**
      * @param array<string,mixed> $employment
-     * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string}
+     * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string}
      */
     private function average(int $supplierId, array $employment, bool $lockTerms = true): array
     {
@@ -1100,8 +1108,10 @@ final class PayrollEmploymentTerminationService
                 $lockTerms,
             );
             $result['monthly_net'] = $net->netMonthlyMinorUnits;
-        } catch (EmploymentExitReadinessException|PayrollRulesetException|\DomainException|\InvalidArgumentException) {
-            // Čistý průměr jen předvyplňuje A2; bez něj zůstane pole prázdné.
+        } catch (EmploymentExitReadinessException|PayrollRulesetException|\DomainException|\InvalidArgumentException $e) {
+            // Čistý průměr jen předvyplňuje A2; bez něj zůstane pole prázdné,
+            // ale formulář musí říct proč (tlačítko slibuje „čistý průměr").
+            $result['net_error'] = $e->getMessage();
         }
 
         return $result;

@@ -107,6 +107,38 @@ final class PayrollWageStatementFlowTest extends TestCase
         );
     }
 
+    /**
+     * Skončení zapsané dopředu přepne stav na `ended` hned. Do dne skončení
+     * vztah trvá a výměr jde vydat; po skončení ne (C-17).
+     */
+    public function testEmploymentEndingInFutureStillGetsWageStatement(): void
+    {
+        $person = $this->createEmployment($this->officeId, 'Filip Budoucí', 5, 'hpp', 'employment', 40, 10_000);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = 3000000
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $setEnd = $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "ended", end_date = ? WHERE supplier_id = ? AND id = ?'
+        );
+        $setEnd->execute([
+            (new \DateTimeImmutable('today'))->modify('+1 month')->format('Y-m-d'),
+            $this->supplierId,
+            $person['employment_id'],
+        ]);
+        self::assertTrue($this->list($person['employment_id'])['readiness']['available']);
+
+        $setEnd->execute([
+            (new \DateTimeImmutable('today'))->modify('-1 day')->format('Y-m-d'),
+            $this->supplierId,
+            $person['employment_id'],
+        ]);
+        self::assertSame(
+            'wage_statement_employment_closed',
+            $this->list($person['employment_id'])['readiness']['readiness_code'],
+        );
+    }
+
     public function testIssuedRevisionIsImmutable(): void
     {
         $person = $this->createEmployment($this->officeId, 'Karel Kotva', 4, 'hpp', 'employment', 40, 10_000);

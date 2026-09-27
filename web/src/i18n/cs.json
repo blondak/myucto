@@ -5737,6 +5737,7 @@
       "reopen": "Vrátit",
       "start_date": "Od",
       "end_date": "Do",
+      "ends_on": "Končí {date}",
       "accounting": "Předkontace mezd / pojistného",
       "employment_status": {
         "planned": "Plánovaný",
@@ -6034,7 +6035,8 @@
           "death_deduction_agreements_active": "Zaměstnanec má {count} aktivní dohody o srážkách. Pohledávky zaměstnavatele smrtí zanikají (§ 328 odst. 2 ZP) — ukončete je v Dohody o srážkách."
         },
         "a2_prefill": "Předvyplnit ze skončení vztahu",
-        "a2_prefill_hint": "Doplní důvod ukončení, čistý průměr a odstupné ze záznamu Skončení vztahu. Doby důchodového pojištění zkontrolujte.",
+        "a2_prefill_hint": "Doplní den a důvod skončení, čistý průměr a odstupné ze záznamu Skončení vztahu. Doby důchodového pojištění zkontrolujte.",
+        "a2_net_average_missing": "Čistý průměr se nepředvyplnil: {reason} Doplňte ho ručně.",
         "a2_prefill_missing": "Nejdřív vyplňte způsob skončení v části Skončení vztahu."
       },
       "wage_statement": {
@@ -6167,7 +6169,7 @@
           "unknown": "Kontrolu se nepodařilo jednoznačně vyhodnotit. Doplňte podklady nebo kontaktujte správce.",
           "employment_not_found": "Pracovní vztah nebyl nalezen.",
           "employment_not_ended": "Pracovní vztah ještě nemá datum skončení.",
-          "employment_end_in_future": "Datum skončení pracovního vztahu je v budoucnosti.",
+          "employment_end_in_future": "Vztah končí až v budoucnu. Zápočtový list a potvrzení pro Úřad práce se vydávají při skončení (§ 313 ZP) a nesou údaje až do posledního dne, proto je připravte v den skončení nebo po něm. Odhláška A2 jde schválit od dne skončení.",
           "actual_start_date_missing": "Chybí skutečné datum nástupu.",
           "employment_interval_invalid": "Datum nástupu a skončení netvoří platný interval.",
           "birth_date_missing": "V osobním profilu chybí datum narození.",

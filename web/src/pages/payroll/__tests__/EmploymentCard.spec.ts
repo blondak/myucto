@@ -243,6 +243,28 @@ function employment(): PayrollEmployment {
   }
 }
 
+describe('ukončení zapsané dopředu', () => {
+  /* C-17: vztah s budoucím dnem skončení trvá, karta ho nesmí sbalit jako archiv. */
+  it('ukáže „končí" a kartu nechá rozbalenou', async () => {
+    const future = new Date()
+    future.setMonth(future.getMonth() + 1)
+    const endDate = future.toISOString().slice(0, 10)
+    const wrapper = await mountCard({ ...employment(), status: 'ended', end_date: endDate })
+
+    expect(wrapper.find('[data-test="employment-ends-on"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="employment-toggle"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('skončený vztah dál sbalí', async () => {
+    const wrapper = await mountCard({ ...employment(), status: 'ended', end_date: '2020-01-31' })
+
+    expect(wrapper.find('[data-test="employment-ends-on"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="employment-toggle"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
 describe('doskok na podklady JMHZ', () => {
   it.each(['office_id', 'weekly_hours', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
     HTMLElement.prototype.scrollIntoView = vi.fn()

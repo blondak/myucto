@@ -249,7 +249,17 @@ const sortedChecklist = computed(() =>
  * Skončený vztah je archiv, ne pracovní plocha — u člověka se souběhy jinak
  * nedá poznat, který vztah je ten stávající. Sbalí se celý, aktivní zůstává otevřený.
  */
-const isClosed = computed(() => ['ended', 'archived', 'no_show'].includes(props.employment.status))
+/*
+ * Ukončení se zapisuje dopředu (dohoda k 31. 10. uzavřená v září), stav je
+ * pak hned `ended`. Do dne skončení ale vztah trvá: karta se nesmí sbalit
+ * jako archiv a hlavička má říct „končí 31. 10.", ne „Skončený" (C-17).
+ */
+const endsInFuture = computed(() => props.employment.status === 'ended'
+  && props.employment.end_date !== null
+  && props.employment.end_date !== undefined
+  && props.employment.end_date >= todayIso())
+const isClosed = computed(() => !endsInFuture.value
+  && ['ended', 'archived', 'no_show'].includes(props.employment.status))
 
 const accentClass = computed(() => {
   if (isClosed.value) return 'border-l-neutral-300'
@@ -1180,7 +1190,14 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <h3 class="font-semibold text-neutral-900">{{ relationLabel() }}</h3>
-          <span class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700">
+          <span
+            v-if="endsInFuture"
+            class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700"
+            data-test="employment-ends-on"
+          >
+            {{ t('payroll.people.ends_on', { date: formatDate(employment.end_date) }) }}
+          </span>
+          <span v-else class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700">
             {{ statusLabel(employment.status) }}
           </span>
           <span v-if="employment.is_primary" class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700">
@@ -2110,6 +2127,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       :person-id="employment.employee_id"
       :can-write="canWrite"
       :a2-prefill="terminationOverview?.a2_prefill ?? null"
+      :termination-end-date="terminationOverview?.employment.end_date ?? employment.end_date ?? null"
       :master-data-version="registrationMasterDataVersion"
     />
 

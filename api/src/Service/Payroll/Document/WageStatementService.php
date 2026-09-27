@@ -203,7 +203,12 @@ final class WageStatementService
                 . 'mimo pracovní poměr se odměna sjednává přímo v dohodě.',
             );
         }
-        if (in_array($employment['status'], self::CLOSED_STATUSES, true)) {
+        // Ukončení zapsané dopředu (dohoda k poslednímu dni příštího měsíce)
+        // přepne stav na `ended` hned, vztah ale do dne skončení trvá.
+        $endsLater = $employment['status'] === 'ended'
+            && is_string($employment['end_date'] ?? null)
+            && $employment['end_date'] >= (new \DateTimeImmutable('today'))->format('Y-m-d');
+        if (!$endsLater && in_array($employment['status'], self::CLOSED_STATUSES, true)) {
             throw new WageStatementReadinessException(
                 'wage_statement_employment_closed',
                 'Pracovní vztah už skončil nebo nenastoupil; mzdový výměr se vydává jen trvajícímu vztahu.',
