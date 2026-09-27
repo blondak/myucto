@@ -183,6 +183,30 @@ final class PurchaseRoundingSettlementTest extends BankPostingTestCase
         self::assertSame(0, $backfill->run($this->supplierId, true)['candidates'], 'druhý běh nemá co dělat');
     }
 
+    /**
+     * Úhrada převzatá z jiného účetního programu zůstává, jak ji zaúčtoval zdroj: zbytek
+     * na 321 je jeho saldo a dorovnání na 648 by rozbilo rekonciliaci s deníkem zdroje.
+     */
+    public function testBackfillLeavesTakenOverPaymentAsTheSourceBookedIt(): void
+    {
+        $pf = $this->roundedPurchase('PREVZATO', 72600.20, -0.20);
+        $this->postPredpis('purchase_invoice', $pf, '518', '321', 72600.20);
+        $tx = $this->transaction($this->statement(), -72600.00, ['match_status' => 'auto_partial']);
+        $this->match($tx, $pf, 72600.00, 'auto', 65);
+        $entry = $this->postPredpis('bank', $tx, '321', '221', 72600.00);
+        $this->db->pdo()->prepare(
+            "INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', ?, ?)"
+        )->execute([$this->supplierId, self::YEAR . '|BV-PREVZATO', $entry]);
+
+        $report = $this->container->get(PurchaseRoundingSettlementBackfill::class)->run($this->supplierId, true, $this->userId);
+
+        self::assertSame(0, $report['candidates']);
+        self::assertEqualsWithDelta(72600.00, $this->matchAmount($tx), 0.001);
+        $lines = $this->linesByAccountCode($entry);
+        self::assertEqualsWithDelta(72600.00, $lines['321']['debit'], 0.001);
+        self::assertArrayNotHasKey('648', $lines);
+    }
+
     /** Období, které není otevřené, dávka nepřepisuje — jen ho vypíše. */
     public function testBackfillSkipsPeriodThatIsNotOpen(): void
     {

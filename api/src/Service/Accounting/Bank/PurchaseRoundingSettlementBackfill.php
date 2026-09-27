@@ -26,6 +26,10 @@ use PDO;
  * Období, které není otevřené (uzávěrka, schválený rok), se nepřepisuje; řádek se jen
  * vypíše jako `period_not_open`.
  *
+ * Úhrada převzatá z jiného účetního programu ({@see BankDocumentNumber::takenOverSql()})
+ * se nedorovnává: zbytek na 321 tam zaúčtoval zdroj a dorovnání na 548/648 by převedený
+ * deník rozešlo s deníkem zdroje (rekonciliace převodu pak nesedí o haléře).
+ *
  * Idempotentní: po srovnání alokace ≠ částka pohybu, takže ji předfiltr znovu nenabídne.
  * Běží jako auto-backfill v migrate.php a ručně přes
  * api/bin/purchase-rounding-settlement-backfill.php (default dry-run).
@@ -125,7 +129,8 @@ final class PurchaseRoundingSettlementBackfill
                    AND ABS(pm.amount - ABS(bt.amount)) < 0.005
                    AND ABS(pm.amount - ABS(pi.amount_to_pay)) >= 0.005
                    AND ABS(ABS(bt.amount) - ABS(pi.amount_to_pay)) <= ?
-                   AND (SELECT COUNT(*) FROM payment_matches all_pm WHERE all_pm.bank_transaction_id = bt.id) = 1";
+                   AND (SELECT COUNT(*) FROM payment_matches all_pm WHERE all_pm.bank_transaction_id = bt.id) = 1
+                   AND NOT " . BankDocumentNumber::takenOverSql('je');
         $params = [FxPaymentSettlement::AMOUNT_TOLERANCE];
         if ($supplierId !== null) {
             $sql .= ' AND pm.supplier_id = ?';
