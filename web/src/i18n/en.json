@@ -19198,6 +19198,7 @@
     "item_colors_reset": "Restore default colors",
     "columns_reset": "Reset to default",
     "columns_presets": "Default layouts",
+    "columns_preset_simple": "Simple",
     "columns_preset_default": "Default",
     "columns_preset_full": "Complete",
     "columns_preset_client": "Client default",

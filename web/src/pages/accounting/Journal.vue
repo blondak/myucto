@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch, useId } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useI18n } from 'vue-i18n'
@@ -431,10 +432,16 @@ const tbl = useTablePrefs('journal', COLUMNS)
 const colors = useTableColors('journal')
 const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
+  // Úzký deník v jednom řádku: jen údaje, které stačí k orientaci.
+  { key: 'simple', labelKey: 'common.columns_preset_simple', visibleKeys: ['date', 'document_no', 'description', 'source', 'amount', 'status'] },
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
-const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
+// Výchozí profil deníku má jedenáct sloupců: v jednom řádku by se popis mačkal do
+// několika řádků, tak se zápis rozloží na dva řádky mřížky. Jen velký monitor je
+// pobere v jednom řádku.
+const wideScreen = useMediaQuery('(min-width: 2200px)')
+const wrapColumns = computed(() => !wideScreen.value && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
 function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240
