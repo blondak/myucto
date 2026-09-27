@@ -255,6 +255,7 @@ final class PayrollQuickInputRepository
             'total' => $total,
             'columns' => $this->componentColumns($supplierId, $period . '-01', $all),
             'totals' => self::periodTotals($all),
+            'unsaved_suggestions' => self::unsavedSuggestions($all),
             // Za celý zúžený měsíc, ne za stránku: akce „vytvořit vstupy
             // z pravidelných složek" jde přes celý měsíc najednou.
             'recurring_pending' => [
@@ -265,6 +266,37 @@ final class PayrollQuickInputRepository
                 )),
             ],
         ];
+    }
+
+    /**
+     * Vztahy, u kterých formulář ukazuje základní mzdu jen jako návrh
+     * ze sjednaných podmínek, ale žádný vstup za měsíc ještě neexistuje.
+     *
+     * Předvyplněné pole vypadá stejně jako uložená hodnota, jenže mzdový běh
+     * ho nevidí a hlásí „chybí schválená mzdová složka". Počet je za celý
+     * zúžený měsíc, protože uložení jde přes všechny stránky najednou.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return array{employments:int,amount_minor:int}
+     */
+    public static function unsavedSuggestions(array $items): array
+    {
+        $count = 0;
+        $amount = 0;
+        foreach ($items as $item) {
+            $base = (int) ($item['base_amount_minor'] ?? 0);
+            if ($base <= 0
+                || ($item['base_managed_elsewhere'] ?? false) === true
+                || ($item['base_requires_entry'] ?? false) === true
+                || ($item['inputs']['base'] ?? null) !== null
+            ) {
+                continue;
+            }
+            $count++;
+            $amount += $base;
+        }
+
+        return ['employments' => $count, 'amount_minor' => $amount];
     }
 
     /**

@@ -1188,6 +1188,23 @@ function modeSegmentClass(active: boolean): string[] {
 /** Hodnota, kterou spravuje jiný vstup: vypadá jako pole, ale nejde do ní psát. */
 const READONLY_VALUE_CLASS = 'inline-flex h-8 items-center justify-end rounded-md border border-dashed border-neutral-300 bg-neutral-50 px-2 text-sm tabular-nums text-neutral-600'
 
+/*
+ * Základní mzda předvyplněná ze sjednaných podmínek, za kterou v měsíci ještě
+ * žádný vstup neexistuje. Pole vypadalo stejně jako uložená hodnota, ale běh
+ * ho nevidí a hlásí „chybí schválená mzdová složka".
+ */
+const SUGGESTED_FIELD_CLASS = 'border-dashed border-warning-500 bg-warning-50'
+
+function baseSuggested(row: UiRow): boolean {
+  return !row.base_managed_elsewhere
+    && !row.base_requires_entry
+    && row.inputs.base === null
+    && row.base_amount_minor > 0
+    && !pending.value.has(row.employment_id)
+}
+
+const unsavedSuggestions = ref<{ employments: number; amount_minor: number }>({ employments: 0, amount_minor: 0 })
+
 function validAmount(value: string): number {
   const parsed = parsedAmount(value)
   return parsed !== null && parsed >= 0 && parsed <= MAX_AMOUNT_MINOR ? parsed : 0
@@ -1267,6 +1284,7 @@ async function load(): Promise<void> {
     componentColumns.value = month.columns ?? []
     periodTotals.value = month.totals ?? null
     recurringPending.value = month.recurring_pending ?? { employments: 0, assignments: 0 }
+    unsavedSuggestions.value = month.unsaved_suggestions ?? { employments: 0, amount_minor: 0 }
     // Měsíc, který zpracoval předchozí program. Zadávat se v něm dá dál, jen
     // se to nikde nepoužije — mzdový běh za takové období nejde založit.
     historicalMonth.value = month.historical === true
@@ -1464,6 +1482,7 @@ async function save(): Promise<void> {
     // kterou měl uživatel před sebou — jinak by mu tabulka skočila na začátek.
     componentColumns.value = last.month.columns ?? componentColumns.value
     periodTotals.value = last.month.totals ?? null
+    unsavedSuggestions.value = last.month.unsaved_suggestions ?? { employments: 0, amount_minor: 0 }
     rows.value = last.month.items.map(applyPending)
     total.value = last.month.total
     if (failures.length === 0) {
@@ -1610,6 +1629,35 @@ onMounted(() => {
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>
       <p class="mt-1 font-medium text-payroll-800">{{ t('payroll.quick_inputs.gross_preview_hint') }}</p>
+    </div>
+
+    <div
+      v-if="!historyMode && !historicalMonth && unsavedSuggestions.employments > 0"
+      data-testid="quick-unsaved-suggestions"
+      class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-neutral-700"
+      role="status"
+    >
+      <p class="font-medium text-warning-900">
+        {{ t('payroll.quick_inputs.unsaved.title', {
+          count: unsavedSuggestions.employments,
+          amount: formatMoney(unsavedSuggestions.amount_minor),
+        }) }}
+      </p>
+      <p class="mt-1">
+        {{ t(canApprove ? 'payroll.quick_inputs.unsaved.hint_approve' : 'payroll.quick_inputs.unsaved.hint_draft') }}
+      </p>
+      <div v-if="canWrite" class="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          :class="[btnFilled('success'), 'whitespace-nowrap']"
+          :disabled="loading || saving || rows.length === 0"
+          data-testid="quick-unsaved-save"
+          @click="save"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+          {{ t(canApprove ? 'payroll.quick_inputs.unsaved.action_approve' : 'payroll.quick_inputs.unsaved.action_draft', { count: unsavedSuggestions.employments }) }}
+        </button>
+      </div>
     </div>
 
     <div
@@ -2058,7 +2106,7 @@ onMounted(() => {
                       :aria-label="incomeLabel(row)"
                       :aria-invalid="baseError(row) !== null"
                       :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
-                      :class="[fieldClass(baseError(row), true, true), 'w-32']"
+                      :class="[fieldClass(baseError(row), true, true), 'w-32', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
                       :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
                       @input="markDirty(row)"
                     >
@@ -2072,6 +2120,13 @@ onMounted(() => {
                       :link-hint="fieldManaged(row, 'base') ? t('payroll.quick_inputs.blockers.base_managed_elsewhere_link') : null"
                     />
                   </div>
+                  <p
+                    v-if="baseSuggested(row)"
+                    :data-testid="`quick-base-suggested-${row.employment_id}`"
+                    class="mt-1 max-w-40 text-xs text-warning-700"
+                  >
+                    {{ t('payroll.quick_inputs.unsaved.cell') }}
+                  </p>
                   <p
                     v-if="baseError(row)"
                     :id="`quick-base-error-${row.employment_id}`"
@@ -2554,10 +2609,13 @@ onMounted(() => {
                   autocomplete="off"
                   :aria-labelledby="`quick-income-label-mobile-${row.employment_id}`"
                   :aria-invalid="baseError(row) !== null"
-                  :class="[fieldClass(baseError(row)), 'w-full']"
+                  :class="[fieldClass(baseError(row)), 'w-full', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
                   :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
                   @input="markDirty(row)"
                 >
+                <span v-if="baseSuggested(row)" class="mt-1 block text-xs text-warning-700">
+                  {{ t('payroll.quick_inputs.unsaved.cell') }}
+                </span>
                 <span v-if="baseError(row)" class="mt-1 block text-xs text-danger-700">
                   {{ validationMessage(baseError(row)) }}
                 </span>

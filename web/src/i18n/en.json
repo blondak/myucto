@@ -3244,6 +3244,14 @@
       "mode_amount_short": "CZK",
       "managed_summary": "Rows whose value is managed by another input (attendance import or a recurring component): {count}. These fields are read-only here; edit them in Payroll inputs.",
       "managed_summary_link": "Open payroll inputs",
+      "unsaved": {
+        "title": "Suggested, not saved: {count} employments ({amount})",
+        "hint_approve": "The base wage in the dashed fields is only a suggestion from the agreed terms. The payroll run does not see it until you save it. The button saves and approves the monthly inputs for all pages at once.",
+        "hint_draft": "The base wage in the dashed fields is only a suggestion from the agreed terms. The payroll run does not see it until you save it and a user with the payroll approval right approves it.",
+        "action_approve": "Save and approve all ({count})",
+        "action_draft": "Save all ({count})",
+        "cell": "Suggestion, not saved"
+      },
       "recurring_pending": {
         "title": "Recurring payroll component without an input for this month: {count} employments",
         "hint_approve": "The payroll run only uses approved inputs and does not see a recurring component (typically a monthly wage taken over from the previous program) on its own. The button creates inputs for the whole month and approves them; the wage is prorated for approved absences.",

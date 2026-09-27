@@ -249,6 +249,28 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.text()).toContain('payroll.quick_inputs.amount_only_relation_hint')
   })
 
+  it('marks base wages suggested from agreed terms as unsaved and saves them with one action', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture(), fixture({ employment_id: 13, inputs: { base: inputRef('approved'), overtime: null, bonus: null } })],
+      total: 121,
+      unsaved_suggestions: { employments: 120, amount_minor: 504_000_000 },
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-unsaved-suggestions"]').text())
+      .toContain('payroll.quick_inputs.unsaved.title')
+    expect(wrapper.find('[data-testid="quick-base-suggested-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="quick-base-suggested-13"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="quick-unsaved-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save).toHaveBeenCalled()
+    expect(m.save.mock.calls[0][0].rows.map((row: { employment_id: number }) => row.employment_id)).toContain(12)
+  })
+
   it('creates and approves inputs from pending recurring components for the whole month', async () => {
     let materialized = false
     m.load.mockImplementation(async period => ({

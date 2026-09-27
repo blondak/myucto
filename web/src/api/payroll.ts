@@ -2440,6 +2440,8 @@ export interface PayrollQuickInputMonth extends PayrollHistoricalPeriodInfo {
   totals?: PayrollQuickInputTotals
   /** Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup (celý měsíc). */
   recurring_pending?: { employments: number; assignments: number }
+  /** Základní mzdy jen předvyplněné ze sjednaných podmínek, bez vstupu (celý měsíc). */
+  unsaved_suggestions?: { employments: number; amount_minor: number }
 }
 
 export type PayrollEmployeeCardStatusFilter = 'active' | 'away' | 'attention' | 'all'

@@ -288,6 +288,43 @@ final class PayrollQuickInputListPaginationTest extends TestCase
     }
 
     /**
+     * Předvyplněná mzda ze sjednaných podmínek není vstup. Měsíc musí za CELOU
+     * firmu říct, kolik takových návrhů čeká na uložení, jinak účetní nepozná,
+     * proč běh hlásí „chybí schválená mzdová složka".
+     */
+    public function testUnsavedSuggestionsCountTheWholeMonthAndDropAfterSave(): void
+    {
+        $this->seedEmployments(3);
+
+        $before = $this->quickInputs->month($this->supplierId, self::PERIOD, 1, 0);
+        self::assertSame(['employments' => 3, 'amount_minor' => 9_000_000], $before['unsaved_suggestions']);
+
+        $employmentId = $this->employmentIds[2];
+        $this->quickInputs->save(
+            $this->supplierId,
+            self::PERIOD,
+            [[
+                'employment_id' => $employmentId,
+                'employment_row_version' => $this->employmentRowVersion($employmentId),
+                'base_amount_minor' => 3_000_000,
+                'overtime_mode' => 'amount',
+                'overtime_hours_milli' => null,
+                'overtime_amount_minor' => null,
+                'bonus_amount_minor' => 0,
+                'overtime_average_snapshot_id' => null,
+                'overtime_average_snapshot_version' => null,
+                'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+            ]],
+            $this->userId,
+            25,
+            0,
+        );
+
+        $after = $this->quickInputs->month($this->supplierId, self::PERIOD, 1, 0);
+        self::assertSame(['employments' => 2, 'amount_minor' => 6_000_000], $after['unsaved_suggestions']);
+    }
+
+    /**
      * Cena stránky se neřídí velikostí firmy.
      *
      * Doprovodné dotazy na vstupy a opakující se složky se dřív ptaly na CELÝ
