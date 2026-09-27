@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { reactive, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import cs from '@/i18n/cs.json'
+import { cs } from '../../../../tests/locales'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
 import { startPreview, stopPreview } from '@/api/instancePreview'
 

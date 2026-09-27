@@ -47,8 +47,8 @@ databáze MariaDB 11.8+.
 
 ```bash
 # Frontend — build (NUTNÉ po každé změně web/src; web/dist/ se necommituje, ale bez buildu neuvidíš změnu v aplikaci)
-cd web && pnpm build            # = vue-tsc --noEmit && vite build (npm run build funguje též)
-cd web && pnpm type-check       # jen typová kontrola
+cd web && pnpm build            # = kontroly + typy aplikace (type-check:app, bez testů) + vite build (npm run build funguje též)
+cd web && pnpm type-check       # typová kontrola aplikace i testů (CI); halda pro vue-tsc je nastavená ve skriptu
 
 # PHP testy (PHPUnit 13)
 php api/bin/test-parallel.php                     # vše, izolované DB pro workery

@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createI18n } from 'vue-i18n'
-import cs from '@/i18n/cs.json'
-import en from '@/i18n/en.json'
+import { i18nMessages } from '../../../../tests/locales'
 import { averageEarningsTarget, eldpRemediation, eldpRemediationCodes, workSummaryRemediation, workSummaryRemediationCodes } from '../payrollRemediation'
 
 describe('mzdové úkony mají konkrétní nápravu', () => {
@@ -52,7 +51,7 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
 
   it('všechny příčiny i postupy mají srozumitelné cs/en překlady', () => {
     for (const locale of ['cs', 'en']) {
-      const t = createI18n({ legacy: false, locale, messages: { cs, en } }).global.t
+      const t = createI18n({ legacy: false, locale, messages: i18nMessages }).global.t
       for (const guidance of [
         ...Object.keys(eldpRemediationCodes).map(code => eldpRemediation({ code, message: '', detail: { period_start: '2025-03-01' } }, 12, 2025)),
         ...Object.keys(workSummaryRemediationCodes).map(code => workSummaryRemediation(code, 12, '2025-03')),

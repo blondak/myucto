@@ -247,9 +247,7 @@ jobs:
 
       - name: TypeScript check
         working-directory: web
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-        run: pnpm exec vue-tsc --noEmit
+        run: pnpm type-check
 
       - name: PWA service worker tests
         working-directory: web
@@ -262,6 +260,7 @@ jobs:
         working-directory: web
         run: pnpm test
 
+      # Typy už zkontroloval krok TypeScript check; build:image je build bez druhé kontroly.
       - name: Production build
         working-directory: web
-        run: pnpm build
+        run: pnpm build:image

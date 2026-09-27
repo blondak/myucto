@@ -3,7 +3,7 @@ import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import cs from '@/i18n/cs.json'
+import { cs, i18nMessages } from '../../../../tests/locales'
 import { startPreview, stopPreview, type PreviewScenario } from '@/api/instancePreview'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
 import StorageQuotaBanner from '../StorageQuotaBanner.vue'
@@ -19,7 +19,7 @@ async function mountBanner() {
   await router.push('/')
   await router.isReady()
 
-  const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs } })
+  const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs: i18nMessages.cs } })
   const wrapper = mount(StorageQuotaBanner, { global: { plugins: [router, i18n] } })
   await nextTick()
 

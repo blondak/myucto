@@ -214,13 +214,12 @@ jobs:
         working-directory: api
         run: composer install --no-dev --no-progress --no-interaction --prefer-dist --optimize-autoloader
 
+      # Typy kontroluje CI na každém commitu; obraz staví build bez kontroly typů.
       - name: pnpm install + build
         working-directory: web
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           pnpm install --frozen-lockfile
-          pnpm build
+          pnpm build:image
 
       - name: Generate manual (HTML + PDF)
         run: |

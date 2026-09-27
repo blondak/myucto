@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import cs from '@/i18n/cs.json'
-import en from '@/i18n/en.json'
+import { cs, en } from '../../../tests/locales'
 import { cashErrorCode, cashErrorMessage, cashWarningMessage } from '@/api/cashErrors'
 
 /** Minimální náhrada `t()`: vrátí překlad z cs.json, nebo klíč (jako vue-i18n). */

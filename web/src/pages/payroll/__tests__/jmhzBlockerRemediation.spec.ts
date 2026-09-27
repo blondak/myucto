@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
-import cs from '@/i18n/cs.json'
-import en from '@/i18n/en.json'
+import { cs, en, i18nMessages } from '../../../../tests/locales'
 import type { PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
 import { jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
 import { payrollCodeKey } from '../payrollServerMessage'
@@ -16,7 +15,7 @@ function blocker(overrides: Partial<PayrollJmhzXmlDryRunBlocker>): PayrollJmhzXm
 }
 
 function i18n(locale: 'cs' | 'en') {
-  const instance = createI18n({ legacy: false, locale, fallbackLocale: 'cs', messages: { cs, en } })
+  const instance = createI18n({ legacy: false, locale, fallbackLocale: 'cs', messages: i18nMessages })
   const t = instance.global.t as unknown as (key: string) => string
   const te = (key: string) => instance.global.te(key)
   return { t, te }

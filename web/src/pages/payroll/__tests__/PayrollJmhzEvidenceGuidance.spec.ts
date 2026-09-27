@@ -4,8 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { jmhzEvidenceCodes, jmhzEvidenceGuidance } from '../jmhzEvidenceGuidance'
-import cs from '@/i18n/cs.json'
-import en from '@/i18n/en.json'
+import { i18nMessages } from '../../../../tests/locales'
 import PayrollJmhzOrdinaryEvidencePanel from '../PayrollJmhzOrdinaryEvidencePanel.vue'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn() }))
@@ -21,7 +20,7 @@ async function render(code: string, context: Record<string, string> = {}, locale
   const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
     props: { runs: [{ id: 8, revision_id: 18, revision_no: 2, period_start: '2026-08-01' }] as never[] },
     global: {
-      plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
+      plugins: [createI18n({ legacy: false, locale, messages: i18nMessages })],
       stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } },
     },
   })

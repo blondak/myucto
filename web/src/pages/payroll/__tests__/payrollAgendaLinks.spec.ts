@@ -7,8 +7,7 @@ import {
   payrollQueryId,
   payrollQueryValue,
 } from '@/pages/payroll/payrollAgendaLinks'
-import cs from '@/i18n/cs.json'
-import en from '@/i18n/en.json'
+import { cs, en } from '../../../../tests/locales'
 
 /**
  * Katalog agend je kontrakt mezi kartou zaměstnance, routerem a backendem.

@@ -21,7 +21,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate \
 COPY web/ ./
 # Image staví jen artefakt (kontroly + vite build). Typová kontrola vue-tsc potřebuje přes 3 GB
 # haldy a v Docker Desktop VM se 4 GB paměti padala na „heap out of memory"; kód typově
-# ověřuje CI (vue-tsc ve frontend jobu a plný `pnpm build` v release bundlu).
+# ověřuje CI (`pnpm type-check` ve frontend jobu, včetně testů).
 ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN pnpm build:image
 

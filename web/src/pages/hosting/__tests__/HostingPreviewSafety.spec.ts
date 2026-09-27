@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import cs from '@/i18n/cs.json'
+import { cs, i18nMessages } from '../../../../tests/locales'
 import { buildPreviewStatus, stopPreview } from '@/api/instancePreview'
 
 const mocks = vi.hoisted(() => ({
@@ -51,7 +51,7 @@ async function mountHosting(path = '/hosting') {
   await router.push(path)
   await router.isReady()
 
-  const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs } })
+  const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs: i18nMessages.cs } })
   const wrapper = mount(Hosting, { global: { plugins: [router, i18n] } })
   await flushPromises()
 
