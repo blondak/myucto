@@ -646,6 +646,50 @@ final class AccountingSetupApprovalServiceTest extends BankPostingTestCase
     public function testReclassificationIncludesUnclassifiedDocumentWhenPostingRuleMovesDefaultToAnalytic(): void
     {
         $supplierId = $this->supplierId;
+        [, , $bundle] = $this->serviceDefaultAnalyticScenario('SYN-SERVICE-001');
+        $setup = $this->container->get(AccountingSetupRepository::class);
+        $jobs = $this->container->get(ImportJobRepository::class);
+
+        $matchedDryJobId = $jobs->create($supplierId, 'accounting_history_reclassification', [
+            'bundle_id' => (int) $bundle['id'],
+            'bundle_hash' => (string) $bundle['bundle_hash'],
+            'input_hash' => (string) $bundle['input_hash'],
+            'date_from' => self::YEAR . '-06-01',
+            'date_to' => self::YEAR . '-06-30',
+            'scope_mode' => 'matched',
+            'dry_run' => true,
+        ], $this->userId);
+        $runner = $this->container->get(AccountingHistoryReclassificationService::class);
+        $runner->run($matchedDryJobId);
+        self::assertCount(0, $setup->reclassificationItems($supplierId, $matchedDryJobId));
+
+        $allDryJobId = $jobs->create($supplierId, 'accounting_history_reclassification', [
+            'bundle_id' => (int) $bundle['id'],
+            'bundle_hash' => (string) $bundle['bundle_hash'],
+            'input_hash' => (string) $bundle['input_hash'],
+            'date_from' => self::YEAR . '-06-01',
+            'date_to' => self::YEAR . '-06-30',
+            'scope_mode' => 'all',
+            'dry_run' => true,
+        ], $this->userId);
+        $runner->run($allDryJobId);
+        $items = $setup->reclassificationItems($supplierId, $allDryJobId);
+        self::assertCount(1, $items);
+        self::assertSame('would_change', $items[0]['status']);
+        $afterCodes = array_column((array) $items[0]['after_json']['lines'], 'account_code');
+        self::assertContains('518.100', $afterCodes);
+        self::assertNotContains('518', $afterCodes);
+    }
+
+    /**
+     * Přijatá faktura zaúčtovaná na syntetický 518 a schválený balík, který výchozí
+     * předkontaci služeb přesune na analytiku 518.100.
+     *
+     * @return array{0:int, 1:int, 2:array<string,mixed>} [doklad, zápis, balík]
+     */
+    private function serviceDefaultAnalyticScenario(string $number): array
+    {
+        $supplierId = $this->supplierId;
         $chart = $this->container->get(ChartOfAccountsRepository::class);
         $parent = $chart->findByCode($supplierId, '518');
         self::assertNotNull($parent);
@@ -672,7 +716,7 @@ final class AccountingSetupApprovalServiceTest extends BankPostingTestCase
         );
 
         $vendorId = $this->client('Syntetický dodavatel služby');
-        $invoiceId = $this->purchaseInvoice('SYN-SERVICE-001', $vendorId, 1_000.0);
+        $invoiceId = $this->purchaseInvoice($number, $vendorId, 1_000.0);
         $vatRateId = (int) $this->db->pdo()->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
         self::assertGreaterThan(0, $vatRateId);
         $this->db->pdo()->prepare(
@@ -714,20 +758,23 @@ final class AccountingSetupApprovalServiceTest extends BankPostingTestCase
         $bundle = $this->container->get(AccountingSetupApprovalService::class)
             ->approve($supplierId, $runId, [$proposalId], $this->userId);
 
-        $matchedDryJobId = $jobs->create($supplierId, 'accounting_history_reclassification', [
-            'bundle_id' => (int) $bundle['id'],
-            'bundle_hash' => (string) $bundle['bundle_hash'],
-            'input_hash' => (string) $bundle['input_hash'],
-            'date_from' => self::YEAR . '-06-01',
-            'date_to' => self::YEAR . '-06-30',
-            'scope_mode' => 'matched',
-            'dry_run' => true,
-        ], $this->userId);
-        $runner = $this->container->get(AccountingHistoryReclassificationService::class);
-        $runner->run($matchedDryJobId);
-        self::assertCount(0, $setup->reclassificationItems($supplierId, $matchedDryJobId));
+        return [$invoiceId, $entryId, $bundle];
+    }
 
-        $allDryJobId = $jobs->create($supplierId, 'accounting_history_reclassification', [
+    /**
+     * N7: přijatá faktura převzatá z jiného účetního programu má kontaci zdroje. Přeřazení
+     * historie ji vynechá a vypíše jako `taken_over`, nativní doklad se přeřadí dál.
+     */
+    public function testReclassificationSkipsDocumentTakenOverFromAnotherProgram(): void
+    {
+        $supplierId = $this->supplierId;
+        [$invoiceId, $entryId, $bundle] = $this->serviceDefaultAnalyticScenario('SYN-SERVICE-TAKEN');
+        $this->db->pdo()->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'journal_entry', 'synth|PF-TAKEN', ?)")
+            ->execute([$supplierId, $entryId]);
+        $setup = $this->container->get(AccountingSetupRepository::class);
+        $jobs = $this->container->get(ImportJobRepository::class);
+
+        $dryJobId = $jobs->create($supplierId, 'accounting_history_reclassification', [
             'bundle_id' => (int) $bundle['id'],
             'bundle_hash' => (string) $bundle['bundle_hash'],
             'input_hash' => (string) $bundle['input_hash'],
@@ -736,13 +783,14 @@ final class AccountingSetupApprovalServiceTest extends BankPostingTestCase
             'scope_mode' => 'all',
             'dry_run' => true,
         ], $this->userId);
-        $runner->run($allDryJobId);
-        $items = $setup->reclassificationItems($supplierId, $allDryJobId);
+        $this->container->get(AccountingHistoryReclassificationService::class)->run($dryJobId);
+
+        $items = $setup->reclassificationItems($supplierId, $dryJobId);
         self::assertCount(1, $items);
-        self::assertSame('would_change', $items[0]['status']);
-        $afterCodes = array_column((array) $items[0]['after_json']['lines'], 'account_code');
-        self::assertContains('518.100', $afterCodes);
-        self::assertNotContains('518', $afterCodes);
+        self::assertSame($invoiceId, (int) $items[0]['purchase_invoice_id']);
+        self::assertSame('skipped', $items[0]['status']);
+        self::assertSame('taken_over', $items[0]['error_code']);
+        self::assertContains('518', $this->entryAccountCodes($entryId, $supplierId));
     }
 
     public function testFixedAssetCandidateUsesProposedAnalyticAndIsNamed(): void

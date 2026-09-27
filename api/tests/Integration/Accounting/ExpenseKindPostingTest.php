@@ -237,6 +237,44 @@ final class ExpenseKindPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(190.15, $price, 0.001, 'Karta drobného majetku je v ceně po slevě.');
     }
 
+    /**
+     * N7: přijatá faktura převzatá z jiného účetního programu nese kontaci zdroje (sleva
+     * samostatně na D 518). Přeúčtování slev ji jen vypíše jako `taken_over`, zápis ani
+     * druh výdaje slevového řádku nemění.
+     */
+    public function testDiscountReclassLeavesTakenOverPurchaseAsTheSourceBookedIt(): void
+    {
+        $pf = $this->purchaseWithItems('PF-RABATT-PREVZATA', [
+            ['Thunderbolt 10G adaptér', 197.39, 41.45, 'small_asset'],
+            ['Versandkosten', 5.59, 1.17, 'service'],
+            ['Aktionsrabatt', -7.24, -1.52, 'service'],
+        ]);
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pf, [
+            ['account_code' => $this->materialAccount, 'side' => 'debit', 'amount' => 197.39],
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 5.59],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 7.24],
+            ['account_code' => '343.100', 'side' => 'debit', 'amount' => 41.10],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 236.84],
+        ], ['entry_date' => self::YEAR . '-06-10']);
+        $this->db->pdo()->prepare(
+            "INSERT INTO stereo_nx_import_map (supplier_id, source_ico, source_company_index, kind, source_key, source_hash, target_id)
+             VALUES (?, '00000019', 1, 'purchase', 'synth|PF-RABATT', ?, ?)"
+        )->execute([$this->supplierId, str_repeat('0', 64), $pf]);
+
+        $reclass = $this->container->get(\MyInvoice\Service\Accounting\Expense\PurchaseDiscountReclass::class);
+        $report = $reclass->run($this->supplierId, $pf, true, $this->userId);
+
+        self::assertSame('taken_over', $report['state']);
+        self::assertFalse($report['applied']);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(7.24, $byAcc['518']['credit'], 0.001, 'Sleva zůstává, jak ji zaúčtoval zdroj.');
+        self::assertEqualsWithDelta(197.39, $byAcc[$this->materialAccount]['debit'], 0.001);
+        self::assertSame('service', (string) $this->db->pdo()->query(
+            "SELECT expense_kind FROM purchase_invoice_items WHERE purchase_invoice_id = {$pf} AND description = 'Aktionsrabatt'"
+        )->fetchColumn());
+        self::assertContains($pf, array_column($reclass->candidates($this->supplierId), 'purchase_invoice_id'), 'převzatý doklad se vypíše');
+    }
+
     /** Sleva přesně ve výši dopravy je doprava zdarma: jde na dopravu, zboží zůstává celé. */
     public function testDiscountEqualToShippingGoesToShipping(): void
     {

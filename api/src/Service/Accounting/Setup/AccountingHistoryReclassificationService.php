@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 final class AccountingHistoryReclassificationService
@@ -22,7 +23,11 @@ final class AccountingHistoryReclassificationService
         private readonly PostingService $posting,
         private readonly ExpenseClassificationService $classification,
         private readonly SmallAssetService $smallAssets,
-    ) {}
+    ) {
+        $this->takenOver = new TakenOverRecord($db);
+    }
+
+    private readonly TakenOverRecord $takenOver;
 
     public function run(int $jobId): void
     {
@@ -111,6 +116,11 @@ final class AccountingHistoryReclassificationService
                     }
                     if ($before['period_status'] !== 'open' || $before['date_locked']) {
                         $this->setup->addReclassificationItem($jobId, (int) $bundle['id'], $supplierId, $invoiceId, 'skipped', $before, null, null, 'period_locked', 'Uzavřené nebo uzamčené období se nemění.');
+                        $skipped++;
+                        continue;
+                    }
+                    if ($this->takenOver->isDocumentOrItsEntry($supplierId, 'purchase_invoice', $invoiceId)) {
+                        $this->setup->addReclassificationItem($jobId, (int) $bundle['id'], $supplierId, $invoiceId, 'skipped', $before, null, null, 'taken_over', 'Doklad je převzatý z jiného účetního programu, jeho kontace se nepřepisuje.');
                         $skipped++;
                         continue;
                     }

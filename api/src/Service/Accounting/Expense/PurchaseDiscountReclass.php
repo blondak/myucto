@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -26,6 +27,9 @@ use PDO;
  *       jen se doplní chybějící cizoměnová stopa na saldokontní řádky nového zápisu.
  * V obou stavech se srovná druh výdaje slevového řádku na druh zlevněné položky
  * a sesynchronizuje evidence drobného majetku (cena karty po slevě).
+ *
+ * Doklad převzatý z jiného účetního programu ({@see TakenOverRecord}) se jen vypíše ve
+ * stavu `taken_over`: jeho kontaci určil zdroj a převedený deník s ním musí souhlasit.
  */
 final class PurchaseDiscountReclass
 {
@@ -62,7 +66,8 @@ final class PurchaseDiscountReclass
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $report = $this->run((int) $row['supplier_id'], (int) $row['id'], false);
-            if ($report['discount_lines'] > 0 && ($report['posting_changes'] || $report['classification_changes'] > 0 || $report['trace_fixes'] > 0)) {
+            if ($report['discount_lines'] > 0 && ($report['state'] === 'taken_over' || $report['posting_changes']
+                || $report['classification_changes'] > 0 || $report['trace_fixes'] > 0)) {
                 $out[] = $report;
             }
         }
@@ -115,6 +120,11 @@ final class PurchaseDiscountReclass
             }
             $report['entry_id'] = (int) $live['id'];
             $report['entry_date'] = (string) $live['entry_date'];
+            if ((new TakenOverRecord($this->db))->isDocumentOrItsEntry($supplierId, 'purchase_invoice', $purchaseInvoiceId)) {
+                $report['state'] = 'taken_over';
+                $report['message'] = 'Doklad je převzatý z jiného účetního programu, jeho kontace se nepřepisuje.';
+                return $report;
+            }
 
             $built = $this->posting->buildFromPurchaseInvoice($supplierId, $purchaseInvoiceId);
             $report['before'] = $this->describe($this->liveLines($supplierId, (int) $live['id']));

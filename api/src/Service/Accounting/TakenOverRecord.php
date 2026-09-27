@@ -129,6 +129,26 @@ final class TakenOverRecord
         return $this->ask(self::existsSql(self::documentRecord($docType), '?', '?'), $supplierId, $documentId);
     }
 
+    /**
+     * Doklad je převzatý sám, nebo jeho živý zápis (převod navázal převzatý deník na doklad
+     * nepřevzatý, typicky spárovaný s existující fakturou).
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     */
+    public function isDocumentOrItsEntry(int $supplierId, string $docType, int $documentId): bool
+    {
+        if ($this->isDocument($supplierId, $docType, $documentId)) {
+            return true;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries je
+              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.reversed_by IS NULL
+                AND ' . self::journalEntrySql('je') . ' LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $docType, $documentId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function hasLiveBankEntry(int $supplierId, int $txId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT ' . self::liveBankEntrySql((string) $supplierId, (string) $txId));
