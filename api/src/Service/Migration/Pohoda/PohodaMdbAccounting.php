@@ -31,6 +31,7 @@ final class PohodaMdbAccounting
         28 => PohodaJournal::BANK,
         29 => PohodaJournal::INTERNAL,
         63 => PohodaJournal::OPENING,
+        174 => PohodaJournal::ACCRUALS,
     ];
     private const LINKS = [
         2 => 'issuedInvoice',
@@ -135,9 +136,6 @@ final class PohodaMdbAccounting
     private static function validate(string $table, array $r): void
     {
         if ($table === 'pUD') {
-            if (!isset(self::SOURCES[(int) ($r['RelUdAg'] ?? 0)])) {
-                throw new PohodaException('mdb_journal_source', 'MDB obsahuje dosud nepodporovaný zdroj účetního zápisu. Použijte standardní XML export.');
-            }
             return;
         }
         self::lowRate($r);
@@ -217,10 +215,9 @@ final class PohodaMdbAccounting
     private function record(string $key, array $r): ?array
     {
         if ($key === 'journal') {
-            $source = self::SOURCES[(int) ($r['RelUdAg'] ?? 0)] ?? null;
-            if ($source === null) {
-                throw new PohodaException('mdb_journal_source', 'MDB obsahuje dosud nepodporovaný zdroj účetního zápisu. Použijte standardní XML export.');
-            }
+            // Neznámá agenda nezastaví převod: řádek deníku je vyvážený zápis jako každý jiný,
+            // převede se jako ruční zápis a krok deníku to ohlásí upozorněním.
+            $source = self::SOURCES[(int) ($r['RelUdAg'] ?? 0)] ?? PohodaJournal::UNKNOWN_AGENDA_PREFIX . (int) ($r['RelUdAg'] ?? 0);
             return [
                 'id' => $r['ID'],
                 'source' => $source,

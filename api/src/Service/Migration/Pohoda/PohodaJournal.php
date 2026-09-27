@@ -28,6 +28,9 @@ final class PohodaJournal
     public const CASH = 'Pokladna';
     public const INTERNAL = 'Interní doklady';
     public const ASSETS = 'Dlouhodobý majetek';
+    public const ACCRUALS = 'Časové rozlišení';
+    /** Agenda POHODY, kterou převod nezná jménem (MDB/SQL `RelUdAg`); převádí se jako ruční zápis. */
+    public const UNKNOWN_AGENDA_PREFIX = 'Agenda POHODA č. ';
 
     /** Klíč otevíracího zápisu roku (počáteční stavy tvoří jediný zápis). */
     public const OPENING_KEY = 'PS';

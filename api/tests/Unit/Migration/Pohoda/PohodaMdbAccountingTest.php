@@ -171,6 +171,22 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('', iterator_to_array($mapper->records('bank'))[0]['bankHeader']['symPar']);
     }
 
+    /**
+     * Časové rozlišení (RelUdAg 174) je běžná agenda deníku; neznámá agenda převod
+     * nezastaví, řádek přejde pod označením agendy a krok deníku to ohlásí.
+     */
+    public function testAccrualsAndUnknownJournalAgendaAreImported(): void
+    {
+        $mapper = $this->mapper(['pUD' => [
+            ['ID' => '1', 'RelUdAg' => '174', 'Cislo' => 'TEST-CR1', 'Datum' => '2026-03-31', 'UMD' => '548', 'UD' => '381', 'Kc' => '100'],
+            ['ID' => '2', 'RelUdAg' => '999', 'Cislo' => 'TEST-X1', 'Datum' => '2026-03-31', 'UMD' => '518', 'UD' => '321', 'Kc' => '50'],
+        ]]);
+        $rows = iterator_to_array($mapper->records('journal'));
+        self::assertSame(PohodaJournal::ACCRUALS, $rows[0]['source']);
+        self::assertSame(PohodaJournal::UNKNOWN_AGENDA_PREFIX . '999', $rows[1]['source']);
+        self::assertSame('manual', PohodaJournal::sourceType($rows[0]['source']));
+    }
+
     #[DataProvider('unknownTypes')]
     public function testUnknownTypesFailInsteadOfGuessing(array $tables, string $key, string $code): void
     {
@@ -186,7 +202,6 @@ final class PohodaMdbAccountingTest extends TestCase
     public static function unknownTypes(): iterable
     {
         yield 'invoice' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '999']]], 'issued', 'mdb_invoice_type'];
-        yield 'journal' => [['pUD' => [['ID' => '1', 'RelUdAg' => '999']]], 'journal', 'mdb_journal_source'];
         yield 'bank' => [['BV' => [['ID' => '1', 'RelTpBV' => '999']]], 'bank', 'mdb_direction'];
         yield 'historical VAT' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'HistSzDPH' => 'true']]], 'issued', 'mdb_historical_vat'];
     }

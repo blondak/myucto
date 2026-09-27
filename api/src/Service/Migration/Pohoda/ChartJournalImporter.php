@@ -112,12 +112,17 @@ final class ChartJournalImporter
 
         $groups = [];
         $closingRows = 0;
+        $unknownAgendas = [];
         foreach ($ctx->export->records('journal', 'accountingItem') as $item) {
             if (PohodaJournal::isYearEndClosing($item)) {
                 $closingRows++;
                 continue;
             }
             $groups[PohodaJournal::groupKey($item)][] = $item;
+            $source = PohodaJournal::source($item);
+            if (str_starts_with($source, PohodaJournal::UNKNOWN_AGENDA_PREFIX)) {
+                $unknownAgendas[$source] = ($unknownAgendas[$source] ?? 0) + 1;
+            }
             if (PohodaJournal::source($item) === PohodaJournal::CASH) {
                 foreach (['accounting/credit', 'accounting/debit'] as $path) {
                     $code = PohodaXml::text($item, $path);
@@ -134,6 +139,11 @@ final class ChartJournalImporter
         }
         if ($closingRows > 0) {
             $p->info(self::STEP_JOURNAL, 'year_end_closing_skipped', "Uzávěrkové zápisy z Pohody ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.");
+        }
+        foreach ($unknownAgendas as $agenda => $rows) {
+            $p->warn(self::STEP_JOURNAL, 'unknown_journal_source',
+                "{$agenda}: převod tuto agendu POHODY nezná, {$rows} řádků deníku převedl jako ruční zápisy bez vazby na doklad. Zkontrolujte je v deníku.",
+                ['agenda' => $agenda, 'rows' => $rows]);
         }
 
         $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
