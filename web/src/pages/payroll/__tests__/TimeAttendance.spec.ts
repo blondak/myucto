@@ -1816,8 +1816,8 @@ describe('TimeAttendance — měsíční mřížka', () => {
    */
   it('hromadné schválení s nezměněným fondem pošle každému vztahu jeho vlastní návrh', async () => {
     const page = gridPage(['Osoba A', 'Osoba B'])
-    page.items[0].jmhz_work_summary.preview.suggestions.standard_fund_hours = '165'
-    page.items[1].jmhz_work_summary.preview.suggestions.standard_fund_hours = '176'
+    Object.assign(page.items[0].jmhz_work_summary.preview.suggestions, { standard_fund_hours: '165' })
+    Object.assign(page.items[1].jmhz_work_summary.preview.suggestions, { standard_fund_hours: '176' })
     m.timeMonth.mockResolvedValue(page)
     const wrapper = mount(TimeAttendance, GRID_MOUNT)
     await flushPromises()
