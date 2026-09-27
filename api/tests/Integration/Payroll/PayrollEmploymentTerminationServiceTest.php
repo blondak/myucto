@@ -441,6 +441,9 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         self::assertSame('blocked', $overview['leave_settlement']['state']);
         $codes = array_column($overview['issues'], 'code');
         self::assertContains('average_missing', $codes);
+        // Q15-26/C-16: přehled, dovolená i odstupné hlásí chybějící průměr
+        // každý sám, souhrn ho smí ukázat jen jednou.
+        self::assertCount(1, array_keys($codes, 'average_missing', true));
         $issue = $overview['issues'][array_search('average_missing', $codes, true)];
         self::assertSame(['year' => 2026, 'quarter' => 3], $issue['params']);
     }

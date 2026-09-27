@@ -184,12 +184,15 @@ final class PayrollEmploymentTerminationService
             'severance' => $severance,
             'death' => $death,
             'a2_prefill' => $this->a2Prefill($employment, $reason, $average, $severance),
-            'issues' => array_merge(
+            // Chybějící průměr blokuje přehled i dovolenou, odstupné a úmrtí;
+            // každá sekce ho hlásí sama, souhrn ho ale smí říct jen jednou
+            // (dřív se tatáž věta ukázala dvakrát až třikrát).
+            'issues' => self::uniqueIssues(array_merge(
                 $blockers,
                 $leave['issues'],
                 $severance['issues'],
                 $death['issues'] ?? [],
-            ),
+            )),
             'options' => [
                 'methods' => PayrollTerminationReason::METHODS,
                 'allowed_grounds' => PayrollTerminationReason::ALLOWED_GROUNDS,
@@ -1172,6 +1175,25 @@ final class PayrollEmploymentTerminationService
      * @param array<string,mixed> $params
      * @return array{code:string,severity:string,params:array<string,mixed>}
      */
+    /**
+     * @param list<array{code:string,severity:string,params:array<string,mixed>}> $issues
+     * @return list<array{code:string,severity:string,params:array<string,mixed>}>
+     */
+    private static function uniqueIssues(array $issues): array
+    {
+        $seen = [];
+        $unique = [];
+        foreach ($issues as $issue) {
+            if (isset($seen[$issue['code']])) {
+                continue;
+            }
+            $seen[$issue['code']] = true;
+            $unique[] = $issue;
+        }
+
+        return $unique;
+    }
+
     private static function issue(string $code, string $severity, array $params = []): array
     {
         return ['code' => $code, 'severity' => $severity, 'params' => $params];
