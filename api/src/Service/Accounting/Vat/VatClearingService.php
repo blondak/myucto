@@ -13,6 +13,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\VatClearingRunRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -98,6 +99,16 @@ final class VatClearingService
     public const STATUS_NOT_DOUBLE_ENTRY  = 'skipped_not_double_entry';
     public const STATUS_MISSING_ACCOUNTS  = 'skipped_missing_accounts';
     public const STATUS_FLAT_VAT_ACCOUNT  = 'skipped_flat_vat_account';
+    /**
+     * Období má zápisy převzaté z jiného účetního programu ({@see TakenOverRecord}).
+     * DPH za ně vyrovnal (nebo nevyrovnal) zdroj; automatický přepočet by do převedeného
+     * deníku přidal zápis, který zdroj nemá. Vyrovnat ho jde jen vědomě ručně
+     * ({@see TRIGGER_MANUAL}, náhled nese `taken_over`) nebo podáním přiznání.
+     */
+    public const STATUS_TAKEN_OVER        = 'skipped_taken_over';
+
+    /** Spouštěče bez rozhodnutí uživatele: v období s převzatými zápisy nic nezapíší ani nesmažou. */
+    private const AUTOMATIC_TRIGGERS = [self::TRIGGER_CRON, self::TRIGGER_RETURN_DRAFT];
 
     /** Čím byl přepočet vyvolán — hodnoty ENUM `vat_clearing_runs.trigger_source`. */
     public const TRIGGER_RETURN_FILED = 'return_filed';
@@ -292,7 +303,7 @@ final class VatClearingService
      *   supplier_id:int, period_type:string, period_start:string, period_end:string,
      *   period_label:string, source_id:int, input_vat:float, output_vat:float,
      *   settlement:float, accounts:array{input:string, output:string, settlement:string},
-     *   status:?string, entry_id:?int
+     *   status:?string, entry_id:?int, taken_over:bool
      * }
      */
     public function preview(int $supplierId, int $year, int $month): array
@@ -320,6 +331,7 @@ final class VatClearingService
             'accounts'     => ['input' => $inputAcc, 'output' => $outputAcc, 'settlement' => $settlementAcc],
             'status'       => null,
             'entry_id'     => $existing !== null ? (int) $existing['id'] : null,
+            'taken_over'   => $this->hasTakenOverEntries($supplierId, $start, $end),
         ];
 
         // Tenant, který si analytiky vypnul (obě nohy míří na týž účet), nemá co
@@ -374,6 +386,11 @@ final class VatClearingService
     {
         $result = $this->preview($supplierId, $year, $month);
         $trigger = self::normalizeTrigger($meta['trigger'] ?? null);
+
+        if ($result['taken_over'] && in_array($trigger, self::AUTOMATIC_TRIGGERS, true)) {
+            $result['status'] = self::STATUS_TAKEN_OVER;
+            return $result;
+        }
 
         // Nulové období: doklad nemá co převádět. Pokud z dřívějška existuje (období se
         // po zaúčtování vynulovalo — dobropis, přeřazení dokladu), musí zmizet, jinak by
@@ -435,6 +452,19 @@ final class VatClearingService
         $this->recordRun($result, $trigger, is_array($meta['submission'] ?? null) ? $meta['submission'] : null, $meta['user_id'] ?? null);
 
         return $result;
+    }
+
+    /** Má deník firmy v rozsahu dat zápis převzatý z jiného účetního programu? */
+    public function hasTakenOverEntries(int $supplierId, string $from, string $to): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries je
+              WHERE je.supplier_id = ? AND je.entry_date BETWEEN ? AND ?
+                AND ' . TakenOverRecord::journalEntrySql('je') . ' LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $from, $to]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

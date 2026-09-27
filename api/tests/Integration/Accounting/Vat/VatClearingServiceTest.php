@@ -171,6 +171,34 @@ final class VatClearingServiceTest extends TestCase
         self::assertEqualsWithDelta(4000.00, $byCode['343.900']['debit'], 0.001);
     }
 
+    /**
+     * Období s deníkem převzatým z jiného programu: DPH vyrovnal (nebo nevyrovnal) zdroj.
+     * Cron ani obnova konceptu přiznání do něj nic nezapíšou; ruční zúčtování projde,
+     * náhled ale nese `taken_over`, aby to bylo vědomé.
+     */
+    public function testAutomaticClearingSkipsPeriodWithTakenOverEntries(): void
+    {
+        $this->bookOutputVat(10000.00, self::YEAR . '-05-10', 900011);
+        $entry = $this->journal->findBySource($this->supplierId, 'manual', 900011);
+        $this->db->pdo()->prepare("INSERT INTO premier_import_map (supplier_id, kind, premier_key, target_id) VALUES (?, 'journal_entry', ?, ?)")
+            ->execute([$this->supplierId, 'synth|ID-05', (int) $entry['id']]);
+
+        foreach ([VatClearingService::TRIGGER_CRON, VatClearingService::TRIGGER_RETURN_DRAFT] as $trigger) {
+            $auto = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 5, ['trigger' => $trigger]);
+            self::assertSame(VatClearingService::STATUS_TAKEN_OVER, $auto['status'], $trigger);
+            self::assertNull($this->journal->findBySource($this->supplierId, VatClearingService::SOURCE_TYPE, (int) $auto['source_id']));
+        }
+
+        $manual = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 5, ['trigger' => VatClearingService::TRIGGER_MANUAL]);
+        self::assertTrue($manual['taken_over']);
+        self::assertSame(VatClearingService::STATUS_POSTED, $manual['status']);
+
+        $this->bookOutputVat(500.00, self::YEAR . '-07-10', 900012);
+        $native = $this->clearing->postForPeriod($this->supplierId, self::YEAR, 7, ['trigger' => VatClearingService::TRIGGER_CRON]);
+        self::assertFalse($native['taken_over']);
+        self::assertSame(VatClearingService::STATUS_POSTED, $native['status'], 'nativní období cron vyrovná dál');
+    }
+
     /** Smysl celé věci: po dokladu jsou vstup i výstup za období nulové. */
     public function testAfterClearingInputAndOutputAreZeroForThePeriod(): void
     {
