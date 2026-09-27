@@ -75,7 +75,7 @@ final class PohodaPayrollImportTest extends TestCase
         $supplierId = $this->payrollSupplier();
         $file = SyntheticPohodaPayroll::write($this->tmp);
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $counts = self::stepCounts($protocol, PohodaPayrollImporter::STEP_MONTHS);
         self::assertSame(2, $counts['months'] ?? 0, $this->explain($protocol));
@@ -91,7 +91,7 @@ final class PohodaPayrollImportTest extends TestCase
         $map = (new PohodaImportRepository($this->db))->all($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH);
         self::assertCount(2, $map, json_encode($map) . $this->explain($protocol));
 
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(2, self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS)['existing'] ?? 0);
         self::assertSame(2, $this->rows('payroll_employees', $supplierId));
@@ -105,7 +105,7 @@ final class PohodaPayrollImportTest extends TestCase
         $pdo = $this->db->pdo();
 
         // Bez potvrzení původu se OIČ a ID PPV nepřevezmou, zbytek údajů ano.
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $counts = self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE);
         self::assertSame(2, $counts['identifiers_unconfirmed'] ?? 0, $this->explain($protocol));
@@ -244,7 +244,7 @@ final class PohodaPayrollImportTest extends TestCase
         ], $discounts->fetchAll(\PDO::FETCH_ASSOC));
 
         // S potvrzením se uloží platné OIČ a ID PPV; OIČ s chybnou kontrolní číslicí ne.
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE);
         self::assertSame(1, $counts['oic'] ?? 0, $this->explain($again));
@@ -256,7 +256,7 @@ final class PohodaPayrollImportTest extends TestCase
 
         // Mzdy vedené v MyÚčtu od února: leden z PAMICA jako počáteční stav kumulací.
         $pdo->prepare("UPDATE payroll_module_state SET start_period = '2026-02-01' WHERE supplier_id = ?")->execute([$supplierId]);
-        $third = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $third = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertSame(2, self::stepCounts($third, PohodaPayrollImporter::STEP_PEOPLE)['openings'] ?? 0, $this->explain($third));
         $opening = $pdo->prepare("SELECT values_json FROM payroll_statutory_accumulator_openings WHERE supplier_id = ? AND employee_id = ? AND calculation_kind = 'social_insurance'");
         $opening->execute([$supplierId, $jana['employee_id']]);
@@ -270,7 +270,7 @@ final class PohodaPayrollImportTest extends TestCase
         $tax->execute([$supplierId, $petr['employee_id']]);
         self::assertSame(75000, json_decode((string) $tax->fetchColumn(), true)['withholding_tax_minor_units'] ?? null);
 
-        $fourth = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $fourth = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertSame(2, self::stepCounts($fourth, PohodaPayrollImporter::STEP_PEOPLE)['openings_existing'] ?? 0, $this->explain($fourth));
         // Dvě osoby krát tři druhy kumulace (sociální, zdravotní, daň z příjmů).
         self::assertSame(6, $this->rows('payroll_statutory_accumulator_openings', $supplierId));
@@ -281,7 +281,7 @@ final class PohodaPayrollImportTest extends TestCase
         mkdir($changedDir, 0755, true);
         $changed = $changedDir . '/' . basename($file);
         file_put_contents($changed, preg_replace('~<KcSocZak>43000</KcSocZak>~', '<KcSocZak>44000</KcSocZak>', (string) file_get_contents($file), 1));
-        $fifth = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $fifth = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($fifth->hasErrors(), $this->explain($fifth));
         $counts = self::stepCounts($fifth, PohodaPayrollImporter::STEP_PEOPLE);
         self::assertSame([1, 1], [$counts['openings'] ?? 0, $counts['openings_existing'] ?? 0], $this->explain($fifth));
@@ -302,7 +302,7 @@ final class PohodaPayrollImportTest extends TestCase
         $supplierId = $this->payrollSupplier();
         $file = SyntheticPohodaPayroll::write($this->tmp);
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $verified = $this->scalar(
             'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND verification_source IS NOT NULL',
@@ -319,7 +319,7 @@ final class PohodaPayrollImportTest extends TestCase
             [$supplierId],
         ));
 
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame($verified, $this->scalar(
             'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND verification_source IS NOT NULL',
@@ -348,7 +348,7 @@ final class PohodaPayrollImportTest extends TestCase
             . ' AND payout_method = "bank" ORDER BY employee_id'
         )->fetchAll(\PDO::FETCH_COLUMN));
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $shares = $cashShares();
         self::assertNotSame([], $shares, $this->explain($protocol));
@@ -358,7 +358,7 @@ final class PohodaPayrollImportTest extends TestCase
         $this->db->pdo()->prepare(
             'UPDATE payroll_employee_profiles SET cash_allocation_basis_points = 10000 WHERE supplier_id = ? AND payout_method = "bank"'
         )->execute([$supplierId]);
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(array_fill(0, count($shares), 0), $cashShares(), $this->explain($again));
         self::assertSame(count($shares), self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE)['payout_cash_share_repaired'] ?? 0);
@@ -377,7 +377,7 @@ final class PohodaPayrollImportTest extends TestCase
         $supplierId = $this->payrollSupplier();
         $file = $this->writeSicknessPayroll();
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $employment = $this->employment($supplierId, '5001');
 
@@ -425,7 +425,7 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertGreaterThan(0, (int) $sickness['compensation_minor']);
 
         // Opakovaný převod výpočet nezdvojí.
-        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true);
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         self::assertArrayNotHasKey('sickness_compensations', self::stepCounts($again, PohodaPayrollImporter::STEP_SICKNESS), $this->explain($again));
     }
 
@@ -442,7 +442,7 @@ final class PohodaPayrollImportTest extends TestCase
         $file = $this->writeTwoYearSicknessPayroll();
 
         foreach ([2025, 2026, 2026] as $year) {
-            $protocol = $this->importer->run($supplierId, $this->userId, $file, $year, false, null, null, null, false, true);
+            $protocol = $this->importer->run($supplierId, $this->userId, $file, $year, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
             self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         }
         $employment = $this->employment($supplierId, '5001');
@@ -569,7 +569,7 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertNotContains('payroll_office_missing', $codes);
         self::assertContains('payroll_no_months', array_column($this->importer->preflight($supplierId, $file, 2025), 'code'));
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertGreaterThan(0, $this->rows('payroll_employees', $supplierId), $this->explain($protocol));
         $stmt = $this->db->pdo()->prepare('SELECT s.payroll_enabled, m.status, m.start_period FROM supplier s
@@ -579,7 +579,7 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(['1', 'setup', '2026-03-01'], [(string) $state['payroll_enabled'], (string) $state['status'], (string) $state['start_period']]);
         self::assertSame(1, $this->rows('payroll_offices', $supplierId));
 
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(1, $this->rows('payroll_offices', $supplierId));
     }
@@ -599,7 +599,7 @@ final class PohodaPayrollImportTest extends TestCase
         $preflight = $this->importer->preflight($supplierId, $file, SyntheticPohodaPayroll::YEAR);
         self::assertContains('payroll_open_months', array_column($preflight, 'code'));
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_MONTHS)['months'] ?? 0, $this->explain($protocol));
         self::assertSame(1, $this->rows('payroll_attendance_imports', $supplierId));
@@ -622,13 +622,13 @@ final class PohodaPayrollImportTest extends TestCase
         $supplierId = $this->payrollSupplier();
         $file = SyntheticPohodaPayroll::write($this->tmp);
 
-        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         self::assertFalse($first->hasErrors(), $this->explain($first));
         $counts = self::stepCounts($first, PohodaPayrollImporter::STEP_MONTHS);
         self::assertGreaterThan(0, ($counts['time_months_approved'] ?? 0) + ($counts['time_months_not_approved'] ?? 0), $this->explain($first));
         self::assertGreaterThan(0, $counts['inputs_approved'] ?? 0, $this->explain($first));
 
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS);
         self::assertSame(0, $counts['inputs_approved'] ?? 0, $this->explain($again));
         self::assertGreaterThan(0, $counts['inputs_already_approved'] ?? 0, $this->explain($again));
@@ -652,15 +652,83 @@ final class PohodaPayrollImportTest extends TestCase
         $file = SyntheticPohodaPayroll::write($this->tmp);
 
         $counted = $this->payrollSupplier();
-        $this->importer->run($counted, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $this->importer->run($counted, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertGreaterThan(0, $attendanceAgreements($counted), 'Syntetický export musí nést srážku ze mzdy.');
 
         $takenOver = $this->payrollSupplier();
         $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2026-03-01' WHERE supplier_id = ?")
             ->execute([$takenOver]);
-        $protocol = $this->importer->run($takenOver, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($takenOver, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(0, $attendanceAgreements($takenOver), $this->explain($protocol));
+    }
+
+    /**
+     * Existující firma (po resetu zůstane konfigurace) má začátek vedení mezd dřív, než
+     * končí měsíce zpracované PAMICA. Náhled to řekne a nabídne posun; ostrý převod bez
+     * rozhodnutí se odmítne a nic nezapíše. S posunem převezme měsíce jako zpracované
+     * předchozím programem: žádné dohody o srážkách ani vstupy z docházky v nich.
+     */
+    public function testStartBeforeProcessedMonthsNeedsDecisionAndAdvanceTakesMonthsOver(): void
+    {
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        $supplierId = $this->payrollSupplier();
+
+        $behind = array_values(array_filter(
+            $this->importer->preflight($supplierId, $file, SyntheticPohodaPayroll::YEAR),
+            static fn (array $m): bool => $m['code'] === PohodaPayrollImporter::START_BEHIND,
+        ));
+        self::assertCount(1, $behind);
+        self::assertSame(['from' => '2026-01', 'to' => '2026-03', 'last' => '2026-02'], $behind[0]['context']);
+
+        $dry = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, true);
+        self::assertFalse($dry->hasErrors(), 'Zkouška nanečisto bez rozhodnutí proběhne. ' . $this->explain($dry));
+
+        $refused = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false);
+        self::assertTrue($refused->hasErrors());
+        $codes = array_column(array_merge(...array_column($refused->toArray()['steps'], 'messages')), 'code');
+        self::assertContains('payroll_start_decision_required', $codes);
+        self::assertSame(0, $this->rows('payroll_employees', $supplierId), 'Odmítnutý převod nic nezapíše.');
+        self::assertSame('2026-01-01', $this->startPeriod($supplierId));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false,
+            startDecision: PohodaPayrollImporter::START_ADVANCE);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('2026-03-01', $this->startPeriod($supplierId));
+        $codes = array_column(array_merge(...array_column($protocol->toArray()['steps'], 'messages')), 'code');
+        self::assertContains('payroll_start_advanced', $codes);
+        self::assertNotContains(PohodaPayrollImporter::START_BEHIND, $codes);
+        self::assertGreaterThan(0, $this->rows('payroll_employees', $supplierId));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_deduction_agreements WHERE supplier_id = ? AND agreement_reference LIKE 'attendance:%'",
+            [$supplierId],
+        ), $this->explain($protocol));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND source_kind = 'absence' AND status <> 'cancelled'",
+            [$supplierId],
+        ), $this->explain($protocol));
+
+        // Vědomé ponechání začátku: měsíce počítá MyÚčto, srážky z docházky mají dohody.
+        $kept = $this->payrollSupplier();
+        $keep = $this->importer->run($kept, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false,
+            startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($keep->hasErrors(), $this->explain($keep));
+        self::assertSame('2026-01-01', $this->startPeriod($kept));
+        self::assertGreaterThan(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_deduction_agreements WHERE supplier_id = ? AND agreement_reference LIKE 'attendance:%'",
+            [$kept],
+        ));
+        self::assertGreaterThan(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND source_kind = 'absence' AND status <> 'cancelled'",
+            [$kept],
+        ), 'Syntetický export musí nést nepřítomnost s náhradou.');
+    }
+
+    private function startPeriod(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        return (string) $stmt->fetchColumn();
     }
 
     /**
@@ -673,7 +741,7 @@ final class PohodaPayrollImportTest extends TestCase
     {
         $supplierId = $this->payrollSupplier();
         $file = SyntheticPohodaPayroll::write($this->tmp);
-        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $first = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         self::assertFalse($first->hasErrors(), $this->explain($first));
         $jana = $this->employment($supplierId, '1001');
         $bonus = "SELECT COUNT(*) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
@@ -691,7 +759,7 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertNotSame($xml, $without);
         file_put_contents($changed, $without);
 
-        $again = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true);
+        $again = $this->importer->run($supplierId, $this->userId, $changed, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS);
         self::assertSame(1, $counts['superseded_inputs'] ?? 0, $this->explain($again));

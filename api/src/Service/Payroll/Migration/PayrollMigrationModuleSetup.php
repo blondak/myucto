@@ -420,6 +420,37 @@ final class PayrollMigrationModuleSetup
         return $missing;
     }
 
+    /**
+     * Posun začátku vedení mezd PŘED převodem, který přebírá měsíce zpracované
+     * předchozím programem až do `$lastProcessedPeriod` (volba „Posunout začátek
+     * a převést" v náhledu převodu).
+     *
+     * Na rozdíl od {@see advanceStartTo()} nevyžaduje úhrny z převodu za přeskočené
+     * měsíce: přináší je právě tenhle převod. Bez posunu by je převod bral jako
+     * měsíce počítané MyÚčtem (vstupy z docházky, dohody o srážkách). Vlastní
+     * nezrušený běh v přeskočených měsících posun zastaví stejně jako na obrazovce běhů.
+     *
+     * @return ?array{from:string,to:string} null, když začátek už za posledním zpracovaným měsícem leží
+     * @throws \DomainException když MyÚčto za přeskočené měsíce už má vlastní běhy
+     */
+    public function advanceStartBeforeTakeover(int $supplierId, ?int $userId, string $lastProcessedPeriod): ?array
+    {
+        $advance = $this->startAdvance($supplierId, $lastProcessedPeriod);
+        if ($advance['to'] === null || $advance['from'] === null) {
+            return null;
+        }
+        if ($advance['blocking_runs'] !== []) {
+            throw new \DomainException(sprintf(
+                'MyÚčto už má vlastní mzdové běhy za %s. Zrušte je, nebo začátek neposouvejte.',
+                implode(', ', array_map(self::monthLabel(...), $advance['blocking_runs'])),
+            ));
+        }
+        $state = $this->state->get($supplierId);
+        $this->state->setActivation($supplierId, true, $advance['to'] . '-01', $state['row_version'], $userId);
+
+        return ['from' => $advance['from'], 'to' => $advance['to']];
+    }
+
     private static function previous(string $period): string
     {
         return (new \DateTimeImmutable($period . '-01'))->modify('-1 month')->format('Y-m');

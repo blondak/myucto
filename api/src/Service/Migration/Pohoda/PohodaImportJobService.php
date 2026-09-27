@@ -261,7 +261,8 @@ final class PohodaImportJobService extends AbstractImportJobService
                     'kind' => $payroll ? 'payroll' : 'accounting',
                     'import' => fn (?callable $progress, ?callable $cancel): object => $export === null
                         ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
-                            (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false))
+                            (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false),
+                            isset($params['start_decision']) ? (string) $params['start_decision'] : null)
                         : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip']),
                     'journal' => static fn (array $byStep): array => $payroll
                         ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]

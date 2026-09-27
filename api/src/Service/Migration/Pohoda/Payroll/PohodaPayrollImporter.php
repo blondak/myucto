@@ -54,6 +54,12 @@ final class PohodaPayrollImporter
     public const STEP_DEDUCTIONS = 'payroll_deductions';
     public const STEP_SICKNESS = 'payroll_sickness';
     public const STEP_POSTING_MAP = 'payroll_posting_map';
+    /** Kód kontroly: začátek vedení mezd leží před měsíci, které PAMICA zpracovala. */
+    public const START_BEHIND = 'payroll_start_behind_takeover';
+    /** Rozhodnutí k začátku vedení mezd: posunout ho za poslední zpracovaný měsíc a pak převést. */
+    public const START_ADVANCE = 'advance';
+    /** Rozhodnutí k začátku vedení mezd: vědomě ponechat, MyÚčto dotčené měsíce spočítá znovu. */
+    public const START_KEEP = 'keep';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -117,7 +123,12 @@ final class PohodaPayrollImporter
      * v MyÚčtu přepočítat), ale nesmí o tom mlčet: jinak MyÚčto tvrdí, že mzdy
      * počítá od měsíce, za který žádný běh nemá a převzít ho nejde.
      *
-     * @return array{code:string,message:string}|null
+     * Bez vlastních běhů v dotčených měsících rozhoduje uživatel před ostrým převodem
+     * ({@see self::START_ADVANCE} / {@see self::START_KEEP}); bez rozhodnutí se ostrý
+     * převod odmítne, jinak by měsíce zpracované PAMICA dostaly vstupy z docházky
+     * a dohody o srážkách jako měsíce počítané MyÚčtem.
+     *
+     * @return array{code:string,message:string,context:array<string,mixed>}|null
      */
     private function startBehindMessage(int $supplierId, string $last): ?array
     {
@@ -125,19 +136,28 @@ final class PohodaPayrollImporter
         if ($advance['to'] === null) {
             return null;
         }
+        $context = ['from' => $advance['from'], 'to' => $advance['to'], 'last' => $last];
         if ($advance['blocking_runs'] !== []) {
             return ['code' => 'payroll_start_behind_takeover_runs', 'message' => sprintf(
                 'Začátek vedení mezd v MyÚčtu je %s, PAMICA ale zpracovala mzdy až do %s a MyÚčto už má za %s vlastní '
                 . 'mzdové běhy. Zkontrolujte, jestli se tyto měsíce nepočítají dvakrát.',
-                $advance['from'], $last, implode(', ', $advance['blocking_runs']),
-            )];
+                self::monthLabel((string) $advance['from']), self::monthLabel($last),
+                implode(', ', array_map(self::monthLabel(...), $advance['blocking_runs'])),
+            ), 'context' => $context + ['blocking_runs' => $advance['blocking_runs']]];
         }
-        return ['code' => 'payroll_start_behind_takeover', 'message' => sprintf(
-            'Začátek vedení mezd v MyÚčtu je %s, PAMICA ale zpracovala mzdy až do %s. Pokud MyÚčto nemá tyto měsíce '
-            . 'počítat znovu, posuňte začátek na %s v Mzdy → Mzdové běhy (tlačítko u upozornění na chybějící běhy) '
-            . 'a měsíce převezměte tlačítkem „Převzít všechny měsíce".',
-            $advance['from'], $last, $advance['to'],
-        )];
+        return ['code' => self::START_BEHIND, 'message' => sprintf(
+            'Začátek vedení mezd v MyÚčtu je %s, PAMICA ale zpracovala mzdy až do %s. Bez posunu začátku by převod '
+            . 'měsíce %s až %s převedl jako měsíce, které počítá MyÚčto (vstupy z docházky, dohody o srážkách). '
+            . 'Doporučený postup je posunout začátek na %s a převést; převod bez posunu jde jen s vědomým potvrzením.',
+            self::monthLabel((string) $advance['from']), self::monthLabel($last),
+            self::monthLabel((string) $advance['from']), self::monthLabel($last), self::monthLabel((string) $advance['to']),
+        ), 'context' => $context];
+    }
+
+    /** `YYYY-MM` → `M/YYYY`. */
+    private static function monthLabel(string $period): string
+    {
+        return preg_match('/^([0-9]{4})-([0-9]{2})/', $period, $m) === 1 ? ((int) $m[2]) . '/' . $m[1] : $period;
     }
 
     /**
@@ -225,7 +245,7 @@ final class PohodaPayrollImporter
         if ($last !== null && ($plan['start_period'] ?? null) === null) {
             $stale = $this->startBehindMessage($supplierId, (string) $last);
             if ($stale !== null) {
-                $add('warning', $stale['code'], $stale['message']);
+                $add('warning', $stale['code'], $stale['message'], $stale['context']);
             }
         }
         if ($this->db->hasTable('payroll_employer_settings')) {
@@ -260,8 +280,10 @@ final class PohodaPayrollImporter
      * @param (callable():bool)|null $shouldCancel
      * @param bool $confirmIdentifiers uživatel potvrdil, že OIČ a ID PPV v PAMICA pocházejí z protokolů ČSSZ
      * @param bool $approveTakenOver převzatá docházka a mzdové vstupy se rovnou schválí (viz {@see approveTakenOverInputs()})
+     * @param ?string $startDecision rozhodnutí k začátku vedení mezd, který leží před měsíci zpracovanými
+     *        PAMICA ({@see self::START_ADVANCE} / {@see self::START_KEEP}); ostrý převod bez něj skončí chybou
      */
-    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false): ImportProtocol
+    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false, ?string $startDecision = null): ImportProtocol
     {
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import');
         $protocol->set('kind', 'payroll');
@@ -271,6 +293,16 @@ final class PohodaPayrollImporter
         foreach ($preflight as $m) {
             if ($m['level'] === 'error') {
                 $protocol->error(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
+            }
+            if ($m['code'] === self::START_BEHIND && !$dryRun
+                && !in_array($startDecision, [self::START_ADVANCE, self::START_KEEP], true)
+            ) {
+                $protocol->error(self::STEP_PREFLIGHT, 'payroll_start_decision_required', sprintf(
+                    'Převod mezd se nespustil: začátek vedení mezd v MyÚčtu (%s) leží před měsíci, které PAMICA už zpracovala '
+                    . '(do %s). V náhledu převodu zvolte „Posunout začátek na %s a převést", nebo vědomě potvrďte převod bez posunu.',
+                    self::monthLabel((string) $m['context']['from']), self::monthLabel((string) $m['context']['last']),
+                    self::monthLabel((string) $m['context']['to']),
+                ), $m['context']);
             }
         }
         if ($protocol->hasErrors()) {
@@ -296,9 +328,24 @@ final class PohodaPayrollImporter
             if ($last !== null) {
                 PayrollMigrationModuleSetup::report($protocol, self::STEP_PREFLIGHT,
                     $this->moduleSetup->ensure($supplierId, $userOrNull, $last), 'PAMICA');
+                if ($startDecision === self::START_ADVANCE) {
+                    try {
+                        $moved = $this->moduleSetup->advanceStartBeforeTakeover($supplierId, $userOrNull, $last);
+                    } catch (\DomainException $e) {
+                        $moved = null;
+                        $protocol->warn(self::STEP_PREFLIGHT, 'payroll_start_not_advanced', 'Začátek vedení mezd se neposunul: ' . $e->getMessage());
+                    }
+                    if ($moved !== null) {
+                        $protocol->info(self::STEP_PREFLIGHT, 'payroll_start_advanced', sprintf(
+                            'Začátek vedení mezd v MyÚčtu se před převodem posunul z %s na %s (poslední měsíc zpracovaný PAMICA + 1). '
+                            . 'Měsíce do %s se převezmou jako zpracované předchozím programem.',
+                            self::monthLabel($moved['from']), self::monthLabel($moved['to']), self::monthLabel($last),
+                        ), $moved);
+                    }
+                }
                 $stale = $this->startBehindMessage($supplierId, $last);
                 if ($stale !== null) {
-                    $protocol->warn(self::STEP_PREFLIGHT, $stale['code'], $stale['message']);
+                    $protocol->warn(self::STEP_PREFLIGHT, $stale['code'], $stale['message'], $stale['context']);
                 }
             }
             // Začátek vedení mezd v MyÚčtu (po případném nastavení převodem): měsíce

@@ -256,6 +256,13 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         if (!in_array($kind, ['accounting', 'payroll'], true)) {
             return Json::error($response, 'invalid_kind', 'Neznámý druh převodu.', 422);
         }
+        $startDecision = $body['start_decision'] ?? null;
+        if ($startDecision === '' || $kind !== 'payroll') {
+            $startDecision = null;
+        }
+        if ($startDecision !== null && !in_array($startDecision, [PohodaPayrollImporter::START_ADVANCE, PohodaPayrollImporter::START_KEEP], true)) {
+            return Json::error($response, 'invalid_start_decision', 'Neznámé rozhodnutí k začátku vedení mezd.', 422);
+        }
         if ($kind === 'payroll') {
             // Mzdy zakládají osoby, vztahy, vstupy a profil importu - i zkouška nanečisto jde celou cestou.
             $missing = self::missingPayrollRights($request);
@@ -303,6 +310,9 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             // `open` a vstupy `draft` a mzdový běh nad nimi narazí na blokující kontroly
             // `time_month_not_approved` a `draft_inputs_present`, které nejdou přebít výjimkou.
             'approve_taken_over' => $kind === 'payroll' && filter_var($body['approve_taken_over'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            // Začátek vedení mezd před měsíci zpracovanými PAMICA: posunout a převést, nebo vědomě ponechat.
+            // Bez rozhodnutí ostrý převod skončí chybou ({@see PohodaPayrollImporter::run()}).
+            'start_decision' => $startDecision,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;

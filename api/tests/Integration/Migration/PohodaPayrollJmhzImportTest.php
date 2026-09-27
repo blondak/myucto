@@ -72,7 +72,7 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         $supplierId = $this->payrollSupplier();
         $file = SyntheticPohodaPayroll::writeWithReports($this->tmp);
 
-        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $counts = self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ);
         self::assertSame(4, $counts['jmhz_submissions'] ?? 0, $this->explain($protocol));
@@ -129,7 +129,7 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_dependants WHERE supplier_id = ? AND employee_id = ?', [$supplierId, $jana['employee_id']]));
 
         // Opakovaný převod: historie beze změny, nic se nezdvojí.
-        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true);
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_JMHZ);
         self::assertSame(4, $counts['jmhz_submissions_unchanged'] ?? 0, $this->explain($again));
@@ -141,7 +141,7 @@ final class PohodaPayrollJmhzImportTest extends TestCase
     public function testIdentifiersFromReportsNeedConfirmation(): void
     {
         $supplierId = $this->payrollSupplier();
-        $protocol = $this->importer->run($supplierId, $this->userId, SyntheticPohodaPayroll::writeWithReports($this->tmp), SyntheticPohodaPayroll::YEAR, false);
+        $protocol = $this->importer->run($supplierId, $this->userId, SyntheticPohodaPayroll::writeWithReports($this->tmp), SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(2, self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ)['jmhz_identifiers_unconfirmed'] ?? 0, $this->explain($protocol));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ?', [$supplierId]));
