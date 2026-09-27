@@ -66,7 +66,7 @@ final class MoneyS3Reconciler
     public function moneyTrialBalances(ImportContext $ctx): array
     {
         $out = [];
-        foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'Castka', 'UcMD', 'UcD']) as $r) {
             $year = $ctx->yearOf($r);
             $effect = Ms3Journal::isYearEndClosing($r) ? null : Ms3Journal::effect($r);
             if ($year === null || $effect === null) {
@@ -348,8 +348,10 @@ final class MoneyS3Reconciler
             return [];
         }
         [$prefix, $creditPositive] = $key === 'bank' ? ['221', false] : [self::sources()[$key][4], self::sources()[$key][5]];
+        // Jen adresáře tohoto roku - řádky ostatních by podmínka roku stejně vyřadila.
+        $dirs = array_map('strval', array_keys($ctx->dirYears, $year, true));
         $journal = [];
-        foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'Doklad', 'Castka', 'UcMD', 'UcD'], $dirs) as $r) {
             $doc = trim((string) ($r['Doklad'] ?? ''));
             if (!isset($wanted[$doc]) || $ctx->yearOf($r) !== $year || Ms3Journal::isYearEndClosing($r) || Ms3Journal::isOpening($r)) {
                 continue;
@@ -373,7 +375,7 @@ final class MoneyS3Reconciler
             default => [],
         };
         foreach ($tables as $table) {
-            foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
+            foreach ($ctx->backup->rowsAcrossYears($table, null, $dirs) as $r) {
                 $doc = trim((string) ($r['Doklad'] ?? ''));
                 if (!isset($wanted[$doc]) || $ctx->yearOf($r) !== $year || !empty($r['FlagDel'])) {
                     continue;

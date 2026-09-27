@@ -40,24 +40,14 @@ final class AgendaInfo
         $years = [];
         foreach ($backup->yearDirs() as $dir) {
             $journal = $backup->table('UcDenik', $dir);
-            $rows = $journal !== null && $journal->hasData() ? iterator_to_array($journal->rows(), false) : [];
-            $opening = 0;
-            $dates = [];
-            foreach ($rows as $r) {
-                if (Ms3Journal::isOpening($r)) {
-                    $opening++;
-                } elseif (($r['Datum'] ?? null) !== null) {
-                    $dates[] = (string) $r['Datum'];
-                }
-            }
-            sort($dates);
+            $summary = Ms3Journal::summarize($journal !== null && $journal->hasData() ? $journal->rows(['Zdroj', 'Datum', 'Popis']) : []);
             $years[] = [
                 'dir' => basename($dir),
-                'fiscal_year' => $rows === [] ? null : Ms3Journal::fiscalYear($rows),
-                'journal_rows' => count($rows),
-                'opening_rows' => $opening,
-                'first_date' => $dates[0] ?? null,
-                'last_date' => $dates === [] ? null : $dates[count($dates) - 1],
+                'fiscal_year' => $summary['fiscal_year'],
+                'journal_rows' => $summary['rows'],
+                'opening_rows' => $summary['opening_rows'],
+                'first_date' => $summary['first_date'],
+                'last_date' => $summary['last_date'],
                 'purchase_invoices' => self::count($backup, 'PFaktury', $dir),
                 'issued_invoices' => self::count($backup, 'VFaktury', $dir),
                 'cash_documents' => self::count($backup, 'PoklKnih', $dir),
@@ -68,9 +58,7 @@ final class AgendaInfo
         $partners = 0;
         $address = $backup->table('AdresarF');
         if ($address !== null && $address->hasData()) {
-            foreach ($address->rows() as $_) {
-                $partners++;
-            }
+            $partners = $address->countRows();
         }
 
         $ico = $company['ico'] !== '' ? $company['ico'] : $ini['ico'];
@@ -135,6 +123,28 @@ final class AgendaInfo
         );
     }
 
+    /**
+     * Náhled z `meta.json` má všechny údaje, které dnes {@see toArray()} ukládá (nahrání
+     * starší verzí je mít nemusí - pak se náhled čte znovu ze zálohy).
+     */
+    public static function isComplete(mixed $data): bool
+    {
+        if (!is_array($data) || !is_array($data['years'] ?? null) || !is_array($data['warnings'] ?? null)) {
+            return false;
+        }
+        foreach (['name', 'ico', 'dic', 'street', 'city', 'zip', 'version', 'backup_at', 'partners'] as $key) {
+            if (!array_key_exists($key, $data)) {
+                return false;
+            }
+        }
+        foreach ($data['years'] as $y) {
+            if (!is_array($y) || array_diff(['dir', 'fiscal_year', 'journal_rows', 'opening_rows', 'first_date', 'last_date', 'purchase_invoices', 'issued_invoices', 'cash_documents', 'bank_documents'], array_keys($y)) !== []) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** @return list<int> */
     public function fiscalYears(): array
     {
@@ -173,10 +183,6 @@ final class AgendaInfo
         if ($t === null || !$t->hasData()) {
             return 0;
         }
-        $n = 0;
-        foreach ($t->rows() as $_) {
-            $n++;
-        }
-        return $n;
+        return $t->countRows();
     }
 }

@@ -31,6 +31,12 @@ final class CashBankImporter
     public const STEP_CASH = 'cash';
     public const STEP_BANK = 'bank';
 
+    /**
+     * Pole bankovní knihy (`BankKnih`), se kterými pracuje převod pohybů: pohyby všech let
+     * leží v paměti naráz (výpisy po účtech a letech), tak jen s nimi.
+     */
+    private const BANK_FIELDS = ['Doklad', 'Ucet', 'DatPlat', 'DatUcPr', 'Celkem', 'ValutyKUhr', 'ValutyZak0', 'Vydej', 'Kurs', 'PocetJedn', 'AdNazev', 'VarSym', 'Popis'];
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -184,7 +190,7 @@ final class CashBankImporter
             }
         }
         $byStatement = [];
-        foreach ($ctx->backup->rowsAcrossYears('BankKnih') as $r) {
+        foreach ($ctx->backup->rowsAcrossYears('BankKnih', self::BANK_FIELDS) as $r) {
             $year = $ctx->yearOf($r);
             if ($year === null || trim((string) ($r['Doklad'] ?? '')) === '') {
                 continue;
@@ -371,7 +377,7 @@ final class CashBankImporter
     private static function foreignOpenings(ImportContext $ctx, array $accounts): array
     {
         $byYear = [];
-        foreach ($ctx->backup->rowsAcrossYears('BankKnih') as $r) {
+        foreach ($ctx->backup->rowsAcrossYears('BankKnih', self::BANK_FIELDS) as $r) {
             $code = trim((string) ($r['Ucet'] ?? ''));
             // Roky před převáděným obdobím v mapě adresářů nejsou — rok dá datum pohybu.
             $date = InvoiceImporter::date($r, ['DatUcPr', 'DatPlat']);

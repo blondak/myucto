@@ -40,7 +40,9 @@ final class DocumentLinker
     public function link(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
-        $index = $this->journalIndex($ctx->supplierId);
+        // Index deníku jen roku, jehož doklady se právě navazují (doklady jdou po letech).
+        $index = [];
+        $indexYear = null;
         // Koncept k ruční kontrole (zálohová faktura, doklad nejisté daňové povahy)
         // v deníku Money zápis mít nemusí a zaúčtuje se až po potvrzení účetní.
         $drafts = [
@@ -60,7 +62,11 @@ final class DocumentLinker
         ] as [$sourceType, $docType, $docs, $retype]) {
             foreach ($docs as $key => $docId) {
                 [$year, $docNo] = explode('|', (string) $key, 3);
-                $entries = $index[(int) $year][$sourceType][$docNo] ?? [];
+                if ($indexYear !== (int) $year) {
+                    $indexYear = (int) $year;
+                    $index = $this->journalIndex($ctx->supplierId, $indexYear);
+                }
+                $entries = $index[$sourceType][$docNo] ?? [];
                 if (count($entries) > 1 && in_array($docType, ['bank', 'cash'], true)) {
                     // Stejné číslo dokladu na dvou účtech (pokladnách): zápis se pozná podle data.
                     $date = $this->documentDate($ctx->supplierId, $docType, $docId);
@@ -254,34 +260,33 @@ final class DocumentLinker
     }
 
     /**
-     * Zápisy deníku převedené z Money: rok → typ zdroje → číslo dokladu → id zápisů
+     * Zápisy deníku roku převedené z Money: typ zdroje → číslo dokladu → id zápisů
      * (v pořadí data). Staví se z mapy převodu, takže funguje i pro zápisy z dřívějšího
-     * běhu.
+     * běhu. Klíč zápisu v mapě je `rok|zdroj|číslo|datum`.
      *
-     * @return array<int,array<string,array<string,list<array{date:string,id:int}>>>>
+     * @return array<string,array<string,list<array{date:string,id:int}>>>
      */
-    private function journalIndex(int $supplierId): array
+    private function journalIndex(int $supplierId, int $year): array
     {
         $index = [];
-        foreach ($this->map->all($supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY) as $key => $entryId) {
+        foreach ($this->map->all($supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|') as $key => $entryId) {
             $parts = explode('|', (string) $key);
-            if (count($parts) < 4) {
+            if (count($parts) < 4 || (int) $parts[0] !== $year) {
                 continue; // otevírací zápis "rok|XP"
             }
-            [$year, $source, $docNo, $date] = $parts;
+            [, $source, $docNo, $date] = $parts;
             if ($docNo === '') {
                 continue;
             }
-            $index[(int) $year][Ms3Journal::sourceType($source)][$docNo][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['date' => $date, 'id' => $entryId];
+            $index[Ms3Journal::sourceType($source)][$docNo][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['date' => $date, 'id' => $entryId];
         }
-        foreach ($index as &$types) {
-            foreach ($types as &$docs) {
-                foreach ($docs as &$entries) {
-                    ksort($entries);
-                    $entries = array_values($entries);
-                }
+        foreach ($index as &$docs) {
+            foreach ($docs as &$entries) {
+                ksort($entries);
+                $entries = array_values($entries);
             }
         }
+        unset($docs, $entries);
         return $index;
     }
 

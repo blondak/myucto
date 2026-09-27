@@ -192,8 +192,12 @@ final class MoneyS3Importer
     }
 
     /**
+     * `$agenda` a `$journalPreview` = náhled agendy a deníku, který už spočítal job nahrání
+     * (`meta.json`); bez nich se čtou ze zálohy.
+     *
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
+     * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
      */
     public function run(
         int $supplierId,
@@ -203,13 +207,15 @@ final class MoneyS3Importer
         ?int $runId = null,
         ?callable $progress = null,
         ?callable $shouldCancel = null,
+        ?AgendaInfo $agenda = null,
+        ?array $journalPreview = null,
     ): ImportProtocol {
         $protocol = new ImportProtocol($options->mode);
-        $agenda = AgendaInfo::fromBackup($backup);
+        $agenda ??= AgendaInfo::fromBackup($backup);
         $protocol->set('agenda', $agenda->toArray());
         $protocol->set('options', $options->toArray());
 
-        $preflight = $this->preflight($supplierId, $backup, $agenda, $options);
+        $preflight = $this->preflight($supplierId, $backup, $agenda, $options, $journalPreview);
         $protocol->set('preflight', $preflight);
         $protocol->begin(self::STEP_PREFLIGHT);
         foreach ($preflight as $m) {

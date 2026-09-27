@@ -45,7 +45,7 @@ final class ChartImporter
         }
 
         $used = [];
-        foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $r) {
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'UcMD', 'UcD']) as $r) {
             if (Ms3Journal::isYearEndClosing($r)) {
                 continue;
             }

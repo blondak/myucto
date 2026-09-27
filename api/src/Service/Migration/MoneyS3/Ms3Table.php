@@ -34,6 +34,16 @@ final class Ms3Table
     private const FIELD_DICT_OFFSET = 0x28;
     private const FIELD_DICT_ENTRY = 26;
 
+    /** Hledání začátku dat: kolik bajtů za slovníkem polí a kolik záznamů se zkouší. */
+    private const LOCATE_WINDOW = 8192;
+    private const LOCATE_RECORDS = 40;
+
+    /** Záznamy se čtou po blocích zhruba této velikosti, ne celý soubor naráz. */
+    public const READ_CHUNK_BYTES = 1024 * 1024;
+
+    /** Příznaky režijních a smazaných záznamů ({@see rows()}); dekódují se vždy. */
+    private const DELETE_FLAGS = ['Free', 'Del', 'FlagDel'];
+
     /** @var list<array{name:string,type:string,len:int,offset:int,size:int}> */
     private array $fields = [];
     private int $recordSize = 0;
@@ -41,13 +51,25 @@ final class Ms3Table
     private int $recordCount = 0;
     private int $skippedDeleted = 0;
 
-    private function __construct(private readonly string $raw, public readonly string $tableName)
-    {
+    /** Začátek souboru, ve kterém leží hlavička, slovník polí a záznamy pro hledání dat. */
+    private string $head = '';
+
+    /**
+     * @param string|null $path soubor tabulky, nebo null u tabulky z řetězce ({@see fromString()})
+     * @param string|null $raw obsah tabulky z řetězce
+     */
+    private function __construct(
+        private readonly ?string $path,
+        private readonly ?string $raw,
+        private readonly int $size,
+        public readonly string $tableName,
+    ) {
     }
 
     /**
-     * Strop velikosti jedné tabulky: čte se celá do paměti. Deník velké firmy má desítky
-     * MB; větší soubor je podvrh nebo agenda, kterou převod v jednom běhu nezvládne.
+     * Strop velikosti jedné tabulky. Tabulka se čte po blocích záznamů, takže velikost
+     * souboru paměť neurčuje; větší soubor je podvrh nebo agenda, kterou převod v jednom
+     * běhu nezvládne.
      */
     public const MAX_TABLE_BYTES = 512 * 1024 * 1024;
 
@@ -57,18 +79,67 @@ final class Ms3Table
         if ($size !== false && $size > $maxBytes) {
             throw new MoneyS3Exception('table_too_large', 'Soubor ' . basename($path) . ' je na převod příliš velký.');
         }
-        $raw = @file_get_contents($path);
-        if ($raw === false) {
+        $fh = @fopen($path, 'rb');
+        if ($fh === false) {
             throw new MoneyS3Exception('table_unreadable', 'Soubor ' . basename($path) . ' nelze přečíst.');
         }
-        return self::fromString($raw, strtoupper(pathinfo($path, PATHINFO_FILENAME)));
+        try {
+            $stat = fstat($fh);
+            $t = new self($path, null, (int) ($stat['size'] ?? 0), strtoupper(pathinfo($path, PATHINFO_FILENAME)));
+            $t->parseHeader($fh);
+        } finally {
+            fclose($fh);
+        }
+        return $t;
     }
 
+    /** Tabulka z obsahu v paměti (testy); čte se stejnou cestou jako soubor. */
     public static function fromString(string $raw, string $tableName): self
     {
-        $t = new self($raw, $tableName);
-        $t->parseHeader();
+        $t = new self(null, $raw, strlen($raw), $tableName);
+        $fh = $t->stream();
+        try {
+            $t->parseHeader($fh);
+        } finally {
+            fclose($fh);
+        }
         return $t;
+    }
+
+    /** @return resource */
+    private function stream()
+    {
+        if ($this->path !== null) {
+            $fh = @fopen($this->path, 'rb');
+            if ($fh === false) {
+                throw new MoneyS3Exception('table_unreadable', 'Soubor ' . basename($this->path) . ' nelze přečíst.');
+            }
+            return $fh;
+        }
+        $fh = fopen('php://memory', 'w+b');
+        if ($fh === false) {
+            throw new MoneyS3Exception('table_unreadable', "{$this->tableName}: tabulku nelze přečíst.");
+        }
+        fwrite($fh, (string) $this->raw);
+        rewind($fh);
+        return $fh;
+    }
+
+    /** @param resource $fh */
+    private static function readAt($fh, int $offset, int $length): string
+    {
+        if ($length <= 0 || fseek($fh, $offset) !== 0) {
+            return '';
+        }
+        $out = '';
+        while (strlen($out) < $length) {
+            $part = fread($fh, $length - strlen($out));
+            if ($part === false || $part === '') {
+                break;
+            }
+            $out .= $part;
+        }
+        return $out;
     }
 
     public static function isMs3Table(string $path): bool
@@ -96,15 +167,18 @@ final class Ms3Table
             ->format('Y-m-d');
     }
 
-    private function parseHeader(): void
+    /** @param resource $fh */
+    private function parseHeader($fh): void
     {
-        if (strlen($this->raw) < self::FIELD_DICT_OFFSET || substr($this->raw, 1, 4) !== self::HEADER_MAGIC) {
+        $this->head = self::readAt($fh, 0, min($this->size, self::FIELD_DICT_OFFSET));
+        if (strlen($this->head) < self::FIELD_DICT_OFFSET || substr($this->head, 1, 4) !== self::HEADER_MAGIC) {
             throw new MoneyS3Exception('not_ms3_table', "{$this->tableName}: není tabulka Money S3.");
         }
-        $fieldCount = ord($this->raw[7]);
+        $fieldCount = ord($this->head[7]);
+        $this->head = self::readAt($fh, 0, min($this->size, self::FIELD_DICT_OFFSET + $fieldCount * self::FIELD_DICT_ENTRY));
         $off = self::FIELD_DICT_OFFSET;
         for ($i = 0; $i < $fieldCount; $i++) {
-            $entry = substr($this->raw, $off, self::FIELD_DICT_ENTRY);
+            $entry = substr($this->head, $off, self::FIELD_DICT_ENTRY);
             if (strlen($entry) < self::FIELD_DICT_ENTRY) {
                 break;
             }
@@ -128,7 +202,12 @@ final class Ms3Table
         foreach ($this->fields as $f) {
             $this->recordSize = max($this->recordSize, $f['offset'] + $f['size']);
         }
+        if ($this->recordSize > 0) {
+            // Hledání dat čte nejvýš LOCATE_RECORDS záznamů od kandidáta v okně za slovníkem.
+            $this->head = self::readAt($fh, 0, min($this->size, $off + self::LOCATE_WINDOW + self::LOCATE_RECORDS * $this->recordSize));
+        }
         $this->locateData($off);
+        $this->head = '';
     }
 
     /**
@@ -139,11 +218,11 @@ final class Ms3Table
      */
     private function locateData(int $headerEnd): void
     {
-        $size = strlen($this->raw);
+        $size = $this->size;
         if ($this->recordSize <= 0) {
             return;
         }
-        $limit = min($size, $headerEnd + 8192);
+        $limit = min($size, $headerEnd + self::LOCATE_WINDOW);
         for ($cand = $headerEnd; $cand < $limit; $cand++) {
             if (($size - $cand) % $this->recordSize !== 0) {
                 continue;
@@ -158,15 +237,15 @@ final class Ms3Table
 
     private function validateAt(int $offset): bool
     {
-        $count = intdiv(strlen($this->raw) - $offset, $this->recordSize);
+        $count = intdiv($this->size - $offset, $this->recordSize);
         if ($count < 1) {
             return false;
         }
         $ok = 0;
         $total = 0;
         $nonEmpty = 0;
-        for ($i = 0, $n = min($count, 40); $i < $n; $i++) {
-            $rec = $this->rawRecord($offset + $i * $this->recordSize);
+        for ($i = 0, $n = min($count, self::LOCATE_RECORDS); $i < $n; $i++) {
+            $rec = ~substr($this->head, $offset + $i * $this->recordSize, $this->recordSize);
             if ($this->isBlank($rec)) {
                 continue;
             }
@@ -184,11 +263,6 @@ final class Ms3Table
             return false;
         }
         return $total === 0 || ($ok / $total) > 0.97;
-    }
-
-    private function rawRecord(int $absOffset): string
-    {
-        return ~substr($this->raw, $absOffset, $this->recordSize);
     }
 
     /**
@@ -228,36 +302,79 @@ final class Ms3Table
     }
 
     /**
+     * Živé záznamy tabulky. Soubor se čte po blocích záznamů ({@see READ_CHUNK_BYTES}),
+     * v paměti je vždy jen jeden blok.
+     *
+     * `$fields` omezí dekódovaná pole (a klíče řádku) na vyjmenovaná, v pořadí slovníku
+     * tabulky; pole, které tabulka nemá, v řádku chybí stejně jako bez výběru. Příznaky
+     * smazání se dekódují vždy, v řádku jsou jen vyžádané. `null` = všechna pole.
+     *
+     * @param list<string>|null $fields
      * @return \Generator<int,array<string,mixed>>
      */
-    public function rows(): \Generator
+    public function rows(?array $fields = null): \Generator
     {
         $this->skippedDeleted = 0;
         if (!$this->hasData()) {
             return;
         }
-        for ($i = 0; $i < $this->recordCount; $i++) {
-            $rec = $this->rawRecord($this->dataOffset + $i * $this->recordSize);
-            if ($this->isBlank($rec)) {
-                continue;
+        $wanted = $fields === null ? null : array_fill_keys($fields, true);
+        $decoded = [];
+        $flags = [];
+        foreach ($this->fields as $f) {
+            if ($wanted === null || isset($wanted[$f['name']])) {
+                $decoded[] = $f;
+            } elseif (in_array($f['name'], self::DELETE_FLAGS, true)) {
+                $flags[$f['name']] = $f;
             }
-            $row = [];
-            foreach ($this->fields as $f) {
-                $row[$f['name']] = self::decode($rec, $f);
-            }
-            // Money drží v souboru i režijní záznamy: hlavičku free-listu a smazané
-            // sloty. Nepoznají se podle obsahu (bývají plné pseudonáhodných bajtů),
-            // ale podle vlastních příznaků `Free` / `Del`. Doklady (faktury) mají
-            // místo `Del` příznak `FlagDel`: smazaná faktura v souboru zůstává a její
-            // číslo řada přidělí znovu, takže vedle ní bývá živý doklad téhož čísla.
-            // Smazané doklady do sestav Money nepatří, takže je správné je vynechat
-            // i při převodu.
-            if (!empty($row['Free']) || !empty($row['Del']) || !empty($row['FlagDel'])) {
-                $this->skippedDeleted++;
-                continue;
-            }
-            yield $row;
         }
+        $perChunk = max(1, intdiv(self::READ_CHUNK_BYTES, $this->recordSize));
+        $fh = $this->stream();
+        try {
+            for ($first = 0; $first < $this->recordCount; $first += $perChunk) {
+                $n = min($perChunk, $this->recordCount - $first);
+                $chunk = ~self::readAt($fh, $this->dataOffset + $first * $this->recordSize, $n * $this->recordSize);
+                for ($i = 0; $i < $n; $i++) {
+                    $rec = substr($chunk, $i * $this->recordSize, $this->recordSize);
+                    if ($this->isBlank($rec)) {
+                        continue;
+                    }
+                    $row = [];
+                    foreach ($decoded as $f) {
+                        $row[$f['name']] = self::decode($rec, $f);
+                    }
+                    // Money drží v souboru i režijní záznamy: hlavičku free-listu a smazané
+                    // sloty. Nepoznají se podle obsahu (bývají plné pseudonáhodných bajtů),
+                    // ale podle vlastních příznaků `Free` / `Del`. Doklady (faktury) mají
+                    // místo `Del` příznak `FlagDel`: smazaná faktura v souboru zůstává a její
+                    // číslo řada přidělí znovu, takže vedle ní bývá živý doklad téhož čísla.
+                    // Smazané doklady do sestav Money nepatří, takže je správné je vynechat
+                    // i při převodu.
+                    $deleted = !empty($row['Free']) || !empty($row['Del']) || !empty($row['FlagDel']);
+                    foreach ($flags as $f) {
+                        $deleted = $deleted || !empty(self::decode($rec, $f));
+                    }
+                    if ($deleted) {
+                        $this->skippedDeleted++;
+                        continue;
+                    }
+                    yield $row;
+                }
+                unset($chunk);
+            }
+        } finally {
+            fclose($fh);
+        }
+    }
+
+    /** Počet živých záznamů ({@see rows()}) bez dekódování polí. */
+    public function countRows(): int
+    {
+        $n = 0;
+        foreach ($this->rows([]) as $_) {
+            $n++;
+        }
+        return $n;
     }
 
     /**

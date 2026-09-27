@@ -44,7 +44,7 @@ final class MoneyS3BackupReader
             if ($table === null || !$table->hasData()) {
                 continue;
             }
-            if (Ms3Journal::fiscalYear(iterator_to_array($table->rows(), false)) === $year) {
+            if (Ms3Journal::summarize($table->rows(['Zdroj', 'Datum', 'Popis']))['fiscal_year'] === $year) {
                 $yearDir = $dir;
                 break;
             }
@@ -58,7 +58,7 @@ final class MoneyS3BackupReader
         // ({@see Ms3Journal::sourceType()}), po skupinách jako při převodu.
         $internal = [];
         $journal = $backup->table('UcDenik', $yearDir);
-        foreach ($journal === null ? [] : $journal->rows() as $r) {
+        foreach ($journal === null ? [] : $journal->rows(Ms3Journal::FIELDS) as $r) {
             if (Ms3Journal::isYearEndClosing($r)) {
                 continue;
             }
@@ -98,7 +98,7 @@ final class MoneyS3BackupReader
                 continue;
             }
             $n = 0;
-            foreach ($table->rows() as $r) {
+            foreach ($table->rows(['Doklad', 'FlagDel', ...$fields]) as $r) {
                 if (!empty($r['FlagDel']) || trim((string) ($r['Doklad'] ?? '')) === '') {
                     continue;
                 }

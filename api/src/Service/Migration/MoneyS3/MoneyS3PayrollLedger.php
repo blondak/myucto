@@ -74,7 +74,7 @@ final class MoneyS3PayrollLedger
                 'KZ' => self::documents($backup, 'KnihZav', $path),
                 'ID' => self::documents($backup, 'IntDokl', $path),
             ];
-            foreach (self::rows($backup, 'UcDenik', $path) as $row) {
+            foreach (self::rows($backup, 'UcDenik', $path, Ms3Journal::FIELDS) as $row) {
                 if (Ms3Journal::isOpening($row) || Ms3Journal::isYearEndClosing($row)) {
                     continue;
                 }
@@ -149,7 +149,7 @@ final class MoneyS3PayrollLedger
     private static function documents(Ms3Backup $backup, string $table, string $path): array
     {
         $out = [];
-        foreach (self::rows($backup, $table, $path) as $row) {
+        foreach (self::rows($backup, $table, $path, ['Doklad', 'MZTyp', 'MZRok', 'MZMesic', 'MZDI_Zauct']) as $row) {
             $number = trim((string) ($row['Doklad'] ?? ''));
             if ($number === '') {
                 continue;
@@ -226,13 +226,16 @@ final class MoneyS3PayrollLedger
             || in_array(substr($credit, 0, 3), self::PAYROLL_SYNTHETICS, true);
     }
 
-    /** @return \Generator<int,array<string,mixed>> */
-    private static function rows(Ms3Backup $backup, string $table, ?string $path): \Generator
+    /**
+     * @param list<string>|null $fields
+     * @return \Generator<int,array<string,mixed>>
+     */
+    private static function rows(Ms3Backup $backup, string $table, ?string $path, ?array $fields = null): \Generator
     {
         $t = $backup->table($table, $path);
         if ($t === null || !$t->hasData()) {
             return;
         }
-        yield from $t->rows();
+        yield from $t->rows($fields);
     }
 }

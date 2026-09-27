@@ -349,6 +349,8 @@ final class InvoiceImporter
         }
         $this->importOtherReceivables($ctx, $currencyId, $clients);
         $ctx->statsClients = array_values(array_unique(array_merge($ctx->statsClients, array_values($clients))));
+        // Doklady deníku potřebují jen přijaté a vydané faktury; další kroky už ne.
+        $ctx->journalDocuments = null;
         $p->finish(self::STEP_ISSUED);
     }
 
@@ -569,7 +571,7 @@ final class InvoiceImporter
         }
         if ($ctx->journalDocuments === null) {
             $ctx->journalDocuments = [];
-            foreach ($ctx->backup->rowsAcrossYears('UcDenik') as $row) {
+            foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'Doklad']) as $row) {
                 $y = $ctx->yearOf($row);
                 if ($y !== null) {
                     $ctx->journalDocuments[$y . '|' . strtoupper(trim((string) ($row['Zdroj'] ?? ''))) . '|' . trim((string) ($row['Doklad'] ?? ''))] = true;
@@ -615,7 +617,7 @@ final class InvoiceImporter
     private function selfAssessments(ImportContext $ctx): array
     {
         $lines = [];
-        foreach ($ctx->backup->rowsAcrossYears('PolUcDID') as $l) {
+        foreach ($ctx->backup->rowsAcrossYears('PolUcDID', ['CISLO', 'Cleneni', 'PredmPln', 'Cena', 'PocetMJ', 'SazbaDPH']) as $l) {
             $lines[$l['__dir'] . '|' . (int) ($l['CISLO'] ?? 0)][] = $l;
         }
         $out = [];

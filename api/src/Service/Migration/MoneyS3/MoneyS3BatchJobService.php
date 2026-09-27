@@ -133,6 +133,9 @@ final class MoneyS3BatchJobService extends AbstractBatchImportJobService
             );
         } finally {
             $this->uploads()->releaseJobLock($lock);
+            // Převod firmy nechá za sebou cykly objektů (kontext, protokol); další firma
+            // dávky je v paměti nepotřebuje.
+            gc_collect_cycles();
         }
         if ($result['target_supplier_id'] !== null) {
             // Firma založená dávkou je pro další položky „existující, přístupná".

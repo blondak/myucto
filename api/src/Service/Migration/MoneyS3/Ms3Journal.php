@@ -17,6 +17,13 @@ final class Ms3Journal
     /** Zdroj řádku deníku, kterým Money označuje uzávěrkové zápisy roku (převod na 702/710). */
     public const YEAR_END_CLOSING_SOURCE = 'XZ';
 
+    /**
+     * Pole deníku, se kterými pracují pravidla této třídy, převod deníku, dimenze
+     * a rekonciliace. Deník se čte jen s nimi ({@see Ms3Table::rows()}); kdo potřebuje
+     * další pole, musí ho sem doplnit.
+     */
+    public const FIELDS = ['Zdroj', 'Doklad', 'Datum', 'DatPlnDPH', 'Popis', 'Castka', 'UcMD', 'UcD', 'Stred', 'Zakazka'];
+
     /** @param array<string,mixed> $row */
     public static function isOpening(array $row): bool
     {
@@ -133,38 +140,92 @@ final class Ms3Journal
      */
     public static function fiscalYear(array $rows): ?int
     {
+        return self::summarize($rows)['fiscal_year'];
+    }
+
+    /**
+     * Souhrn deníku roku v jednom průchodu - deník se tak nemusí držet v paměti celý:
+     * počet řádků a počátečních stavů, účetní rok ({@see fiscalYear()}), kalendářní rok
+     * ({@see isCalendarYear()} pro ten rok), první a poslední datum mimo počáteční stavy
+     * a první datum zápisu v účetním roce.
+     *
+     * @param iterable<array<string,mixed>> $rows
+     * @return array{rows:int,opening_rows:int,fiscal_year:?int,calendar:bool,first_date:?string,last_date:?string,first_entry:?string}
+     */
+    public static function summarize(iterable $rows): array
+    {
+        $count = 0;
+        $opening = 0;
         $years = [];
         $fromText = null;
+        $firstAnyDate = null;
+        $dated = 0;
+        $datedByYear = [];
+        $minByYear = [];
+        $firstDate = null;
+        $lastDate = null;
         foreach ($rows as $r) {
+            $count++;
+            $isOpening = self::isOpening($r);
             $date = (string) ($r['Datum'] ?? '');
-            if (!self::isOpening($r) && $date !== '') {
-                $y = (int) substr($date, 0, 4);
-                if ($y >= 1990 && $y <= 2100) {
-                    $years[$y] = ($years[$y] ?? 0) + 1;
+            if ($isOpening) {
+                $opening++;
+            } else {
+                if ($date !== '') {
+                    $y = (int) substr($date, 0, 4);
+                    if ($y >= 1990 && $y <= 2100) {
+                        $years[$y] = ($years[$y] ?? 0) + 1;
+                    }
+                    $dated++;
+                    $datedByYear[$y] = ($datedByYear[$y] ?? 0) + 1;
+                    $prefix = substr($date, 0, 4);
+                    if (!isset($minByYear[$prefix]) || $date < $minByYear[$prefix]) {
+                        $minByYear[$prefix] = $date;
+                    }
+                }
+                if (($r['Datum'] ?? null) !== null) {
+                    $raw = (string) $r['Datum'];
+                    if ($firstDate === null || $raw < $firstDate) {
+                        $firstDate = $raw;
+                    }
+                    if ($lastDate === null || $raw > $lastDate) {
+                        $lastDate = $raw;
+                    }
                 }
             }
-            if ($fromText === null && preg_match('/\b(19|20)(\d{2})\b/', (string) ($r['Popis'] ?? ''), $m) === 1 && self::isOpening($r)) {
+            if ($fromText === null && $isOpening && preg_match('/\b(19|20)(\d{2})\b/', (string) ($r['Popis'] ?? ''), $m) === 1) {
                 $fromText = (int) ($m[1] . $m[2]);
+            }
+            if ($firstAnyDate === null && $date !== '') {
+                $firstAnyDate = $date;
             }
         }
         if ($years !== []) {
             arsort($years);
-            return (int) array_key_first($years);
+            $year = (int) array_key_first($years);
+        } elseif ($fromText !== null) {
+            $year = $fromText;
+        } else {
+            $year = $firstAnyDate !== null ? (int) substr($firstAnyDate, 0, 4) : null;
         }
-        if ($fromText !== null) {
-            return $fromText;
-        }
-        foreach ($rows as $r) {
-            $date = (string) ($r['Datum'] ?? '');
-            if ($date !== '') {
-                return (int) substr($date, 0, 4);
-            }
-        }
-        return null;
+        return [
+            'rows' => $count,
+            'opening_rows' => $opening,
+            'fiscal_year' => $year,
+            'calendar' => $year === null || self::calendarShare($dated, $dated - ($datedByYear[$year] ?? 0)),
+            'first_date' => $firstDate,
+            'last_date' => $lastDate,
+            'first_entry' => $year !== null ? ($minByYear[(string) $year] ?? null) : null,
+        ];
     }
 
     /** Podíl zápisů mimo kalendářní rok, nad kterým agenda vede hospodářský rok. */
     private const NON_CALENDAR_SHARE = 0.1;
+
+    private static function calendarShare(int $total, int $outside): bool
+    {
+        return $total === 0 || $outside / $total <= self::NON_CALENDAR_SHARE;
+    }
 
     /**
      * Vede agenda kalendářní účetní rok? Převod jiný nezná (období jsou 1. 1. – 31. 12.).
@@ -185,7 +246,7 @@ final class Ms3Journal
             $total++;
             $outside += (int) substr($date, 0, 4) !== $year ? 1 : 0;
         }
-        return $total === 0 || $outside / $total <= self::NON_CALENDAR_SHARE;
+        return self::calendarShare($total, $outside);
     }
 
     /**

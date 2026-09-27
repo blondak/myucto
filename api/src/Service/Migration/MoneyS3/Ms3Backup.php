@@ -295,16 +295,25 @@ final class Ms3Backup
      * Všechny řádky tabulky ze všech účetních roků, s rokem-adresářem u každého řádku
      * (`__dir`). Tabulky vázané na rok (doklady, deník) jsou v každém ROK.nnn zvlášť.
      *
+     * `$fields` omezí dekódovaná pole ({@see Ms3Table::rows()}), `$onlyDirs` projde jen
+     * vyjmenované adresáře roků (jména `ROK.nnn` jako v `__dir`), v tomtéž pořadí.
+     *
+     * @param list<string>|null $fields
+     * @param list<string>|null $onlyDirs
      * @return \Generator<int,array<string,mixed>>
      */
-    public function rowsAcrossYears(string $name): \Generator
+    public function rowsAcrossYears(string $name, ?array $fields = null, ?array $onlyDirs = null): \Generator
     {
+        $only = $onlyDirs === null ? null : array_fill_keys($onlyDirs, true);
         foreach ($this->yearDirs() as $dir) {
+            if ($only !== null && !isset($only[basename($dir)])) {
+                continue;
+            }
             $table = $this->table($name, $dir);
             if ($table === null || !$table->hasData()) {
                 continue;
             }
-            foreach ($table->rows() as $row) {
+            foreach ($table->rows($fields) as $row) {
                 $row['__dir'] = basename($dir);
                 yield $row;
             }

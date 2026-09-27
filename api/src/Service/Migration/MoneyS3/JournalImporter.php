@@ -29,12 +29,23 @@ final class JournalImporter
 {
     public const STEP = 'journal';
 
+    /**
+     * Rozvrh období zálohy podle voleb, které na něj mají vliv. Rozvrh čte deník všech let;
+     * za jeden převod ho chce kontrola před převodem, nenavazující roky i převod deníku.
+     * Záloha se během převodu nemění a klíčem je objekt zálohy, takže rozvrh zmizí s ní.
+     *
+     * @var \WeakMap<Ms3Backup,array<string,list<array<string,mixed>>>>
+     */
+    private \WeakMap $plans;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly MoneyS3ImportRepository $map,
-    ) {}
+    ) {
+        $this->plans = new \WeakMap();
+    }
 
     /**
      * Rozvrh období: rok a jeho hranice pro každý adresář ROK.nnn. Bez zápisu — používá
@@ -44,37 +55,37 @@ final class JournalImporter
      */
     public function plan(Ms3Backup $backup, ImportOptions $options): array
     {
+        $key = ($options->fromYear ?? '') . '|' . ($options->firstPeriodStart ?? '');
+        $cached = $this->plans[$backup] ?? [];
+        if (!isset($cached[$key])) {
+            $cached[$key] = $this->buildPlan($backup, $options);
+            $this->plans[$backup] = $cached;
+        }
+        return $cached[$key];
+    }
+
+    /** @return list<array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool,calendar:bool}> */
+    private function buildPlan(Ms3Backup $backup, ImportOptions $options): array
+    {
         $plan = [];
         foreach ($backup->yearDirs() as $dir) {
             $table = $backup->table('UcDenik', $dir);
             if ($table === null || !$table->hasData()) {
                 continue;
             }
-            $rows = iterator_to_array($table->rows(), false);
-            $year = Ms3Journal::fiscalYear($rows);
+            $summary = Ms3Journal::summarize($table->rows(Ms3Journal::FIELDS));
+            $year = $summary['fiscal_year'];
             if ($year === null) {
                 continue;
-            }
-            $hasOpening = false;
-            $min = null;
-            foreach ($rows as $r) {
-                if (Ms3Journal::isOpening($r)) {
-                    $hasOpening = true;
-                    continue;
-                }
-                $date = (string) ($r['Datum'] ?? '');
-                if (str_starts_with($date, (string) $year) && ($min === null || $date < $min)) {
-                    $min = $date;
-                }
             }
             $plan[] = [
                 'dir' => basename($dir),
                 'year' => $year,
                 'starts_on' => sprintf('%04d-01-01', $year),
                 'ends_on' => sprintf('%04d-12-31', $year),
-                'has_opening' => $hasOpening,
-                'calendar' => Ms3Journal::isCalendarYear($rows, $year),
-                'first_entry' => $min,
+                'has_opening' => $summary['opening_rows'] > 0,
+                'calendar' => $summary['calendar'],
+                'first_entry' => $summary['first_entry'],
             ];
         }
         usort($plan, static fn (array $a, array $b): int => $a['year'] <=> $b['year']);
@@ -155,15 +166,15 @@ final class JournalImporter
         $p = $ctx->protocol;
         $year = $item['year'];
         $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
-        $rows = $table !== null ? iterator_to_array($table->rows(), false) : [];
 
-        [$groups, $closingRows] = self::groupRows($rows);
+        [$groups, $closingRows] = self::groupRows($table !== null ? $table->rows(Ms3Journal::FIELDS) : []);
         $ctx->yearEndClosingRows[$year] = $closingRows;
         if ($closingRows > 0) {
             $p->info(self::STEP, 'year_end_closing_skipped', "Rok {$year}: uzávěrkové zápisy z Money ({$closingRows} řádků) se nepřebírají, rok uzavře průvodce uzávěrkou MyÚčta.", ['year' => $year]);
         }
 
-        $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY);
+        // Klíč zápisu v mapě je `rok|skupina` - stačí zápisy tohoto roku.
+        $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|');
         $stats = [
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
             'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
@@ -293,22 +304,28 @@ final class JournalImporter
     }
 
     /**
-     * Dimenze z Money po řádcích převedeného deníku: klíč zápisu v mapě převodu
-     * (`rok|skupina`) => číslo řádku => středisko a zakázka. Řádky se číslují stejně
-     * jako v {@see importYear()} (každý řádek Money = řádek MD a řádek D), takže jde
-     * dimenze doplnit i do zápisů z dřívějšího převodu.
+     * Dimenze z Money po řádcích převedeného deníku, po letech (rok => dimenze roku):
+     * klíč zápisu v mapě převodu (`rok|skupina`) => číslo řádku => středisko a zakázka.
+     * Řádky se číslují stejně jako v {@see importYear()} (každý řádek Money = řádek MD
+     * a řádek D), takže jde dimenze doplnit i do zápisů z dřívějšího převodu. V paměti
+     * je vždy jen deník jednoho roku.
      *
-     * @return array<string,array<int,array{stred:?string,zakazka:?string}>>
+     * Vrací dvojice [předpona klíčů v mapě, dimenze]. Záloha, ve které má týž účetní rok
+     * víc adresářů, vrátí jediný celek bez předpony: pozdější adresář přepíše klíče
+     * dřívějšího na jejich místě.
+     *
+     * @return \Generator<int,array{0:?string,1:array<string,array<int,array{stred:?string,zakazka:?string}>>}>
      */
-    public function lineDimensions(ImportContext $ctx): array
+    public function lineDimensions(ImportContext $ctx): \Generator
     {
+        $merged = count(array_unique($ctx->dirYears)) !== count($ctx->dirYears);
         $out = [];
         foreach ($ctx->dirYears as $dir => $year) {
             $table = $ctx->backup->table('UcDenik', $ctx->backup->dir() . DIRECTORY_SEPARATOR . $dir);
             if ($table === null || !$table->hasData()) {
                 continue;
             }
-            [$groups] = self::groupRows(iterator_to_array($table->rows(), false));
+            [$groups] = self::groupRows($table->rows(['Zdroj', 'Doklad', 'Datum', 'Castka', 'UcMD', 'UcD', 'Stred', 'Zakazka']));
             foreach ($groups as $groupKey => $groupRows) {
                 $lineNo = 0;
                 $lines = [];
@@ -324,17 +341,24 @@ final class JournalImporter
                     $out[$year . '|' . $groupKey] = $lines;
                 }
             }
+            unset($groups);
+            if (!$merged) {
+                yield [$year . '|', $out];
+                $out = [];
+            }
         }
-        return $out;
+        if ($merged) {
+            yield [null, $out];
+        }
     }
 
     /**
      * Řádky deníku roku po účetních zápisech, bez uzávěrkových zápisů Money.
      *
-     * @param list<array<string,mixed>> $rows
+     * @param iterable<array<string,mixed>> $rows
      * @return array{0:array<string,list<array<string,mixed>>>,1:int} skupiny a počet vynechaných uzávěrkových řádků
      */
-    private static function groupRows(array $rows): array
+    private static function groupRows(iterable $rows): array
     {
         $groups = [];
         $closingRows = 0;
@@ -377,7 +401,7 @@ final class JournalImporter
             $table = $backup->table('UcDenik', $backup->dir() . DIRECTORY_SEPARATOR . $item['dir']);
             $opening = [];
             $closing = [];
-            foreach ($table !== null ? $table->rows() : [] as $r) {
+            foreach ($table !== null ? $table->rows(['Zdroj', 'Castka', 'UcMD', 'UcD']) : [] as $r) {
                 if (Ms3Journal::isYearEndClosing($r)) {
                     continue;
                 }

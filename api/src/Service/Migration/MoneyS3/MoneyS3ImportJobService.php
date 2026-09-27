@@ -123,7 +123,10 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
             $progress = $options->isDryRun() ? null : $this->progressCallback($jobId, $steps, 0, null);
             $cancel = $options->isDryRun() ? null : $this->cancelCallback($jobId);
 
-            $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel);
+            // Náhled agendy a deníku spočítal job nahrání - převod zálohu kvůli nim znovu nečte.
+            $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel,
+                AgendaInfo::isComplete($agenda) ? AgendaInfo::fromArray($agenda) : null,
+                MoneyS3Importer::journalPreviewComplete($meta['journal_preview'] ?? null) ? $meta['journal_preview'] : null);
             $result = $protocol->toArray();
             $cancelled = $result['failure'] === 'cancelled';
             $status = $cancelled ? 'cancelled' : $protocol->status();

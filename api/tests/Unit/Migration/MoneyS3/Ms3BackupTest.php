@@ -85,7 +85,7 @@ final class Ms3BackupTest extends TestCase
         Ms3Backup::extract($lz, $this->tmp . '/out', 5);
     }
 
-    /** Tabulka se čte celá do paměti — přerostlý soubor se odmítne dřív, než se načte. */
+    /** Přerostlý soubor tabulky se odmítne dřív, než se začne číst. */
     public function testRefusesOversizedTable(): void
     {
         SyntheticAgenda::writeDir($this->tmp . '/a');

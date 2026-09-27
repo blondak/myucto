@@ -61,22 +61,25 @@ final class DimensionImporter
     public function run(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
-        $lines = $this->journal->lineDimensions($ctx);
 
+        // Deník se čte po letech dvakrát (hodnoty dimenzí, pak razítka řádků), ať v paměti
+        // neleží dimenze řádků všech let naráz.
         $centers = [];
         $jobs = [];
-        foreach ($lines as $key => $byLine) {
-            $year = (int) explode('|', $key, 2)[0];
-            foreach ($byLine as $no => $d) {
-                // Řádek Money = dva řádky deníku (MD a D); počítá se jednou.
-                if ($no % 2 === 0) {
-                    continue;
-                }
-                if ($d['stred'] !== null) {
-                    $centers[$d['stred']] = self::used($centers[$d['stred']] ?? null, $year);
-                }
-                if ($d['zakazka'] !== null) {
-                    $jobs[$d['zakazka']] = self::used($jobs[$d['zakazka']] ?? null, $year);
+        foreach ($this->journal->lineDimensions($ctx) as [, $lines]) {
+            foreach ($lines as $key => $byLine) {
+                $year = (int) explode('|', (string) $key, 2)[0];
+                foreach ($byLine as $no => $d) {
+                    // Řádek Money = dva řádky deníku (MD a D); počítá se jednou.
+                    if ($no % 2 === 0) {
+                        continue;
+                    }
+                    if ($d['stred'] !== null) {
+                        $centers[$d['stred']] = self::used($centers[$d['stred']] ?? null, $year);
+                    }
+                    if ($d['zakazka'] !== null) {
+                        $jobs[$d['zakazka']] = self::used($jobs[$d['zakazka']] ?? null, $year);
+                    }
                 }
             }
         }
@@ -121,7 +124,7 @@ final class DimensionImporter
         }
 
         $managed = array_values($types);
-        $stamped = $this->stampLines($ctx, $lines, $types['center'] ?? null, $centerValues, $jobValues, $managed);
+        $stamped = $this->stampLines($ctx, $types['center'] ?? null, $centerValues, $jobValues, $managed);
         $p->count(self::STEP, 'lines', $stamped);
         $documents = $this->stampDocuments($ctx, $managed);
         $p->count(self::STEP, 'documents', $documents);
@@ -215,16 +218,14 @@ final class DimensionImporter
     }
 
     /**
-     * @param array<string,array<int,array{stred:?string,zakazka:?string}>> $lines
      * @param array<string,int> $centerValues
      * @param array<string,array{0:int,1:int}> $jobValues kód => [typ, hodnota]
      * @param list<int> $managedTypes typy, které převod na řádcích z Money spravuje
      * @return int počet změněných vazeb řádek–dimenze
      */
-    private function stampLines(ImportContext $ctx, array $lines, ?int $centerType, array $centerValues, array $jobValues, array $managedTypes): int
+    private function stampLines(ImportContext $ctx, ?int $centerType, array $centerValues, array $jobValues, array $managedTypes): int
     {
         $pdo = $this->db->pdo();
-        $entries = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY);
         $pdo->exec('DROP TEMPORARY TABLE IF EXISTS tmp_money_s3_dimensions');
         $pdo->exec(
             'CREATE TEMPORARY TABLE tmp_money_s3_dimensions (
@@ -249,23 +250,28 @@ final class DimensionImporter
             )->execute(array_merge(...$batch));
             $batch = [];
         };
-        foreach ($lines as $key => $byLine) {
-            $entryId = $entries[$key] ?? null;
-            if ($entryId === null) {
-                continue;
-            }
-            foreach ($byLine as $no => $d) {
-                $center = $d['stred'] !== null ? ($centerValues[$d['stred']] ?? null) : null;
-                $job = $d['zakazka'] !== null ? ($jobValues[$d['zakazka']] ?? null) : null;
-                $batch[] = [
-                    $entryId, $no, $d['stred'],
-                    $center !== null ? $centerType : null, $center,
-                    $job[0] ?? null, $job[1] ?? null,
-                ];
-                if (count($batch) >= self::BATCH) {
-                    $flush();
+        foreach ($this->journal->lineDimensions($ctx) as [$prefix, $lines]) {
+            // Klíč zápisu v mapě je `rok|skupina` - stačí zápisy roku.
+            $entries = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $prefix);
+            foreach ($lines as $key => $byLine) {
+                $entryId = $entries[$key] ?? null;
+                if ($entryId === null) {
+                    continue;
+                }
+                foreach ($byLine as $no => $d) {
+                    $center = $d['stred'] !== null ? ($centerValues[$d['stred']] ?? null) : null;
+                    $job = $d['zakazka'] !== null ? ($jobValues[$d['zakazka']] ?? null) : null;
+                    $batch[] = [
+                        $entryId, $no, $d['stred'],
+                        $center !== null ? $centerType : null, $center,
+                        $job[0] ?? null, $job[1] ?? null,
+                    ];
+                    if (count($batch) >= self::BATCH) {
+                        $flush();
+                    }
                 }
             }
+            unset($entries, $lines);
         }
         $flush();
 

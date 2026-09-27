@@ -221,7 +221,7 @@ final class MoneyS3BatchImporter
                 'backup_sha256' => (string) hash_file('sha256', $lzPath),
             ], $userId > 0 ? $userId : null);
             try {
-                $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel);
+                $protocol = $this->importer->run($supplierId, $userId, $backup, $options, $runId, $progress, $cancel, $agenda);
             } catch (\Throwable $e) {
                 $this->runs->finishRun($runId, $supplierId, 'failed', ['mode' => $options->mode, 'status' => 'failed', 'failure' => 'unexpected', 'error' => 'Převod selhal na neočekávané chybě.', 'steps' => []]);
                 throw $e;
@@ -351,7 +351,7 @@ final class MoneyS3BatchImporter
     /** Účtuje firma DPH? Obraty na účtu 343 v kterémkoli roce zálohy (bez počátečních a konečných stavů). */
     private static function journalUsesVat(Ms3Backup $backup): bool
     {
-        foreach ($backup->rowsAcrossYears('UcDenik') as $r) {
+        foreach ($backup->rowsAcrossYears('UcDenik', ['Zdroj', 'UcMD', 'UcD']) as $r) {
             $source = trim((string) ($r['Zdroj'] ?? ''));
             if ($source !== 'XP' && $source !== 'XZ'
                 && (str_starts_with(trim((string) ($r['UcMD'] ?? '')), '343') || str_starts_with(trim((string) ($r['UcD'] ?? '')), '343'))) {
