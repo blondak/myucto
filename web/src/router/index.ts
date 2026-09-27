@@ -13,6 +13,7 @@ import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
 import { createWorkspaceRoutes } from './workspaceRoutes'
 import { switchSupplierForDeepLink } from './supplierDeepLink'
+import { payrollStartPeriodGuard } from './payrollStartPeriodGuard'
 import {
   clientDomainCanonicalHandoffPath,
   clientDomainRedirect,
@@ -592,6 +593,7 @@ export function canonicalInternalUrl(
 }
 
 router.beforeEach((to, from) => authorizationGuard(to, from))
+router.beforeEach(to => payrollStartPeriodGuard(to))
 
 /**
  * Dotáhne překlady, které daná routa potřebuje nad rámec jádra (viz i18n/index.ts).

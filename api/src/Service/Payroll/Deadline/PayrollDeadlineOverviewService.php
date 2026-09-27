@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
@@ -194,6 +195,7 @@ final readonly class PayrollDeadlineOverviewService
         private SicknessDeadlinePolicy $sicknessDeadlines,
         private ClockInterface $clock,
         private ?JmhzPredecessorGapService $predecessorGaps = null,
+        private ?PayrollAwaitingRunDutyService $awaitingRuns = null,
     ) {}
 
     /**
@@ -461,6 +463,7 @@ final readonly class PayrollDeadlineOverviewService
         $items = [
             ...$this->submissionItems($supplierId, $environment, $from, $to),
             ...$this->predecessorJmhzItems($supplierId, $environment, $from, $to),
+            ...$this->awaitingRunItems($supplierId, $from, $to),
             ...$this->levyItems($supplierId, $from, $to),
             ...$this->checklistItems($supplierId, $from, $to),
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
@@ -754,6 +757,44 @@ final readonly class PayrollDeadlineOverviewService
                 'submission_status' => null,
                 'ruleset_id' => '',
                 'path' => '/payroll/submissions/jmhz',
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Hlášení JMHZ za měsíc vedení mezd, který ještě nemá schválený běh
+     * ({@see PayrollAwaitingRunDutyService}). Na rozdíl od podání z evidence
+     * se ukazuje i před otevřením lhůty: nejdřív se musí spočítat a schválit
+     * běh, a to je práce, na kterou hlídač upozorňuje.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function awaitingRunItems(int $supplierId, string $from, string $to): array
+    {
+        if ($this->awaitingRuns === null) {
+            return [];
+        }
+        $items = [];
+        foreach ($this->awaitingRuns->missing($supplierId) as $gap) {
+            if ($gap['due_on'] < $from || $gap['due_on'] > $to) {
+                continue;
+            }
+            $items[] = [
+                'source' => 'submission',
+                'reference' => 'awaiting_run:' . $gap['period'],
+                'title' => PayrollAwaitingRunDutyService::agendaCode(),
+                'subject' => 'čeká na schválený mzdový běh',
+                'period' => $gap['period'],
+                'due_on' => $gap['due_on'],
+                'phase' => $gap['phase'] === 'not_open' ? 'due_soon' : $gap['phase'],
+                'days_to_due' => $gap['days_to_due'],
+                'is_overdue' => $gap['is_overdue'],
+                'status' => 'open',
+                'submission_status' => null,
+                'ruleset_id' => '',
+                'path' => '/payroll/runs?period=' . $gap['period'],
             ];
         }
 

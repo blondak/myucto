@@ -100,6 +100,7 @@ final readonly class PayrollMonthlyChecklistService
         private IsdsTransportAvailabilityResolver $transportAvailability,
         private PayrollMonthlyAgendaDutyService $agendaDuties,
         private ?JmhzPredecessorGapService $predecessorGaps = null,
+        private ?PayrollAwaitingRunDutyService $awaitingRuns = null,
     ) {}
 
     /**
@@ -151,6 +152,7 @@ final readonly class PayrollMonthlyChecklistService
             ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
             ...$this->predecessorJmhzRows($supplierId, $environment, $period),
+            ...$this->awaitingRunRows($supplierId, $period),
         ];
         usort(
             $items,
@@ -326,6 +328,57 @@ final readonly class PayrollMonthlyChecklistService
                         $label,
                         $gap['prepared_not_sent'] ? ' (hlášení tam je připravené, jen neodeslané)' : '',
                     ),
+                ],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Měsíc vedení mezd bez schváleného běhu (C-2). Povinnosti JMHZ a přehledů
+     * o platbě pojistného vzniknou až ze schváleného běhu, do té doby o nich
+     * přehled mlčel a tvrdil „žádná otevřená položka". Pravidlo drží
+     * {@see PayrollAwaitingRunDutyService}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function awaitingRunRows(int $supplierId, string $period): array
+    {
+        if ($this->awaitingRuns === null) {
+            return [];
+        }
+        $rows = [];
+        foreach ($this->awaitingRuns->missing($supplierId, $period) as $gap) {
+            [$year, $month] = explode('-', $gap['period']);
+            $rows[] = [
+                'key' => 'awaiting_run:' . $gap['period'],
+                'source' => 'awaiting_run',
+                'agenda_code' => PayrollAwaitingRunDutyService::agendaCode(),
+                'agenda_label' => PayrollAwaitingRunDutyService::agendaCode(),
+                'subject' => sprintf('čeká na schválený mzdový běh (%d vztahů)', $gap['employment_count']),
+                'period' => $gap['period'],
+                'due_on' => $gap['due_on'],
+                'phase' => $gap['phase'],
+                'days_to_due' => $gap['days_to_due'],
+                'is_overdue' => $gap['is_overdue'],
+                'status' => 'pending',
+                'document' => ['format' => 'XML (JMHZ — jednotné měsíční hlášení zaměstnavatele)', 'note' => ''],
+                'recipient' => self::withApplicable(['label' => 'ČSSZ a zdravotní pojišťovny', 'note' => '']),
+                'channel' => self::withApplicable(['label' => null, 'note' => '']),
+                'done' => false,
+                'action' => [
+                    'kind' => 'generate',
+                    'label' => 'Otevřít mzdový běh',
+                    'path' => '/payroll/runs?period=' . $gap['period'],
+                    'reason' => sprintf(
+                        'Za %d/%s ještě není schválený mzdový běh. Hlášení JMHZ i přehledy o platbě pojistného '
+                        . 'pro zdravotní pojišťovny vzniknou z jeho schválení; lhůta hlášení JMHZ je %s.',
+                        (int) $month,
+                        $year,
+                        (new \DateTimeImmutable($gap['due_on']))->format('j. n. Y'),
+                    ),
+                    'prepare' => null,
                 ],
             ];
         }

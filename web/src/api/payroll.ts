@@ -3284,7 +3284,7 @@ export interface PayrollMonthlyChecklistAction {
  * doménu s {@see PayrollDeadlineSource}.
  */
 /** `predecessor_jmhz` = převzatý měsíc, za který nikdo nepodal JMHZ (Q15-17). */
-export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty' | 'predecessor_jmhz'
+export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty' | 'predecessor_jmhz' | 'awaiting_run'
 
 export interface PayrollMonthlyChecklistItem {
   key: string

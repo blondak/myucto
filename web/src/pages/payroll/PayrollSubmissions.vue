@@ -29,7 +29,7 @@ import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
-import { localPayrollPeriod } from './payrollComponentsUi'
+import { localPayrollPeriod, payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -50,6 +50,15 @@ const router = useRouter()
  * osoby má přednost.
  */
 const routedHealthPeriod = route.query.period
+/*
+ * Období Měsíčního přehledu, JMHZ a Ostatních. Dřív si ho panely braly
+ * natvrdo jako předchozí kalendářní měsíc a `?period=` z odkazu (nebo výchozí
+ * první měsíc vedení mezd u převzaté firmy) ignorovaly.
+ */
+const routedPeriod = typeof routedHealthPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedHealthPeriod)
+  ? routedHealthPeriod
+  : null
+const overviewPeriod = ref(routedPeriod ?? payrollWorkingPeriod())
 const healthPeriod = ref(
   typeof routedHealthPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedHealthPeriod)
     ? routedHealthPeriod
@@ -396,6 +405,7 @@ onMounted(loadInboxBadge)
     <PayrollMonthlyChecklistPanel
       v-if="activeTab === 'monthly'"
       v-model:environment="environment"
+      :initial-period="overviewPeriod"
     />
 
     <!--
@@ -736,6 +746,7 @@ onMounted(loadInboxBadge)
       />
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
+        v-model:period="overviewPeriod"
         :mode="activeTab === 'other' ? activeTab : 'jmhz'"
       />
     </template>

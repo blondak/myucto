@@ -39,6 +39,8 @@ const props = defineProps<{
    * jedno, druhé zůstane, a čte pak dvě různá období vedle sebe.
    */
   period?: string
+  /** Výchozí měsíc samostatného panelu (z adresy stránky podání). */
+  initialPeriod?: string
 }>()
 const emit = defineEmits<{
   'update:environment': [value: PayrollRegzelEnvironment]
@@ -51,7 +53,7 @@ const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
-const ownPeriod = ref(payrollWorkingPeriod())
+const ownPeriod = ref(props.initialPeriod ?? payrollWorkingPeriod())
 const embedded = computed(() => props.period !== undefined)
 const period = computed({
   get: () => props.period ?? ownPeriod.value,
@@ -118,7 +120,7 @@ function agendaLabel(item: PayrollMonthlyChecklistItem): string {
   // jen k němu ještě neexistuje podání. Kdyby se překládal jinak, četla by
   // účetní o téže povinnosti dva různé názvy podle toho, jestli už na ni
   // klikla.
-  if (item.source !== 'submission' && item.source !== 'agenda_duty' && item.source !== 'predecessor_jmhz') {
+  if (!['submission', 'agenda_duty', 'predecessor_jmhz', 'awaiting_run'].includes(item.source)) {
     return item.agenda_label
   }
   return submissionAgendaLabel(code)

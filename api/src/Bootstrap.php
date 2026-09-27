@@ -173,11 +173,17 @@ final class Bootstrap
                 \DI\autowire()->constructorParameter(
                     'predecessorGaps',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService::class),
+                )->constructorParameter(
+                    'awaitingRuns',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService::class),
                 ),
             \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::class =>
                 \DI\autowire()->constructorParameter(
                     'predecessorGaps',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService::class),
+                )->constructorParameter(
+                    'awaitingRuns',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
