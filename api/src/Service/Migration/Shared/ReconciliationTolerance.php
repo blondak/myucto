@@ -25,6 +25,14 @@ final class ReconciliationTolerance
      */
     public const FILING_ROUNDING = 1.0;
 
+    /**
+     * Haléřové zaokrouhlení obratové předvahy (K1): když se od zdroje liší KAŽDÝ účet
+     * nejvýše o tuto částku (včetně), jde o zaokrouhlení dokladů ve zdrojovém programu,
+     * ne o chybějící nebo špatně převedený zápis. Protokol ho ukáže jako upozornění
+     * `rounding_difference`; větší rozdíl je rozdíl k přijetí.
+     */
+    public const ROUNDING_DIFFERENCE = 1.0;
+
     /** Částky se shodují na haléř. */
     public static function sameCent(float $a, float $b): bool
     {
@@ -35,5 +43,11 @@ final class ReconciliationTolerance
     public static function isZeroCent(float $amount): bool
     {
         return abs($amount) < self::CENT;
+    }
+
+    /** Rozdíl je nejvýše {@see ROUNDING_DIFFERENCE} včetně (na haléř). */
+    public static function isRounding(float $difference): bool
+    {
+        return abs($difference) < self::ROUNDING_DIFFERENCE + self::CENT;
     }
 }

@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
@@ -71,7 +72,7 @@ final class PremierReconciler
         $checks[] = $balanceSheet['check'];
 
         $ok = TrialBalanceReconciliation::allOk($checks);
-        $p->set('reconciliation', [[
+        $p->set('reconciliation', [ReconciliationVerdict::apply($p, self::STEP, [
             'year' => $ctx->year,
             'period_id' => $periodId,
             'ok' => $ok,
@@ -81,10 +82,7 @@ final class PremierReconciler
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
             'negative_net_rows' => $balanceSheet['negative_net_rows'],
-        ]]);
-        if (!$ok) {
-            $p->error(self::STEP, 'reconciliation_failed', "Rok {$ctx->year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $ctx->year]);
-        }
+        ])]);
         $warning = TrialBalanceReconciliation::negativeNetWarning($ctx->year, $balanceSheet['negative_net_rows']);
         if ($warning !== null) {
             $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $ctx->year, 'rows' => $balanceSheet['negative_net_rows']]);

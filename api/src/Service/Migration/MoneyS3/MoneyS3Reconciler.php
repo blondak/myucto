@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
@@ -41,11 +42,8 @@ final class MoneyS3Reconciler
         $years = [];
         $moneyByYear = $this->moneyTrialBalances($ctx);
         foreach ($ctx->periods as $year => $period) {
-            $result = $this->reconcileYear($ctx, $year, $period['id'], $moneyByYear[$year] ?? []);
+            $result = ReconciliationVerdict::apply($p, self::STEP, $this->reconcileYear($ctx, $year, $period['id'], $moneyByYear[$year] ?? []));
             $years[] = $result;
-            if (!$result['ok']) {
-                $p->error(self::STEP, 'reconciliation_failed', "Rok {$year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $year]);
-            }
             $warning = TrialBalanceReconciliation::negativeNetWarning($year, $result['negative_net_rows']);
             if ($warning !== null) {
                 $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $year, 'rows' => $result['negative_net_rows']]);

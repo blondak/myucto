@@ -38,19 +38,24 @@ final class ReconciliationCriteria
     {
         $out = [self::K1 => null, self::K2 => null, self::K3 => null, self::K4 => null];
         foreach ((array) ($year['checks'] ?? []) as $check) {
-            $key = (string) ($check['key'] ?? '');
-            $criterion = match (true) {
-                str_ends_with($key, '_journal'), str_ends_with($key, '_report') => self::K1,
-                in_array($key, self::K2_CHECKS, true) => self::K2,
-                $key === 'balance_sheet_balanced' => self::K3,
-                str_starts_with($key, 'documents_') => self::K4,
-                default => null,
-            };
+            $criterion = self::criterion((string) ($check['key'] ?? ''));
             if ($criterion !== null) {
                 $out[$criterion] = ($out[$criterion] ?? true) && (bool) ($check['ok'] ?? false);
             }
         }
         return $out;
+    }
+
+    /** Kritérium kontroly rekonciliace, `null` = kontrola zdroje mimo K1–K4. */
+    public static function criterion(string $key): ?string
+    {
+        return match (true) {
+            str_ends_with($key, '_journal'), str_ends_with($key, '_report') => self::K1,
+            in_array($key, self::K2_CHECKS, true) => self::K2,
+            $key === 'balance_sheet_balanced' => self::K3,
+            str_starts_with($key, 'documents_') => self::K4,
+            default => null,
+        };
     }
 
     /**

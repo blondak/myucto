@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\ReconciliationVerdict;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
 
 /**
@@ -95,7 +96,7 @@ final class PohodaReconciler
         if ($derived['entries'] > 0) {
             $p->info(self::STEP, 'derived_payments', "Předvaha obsahuje navíc {$derived['entries']} zápisů úhrad, které převod zaúčtoval u pohybů bez zápisu v deníku POHODY (a jejich storna); kontrola proti deníku POHODY s nimi počítá.", ['entries' => $derived['entries']]);
         }
-        $p->set('reconciliation', [[
+        $p->set('reconciliation', [ReconciliationVerdict::apply($p, self::STEP, [
             'year' => $year,
             'period_id' => $periodId,
             'period_ids' => $periodIds,
@@ -107,10 +108,7 @@ final class PohodaReconciler
             'documents' => $documents,
             'unmapped_accounts' => $unmapped,
             'negative_net_rows' => $balanceSheet['negative_net_rows'],
-        ]]);
-        if (!$ok) {
-            $p->error(self::STEP, 'reconciliation_failed', "Rok {$year}: převod nesedí, podrobnosti v rekonciliaci.", ['year' => $year]);
-        }
+        ])]);
         $warning = TrialBalanceReconciliation::negativeNetWarning($year, $balanceSheet['negative_net_rows']);
         if ($warning !== null) {
             $p->warn(self::STEP, 'negative_net_rows', $warning, ['year' => $year, 'rows' => $balanceSheet['negative_net_rows']]);

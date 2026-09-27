@@ -604,12 +604,32 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     public function testDifferenceAgainstMoneyReportIsReported(): void
     {
         $supplierId = $this->supplier();
-        file_put_contents($this->tmp . '/chybna.csv', str_replace('10 300,00;0,00', '10 301,00;0,00', SyntheticAgenda::trialBalanceCsv2024()));
+        file_put_contents($this->tmp . '/chybna.csv', str_replace('10 300,00;0,00', '10 305,00;0,00', SyntheticAgenda::trialBalanceCsv2024()));
         $protocol = $this->import($supplierId, ImportOptions::MODE_DRY_RUN, [2024 => $this->tmp . '/chybna.csv']);
 
         $year = $protocol->get('reconciliation')[0];
         self::assertFalse($year['ok']);
         self::assertSame(['518'], array_column($year['money_report']['diffs'], 'account'));
         self::assertTrue($protocol->hasErrors());
+        // Rozdíl předvahy nad korunu je rozdíl k přijetí, ne chyba.
+        self::assertTrue($protocol->toArray()['acceptable_only'], $this->explain($protocol));
+    }
+
+    /** Rozdíl předvahy do koruny včetně je zaokrouhlení: upozornění se seznamem účtů, K1 sedí. */
+    public function testRoundingAgainstMoneyReportIsAWarning(): void
+    {
+        $supplierId = $this->supplier();
+        file_put_contents($this->tmp . '/zaokrouhleni.csv', str_replace('10 300,00;0,00', '10 301,00;0,00', SyntheticAgenda::trialBalanceCsv2024()));
+        $protocol = $this->import($supplierId, ImportOptions::MODE_DRY_RUN, [2024 => $this->tmp . '/zaokrouhleni.csv']);
+
+        $year = $protocol->get('reconciliation')[0];
+        self::assertTrue($year['ok'], $this->explain($protocol));
+        self::assertSame(['518'], array_column($year['money_report']['diffs'], 'account'));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $rounding = array_values(array_filter(array_merge(...array_column($protocol->toArray()['steps'], 'messages')),
+            static fn (array $m): bool => $m['code'] === 'rounding_difference'));
+        self::assertCount(1, $rounding);
+        self::assertSame('warning', $rounding[0]['level']);
+        self::assertSame([['account' => '518', 'difference' => -1.0]], $rounding[0]['context']['accounts']);
     }
 }
