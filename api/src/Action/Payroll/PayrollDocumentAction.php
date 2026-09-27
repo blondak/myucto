@@ -359,6 +359,12 @@ final class PayrollDocumentAction
             $request->getHeaderLine('User-Agent'),
             $supplierId,
         );
+        // Dávka se začne zpracovávat hned, ne až příštím tickem cronu — na
+        // instalaci bez cronu by jinak visela na 0 z N. Cron zůstává pojistkou,
+        // souběh dvou workerů serializuje zámek souboru.
+        if (($report['status'] ?? null) !== 'completed') {
+            $this->spawnWorker();
+        }
 
         return Json::ok($response, ['batch' => $report], 202)
             ->withHeader('Cache-Control', 'private, no-store')
@@ -387,6 +393,55 @@ final class PayrollDocumentAction
         return Json::ok($response, ['batch' => $batch])
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * POST /documents/batches/{batchId}/run — ruční rozběhnutí stojící fronty
+     * (dávka hlásí `worker_stalled`, protože na instalaci neběží cron).
+     * Idempotentní: druhý souběžný worker skončí na zámku souboru.
+     *
+     * @param array<string,string> $args
+     */
+    public function runBatch(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $batch = $this->batch->detail(
+            $this->currentSupplierId($request),
+            (int) ($args['batchId'] ?? 0),
+        );
+        if ($batch === null) {
+            return Json::error($response, 'not_found', 'Dávka dokumentů nebyla nalezena.', 404);
+        }
+        if ($batch['status'] !== 'completed') {
+            $this->spawnWorker();
+        }
+
+        return Json::ok($response, ['batch' => $batch], 202)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Worker na pozadí (vzor PayrollPeriodExportAction::spawnWorker). Neúspěšný
+     * spawn není chyba požadavku: dávka zůstává ve frontě a UI ukáže, že stojí.
+     */
+    private function spawnWorker(): void
+    {
+        $rootDir = \MyInvoice\Bootstrap::rootDir();
+        \MyInvoice\Service\BackgroundProcess::spawnPhp(
+            $rootDir . '/api/bin/payroll-document-worker.php',
+            ['--limit=500'],
+            \MyInvoice\Infrastructure\Config\RuntimePaths::log('payroll-document-worker.log'),
+            $rootDir,
+        );
     }
 
     /** @param array<string,string> $args */

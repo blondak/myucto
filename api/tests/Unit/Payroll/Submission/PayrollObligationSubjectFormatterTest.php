@@ -78,6 +78,19 @@ final class PayrollObligationSubjectFormatterTest extends TestCase
     }
 
     /**
+     * Q15-34: oznámení za jednu osobu vede předmět `employment:{id}`. Id
+     * vztahu (236) není kód pojišťovny — dřív z něj vznikla neexistující
+     * „zdravotní pojišťovna 236" po termínu.
+     */
+    public function testHealthNotificationForOneEmploymentDoesNotTurnIdIntoInsurer(): void
+    {
+        self::assertNull(PayrollObligationSubjectFormatter::humanSubject(
+            HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            'employment:236',
+        ));
+    }
+
+    /**
      * `employment:{id}` (ELDP/OZUSPOJ/PREZEC/REGZEC) appka nezná jak
      * přeložit na jméno osoby — radši nic než syrové interní ID.
      */

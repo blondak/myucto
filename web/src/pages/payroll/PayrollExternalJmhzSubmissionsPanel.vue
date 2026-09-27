@@ -38,6 +38,8 @@ const route = useRoute() as ReturnType<typeof useRoute> | undefined
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
 const items = ref<PayrollJmhzExternalSubmission[]>([])
+/** Převzaté měsíce, za které předchozí program žádné hlášení nemá (Q15-17). */
+const missingPeriods = ref<string[]>([])
 const loading = ref(true)
 const error = ref('')
 const removing = ref<number | null>(null)
@@ -175,9 +177,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    items.value = (await payrollApi.jmhzExternalSubmissions(props.environment)).items
+    const page = await payrollApi.jmhzExternalSubmissions(props.environment)
+    items.value = page.items
+    missingPeriods.value = page.missing_periods ?? []
   } catch (exception) {
     items.value = []
+    missingPeriods.value = []
     error.value = apiErrorMessage(exception, t('payroll.external_jmhz.load_failed'))
   } finally {
     loading.value = false
@@ -246,7 +251,7 @@ onMounted(async () => {
 
 <template>
   <section
-    v-if="items.length > 0 || error"
+    v-if="items.length > 0 || missingPeriods.length > 0 || error"
     id="external-submissions"
     class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
     data-test="external-jmhz-panel"
@@ -274,6 +279,23 @@ onMounted(async () => {
     >
       <p class="font-medium">{{ t('payroll.external_jmhz.unsent_title', { period: formatPeriod(period) }) }}</p>
       <p class="mt-1">{{ t('payroll.external_jmhz.unsent_hint') }}</p>
+      <RouterLink
+        :to="{ name: 'imports-pamica' }"
+        class="mt-1 inline-block font-medium text-payroll-600 underline hover:text-payroll-700"
+      >
+        {{ t('payroll.external_jmhz.open_migration') }}
+      </RouterLink>
+    </div>
+
+    <div
+      v-for="period in missingPeriods"
+      :key="`missing-${period}`"
+      class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+      role="status"
+      data-test="external-jmhz-missing"
+    >
+      <p class="font-medium">{{ t('payroll.external_jmhz.missing_title', { period: formatPeriod(period) }) }}</p>
+      <p class="mt-1">{{ t('payroll.external_jmhz.missing_hint') }}</p>
       <RouterLink
         :to="{ name: 'imports-pamica' }"
         class="mt-1 inline-block font-medium text-payroll-600 underline hover:text-payroll-700"

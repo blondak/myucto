@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
@@ -98,6 +99,7 @@ final readonly class PayrollMonthlyChecklistService
         private PayrollStatutoryAgendaCatalog $statutoryCatalog,
         private IsdsTransportAvailabilityResolver $transportAvailability,
         private PayrollMonthlyAgendaDutyService $agendaDuties,
+        private ?JmhzPredecessorGapService $predecessorGaps = null,
     ) {}
 
     /**
@@ -148,6 +150,7 @@ final readonly class PayrollMonthlyChecklistService
             ...$this->submissionRows($registered, $transport),
             ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
+            ...$this->predecessorJmhzRows($supplierId, $environment, $period),
         ];
         usort(
             $items,
@@ -269,6 +272,61 @@ final readonly class PayrollMonthlyChecklistService
                                 . '— připravte a odešlete nové.'
                             : null,
                     ]),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Hlášení JMHZ za PŘEVZATÝ měsíc, které nikdo nepodal (Q15-17). MyÚčto
+     * převzatý měsíc nepočítá, takže mu nevznikne ani `agenda_duty`; bez
+     * tohohle řádku Měsíční přehled tvrdil „žádná otevřená položka", přestože
+     * lhůta dávno uplynula. Pravidlo drží {@see JmhzPredecessorGapService}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function predecessorJmhzRows(int $supplierId, string $environment, string $period): array
+    {
+        if ($this->predecessorGaps === null) {
+            return [];
+        }
+        $rows = [];
+        foreach ($this->predecessorGaps->missing($supplierId, $environment, $period) as $gap) {
+            [$year, $month] = explode('-', $gap['period']);
+            $label = (int) $month . '/' . $year;
+            $rows[] = [
+                'key' => 'predecessor_jmhz:' . $gap['period'],
+                'source' => 'predecessor_jmhz',
+                'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                'agenda_label' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                'subject' => 'převzatý měsíc – hlášení nebylo podáno',
+                'period' => $gap['period'],
+                'due_on' => $gap['due_on'],
+                'phase' => $gap['phase'],
+                'days_to_due' => $gap['days_to_due'],
+                'is_overdue' => $gap['is_overdue'],
+                'status' => 'open',
+                'document' => ['format' => 'XML (JMHZ — jednotné měsíční hlášení zaměstnavatele)', 'note' => ''],
+                'recipient' => self::withApplicable(['label' => 'ČSSZ', 'note' => '']),
+                'channel' => self::withApplicable([
+                    'label' => null,
+                    'note' => 'Podává program, který mzdy za měsíc zpracoval.',
+                ]),
+                'done' => false,
+                'action' => [
+                    'kind' => 'manual',
+                    'label' => 'Otevřít podání předchozím programem',
+                    'path' => '/payroll/submissions/jmhz',
+                    'reason' => sprintf(
+                        'Hlášení za %s nebylo podáno. Měsíc zpracoval předchozí mzdový program a MyÚčto ho '
+                        . 'nepočítá, takže hlášení nepřipraví. Podejte ho z předchozího programu%s. Když už '
+                        . 'odešlo, nahrajte odeslané hlášení (XML) v Mzdy → Importy nebo zopakujte převod '
+                        . 's novým exportem; MyÚčto ho pak bude evidovat jako podané.',
+                        $label,
+                        $gap['prepared_not_sent'] ? ' (hlášení tam je připravené, jen neodeslané)' : '',
+                    ),
+                ],
             ];
         }
 
@@ -545,7 +603,8 @@ final readonly class PayrollMonthlyChecklistService
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW => $this->isdsAgendaDescription(
                 'XML nebo PDF podle toho, co pojišťovna přijímá',
-                PayrollObligationSubjectFormatter::humanSubject($agendaCode, $subjectReference),
+                PayrollObligationSubjectFormatter::humanSubject($agendaCode, $subjectReference)
+                    ?? 'zdravotní pojišťovna zaměstnance',
                 '/payroll/submissions/health',
                 $transport,
             ),

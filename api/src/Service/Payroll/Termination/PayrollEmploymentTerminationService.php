@@ -129,7 +129,9 @@ final class PayrollEmploymentTerminationService
         $reason = $record === null
             ? null
             : new PayrollTerminationReason((string) $record['termination_method'], (string) $record['legal_ground']);
-        $average = $this->average($supplierId, $employment);
+        // Přehled je čtecí GET bez transakce: podmínky úvazku jen čte, zámek
+        // si berou až zápisové cesty (odstupné, dovolená, A2) v transactional().
+        $average = $this->average($supplierId, $employment, false);
         $blockers = [];
         if ($reason === null) {
             $blockers[] = self::issue('reason_missing', 'blocker');
@@ -1054,7 +1056,7 @@ final class PayrollEmploymentTerminationService
      * @param array<string,mixed> $employment
      * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string}
      */
-    private function average(int $supplierId, array $employment): array
+    private function average(int $supplierId, array $employment, bool $lockTerms = true): array
     {
         $end = (string) $employment['end_date'];
         $year = (int) substr($end, 0, 4);
@@ -1079,6 +1081,7 @@ final class PayrollEmploymentTerminationService
                 $snapshot,
                 $end,
                 false,
+                $lockTerms,
             );
             $result['monthly_gross'] = $gross->grossMonthlyMinorUnits;
         } catch (EmploymentExitReadinessException|PayrollRulesetException|\DomainException|\InvalidArgumentException $e) {
@@ -1094,6 +1097,7 @@ final class PayrollEmploymentTerminationService
                 $snapshot,
                 $this->today(),
                 true,
+                $lockTerms,
             );
             $result['monthly_net'] = $net->netMonthlyMinorUnits;
         } catch (EmploymentExitReadinessException|PayrollRulesetException|\DomainException|\InvalidArgumentException) {

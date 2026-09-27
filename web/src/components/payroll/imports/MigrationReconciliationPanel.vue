@@ -251,6 +251,16 @@ onMounted(() => { void load() })
         </div>
       </section>
 
+      <p
+        v-if="report.takeover_periods_not_compared?.length"
+        class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+        data-test="reconciliation-not-compared"
+      >
+        {{ t('payroll.migration_reconciliation.not_compared', {
+          periods: report.takeover_periods_not_compared.map(period => formatPeriod(period)).join(', '),
+        }) }}
+      </p>
+
       <EmptyState
         v-if="report.summary.row_count === 0"
         variant="empty"

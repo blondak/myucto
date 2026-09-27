@@ -3099,6 +3099,8 @@ export interface PayrollSubmissionQueueItem {
   subject_employee_id?: number | null
   period_start: string
   period_end: string
+  /** Akce registrace ČSSZ (A1 přihláška, A2 odhláška, A3 změna, A4 oprava); jinak `null`. */
+  registration_action?: string | null
   obligation_kind: string
   obligation_status: PayrollSubmissionObligationStatus
   earliest_submission_on: string
@@ -3279,7 +3281,8 @@ export interface PayrollMonthlyChecklistAction {
  * (JMHZ, přehled o platbě pojistného za pojišťovnu). Ostatní hodnoty sdílí
  * doménu s {@see PayrollDeadlineSource}.
  */
-export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty'
+/** `predecessor_jmhz` = převzatý měsíc, za který nikdo nepodal JMHZ (Q15-17). */
+export type PayrollMonthlyChecklistSource = PayrollDeadlineSource | 'agenda_duty' | 'predecessor_jmhz'
 
 export interface PayrollMonthlyChecklistItem {
   key: string
@@ -6178,6 +6181,9 @@ export interface PayrollDocumentBatch {
   started_at: string | null
   completed_at: string | null
   updated_at: string
+  /** Položka čeká déle než tick workeru — fronta stojí (chybí cron). */
+  worker_stalled?: boolean
+  waiting_since?: string | null
 }
 
 export interface PayrollDocumentBatchItem {
@@ -8963,6 +8969,11 @@ export const payrollApi = {
     api.get<{ batch: PayrollDocumentBatch }>(
       `/payroll/documents/batches/${batchId}`,
     ).then(response => response.data.batch),
+  runDocumentBatch: (batchId: number) =>
+    api.post<{ batch: PayrollDocumentBatch }>(
+      `/payroll/documents/batches/${batchId}/run`,
+      {},
+    ).then(response => response.data.batch),
   documentBatchItems: (batchId: number, page?: PayrollPageParams) =>
     api.get<{ items: PayrollDocumentBatchItem[], total: number }>(
       `/payroll/documents/batches/${batchId}/items`,
@@ -9782,7 +9793,12 @@ export const payrollApi = {
    * nahrané XML hlášení). Bez obsahu podání — ten leží zapečetěný na serveru.
    */
   jmhzExternalSubmissions: (environment: PayrollJmhzTransportEnvironment) =>
-    api.get<{ environment: PayrollJmhzTransportEnvironment; items: PayrollJmhzExternalSubmission[] }>(
+    api.get<{
+      environment: PayrollJmhzTransportEnvironment
+      items: PayrollJmhzExternalSubmission[]
+      /** Převzaté měsíce, za které v historii není žádné hlášení (`YYYY-MM`). */
+      missing_periods?: string[]
+    }>(
       '/payroll/submissions/jmhz-external',
       { params: { environment } },
     ).then(response => response.data),

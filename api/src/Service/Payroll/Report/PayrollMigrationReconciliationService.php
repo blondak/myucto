@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 
 /**
  * Kontrolní sestava „naše přepočtená mzda vs. mzda převzatá z původního systému".
@@ -24,6 +25,7 @@ final class PayrollMigrationReconciliationService
         private readonly PayrollMigrationReconciliationRepository $repository,
         private readonly PayrollTakeoverCoverage $coverage,
         private readonly PayrollTakeoverLayerCheck $layers,
+        private readonly PayrollHistoricalPeriodService $historical,
         ?PayrollMigrationReconciliationBuilder $builder = null,
     ) {
         $this->builder = $builder ?? new PayrollMigrationReconciliationBuilder();
@@ -48,6 +50,7 @@ final class PayrollMigrationReconciliationService
             $this->repository->referenceTotals($supplierId, $year, $source),
             $calculated,
             $this->repository->calculatedEmployerSocial($supplierId, $year),
+            $this->historical->startPeriod($supplierId),
         );
 
         $statuses = $this->revisionStatuses($calculated);

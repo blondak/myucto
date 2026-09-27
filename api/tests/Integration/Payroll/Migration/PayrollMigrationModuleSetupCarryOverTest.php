@@ -206,12 +206,16 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         }
         self::assertNull($this->setup->advanceStartProblem($this->supplierId, '2026-09'));
         self::assertNotNull($this->setup->advanceStartProblem($this->supplierId, '2026-05'), 'Jen dopředu.');
+        // Q15-1: obrazovka běhů navrhuje TENTÝŽ cíl jako kontrola převodu
+        // (poslední zpracovaný měsíc + 1), ne právě zobrazené období.
+        self::assertSame('2026-09', $this->setup->suggestedStart($this->supplierId));
 
         // Vlastní běh v mezeře posun zastaví.
         $pdo->prepare('INSERT INTO payroll_runs (supplier_id, period_start, payment_date) VALUES (?, "2026-07-01", "2026-08-15")')
             ->execute([$this->supplierId]);
         $runId = (int) $pdo->lastInsertId();
         self::assertStringContainsString('7/2026', (string) $this->setup->advanceStartProblem($this->supplierId, '2026-09'));
+        self::assertNull($this->setup->suggestedStart($this->supplierId), 'Posun, který nejde, se nenabízí.');
         $pdo->prepare('UPDATE payroll_runs SET status = "cancelled" WHERE id = ?')->execute([$runId]);
 
         $moved = $this->setup->advanceStartTo($this->supplierId, $this->userId, '2026-09');

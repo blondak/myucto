@@ -68,6 +68,7 @@ final class PayrollMigrationReconciliationBuilder
      * @param list<array<string,mixed>> $reference převzaté úhrny, granularita vztah × měsíc
      * @param list<array<string,mixed>> $calculated náš výsledek, granularita osoba × měsíc
      * @param array<string,int|null> $calculatedEmployerSocial období => pojistné zaměstnavatele SP za firmu
+     * @param ?string $startPeriod první mzdové období v MyÚčtu (`YYYY-MM`)
      * @return array<string,mixed>
      */
     public function build(
@@ -75,13 +76,40 @@ final class PayrollMigrationReconciliationBuilder
         array $reference,
         array $calculated,
         array $calculatedEmployerSocial = [],
+        ?string $startPeriod = null,
     ): array {
         if ($year < 2000 || $year > 2200) {
             throw new \InvalidArgumentException('Mzdový rok musí být v rozsahu 2000 až 2200.');
         }
 
-        $referenceByPerson = $this->groupReference($year, $reference);
         $calculatedByPerson = $this->indexCalculated($year, $calculated);
+        // Převzatý měsíc (před začátkem vedení mezd) MyÚčto samo nepočítá.
+        // Porovnávat ho znamenalo hlásit každý osoboměsíc jako odchylku
+        // „MyÚčto: nespočítáno" (Q15-35: 16 440 falešných odchylek). Takový
+        // měsíc se vynechá, ledaže za něj MyÚčto přesto vlastní výsledek má.
+        $calculatedPeriods = [];
+        foreach ($calculatedByPerson as $row) {
+            $calculatedPeriods[(string) $row['period']] = true;
+        }
+        $notCompared = [];
+        if ($startPeriod !== null && preg_match('/^\d{4}-\d{2}/', $startPeriod) === 1) {
+            $start = substr($startPeriod, 0, 7);
+            $reference = array_values(array_filter(
+                $reference,
+                static function (array $row) use ($start, $calculatedPeriods, &$notCompared): bool {
+                    $period = substr((string) ($row['period'] ?? ''), 0, 7);
+                    if ($period === '' || $period >= $start || isset($calculatedPeriods[$period])) {
+                        return true;
+                    }
+                    $notCompared[$period] = true;
+
+                    return false;
+                },
+            ));
+        }
+        $notCompared = array_keys($notCompared);
+        sort($notCompared);
+        $referenceByPerson = $this->groupReference($year, $reference);
 
         /** @var array<string,array<string,array<string,mixed>>> $rowsByPeriod */
         $rowsByPeriod = [];
@@ -173,6 +201,8 @@ final class PayrollMigrationReconciliationBuilder
             'months' => $months,
             'totals' => $this->totals($yearCells),
             'deviations' => $deviations,
+            // Převzaté měsíce, které se nesrovnávají (MyÚčto je nepočítá).
+            'takeover_periods_not_compared' => $notCompared,
             'summary' => [
                 'row_count' => $rowCount,
                 'deviation_count' => count($deviations),
@@ -206,6 +236,7 @@ final class PayrollMigrationReconciliationBuilder
             $grouped[$key] ??= [
                 'period' => $period,
                 'employee_id' => $employeeId,
+                'full_name' => self::nullableText($row['full_name'] ?? null),
                 'external_person_ref' => $personRef !== '' ? $personRef : null,
                 'relationships' => [],
                 'metrics' => array_fill_keys(
@@ -302,7 +333,7 @@ final class PayrollMigrationReconciliationBuilder
         return [
             'period' => (string) ($reference['period'] ?? $calculated['period'] ?? ''),
             'employee_id' => $reference['employee_id'] ?? $calculated['employee_id'] ?? null,
-            'full_name' => $calculated['full_name'] ?? null,
+            'full_name' => $calculated['full_name'] ?? $reference['full_name'] ?? null,
             'external_person_ref' => $reference['external_person_ref'] ?? null,
             'presence' => $presence,
             'relationships' => $reference['relationships'] ?? [],

@@ -2050,6 +2050,7 @@
       "relationship_count": "{count} pracovní vztahy v původním systému",
       "revision_status": "Revize ve stavu {status}",
       "external_person": "Osoba {ref} z původního systému",
+      "not_compared": "Převzaté měsíce {periods} se nesrovnávají: zpracoval je předchozí program a MyÚčto je samo nepřepočítává, takže by se každý osoboměsíc hlásil jako odchylka. Porovnávají se měsíce, které MyÚčto počítá.",
       "unknown_person": "Neurčená osoba",
       "employer_social_note": "Pojistné zaměstnavatele na sociální zabezpečení (jen za firmu, osobní veličina to není):",
       "grain_hint": "Řádek je osoba a měsíc. Převzatá strana se sčítá přes pracovní vztahy, protože pojistné i daň jsou ze zákona veličiny osoby, ne vztahu — rozpočítat je zpět na vztahy by znamenalo vymyslet si alokační klíč.",
@@ -2657,6 +2658,11 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Kontroly běhu",
+      "validation_scope": {
+        "blocking": "Blokují schválení ({count})",
+        "all": "Všechny kontroly ({count})",
+        "hint": "Zobrazeny jsou jen kontroly, které brání schválení. Dalších {count} varování schválení nezastaví; najdete je pod Všechny kontroly, seskupené podle druhu."
+      },
       "missing_previous": {
         "title": "Před obdobím {period} chybí mzdový běh za {count} měsíců od začátku vedení mezd v MyÚčtu",
         "hint": "Mzda staví na předchozích měsících (roční úhrny, průměry, zálohová daň). Spočítejte chybějící měsíce dřív. Pokud je zpracoval předchozí program, posuňte v Nastavení mezd začátek vedení mezd za ně a převezměte je jako převzaté měsíce.",
@@ -3817,6 +3823,12 @@
       "batch_complete": "Všechny výplatní pásky a měsíční ZIP jsou hotové.",
       "batch_failed": "Dávku výstupních dokumentů se nepodařilo dokončit.",
       "batch_poll_failed": "Stav dávky se nepodařilo načíst.",
+      "batch_stalled_title": "Dávka čeká na zpracování, ale zpracování dokumentů neběží.",
+      "batch_stalled_hint": "Dokumenty generuje úloha na pozadí (cron-payroll-document-worker), která se na této instalaci nespouští. Zpracování můžete spustit ručně; trvale ho zajistí úloha nastavená v Systém → Plánované úlohy.",
+      "batch_worker_start": "Spustit zpracování",
+      "batch_worker_starting": "Spouštím…",
+      "batch_worker_started": "Zpracování dávky je spuštěné.",
+      "batch_worker_start_failed": "Zpracování dávky se nepodařilo spustit.",
       "batch_bundle_ready": "Měsíční ZIP vznikl až po úspěšném dokončení všech osob.",
       "batch_bundle_download": "Stáhnout měsíční ZIP",
       "batch_bundle_downloading": "Stahuji…",
@@ -7721,6 +7733,12 @@
       "queue": {
         "title": "K odeslání",
         "subtitle": "Všechno připravené, co ještě neodešlo — napříč agendami i zaměstnanci. Řazeno podle lhůty, po lhůtě nahoře. U položek, které odeslat nejde, je uvedený důvod.",
+        "registration_action": {
+          "A1": "Přihláška zaměstnance (A1)",
+          "A2": "Odhláška zaměstnance (A2)",
+          "A3": "Změna údajů (A3)",
+          "A4": "Oprava registrace (A4)"
+        },
         "load_failed": "Frontu odchozích podání se nepodařilo načíst.",
         "send_failed": "Podání se nepodařilo odeslat.",
         "send": "Odeslat",
@@ -11401,6 +11419,8 @@
       "open_migration": "Otevřít převod z PAMICA",
       "unsent_title": "Hlášení za {period} předchozí program neodeslal",
       "unsent_hint": "PAMICA hlášení připravila, ale ČSSZ ho nedostala. Odešlete ho z předchozího programu (měsíce před začátkem vedení mezd MyÚčto nepočítá). Když už odešlo, převod z PAMICA zopakujte s novým exportem, stav se doplní.",
+      "missing_title": "Hlášení za {period} nebylo podáno",
+      "missing_hint": "Měsíc zpracoval předchozí mzdový program, ale v historii podání za něj žádné hlášení JMHZ není. MyÚčto převzatý měsíc nepočítá, takže hlášení nepřipraví: podejte ho z předchozího programu. Když už odešlo, zopakujte převod s novým exportem nebo nahrajte odeslané hlášení (XML) v Mzdy → Importy, stav se doplní.",
       "col_source": "Zdroj",
       "col_result": "Výsledek",
       "col_guid": "GUID podání",

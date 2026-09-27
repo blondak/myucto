@@ -1004,6 +1004,14 @@ onMounted(() => {
                   <span v-if="item.deadline" class="block text-neutral-900">
                     {{ formatDate(item.deadline.due_on) }}
                   </span>
+                  <!-- Q15-30: 8 dnů u pracovního poměru, 20. den dalšího
+                       měsíce u DPP/DPČ. Bez pramene to vypadalo jako dvě
+                       různá pravidla pro stejný nástup. -->
+                  <span
+                    v-if="item.deadline"
+                    class="block text-xs text-neutral-500"
+                    data-test="health-notification-deadline-source"
+                  >{{ item.deadline.source }}</span>
                   <span
                     class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
                     :class="deadlineClass(item)"

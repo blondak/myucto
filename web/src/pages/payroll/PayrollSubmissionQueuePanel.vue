@@ -648,6 +648,13 @@ void load()
                 <div class="font-medium text-neutral-900">
                   {{ submissionAgendaLabel(item.agenda_code) }}
                 </div>
+                <div
+                  v-if="item.registration_action"
+                  class="text-xs font-medium text-neutral-700"
+                  data-test="queue-registration-action"
+                >
+                  {{ t(`payroll.submissions.queue.registration_action.${item.registration_action}`) }}
+                </div>
                 <div v-if="item.submission_kind !== 'regular'" class="text-xs text-neutral-500">
                   {{ submissionKindLabel(item.submission_kind) }}
                 </div>
@@ -664,7 +671,12 @@ void load()
                 <template v-else>{{ item.subject_label ?? '—' }}</template>
               </td>
               <td class="px-3 py-2 align-top whitespace-nowrap text-neutral-700">
-                {{ formatPeriod(item.period_start.slice(0, 7)) }}
+                <!-- Registrace nemá mzdové období: `period_start` je první den,
+                     kdy jde podat (u nástupu 1. 9. to byl „srpen"). Rozhoduje
+                     den události. -->
+                {{ item.registration_action
+                  ? formatDate(item.period_end)
+                  : formatPeriod(item.period_start.slice(0, 7)) }}
               </td>
               <td class="px-3 py-2 align-top whitespace-nowrap">
                 <div>{{ formatDate(item.due_on) }}</div>

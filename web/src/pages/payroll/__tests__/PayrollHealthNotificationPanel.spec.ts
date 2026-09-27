@@ -291,6 +291,9 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].text()).toContain('Syntetická osoba')
     expect(rows[0].text()).toContain('P')
+    // Q15-30: u termínu je vidět pramen lhůty (8 dnů vs. 20. den u dohod).
+    expect(rows[0].get('[data-test="health-notification-deadline-source"]').text())
+      .toBe('§ 10 zákona č. 48/1997 Sb.')
   })
 
   it('oznámení z doby před MyÚčtem ukáže jako vyřízené předchozím programem, ne po lhůtě', async () => {

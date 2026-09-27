@@ -167,8 +167,19 @@ final class PayrollDocumentBatchRepository
     public function detail(int $supplierId, int $batchId): ?array
     {
         $statement = $this->db->pdo()->prepare(
+            // `waiting_since`: nejstarší položka, která je k vyzvednutí déle
+            // než dvě minuty. Worker běží každou minutu, takže taková položka
+            // znamená, že fronta stojí (chybí cron) — UI to musí říct, jinak
+            // dávka mlčky visí na 0 z N.
             'SELECT batch.*, run.period_start,
-                    document.suggested_filename AS bundle_filename
+                    document.suggested_filename AS bundle_filename,
+                    (SELECT MIN(item.available_at)
+                       FROM payroll_document_batch_items item
+                      WHERE item.supplier_id = batch.supplier_id
+                        AND item.batch_id = batch.id
+                        AND item.status IN ("queued", "retry_wait")
+                        AND item.available_at <= UTC_TIMESTAMP() - INTERVAL 2 MINUTE
+                    ) AS waiting_since
                FROM payroll_document_batches batch
                JOIN payroll_runs run
                  ON run.supplier_id = batch.supplier_id AND run.id = batch.run_id
@@ -718,6 +729,9 @@ final class PayrollDocumentBatchRepository
         }
         $row['bundle_document_id'] = $row['bundle_document_id'] === null
             ? null : (int) $row['bundle_document_id'];
+        $waitingSince = $row['waiting_since'] ?? null;
+        $row['waiting_since'] = is_string($waitingSince) && $waitingSince !== '' ? $waitingSince : null;
+        $row['worker_stalled'] = $row['waiting_since'] !== null && $row['status'] !== 'completed';
         unset($row['idempotency_key_hash'], $row['source_snapshot_hash']);
         return $row;
     }

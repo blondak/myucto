@@ -118,7 +118,7 @@ function agendaLabel(item: PayrollMonthlyChecklistItem): string {
   // jen k němu ještě neexistuje podání. Kdyby se překládal jinak, četla by
   // účetní o téže povinnosti dva různé názvy podle toho, jestli už na ni
   // klikla.
-  if (item.source !== 'submission' && item.source !== 'agenda_duty') {
+  if (item.source !== 'submission' && item.source !== 'agenda_duty' && item.source !== 'predecessor_jmhz') {
     return item.agenda_label
   }
   return submissionAgendaLabel(code)

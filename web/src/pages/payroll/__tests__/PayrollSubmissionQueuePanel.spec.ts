@@ -119,6 +119,24 @@ describe('PayrollSubmissionQueuePanel', () => {
     })
   })
 
+  /** Q15-28: přihláška agendou REGZEC se nesmí tvářit jako změna v registraci. */
+  it('u registrace ukáže akci a den události místo měsíce, kdy jde podat', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({
+        agenda_code: 'REGZEC25',
+        registration_action: 'A1',
+        period_start: '2026-08-24',
+        period_end: '2026-09-01',
+      }),
+    ]))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="queue-registration-action"]').text())
+      .toContain('payroll.submissions.queue.registration_action.A1')
+    expect(wrapper.text()).not.toContain('2026-08')
+  })
+
   it('jméno vede na kartu zaměstnance a řádek ukáže soubory podání ke stažení', async () => {
     m.submissionQueue.mockResolvedValue(queueResponse([
       item({ submission_id: 5, subject_employee_id: 42 }),

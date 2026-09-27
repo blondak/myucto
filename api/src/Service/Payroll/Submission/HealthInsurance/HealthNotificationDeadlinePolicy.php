@@ -16,6 +16,15 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  * měsíce; obě jsou doložené publikacemi VZP, ne textem zákona, a katalog to
  * u nich říká stavem pramene.
  *
+ * Dvě různá data u „stejného" nástupu proto NEJSOU dvě pravidla: pracovní
+ * poměr nástup 1. 9. → 9. 9. (8 dnů), DPČ nástup 15. 10. → 20. 11. VZP od
+ * 1. 1. 2026 uvádí pro osoby činné „pouze na DPČ nebo DPP" oznámení do 20. dne
+ * měsíce následujícího po měsíci, v němž skutečnost nastala; ostatní nástupy
+ * a skončení do 8 dnů (ověřeno 27. 9. 2026 na vzp.cz, „Změny v oznamovací
+ * povinnosti zaměstnavatelů"). Jediný zdroj termínu je tahle třída — čtou ji
+ * zdravotní agenda, Měsíční přehled, termíny na kartě i detekce změn
+ * registrace. Obrazovka zdravotních oznámení ukazuje u termínu pramen.
+ *
  * Přehled o platbě má lhůtu shodnou se splatností pojistného, tedy 20. den
  * následujícího kalendářního měsíce podle § 25 odst. 3 zákona č. 592/1992 Sb.
  *

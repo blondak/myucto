@@ -507,12 +507,12 @@ final class PayrollRunsAction
              * obrazovka mlčela.
              */
             'missing_previous_periods' => $missingPeriods,
-            // Zvolené období, na které jde začátek vedení mezd posunout, protože
-            // všechny chybějící měsíce před ním zpracoval předchozí program a
-            // MyÚčto za ně vlastní běh nemá. `null` = posun nenabízet.
+            // Měsíc po posledním měsíci, který zpracoval předchozí program — týž
+            // cíl, jaký radí kontrola převodu. Dřív se nabízelo právě zobrazené
+            // období a po posunu převod hlásil, že začátek je pořád pozadu.
+            // `null` = posun nenabízet.
             'advance_start_to' => $missingPeriods !== []
-                && $this->migrationSetup->advanceStartProblem($this->currentSupplierId($request), (string) $period) === null
-                ? $period
+                ? $this->migrationSetup->suggestedStart($this->currentSupplierId($request))
                 : null,
             /*
              * KONTROLA PŘED ZAHÁJENÍM. Čtecí, nic neukládá, nic neblokuje —

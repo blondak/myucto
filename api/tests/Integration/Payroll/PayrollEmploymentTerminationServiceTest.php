@@ -494,6 +494,40 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         ], $this->userId);
     }
 
+    /**
+     * Panel Skončení vztahu načítá přehled čtecím GET bez transakce. Se
+     * schváleným průměrem dřív přepočet zamykal smluvní podmínky a padal na
+     * „vyžaduje aktivní transakci" (HTTP 500). Ostatní testy běží celé
+     * v transakci, proto tady data výjimečně commitneme a uklidíme.
+     */
+    public function testOverviewWithApprovedAverageWorksOutsideTransaction(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->commit();
+        try {
+            $this->averageFor($this->employmentId);
+            self::assertFalse($pdo->inTransaction());
+
+            $overview = $this->service->overview($this->supplierId, $this->employmentId);
+
+            self::assertSame(self::MONTHLY_AVERAGE, $overview['average']['monthly_gross_minor']);
+            self::assertFalse($pdo->inTransaction());
+        } finally {
+            foreach ([
+                'payroll_average_earning_snapshots',
+                'payroll_employment_terms',
+                'payroll_employments',
+                'payroll_person_tax_declarations',
+                'payroll_employees',
+                'payroll_module_state',
+                'supplier_vat_status_history',
+            ] as $table) {
+                $pdo->prepare("DELETE FROM {$table} WHERE supplier_id = ?")->execute([$this->supplierId]);
+            }
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
+        }
+    }
+
     public function testActiveEmploymentHasNoTermination(): void
     {
         [, $active] = $this->employment('SKON-2', '2026-01-01', null);

@@ -218,6 +218,47 @@ describe('PayrollMonthlyChecklistPanel', () => {
   })
 
   /**
+   * Q15-17: převzatý měsíc bez podaného JMHZ. Přehled dřív ukázal „žádná
+   * otevřená položka"; teď nesplněný řádek s lidským názvem agendy a návodem.
+   */
+  it('ukáže nepodané hlášení převzatého měsíce jako nesplněnou položku s návodem', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 0, manual: 1, done: 0 },
+      items: [{
+        key: 'predecessor_jmhz:2026-08',
+        source: 'predecessor_jmhz',
+        agenda_code: 'JMHZ25',
+        agenda_label: 'JMHZ25',
+        subject: 'převzatý měsíc – hlášení nebylo podáno',
+        period: '2026-08',
+        due_on: '2026-09-21',
+        phase: 'overdue',
+        days_to_due: -6,
+        is_overdue: true,
+        status: 'open',
+        document: { format: 'XML (JMHZ)', note: '' },
+        recipient: { label: 'ČSSZ', note: '', applicable: true },
+        channel: { label: null, note: 'Podává program, který mzdy za měsíc zpracoval.', applicable: true },
+        done: false,
+        action: {
+          kind: 'manual',
+          label: 'Otevřít podání předchozím programem',
+          path: '/payroll/submissions/jmhz',
+          reason: 'Hlášení za 8/2026 nebylo podáno.',
+        },
+      }],
+    }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-empty"]').exists()).toBe(false)
+    const row = wrapper.get('tbody tr[data-test="monthly-checklist-row"]')
+    expect(row.text()).toContain('payroll.submissions.statutory.agenda.JMHZ25')
+    expect(row.text()).toContain('Hlášení za 8/2026 nebylo podáno.')
+  })
+
+  /**
    * „Netýká se" (pojem na řádek nesedí — úkon v kartě zaměstnance nikam
    * neodchází) je JINÁ informace než „neznámo" (appka to neví, ověřte).
    * Sloupec musí obě rozlišit, ne obojí schovat pod stejné slovo.

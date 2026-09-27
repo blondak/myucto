@@ -1319,6 +1319,10 @@ final class Routes
                 [PayrollDocumentAction::class, 'batchItems'],
             );
             $g->post(
+                '/documents/batches/{batchId:[0-9]+}/run',
+                [PayrollDocumentAction::class, 'runBatch'],
+            );
+            $g->post(
                 '/documents/batches/{batchId:[0-9]+}/items/{itemId:[0-9]+}/retry',
                 [PayrollDocumentAction::class, 'retryBatchItem'],
             );

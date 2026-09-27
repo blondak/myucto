@@ -78,6 +78,35 @@ final class PayrollDocumentBatchQueueServiceTest extends TestCase
         self::assertSame(500, $this->itemCount((int) $batch['id']));
     }
 
+    /**
+     * Q15-15: na instalaci bez cronu dávka visela na 0 z N a UI neřeklo proč.
+     * Položka k vyzvednutí déle než dvě minuty = fronta stojí.
+     */
+    public function testBatchWaitingLongerThanWorkerTickIsReportedAsStalled(): void
+    {
+        [$runId, $revisionId] = $this->approvedRevision(2, null, false);
+        $batch = $this->queue->enqueueApprovedRevision($this->supplierId, $runId, $revisionId, null);
+
+        $fresh = $this->queue->detail($this->supplierId, (int) $batch['id']);
+        self::assertIsArray($fresh);
+        self::assertFalse($fresh['worker_stalled']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_document_batch_items
+                SET available_at = UTC_TIMESTAMP() - INTERVAL 10 MINUTE
+              WHERE supplier_id = ? AND batch_id = ?',
+        )->execute([$this->supplierId, (int) $batch['id']]);
+        $stalled = $this->queue->detail($this->supplierId, (int) $batch['id']);
+        self::assertIsArray($stalled);
+        self::assertTrue($stalled['worker_stalled']);
+        self::assertNotNull($stalled['waiting_since']);
+
+        $this->queue->processAvailable(10);
+        $done = $this->queue->detail($this->supplierId, (int) $batch['id']);
+        self::assertIsArray($done);
+        self::assertFalse($done['worker_stalled']);
+    }
+
     public function testOneBrokenPersonDoesNotCancelSuccessfulNeighboursAndPreventsZip(): void
     {
         [$runId, $revisionId] = $this->approvedRevision(3, 1, true);

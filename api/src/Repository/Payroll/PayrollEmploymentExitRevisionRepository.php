@@ -249,6 +249,50 @@ final class PayrollEmploymentExitRevisionRepository
         string $decisiveTo,
     ): array {
         $this->requireTransaction();
+
+        return $this->decisivePeriodTermRows($supplierId, $employmentId, $decisiveFrom, $decisiveTo, true);
+    }
+
+    /**
+     * Stejné podmínky jako {@see lockDecisivePeriodTerms()} bez zámku — pro
+     * čtecí přehled (panel Skončení vztahu), který nic nezapisuje a transakci
+     * nemá. Zápisové cesty dál zamykají.
+     *
+     * @return list<array{
+     *   id:int,
+     *   effective_from:string,
+     *   effective_to:?string,
+     *   weekly_hours:?string,
+     *   tax_regime:string,
+     *   row_version:int
+     * }>
+     */
+    public function decisivePeriodTerms(
+        int $supplierId,
+        int $employmentId,
+        string $decisiveFrom,
+        string $decisiveTo,
+    ): array {
+        return $this->decisivePeriodTermRows($supplierId, $employmentId, $decisiveFrom, $decisiveTo, false);
+    }
+
+    /**
+     * @return list<array{
+     *   id:int,
+     *   effective_from:string,
+     *   effective_to:?string,
+     *   weekly_hours:?string,
+     *   tax_regime:string,
+     *   row_version:int
+     * }>
+     */
+    private function decisivePeriodTermRows(
+        int $supplierId,
+        int $employmentId,
+        string $decisiveFrom,
+        string $decisiveTo,
+        bool $forUpdate,
+    ): array {
         $statement = $this->db->pdo()->prepare(
             'SELECT id, effective_from, effective_to, weekly_hours,
                     tax_regime, row_version
@@ -256,8 +300,8 @@ final class PayrollEmploymentExitRevisionRepository
               WHERE supplier_id = ? AND employment_id = ?
                 AND effective_from <= ?
                 AND (effective_to IS NULL OR effective_to >= ?)
-              ORDER BY effective_from, id
-              FOR UPDATE',
+              ORDER BY effective_from, id'
+            . ($forUpdate ? ' FOR UPDATE' : ''),
         );
         $statement->execute([
             $supplierId,

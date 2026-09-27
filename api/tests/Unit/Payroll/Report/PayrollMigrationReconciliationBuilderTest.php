@@ -150,6 +150,33 @@ final class PayrollMigrationReconciliationBuilderTest extends TestCase
         self::assertSame('calculated_missing', $totals['gross']['status']);
     }
 
+    /**
+     * Q15-35: převzatý měsíc před začátkem vedení mezd MyÚčto nepočítá. Každý
+     * jeho osoboměsíc svítil jako odchylka „nespočítáno" (16 440 falešných
+     * odchylek). Vynechá se a sestava řekne, které měsíce nesrovnává; měsíc
+     * od začátku dál se porovnává dál i bez našeho výsledku.
+     */
+    public function testTakeoverMonthsBeforeStartAreNotCompared(): void
+    {
+        $report = (new PayrollMigrationReconciliationBuilder())->build(
+            self::YEAR,
+            [
+                $this->reference('2026-07', '1001', '1', 11, 21, ['full_name' => 'Převzatá Osoba']),
+                $this->reference('2026-08', '1001', '1', 11, 21),
+                $this->reference('2026-09', '1001', '1', 11, 21, ['full_name' => 'Převzatá Osoba']),
+            ],
+            [$this->calculated('2026-08', 11)],
+            [],
+            '2026-09',
+        );
+
+        self::assertSame(['2026-07'], $report['takeover_periods_not_compared']);
+        self::assertSame(['2026-08', '2026-09'], array_column($report['months'], 'period'), 'Měsíc s naším výsledkem se porovná i před začátkem.');
+        self::assertSame(1, $report['summary']['missing_counterpart_count']);
+        $september = $report['months'][1]['rows'][0];
+        self::assertSame('Převzatá Osoba', $september['full_name'], 'Řádek bez protějšku nese jméno, ne jen id.');
+    }
+
     /** Vztah, který původní systém nemá, je druhá polovina téhož pravidla. */
     public function testPersonWithoutReferenceIsNotReportedAsZeroDifference(): void
     {

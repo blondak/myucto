@@ -162,9 +162,14 @@ function onFocus() {
   }
 }
 
+/*
+ * Přepsání textu na název už vybrané položky ukáže celou nabídku (viz
+ * `filtered`). Zvýraznění proto musí zůstat na vybrané položce — dřív
+ * skočilo na první řádek a Enter po „Česko" → Enter vybral Afghánistán.
+ */
 function onInput() {
   open.value = true
-  highlightIdx.value = 0
+  highlightIdx.value = Math.max(0, filtered.value.findIndex(opt => opt.value === props.modelValue))
   if (props.remote) emitSearchDebounced(query.value.trim())
 }
 
@@ -180,9 +185,16 @@ function onKey(e: KeyboardEvent) {
     highlightIdx.value = Math.max(highlightIdx.value - 1, 0)
     scrollHighlightIntoView()
   } else if (e.key === 'Enter') {
-    if (open.value && filtered.value[highlightIdx.value]) {
-      e.preventDefault()
-      selectOption(filtered.value[highlightIdx.value])
+    // Otevřená nabídka Enter vždy spotřebuje: bez shody nesmí odeslat
+    // okolní formulář ani nechat rozepsaný text, který nic nevybral.
+    if (!open.value) return
+    e.preventDefault()
+    const option = filtered.value[highlightIdx.value]
+    if (option) {
+      selectOption(option)
+    } else {
+      open.value = false
+      query.value = selected.value?.label ?? ''
     }
   } else if (e.key === 'Home' && open.value && filtered.value.length > 0) {
     e.preventDefault()

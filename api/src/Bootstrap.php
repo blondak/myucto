@@ -167,6 +167,18 @@ final class Bootstrap
                     'external',
                     \DI\get(\MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore::class),
                 ),
+            // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
+            // jednotkovým testům přehledů, v aplikaci se předává výslovně.
+            \MyInvoice\Service\Payroll\Submission\PayrollMonthlyChecklistService::class =>
+                \DI\autowire()->constructorParameter(
+                    'predecessorGaps',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService::class),
+                ),
+            \MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::class =>
+                \DI\autowire()->constructorParameter(
+                    'predecessorGaps',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService::class),
+                ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthOfficialFormProvider::class,

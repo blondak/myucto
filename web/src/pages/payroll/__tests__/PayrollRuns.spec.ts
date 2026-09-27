@@ -791,6 +791,52 @@ describe('PayrollRuns', () => {
     expect(m.success).toHaveBeenCalledWith('payroll.runs.override.granted_all')
   })
 
+  /**
+   * Q15-8/Q15-11: 19 blokujících kontrol se ztrácelo pod 187 varováními bez
+   * jmen na osmi stránkách. Blokátory jdou nahoru a karta se otevře jen s nimi;
+   * varování jednoho druhu jsou jedna skupina se jmény.
+   */
+  it('blokující kontroly ukáže nahoře a samostatně, varování sloučí se jmény', async () => {
+    const warnings = [1, 2, 3, 4, 5].map(index => validation({
+      id: 300 + index,
+      code: 'time_month_missing',
+      entity_id: 40 + index,
+      message: `Syntetická Osoba ${index}: pracovní vztah nemá za období založenou a schválenou pracovní dobu.`,
+      remediation_path: `/payroll/time?employment=${40 + index}`,
+      requires_override: false,
+    }))
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        ...warnings,
+        validation({
+          id: 900,
+          severity: 'blocker',
+          code: 'enforcement_not_deducting',
+          message: 'Syntetický Dlužník: exekuční případ je doručený, ale ještě se nesráží.',
+          remediation_path: '/payroll/enforcement?case=5',
+          requires_override: false,
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const listed = () => wrapper.findAll('[data-test^="payroll-validation-group-"]')
+    expect(listed()).toHaveLength(1)
+    expect(listed()[0].text()).toContain('Syntetický Dlužník')
+    expect(wrapper.find('[data-testid="payroll-run-15-validation-scope-hint"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="payroll-run-15-validation-scope-all"]').trigger('click')
+    expect(listed()).toHaveLength(2)
+    expect(listed()[0].text()).toContain('Syntetický Dlužník')
+    const group = wrapper.get('[data-test="payroll-validation-group-warning-time_month_missing"]')
+    expect(group.text()).toContain('Syntetická Osoba 1')
+    expect(group.text()).toContain('Pracovní vztah nemá za období')
+  })
+
   it('osobu ve skupině jde schválit i odvolat jednotlivě', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',
@@ -804,6 +850,10 @@ describe('PayrollRuns', () => {
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
+    // Při blokátorech se karta otevírá jen s nimi (Q15-8); vyřízená skupina
+    // je pod „Všechny kontroly".
+    expect(wrapper.find('[data-test="payroll-validation-group-override-employment_social_registration_missing-granted"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="payroll-run-15-validation-scope-all"]').trigger('click')
     const granted = wrapper.get('[data-test="payroll-validation-group-override-employment_social_registration_missing-granted"]')
     expect(granted.find('[data-testid="payroll-validation-1100-override-all"]').exists()).toBe(false)
     expect(granted.text()).toContain('payroll.runs.override.granted_group')
