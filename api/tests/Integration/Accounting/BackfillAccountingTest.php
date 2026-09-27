@@ -336,6 +336,63 @@ final class BackfillAccountingTest extends TestCase
         self::assertSame(1, (int) $this->jobs->findById($jobId)['created_count']);
     }
 
+    /**
+     * N4: doklad převzatý z jiného programu bez vlastního zápisu má předpis v převzatém
+     * deníku (jen na doklad není navázaný). Doúčtování ho nenabízí ani nezaúčtuje, jinak
+     * by výnos, náklad i DPH byly v deníku dvakrát. Nativní doklad se doúčtuje dál.
+     */
+    public function testDocumentBackfillSkipsTakenOverDocumentsWithoutEntry(): void
+    {
+        $clientId = $this->client('Převzatá protistrana s.r.o.');
+        $before = $this->pending->count($this->supplierId, self::YEAR . '-01-01');
+        $takenInvoice = $this->sale('FV-BF-2098-T', $clientId, 1000.00, 210.00, 21.00);
+        $takenPurchase = $this->purchase('PF-BF-2098-T', $clientId, 500.00, 105.00, 21.00);
+        $native = $this->sale('FV-BF-2098-V', $clientId, 300.00, 63.00, 21.00);
+        $map = $this->db->pdo()->prepare('INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, ?, ?, ?)');
+        $map->execute([$this->supplierId, 'invoice', 'synth|FV-T', $takenInvoice]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO stereo_nx_import_map (supplier_id, source_ico, source_company_index, kind, source_key, source_hash, target_id)
+             VALUES (?, '00000019', 1, 'purchase', 'synth|PF-T', ?, ?)"
+        )->execute([$this->supplierId, str_repeat('0', 64), $takenPurchase]);
+
+        $pending = $this->pending->count($this->supplierId, self::YEAR . '-01-01');
+        self::assertSame($before['invoices'] + 1, $pending['invoices'], 'převzatá FV se nehlásí jako čekající');
+        self::assertSame($before['purchase_invoices'], $pending['purchase_invoices'], 'převzatá PF se nehlásí jako čekající');
+
+        $report = $this->backfill->run($this->supplierId, null, self::YEAR, false, onlyUnposted: true);
+
+        self::assertSame(0, $this->sourceEntryCount('invoice', $takenInvoice));
+        self::assertSame(0, $this->sourceEntryCount('purchase_invoice', $takenPurchase));
+        self::assertSame(1, $this->sourceEntryCount('invoice', $native));
+        self::assertSame(['invoice' => 1, 'purchase_invoice' => 1], $report['taken_over']);
+    }
+
+    /**
+     * N6: průvodce aktivací jede bez `onlyUnposted` a existující zápis přepisuje. Převzatý
+     * zápis dokladu ale nese kontaci zdroje; zůstane beze změny (hlavička i řádky).
+     */
+    public function testActivationRunDoesNotRewriteTakenOverDocumentEntry(): void
+    {
+        $clientId = $this->client('Převzatý odběratel s.r.o.');
+        $invoiceId = $this->sale('FV-BF-2098-A', $clientId, 1000.00, 210.00, 21.00);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 1210.00],
+            ['account_code' => '604', 'side' => 'credit', 'amount' => 1000.00],
+            ['account_code' => '343', 'side' => 'credit', 'amount' => 210.00],
+        ], ['entry_date' => self::YEAR . '-06-15', 'description' => 'Kontace zdroje']);
+        $this->db->pdo()->prepare("INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'invoice', 'synth|FV-A', ?)")
+            ->execute([$this->supplierId, $invoiceId]);
+        $this->db->pdo()->prepare("INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', 'synth|ZAP-A', ?)")
+            ->execute([$this->supplierId, $entryId]);
+        $before = $this->entryHeader($entryId);
+
+        $this->backfill->run($this->supplierId, null, self::YEAR, false);
+
+        self::assertSame($before, $this->entryHeader($entryId));
+        self::assertSame(1000.0, $this->sourceAccountAmount('invoice', $invoiceId, '604', 'credit'), 'kontace zdroje zůstává');
+        self::assertSame(0.0, $this->sourceAccountAmount('invoice', $invoiceId, '602', 'credit'));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array<string,mixed> */

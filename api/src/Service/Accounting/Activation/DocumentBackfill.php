@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 final class DocumentBackfill
@@ -29,6 +30,11 @@ final class DocumentBackfill
      *        existující zápis přepíše (`postDocument` → `rewriteExisting`) — to potřebuje
      *        průvodce aktivací pro zúčtování záloh, ne doúčtování: přepis vrací hlavičku
      *        (popis, posted_at/by) na generické hodnoty a smaže ruční úpravy zápisu.
+     *
+     * Doklad převzatý z jiného účetního programu ({@see TakenOverRecord}) se nezaúčtuje ani
+     * nepřepíše v žádném režimu: jeho předpis je v převzatém deníku (i když na doklad není
+     * navázaný) a nový zápis by výnos, náklad i DPH zapsal podruhé. Počet vynechaných vrací
+     * `taken_over`; počítadlo čekajících ({@see PendingBackfillCounter}) je nehlásí.
      */
     public function run(
         int $supplierId,
@@ -78,6 +84,7 @@ final class DocumentBackfill
                 AND i.status NOT IN ('draft','cancelled')
                 AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}"
                 . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i')
+                . ' AND NOT ' . TakenOverRecord::documentSql('invoice', 'i')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM invoices parent
@@ -106,6 +113,7 @@ final class DocumentBackfill
                 AND pi.status IN ('received','booked','paid'){$dateWhere}
                 AND pi.document_kind <> 'advance'"
                 . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi')
+                . ' AND NOT ' . TakenOverRecord::documentSql('purchase_invoice', 'pi')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM purchase_invoices adv
@@ -126,7 +134,13 @@ final class DocumentBackfill
         $piStmt->execute($bind);
         $purchases = $piStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $emit('Ke zpracování: ' . count($invoices) . ' vydaných + ' . count($purchases) . " přijatých faktur.\n\n");
+        $takenOver = $this->takenOverCount($invoiceBind, $bind, $dateWhere, $invoiceTypePlaceholders, $onlyUnposted);
+        $emit('Ke zpracování: ' . count($invoices) . ' vydaných + ' . count($purchases) . " přijatých faktur.\n");
+        if ($takenOver['invoice'] + $takenOver['purchase_invoice'] > 0) {
+            $emit('Převzato z jiného účetního programu, nezaúčtuje se ani nepřepíše: ' . $takenOver['invoice']
+                . ' vydaných + ' . $takenOver['purchase_invoice'] . " přijatých faktur.\n");
+        }
+        $emit("\n");
 
         $stats = [
             'invoice' => ['posted' => 0, 'updated' => 0, 'skipped' => 0, 'failed' => 0],
@@ -277,12 +291,48 @@ final class DocumentBackfill
         if ($dryRun) $emit("\n(dry-run — nic nebylo zapsáno; pro ostrý běh spusť bez --dry-run)\n");
 
         return $stats + [
+            'taken_over' => $takenOver,
             'skip_reasons' => $skipReasons,
             'document_issues' => $documentIssues,
             'balance' => ['debit_cents' => $debitCents, 'credit_cents' => $creditCents, 'balanced' => $balanced],
             'processed' => $processed,
             'cancelled' => $cancelled,
         ];
+    }
+
+    /**
+     * Převzaté doklady, které guard z dávky vynechal (týž rozsah dat a typů).
+     *
+     * @param array<string,mixed> $invoiceBind
+     * @param array<string,mixed> $bind
+     * @param list<string> $invoiceTypePlaceholders
+     * @return array{invoice:int, purchase_invoice:int}
+     */
+    private function takenOverCount(array $invoiceBind, array $bind, string $dateWhere, array $invoiceTypePlaceholders, bool $onlyUnposted): array
+    {
+        $unposted = static fn (string $type, string $alias): string => $onlyUnposted
+            ? " AND NOT EXISTS (SELECT 1 FROM journal_entries je
+                                 WHERE je.supplier_id = {$alias}.supplier_id AND je.source_type = '{$type}'
+                                   AND je.source_id = {$alias}.id AND je.reversed_by IS NULL)"
+            : '';
+        $pdo = $this->db->pdo();
+        $invoices = $pdo->prepare(
+            "SELECT COUNT(*) FROM invoices i
+              WHERE i.supplier_id = :sid AND i.status NOT IN ('draft','cancelled')
+                AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}
+                AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i') . '
+                AND ' . TakenOverRecord::documentSql('invoice', 'i') . $unposted('invoice', 'i')
+        );
+        $invoices->execute($invoiceBind);
+        $purchases = $pdo->prepare(
+            "SELECT COUNT(*) FROM purchase_invoices pi
+              WHERE pi.supplier_id = :sid AND pi.status IN ('received','booked','paid'){$dateWhere}
+                AND pi.document_kind <> 'advance'
+                AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi') . '
+                AND ' . TakenOverRecord::documentSql('purchase_invoice', 'pi') . $unposted('purchase_invoice', 'pi')
+        );
+        $purchases->execute($bind);
+        return ['invoice' => (int) $invoices->fetchColumn(), 'purchase_invoice' => (int) $purchases->fetchColumn()];
     }
 
     private function documentIssue(string $sourceType, array $doc, string $severity, string $errorCode, string $message): array

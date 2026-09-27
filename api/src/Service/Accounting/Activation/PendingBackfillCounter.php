@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Activation;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 
 final class PendingBackfillCounter
 {
@@ -31,6 +32,7 @@ final class PendingBackfillCounter
               WHERE i.supplier_id = ? AND i.status NOT IN ('draft','cancelled')
                 AND i.invoice_type IN ({$invoiceTypePlaceholders}){$docDate}
                 AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i') . "
+                AND NOT " . TakenOverRecord::documentSql('invoice', 'i') . "
                 AND NOT EXISTS (SELECT 1 FROM journal_entries je
                                  WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice'
                                    AND je.source_id = i.id AND je.reversed_by IS NULL)"
@@ -45,6 +47,7 @@ final class PendingBackfillCounter
               WHERE pi.supplier_id = ? AND pi.status IN ('received','booked','paid'){$docDate}
                 AND pi.document_kind <> 'advance'
                 AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi') . "
+                AND NOT " . TakenOverRecord::documentSql('purchase_invoice', 'pi') . "
                 AND NOT EXISTS (SELECT 1 FROM journal_entries je
                                  WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
                                    AND je.source_id = pi.id AND je.reversed_by IS NULL)"
