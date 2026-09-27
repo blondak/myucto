@@ -283,6 +283,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
       schedulePoll(id)
       return
     }
+    if (job.value?.status === 'failed' && job.value.last_error) toast.error(job.value.last_error)
     await loadRuns()
     let ok: boolean
     if (options.multiYear) {

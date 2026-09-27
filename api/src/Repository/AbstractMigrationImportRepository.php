@@ -80,17 +80,26 @@ abstract class AbstractMigrationImportRepository
         return $stmt->fetchColumn() !== false;
     }
 
-    /** @return array<string,int> klíč zdroje => target_id */
-    public function all(int $supplierId, string $kind): array
+    /**
+     * Mapa se čte po řádcích, ne přes fetchAll — u deníku jde o statisíce klíčů a výsledek
+     * dotazu by v paměti ležel dvakrát. `$keyPrefix` omezí mapu na klíče jednoho roku apod.
+     *
+     * @return array<string,int> klíč zdroje => target_id
+     */
+    public function all(int $supplierId, string $kind, ?string $keyPrefix = null): array
     {
         $column = $this->keyColumn();
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . $column . ', target_id FROM ' . $this->mapTable() . ' WHERE supplier_id = ? AND kind = ? ORDER BY ' . $column
-        );
-        $stmt->execute([$supplierId, $kind]);
+        $sql = 'SELECT ' . $column . ', target_id FROM ' . $this->mapTable() . ' WHERE supplier_id = ? AND kind = ?';
+        $params = [$supplierId, $kind];
+        if ($keyPrefix !== null) {
+            $sql .= ' AND ' . $column . ' LIKE ?';
+            $params[] = addcslashes($keyPrefix, '\\%_') . '%';
+        }
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY ' . $column);
+        $stmt->execute($params);
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$key, $id]) {
-            $out[(string) $key] = (int) $id;
+        while (($row = $stmt->fetch(PDO::FETCH_NUM)) !== false) {
+            $out[(string) $row[0]] = (int) $row[1];
         }
         return $out;
     }
@@ -196,6 +205,21 @@ abstract class AbstractMigrationImportRepository
               WHERE supplier_id = ? AND status = 'running'"
         );
         $stmt->execute([$protocol, $supplierId]);
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Běhy jobu, jehož worker spadl na fatální chybě (typicky vyčerpaná paměť). Volá je
+     * shutdown handler workeru, aby průvodce hned ukázal chybu, a ne „běží" až do dalšího převodu.
+     */
+    public function failJobRuns(int $jobId, string $error): int
+    {
+        $protocol = json_encode(['status' => 'failed', 'failure' => 'unexpected', 'error' => $error, 'steps' => []], JSON_UNESCAPED_UNICODE);
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . $this->runsTable() . " SET status = 'failed', finished_at = NOW(), protocol = COALESCE(protocol, ?)
+              WHERE job_id = ? AND status = 'running'"
+        );
+        $stmt->execute([$protocol, $jobId]);
         return $stmt->rowCount();
     }
 

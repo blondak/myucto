@@ -84,14 +84,14 @@ final class MigrationBatchRepository
     /**
      * Položky, které po sobě nechal spadlý worker ve stavu „běží", se uzavřou jako chyba.
      */
-    public function closeInterrupted(int $jobId, int $supplierId): int
+    public function closeInterrupted(int $jobId, int $supplierId, ?string $error = null): int
     {
         $stmt = $this->db->pdo()->prepare(
             "UPDATE migration_batch_items SET status = 'failed', finished_at = NOW(),
-                    error = COALESCE(error, 'Převod firmy byl přerušen (worker skončil dřív, než doběhl).')
+                    error = COALESCE(error, ?)
               WHERE job_id = ? AND supplier_id = ? AND status = 'running'"
         );
-        $stmt->execute([$jobId, $supplierId]);
+        $stmt->execute([$error ?? 'Převod firmy byl přerušen (worker skončil dřív, než doběhl).', $jobId, $supplierId]);
         return $stmt->rowCount();
     }
 

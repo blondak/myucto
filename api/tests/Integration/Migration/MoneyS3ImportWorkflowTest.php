@@ -140,6 +140,25 @@ final class MoneyS3ImportWorkflowTest extends MoneyS3ImportTestCase
         self::assertNull($this->map->pendingAutomationSnapshot($supplierId), 'Po obnovení nesmí čekat žádný snímek.');
     }
 
+    /**
+     * Worker spadlý na vyčerpané paměti uzavře ze shutdown handleru běhy svého jobu,
+     * aby průvodce ukázal chybu hned, a ne rozpracovaný běh až do dalšího převodu.
+     */
+    public function testFatalWorkerCrashFailsOnlyRunsOfItsJob(): void
+    {
+        $supplierId = $this->supplier();
+        $crashed = $this->map->startRun($supplierId, 900001, 'dry_run', [], $this->userId);
+        $other = $this->map->startRun($supplierId, 900002, 'dry_run', [], $this->userId);
+
+        self::assertSame(1, $this->map->failJobRuns(900001, 'Převod spadl na nedostatek paměti serveru.'));
+
+        $run = $this->map->findRun($crashed, $supplierId);
+        self::assertSame('failed', $run['status']);
+        self::assertSame('Převod spadl na nedostatek paměti serveru.', $run['protocol']['error']);
+        self::assertSame('running', $this->map->findRun($other, $supplierId)['status']);
+        self::assertSame(0, $this->map->failJobRuns(900001, 'znovu'), 'Uzavřený běh se nepřepisuje.');
+    }
+
     public function testMapRefusesSecondTargetForTheSameMoneyRecord(): void
     {
         $supplierId = $this->supplier();

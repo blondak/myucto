@@ -81,7 +81,15 @@ ignore_user_abort(true);
 // zůstal ve stavu running, dokud ho po čtvrthodině neuklidí reapStale() — do té doby
 // UI hlásí „Převod už běží". Otevřenou transakci (zkouška nanečisto) je nutné vrátit,
 // jinak by se s ní vrátil i zápis chyby do jobu.
-register_shutdown_function(static function () use ($pdo, $jobs, $jobId, $stderr): void {
+// Protokoly převodů (běhy) téhož jobu by jinak zůstaly „running" a průvodce by místo
+// chyby ukazoval rozpracovaný běh, dokud je nezavře další převod.
+$runRepositories = match ($source) {
+    'pohoda_import' => [\MyInvoice\Repository\PohodaImportRepository::class],
+    'premier_import' => [\MyInvoice\Repository\PremierImportRepository::class],
+    'money_s3_import', 'money_s3_batch' => [\MyInvoice\Repository\MoneyS3ImportRepository::class],
+    default => [],
+};
+register_shutdown_function(static function () use ($pdo, $jobs, $jobId, $stderr, $container, $runRepositories, $source, $row): void {
     $error = error_get_last();
     if ($error === null || !in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
         return;
@@ -89,7 +97,7 @@ register_shutdown_function(static function () use ($pdo, $jobs, $jobId, $stderr)
     $limit = (string) ini_get('memory_limit');
     ini_set('memory_limit', '-1');
     $message = str_contains($error['message'], 'Allowed memory size')
-        ? "Převod spadl na nedostatek paměti serveru (memory_limit {$limit}). Kontaktujte podporu."
+        ? "Převod spadl na nedostatek paměti serveru (PHP memory_limit {$limit}). Zvyšte memory_limit v konfiguraci PHP, nebo kontaktujte podporu."
         : 'Převod spadl na neočekávané chybě serveru. Kontaktujte podporu.';
     fwrite($stderr, "Fatal error in job #{$jobId}: {$error['message']} in {$error['file']}:{$error['line']}\n");
     try {
@@ -99,6 +107,12 @@ register_shutdown_function(static function () use ($pdo, $jobs, $jobId, $stderr)
         $stmt = $pdo->prepare('SELECT status FROM import_jobs WHERE id = ?');
         $stmt->execute([$jobId]);
         if (in_array($stmt->fetchColumn(), ['queued', 'running'], true)) {
+            foreach ($runRepositories as $class) {
+                $container->get($class)->failJobRuns($jobId, $message);
+            }
+            if ($source === 'money_s3_batch') {
+                $container->get(\MyInvoice\Repository\MigrationBatchRepository::class)->closeInterrupted($jobId, (int) $row['supplier_id'], $message);
+            }
             $jobs->appendLog($jobId, $message);
             $jobs->markFailed($jobId, $message);
         }
