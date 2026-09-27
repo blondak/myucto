@@ -237,6 +237,9 @@ final class PohodaPayrollCatalog
      * - `net_meal_deduction` / `net_other_deduction` = dobrovolná srážka. Víc významů
      *   pro srážky import docházky nezná a hodnoty téhož významu nesčítá, takže každý
      *   z nich má v sešitu právě jeden sloupec, do kterého se srážky sčítají.
+     *   `net_other_deduction` (např. S07 „Srážka zadaná částkou") import zakládá
+     *   s druhem `imported`, ne jako dohodu podle OZ: ta za ní doložená není
+     *   a PAMICA ji do JMHZ 10116 nehlásí ({@see \MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService}).
      *
      * @param array<string,mixed>|string $catalog řádek číselníku `sMZsrazky`; samotné
      *        číslo složky je zkratka pro případ, kdy o zákonnosti rozhodl volající už

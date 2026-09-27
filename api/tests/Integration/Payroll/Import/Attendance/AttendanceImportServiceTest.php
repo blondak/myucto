@@ -283,7 +283,9 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertSame(['created' => 1, 'updated' => 0, 'unchanged' => 0, 'conflicts' => []], $first['deductions']);
         $reference = 'attendance:' . self::PERIOD . ":{$this->petr['employee_id']}:other";
         $agreement = $this->agreement($reference);
-        self::assertSame('other', $agreement['deduction_kind']);
+        // Obecná srážka z podkladů není doložená dohoda podle OZ, do JMHZ 10116 nepatří;
+        // klíč reference zůstává `other`, aby opakovaný import našel starší dohody.
+        self::assertSame('imported', $agreement['deduction_kind']);
         self::assertSame('active', $agreement['status']);
         self::assertSame(30000, (int) $agreement['requested_minor']);
         self::assertSame(30000, (int) $agreement['total_limit_minor']);

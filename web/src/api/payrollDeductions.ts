@@ -7,6 +7,7 @@ export type DeductionAgreementKind =
   | 'contribution'
   | 'damage'
   | 'other'
+  | 'imported'
 
 /**
  * Právní titul srážky: dohoda o srážkách ze mzdy (§ 146 písm. b) ZP), nebo
@@ -44,7 +45,7 @@ export type DeductionAgreementCommand =
   | 'reopen'
 
 export const deductionAgreementKinds: DeductionAgreementKind[] = [
-  'advance', 'meal', 'contribution', 'damage', 'other',
+  'advance', 'meal', 'contribution', 'damage', 'other', 'imported',
 ]
 
 /** Pásmo 1–9 patří zákonným a exekučním srážkám (backend to vynucuje). */

@@ -912,7 +912,8 @@
         "1926_payroll_standby_rate.sql",
         "1927_payroll_wage_statements.sql",
         "1930_payroll_employment_start_estimated.sql",
-        "1931_payroll_component_vacation_settlement_mapping.sql"
+        "1931_payroll_component_vacation_settlement_mapping.sql",
+        "1932_payroll_deduction_kind_imported.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -8266,7 +8267,7 @@
                 "basis_points": "int(10) unsigned NULL DEFAULT NULL",
                 "change_kind": "enum('created','updated','activated','paused','resumed','ended','cancelled','reopened') NOT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
-                "deduction_kind": "enum('advance','meal','contribution','damage','other') NOT NULL",
+                "deduction_kind": "enum('advance','meal','contribution','damage','other','imported') NOT NULL",
                 "delivered_on": "date NULL DEFAULT NULL",
                 "effective_from": "date NOT NULL",
                 "employee_id": "bigint(20) unsigned NOT NULL",
@@ -8313,7 +8314,7 @@
                 "basis_points": "int(10) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
-                "deduction_kind": "enum('advance','meal','contribution','damage','other') NOT NULL",
+                "deduction_kind": "enum('advance','meal','contribution','damage','other','imported') NOT NULL",
                 "delivered_on": "date NULL DEFAULT NULL",
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",

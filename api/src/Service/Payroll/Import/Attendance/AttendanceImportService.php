@@ -75,10 +75,20 @@ final class AttendanceImportService
     private const WAGE_BASE_KINDS = ['hourly_wage', 'task_wage'];
 
     /**
-     * Srážky z podkladů = dohody o srážce na importovaný měsíc. Druh dohody
-     * podle významu sloupce; pořadí za ručně sjednanými dohodami.
+     * Srážky z podkladů = dohody o srážce na importovaný měsíc; pořadí za ručně
+     * sjednanými dohodami. Význam sloupce => [klíč v referenci dohody, druh].
+     *
+     * Obecná „Srážka" z podkladů (v převodu PAMICA složka zadaná částkou, např.
+     * S07) má druh `imported`, ne „Jiná srážka": dohoda o srážkách podle OZ za
+     * ní doložená není (typicky srážky za stravování z docházkového systému),
+     * takže do JMHZ 10116 nepatří ({@see DeductionAgreementTerms::reportedAsWageDeduction()}).
+     * Klíč reference zůstává `other`, aby opakovaný import našel dohody založené
+     * dřív a nezaložil vedle nich druhé.
      */
-    private const DEDUCTION_KINDS = ['net_meal_deduction' => 'meal', 'net_other_deduction' => 'other'];
+    private const DEDUCTION_KINDS = [
+        'net_meal_deduction' => ['meal', 'meal'],
+        'net_other_deduction' => ['other', 'imported'],
+    ];
     private const DEDUCTION_PRIORITY = 500;
 
     public function __construct(
@@ -1351,12 +1361,13 @@ final class AttendanceImportService
         $wanted = [];
         foreach ($assigned as $item) {
             foreach ($item['person']['_deductions'] ?? [] as $meaning => $deduction) {
-                $kind = self::DEDUCTION_KINDS[(string) $meaning] ?? null;
-                if ($kind === null) {
+                [$referenceKey, $kind] = self::DEDUCTION_KINDS[(string) $meaning] ?? [null, null];
+                if ($referenceKey === null) {
                     continue;
                 }
                 $employeeId = (int) $item['employment']['employee_id'];
-                $entry = $wanted[$employeeId][$kind] ?? [
+                $entry = $wanted[$employeeId][$referenceKey] ?? [
+                    'kind' => $kind,
                     'amount_minor' => 0,
                     'sources' => [],
                     'key' => (string) $item['person']['key'],
@@ -1364,19 +1375,20 @@ final class AttendanceImportService
                 ];
                 $entry['amount_minor'] += (int) $deduction['amount_minor'];
                 $entry['sources'][] = (string) $deduction['source'];
-                $wanted[$employeeId][$kind] = $entry;
+                $wanted[$employeeId][$referenceKey] = $entry;
             }
         }
 
         $report = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'conflicts' => []];
         foreach ($wanted as $employeeId => $kinds) {
-            foreach ($kinds as $kind => $entry) {
+            foreach ($kinds as $referenceKey => $entry) {
+                $kind = $entry['kind'];
                 $conflict = static fn (string $reason): array => [
                     'key' => $entry['key'],
                     'display_name' => $entry['display_name'],
                     'reason' => $reason,
                 ];
-                $reference = "attendance:{$period}:{$employeeId}:{$kind}";
+                $reference = "attendance:{$period}:{$employeeId}:{$referenceKey}";
                 try {
                     $terms = DeductionAgreementTerms::fromRequest([
                         'agreement_reference' => $reference,
@@ -1390,7 +1402,9 @@ final class AttendanceImportService
                         'valid_to' => $periodEnd,
                         'note' => mb_substr(
                             "Import docházky za {$period} (" . implode(', ', $entry['sources']) . '). '
-                            . 'Srážka na základě dohody o srážkách ze mzdy (§ 146 písm. b) zákoníku práce).',
+                            . ($kind === 'meal'
+                                ? 'Srážka na základě dohody o srážkách ze mzdy (§ 146 písm. b) zákoníku práce).'
+                                : 'Srážka převzatá z podkladů; dohoda o srážkách podle občanského zákoníku není doložená.'),
                             0,
                             500,
                         ),

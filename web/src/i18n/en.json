@@ -8945,7 +8945,8 @@
         "meal": "Meals",
         "contribution": "Contribution",
         "damage": "Damage compensation",
-        "other": "Other deduction"
+        "other": "Other deduction",
+        "imported": "Deduction from imported records (no civil-code agreement)"
       },
       "status": {
         "draft": "Draft",

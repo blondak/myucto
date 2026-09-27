@@ -8945,7 +8945,8 @@
         "meal": "Stravování",
         "contribution": "Příspěvek",
         "damage": "Náhrada škody",
-        "other": "Jiná srážka"
+        "other": "Jiná srážka",
+        "imported": "Srážka z podkladů (bez dohody podle OZ)"
       },
       "status": {
         "draft": "Návrh",

@@ -16,7 +16,12 @@ namespace MyInvoice\Service\Payroll\Net;
  */
 final readonly class DeductionAgreementTerms
 {
-    public const KINDS = ['advance', 'meal', 'contribution', 'damage', 'other'];
+    /**
+     * `imported` = srážka převzatá z podkladů (import docházky, převod PAMICA),
+     * za kterou není doložená dohoda o srážkách podle OZ; viz
+     * {@see self::reportedAsWageDeduction()}.
+     */
+    public const KINDS = ['advance', 'meal', 'contribution', 'damage', 'other', 'imported'];
 
     /**
      * Právní titul srážky.
@@ -78,12 +83,17 @@ final readonly class DeductionAgreementTerms
      * zaměstnance na závodní stravování (§ 236 ZP) vedou tytéž pokyny jako
      * samostatný druh (10352, vedle dohody podle OZ 10350), do 10116 tedy nepatří;
      * nepatří tam ani srážky ze zákona podle § 147 odst. 1 ZP (ani výkon
-     * rozhodnutí, ani dohoda). Výkon rozhodnutí a insolvence řeší exekuční
-     * evidence mimo tuto třídu.
+     * rozhodnutí, ani dohoda). Nepatří tam ani srážka převzatá z podkladů
+     * docházky (`imported`): dohoda podle OZ za ní doložená není, typicky jde
+     * o srážky za stravování z docházkového systému a PAMICA ji do 10116
+     * nehlásí. Výkon rozhodnutí a insolvence řeší exekuční evidence mimo tuto
+     * třídu.
      */
     public static function reportedAsWageDeduction(string $deductionKind, string $legalBasis): bool
     {
-        return !self::isStatutory($legalBasis) && $deductionKind !== 'meal';
+        return !self::isStatutory($legalBasis)
+            && $deductionKind !== 'meal'
+            && $deductionKind !== 'imported';
     }
 
     /**

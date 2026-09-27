@@ -273,6 +273,7 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         foreach ([
             'obědy' => [['deduction_kind' => 'meal'], false],
             '§ 147' => [['deduction_kind' => 'advance', 'legal_basis' => 'zp_147_1_c'], false],
+            'srážka z podkladů docházky (PAMICA S07)' => [['deduction_kind' => 'imported'], false],
             'dohoda podle OZ' => [['deduction_kind' => 'other'], true],
         ] as $label => [$agreement, $expected]) {
             $source = $this->source();
