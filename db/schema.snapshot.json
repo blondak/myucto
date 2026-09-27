@@ -911,7 +911,8 @@
         "1925_payroll_small_lifecycle_deadlines.sql",
         "1926_payroll_standby_rate.sql",
         "1927_payroll_wage_statements.sql",
-        "1930_payroll_employment_start_estimated.sql"
+        "1930_payroll_employment_start_estimated.sql",
+        "1931_payroll_component_vacation_settlement_mapping.sql"
     ],
     "tables": {
         "accounting_archives": {
