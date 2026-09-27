@@ -20,7 +20,7 @@
     }
     .warn-title { font-weight: bold; font-size: 9pt; margin-bottom: 1mm; }
     .warn-line { font-size: 8pt; margin-top: 0.5mm; }
-    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
     table.book thead th {
         font-size: 7pt;
         font-weight: normal;
@@ -39,9 +39,15 @@
     }
     .num { text-align: right; }
     .row-unclassified td { background-color: #fef3c7; }
-    .col-date { width: 18mm; }
-    .col-doc { width: 28mm; }
-    .col-partner { width: 45mm; }
+    /* Pevné šířky všech sloupců: dlouhá sestava se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 7%; }
+    .col-doc { width: 10%; }
+    .col-partner { width: 17%; }
+    .col-desc { width: 21%; }
+    .col-num { width: 10%; }
+    .col-balance { width: 11%; }
+    .col-bucket { width: 14%; }
     .totals-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; margin-bottom: 1mm; }
     table.totals { width: 60%; border-collapse: collapse; }
     table.totals td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; }
@@ -100,24 +106,24 @@
             <th class="thl col-date">Datum</th>
             <th class="thl col-doc">Doklad</th>
             <th class="thl col-partner">Protistrana</th>
-            <th class="thl">Popis</th>
-            <th>Příjem</th>
-            <th>Výdaj</th>
-            <th>Zůstatek</th>
-            <th class="thl">Klasifikace</th>
+            <th class="thl col-desc">Popis</th>
+            <th class="col-num">Příjem</th>
+            <th class="col-num">Výdaj</th>
+            <th class="col-balance">Zůstatek</th>
+            <th class="thl col-bucket">Klasifikace</th>
         </tr>
     </thead>
     <tbody>
         {% for row in rows %}
             <tr class="{{ row.unclassified ? 'row-unclassified' : '' }}">
-                <td>{{ row.date|cz_date }}</td>
-                <td>{{ row.doc_no }}</td>
-                <td>{{ row.partner|slice(0, 40) }}</td>
-                <td>{{ row.description|slice(0, 40) }}</td>
-                <td class="num">{{ row.income is not null ? row.income|cz_money : '' }}</td>
-                <td class="num">{{ row.expense is not null ? row.expense|cz_money : '' }}</td>
-                <td class="num">{{ row.running_balance|cz_money }}</td>
-                <td>{{ bucket_labels[row.bucket] ?? row.bucket }}</td>
+                <td class="col-date">{{ row.date|cz_date }}</td>
+                <td class="col-doc">{{ row.doc_no }}</td>
+                <td class="col-partner">{{ row.partner|slice(0, 40) }}</td>
+                <td class="col-desc">{{ row.description|slice(0, 40) }}</td>
+                <td class="num col-num">{{ row.income is not null ? row.income|cz_money : '' }}</td>
+                <td class="num col-num">{{ row.expense is not null ? row.expense|cz_money : '' }}</td>
+                <td class="num col-balance">{{ row.running_balance|cz_money }}</td>
+                <td class="col-bucket">{{ bucket_labels[row.bucket] ?? row.bucket }}</td>
             </tr>
         {% endfor %}
     </tbody>

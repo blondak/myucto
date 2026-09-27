@@ -96,6 +96,39 @@ final class ChunkedHtmlWriterTest extends TestCase
         self::assertSame(30, substr_count(implode('', $mpdf->bodyWrites), 'class="entry-head"'));
     }
 
+    /** Součtový řádek v <tfoot> zůstane v posledním kusu, i když na něj připadne hranice dávky. */
+    public function testTableFooterStaysInLastPiece(): void
+    {
+        $rows = '';
+        for ($i = 1; $i <= 10; $i++) {
+            $rows .= '<tr><td class="c1">' . $i . '</td><td class="c2">řádek</td></tr>';
+        }
+        $html = '<html><head><style>.c1{width:30%;} .c2{width:70%;}</style></head><body>'
+            . '<table class="book"><thead><tr><th class="c1">A</th><th class="c2">B</th></tr></thead>'
+            . '<tbody>' . $rows . '</tbody><tfoot><tr><td>CELKEM</td><td>10</td></tr></tfoot></table>'
+            . '<p>konec</p></body></html>';
+        $mpdf = self::recordingMpdf();
+
+        ChunkedHtmlWriter::write($mpdf, $html, 5);
+
+        self::assertCount(3, $mpdf->bodyWrites);
+        self::assertSame('<p>konec</p>', $mpdf->bodyWrites[2]);
+        foreach ($mpdf->bodyWrites as $write) {
+            self::assertSame(substr_count($write, '<table'), substr_count($write, '</table>'));
+            self::assertStringNotContainsString('<tfoot></tbody>', $write);
+        }
+        self::assertMatchesRegularExpression('/<tr><td class="c1">10<\/td>.*<\/tbody><tfoot><tr><td>CELKEM<\/td>/', $mpdf->bodyWrites[1]);
+        self::assertSame(['<table class="book"><thead><tr><th class="c1">A</th><th class="c2">B</th></tr></thead></table>', ''], $mpdf->headers);
+    }
+
+    /** HTML bez <body> (sestavy skládané v PHP): styl jde do CSS, ne jako text do těla. */
+    public function testHtmlWithoutBodyDoesNotWriteStyleIntoBody(): void
+    {
+        $mpdf = self::recordingMpdf();
+        ChunkedHtmlWriter::write($mpdf, '<style>td{color:#000}</style><h1>Kniha</h1><table><tr><td>1</td></tr></table>');
+        self::assertSame(['<h1>Kniha</h1><table><tr><td>1</td></tr></table>'], $mpdf->bodyWrites);
+    }
+
     public function testShortTableIsWrittenUntouched(): void
     {
         $html = self::syntheticJournalHtml(5);

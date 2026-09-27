@@ -8,6 +8,7 @@ use Mpdf\Mpdf;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TripRepository;
+use MyInvoice\Service\Pdf\ChunkedHtmlWriter;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -23,6 +24,9 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 final class TripExportService
 {
     private const HEADERS = ['Datum', 'Auto', 'Odkud', 'Kam', 'Účel cesty', 'Kategorie', 'Tachometr od', 'Tachometr do', 'Ujeto (km)'];
+
+    /** Pevné šířky sloupců v % (součet 100): dlouhá kniha se sází po kusech, které musí lícovat. */
+    private const PDF_WIDTHS = [14, 8, 11, 11, 24, 9, 7, 7, 9];
 
     public function __construct(
         private readonly TripRepository $trips,
@@ -142,7 +146,8 @@ final class TripExportService
         ]);
         $mpdf->SetTitle('Kniha jízd' . ($period !== '' ? ' ' . $period : ''));
         $mpdf->SetCreator('MyÚčto.cz');
-        $mpdf->WriteHTML($this->pdfHtml($rows, $period, $supplier));
+        // Kniha jízd za rok má tisíce řádků: po kusech kvůli pcre.backtrack_limit i paměti.
+        ChunkedHtmlWriter::write($mpdf, $this->pdfHtml($rows, $period, $supplier));
         return $mpdf->Output('', 'S');
     }
 
@@ -159,13 +164,14 @@ final class TripExportService
             td.r,th.r{text-align:right}
             tr.sub td{background:#f5f5f5;font-style:italic;font-weight:bold}
             tr.tot td{font-weight:bold;border-top:1px solid #555}
+            ' . self::widthCss(self::PDF_WIDTHS) . '
         </style>';
 
         $head = '<h1>Kniha jízd</h1><p class="sub">' . $e($supplier)
             . ($period !== '' ? ' &nbsp;·&nbsp; Období: ' . $e($period) : '') . '</p>';
 
-        $h = '<tr><th>Datum</th><th>Auto</th><th>Odkud</th><th>Kam</th><th>Účel cesty</th>'
-           . '<th>Kategorie</th><th class="r">Tach. od</th><th class="r">Tach. do</th><th class="r">Ujeto (km)</th></tr>';
+        $h = '<thead><tr><th class="w0">Datum</th><th class="w1">Auto</th><th class="w2">Odkud</th><th class="w3">Kam</th><th class="w4">Účel cesty</th>'
+           . '<th class="w5">Kategorie</th><th class="r w6">Tach. od</th><th class="r w7">Tach. do</th><th class="r w8">Ujeto (km)</th></tr></thead>';
 
         $body = ''; $total = 0.0; $perCar = 0.0; $currentCar = null;
         foreach ($rows as $t) {
@@ -176,15 +182,15 @@ final class TripExportService
             }
             $currentCar = $car;
             $body .= '<tr>'
-                . '<td>' . $e($this->dateCell($t)) . '</td>'
-                . '<td>' . $e($car) . '</td>'
-                . '<td>' . $e($t['origin'] ?? '') . '</td>'
-                . '<td>' . $e($t['destination'] ?? '') . '</td>'
-                . '<td>' . $e($t['purpose'] ?? '') . '</td>'
-                . '<td>' . $e($t['category_label'] ?? '') . '</td>'
-                . '<td class="r">' . ($t['odometer_start'] !== null ? $e($t['odometer_start']) : '') . '</td>'
-                . '<td class="r">' . ($t['odometer_end'] !== null ? $e($t['odometer_end']) : '') . '</td>'
-                . '<td class="r">' . $e($this->km((float) $t['distance_km'])) . '</td>'
+                . '<td class="w0">' . $e($this->dateCell($t)) . '</td>'
+                . '<td class="w1">' . $e($car) . '</td>'
+                . '<td class="w2">' . $e($t['origin'] ?? '') . '</td>'
+                . '<td class="w3">' . $e($t['destination'] ?? '') . '</td>'
+                . '<td class="w4">' . $e($t['purpose'] ?? '') . '</td>'
+                . '<td class="w5">' . $e($t['category_label'] ?? '') . '</td>'
+                . '<td class="r w6">' . ($t['odometer_start'] !== null ? $e($t['odometer_start']) : '') . '</td>'
+                . '<td class="r w7">' . ($t['odometer_end'] !== null ? $e($t['odometer_end']) : '') . '</td>'
+                . '<td class="r w8">' . $e($this->km((float) $t['distance_km'])) . '</td>'
                 . '</tr>';
             $total += (float) $t['distance_km'];
             $perCar += (float) $t['distance_km'];
@@ -196,7 +202,17 @@ final class TripExportService
             $body = '<tr><td colspan="9" style="text-align:center;color:#888;padding:12px">Žádné jízdy ve zvoleném období.</td></tr>';
         }
 
-        return $css . $head . '<table>' . $h . $body . '</table>';
+        return '<html><head>' . $css . '</head><body>' . $head . '<table>' . $h . '<tbody>' . $body . '</tbody></table></body></html>';
+    }
+
+    /** @param list<int> $widths */
+    private static function widthCss(array $widths): string
+    {
+        $css = '';
+        foreach ($widths as $i => $w) {
+            $css .= '.w' . $i . '{width:' . $w . '%}';
+        }
+        return $css;
     }
 
     private function pdfSubtotalRow(string $car, float $sum): string

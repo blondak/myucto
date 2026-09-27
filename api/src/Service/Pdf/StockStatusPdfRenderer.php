@@ -16,7 +16,8 @@ final class StockStatusPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Stav zásob');
         $this->withPageNumbers($mpdf, 'Stav zásob');
-        $mpdf->WriteHTML($body);
+        // Dlouhý seznam po kusech kvůli pcre.backtrack_limit i paměti (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

@@ -20,7 +20,7 @@
         padding: 1mm 0;
         border-bottom: 0.5pt solid #999;
     }
-    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
     table.book thead th {
         font-size: 7pt;
         font-weight: normal;
@@ -69,14 +69,16 @@
         margin-top: 6mm;
         font-style: italic;
     }
-    .col-date { width: 17mm; }
-    .col-doc { width: 22mm; }
-    .col-desc { width: 50mm; }
-    .col-num { width: 22mm; }
-    .col-partner { width: 50mm; }
-    .col-dic { width: 18mm; }
-    .col-orig { width: 22mm; }
-    .col-kh { width: 12mm; }
+    /* Pevné šířky všech sloupců: dlouhá sestava se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 6%; }
+    .col-doc { width: 8%; }
+    .col-desc { width: 15%; }
+    .col-num { width: 8%; }
+    .col-partner { width: 15%; }
+    .col-dic { width: 7%; }
+    .col-orig { width: 8%; }
+    .col-kh { width: 5%; }
 </style>
 </head>
 <body>
@@ -120,33 +122,33 @@
                 <th class="col-partner">Partner</th>
                 <th class="col-dic">DIČ</th>
                 <th class="col-orig">Orig.<br>číslo dokladu</th>
-                <th class="col-orig">Orig.<br>datum plnění</th>
+                <th class="col-date">Orig.<br>datum plnění</th>
                 <th class="col-kh">KH</th>
             </tr>
         </thead>
         <tbody>
             {% for row in section.rows %}
                 <tr class="{{ row.is_draft ? 'row-draft' : '' }}">
-                    <td>
+                    <td class="col-date">
                         {{ row.tax_date|cz_date }}
                         {% if row.claim_basis == 'received_at' %}
                             <br><span class="claim-shift">* {{ row.claim_date|cz_date }}</span>
                         {% endif %}
                     </td>
-                    <td>{{ row.accounting_date|cz_date }}</td>
-                    <td>
+                    <td class="col-date">{{ row.accounting_date|cz_date }}</td>
+                    <td class="col-doc">
                         {% if row.is_draft %}<span class="draft-badge">KONCEPT</span>{% endif %}
                         {{ row.direction == 'issued' ? 'VF' : 'PF' }} {{ row.doc_number }}
                     </td>
-                    <td>{{ row.description|slice(0, 60) }}</td>
-                    <td class="num">{{ row.base|cz_money }}</td>
-                    <td class="num">{{ row.vat|cz_money }}</td>
-                    <td class="num">{{ row.total|cz_money }}</td>
-                    <td>{{ row.counterparty_name|slice(0, 32) }}</td>
-                    <td>{{ row.counterparty_dic }}</td>
-                    <td>{{ row.original_doc_number ?? '' }}</td>
-                    <td>{{ row.tax_date|cz_date }}</td>
-                    <td>{{ row.kh_section ?? '' }}</td>
+                    <td class="col-desc">{{ row.description|slice(0, 60) }}</td>
+                    <td class="num col-num">{{ row.base|cz_money }}</td>
+                    <td class="num col-num">{{ row.vat|cz_money }}</td>
+                    <td class="num col-num">{{ row.total|cz_money }}</td>
+                    <td class="col-partner">{{ row.counterparty_name|slice(0, 32) }}</td>
+                    <td class="col-dic">{{ row.counterparty_dic }}</td>
+                    <td class="col-orig">{{ row.original_doc_number ?? '' }}</td>
+                    <td class="col-date">{{ row.tax_date|cz_date }}</td>
+                    <td class="col-kh">{{ row.kh_section ?? '' }}</td>
                 </tr>
             {% endfor %}
         </tbody>

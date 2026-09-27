@@ -57,7 +57,9 @@ final class DphBookPdfRenderer
         $mpdf->SetTitle('Kniha DPH ' . $period);
         $mpdf->SetCreator('MyÚčto.cz');
 
-        $mpdf->WriteHTML($body);
+        // Rok velké firmy jsou desítky tisíc řádků: po kusech kvůli pcre.backtrack_limit
+        // i paměti (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 

@@ -49,9 +49,10 @@ final class ChunkedHtmlWriter
             }
         }
 
-        $body = $html;
         if (preg_match('/<body\b[^>]*>(.*)<\/body>/is', $html, $bodyMatch)) {
             $body = $bodyMatch[1];
+        } else {
+            $body = (string) preg_replace('/<style\b[^>]*>.*?<\/style>/is', '', $html);
         }
 
         // Rozdělí tělo na střídavá "strukturní" a "<tr>…</tr>" místa se zachováním
@@ -71,6 +72,8 @@ final class ChunkedHtmlWriter
         $thead = '';
         $inThead = false;
         $hasTbody = false;
+        // Za </tbody> (tedy v <tfoot>) se už nedělí: součtový řádek patří k poslednímu kusu.
+        $sealed = false;
         // Rozdělená tabulka nese hlavičku sloupců jako hlavičku stránky, ne jako <thead>
         // každého kusu, jinak by se hlavička opakovala uprostřed stránky na každém švu.
         $pagedHeader = false;
@@ -87,12 +90,12 @@ final class ChunkedHtmlWriter
                     $mpdf->WriteHTML($buffer . $head, HTMLParserMode::HTML_BODY);
                     $mpdf->SetHTMLHeader('');
                     $pagedHeader = false;
-                    self::trackStructure($head, $tableOpen, $thead, $inThead, $hasTbody);
+                    self::trackStructure($head, $tableOpen, $thead, $inThead, $hasTbody, $sealed);
                     $part = substr($part, $close + 8);
                     $buffer = '';
                     $rowsInBuffer = 0;
                 }
-                self::trackStructure($part, $tableOpen, $thead, $inThead, $hasTbody);
+                self::trackStructure($part, $tableOpen, $thead, $inThead, $hasTbody, $sealed);
                 $buffer .= $part;
                 continue;
             }
@@ -106,11 +109,13 @@ final class ChunkedHtmlWriter
                     $mpdf->WriteHTML($buffer, HTMLParserMode::HTML_BODY);
                     $buffer = '';
                     $rowsInBuffer = 0;
-                } elseif ($splitBefore === null || preg_match($splitBefore, $part) === 1 || $rowsInBuffer >= 4 * $rowsPerChunk) {
+                } elseif (!$sealed && ($splitBefore === null || preg_match($splitBefore, $part) === 1 || $rowsInBuffer >= 4 * $rowsPerChunk)) {
                     $mpdf->WriteHTML($buffer . ($hasTbody ? '</tbody>' : '') . '</table>', HTMLParserMode::HTML_BODY);
                     if (!$pagedHeader && $thead !== '') {
                         // Platí od další stránky; ta rozepsaná už hlavičku sloupců má z <thead>.
                         $mpdf->setAutoTopMargin = 'stretch';
+                        // Tělo navazuje těsně pod hlavičkou sloupců jako pod <thead>, bez mezery.
+                        $mpdf->autoMarginPadding = 0;
                         $mpdf->SetHTMLHeader($tableOpen . $thead . '</table>');
                         $pagedHeader = true;
                     }
@@ -128,9 +133,9 @@ final class ChunkedHtmlWriter
     }
 
     /** Projde tagy tabulky ve strukturní části (ta je malá — mezi řádky) a posune stav. */
-    private static function trackStructure(string $part, ?string &$tableOpen, string &$thead, bool &$inThead, bool &$hasTbody): void
+    private static function trackStructure(string $part, ?string &$tableOpen, string &$thead, bool &$inThead, bool &$hasTbody, bool &$sealed): void
     {
-        if (!preg_match_all('/<table\b[^>]*>|<\/table>|<thead\b[^>]*>|<\/thead>|<tbody\b[^>]*>/i', $part, $m, PREG_OFFSET_CAPTURE)) {
+        if (!preg_match_all('/<table\b[^>]*>|<\/table>|<thead\b[^>]*>|<\/thead>|<tbody\b[^>]*>|<\/tbody>|<tfoot\b[^>]*>/i', $part, $m, PREG_OFFSET_CAPTURE)) {
             if ($inThead) {
                 $thead .= $part;
             }
@@ -148,17 +153,21 @@ final class ChunkedHtmlWriter
                 $thead = '';
                 $inThead = false;
                 $hasTbody = false;
+                $sealed = false;
             } elseif ($lower === '</table>') {
                 $tableOpen = null;
                 $thead = '';
                 $inThead = false;
                 $hasTbody = false;
+                $sealed = false;
             } elseif (str_starts_with($lower, '<thead')) {
                 $inThead = true;
                 $thead = $tag;
             } elseif ($lower === '</thead>') {
                 $thead .= $tag;
                 $inThead = false;
+            } elseif ($lower === '</tbody>' || str_starts_with($lower, '<tfoot')) {
+                $sealed = true;
             } else {
                 $hasTbody = true;
             }

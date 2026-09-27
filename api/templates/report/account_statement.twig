@@ -13,7 +13,7 @@
     .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
     .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
     .opening-line { font-size: 9pt; font-weight: bold; margin-bottom: 2mm; }
-    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
     table.book thead th {
         font-size: 7pt;
         font-weight: normal;
@@ -38,9 +38,12 @@
         border-bottom: 0.5pt solid #333;
     }
     .num { text-align: right; }
-    .col-date { width: 18mm; }
-    .col-doc { width: 30mm; }
-    .col-num { width: 26mm; }
+    /* Pevné šířky všech sloupců: dlouhá sestava se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 7%; }
+    .col-doc { width: 11%; }
+    .col-desc { width: 49%; }
+    .col-num { width: 11%; }
 </style>
 </head>
 <body>
@@ -76,7 +79,7 @@
         <tr>
             <th class="thl col-date">Datum</th>
             <th class="thl col-doc">Doklad</th>
-            <th class="thl">Popis</th>
+            <th class="thl col-desc">Popis</th>
             <th class="col-num">MD</th>
             <th class="col-num">D</th>
             <th class="col-num">Zůstatek</th>
@@ -85,12 +88,12 @@
     <tbody>
         {% for item in items %}
             <tr>
-                <td>{{ item.entry_date|cz_date }}</td>
-                <td>{{ item.document_no }}</td>
-                <td>{{ item.description|slice(0, 70) }}</td>
-                <td class="num">{{ item.side == 'debit' ? item.amount|cz_money : '' }}</td>
-                <td class="num">{{ item.side == 'credit' ? item.amount|cz_money : '' }}</td>
-                <td class="num">{{ item.balance|cz_money }}</td>
+                <td class="col-date">{{ item.entry_date|cz_date }}</td>
+                <td class="col-doc">{{ item.document_no }}</td>
+                <td class="col-desc">{{ item.description|slice(0, 70) }}</td>
+                <td class="num col-num">{{ item.side == 'debit' ? item.amount|cz_money : '' }}</td>
+                <td class="num col-num">{{ item.side == 'credit' ? item.amount|cz_money : '' }}</td>
+                <td class="num col-num">{{ item.balance|cz_money }}</td>
             </tr>
         {% endfor %}
     </tbody>

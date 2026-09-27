@@ -8,6 +8,7 @@ use Mpdf\Mpdf;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FuelingRepository;
+use MyInvoice\Service\Pdf\ChunkedHtmlWriter;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -23,6 +24,9 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 final class FuelingExportService
 {
     private const HEADERS = ['Datum', 'Auto', 'Palivo', 'Množství', 'Jedn. cena', 'Cena bez DPH', 'Cena s DPH', 'Tachometr', 'Místo / síť'];
+
+    /** Pevné šířky sloupců v % (součet 100): dlouhá evidence se sází po kusech, které musí lícovat. */
+    private const PDF_WIDTHS = [12, 8, 7, 9, 8, 10, 12, 9, 25];
 
     public function __construct(
         private readonly FuelingRepository $fuelings,
@@ -114,7 +118,8 @@ final class FuelingExportService
         ]);
         $mpdf->SetTitle('Tankování' . ($period !== '' ? ' ' . $period : ''));
         $mpdf->SetCreator('MyÚčto.cz');
-        $mpdf->WriteHTML($this->pdfHtml($rows, $period, $supplier));
+        // Tankování za rok má tisíce řádků: po kusech kvůli pcre.backtrack_limit i paměti.
+        ChunkedHtmlWriter::write($mpdf, $this->pdfHtml($rows, $period, $supplier));
         return $mpdf->Output('', 'S');
     }
 
@@ -130,26 +135,27 @@ final class FuelingExportService
             td{padding:2px 4px;border:0.5px solid #ccc}
             td.r,th.r{text-align:right}
             tr.tot td{font-weight:bold;border-top:1px solid #555}
+            ' . self::widthCss(self::PDF_WIDTHS) . '
         </style>';
         $head = '<h1>Tankování</h1><p class="sub">' . $e($supplier)
             . ($period !== '' ? ' &nbsp;·&nbsp; Období: ' . $e($period) : '') . '</p>';
-        $h = '<tr><th>Datum</th><th>Auto</th><th>Palivo</th><th class="r">Množství</th>'
-           . '<th class="r">Jedn. cena</th><th class="r">Cena bez DPH</th><th class="r">Cena s DPH</th>'
-           . '<th class="r">Tachometr</th><th>Místo / síť</th></tr>';
+        $h = '<thead><tr><th class="w0">Datum</th><th class="w1">Auto</th><th class="w2">Palivo</th><th class="r w3">Množství</th>'
+           . '<th class="r w4">Jedn. cena</th><th class="r w5">Cena bez DPH</th><th class="r w6">Cena s DPH</th>'
+           . '<th class="r w7">Tachometr</th><th class="w8">Místo / síť</th></tr></thead>';
 
         $body = ''; $total = 0.0; $totalBase = 0.0;
         foreach ($rows as $t) {
             $base = $t['amount_without_vat'] !== null ? (float) $t['amount_without_vat'] : null;
             $body .= '<tr>'
-                . '<td>' . $e($this->dateCell($t)) . '</td>'
-                . '<td>' . $e($t['car_registration'] ?? '') . '</td>'
-                . '<td>' . $e($t['fuel_type'] ?? '') . '</td>'
-                . '<td class="r">' . ($t['quantity'] !== null ? $e($this->num((float) $t['quantity']) . ' ' . ((string) ($t['unit'] ?? 'l') ?: 'l')) : '') . '</td>'
-                . '<td class="r">' . ($t['unit_price'] !== null ? $e($this->num((float) $t['unit_price'])) : '') . '</td>'
-                . '<td class="r">' . ($base !== null ? $e($this->num($base)) : '') . '</td>'
-                . '<td class="r">' . $e($this->money((float) $t['amount_with_vat'], (string) $t['currency'])) . '</td>'
-                . '<td class="r">' . $e($this->odo($t)) . '</td>'
-                . '<td>' . $e($t['station'] ?? $t['vendor_name'] ?? '') . '</td>'
+                . '<td class="w0">' . $e($this->dateCell($t)) . '</td>'
+                . '<td class="w1">' . $e($t['car_registration'] ?? '') . '</td>'
+                . '<td class="w2">' . $e($t['fuel_type'] ?? '') . '</td>'
+                . '<td class="r w3">' . ($t['quantity'] !== null ? $e($this->num((float) $t['quantity']) . ' ' . ((string) ($t['unit'] ?? 'l') ?: 'l')) : '') . '</td>'
+                . '<td class="r w4">' . ($t['unit_price'] !== null ? $e($this->num((float) $t['unit_price'])) : '') . '</td>'
+                . '<td class="r w5">' . ($base !== null ? $e($this->num($base)) : '') . '</td>'
+                . '<td class="r w6">' . $e($this->money((float) $t['amount_with_vat'], (string) $t['currency'])) . '</td>'
+                . '<td class="r w7">' . $e($this->odo($t)) . '</td>'
+                . '<td class="w8">' . $e($t['station'] ?? $t['vendor_name'] ?? '') . '</td>'
                 . '</tr>';
             $total += (float) $t['amount_with_vat'];
             if ($base !== null) $totalBase += $base;
@@ -161,7 +167,17 @@ final class FuelingExportService
                 . '<td class="r">' . $e($this->num($totalBase)) . '</td>'
                 . '<td class="r">' . $e($this->money($total, 'CZK')) . '</td><td colspan="2"></td></tr>';
         }
-        return $css . $head . '<table>' . $h . $body . '</table>';
+        return '<html><head>' . $css . '</head><body>' . $head . '<table>' . $h . '<tbody>' . $body . '</tbody></table></body></html>';
+    }
+
+    /** @param list<int> $widths */
+    private static function widthCss(array $widths): string
+    {
+        $css = '';
+        foreach ($widths as $i => $w) {
+            $css .= '.w' . $i . '{width:' . $w . '%}';
+        }
+        return $css;
     }
 
     private function num(float $n): string { return number_format($n, 2, ',', ' '); }

@@ -19,7 +19,9 @@ final class TaxEvidenceCashJournalPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Peněžní deník ' . (string) ($data['year'] ?? ''));
         $this->withPageNumbers($mpdf, 'Peněžní deník');
-        $mpdf->WriteHTML($body);
+        // Rok velké firmy jsou desítky tisíc řádků: po kusech kvůli pcre.backtrack_limit
+        // i paměti (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

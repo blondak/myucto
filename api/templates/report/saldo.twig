@@ -18,7 +18,7 @@
     .num { text-align: right; }
     .diff-ok { color: #166534; font-weight: bold; }
     .diff-fail { color: #b91c1c; font-weight: bold; }
-    table.book { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
     table.book thead th {
         font-size: 7pt; font-weight: normal; color: #555; text-align: right;
         padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
@@ -26,8 +26,13 @@
     table.book thead th.thl { text-align: left; }
     table.book tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
     .partner-row td { font-weight: bold; background-color: #f4f4f5; }
-    .col-doc { width: 26mm; }
-    .col-partner { width: 60mm; }
+    /* Pevné šířky všech sloupců: dlouhá sestava se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-doc { width: 16%; }
+    .col-date { width: 10%; }
+    .col-days { width: 8%; }
+    .col-amount { width: 24%; }
+    .col-num { width: 16%; }
     .overdue { color: #b91c1c; }
     .empty { text-align: center; color: #888; padding: 8mm 0; }
 </style>
@@ -79,41 +84,41 @@
         <thead>
             <tr>
                 <th class="thl col-doc">Doklad</th>
-                <th class="thl">Vystaveno</th>
-                <th class="thl">Splatnost</th>
-                <th>Dní po spl.</th>
-                <th>Částka</th>
-                <th>Uhrazeno</th>
-                <th>Zbývá (Kč)</th>
+                <th class="thl col-date">Vystaveno</th>
+                <th class="thl col-date">Splatnost</th>
+                <th class="col-days">Dní po spl.</th>
+                <th class="col-amount">Částka</th>
+                <th class="col-num">Uhrazeno</th>
+                <th class="col-num">Zbývá (Kč)</th>
             </tr>
         </thead>
         <tbody>
             {% for p in acc.partners %}
                 <tr class="partner-row">
                     <td colspan="6">{{ p.partner_name }}</td>
-                    <td class="num">{{ p.total_remaining|cz_money }}</td>
+                    <td class="num col-num">{{ p.total_remaining|cz_money }}</td>
                 </tr>
                 {% for it in p.items %}
                     {% if it.kind is defined and it.kind == 'advance_pending' %}
                     {# Záloha čekající na vyúčtování: částka = platba, uhrazeno = daň z DDKP. #}
                     <tr>
-                        <td>{{ it.doc_no }}<br><span style="color:#888">{{ it.label }}</span></td>
-                        <td>{{ it.issue_date|cz_date }}</td>
-                        <td>{{ it.due_date|cz_date }}</td>
-                        <td class="num"></td>
-                        <td class="num">{{ it.advance_payment_czk|cz_money }}</td>
-                        <td class="num">{% if it.advance_vat_czk %}{{ it.advance_vat_czk|cz_money }}<br><span style="color:#888">DPH z daňového dokladu k platbě</span>{% endif %}</td>
-                        <td class="num">{{ it.remaining_czk|cz_money }}</td>
+                        <td class="col-doc">{{ it.doc_no }}<br><span style="color:#888">{{ it.label }}</span></td>
+                        <td class="col-date">{{ it.issue_date|cz_date }}</td>
+                        <td class="col-date">{{ it.due_date|cz_date }}</td>
+                        <td class="num col-days"></td>
+                        <td class="num col-amount">{{ it.advance_payment_czk|cz_money }}</td>
+                        <td class="num col-num">{% if it.advance_vat_czk %}{{ it.advance_vat_czk|cz_money }}<br><span style="color:#888">DPH z daňového dokladu k platbě</span>{% endif %}</td>
+                        <td class="num col-num">{{ it.remaining_czk|cz_money }}</td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td>{{ it.doc_no }}</td>
-                        <td>{{ it.issue_date|cz_date }}</td>
-                        <td>{{ it.due_date|cz_date }}</td>
-                        <td class="num {{ it.days_overdue > 0 ? 'overdue' : '' }}">{{ it.days_overdue > 0 ? it.days_overdue : '' }}</td>
-                        <td class="num">{{ it.booked_czk|cz_money }}{% if it.currency_code != 'CZK' %} <span style="color:#888">({{ it.amount_foreign|cz_money }} {{ it.currency_code }})</span>{% endif %}</td>
-                        <td class="num">{{ it.paid_czk|cz_money }}</td>
-                        <td class="num">{{ it.remaining_czk|cz_money }}</td>
+                        <td class="col-doc">{{ it.doc_no }}</td>
+                        <td class="col-date">{{ it.issue_date|cz_date }}</td>
+                        <td class="col-date">{{ it.due_date|cz_date }}</td>
+                        <td class="num col-days {{ it.days_overdue > 0 ? 'overdue' : '' }}">{{ it.days_overdue > 0 ? it.days_overdue : '' }}</td>
+                        <td class="num col-amount">{{ it.booked_czk|cz_money }}{% if it.currency_code != 'CZK' %} <span style="color:#888">({{ it.amount_foreign|cz_money }} {{ it.currency_code }})</span>{% endif %}</td>
+                        <td class="num col-num">{{ it.paid_czk|cz_money }}</td>
+                        <td class="num col-num">{{ it.remaining_czk|cz_money }}</td>
                     </tr>
                     {% endif %}
                 {% endfor %}

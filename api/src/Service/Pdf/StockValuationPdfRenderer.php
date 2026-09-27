@@ -16,7 +16,8 @@ final class StockValuationPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Ocenění zásob k ' . (string) ($data['date'] ?? ''));
         $this->withPageNumbers($mpdf, 'Ocenění zásob');
-        $mpdf->WriteHTML($body);
+        // Dlouhý seznam po kusech kvůli pcre.backtrack_limit i paměti (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }

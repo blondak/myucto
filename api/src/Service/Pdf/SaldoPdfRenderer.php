@@ -20,7 +20,10 @@ final class SaldoPdfRenderer extends ReportPdfRendererBase
         $mpdf = $this->mpdf();
         $mpdf->SetTitle($title . ' k ' . (string) ($data['as_of'] ?? ''));
         $this->withPageNumbers($mpdf, 'Saldokonto');
-        $mpdf->WriteHTML($body);
+        // Velká firma má tisíce otevřených položek: po kusech kvůli pcre.backtrack_limit
+        // i paměti (viz ChunkedHtmlWriter). Kus začíná položkou, ne řádkem partnera,
+        // takže nese šířky všech sloupců.
+        ChunkedHtmlWriter::write($mpdf, $body, 400, '/^<tr>/');
         return $mpdf->Output('', 'S');
     }
 }

@@ -17,7 +17,8 @@ final class StockItemMovementsPdfRenderer extends ReportPdfRendererBase
         $item = $data['item'] ?? [];
         $mpdf->SetTitle('Skladová karta ' . (string) ($item['sku'] ?? ''));
         $this->withPageNumbers($mpdf, 'Skladová karta');
-        $mpdf->WriteHTML($body);
+        // Dlouhý seznam po kusech kvůli pcre.backtrack_limit i paměti (viz ChunkedHtmlWriter).
+        ChunkedHtmlWriter::write($mpdf, $body);
         return $mpdf->Output('', 'S');
     }
 }
