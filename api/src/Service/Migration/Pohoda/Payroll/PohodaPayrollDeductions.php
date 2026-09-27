@@ -96,6 +96,13 @@ final class PohodaPayrollDeductions
             $lastPeriod = $lastPeriod === null || $period > $lastPeriod ? $period : $lastPeriod;
             $payslips[PohodaXml::text($row, 'ID')] = ['person' => PohodaXml::text($row, 'RefZAM'), 'period' => $period];
         }
+        // Poslední měsíc, který zpracoval předchozí program: export nese i rozpracované
+        // měsíce (výstupní mzdy), ty ale předchozí program neuzavřel. S nastaveným začátkem
+        // vedení mezd je to měsíc před ním.
+        if ($lastPeriod !== null && $moduleStart !== null && $moduleStart !== '') {
+            $beforeStart = (new \DateTimeImmutable(substr($moduleStart, 0, 7) . '-01'))->modify('-1 month')->format('Y-m');
+            $lastPeriod = min($lastPeriod, $beforeStart);
+        }
         $relationCount = [];
         foreach ($byId['ZAMpomer'] ?? [] as $relation) {
             $person = PohodaXml::text($relation, 'RefZAM');

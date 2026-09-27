@@ -55,6 +55,10 @@ final class PohodaPayrollEnforcementWithheldTest extends TestCase
             self::assertNotSame([], $withSource);
             self::assertSame(['2026-01'], $withSource[0]['withheld_periods']);
             self::assertSame('2026-02', $withSource[0]['source_last_period']);
+            // S začátkem vedení mezd v únoru zpracoval předchozí program naposledy leden;
+            // pozdější měsíce exportu jsou rozpracované.
+            $fromStart = PohodaPayrollDeductions::read($file, SyntheticPohodaPayroll::YEAR, '2026-02-01')['deductions'];
+            self::assertSame('2026-01', $fromStart[0]['source_last_period']);
         } finally {
             foreach (glob($dir . '/*/*') ?: [] as $path) {
                 unlink($path);
