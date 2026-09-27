@@ -44,10 +44,10 @@ final readonly class JmhzScenario1XmlDryRunService
             $preparationId,
             $officeId,
         );
-        $blockers = array_map(
+        $blockers = self::withoutConsequentialBlockers(array_map(
             static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
             $resolution->blockers,
-        );
+        ));
         if ($resolution->status() !== 'resolved') {
             $result = [
                 'status' => 'blocked',
@@ -172,6 +172,40 @@ final readonly class JmhzScenario1XmlDryRunService
      * výslovně připouští. Varování z nich jsou očekávaná, ne chyba.
      */
     public const DEFERRAL_EXPECTED_CONTROL_IDS = [1, 7, 9, 12, 142, 207, 209, 213, 227, 269, 297, 298];
+
+    /**
+     * Chybějící pracovní souhrn pro ELDP je u vztahu s neschválenou docházkou
+     * jen důsledek téže příčiny a opravuje se týmž krokem. Hlášený dvakrát
+     * zdvojnásobil seznam nálezů (u firmy před koncem měsíce stovky řádků)
+     * a vypadal jako druhá, samostatná vada dat.
+     *
+     * @param list<array<string,mixed>> $blockers
+     * @return list<array<string,mixed>>
+     */
+    public static function withoutConsequentialBlockers(array $blockers): array
+    {
+        $unapproved = [];
+        foreach ($blockers as $blocker) {
+            if (($blocker['code'] ?? null) === 'jmhz_work_month_not_approved'
+                && ($blocker['entity_type'] ?? null) === 'employment'
+                && is_int($blocker['entity_id'] ?? null)
+            ) {
+                $unapproved[$blocker['entity_id']] = true;
+            }
+        }
+        if ($unapproved === []) {
+            return $blockers;
+        }
+
+        return array_values(array_filter(
+            $blockers,
+            static fn (array $blocker): bool => !(
+                ($blocker['code'] ?? null) === 'jmhz_eldp_work_summary_missing'
+                && ($blocker['entity_type'] ?? null) === 'employment'
+                && isset($unapproved[$blocker['entity_id'] ?? -1])
+            ),
+        ));
+    }
 
     /**
      * Vynechané formuláře hlášení: kdo, proč a která varování kontrol to

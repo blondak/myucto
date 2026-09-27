@@ -50,6 +50,33 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
         self::assertArrayNotHasKey('controls', $result);
     }
 
+    /**
+     * Neschválená docházka a chybějící pracovní souhrn ELDP mají jednu
+     * příčinu. Hlášené obojí zdvojnásobilo nálezy celé firmy.
+     */
+    public function testMissingEldpWorkSummaryIsNotRepeatedForUnapprovedWorkMonth(): void
+    {
+        $result = $this->service(
+            new JmhzScenario1Resolution(null, [
+                new JmhzScenario1Blocker('jmhz_work_month_not_approved', 'employment', 101, ['10259']),
+                new JmhzScenario1Blocker('jmhz_eldp_work_summary_missing', 'employment', 101, ['10240']),
+                new JmhzScenario1Blocker('jmhz_eldp_work_summary_missing', 'employment', 102, ['10240']),
+            ]),
+            $this->createStub(JmhzScenario1XmlValidator::class),
+        )->dryRun(1, 'test', 77);
+
+        self::assertSame(
+            [
+                ['jmhz_work_month_not_approved', 101],
+                ['jmhz_eldp_work_summary_missing', 102],
+            ],
+            array_map(
+                static fn (array $blocker): array => [$blocker['code'], $blocker['entity_id']],
+                $result['blockers'],
+            ),
+        );
+    }
+
     public function testSpecialScopeReturnsScenarioTwoCandidateAndExactBlocker(): void
     {
         $candidate = new JmhzScenario2NormalizedDocument([

@@ -656,6 +656,33 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(wrapper.find('[data-test="jmhz-controls-expected-12"]').exists()).toBe(true)
   })
 
+  /*
+   * Test nad celou firmou před koncem měsíce vrátí stovky nálezů (u každého
+   * vztahu neschválená docházka i chybějící pracovní souhrn). Stránka je musí
+   * vykreslit seskupené a rychle, ne zamrznout.
+   */
+  it('stovky nálezů seskupí po kódu a vykreslí bez zamrznutí', async () => {
+    const employments = Array.from({ length: 200 }, (_, index) => ({
+      id: 100 + index, employee_id: 500 + index, code: `ZAM-${index}`,
+      relation_type: 'employment', status: 'active', full_name: `Osoba ${index}`,
+    }))
+    m.context.mockResolvedValue(employments)
+    const blockers = employments.flatMap(item => [
+      { code: 'jmhz_work_month_not_approved', entity_type: 'employment', entity_id: item.id, attribute_ids: ['10259', '10260'], remediation: { kind: 'time', field: null }, deferrable: true },
+      { code: 'jmhz_eldp_work_summary_missing', entity_type: 'employment', entity_id: item.id, attribute_ids: ['10240', '10241'], remediation: { kind: 'time', field: null }, deferrable: true },
+    ])
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'x' }, blockers })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    const started = performance.now()
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+    expect(performance.now() - started).toBeLessThan(2000)
+    expect(wrapper.findAll('[data-test="jmhz-dry-run-blocker"]')).toHaveLength(2)
+  })
+
   /** Období karty v lidském tvaru, ne strojové „2026-08". */
   it('období karty ukáže česky', async () => {
     const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
