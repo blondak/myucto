@@ -26,6 +26,9 @@ final class ReportXlsxExporter
 {
     private const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
+    /** Nad tolik buněk tabulky se mřížka a zarovnání dávají jen hlavičce (viz finishTable). */
+    private const STYLED_CELLS_MAX = 50000;
+
     private const THOUSANDS_NOTE = 'Hodnoty jsou v celých tisících Kč, zaokrouhleny po řádcích (§4 odst. 3 vyhl. č. 500/2002 Sb.);'
         . ' součtové řádky se počítají z hodnot v Kč — proti součtu zaokrouhlených položek může vzniknout rozdíl ±1 tis. Kč.';
 
@@ -1587,8 +1590,12 @@ final class ReportXlsxExporter
 
     private function boldRow(Worksheet $sheet, int $row, int $cols): void
     {
-        $last = Coordinate::stringFromColumnIndex($cols);
-        $sheet->getStyle("A{$row}:{$last}{$row}")->getFont()->setBold(true);
+        // Jen vyplněné buňky: styl na prázdnou buňku by ji zbytečně založil (viz finishTable).
+        for ($c = 1; $c <= $cols; $c++) {
+            if ($sheet->cellExists([$c, $row])) {
+                $sheet->getStyle([$c, $row])->getFont()->setBold(true);
+            }
+        }
     }
 
     private function finishTable(Worksheet $sheet, int $headRow, int $lastRow, int $cols, int $firstNumCol): void
@@ -1597,9 +1604,13 @@ final class ReportXlsxExporter
             $lastRow = $headRow;
         }
         $last = Coordinate::stringFromColumnIndex($cols);
-        $sheet->getStyle("A{$headRow}:{$last}{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
         $numFirst = Coordinate::stringFromColumnIndex($firstNumCol);
-        $sheet->getStyle("{$numFirst}{$headRow}:{$last}{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        // Styl na rozsah založí objekt buňky i pro každou prázdnou buňku — deník s 55 tis.
+        // řádky tak spotřeboval stovky MB. Velká tabulka dostane mřížku a zarovnání jen
+        // v hlavičce; čísla zarovná doprava Excel sám.
+        $bodyTo = ($lastRow - $headRow + 1) * $cols > self::STYLED_CELLS_MAX ? $headRow : $lastRow;
+        $sheet->getStyle("A{$headRow}:{$last}{$bodyTo}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        $sheet->getStyle("{$numFirst}{$headRow}:{$last}{$bodyTo}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
         for ($i = 1; $i <= $cols; $i++) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i))->setAutoSize(true);
         }

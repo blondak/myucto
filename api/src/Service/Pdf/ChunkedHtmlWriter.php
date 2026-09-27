@@ -13,10 +13,18 @@ use Mpdf\Mpdf;
  * pcre.backtrack_limit"). mPDF má tenhle limit na jedno volání WriteHTML() —
  * chybová hláška sama radí "Pass your HTML in smaller chunks", což je přesně
  * tohle: CSS pošleme zvlášť (mode HEADER_CSS), tělo dokumentu pak po dávkách
- * řádků (mode HTML_BODY). mPDF si mezi voděními WriteHTML() drží otevřený
- * stav parseru (otevřenou <table>/<tbody>), takže rozdělení přesně na hranici
- * `<tr>…</tr>` je bezpečné a výsledné PDF je vizuálně shodné s jedním
- * voláním — jen bez rizika, že se to zhroutí na regexovém limitu.
+ * řádků (mode HTML_BODY).
+ *
+ * Samotné dávkování nestačí na paměť: mPDF drží otevřenou <table> celou a rozkládá
+ * ji až při </table>, takže deník s 13 tis. zápisy (55 tis. řádků tabulky) spotřeboval
+ * 3,7 GB. Tabulka delší než $rowsPerChunk se proto na hranici dávky UZAVŘE a otevře
+ * znovu se stejným otevíracím tagem. Každý kus se vysází a uvolní hned. Hlavičku
+ * sloupců (<thead>) pak nese hlavička stránky, takže je na každé stránce jednou a šev
+ * mezi kusy není vidět. Aby sloupce kusů i hlavičky lícovaly, musí mít šablona pevné
+ * šířky všech sloupců v procentech (součet 100 %). `$splitBefore` (regex na otevírací <tr>)
+ * dovolí dělit jen před řádkem, který začíná logický celek (zápis deníku s jeho
+ * řádky zůstane v jednom kusu); celek delší než čtyři dávky se rozdělí i uprostřed,
+ * jinak by jeden obří zápis (počáteční stavy) vrátil problém s pamětí.
  *
  * Použitelné jen na šablony bez vnořených <table> uvnitř <tr> (žádná z
  * report šablon to nemá — řádky mají jen <td>).
@@ -24,10 +32,11 @@ use Mpdf\Mpdf;
 final class ChunkedHtmlWriter
 {
     /**
-     * @param string $html   kompletní HTML dokument (výstup Twig šablony, s <style> v <head>)
-     * @param int    $rowsPerChunk kolik <tr> elementů poslat do mPDF v jednom WriteHTML() volání
+     * @param string      $html         kompletní HTML dokument (výstup Twig šablony, s <style> v <head>)
+     * @param int         $rowsPerChunk kolik <tr> elementů poslat do mPDF v jednom WriteHTML() volání
+     * @param string|null $splitBefore  regex, kterému musí odpovídat <tr>, před nímž se smí tabulka rozdělit
      */
-    public static function write(Mpdf $mpdf, string $html, int $rowsPerChunk = 400): void
+    public static function write(Mpdf $mpdf, string $html, int $rowsPerChunk = 400, ?string $splitBefore = null): void
     {
         if ($rowsPerChunk < 1) {
             $rowsPerChunk = 1;
@@ -57,24 +66,105 @@ final class ChunkedHtmlWriter
 
         $buffer = '';
         $rowsInBuffer = 0;
+        // Stav právě otevřené tabulky: otevírací tag, <thead> (i s řádky) a zda má <tbody>.
+        $tableOpen = null;
+        $thead = '';
+        $inThead = false;
+        $hasTbody = false;
+        // Rozdělená tabulka nese hlavičku sloupců jako hlavičku stránky, ne jako <thead>
+        // každého kusu, jinak by se hlavička opakovala uprostřed stránky na každém švu.
+        $pagedHeader = false;
 
         foreach ($parts as $part) {
             if ($part === '') {
                 continue;
             }
-            $buffer .= $part;
-            if (preg_match('/^<tr\b/i', $part) === 1) {
-                $rowsInBuffer++;
+            $isRow = preg_match('/^<tr\b/i', $part) === 1;
+            if (!$isRow) {
+                $close = $pagedHeader ? stripos($part, '</table>') : false;
+                if ($close !== false) {
+                    $head = substr($part, 0, $close + 8);
+                    $mpdf->WriteHTML($buffer . $head, HTMLParserMode::HTML_BODY);
+                    $mpdf->SetHTMLHeader('');
+                    $pagedHeader = false;
+                    self::trackStructure($head, $tableOpen, $thead, $inThead, $hasTbody);
+                    $part = substr($part, $close + 8);
+                    $buffer = '';
+                    $rowsInBuffer = 0;
+                }
+                self::trackStructure($part, $tableOpen, $thead, $inThead, $hasTbody);
+                $buffer .= $part;
+                continue;
+            }
+            if ($inThead) {
+                $thead .= $part;
+                $buffer .= $part;
+                continue;
             }
             if ($rowsInBuffer >= $rowsPerChunk) {
-                $mpdf->WriteHTML($buffer, HTMLParserMode::HTML_BODY);
-                $buffer = '';
-                $rowsInBuffer = 0;
+                if ($tableOpen === null) {
+                    $mpdf->WriteHTML($buffer, HTMLParserMode::HTML_BODY);
+                    $buffer = '';
+                    $rowsInBuffer = 0;
+                } elseif ($splitBefore === null || preg_match($splitBefore, $part) === 1 || $rowsInBuffer >= 4 * $rowsPerChunk) {
+                    $mpdf->WriteHTML($buffer . ($hasTbody ? '</tbody>' : '') . '</table>', HTMLParserMode::HTML_BODY);
+                    if (!$pagedHeader && $thead !== '') {
+                        // Platí od další stránky; ta rozepsaná už hlavičku sloupců má z <thead>.
+                        $mpdf->setAutoTopMargin = 'stretch';
+                        $mpdf->SetHTMLHeader($tableOpen . $thead . '</table>');
+                        $pagedHeader = true;
+                    }
+                    $buffer = $tableOpen . ($hasTbody ? '<tbody>' : '');
+                    $rowsInBuffer = 0;
+                }
             }
+            $buffer .= $part;
+            $rowsInBuffer++;
         }
 
         if ($buffer !== '') {
             $mpdf->WriteHTML($buffer, HTMLParserMode::HTML_BODY);
+        }
+    }
+
+    /** Projde tagy tabulky ve strukturní části (ta je malá — mezi řádky) a posune stav. */
+    private static function trackStructure(string $part, ?string &$tableOpen, string &$thead, bool &$inThead, bool &$hasTbody): void
+    {
+        if (!preg_match_all('/<table\b[^>]*>|<\/table>|<thead\b[^>]*>|<\/thead>|<tbody\b[^>]*>/i', $part, $m, PREG_OFFSET_CAPTURE)) {
+            if ($inThead) {
+                $thead .= $part;
+            }
+            return;
+        }
+        $pos = 0;
+        foreach ($m[0] as [$tag, $offset]) {
+            if ($inThead) {
+                $thead .= substr($part, $pos, $offset - $pos);
+            }
+            $pos = $offset + strlen($tag);
+            $lower = strtolower($tag);
+            if (str_starts_with($lower, '<table')) {
+                $tableOpen = $tag;
+                $thead = '';
+                $inThead = false;
+                $hasTbody = false;
+            } elseif ($lower === '</table>') {
+                $tableOpen = null;
+                $thead = '';
+                $inThead = false;
+                $hasTbody = false;
+            } elseif (str_starts_with($lower, '<thead')) {
+                $inThead = true;
+                $thead = $tag;
+            } elseif ($lower === '</thead>') {
+                $thead .= $tag;
+                $inThead = false;
+            } else {
+                $hasTbody = true;
+            }
+        }
+        if ($inThead) {
+            $thead .= substr($part, $pos);
         }
     }
 }

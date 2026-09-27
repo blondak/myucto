@@ -64,12 +64,80 @@ final class ChunkedHtmlWriterTest extends TestCase
         self::assertGreaterThan(1000, strlen($pdf));
     }
 
+    /**
+     * mPDF drží otevřenou <table> v paměti celou (deník 13 tis. zápisů = 3,7 GB), proto
+     * se dlouhá tabulka zapisuje jako řada uzavřených tabulek a hlavička sloupců přejde
+     * do hlavičky stránky. Zápis deníku se svými řádky se nerozdělí.
+     */
+    public function testLongTableIsWrittenAsClosedPiecesWithColumnHeaderAsPageHeader(): void
+    {
+        $mpdf = self::recordingMpdf();
+
+        ChunkedHtmlWriter::write($mpdf, self::syntheticJournalHtml(30), 10, '/^<tr class="entry-head"/');
+
+        self::assertGreaterThan(3, count($mpdf->bodyWrites));
+        foreach (array_slice($mpdf->bodyWrites, 0, -1) as $i => $write) {
+            self::assertSame(
+                substr_count($write, '<table'),
+                substr_count($write, '</table>'),
+                "Kus #{$i} musí tabulku uzavřít, jinak ji mPDF drží v paměti dál."
+            );
+        }
+        foreach (array_slice($mpdf->bodyWrites, 1) as $write) {
+            self::assertStringNotContainsString('<thead>', $write, 'Hlavičku sloupců nese hlavička stránky, ne každý kus.');
+            if (str_contains($write, 'class="entry-')) {
+                self::assertMatchesRegularExpression('/^<table class="entries"><tbody><tr class="entry-head"/', $write, 'Kus začíná zápisem, ne jeho řádkem.');
+            }
+        }
+        self::assertCount(2, $mpdf->headers);
+        self::assertStringContainsString('<thead><tr><th>Datum</th>', $mpdf->headers[0]);
+        self::assertSame('', $mpdf->headers[1], 'Za koncem tabulky se hlavička stránky zase ruší.');
+        self::assertStringContainsString('Počet zápisů: 30', end($mpdf->bodyWrites));
+        self::assertSame(30, substr_count(implode('', $mpdf->bodyWrites), 'class="entry-head"'));
+    }
+
+    public function testShortTableIsWrittenUntouched(): void
+    {
+        $html = self::syntheticJournalHtml(5);
+        $mpdf = self::recordingMpdf();
+        ChunkedHtmlWriter::write($mpdf, $html, 400);
+        self::assertCount(1, $mpdf->bodyWrites);
+        self::assertStringContainsString('<thead>', $mpdf->bodyWrites[0]);
+        self::assertSame([], $mpdf->headers);
+    }
+
     public function testEmptyBodyDoesNotThrow(): void
     {
         $html = '<html><head><style>body{color:#000;}</style></head><body></body></html>';
         $mpdf = self::mpdf();
         ChunkedHtmlWriter::write($mpdf, $html);
         self::assertStringStartsWith('%PDF', $mpdf->Output('', 'S'));
+    }
+
+    /** mPDF, které zápisy těla a hlavičky stránky jen zaznamená. */
+    private static function recordingMpdf(): Mpdf
+    {
+        return new class ([
+            'mode' => 'utf-8',
+            'tempDir' => sys_get_temp_dir() . '/mi-mpdf-test-' . bin2hex(random_bytes(4)),
+        ] + MpdfFontConfig::options()) extends Mpdf {
+            /** @var list<string> */
+            public array $bodyWrites = [];
+            /** @var list<string> */
+            public array $headers = [];
+
+            public function WriteHTML($html, $mode = \Mpdf\HTMLParserMode::DEFAULT_MODE, $init = true, $close = true): void
+            {
+                if ($mode === \Mpdf\HTMLParserMode::HTML_BODY) {
+                    $this->bodyWrites[] = $html;
+                }
+            }
+
+            public function SetHTMLHeader($header = '', $OE = '', $write = false): void
+            {
+                $this->headers[] = $header;
+            }
+        };
     }
 
     private static function mpdf(): Mpdf

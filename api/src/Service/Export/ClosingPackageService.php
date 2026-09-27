@@ -407,13 +407,32 @@ final class ClosingPackageService
             if (in_array('journal', $parts, true)) {
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 try {
-                    $data = $this->journalExportService->build($supplierId, ['period_id' => $periodId]);
-                    $put(sprintf('Ucetni-denik/ucetni-denik-%d.pdf', $fiscalYear), $this->journalPdf->render($data));
-                    $added++; $summary['journal'] = 1;
-                    if ($includeXlsx) {
-                        $out = $this->xlsx->journal($data);
-                        $put(sprintf('Ucetni-denik/ucetni-denik-%d.xlsx', $fiscalYear), $out['bytes']);
+                    // Rok nad strop jednoho souboru se sestaví po měsících (paměť workeru).
+                    try {
+                        $chunks = [[sprintf('ucetni-denik-%d', $fiscalYear),
+                            $this->journalExportService->build($supplierId, ['period_id' => $periodId], JournalExportService::PACKAGE_MAX_ROWS)]];
+                    } catch (ReportException $e) {
+                        if ($e->errorCode !== 'too_many_rows') {
+                            throw $e;
+                        }
+                        $chunks = [];
                     }
+                    foreach ($chunks === [] ? $this->monthsInPeriod($startsOn, $endsOn) : [] as [$y, $m]) {
+                        $from = max($startsOn, sprintf('%04d-%02d-01', $y, $m));
+                        $to = min($endsOn, (new \DateTimeImmutable($from))->format('Y-m-t'));
+                        $chunks[] = [sprintf('ucetni-denik-%d-%02d', $y, $m), fn (): array => $this->journalExportService->build(
+                            $supplierId, ['period_id' => $periodId, 'date_from' => $from, 'date_to' => $to], JournalExportService::PACKAGE_MAX_ROWS)];
+                    }
+                    foreach ($chunks as [$name, $data]) {
+                        $this->ensureNotCancelled($jobId, $zip, $absPath);
+                        $data = is_callable($data) ? $data() : $data;
+                        $put("Ucetni-denik/{$name}.pdf", $this->journalPdf->render($data));
+                        if ($includeXlsx) {
+                            $put("Ucetni-denik/{$name}.xlsx", $this->xlsx->journal($data)['bytes']);
+                        }
+                        unset($data);
+                    }
+                    $added++; $summary['journal'] = 1;
                 } catch (ReportException $e) { $warnings[] = 'Účetní deník: ' . $e->getMessage(); }
                 catch (\Throwable $e) { $warnings[] = 'Účetní deník: ' . $e->getMessage(); }
                 $bump('Účetní deník');

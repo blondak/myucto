@@ -24,9 +24,15 @@
         font-size: 7.5pt;
         border-bottom: 0.2pt solid #eee;
     }
-    .col-desc { width: 48mm; }
-    .col-account { width: 14mm; }
-    .col-name { width: 60mm; }
+    /* Pevné šířky všech sloupců: dlouhý deník se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 7%; }
+    .col-doc { width: 11%; }
+    .col-desc { width: 22%; }
+    .col-origin { width: 7%; }
+    .col-amount { width: 12%; }
+    .col-account { width: 7%; }
+    .col-name { width: 22%; }
     .num { text-align: right; }
     .badge { font-size: 6.5pt; color: #92400e; }
     .totals { width: 100%; border-collapse: collapse; margin-top: 3mm; }
@@ -62,35 +68,37 @@
 <table class="entries">
     <thead>
         <tr>
-            <th class="thl" style="text-align:left;">Datum</th>
-            <th class="thl" style="text-align:left;">Doklad</th>
+            <th class="thl col-date" style="text-align:left;">Datum</th>
+            <th class="thl col-doc" style="text-align:left;">Doklad</th>
             <th class="thl col-desc" style="text-align:left;">Popis</th>
-            <th class="thl" style="text-align:left;">Původ</th>
+            <th class="thl col-origin" style="text-align:left;">Původ</th>
             <th class="thl col-account" style="text-align:left;">Účet</th>
             <th class="thl col-name" style="text-align:left;">Název</th>
-            <th style="text-align:right;">MD</th>
-            <th style="text-align:right;">Dal</th>
+            <th class="col-amount" style="text-align:right;">MD</th>
+            <th class="col-amount" style="text-align:right;">Dal</th>
         </tr>
     </thead>
     <tbody>
     {% for e in entries %}
+        {# Šířky nese i řádek zápisu: kus tabulky za švem nemá <thead> (viz ChunkedHtmlWriter). #}
         <tr class="entry-head">
-            <td>{{ e.entry_date|cz_date }}</td>
-            <td>{{ e.document_no ?: '—' }}</td>
+            <td class="col-date">{{ e.entry_date|cz_date }}</td>
+            <td class="col-doc">{{ e.document_no ?: '—' }}</td>
             <td class="col-desc">
                 {{ e.description ?: '—' }}
                 {% if e.reversed_by %}<span class="badge">[stornováno #{{ e.reversed_by }}]</span>{% endif %}
                 {% if not e.posted_at %}<span class="badge">[koncept]</span>{% endif %}
             </td>
-            <td>{{ e.automation_origin ?: 'ručně' }}</td>
-            <td colspan="2"></td>
+            <td class="col-origin">{{ e.automation_origin ?: 'ručně' }}</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
             {# Bez filtru na účet je e.amount Σ MD = Σ Dal celého (vyváženého) zápisu
                (obě buňky pravdivě duplikují). S filtrem na účet (e.amount_side != null)
                jde o NETTO částku a stranu JEN filtrovaného účtu — psát ji do obou
                sloupců by tvrdilo Σ MD = Σ Dal i pro ten jeden účet, což u víc-nohého
                zápisu neplatí (nález „ČÁSTKA u filtru na účet"). #}
-            <td class="num">{% if e.amount_side is null or e.amount_side == 'debit' %}{{ e.amount|cz_money }}{% endif %}</td>
-            <td class="num">{% if e.amount_side is null or e.amount_side == 'credit' %}{{ e.amount|cz_money }}{% endif %}</td>
+            <td class="num col-amount">{% if e.amount_side is null or e.amount_side == 'debit' %}{{ e.amount|cz_money }}{% endif %}</td>
+            <td class="num col-amount">{% if e.amount_side is null or e.amount_side == 'credit' %}{{ e.amount|cz_money }}{% endif %}</td>
         </tr>
         {% for l in e.lines %}
             {% set line_amount = l.is_red_storno ? -l.amount : l.amount %}

@@ -19,8 +19,9 @@ final class JournalPdfRenderer extends ReportPdfRendererBase
         $mpdf->SetTitle('Účetní deník');
         $this->withPageNumbers($mpdf, 'Účetní deník');
         // Velké firmy mívají desítky tisíc zápisů/rok — jedno WriteHTML() na celý
-        // dokument naráží na pcre.backtrack_limit, proto po dávkách (viz ChunkedHtmlWriter).
-        ChunkedHtmlWriter::write($mpdf, $body);
+        // dokument naráží na pcre.backtrack_limit a jedna tabulka na paměť, proto po
+        // kusech (viz ChunkedHtmlWriter); zápis se svými řádky zůstane v jednom kusu.
+        ChunkedHtmlWriter::write($mpdf, $body, 400, '/^<tr class="entry-head"/');
         return $mpdf->Output('', 'S');
     }
 }

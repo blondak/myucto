@@ -25,6 +25,13 @@ final class JournalExportService
 {
     public const MAX_ROWS = 5000;
 
+    /**
+     * Strop jednoho souboru deníku v uzávěrkovém balíčku. Balíček běží ve workeru a
+     * deník se sází po kusech (ChunkedHtmlWriter): 13 tis. zápisů ~ 260 MB a dvě minuty.
+     * Nad strop balíček sestaví deník po měsících.
+     */
+    public const PACKAGE_MAX_ROWS = 20000;
+
     public function __construct(
         private readonly JournalEntryRepository $journal,
         private readonly Connection $db,
@@ -36,13 +43,13 @@ final class JournalExportService
      * @return array<string,mixed>
      * @throws ReportException 422 too_many_rows
      */
-    public function build(int $supplierId, array $filters): array
+    public function build(int $supplierId, array $filters, int $maxRows = self::MAX_ROWS): array
     {
-        $entries = $this->journal->forExport($supplierId, $filters, self::MAX_ROWS);
-        if (count($entries) > self::MAX_ROWS) {
+        $entries = $this->journal->forExport($supplierId, $filters, $maxRows);
+        if (count($entries) > $maxRows) {
             throw new ReportException(
                 'too_many_rows',
-                'Filtru odpovídá příliš mnoho zápisů (nad ' . self::MAX_ROWS . ') pro jeden export — zúžte rozsah dat (období/datum).',
+                'Filtru odpovídá příliš mnoho zápisů (nad ' . $maxRows . ') pro jeden export — zúžte rozsah dat (období/datum).',
                 422,
             );
         }
