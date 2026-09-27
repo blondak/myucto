@@ -1566,6 +1566,26 @@ function isCorporateBodyRelation(relationType: string | null | undefined): boole
   return CORPORATE_BODY_RELATIONS.includes(relationType ?? '')
 }
 
+/*
+ * Stanovený fond navrhuje server PODLE VZTAHU (stanovená týdenní doba 37,5
+ * až 40 h), takže v dávce nemusí být pro všechny stejný. Dávka dřív vzala
+ * návrh prvního řádku a vnutila ho všem: lidem na 40 h tak zapsala fond
+ * vztahu na 37,5 h (C-11). Nezměněné pole teď znamená „návrh každého vztahu";
+ * přepsaná hodnota platí pro celou dávku.
+ */
+const bulkStandardFundSuggested = ref('')
+
+const bulkDistinctFunds = computed(() => [...new Set(bulkCandidates.value
+  .filter(item => !isCorporateBodyRelation(item.employment.relation_type))
+  .map(item => item.jmhz_work_summary?.preview?.suggestions.standard_fund_hours ?? '')
+  .filter(value => value !== ''))])
+
+function bulkStandardFundFor(item: PayrollTimeOverviewItem, override: string): string {
+  const own = item.jmhz_work_summary?.preview?.suggestions.standard_fund_hours ?? null
+  if (isCorporateBodyRelation(item.employment.relation_type)) return own ?? '0'
+  return override === bulkStandardFundSuggested.value.trim() && own !== null ? own : override
+}
+
 function openBulkApproval() {
   if (bulkSelectedItems.value.length === 0) return
   // Návrh serveru je pro celý měsíc stejný, takže stačí vzít ho z prvního
@@ -1574,6 +1594,7 @@ function openBulkApproval() {
     ?? bulkCandidates.value[0]
   bulkStandardFund.value = fundSource
     ?.jmhz_work_summary?.preview?.suggestions.standard_fund_hours ?? ''
+  bulkStandardFundSuggested.value = bulkStandardFund.value
   bulkNote.value = ''
   approveFailures.value = []
   bulkApprovalOpen.value = true
@@ -1602,9 +1623,7 @@ async function approveSelected() {
         row_version: item.month.row_version,
         jmhz_work_summary: {
           source_snapshot_sha256: preview.source_snapshot_sha256,
-          standard_fund_hours: isCorporateBodyRelation(item.employment.relation_type)
-            ? (preview.suggestions.standard_fund_hours ?? '0')
-            : standardFund,
+          standard_fund_hours: bulkStandardFundFor(item, standardFund),
           agreed_fund_hours: preview.suggestions.agreed_fund_hours ?? '',
           weekly_work_hours: preview.suggestions.weekly_work_hours ?? '',
           worked_hours: preview.suggestions.worked_hours ?? '',
@@ -3461,6 +3480,11 @@ onMounted(async () => {
             class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
           >
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.bulk.standard_fund_hint') }}</span>
+          <span
+            v-if="bulkDistinctFunds.length > 1"
+            class="mt-1 block text-xs text-warning-700"
+            data-test="bulk-standard-fund-per-employment"
+          >{{ t('payroll.time.bulk.standard_fund_per_employment', { values: bulkDistinctFunds.join(', ') }) }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.note') }}</span>

@@ -1810,6 +1810,29 @@ describe('TimeAttendance — měsíční mřížka', () => {
     wrapper.unmount()
   })
 
+  /*
+   * C-11: návrh fondu je podle stanovené týdenní doby vztahu. Dávka dřív vzala
+   * návrh prvního řádku (37,5 h → 165) a vnutila ho i vztahu na 40 h.
+   */
+  it('hromadné schválení s nezměněným fondem pošle každému vztahu jeho vlastní návrh', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    page.items[0].jmhz_work_summary.preview.suggestions.standard_fund_hours = '165'
+    page.items[1].jmhz_work_summary.preview.suggestions.standard_fund_hours = '176'
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    expect(wrapper.find('[data-test="bulk-standard-fund-per-employment"]').exists()).toBe(true)
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth.mock.calls.map(call => call[1].jmhz_work_summary.standard_fund_hours))
+      .toEqual(['165', '176'])
+    wrapper.unmount()
+  })
+
   /**
    * Bez zákonného fondu by souhrn nebyl úplný — tlačítko proto drží a věta
    * pod ním říká proč (zašedlé tlačítko bez důvodu je slepá ulička).

@@ -4315,7 +4315,8 @@
         "title": "Bulk attendance approval",
         "hint": "{count} employments will be approved with a JMHZ summary. The agreed fund, weekly hours and hours worked come from each employment's own suggestion.",
         "confirm": "Approve ({count})",
-        "standard_fund_hint": "Prefilled from the statutory weekly hours including public holidays on working days — the same for every relationship being approved. Overwrite if yours is shorter. The app adds holidays to the unworked hours itself. Executives, partners and board members get a fund of 0 as the MPSV instructions require.",
+        "standard_fund_hint": "Prefilled from the relationship's stated weekly hours (37.5 to 40 h) including public holidays on working days, i.e. 8 hours per working day at 40 h. If you leave the value unchanged, each relationship gets its own suggestion; an overwritten value applies to the whole batch. The app adds holidays to the unworked hours itself. Executives, partners and board members get a fund of 0 as the MPSV instructions require.",
+        "standard_fund_per_employment": "Relationships in the batch have different stated weekly hours, the fund suggestions are {values} h. With the field unchanged each relationship gets its own.",
         "blocked_no_candidates": "The selection contains no employment that can be approved in bulk.",
         "blocked_no_standard_fund": "Fill in the standard monthly fund — without it the JMHZ summary would be incomplete.",
         "excluded": {

@@ -4315,7 +4315,8 @@
         "title": "Hromadné schválení docházky",
         "hint": "Schválí se {count} vztahů se souhrnem JMHZ. Dohodnutý fond, týdenní doba a odpracované hodiny se berou z návrhu pro každý vztah zvlášť.",
         "confirm": "Schválit ({count})",
-        "standard_fund_hint": "Předvyplněno ze zákonné týdenní doby včetně svátků v jinak pracovní dny — pro všechny schvalované vztahy stejné. Přepište, pokud u vás platí kratší. Svátky přičte aplikace k neodpracovaným hodinám sama. Jednatel, společník a člen orgánu dostanou podle pokynů MPSV fond 0.",
+        "standard_fund_hint": "Předvyplněno ze stanovené týdenní doby vztahu (37,5 až 40 h) včetně svátků v jinak pracovní dny, tedy 8 hodin za každý pracovní den u 40 h. Necháte-li hodnotu beze změny, dostane každý vztah svůj vlastní návrh; přepsaná hodnota platí pro celou dávku. Svátky přičte aplikace k neodpracovaným hodinám sama. Jednatel, společník a člen orgánu dostanou podle pokynů MPSV fond 0.",
+        "standard_fund_per_employment": "Vztahy v dávce mají různou stanovenou týdenní dobu, návrhy fondu jsou {values} h. Beze změny pole dostane každý vztah svůj.",
         "blocked_no_candidates": "Ve výběru není žádný vztah, který by šel schválit hromadně.",
         "blocked_no_standard_fund": "Vyplňte stanovený měsíční fond — bez něj by souhrn JMHZ nebyl úplný.",
         "excluded": {
