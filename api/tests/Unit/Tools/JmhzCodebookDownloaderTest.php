@@ -41,8 +41,6 @@ final class JmhzCodebookDownloaderTest extends TestCase
                 'dictionary',
                 'control-catalog',
                 'scenario-matrix',
-                'cisob',
-                'czemalfa',
                 'cisob-511-legal-coverage',
                 'czemalfa-august-coverage',
                 'cisob-145-2026',
@@ -58,8 +56,8 @@ final class JmhzCodebookDownloaderTest extends TestCase
             self::assertStringStartsWith('https://developers.mpsv.cz/assets/documents/', $source['url'], $id);
             self::assertTrue(str_ends_with($source['url'], $source['filename']), $id);
         }
-        self::assertNull($sources['cisob']['url']);
-        self::assertNull($sources['czemalfa']['url']);
+        self::assertNull($sources['cisob-511-legal-coverage']['url']);
+        self::assertNull($sources['czemalfa-august-coverage']['url']);
     }
 
     public function testCheckedInContentManifestCoversEveryPinnedResource(): void

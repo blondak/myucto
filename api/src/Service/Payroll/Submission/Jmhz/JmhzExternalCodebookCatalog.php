@@ -9,6 +9,11 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzExternalCodebookCatalog
 {
+    /**
+     * Původní otisk ze 13. 8. 2026. Soubory se nedistribuují (zdroje jsou bajtově
+     * shodné s pokrytím do 31. 8.) a k výběru podle data se nepoužívá; identita
+     * zůstává registrovaná kvůli uloženým proveniencím pracovišť.
+     */
     public const HISTORICAL_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1';
     public const HISTORICAL_MANIFEST_SHA256 =
@@ -409,7 +414,8 @@ final class JmhzExternalCodebookCatalog
         }
         $root = $this->resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
         $directory = $root . DIRECTORY_SEPARATOR . $descriptor['directory'];
-        $json = file_get_contents($directory . DIRECTORY_SEPARATOR . 'manifest.json');
+        $manifestPath = $directory . DIRECTORY_SEPARATOR . 'manifest.json';
+        $json = is_file($manifestPath) ? file_get_contents($manifestPath) : false;
         if ($json === false) {
             throw new JmhzCodebookUnavailableException('Manifest externích číselníků JMHZ nelze načíst.');
         }

@@ -77,26 +77,24 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         }
     }
 
-    public function testHistoricalPackageIdentityAndHashRemainLoadable(): void
+    /**
+     * Soubory historického otisku se nedistribuují (bajtově shodné s pokrytím
+     * do 31. 8.). Provenience uložená s jeho identitou dál projde ověřením
+     * pro období, protože balíček zůstává registrovaný.
+     */
+    public function testHistoricalIdentityStaysRegisteredWithoutShippedFiles(): void
     {
         $catalog = $this->catalog();
-        $manifest = $catalog->manifestForIdentity(
-            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
-            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
-        );
 
-        self::assertSame(
-            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
-            $manifest['payload']['overlay_key'],
-        );
-        self::assertSame(JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256, $manifest['manifest_sha256']);
-        self::assertTrue($catalog->hasLoadableIdentity(
+        self::assertFalse($catalog->hasLoadableIdentity(
             JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
             JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
         ));
-        self::assertFalse($catalog->hasLoadableIdentity(
+        self::assertNotNull($catalog->workplaceProvenanceForPeriod(
+            '554782', 'Hlavní město Praha', 'CZ',
             JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
-            str_repeat('0', 64),
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
+            '2026-08-01', '2026-08-31',
         ));
     }
 
@@ -158,7 +156,7 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
     public function testSelfConsistentTamperedManifestStillFailsPinnedTrustAnchor(): void
     {
         $path = dirname(__DIR__, 5)
-            . '/api/resources/payroll/jmhz/external-codebooks-2026-08-13/manifest.json';
+            . '/api/resources/payroll/jmhz/external-codebooks-2026-08-31/manifest.json';
         $manifest = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
         $manifest['payload']['codebooks'][1]['entries'][55]['label'] = 'Pozměněné Česko';
         $entry = $manifest['payload']['codebooks'][1]['entries'][55];
