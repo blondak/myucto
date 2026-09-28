@@ -30,10 +30,10 @@ Závisí na stavu faktury:
 
 | Stav | Dostupné akce |
 |---|---|
-| `issued` | Stáhnout PDF, Odeslat e-mailem, Web faktura, Označit zaplacené, Částečná úhrada, Storno, Dobropis, Test odeslání, Test upomínky, **Editovat (force)**, Zaúčtovat* |
-| `sent` | Stáhnout PDF, Odeslat znovu, Web faktura, Označit zaplacené, Částečná úhrada, Upomínka, Dobropis, Zaúčtovat* |
-| `reminded` | Stáhnout PDF, Další upomínka (cooldown 14 dní), Web faktura, Označit zaplacené, Částečná úhrada, Zaúčtovat* |
-| `paid` | Stáhnout PDF, Web faktura, Dobropis (vrátit peníze), Zaúčtovat* |
+| `issued` | Zobrazit PDF, Stáhnout PDF, Odeslat e-mailem, Web faktura, Označit zaplacené, Částečná úhrada, Storno, Dobropis, Test odeslání, Test upomínky, **Editovat (force)**, Zaúčtovat* |
+| `sent` | Zobrazit PDF, Stáhnout PDF, Odeslat znovu, Web faktura, Označit zaplacené, Částečná úhrada, Upomínka, Dobropis, Zaúčtovat* |
+| `reminded` | Zobrazit PDF, Stáhnout PDF, Další upomínka (cooldown 14 dní), Web faktura, Označit zaplacené, Částečná úhrada, Zaúčtovat* |
+| `paid` | Zobrazit PDF, Stáhnout PDF, Web faktura, Dobropis (vrátit peníze), Zaúčtovat* |
 
 \* jen podvojné účetnictví a dokud faktura nemá účetní ikonu **Zaúčtováno** — viz
 [§ 16.1.3](#1613-zauctovani-do-deniku).
@@ -45,7 +45,9 @@ Závisí na stavu faktury:
 > Uložit jako. Prohlížeč si pamatuje poslední složku zvlášť pro každou firmu: poprvé
 > zvolíte složku, kam PDF dané firmy ukládáte, a příště se dialog otevře rovnou tam.
 > Totéž platí pro tlačítko Stáhnout PDF u přijaté faktury. Firefox a Safari tento
-> dialog nepodporují, tam se PDF otevře nebo stáhne do výchozí složky prohlížeče.
+> dialog nepodporují, tam se PDF stáhne do výchozí složky prohlížeče.
+
+**Zobrazit PDF** otevře fakturu v nové záložce prohlížeče bez dialogu pro uložení.
 
 ### 16.1.2 Platby a částečné úhrady
 

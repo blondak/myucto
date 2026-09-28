@@ -1140,7 +1140,12 @@ async function downloadPdf() {
     toast.error(t('common.pdf_save_failed'))
     return
   }
-  window.open(invoicesApi.pdfUrl(inv.id, false), '_blank')
+  window.open(invoicesApi.pdfUrl(inv.id, true), '_blank')
+}
+
+function viewPdf() {
+  if (!invoice.value) return
+  window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank', 'noopener')
 }
 
 async function sendTest() {
@@ -1641,6 +1646,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'clone', label: t('invoice.clone'), icon: 'copy', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && !['cancellation', 'credit_note'].includes(inv.invoice_type) && canClonePermission,
       disabled: b, loading: busy.value === 'clone', run: cloneInvoice },
+    { key: 'view-pdf', label: t('invoice.view_pdf'), icon: 'eye', tier: 'overflow', variant: 'neutral',
+      show: !isDraft.value || inv.items.length > 0, run: viewPdf },
     { key: 'pdf', label: t('invoice.download_pdf'), icon: 'doc', tier: 'overflow', variant: 'neutral',
       show: !isDraft.value || inv.items.length > 0,
       title: invoiceWillBeSigned.value ? (t('invoice.download_pdf_tooltip_signed') as string) : undefined,

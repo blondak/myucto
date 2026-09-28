@@ -19607,6 +19607,7 @@
     "issue_final_failed": "Failed to issue the final tax document",
     "delete_draft": "Delete",
     "pdf": "PDF",
+    "view_pdf": "View PDF",
     "download_pdf": "Download PDF",
     "download_pdf_tooltip_signed": "Downloads the current invoice PDF. After any edit it is automatically regenerated from current data and electronically signed (PAdES).",
     "signed_badge": "Signed",
