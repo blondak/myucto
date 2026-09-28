@@ -13,7 +13,7 @@ Aktualizace zahrnuje všechny tři vrstvy aplikace:
   představěné v production bundlu), schéma DB se případně migruje
   (`php api/bin/migrate.php`).
 - **Frontend (Vue)** — `web/dist/` (Vite produkční build).
-- **Manuál** — `manual/generated/*.html` + `manual/manual.pdf`.
+- **Manuál** — `manual/generated/*.html`. PDF verze je ke stažení na [myucto.cz](https://myucto.cz/manual/Manual_MyUcto.pdf).
 
 Zachovají se `cfg.php`, `cfg.local.php`, `private/`, `storage/` a `log/`, tedy
 konfigurace a uživatelská data mimo distribuční balíček. Databázové migrace
@@ -208,8 +208,8 @@ klikni na **Aktualizovat**.
 Aplikace stáhne **production bundle** z GitHub release
 (`myucto-X.Y.Z.tar.gz`), ověří jeho SHA-256, nasadí ho přes instalaci
 a spustí migrace. **Composer, Node ani pnpm na hostu potřeba nejsou** —
-bundle má `api/vendor/`, `web/dist/`, `manual/generated/` i
-`manual/manual.pdf` už představěné.
+bundle má `api/vendor/`, `web/dist/` i `manual/generated/` už
+představěné.
 
 ### 102.6.1 Co se děje na pozadí
 

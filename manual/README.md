@@ -3,7 +3,7 @@
 Adresář `manual/` obsahuje uživatelskou dokumentaci v MD souborech. Z nich:
 
 - `tools/generateManualHtml.php` vytvoří HTML verzi servírovanou na URL `/manual`,
-- `tools/exportManualToPdf.php` vytvoří `manual/manual.pdf` (button **„Stáhnout PDF"** v sidebaru).
+- `tools/exportManualToPdf.php` vytvoří `manual/manual.pdf` pro zveřejnění na https://myucto.cz/manual/Manual_MyUcto.pdf; do release bundlu ani Docker obrazu nepatří, tlačítko **„Stáhnout PDF"** v sidebaru odkazuje na tuto adresu.
 
 ## Struktura
 

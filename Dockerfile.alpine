@@ -99,10 +99,9 @@ RUN sed -i 's/\r$//' docker/entrypoint-alpine.sh docker/cron-run.sh \
 COPY --from=web-build --chown=www-data:www-data /app/dist ./web/dist
 COPY --from=php-deps  --chown=www-data:www-data /app/vendor ./api/vendor
 
-# Manuál HTML + PDF (servíruje /manual route + "Stáhnout PDF").
+# Manuál HTML (servíruje /manual route); PDF odkazuje na myucto.cz.
 RUN php tools/generateManualHtml.php \
- && php tools/exportManualToPdf.php \
- && chown -R www-data:www-data manual/generated manual/manual.pdf
+ && chown -R www-data:www-data manual/generated
 
 # Vestavěný cron — wrapper + crontab z CronCatalog (cronie čte /etc/cron.d/*).
 RUN cp docker/cron-run.sh /usr/local/bin/myucto-cron-run \

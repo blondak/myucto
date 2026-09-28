@@ -166,4 +166,4 @@ Praktické důsledky:
 - Drž se stylu okolního kódu (pojmenování, idiomy, hustota komentářů). Nepřidávej komentáře, které kód jen opakují.
 - Commit messages česky, conventional-commits styl: `feat(scope): …`, `fix(scope): …`, `release: X.Y.Z — …` (viz `git log`).
 - `VERSION` a poznámky k vydání (`.github/release-notes/vX.Y.Z.md`) mění maintainer při release — v běžném PR na ně nesahej.
-- Necommituj vygenerované artefakty. `web/dist/`, `manual/generated/` a `manual/manual.pdf` jsou gitignorované; do release bundlu je staví CI (`.github/workflows/docker-publish.yml`).
+- Necommituj vygenerované artefakty. `web/dist/`, `manual/generated/` a `manual/manual.pdf` jsou gitignorované; `web/dist/` a `manual/generated/` do release bundlu staví CI (`.github/workflows/docker-publish.yml`), PDF manuálu v bundlu není (odkaz na https://myucto.cz/manual/Manual_MyUcto.pdf).

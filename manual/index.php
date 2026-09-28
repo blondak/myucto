@@ -97,7 +97,7 @@ function chapterNum(string $file): string {
 }
 
 $cssVer = (string)@filemtime(__DIR__ . '/manual.css');
-$hasPdf = is_file(__DIR__ . '/manual.pdf');
+$pdfUrl = 'https://myucto.cz/manual/Manual_MyUcto.pdf';
 
 // SVG ikony (Heroicons outline, stroke 2, viewBox 24) — stejné jako ThemeToggle.vue v apce
 $ICON_LIGHT = 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0z';
@@ -140,12 +140,10 @@ $ICON_DARK  = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-
         <button type="button" class="theme-toggle" id="theme-toggle" title="Přepnout barevný režim" aria-label="Přepnout barevný režim">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path id="theme-toggle-icon" stroke-linecap="round" stroke-linejoin="round" d="<?= $ICON_DARK ?>"/></svg>
         </button>
-        <?php if ($hasPdf): ?>
-        <a href="/manual/manual.pdf" class="btn btn-outline hide-mobile" download>
+        <a href="<?= htmlspecialchars($pdfUrl, ENT_QUOTES) ?>" class="btn btn-outline hide-mobile" target="_blank" rel="noopener">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
             Stáhnout PDF
         </a>
-        <?php endif; ?>
         <a href="/" class="btn btn-primary hide-mobile">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
             Zpět do Admin
@@ -166,12 +164,10 @@ $ICON_DARK  = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
                 Zpět do Admin
             </a>
-            <?php if ($hasPdf): ?>
-            <a href="/manual/manual.pdf" class="btn btn-outline" download>
+            <a href="<?= htmlspecialchars($pdfUrl, ENT_QUOTES) ?>" class="btn btn-outline" target="_blank" rel="noopener">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
                 PDF
             </a>
-            <?php endif; ?>
         </div>
         <div class="search-wrap">
             <svg class="search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607z"/></svg>

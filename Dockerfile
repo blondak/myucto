@@ -120,11 +120,10 @@ RUN chmod +x /var/www/html/docker-entrypoint.sh
 COPY --from=web-build --chown=www-data:www-data /app/dist ./web/dist
 COPY --from=php-deps  --chown=www-data:www-data /app/vendor ./api/vendor
 
-# Generate HTML + PDF manual from manual/*.md
-# (HTML servíruje /manual route, PDF se nabízí jako "Stáhnout PDF" v sidebaru)
+# Generate HTML manual from manual/*.md (servíruje /manual route).
+# PDF manuálu v obrazu není, „Stáhnout PDF" odkazuje na myucto.cz.
 RUN php tools/generateManualHtml.php \
- && php tools/exportManualToPdf.php \
- && chown -R www-data:www-data manual/generated manual/manual.pdf
+ && chown -R www-data:www-data manual/generated
 
 # Vestavěný cron (volitelný, MYINVOICE_ENABLE_CRON=1 default). Wrapper + crontab
 # generovaný z CronCatalog (jediný zdroj pravdy — viz tools/generateDockerCrontab.php),

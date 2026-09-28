@@ -4,7 +4,7 @@ Tradiční hosting bez Dockeru (cca 5 minut).
 
 > 💡 **Nechce se ti buildit?** Stáhni si hotový **production bundle** z
 > [GitHub Releases](https://github.com/radekhulan/myucto/releases) — má už
-> hotové `api/vendor/`, `web/dist/`, `manual/generated/` i `manual.pdf`, takže
+> hotové `api/vendor/`, `web/dist/` i `manual/generated/`, takže
 > odpadá Composer, Node/pnpm i build kroky (4.3 frontend/manuál a 4.4). Postup
 > najdeš níže v [4.6 Alternativa: hotový balíček](#46-alternativa-hotovy-balicek-bez-buildu).
 > Pak ti stačí PHP + MariaDB + web server.
@@ -54,7 +54,6 @@ mysql -u root -p -e "CREATE DATABASE myucto CHARACTER SET utf8mb4 COLLATE utf8mb
 cd api && composer install && cd ..
 php api/bin/migrate.php
 php tools/generateManualHtml.php   # vyrenderuje manual/generated/ → /manual route
-php tools/exportManualToPdf.php    # vygeneruje manual/manual.pdf (Stáhnout PDF v sidebaru)
 ```
 
 `generateManualHtml.php` je self-contained (nepotřebuje composer/vendor),
@@ -83,7 +82,7 @@ Po nasazení web serveru pokračuj kapitolou [Po instalaci](05_Po_instalaci.md).
 Pro sdílený hosting bez Composeru / Node — stáhni **production bundle** z
 [release page](https://github.com/radekhulan/myucto/releases). Publikuje se
 automaticky ke každému release tagu a obsahuje hotové `api/vendor/`,
-`web/dist/`, `manual/generated/` i `manual.pdf`, takže **žádný build krok není
+`web/dist/` i `manual/generated/`, takže **žádný build krok není
 potřeba** (přeskočíš sekce 4.3 frontend/manuál i 4.4).
 
 ```bash

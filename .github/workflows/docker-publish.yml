@@ -177,7 +177,8 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
   # Production bundle — full deployable tar.gz s vendor/, web/dist/,
-  # manual/generated/, manual/manual.pdf — uploadne jako release asset.
+  # manual/generated/ — uploadne jako release asset. PDF manuálu v bundlu není,
+  # manuál odkazuje na https://myucto.cz/manual/Manual_MyUcto.pdf.
   # Slouží pro „native auto-update" (UI v Settings → Aktualizace stáhne
   # tarball a rozbalí ho přes hostingy bez Composer / Node).
   bundle:
@@ -221,10 +222,8 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build:image
 
-      - name: Generate manual (HTML + PDF)
-        run: |
-          php tools/generateManualHtml.php
-          php tools/exportManualToPdf.php
+      - name: Generate manual (HTML)
+        run: php tools/generateManualHtml.php
 
       # MCP server — jednosouborový build. Do bundlu jde `MCP/dist/myucto-mcp.mjs`,
       # takže uživatel nemusí mít Node toolchain ani spouštět `npm install`; stačí
@@ -239,7 +238,7 @@ jobs:
       - name: Build production bundle tarball
         # Vyloučí: .git, .github, source/, node_modules, api/vendor.prod (cache),
         # api/.phpunit.cache, api/tests, log/, storage/, private/, cfg.*, web/src.
-        # Zahrne: api/vendor/, web/dist/, manual/ (vč. manual.pdf), root soubory.
+        # Zahrne: api/vendor/, web/dist/, manual/ (bez manual.pdf), root soubory.
         #
         # Pozn.: tarball se píše do /tmp, ne do CWD — jinak tar detekuje, že
         # archiv sám sebe modifikuje během čtení ("file changed as we read it",
@@ -255,6 +254,7 @@ jobs:
             --exclude='./api/vendor.prod' \
             --exclude='./api/.phpunit.cache' \
             --exclude='./api/tests' \
+            --exclude='./manual/manual.pdf' \
             --exclude='./log/*' \
             --exclude='./storage/*' \
             --exclude='./private/*' \

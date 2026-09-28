@@ -4,7 +4,8 @@
 # Co dělá:
 #   1. Verze čte z VERSION (root).
 #   2. Build web/dist (pnpm install + build) — přeskočí, pokud existuje a není --rebuild.
-#   3. Build manual HTML + PDF — přeskočí, pokud existuje a není --rebuild.
+#   3. Build manual HTML — přeskočí, pokud existuje a není --rebuild. PDF manuálu
+#      v bundlu není, manuál odkazuje na https://myucto.cz/manual/Manual_MyUcto.pdf.
 #   4. Composer install --no-dev s VENDOR DIR mimo api/vendor (nepoškodí dev vendor).
 #   5. Sbalí všechno do dist/myucto-X.Y.Z.tar.gz (top-level = "myucto-X.Y.Z/").
 #   6. Vypočítá SHA256 sidecar.
@@ -55,11 +56,10 @@ else
   echo "[skip] web/dist už existuje (--rebuild pro fresh)"
 fi
 
-# 2. manual HTML + PDF
-if [ ${REBUILD} -eq 1 ] || [ ! -f manual/manual.pdf ] || [ ! -f manual/generated/INDEX.html ]; then
-  echo "[build] manual HTML + PDF"
+# 2. manual HTML
+if [ ${REBUILD} -eq 1 ] || [ ! -f manual/generated/INDEX.html ]; then
+  echo "[build] manual HTML"
   "$PHP_BIN" tools/generateManualHtml.php
-  "$PHP_BIN" tools/exportManualToPdf.php
 else
   echo "[skip] manual už vygenerovaný (--rebuild pro fresh)"
 fi
@@ -96,11 +96,10 @@ mkdir -p "${STAGE_DIR}"
 git archive --format=tar HEAD | tar -x -C "${STAGE_DIR}"
 
 # 5. Přidat built artefakty
-echo "[stage] +web/dist +manual/generated +manual.pdf +api/vendor"
+echo "[stage] +web/dist +manual/generated +api/vendor"
 mkdir -p "${STAGE_DIR}/web" "${STAGE_DIR}/manual" "${STAGE_DIR}/api"
 cp -r web/dist           "${STAGE_DIR}/web/dist"
 cp -r manual/generated   "${STAGE_DIR}/manual/generated"
-cp    manual/manual.pdf  "${STAGE_DIR}/manual/manual.pdf"
 cp -r "${PROD_VENDOR}"   "${STAGE_DIR}/api/vendor"
 # .lock-hash je interní marker pro náš cache, do bundle ho nemontuj.
 rm -f "${STAGE_DIR}/api/vendor/.lock-hash"

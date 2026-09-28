@@ -16,8 +16,8 @@ use Throwable;
  * Nativní auto-update z production bundle (GitHub release asset
  * `myucto-X.Y.Z.tar.gz`).
  *
- * Bundle je kompletní deployable strom — `api/vendor/`, `web/dist/`,
- * `manual/generated/` i `manual/manual.pdf` jsou představěné, takže host
+ * Bundle je kompletní deployable strom — `api/vendor/`, `web/dist/`
+ * i `manual/generated/` jsou představěné, takže host
  * nepotřebuje Composer, Node ani pnpm. Konfigurace a uživatelská data
  * v bundlu vůbec nejsou (CI je z tarballu vylučuje) a swap je navíc přeskočí
  * podle {@see self::PROTECTED_PATHS}.
