@@ -66,12 +66,16 @@ final class MigratedPaymentWriter
             if ($movementKind !== 'cash') throw new \InvalidArgumentException('payment_target_missing');
             $column = $documentKind === 'issued' ? 'invoice_id' : 'purchase_invoice_id';
             $purpose = $documentKind === 'issued' ? 'invoice_payment' : 'purchase_payment';
-            $stmt = $pdo->prepare('SELECT invoice_id, purchase_invoice_id, currency_code FROM cash_documents WHERE id = ? AND supplier_id = ?');
+            $stmt = $pdo->prepare('SELECT invoice_id, purchase_invoice_id, currency_code, total_amount
+                FROM cash_documents WHERE id = ? AND supplier_id = ?');
             $stmt->execute([$movementId, $supplierId]);
             $cash = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($cash === false) throw new \InvalidArgumentException('payment_target_missing');
             if ($cash['currency_code'] !== 'CZK') throw new \InvalidArgumentException('payment_currency_unverified');
             if ($cash['invoice_id'] !== null || $cash['purchase_invoice_id'] !== null) {
+                throw new \InvalidArgumentException('cash_payment_ambiguous');
+            }
+            if (abs((float) $cash['total_amount'] - $amount) > 0.01) {
                 throw new \InvalidArgumentException('cash_payment_ambiguous');
             }
             $pdo->prepare("UPDATE cash_documents SET {$column} = ?, purpose = ?, vat_mode = 'none' WHERE id = ? AND supplier_id = ?")
@@ -124,12 +128,17 @@ final class MigratedPaymentWriter
             $this->assertHomeDocument($supplierId, 'issued', $id);
             $pdo->prepare('UPDATE invoices SET paid_total =
                 (SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?),
-                paid_at = (SELECT MAX(paid_on) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?)
-                WHERE supplier_id = ? AND id = ?')->execute([
-                $supplierId, $id, $supplierId, $id, $supplierId, $id,
+                paid_at = CASE WHEN
+                    (SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?)
+                    >= ABS(total_with_vat) - 0.01
+                    THEN (SELECT MAX(paid_on) FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?)
+                    ELSE NULL END
+                WHERE supplier_id = ? AND id = ? AND status <> "cancelled"')->execute([
+                $supplierId, $id, $supplierId, $id, $supplierId, $id, $supplierId, $id,
             ]);
-            $pdo->prepare('UPDATE invoices SET status = "paid" WHERE supplier_id = ? AND id = ? AND status <> "draft"
-                AND paid_total >= total_with_vat - 0.01')->execute([$supplierId, $id]);
+            $pdo->prepare('UPDATE invoices SET status = "paid" WHERE supplier_id = ? AND id = ?
+                AND status NOT IN ("draft", "cancelled")
+                AND paid_total >= ABS(total_with_vat) - 0.01')->execute([$supplierId, $id]);
         }
         foreach (array_unique($purchases) as $id) {
             $this->assertHomeDocument($supplierId, 'purchase', $id);
@@ -138,7 +147,7 @@ final class MigratedPaymentWriter
                   WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?)
                 + (SELECT COALESCE(SUM(cd.total_amount), 0) FROM cash_documents cd
                     WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ? AND cd.status = "posted")
-                WHERE supplier_id = ? AND id = ?')->execute([
+                WHERE supplier_id = ? AND id = ? AND status <> "cancelled"')->execute([
                 $supplierId, $id, $supplierId, $id, $supplierId, $id,
             ]);
             $pdo->prepare('UPDATE purchase_invoices SET status = "paid",
@@ -149,8 +158,8 @@ final class MigratedPaymentWriter
                     COALESCE((SELECT MAX(cd.issue_date) FROM cash_documents cd
                         WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ? AND cd.status = "posted"), "1000-01-01")
                 ), "1000-01-01")
-                WHERE supplier_id = ? AND id = ? AND status <> "draft"
-                  AND paid_amount_invoice_ccy >= total_with_vat - 0.01')->execute([
+                WHERE supplier_id = ? AND id = ? AND status NOT IN ("draft", "cancelled")
+                  AND paid_amount_invoice_ccy >= ABS(total_with_vat + rounding) - 0.01')->execute([
                 $supplierId, $id, $supplierId, $id, $supplierId, $id,
             ]);
         }
