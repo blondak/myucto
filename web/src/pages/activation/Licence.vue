@@ -39,7 +39,10 @@ const points = tm('license.model_points') as unknown[]
         <p class="text-sm text-neutral-700 leading-relaxed mt-1.5">{{ t('license.readonly_body') }}</p>
       </section>
 
-      <p class="text-sm text-neutral-600">
+      <p class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-neutral-600">
+        <RouterLink to="/activation/purchase" class="text-primary-600 hover:text-primary-800 hover:underline font-medium">
+          {{ t('license.purchase_title') }} →
+        </RouterLink>
         <a href="https://myucto.cz/licence" target="_blank" rel="noopener" class="text-primary-600 hover:text-primary-800 hover:underline font-medium">
           {{ t('license.full_license_link') }} →
         </a>

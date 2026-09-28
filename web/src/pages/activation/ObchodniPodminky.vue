@@ -84,6 +84,12 @@ onMounted(async () => {
         </a>
       </div>
 
+      <p class="text-sm">
+        <RouterLink to="/activation/purchase" class="text-primary-600 hover:text-primary-800 hover:underline font-medium">
+          {{ t('license.purchase_title') }} →
+        </RouterLink>
+      </p>
+
       <p class="text-xs text-neutral-500">{{ t('license.terms_effective') }}</p>
     </div>
   </div>
