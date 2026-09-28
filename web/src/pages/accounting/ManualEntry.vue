@@ -519,9 +519,12 @@ async function submitTransfer(force = false) {
 
       <!-- Řádky -->
       <div>
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <label class="text-sm font-medium text-neutral-700">{{ t('accounting.manual.lines') }}</label>
-          <button @click="addLine" class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">+ {{ t('accounting.manual.add_line') }}</button>
+          <button type="button" @click="addLine" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('accounting.manual.add_line') }}
+          </button>
         </div>
         <div class="space-y-2">
           <div v-for="(l, i) in lines" :key="i" class="grid grid-cols-12 gap-2 items-start">
