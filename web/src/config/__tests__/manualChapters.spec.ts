@@ -28,6 +28,7 @@ describe('contextual manual for application menu', () => {
   })
 
   it.each([
+    ['/imports', '21_Importy'],
     ['/imports/stereo-nx', '21_Importy'],
     ['/other-items', '52_Ucetni_denik'],
     ['/other-items/new', '52_Ucetni_denik'],
