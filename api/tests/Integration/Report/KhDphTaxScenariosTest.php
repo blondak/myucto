@@ -1325,6 +1325,47 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertEqualsWithDelta(40000, $amountByType['3'] ?? -1, 0.01, 'SHV kód 3 = služba do JČS');
     }
 
+    public function testForeignSaleWithoutReverseChargeFlagDoesNotEnterDomesticKh(): void
+    {
+        $customer = $this->client('Tuzemský odběratel KH', $this->czId, null, customer: true);
+        $foreignCustomer = $this->client('Zahraniční odběratel KH', $this->skId, 'SK2020202', customer: true);
+        $date = sprintf('%04d-%02d-10', self::YEAR, self::MONTH);
+
+        $this->sale('2099069251', $customer, '1', false, $date, $date, [[1000, 210, 21]]);
+        $this->sale('2099069252', $foreignCustomer, '22', false, $date, $date, [[3000, 0, 21]]);
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        self::assertSame('1000.00', (string) $kh->DPHKH1->VetaA5['zakl_dane1']);
+        self::assertSame('210.00', (string) $kh->DPHKH1->VetaA5['dan1']);
+        self::assertCount(0, $kh->DPHKH1->VetaA4);
+
+        $return = new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']);
+        self::assertSame('3000', (string) $return->DPHDP3->Veta2['pln_sluzby']);
+
+        $book = $this->book->build($this->supplierId, self::YEAR, self::MONTH);
+        $found = false;
+        foreach ($book['sections'] as $section) {
+            foreach ($section['rows'] as $row) {
+                if (($row['doc_number'] ?? null) === '2099069252') {
+                    $found = true;
+                    self::assertNull($row['kh_section']);
+                }
+            }
+        }
+        self::assertTrue($found);
+    }
+
+    public function testUnclassifiedDomesticSaleRemainsInKh(): void
+    {
+        $customer = $this->client('Tuzemský odběratel bez klasifikace', $this->czId, null, customer: true);
+        $date = sprintf('%04d-%02d-10', self::YEAR, self::MONTH);
+        $this->sale('2099069253', $customer, null, false, $date, $date, [[500, 105, 21]]);
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        self::assertSame('500.00', (string) $kh->DPHKH1->VetaA5['zakl_dane1']);
+        self::assertSame('105.00', (string) $kh->DPHKH1->VetaA5['dan1']);
+    }
+
     /**
      * Režim „ceny s DPH" (prices_include_vat) end-to-end až do výkazů: faktura, kde
      * jsou položky brutto (3× 33 Kč s DPH @21 %), se přes InvoiceMath shora rozpadne

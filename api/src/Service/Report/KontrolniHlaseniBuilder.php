@@ -891,8 +891,7 @@ final class KontrolniHlaseniBuilder
             // přispěje jen do JEDNÉ sekce. Tím se mixed faktura (např. §92 RC řádek +
             // běžný 21% řádek) rozdělí správně (RC část do A.1/B.1, zdanitelná do A.4/B.2),
             // místo aby celý součet spadl do jedné sekce (issue — audit KH/DPH 2026-07).
-            // khEligible: vystavené vždy, přijaté jen s nárokem na odpočet (dphdp3_line != NULL);
-            // přijaté bez nároku (kód 42, dphdp3_line=NULL) do KH nepatří, DPHDP3 je taky vynechává.
+            // Přijaté bez nároku (kód 42, dphdp3_line=NULL) do KH nepatří.
             $khEligible = $r['source'] === 'sale' || $r['dphdp3_line'] !== null;
             switch ($r['kh_section']) {
                 case 'A.1': // tuzemský §92 dodavatel — jen základ (VetaA1 nemá sazbové sloupce)
@@ -910,10 +909,12 @@ final class KontrolniHlaseniBuilder
                     $g['b1_by_code'][$rowKodPredPl] = $b1;
                     break;
                 default:
-                    // Tuzemská zdanitelná plnění (A.4/A.5, B.2/B.3). RC bez KH sekce — dovoz
-                    // zboží ze 3. země (kód 25), dodání/služba do EU (kód 20/22) — se sem
-                    // NESMÍ dostat (do KH nepatří, jen DPHDP3/SHV) → guard !is_reverse_charge.
-                    if ($khEligible && !$r['is_reverse_charge']) {
+                    // Tuzemská plnění výhradně s explicitní KH sekcí. Řádky DPH přiznání
+                    // bez KH sekce (např. vývoz nebo služba do EU) sem nepatří.
+                    $domesticKhSection = $r['source'] === 'sale'
+                        ? in_array($r['kh_section'], ['A.4', 'A.5'], true)
+                        : in_array($r['kh_section'], ['B.2', 'B.3'], true);
+                    if ($khEligible && $domesticKhSection && !$r['is_reverse_charge']) {
                         $g['kh_regime_codes'][(string) ($r['kh_regime_code'] ?? '0')] = true;
                         $g['kh_bad_debt_codes'][(string) ($r['kh_bad_debt'] ?? 'N')] = true;
                         if ($is21) { $g['dom_base21'] += $base; $g['dom_vat21'] += $vat; }
