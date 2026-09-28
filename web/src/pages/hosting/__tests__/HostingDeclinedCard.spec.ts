@@ -175,6 +175,35 @@ describe('Hosting — neproběhlá platba doplatku', () => {
     expect(wrapper.find('[data-hosting-pay-again]').exists()).toBe(false)
   })
 
+  it('předplatné placené fakturou nabídne zaplatit kartou, ne „jinou kartou"', async () => {
+    // Bez uložené karty není co odmítnout — změna se zaplatí jednorázově kartou.
+    mocks.upgrade.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'card_payment_required',
+            message: 'Předplatné nemá uloženou platební kartu, změnu proto zaplatíte jednorázově kartou. '
+              + 'Otevřete odkaz k platbě.',
+            pay_url: PAY_URL,
+          },
+        },
+      },
+    })
+    const wrapper = await mountHosting()
+
+    await wrapper.get('[data-hosting-users-order] input').setValue('5')
+    await wrapper.get('[data-hosting-users-quote]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-hosting-users-buy]').trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-hosting-pay-again]')
+    expect(notice.get('a').attributes('href')).toBe(PAY_URL)
+    expect(notice.get('a').text()).toContain(cs.license.card_payment_cta)
+    expect(notice.text()).not.toContain(cs.hosting.pay_again)
+    expect(notice.text()).toContain(cs.license.card_payment_hint)
+  })
+
   it('náhled odmítnuté karty tu nabídku ukazuje taky', async () => {
     const wrapper = await mountHosting('/hosting?nahled=card_declined')
 

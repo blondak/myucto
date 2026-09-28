@@ -17,6 +17,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class UpgradeLicenseAction
 {
+    /**
+     * Předplatné placené fakturou nemá uloženou kartu. Licenční server změnu
+     * nestrhne, ale založí jednorázovou platbu kartou a pošle na ni `pay_url`.
+     * Sdílí ji všechny placené změny licence (místa, úložiště, tarif, Mzdy).
+     */
+    public const CARD_PAYMENT_REQUIRED_MESSAGE = 'Předplatné nemá uloženou platební kartu, změnu proto '
+        . 'zaplatíte jednorázově kartou. Otevřete odkaz k platbě.';
+
     private const ERROR_MESSAGES = [
         'invalid_key'           => 'Aktivní licence nenalezena. Nejprve aktivujte licenční klíč.',
         'not_upgradable'        => 'Tuto licenci nelze navýšit.',
@@ -26,11 +34,17 @@ final class UpgradeLicenseAction
         'charge_failed'         => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
             . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
         'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
+        'card_payment_required' => self::CARD_PAYMENT_REQUIRED_MESSAGE,
         'instance_required'     => 'U hostovaného provozu je pro navýšení nutné ověření této instalace.',
         'not_bound'             => 'Tato instalace není k licenci aktivně přiřazená.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
         'upgrade_failed'        => 'Navýšení se nezdařilo. Zkuste to prosím znovu.',
     ];
+
+    public static function message(string $error): string
+    {
+        return self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['upgrade_failed'];
+    }
 
     public function __construct(
         private readonly LicenseService $license,
@@ -55,7 +69,7 @@ final class UpgradeLicenseAction
         $result = $this->license->upgrade($users, $quoteToken);
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'upgrade_failed');
-            $message = self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['upgrade_failed'];
+            $message = self::message($error);
             $status = $error === 'server_unreachable' ? 503 : 422;
             // ⚠️ `pay_url` musí projít až na obrazovku: po neprojité kartě je to
             // jediná nabídka, která dává smysl — opakovat totéž nepomůže.

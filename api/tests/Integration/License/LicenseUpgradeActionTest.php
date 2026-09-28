@@ -559,6 +559,45 @@ final class LicenseUpgradeActionTest extends TestCase
         self::assertSame('https://myucto.cz/platba?t=tier', $this->body($resp)['error']['pay_url']);
     }
 
+    // ── předplatné placené fakturou (bez uložené karty) ──────────────────────
+    //
+    // Server změnu nestrhne, ale založí jednorázovou platbu kartou. Odkaz musí
+    // dorazit na obrazovku spolu s hláškou, která neradí „zkuste to znovu".
+
+    public function testCardPaymentRequiredForwardsPayUrlWithExplanation(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('upgrade')
+            ->willReturn(['ok' => false, 'error' => 'card_payment_required', 'order_id' => 91, 'pay_url' => 'https://myucto.cz/platba-navrat?t=seat']);
+        $this->client->expects($this->never())->method('renew');
+
+        $resp = $this->upgrade->__invoke($this->adminRequest(['users' => 5, 'quote_token' => 'quote-1']), new Psr7Response());
+
+        self::assertSame(422, $resp->getStatusCode());
+        $error = $this->body($resp)['error'];
+        self::assertSame('card_payment_required', $error['code']);
+        self::assertSame('https://myucto.cz/platba-navrat?t=seat', $error['pay_url']);
+        self::assertSame(UpgradeLicenseAction::CARD_PAYMENT_REQUIRED_MESSAGE, $error['message']);
+    }
+
+    public function testTierCardPaymentRequiredForwardsPayUrlWithExplanation(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('tierChange')
+            ->willReturn(['ok' => false, 'error' => 'card_payment_required', 'pay_url' => 'https://myucto.cz/platba-navrat?t=tier']);
+
+        $resp = $this->tierChange->__invoke(
+            $this->adminRequest(['tier' => 'multi10', 'quote_token' => 'tier-quote']),
+            new Psr7Response(),
+        );
+
+        $error = $this->body($resp)['error'];
+        self::assertSame('https://myucto.cz/platba-navrat?t=tier', $error['pay_url']);
+        self::assertSame(UpgradeLicenseAction::CARD_PAYMENT_REQUIRED_MESSAGE, $error['message']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** Rozšíření místa se prodává jen u hostovaného provozu — pro ten případ vlastní akce. */

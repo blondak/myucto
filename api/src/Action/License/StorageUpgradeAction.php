@@ -39,7 +39,8 @@ final class StorageUpgradeAction
         'charge_failed'         => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
             . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
         'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
-        'payments_disabled'     => 'Platby jsou dočasně pozastavené. Zkuste to prosím později.',
+        'card_payment_required' => UpgradeLicenseAction::CARD_PAYMENT_REQUIRED_MESSAGE,
+        'payments_disabled'     =>'Platby jsou dočasně pozastavené. Zkuste to prosím později.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
         // ⚠️ Nepobízet k opakování: platba mohla proběhnout a ztratila se jen odpověď.
         'result_unknown'        => 'Nevíme, jak platba dopadla. Nezkoušejte to prosím znovu — '

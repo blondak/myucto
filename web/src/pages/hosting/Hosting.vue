@@ -204,6 +204,13 @@ function apiError(e: unknown, fallbackKey: string): { code: string | null; messa
  * zrovna vidět, a každý nákup si ho na začátku vynuluje.
  */
 const payUrl = ref<string | null>(null)
+/** Předplatné placené fakturou nemá kartu — odkaz je jednorázová platba změny, ne „jiná karta". */
+const payCardRequired = ref(false)
+
+function showPayLink(failure: { code: string | null; payUrl: string | null }): void {
+  payUrl.value = failure.payUrl
+  payCardRequired.value = failure.code === 'card_payment_required'
+}
 
 // ─── Co mám ────────────────────────────────────────────────────────────────
 
@@ -413,7 +420,7 @@ async function calcTierQuote(): Promise<void> {
   } catch (e: unknown) {
     const failure = apiError(e, 'license.tier_change_failed')
     tierError.value = failure.message
-    payUrl.value = failure.payUrl
+    showPayLink(failure)
   } finally {
     quotingTier.value = false
   }
@@ -442,7 +449,7 @@ async function applyTierChange(): Promise<void> {
   } catch (e: unknown) {
     const failure = apiError(e, 'license.tier_change_failed')
     tierError.value = failure.message
-    payUrl.value = failure.payUrl
+    showPayLink(failure)
   } finally {
     changingTier.value = false
   }
@@ -480,7 +487,7 @@ async function calcUserQuote(): Promise<void> {
   } catch (e: unknown) {
     const failure = apiError(e, 'license.upgrade_failed')
     userError.value = failure.message
-    payUrl.value = failure.payUrl
+    showPayLink(failure)
   } finally {
     quotingUsers.value = false
   }
@@ -513,7 +520,7 @@ async function buyUsers(): Promise<void> {
   } catch (e: unknown) {
     const failure = apiError(e, 'license.upgrade_failed')
     userError.value = failure.message
-    payUrl.value = failure.payUrl
+    showPayLink(failure)
   } finally {
     upgradingUsers.value = false
   }
@@ -561,7 +568,7 @@ async function pickSize(gb: number): Promise<void> {
   } catch (e: unknown) {
     const failure = apiError(e, 'hosting.storage_order_failed')
     storageError.value = failure.message
-    payUrl.value = failure.payUrl
+    showPayLink(failure)
   } finally {
     quotingStorage.value = false
   }
@@ -606,10 +613,10 @@ async function buyStorage(): Promise<void> {
     await load()
     await auth.refresh()
   } catch (e: unknown) {
-    const { code, message, payUrl: link } = apiError(e, 'hosting.storage_order_failed')
-    storageError.value = message
-    payUrl.value = link
-    if (code === 'result_unknown') offerClosed.value = true
+    const failure = apiError(e, 'hosting.storage_order_failed')
+    storageError.value = failure.message
+    showPayLink(failure)
+    if (failure.code === 'result_unknown') offerClosed.value = true
   } finally {
     buyingStorage.value = false
   }
@@ -1084,7 +1091,7 @@ watch(previewScenario, (scenario) => {
         </div>
         <div v-if="storageError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-hosting-storage-error>
           {{ storageError }}
-          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+          <PayAgainNotice v-if="payUrl" :href="payUrl" :card-required="payCardRequired" />
         </div>
 
         <p v-if="!links?.subscription && !links?.expand_storage" class="mt-3 text-xs text-neutral-500">
@@ -1123,7 +1130,7 @@ watch(previewScenario, (scenario) => {
         <p v-if="tierMessage" class="mt-3 text-sm text-success-700">{{ tierMessage }}</p>
         <div v-if="tierError" class="mt-3 text-sm text-danger-600">
           {{ tierError }}
-          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+          <PayAgainNotice v-if="payUrl" :href="payUrl" :card-required="payCardRequired" />
         </div>
         <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
       </section>
@@ -1174,7 +1181,7 @@ watch(previewScenario, (scenario) => {
         <div v-if="userDone" class="mt-4 rounded-md border border-success-500/40 bg-success-50 p-3 text-sm text-success-700">{{ userDone }}</div>
         <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
           {{ userError }}
-          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+          <PayAgainNotice v-if="payUrl" :href="payUrl" :card-required="payCardRequired" />
         </div>
       </section>
 

@@ -14,6 +14,18 @@ final class TierChangeAction
 {
     private const TIERS = ['single', 'multi10', 'unlimited'];
 
+    private const ERROR_MESSAGES = [
+        'charge_failed'         => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte jinou kartou '
+            . 'přes odkaz níž — poslali jsme ho i e-mailem.',
+        'card_payment_required' => UpgradeLicenseAction::CARD_PAYMENT_REQUIRED_MESSAGE,
+        'change_failed'         => 'Změna tarifu se nezdařila.',
+    ];
+
+    public static function message(string $error): string
+    {
+        return self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['change_failed'];
+    }
+
     public function __construct(private readonly LicenseService $license) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -33,10 +45,7 @@ final class TierChangeAction
         $result = $this->license->changeTier($tier, $quoteToken);
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'change_failed');
-            $message = $error === 'charge_failed'
-                ? 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte jinou kartou '
-                    . 'přes odkaz níž — poslali jsme ho i e-mailem.'
-                : 'Změna tarifu se nezdařila.';
+            $message = self::message($error);
             // ⚠️ `pay_url` musí projít až na obrazovku: po neprojité kartě je to
             // jediná nabídka, která dává smysl — opakovat totéž nepomůže.
             $extra = isset($result['pay_url']) ? ['pay_url' => (string) $result['pay_url']] : [];

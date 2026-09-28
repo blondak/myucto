@@ -171,6 +171,13 @@ vyššího pásma podle počtu zaměstnanců. Server účtuje poměrný doplatek
 období. Bez aktivního mzdového nároku po zkušební době nelze Mzdy zapnout ani
 otevřít. Aplikace v takovém případě nabídne zakoupení nebo rozšíření licence.
 
+**Předplatné placené fakturou** (typicky roční, bez uložené karty) jde měnit
+stejně, dokud trvá zaplacené období. Doplatek za změnu nemá z čeho strhnout,
+proto aplikace po potvrzení nabídne tlačítko **Zaplatit kartou**. Kartou se
+jednorázově zaplatí jen tato změna, předplatné se dál platí fakturou a konec
+zaplaceného období se nemění. Nový rozsah se projeví hned po zaplacení.
+Opakované potvrzení vede na tutéž platbu, takže se nic nezaplatí dvakrát.
+
 **Snížení počtu uživatelů, tarifu nebo prostoru** se neprojeví uprostřed už
 zaplaceného období. Po potvrzení se naplánuje od začátku následujícího
 fakturačního období a jeho nižší rozsah se použije pro další pravidelnou
