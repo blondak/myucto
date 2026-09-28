@@ -212,7 +212,7 @@ onBeforeUnmount(() => {
       >
         <div
           v-if="openSection === section.key"
-          class="absolute top-full z-50 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-neutral-200 dark:border-neutral-300 rounded-b-lg shadow-xl dark:shadow-[0_14px_32px_rgba(0,0,0,0.45)] py-1.5"
+          class="absolute top-full z-50 w-72 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain scrollbar-slim bg-surface border border-neutral-200 dark:border-neutral-300 rounded-b-lg shadow-xl dark:shadow-[0_14px_32px_rgba(0,0,0,0.45)] py-1.5"
           :class="index >= visibleSections.length - 3 ? 'right-0' : 'left-0'"
           role="menu"
         >

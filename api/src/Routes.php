@@ -2812,6 +2812,16 @@ final class Routes
         $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'result']);
         $app->delete ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'delete']);
 
+        $app->get    ('/api/admin/imports/abra-flexi/connection', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'status']);
+        $app->put    ('/api/admin/imports/abra-flexi/connection', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'update']);
+        $app->delete ('/api/admin/imports/abra-flexi/connection', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'remove']);
+        $app->post   ('/api/admin/imports/abra-flexi/discover', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'discover']);
+        $app->post   ('/api/admin/imports/abra-flexi/start', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'start']);
+        $app->post   ('/api/admin/imports/abra-flexi/sync', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'sync']);
+        $app->post   ('/api/admin/imports/abra-flexi/catalog', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'catalog']);
+        $app->get    ('/api/admin/imports/abra-flexi/runs', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'runs']);
+        $app->get    ('/api/admin/imports/abra-flexi/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'run']);
+
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí
         // (api/bin/export-instance.php), archiv leží mimo docroot a stahuje se jen

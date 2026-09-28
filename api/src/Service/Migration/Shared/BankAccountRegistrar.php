@@ -33,6 +33,7 @@ final class BankAccountRegistrar
      */
     public static function accountKey(string $number, string $bank): string
     {
+        if (preg_match('/^[A-Za-z]+-[0-9]+$/D', $number) === 1) return 'virtual:' . strtoupper($number);
         return AccountNumberNormalizer::normalize($number) . '/' . ltrim(trim($bank), '0');
     }
 
@@ -69,6 +70,11 @@ final class BankAccountRegistrar
             }
         }
         return $registered;
+    }
+
+    public function registerVirtual(int $supplierId, string $identity, string $currency, string $label, ?string $suffix): int
+    {
+        return $this->bankAccounts->registerImportedVirtual($supplierId, $identity, $currency, $label, $suffix);
     }
 
     /**
@@ -112,12 +118,27 @@ final class BankAccountRegistrar
              VALUES (?, ?, ?, ?, ?, ?, 2, 1, 0, ?, ?, ?)'
         );
         $link = $pdo->prepare('UPDATE supplier_bank_accounts SET currency_id = ? WHERE id = ? AND supplier_id = ? AND currency_id IS NULL');
+        $linkedCurrency = $pdo->prepare('SELECT c.id, c.code, c.account_number, c.bank_code
+            FROM supplier_bank_accounts a JOIN currencies c ON c.id = a.currency_id AND c.supplier_id = a.supplier_id
+            WHERE a.id = ? AND a.supplier_id = ?');
+        $promoteBankCode = $pdo->prepare('UPDATE currencies SET bank_code = ?
+            WHERE id = ? AND supplier_id = ? AND (bank_code IS NULL OR bank_code = "")');
         foreach ($used as $code) {
             $a = $accounts[$code] ?? null;
             if ($a === null || $a['number'] === '' || !isset($registered[$code])) {
                 continue;
             }
             $key = self::accountKey($a['number'], $a['bank']);
+            if (!isset($known[$key]) && $a['bank'] !== '') {
+                $linkedCurrency->execute([$registered[$code], $supplierId]);
+                $linked = $linkedCurrency->fetch(\PDO::FETCH_ASSOC);
+                if ($linked !== false && $linked['code'] === $a['currency']
+                    && (string) ($linked['bank_code'] ?? '') === ''
+                    && self::accountKey((string) $linked['account_number'], '') === self::accountKey($a['number'], '')) {
+                    $promoteBankCode->execute([$a['bank'], (int) $linked['id'], $supplierId]);
+                    $known[$key] = (int) $linked['id'];
+                }
+            }
             if (!isset($known[$key])) {
                 $base = $namesFromExistingCurrency ? ($byCode[$a['currency']] ?? null) : null;
                 $czk = $a['currency'] === 'CZK';

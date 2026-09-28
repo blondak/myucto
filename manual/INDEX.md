@@ -31,7 +31,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 11. [Zisk](11_Zisk.md)
 12. [Tržby](12_Trzby.md)
 13. [Náklady](13_Naklady.md)
-[Dimenze](110_Dimenze.md) (při zapnutých dimenzích)
+[Dimenze](114_Dimenze.md) (při zapnutých dimenzích)
 
 ### Prodej
 
@@ -154,7 +154,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 97. [Datová schránka](97_Datova_schranka.md)
 98. [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md)
 99. [Elektronické podpisy](99_Elektronicke_podpisy.md)
-110. [Dimenze](110_Dimenze.md)
+114. [Dimenze](114_Dimenze.md)
 
 ### Systém
 
@@ -168,6 +168,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 107. [Přechod z POHODY](107_Prechod_z_POHODY.md)
 108. [Přechod z PAMICA](108_Prechod_z_PAMICA.md)
 109. [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
+110. [Přechod z ABRA Flexi](110_Prechod_z_ABRA_Flexi.md)
 
 ### Reference
 

@@ -786,17 +786,7 @@ const navSections = computed<NavSection[]>(() => {
           // Automatické zálohy ke stažení — protějšek exportu: ne balíček na vyžádání,
           // ale historie toho, co crony odkládají samy.
           { to: '/admin/backups', label: t('nav.backups'), icon: ICONS.tax_archive },
-          // Převod celé agendy z Money S3 — protějšek exportu: data dovnitř. I pro firmu
-          // v daňové evidenci (převod ji přepne).
-          { to: '/imports/money-s3', label: t('nav.money_s3_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
-          { to: '/imports/pohoda', label: t('nav.pohoda_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
-          // PREMIER je jiný program se zálohou přímo z aplikace (F11), bez exportního
-          // nástroje — vlastní položka hned vedle POHODY, ne volba uvnitř jejího průvodce.
-          { to: '/imports/premier', label: t('nav.premier_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
-          { to: '/imports/stereo-nx', label: t('nav.stereo_nx_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
-          // PAMICA je samostatný mzdový program s vlastním datovým souborem — jiný nástroj
-          // i jiný obsah převodu, proto vlastní položka, ne volba uvnitř převodu POHODY.
-          { to: '/imports/pamica', label: t('nav.pamica_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
+          { to: '/imports', label: t('nav.accounting_migrations'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },
           // Podklady k incidentu a rozcestník podpory — vlastní skupina na konci.
           { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
           { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },

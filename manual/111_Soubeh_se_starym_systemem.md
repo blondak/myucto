@@ -105,7 +105,7 @@ Sloupce se hledají podle názvu bez ohledu na diakritiku a velikost písmen:
   čísla. Bez sloupce účtu se porovnají všechny saldokontní účty najednou.
 - **Obraty po střediscích** jsou obraty měsíce, výnosy i náklady kladně. Řádek
   *Bez střediska* porovná i obraty bez střediska. Na straně MyÚčta se bere první
-  aktivní typ dimenze *Středisko* (kapitola 110).
+  aktivní typ dimenze *Středisko* (kapitola 114).
 - **Rozvaha**: pasiva poznají sloupec *Strana* s hodnotou P nebo označení začínající
   `P.` (například `P.A.I.`), ostatní řádky jsou aktiva. Aktiva se porovnávají
   v netto hodnotě.

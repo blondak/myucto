@@ -41,6 +41,7 @@ final class BankSymbolsTest extends TestCase
         self::assertSame(BankAccountRegistrar::accountKey('19-0000123', '0100'), BankAccountRegistrar::accountKey('0000190000123', ' 100'));
         self::assertSame('190000123/100', BankAccountRegistrar::accountKey('19-0000123', '0100'));
         self::assertNotSame(BankAccountRegistrar::accountKey('1000000005', '0100'), BankAccountRegistrar::accountKey('1000000005', '0300'));
+        self::assertNotSame(BankAccountRegistrar::accountKey('ABRA-1', ''), BankAccountRegistrar::accountKey('1', ''));
     }
 
     public function testAmountFromCents(): void

@@ -86,6 +86,7 @@ ignore_user_abort(true);
 $runRepositories = match ($source) {
     'pohoda_import' => [\MyInvoice\Repository\PohodaImportRepository::class],
     'premier_import' => [\MyInvoice\Repository\PremierImportRepository::class],
+    'abra_flexi_import' => [\MyInvoice\Repository\AbraImportRepository::class],
     'money_s3_import', 'money_s3_batch' => [\MyInvoice\Repository\MoneyS3ImportRepository::class],
     default => [],
 };
@@ -148,6 +149,8 @@ try {
         $container->get(\MyInvoice\Service\Migration\MoneyS3\MoneyS3BatchJobService::class)->run($jobId);
     } elseif ($source === 'pohoda_import') {
         $container->get(\MyInvoice\Service\Migration\Pohoda\PohodaImportJobService::class)->run($jobId);
+    } elseif ($source === 'abra_flexi_import') {
+        $container->get(\MyInvoice\Service\Migration\Abra\AbraImportJobService::class)->run($jobId);
     } elseif ($source === 'premier_import') {
         $container->get(\MyInvoice\Service\Migration\Premier\PremierImportJobService::class)->run($jobId);
     } elseif ($source === 'stereo_nx_import') {

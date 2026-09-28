@@ -184,6 +184,7 @@ final class SupplierBankAccountRepository
             return null;
         }
         $bank = AccountNumberNormalizer::canonicalBankCode($bankCode);
+        if ($bank !== null) $this->promoteImportedBankCode($supplierId, $canonical, strtoupper($currency), $bank);
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO supplier_bank_accounts
@@ -216,6 +217,46 @@ final class SupplierBankAccountRepository
         }
         $id = (int) $row['id'];
         if ($suffix !== null && preg_match('/^[0-9]{1,6}$/', $suffix) === 1
+            && ($row['analytic_suffix'] ?? '') === '' && $this->findBySuffix($supplierId, $suffix) === null) {
+            $this->assignSuffix($supplierId, $id, $suffix);
+        }
+        return $id;
+    }
+
+    private function promoteImportedBankCode(int $supplierId, string $canonical, string $currency, string $bank): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id, currency, source FROM supplier_bank_accounts
+            WHERE supplier_id = ? AND account_canonical = ? AND bank_code_norm = ""');
+        $stmt->execute([$supplierId, $canonical]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['source'] !== 'statement'
+            || !in_array($row['currency'], [null, $currency], true)) return;
+        try {
+            $pdo->prepare('UPDATE supplier_bank_accounts SET bank_code = ?, bank_code_norm = ?
+                WHERE id = ? AND supplier_id = ? AND bank_code_norm = ""')
+                ->execute([$bank, $bank, (int) $row['id'], $supplierId]);
+        } catch (\PDOException $error) {
+            if ((string) $error->getCode() !== '23000') throw $error;
+        }
+    }
+
+    public function registerImportedVirtual(int $supplierId, string $identity, string $currency, string $label, ?string $suffix): int
+    {
+        $canonical = 'V' . substr(hash('sha256', $identity), 0, 19);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO supplier_bank_accounts
+            (supplier_id, label, account_number, bank_code_norm, currency, account_canonical, kind, source, is_active)
+            VALUES (?, ?, NULL, "", ?, ?, "current", "manual", 1)
+            ON DUPLICATE KEY UPDATE is_active = 1')->execute([
+                $supplierId, mb_substr($label, 0, 100), strtoupper($currency), $canonical,
+            ]);
+        $stmt = $pdo->prepare('SELECT id, analytic_suffix FROM supplier_bank_accounts
+            WHERE supplier_id = ? AND account_canonical = ? AND bank_code_norm = ""');
+        $stmt->execute([$supplierId, $canonical]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $id = (int) $row['id'];
+        if ($suffix !== null && preg_match('/^[0-9]{1,6}$/D', $suffix) === 1
             && ($row['analytic_suffix'] ?? '') === '' && $this->findBySuffix($supplierId, $suffix) === null) {
             $this->assignSuffix($supplierId, $id, $suffix);
         }

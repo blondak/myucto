@@ -184,6 +184,8 @@ $report['money_s3_batch_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3
 $report['pohoda_uploads'] = \MyInvoice\Service\Migration\Pohoda\PohodaUploads::purgeStaleAll();
 // 8c) Nahrané zálohy dat z PREMIER - totéž, celá databáze firmy (všechny roky).
 $report['premier_uploads'] = \MyInvoice\Service\Migration\Premier\PremierUploads::purgeStaleAll();
+$report['abra_flexi_snapshot_tenants'] = (new \MyInvoice\Service\Migration\Abra\AbraSnapshotStore())->pruneAll();
+$report['abra_flexi_cache_pages'] = \MyInvoice\Service\Migration\Abra\AbraPageCache::pruneExpired();
 
 // Pročisti cron_runs — drž max 500 posledních záznamů na skript.
 $report['cron_runs_purged'] = CronRun::purgeOld($pdo, 500);

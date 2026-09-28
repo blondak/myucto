@@ -1557,6 +1557,7 @@ const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
   && !invoice.value.booked_at
+  && !invoice.value.locked?.journal_entry_id
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('invoices'))
@@ -1635,7 +1636,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
       show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-      show: isDoubleEntry.value && !!inv.booked_at,
+      show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
       to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
     { key: 'posting-rule', label: t('accounting.template.create_posting_rule'), icon: 'doc', tier: 'overflow', variant: 'neutral',
       show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } },

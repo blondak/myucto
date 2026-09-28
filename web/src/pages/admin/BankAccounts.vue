@@ -986,6 +986,10 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                           class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                           {{ t('bank_accounts.balances_source_api') }}
                         </span>
+                        <span v-if="a.current_source === 'import'" :title="t('bank_accounts.balances_source_import_hint')"
+                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                          {{ t('bank_accounts.balances_source_import') }}
+                        </span>
                         <span v-if="a.current_source === 'email_notice'" :title="t('bank_accounts.balances_source_email_hint')"
                           class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                           {{ t('bank_accounts.balances_source_email') }}
@@ -1022,6 +1026,10 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                     <span v-if="a.current_source === 'bank_api'" :title="t('bank_accounts.balances_source_api_hint')"
                       class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
                       {{ t('bank_accounts.balances_source_api') }}
+                    </span>
+                    <span v-if="a.current_source === 'import'" :title="t('bank_accounts.balances_source_import_hint')"
+                      class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                      {{ t('bank_accounts.balances_source_import') }}
                     </span>
                     <span v-if="a.current_source === 'email_notice'" :title="t('bank_accounts.balances_source_email_hint')"
                       class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">

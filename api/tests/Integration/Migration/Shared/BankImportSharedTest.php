@@ -74,4 +74,24 @@ final class BankImportSharedTest extends SharedMigrationDbTestCase
         $added = $this->row("SELECT label, symbol, name_cs, is_default FROM currencies WHERE supplier_id = ? AND account_number = '8800000013'", [$supplier]);
         self::assertSame(['Fio', 'Kč', 'Česká koruna', '0'], array_map('strval', array_values($added)));
     }
+
+    public function testRegistrarAddsKnownBankCodeToPreviouslyImportedAccount(): void
+    {
+        $supplier = $this->supplier();
+        $registrar = new BankAccountRegistrar($this->db, $this->container->get(SupplierBankAccountRepository::class));
+        $account = ['number' => '9000000001', 'bank' => '', 'iban' => '', 'currency' => 'CZK',
+            'label' => 'Synthetic account', 'suffix' => '101'];
+        $first = $registrar->register($supplier, ['A' => $account]);
+        $protocol = new ImportProtocol('import');
+        $registrar->linkCompanyAccounts($supplier, ['A' => $account], ['A'], $first, $protocol, 'bank', true);
+        $second = $registrar->register($supplier, ['A' => array_replace($account, ['bank' => '0100'])]);
+        $registrar->linkCompanyAccounts($supplier, ['A' => array_replace($account, ['bank' => '0100'])], ['A'], $second, $protocol, 'bank', true);
+
+        self::assertSame($first, $second);
+        self::assertSame('0100', $this->row('SELECT bank_code FROM supplier_bank_accounts WHERE id = ?', [$first['A']])['bank_code']);
+        self::assertSame(1, count($this->rows('SELECT id FROM supplier_bank_accounts WHERE supplier_id = ?', [$supplier])));
+        self::assertSame('0100', $this->row('SELECT bank_code FROM currencies WHERE id =
+            (SELECT currency_id FROM supplier_bank_accounts WHERE id = ?)', [$first['A']])['bank_code']);
+        self::assertSame(1, count($this->rows('SELECT id FROM currencies WHERE supplier_id = ? AND account_number = ?', [$supplier, '9000000001'])));
+    }
 }

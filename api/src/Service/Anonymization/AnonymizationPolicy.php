@@ -42,6 +42,7 @@ final class AnonymizationPolicy
      * @var array<string,string> tabulka → důvod
      */
     public const TRUNCATE = [
+        'abra_flexi_connections' => 'šifrované připojení ke zdrojové účetní firmě',
         'ai_embeddings' => 'vektory z textů skutečných dokladů; naučí se znovu',
         'api_request_log' => 'IP adresy a dotazy klientů API',
         'api_token_ips' => 'patří k API tokenům',
@@ -479,6 +480,8 @@ final class AnonymizationPolicy
         'payroll_wage_statement_revisions' => ['snapshot_hash' => 'keep', 'snapshot_json' => 'json', 'source_manifest_hash' => 'keep'],
         'payroll_work_calendars' => ['name' => 'text', 'timezone_name' => 'keep', 'week_pattern' => 'keep'],
         'pdf_signature_output_settings' => ['backend' => 'keep', 'output_type' => 'keep', 'signature_config_json' => 'json'],
+        'abra_flexi_import_map' => ['kind' => 'keep', 'abra_key' => 'text', 'target_type' => 'keep', 'source_hash' => 'keep'],
+        'abra_flexi_imports' => ['automation_snapshot' => 'json', 'protocol' => 'json'],
         'pohoda_import_map' => ['kind' => 'keep', 'pohoda_key' => 'text'],
         'pohoda_imports' => ['agenda_ico' => 'ico', 'automation_snapshot' => 'json', 'export_sha256' => 'keep', 'pohoda_version' => 'keep', 'protocol' => 'json'],
         'posting_rules' => ['credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description' => 'text', 'rule_key' => 'keep'],

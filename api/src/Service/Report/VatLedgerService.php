@@ -247,10 +247,19 @@ final class VatLedgerService
                      ELSE {$clientAlias}.dic END";
     }
 
+    private static function saleTaxSignExpr(Connection $db, string $alias): string
+    {
+        $sourceSign = $db->hasColumn('invoices', 'import_tax_sign')
+            ? "WHEN {$alias}.import_tax_sign IN (-1, 1) THEN {$alias}.import_tax_sign " : '';
+        return "CASE {$sourceSign}WHEN {$alias}.invoice_type = 'credit_note'
+            AND {$alias}.total_with_vat > 0 THEN -1 ELSE 1 END";
+    }
+
     /** @return list<array<string,mixed>> */
     private function fetchSales(int $supplierId, string $start, string $end, bool $includeDrafts): array
     {
         $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+        $saleSign = self::saleTaxSignExpr($this->db, 'i');
         // DIČ protistrany ze snapshotu dokladu s fallbackem na živého klienta (viz helper).
         $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
         $ossFilter = $this->db->hasColumn('invoice_items', 'oss_applicable')
@@ -277,8 +286,7 @@ final class VatLedgerService
                    --
                    -- Normalizuje se CELÝ DOKLAD jedním znaménkem podle jeho součtu, ne každá
                    -- položka zvlášť — zdůvodnění a precedent viz tentýž výraz ve fetchPurchases().
-                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * i.total_with_vat AS inv_total,
+                   ({$saleSign}) * i.total_with_vat AS inv_total,
                    i.reverse_charge AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -313,16 +321,16 @@ final class VatLedgerService
                        END
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
+                   vr.country AS tax_country,
                    ii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
-                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(ii.total_without_vat, 0) AS base,
-                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(ii.total_vat, 0) AS vat
+                   ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
+                   ({$saleSign}) * COALESCE(ii.total_vat, 0) AS vat
               FROM invoices i
               JOIN clients c ON c.id = i.client_id
          LEFT JOIN countries co ON co.id = c.country_id
               JOIN invoice_items ii ON ii.invoice_id = i.id
+         LEFT JOIN vat_rates vr ON vr.id = ii.vat_rate_id
          LEFT JOIN currencies cur ON cur.id = i.currency_id
              WHERE i.supplier_id = ?
                AND {$statusFilter}
@@ -423,14 +431,14 @@ final class VatLedgerService
             return [];
         }
         $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
+        $saleSign = self::saleTaxSignExpr($this->db, 'i');
         $dicExpr = self::saleCounterpartyDicExpr($this->db, 'i', 'c');
         $stmt = $this->db->pdo()->prepare("
             SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.varsymbol AS vendor_invoice_number,
                    i.invoice_type AS document_kind, i.status,
                    i.effective_tax_date AS tax_date, i.issue_date,
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
-                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * i.total_with_vat AS inv_total,
+                   ({$saleSign}) * i.total_with_vat AS inv_total,
                    0 AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
@@ -438,8 +446,7 @@ final class VatLedgerService
                    '24z' AS code,
                    0 AS vat_rate,
                    ii.description AS description,
-                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(ii.total_without_vat, 0) AS base,
+                   ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
                    0 AS vat
               FROM invoices i
               JOIN clients c ON c.id = i.client_id
@@ -677,6 +684,8 @@ final class VatLedgerService
     private function fetchPurchases(int $supplierId, string $start, string $end, bool $includeDrafts): array
     {
         $statusFilter = $includeDrafts ? "pi.status != 'cancelled'" : "pi.status NOT IN ('draft', 'cancelled')";
+        $projectionVatColumn = $this->db->hasColumn('purchase_invoice_items', 'import_projection_vat_czk')
+            ? 'i.import_projection_vat_czk' : 'NULL';
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období.
         // Viz fetchSales — rozhoduje ZÁKLADNÍ sazba, ne práh mezi buckety.
         $standardRate = $this->taxConstants->vatRateStandard((int) substr($start, 0, 4));
@@ -809,7 +818,13 @@ final class VatLedgerService
                    (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
                          THEN -1 ELSE 1 END) * COALESCE(pii.total_without_vat, 0) AS base,
                    (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(pii.total_vat, 0) AS vat
+                         THEN -1 ELSE 1 END) * COALESCE(pii.total_vat, 0) AS vat,
+                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * pii.import_tax_base_czk AS import_tax_base_czk,
+                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * pii.import_tax_vat_czk AS import_tax_vat_czk,
+                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * pii.import_projection_vat_czk AS import_projection_vat_czk
               FROM purchase_invoices pi
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN countries co ON co.id = c.country_id
@@ -818,12 +833,15 @@ final class VatLedgerService
                     SELECT i.id, i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
                            i.total_without_vat, i.total_vat, i.vat_classification_code,
                            i.is_fixed_asset, NULL AS vat_deduction,
-                           NULL AS vat_deduction_percent
+                           NULL AS vat_deduction_percent,
+                           i.import_tax_base_czk, i.import_tax_vat_czk,
+                           {$projectionVatColumn} AS import_projection_vat_czk
                       FROM purchase_invoice_items i
                       -- Omezení na firmu uvnitř odvozené tabulky: MariaDB ji materializuje
                       -- celou, bez něj tedy položky VŠECH firem instalace na každé volání.
                       JOIN purchase_invoices own ON own.id = i.purchase_invoice_id AND own.supplier_id = ?
                      WHERE {$claimWindow}
+                       AND i.import_tax_excluded = 0
                        AND NOT EXISTS (
                                SELECT 1 FROM purchase_invoice_vat_allocations a
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
@@ -832,7 +850,9 @@ final class VatLedgerService
                     SELECT a.id, a.purchase_invoice_id, a.description, a.vat_rate,
                            a.base_amount, a.vat_amount, a.vat_classification_code,
                            0 AS is_fixed_asset, a.vat_deduction,
-                           a.vat_deduction_percent
+                           a.vat_deduction_percent,
+                           NULL AS import_tax_base_czk, NULL AS import_tax_vat_czk,
+                           NULL AS import_projection_vat_czk
                       FROM purchase_invoice_vat_allocations a
                       JOIN purchase_invoices own ON own.id = a.purchase_invoice_id AND own.supplier_id = ?
                      WHERE {$claimWindow}
@@ -901,8 +921,13 @@ final class VatLedgerService
         $vatRate = (float) $r['vat_rate'];
         $baseRaw = (float) $r['base'];
         $vatRaw = (float) $r['vat'];
+        $projectionVatCzk = $source === 'purchase' ? ($r['import_projection_vat_czk'] ?? null) : null;
 
         $code = $r['code'] !== null ? (string) $r['code'] : null;
+        if ($source === 'sale' && in_array($code, ['26', '24z'], true)
+            && isset($r['tax_country']) && strtoupper((string) $r['tax_country']) !== 'CZ') {
+            $vatRaw = 0.0;
+        }
         $clsf = $code !== null ? ($map[$code] ?? null) : null;
         $isRc = ($clsf['is_reverse_charge'] ?? false) || (bool) $r['rc_flag'];
 
@@ -912,7 +937,9 @@ final class VatLedgerService
         // nemá, vezmi tuzemskou sazbu z klasifikace (kódy 5/23/24/25 nesou 21.00) —
         // efektivní sazba se propíše i do row['vat_rate'], protože KH (A.2/B.1) a
         // DPHDP3 podle ní bucketují základ/daň do 21%/12% sloupců.
-        if ($source === 'purchase' && $isRc && $vatRate == 0.0 && (float) ($clsf['vat_rate'] ?? 0) > 0) {
+        if ($source === 'purchase' && $isRc && $vatRate == 0.0
+            && ($projectionVatCzk === null || abs((float) $projectionVatCzk) >= 0.005)
+            && (float) ($clsf['vat_rate'] ?? 0) > 0) {
             $vatRate = (float) $clsf['vat_rate'];
         }
         // RC samovyměření: dodavatel fakturuje bez DPH (daň 0) → daň si dopočítá příjemce.
@@ -976,16 +1003,23 @@ final class VatLedgerService
             }
         }
 
-        $baseCzk = round($baseRaw * $rate, 2);
+        $sourceBaseCzk = $r['import_tax_base_czk'] ?? null;
+        $baseCzk = $sourceBaseCzk !== null
+            ? round((float) $sourceBaseCzk * ($isPartialDeduction && !$rcSelfAssess ? $deductionRatio : 1.0), 2)
+            : round($baseRaw * $rate, 2);
         // Daň u RC samovyměření = ZÁKLAD přepočtený na CZK × sazba (§ 37 odst. 1:
         // „daň se vypočte ze základu daně" — a základem je hodnota v Kč). Počítat ji
         // z cizoměnové daně přenásobené kurzem by dvojím zaokrouhlením rozešlo KH
         // oddíl A.2 a přiznání ř.3/43 o haléře (např. 305 312,26 × 21 % = 64 115,57 Kč,
         // ne 64 115,67 Kč jako round(EUR daň) × kurz). U běžných tuzemských dokladů
         // bereme skutečnou daň z dokladu přepočtenou kurzem (zpravidlo se neuplatní).
-        $vatCzk = $rcSelfAssess
-            ? round($baseCzk * $vatRate / 100, 2)
-            : round($vatRaw * $rate, 2);
+        $vatCzk = $projectionVatCzk !== null
+            ? round((float) $projectionVatCzk * ($isPartialDeduction && !$rcSelfAssess ? $deductionRatio : 1.0), 2)
+            : ($rcSelfAssess
+                ? round($baseCzk * $vatRate / 100, 2)
+                : (($r['import_tax_vat_czk'] ?? null) !== null
+                    ? round((float) $r['import_tax_vat_czk'] * ($isPartialDeduction ? $deductionRatio : 1.0), 2)
+                    : round($vatRaw * $rate, 2)));
         $deductionBaseCzk = $rcSelfAssess && $isPartialDeduction
             ? round($baseCzk * $deductionRatio, 2)
             : $baseCzk;

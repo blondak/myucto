@@ -914,9 +914,94 @@
         "1930_payroll_employment_start_estimated.sql",
         "1931_payroll_component_vacation_settlement_mapping.sql",
         "1932_payroll_deduction_kind_imported.sql",
-        "1933_payroll_migration_stereo_nx_source.sql"
+        "1933_payroll_migration_stereo_nx_source.sql",
+        "1934_abra_flexi_migration.sql",
+        "1935_imported_purchase_tax_snapshot.sql",
+        "1936_abra_vat_projection_overrides.sql"
     ],
     "tables": {
+        "abra_flexi_connections": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "connection_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "credentials_enc": "longtext NOT NULL",
+                "discovery": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "imported_at": "timestamp NULL DEFAULT NULL",
+                "last_synced_at": "timestamp NULL DEFAULT NULL",
+                "selected_years": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "source_fingerprint": "char(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "sync_state": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)"
+            },
+            "foreign_keys": {
+                "fk_abra_connection_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "discovery": "json_valid(`discovery`)",
+                "selected_years": "json_valid(`selected_years`)",
+                "sync_state": "json_valid(`sync_state`)"
+            }
+        },
+        "abra_flexi_import_map": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "abra_key": "varchar(190) NOT NULL COLLATE utf8mb4_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "kind": "varchar(32) NOT NULL COLLATE utf8mb4_bin",
+                "run_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_hash": "char(64) NOT NULL",
+                "source_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_id": "bigint(20) unsigned NOT NULL",
+                "target_type": "varchar(32) NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, kind, abra_key)",
+                "ix_abra_map_target": "BTREE (supplier_id, target_type, target_id)"
+            },
+            "foreign_keys": {
+                "fk_abra_map_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "abra_flexi_imports": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "agenda_year": "smallint(5) unsigned NULL DEFAULT NULL",
+                "automation_restored_at": "timestamp NULL DEFAULT NULL",
+                "automation_snapshot": "longtext NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "finished_at": "timestamp NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "job_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "mode": "enum('dry_run','import') NOT NULL",
+                "protocol": "longtext NULL DEFAULT NULL",
+                "status": "enum('running','completed','completed_with_warnings','failed','cancelled') NOT NULL DEFAULT 'running'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_abra_imports_supplier": "BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_abra_imports_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "protocol": "`protocol` is null or json_valid(`protocol`)"
+            }
+        },
         "accounting_archives": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -5240,7 +5325,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -5896,6 +5981,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idoklad_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "import_batch_id": "varchar(32) NULL DEFAULT NULL",
+                "import_tax_sign": "tinyint(4) NULL DEFAULT NULL",
                 "imported_pdf_hash": "char(64) NULL DEFAULT NULL",
                 "imported_pdf_original_name": "varchar(255) NULL DEFAULT NULL",
                 "imported_pdf_path": "varchar(255) NULL DEFAULT NULL",
@@ -17373,6 +17459,10 @@
                 "expense_kind": "enum('service','material','small_asset','small_intangible','fixed_asset') NULL DEFAULT NULL",
                 "expense_rule_id": "int(10) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "import_projection_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_tax_base_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "import_tax_excluded": "tinyint(1) NOT NULL DEFAULT 0",
+                "import_tax_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "is_fixed_asset": "tinyint(1) NOT NULL DEFAULT 0",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "purchase_invoice_id": "bigint(20) unsigned NOT NULL",

@@ -29,6 +29,7 @@
     "workspace"
   ],
   "lazy": [
+    "abra_flexi",
     "activation",
     "activity_log",
     "aiGateway",
@@ -80,6 +81,7 @@
     "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
+    "migration_overview",
     "money_s3",
     "monthly_report",
     "oss_rates",
@@ -327,6 +329,9 @@
       "imports",
       "purchase_invoice"
     ],
+    "imports-overview": [
+      "migration_overview"
+    ],
     "imports-money-s3": [
       "company_profile",
       "imports",
@@ -357,6 +362,10 @@
       "imports",
       "premier",
       "stereo_nx"
+    ],
+    "imports-abra-flexi": [
+      "abra_flexi",
+      "imports"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",

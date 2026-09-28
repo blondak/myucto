@@ -72,7 +72,7 @@ final class MigratedInventoryWriter
         }
         $id = $this->items->insert($supplierId, [
             'sku' => $sku, 'name' => $card['name'], 'item_type' => $card['item_type'], 'unit' => $card['unit'],
-            'tracking_mode' => $card['tracking_mode'], 'ean' => $card['ean'], 'vat_rate_id' => null,
+            'tracking_mode' => $card['tracking_mode'], 'ean' => $card['ean'], 'vat_rate_id' => $card['vat_rate_id'] ?? null,
             'sale_price_without_vat' => $card['sale_price_without_vat'], 'min_qty' => $card['min_qty'],
             'intrastat_cn8_code' => $card['intrastat_cn8_code'],
             'intrastat_net_mass_kg' => $card['intrastat_net_mass_kg'],
@@ -80,8 +80,11 @@ final class MigratedInventoryWriter
             'intrastat_supplementary_unit_coefficient' => $card['intrastat_supplementary_unit_coefficient'],
             'is_active' => $card['is_active'], 'note' => $card['note'],
         ]);
-        if ($card['weight_g'] !== null) {
-            $this->items->updateEshopFieldsVersioned($supplierId, $id, 1, ['weight_g' => $card['weight_g']]);
+        $eshopFields = [];
+        if ($card['weight_g'] !== null) $eshopFields['weight_g'] = $card['weight_g'];
+        if (array_key_exists('is_stocked', $card)) $eshopFields['is_stocked'] = $card['is_stocked'];
+        if ($eshopFields !== []) {
+            $this->items->updateEshopFieldsVersioned($supplierId, $id, 1, $eshopFields);
         }
         return ['id' => $id, 'created' => true];
     }
@@ -101,7 +104,9 @@ final class MigratedInventoryWriter
             }
         }
         if ((bool) $row['is_active'] !== $card['is_active']
-            || ($row['weight_g'] === null ? null : (int) $row['weight_g']) !== $card['weight_g']) {
+            || ($row['weight_g'] === null ? null : (int) $row['weight_g']) !== $card['weight_g']
+            || (array_key_exists('is_stocked', $card) && (bool) $row['is_stocked'] !== $card['is_stocked'])
+            || (array_key_exists('vat_rate_id', $card) && ($row['vat_rate_id'] === null ? null : (int) $row['vat_rate_id']) !== $card['vat_rate_id'])) {
             throw new MigratedInventoryException('inventory_target_changed', 'Cílová skladová karta chybí nebo se změnila.');
         }
     }

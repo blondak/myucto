@@ -9,7 +9,7 @@
  *
  * Spouštět přes `npm run gen:i18n` po přidání klíčů do nového prostoru.
  */
-import { writeFileSync } from 'node:fs'
+import { realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { analyze, SRC, knownNamespaces, routeEntries } from './i18n-usage.mjs'
@@ -82,7 +82,7 @@ const OUT = join(SRC, 'i18n/namespaces.generated.json')
 
 // `file://` + cesta nestačí: na Windows vzniká `file:///C:/…` se třemi lomítky
 // a porovnání by tiše selhalo (skript by se choval jako pouhá knihovna).
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url.toLowerCase() === pathToFileURL(realpathSync(process.argv[1])).href.toLowerCase()) {
   const map = buildMap()
   writeFileSync(OUT, JSON.stringify(map, null, 2) + '\n')
 

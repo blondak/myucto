@@ -1,4 +1,4 @@
-# Dimenze
+# 114. Dimenze
 
 Dimenze jsou analytické členění dokladů a účetních zápisů: středisko, projekt,
 vozidlo, lokalita, obchodní případ nebo vlastní typ. Každý doklad i každý řádek

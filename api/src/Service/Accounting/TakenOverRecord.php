@@ -33,9 +33,14 @@ final class TakenOverRecord
     /**
      * Mapa převodu => druh záznamu MyÚčta => `kind` v mapě.
      *
-     * @var array<string, array<string, string>>
+     * @var array<string, array<string, string|list<string>>>
      */
     public const MAPS = [
+        'abra_flexi_import_map' => [
+            self::JOURNAL_ENTRY    => 'ucetni-denik',
+            self::INVOICE          => ['faktura-vydana', 'prodejka'],
+            self::PURCHASE_INVOICE => ['faktura-prijata', 'zavazek'],
+        ],
         'money_s3_import_map' => [
             self::JOURNAL_ENTRY    => 'journal_entry',
             self::INVOICE          => 'invoice',
@@ -79,8 +84,15 @@ final class TakenOverRecord
             if (!isset($kinds[$record])) {
                 throw new \InvalidArgumentException('Neznámý druh převzatého záznamu: ' . $record);
             }
+            $sourceKinds = (array) $kinds[$record];
+            $kindSql = implode(', ', array_map(static function (string $kind): string {
+                if (preg_match('/^[a-z0-9_-]+$/D', $kind) !== 1) {
+                    throw new \LogicException('Neplatný druh záznamu v mapě převodu.');
+                }
+                return "'{$kind}'";
+            }, $sourceKinds));
             $parts[] = "EXISTS (SELECT 1 FROM {$map} tom
-                WHERE tom.supplier_id = {$supplierIdSql} AND tom.kind = '{$kinds[$record]}' AND tom.target_id = {$idSql})";
+                WHERE tom.supplier_id = {$supplierIdSql} AND tom.kind IN ({$kindSql}) AND tom.target_id = {$idSql})";
         }
         return '(' . implode(' OR ', $parts) . ')';
     }

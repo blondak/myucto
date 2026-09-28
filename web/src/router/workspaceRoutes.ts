@@ -59,6 +59,14 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
             : { path: '/purchase-invoices/export' }
         },
       },
+      {
+        path: 'imports', name: 'imports-overview',
+        component: () => import('@/pages/imports/MigrationOverview.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
       // Průvodce „Přechod z Money S3" — převod celé účetní agendy ze zálohy Money.
       // Bez requiresDoubleEntry: firmu v daňové evidenci převod sám přepne.
       {
@@ -101,6 +109,14 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       {
         path: 'imports/stereo-nx', name: 'imports-stereo-nx',
         component: () => import('@/pages/imports/StereoNxMigration.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
+      {
+        path: 'imports/abra-flexi', name: 'imports-abra-flexi',
+        component: () => import('@/pages/imports/AbraFlexiMigration.vue'), meta: { requiresSupplier: true },
         beforeEnter: () => {
           const auth = useAuthStore()
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }

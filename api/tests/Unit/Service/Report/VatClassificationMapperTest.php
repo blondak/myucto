@@ -167,6 +167,33 @@ final class VatClassificationMapperTest extends TestCase
         $this->assertEqualsWithDelta(0.0, $lines['24']['vat'], 0.001, 'zahraniční daň do přiznání nevstupuje');
     }
 
+    public function testThirdCountryTaxStaysOnInvoiceButNotInCzechReturn(): void
+    {
+        $this->pdo->exec("INSERT INTO countries (id, iso2, is_eu) VALUES (9, 'GB', 0)");
+        $this->pdo->exec("INSERT INTO clients (id, company_name, country_id) VALUES (300, 'Synthetic GB buyer', 9)");
+        $this->pdo->exec("INSERT INTO vat_rates (id, country) VALUES (30, 'GB'), (31, 'CZ')");
+        $this->pdo->exec("INSERT INTO vat_classifications
+            (supplier_id, code, label, direction, dphdp3_line, vat_rate, is_reverse_charge, display_order, archived)
+            VALUES (NULL, '26', 'Third country supply', 'sale', '22', 0, 0, 0, 0)");
+        $this->pdo->exec("INSERT INTO invoices
+            (id, supplier_id, client_id, varsymbol, issue_date, tax_date, currency_id,
+             status, invoice_type, total_with_vat)
+            VALUES (11, 1, 300, 'GB-SYN', '2026-05-20', '2026-05-20', 1, 'issued', 'invoice', 120),
+                   (12, 1, 200, 'CZ-SYN', '2026-05-20', '2026-05-20', 1, 'issued', 'invoice', 121)");
+        $this->pdo->exec("INSERT INTO invoice_items
+            (id, invoice_id, vat_rate_id, vat_rate_snapshot, total_without_vat,
+             total_vat, vat_classification_code)
+            VALUES (11, 11, 30, 20, 100, 20, '26'),
+                   (12, 12, 31, 21, 100, 21, '1')");
+
+        $lines = $this->mapper->aggregateForDphPriznani(1, 2026, 5, 'monthly');
+
+        $this->assertSame(100.0, $lines['22']['base']);
+        $this->assertSame(0.0, $lines['22']['vat']);
+        $this->assertSame(100.0, $lines['1']['base']);
+        $this->assertSame(21.0, $lines['1']['vat']);
+    }
+
     public function testPerTenantOverrideWinsOverGlobal(): void
     {
         // Globální kód 40 → ř.40. Per-tenant override (supplier 1) ho přemapuje na ř.41.
@@ -344,7 +371,10 @@ final class VatClassificationMapperTest extends TestCase
             total_without_vat REAL NOT NULL,
             total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL,
-            is_fixed_asset INTEGER NOT NULL DEFAULT 0
+            is_fixed_asset INTEGER NOT NULL DEFAULT 0,
+            import_tax_base_czk REAL NULL,
+            import_tax_vat_czk REAL NULL,
+            import_tax_excluded INTEGER NOT NULL DEFAULT 0
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_vat_allocations (
             id INTEGER PRIMARY KEY,
@@ -378,6 +408,7 @@ final class VatClassificationMapperTest extends TestCase
         $this->pdo->exec("CREATE TABLE invoice_items (
             id INTEGER PRIMARY KEY,
             invoice_id INTEGER NOT NULL,
+            vat_rate_id INTEGER NULL,
             vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL,
             total_without_vat REAL NOT NULL,
@@ -385,6 +416,7 @@ final class VatClassificationMapperTest extends TestCase
             vat_classification_code TEXT NULL,
             oss_applicable INTEGER NOT NULL DEFAULT 0
         )");
+        $this->pdo->exec("CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, country TEXT NOT NULL)");
 
         // Pokladna (mini-epic #14) — VatLedgerService::fetchCash() JOINuje tyto
         // tabulky. Prázdné → žádné cash řádky (chování neutrální k faktury-only testům).

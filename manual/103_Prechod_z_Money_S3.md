@@ -133,7 +133,7 @@ detail faktury ukazuje úhradu jako zaúčtovanou a automatika už doklad znovu
 nezaúčtuje.
 
 **Střediska a zakázky jako dimenze.** Převod u firmy zapne
-[Dimenze](110_Dimenze.md) a středisko i zakázku z deníku Money převede na
+[Dimenze](114_Dimenze.md) a středisko i zakázku z deníku Money převede na
 hodnoty dimenzí. Doklad dostane hodnotu do hlavičky, když všechny jeho řádky
 s daným typem nesou tutéž; hlavičku, kterou už někdo vyplnil, převod nemění.
 

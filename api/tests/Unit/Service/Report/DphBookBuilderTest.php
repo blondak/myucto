@@ -215,7 +215,9 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
-            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0
+            vat_classification_code TEXT NULL, is_fixed_asset INTEGER NOT NULL DEFAULT 0,
+            import_tax_base_czk REAL NULL, import_tax_vat_czk REAL NULL,
+            import_tax_excluded INTEGER NOT NULL DEFAULT 0
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_vat_allocations (
             id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL DEFAULT 1, purchase_invoice_id INTEGER NOT NULL,
@@ -232,10 +234,12 @@ final class DphBookBuilderTest extends TestCase
             effective_tax_date TEXT GENERATED ALWAYS AS (COALESCE(tax_date, issue_date)) STORED
         )");
         $this->pdo->exec("CREATE TABLE invoice_items (
-            id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
+            id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL, vat_rate_id INTEGER NULL,
+            vat_rate_snapshot REAL NOT NULL,
             description TEXT NULL, total_without_vat REAL NOT NULL, total_vat REAL NOT NULL,
             vat_classification_code TEXT NULL, oss_applicable INTEGER NOT NULL DEFAULT 0
         )");
+        $this->pdo->exec("CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, country TEXT NOT NULL)");
 
         // Pokladna (mini-epic #14) — VatLedgerService::fetchCash() JOINuje tyto tabulky.
         // Prázdné → žádné cash řádky (chování neutrální k faktury-only testům).
