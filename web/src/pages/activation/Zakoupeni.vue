@@ -7,6 +7,7 @@ import { formatQuotaBytes } from '@/api/storageQuota'
 import { ensureInstanceDunning, instanceStatus } from '@/api/instanceStatus'
 import { resolveBillingNarrative } from '@/api/instanceHealth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import ChangePayNotice from './ChangePayNotice.vue'
 
 const { t, te, tm, rt } = useI18n()
 const auth = useAuthStore()
@@ -185,13 +186,27 @@ const periodLabel = computed(() => {
   return t('license.renewal_period_unknown')
 })
 
-/** Navýšení má smysl jen u aktivního placeného předplatného (aktivní klíč). */
+/**
+ * Zrušené, ale zaplacené předplatné (typicky roční placené fakturou, bez karty).
+ * Změnu rozsahu v něm server nestrhne, ale nabídne jednorázovou platbu kartou;
+ * konec období ani způsob placení se tím nemění.
+ */
+const paidCancelledSubscription = computed(() => {
+  const sub = subscription.value
+  return !!sub
+    && sub.state === 'cancelled'
+    && sub.comped !== true
+    && sub.valid_until !== null
+    && sub.valid_until * 1000 > Date.now()
+})
+
+/** Navýšení má smysl jen u placeného předplatného (aktivní klíč). */
 const canUpgrade = computed(() => {
   const s = status.value
   return !!s
     && !!s.license_key_masked
     && (s.state === 'active' || s.state === 'overage')
-    && s.subscription?.state === 'active'
+    && (s.subscription?.state === 'active' || paidCancelledSubscription.value)
 })
 
 /** Přečerpání rozsahu licence — víc aktivních uživatelů / firem, než licencuje klíč. */
@@ -447,12 +462,34 @@ function errBuyUrl(e: unknown): string | null {
   return typeof url === 'string' && url !== '' ? url : null
 }
 
+/**
+ * Odkaz na zaplacení změny, který server přiložil k odmítnutí.
+ *
+ * `card_payment_required`: předplatné placené fakturou nemá uloženou kartu,
+ * změna se zaplatí jednorázově kartou. `charge_failed`: uložená karta neprošla.
+ * V obou případech je to jediná cesta dál — opakování vrátí tutéž objednávku.
+ */
+interface ChangePayLink { url: string; cardRequired: boolean }
+
+function errPayLink(e: unknown): ChangePayLink | null {
+  const err = e as { response?: { data?: { error?: { code?: string; pay_url?: string } } } }
+  const error = err.response?.data?.error
+  const url = error?.pay_url
+  if (typeof url !== 'string' || url === '') return null
+  return { url, cardRequired: error?.code === 'card_payment_required' }
+}
+
+const upgradePayLink = ref<ChangePayLink | null>(null)
+const tierPayLink = ref<ChangePayLink | null>(null)
+const payrollPayLink = ref<ChangePayLink | null>(null)
+
 async function calcQuote() {
   if (quoting.value) return
   const n = Math.floor(Number(upgradeUsers.value))
   if (!n || n < 1) return
   quoting.value = true
   upgradeError.value = null
+  upgradePayLink.value = null
   upgradeSuccess.value = null
   quote.value = null
   try {
@@ -470,6 +507,7 @@ async function doUpgrade() {
   if (!confirm(t(quote.value.scheduled ? 'license.capacity_schedule_confirm' : 'license.upgrade_confirm', { n }))) return
   upgrading.value = true
   upgradeError.value = null
+  upgradePayLink.value = null
   upgradeSuccess.value = null
   try {
     let res = await licenseApi.upgrade(n, quote.value.quote_token)
@@ -489,6 +527,7 @@ async function doUpgrade() {
     await auth.refresh()
   } catch (e: unknown) {
     upgradeError.value = upgradeErrMsg(e)
+    upgradePayLink.value = errPayLink(e)
   } finally {
     upgrading.value = false
   }
@@ -504,6 +543,7 @@ async function calcTierQuote(): Promise<void> {
   if (tierBusy.value || targetTier.value === status.value?.tier) return
   tierBusy.value = true
   tierError.value = null
+  tierPayLink.value = null
   tierSuccess.value = null
   try {
     tierQuote.value = await licenseApi.tierQuote(targetTier.value)
@@ -520,6 +560,7 @@ async function applyTierChange(): Promise<void> {
   if (!confirm(t(quote.scheduled ? 'license.tier_schedule_confirm' : 'license.tier_change_confirm'))) return
   tierBusy.value = true
   tierError.value = null
+  tierPayLink.value = null
   try {
     let result = await licenseApi.changeTier(quote.new_tier, quote.quote_token)
     if (result.pending && result.order_id) {
@@ -535,6 +576,7 @@ async function applyTierChange(): Promise<void> {
     await auth.refresh()
   } catch (e: unknown) {
     tierError.value = upgradeErrMsg(e)
+    tierPayLink.value = errPayLink(e)
   } finally {
     tierBusy.value = false
   }
@@ -546,6 +588,7 @@ async function applyTierChange(): Promise<void> {
  * dopředu prodloužit nedá a server takový pokus stejně odmítne.
  */
 const canSwitchToAnnual = computed(() => canUpgrade.value
+  && subscription.value?.state === 'active'
   && subscription.value?.period === 'month'
   && subscription.value?.auto_renew === true)
 
@@ -596,6 +639,7 @@ async function calcPayrollQuote(enabled: boolean): Promise<void> {
   payrollBusy.value = true
   payrollError.value = null
   payrollBuyUrl.value = null
+  payrollPayLink.value = null
   payrollSuccess.value = null
   try {
     payrollQuotedEmployeesTarget.value = enabled
@@ -623,6 +667,7 @@ async function applyPayrollChange(): Promise<void> {
   payrollBusy.value = true
   payrollError.value = null
   payrollBuyUrl.value = null
+  payrollPayLink.value = null
   try {
     let result = await licenseApi.changePayroll(
       quote.new_enabled,
@@ -643,6 +688,7 @@ async function applyPayrollChange(): Promise<void> {
   } catch (e: unknown) {
     payrollError.value = upgradeErrMsg(e)
     payrollBuyUrl.value = errBuyUrl(e)
+    payrollPayLink.value = errPayLink(e)
   } finally {
     payrollBusy.value = false
   }
@@ -1366,7 +1412,8 @@ onMounted(async () => {
           </button>
         </div>
         <p v-if="payrollSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ payrollSuccess }}</p>
-        <div v-if="payrollError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
+        <ChangePayNotice v-if="payrollError && payrollPayLink" :href="payrollPayLink.url" :card-required="payrollPayLink.cardRequired" :message="payrollError" />
+        <div v-else-if="payrollError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
           <p>{{ payrollError }}</p>
           <a v-if="payrollBuyUrl" :href="checkoutUrl(payrollBuyUrl, true)" :class="[btnFilled('success'), 'mt-3']">
             {{ t('license.payroll_buy_on_web') }}
@@ -1401,7 +1448,8 @@ onMounted(async () => {
           </button>
         </div>
         <p v-if="tierSuccess" class="mt-3 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ tierSuccess }}</p>
-        <p v-if="tierError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ tierError }}</p>
+        <ChangePayNotice v-if="tierError && tierPayLink" :href="tierPayLink.url" :card-required="tierPayLink.cardRequired" :message="tierError" />
+        <p v-else-if="tierError" class="mt-3 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ tierError }}</p>
       </section>
 
       <!-- Přechod na roční předplatné (jen z měsíčního; zaplacený rok se dopředu neprodlužuje) -->
@@ -1472,7 +1520,8 @@ onMounted(async () => {
         <div v-if="upgradeSuccess" class="mt-3 rounded-md bg-success-50 border border-success-300 p-3 text-sm text-success-700">
           {{ upgradeSuccess }}
         </div>
-        <div v-if="upgradeError" class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 p-3 text-sm text-danger-600">
+        <ChangePayNotice v-if="upgradeError && upgradePayLink" :href="upgradePayLink.url" :card-required="upgradePayLink.cardRequired" :message="upgradeError" />
+        <div v-else-if="upgradeError" class="mt-3 rounded-md bg-danger-50 border border-danger-500/40 p-3 text-sm text-danger-600">
           {{ upgradeError }}
         </div>
       </section>

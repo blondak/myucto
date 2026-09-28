@@ -75,6 +75,8 @@ export interface SubscriptionInfo {
    * `undefined` proto znamená „nenabízet".
    */
   resumable?: boolean
+  /** Přidělené předplatné za 0 Kč, fakturované mimo systém. Starší server pole neposílá. */
+  comped?: boolean
 }
 
 /**

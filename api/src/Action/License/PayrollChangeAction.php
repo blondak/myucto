@@ -17,6 +17,7 @@ final class PayrollChangeAction
         'charge_failed' => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
             . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
         'charge_pending' => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
+        'card_payment_required' => UpgradeLicenseAction::CARD_PAYMENT_REQUIRED_MESSAGE,
         'result_unknown' => 'Odpověď licenčního serveru nedorazila. Než to zkusíte znovu, ověřte prosím stav licence — '
             . 'změna mohla proběhnout.',
         'quote_expired' => 'Kalkulace vypršela. Nechte si prosím spočítat aktuální cenu znovu.',
