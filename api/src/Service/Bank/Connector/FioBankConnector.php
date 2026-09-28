@@ -14,6 +14,7 @@ final class FioBankConnector implements BankConnector
     private const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
     private const MAX_IMPORT_RESPONSE_BYTES = 512 * 1024;
     private const MAX_ABO_BYTES = 2 * 1024 * 1024;
+    private const MAX_EMPTY_READS = 200;
 
     public function __construct(
         private readonly ClientInterface $http,
@@ -45,6 +46,7 @@ final class FioBankConnector implements BankConnector
         $reason = null;
         $response = null;
         $body = null;
+        $readDiagnostic = [];
         try {
             $response = $this->request('GET', $url, [
                 'headers' => [
@@ -53,7 +55,7 @@ final class FioBankConnector implements BankConnector
                 ],
             ], false);
             $stage = 'read';
-            $body = $this->readResponse($response, self::MAX_STATEMENT_BYTES, false);
+            $body = $this->readResponse($response, self::MAX_STATEMENT_BYTES, false, $readDiagnostic);
             $stage = 'gpc';
             $reason = $this->gpcFailureReason($body);
             if ($reason !== null) {
@@ -68,11 +70,13 @@ final class FioBankConnector implements BankConnector
         } catch (BankConnectorException $e) {
             $this->logger?->warning('fio_statement_failed', [
                 'stage' => $stage,
-                'reason' => $reason,
+                'reason' => $reason ?? $readDiagnostic['reason'] ?? null,
                 'code' => $e->errorCode,
                 'http_status' => $e->remoteHttpStatus ?? $response?->getStatusCode(),
-                'response_bytes' => $body !== null ? strlen($body) : null,
-            ]);
+                'response_bytes' => $body !== null ? strlen($body) : ($readDiagnostic['bytes_read'] ?? null),
+                'empty_reads' => $readDiagnostic['empty_reads'] ?? null,
+                'stream_error' => $readDiagnostic['stream_error'] ?? null,
+            ] + ($response !== null ? $this->transferHeaders($response) : []));
             throw $e;
         }
     }
@@ -193,25 +197,49 @@ final class FioBankConnector implements BankConnector
         );
     }
 
+    /**
+     * Prázdné čtení před koncem streamu je u síťového (TLS, chunked) streamu běžné a samo
+     * o sobě chybu neznamená; selháním je až série prázdných čtení bez posunu.
+     *
+     * @param array<string,int|string|bool>|null $diagnostic
+     * @param-out array<string,int|string|bool> $diagnostic
+     */
     private function readResponse(
         #[\SensitiveParameter] \Psr\Http\Message\ResponseInterface $response,
         int $limit,
         bool $payment,
+        ?array &$diagnostic = null,
     ): string {
+        $body = '';
+        $emptyReads = 0;
+        $emptyStreak = 0;
+        $diagnostic = [];
         try {
             $stream = $response->getBody();
-            $body = '';
             while (strlen($body) <= $limit) {
                 if ($stream->eof()) {
                     break;
                 }
                 $chunk = $stream->read(min(8192, $limit + 1 - strlen($body)));
                 if ($chunk === '') {
-                    throw new \RuntimeException('Response stream made no progress.');
+                    ++$emptyReads;
+                    if (++$emptyStreak > self::MAX_EMPTY_READS) {
+                        $diagnostic = ['reason' => 'stream_stalled', 'bytes_read' => strlen($body), 'empty_reads' => $emptyReads];
+                        throw new \RuntimeException('Response stream made no progress.');
+                    }
+                    usleep(10_000);
+                    continue;
                 }
+                $emptyStreak = 0;
                 $body .= $chunk;
             }
-        } catch (\RuntimeException) {
+        } catch (\RuntimeException $e) {
+            $diagnostic += [
+                'reason' => 'stream_error',
+                'bytes_read' => strlen($body),
+                'empty_reads' => $emptyReads,
+                'stream_error' => $this->safeStreamError($e),
+            ];
             throw new BankConnectorException(
                 BankConnectorException::INVALID_RESPONSE,
                 'Odpověď banky se nepodařilo bezpečně přečíst.',
@@ -220,7 +248,9 @@ final class FioBankConnector implements BankConnector
             );
         }
 
+        $diagnostic = ['bytes_read' => strlen($body), 'empty_reads' => $emptyReads];
         if (strlen($body) > $limit) {
+            $diagnostic['reason'] = 'too_large';
             throw new BankConnectorException(
                 BankConnectorException::RESPONSE_TOO_LARGE,
                 'Odpověď banky překročila povolenou velikost.',
@@ -229,6 +259,7 @@ final class FioBankConnector implements BankConnector
             );
         }
         if ($body === '') {
+            $diagnostic['reason'] = 'empty_body';
             throw new BankConnectorException(
                 BankConnectorException::INVALID_RESPONSE,
                 'Banka vrátila prázdnou odpověď.',
@@ -238,6 +269,42 @@ final class FioBankConnector implements BankConnector
         }
 
         return $body;
+    }
+
+    /** @return array<string,string|int> */
+    private function transferHeaders(\Psr\Http\Message\ResponseInterface $response): array
+    {
+        $result = [];
+        $type = strtolower(trim(explode(';', $response->getHeaderLine('Content-Type'), 2)[0]));
+        if (preg_match('~^[a-z0-9.+-]+/[a-z0-9.+-]+$~D', $type) === 1) {
+            $result['content_type'] = $type;
+        }
+        $charset = strtolower($response->getHeaderLine('Content-Type'));
+        if (preg_match('/charset=["\']?([a-z0-9._-]{1,40})/', $charset, $m) === 1) {
+            $result['content_charset'] = $m[1];
+        }
+        $length = $response->getHeaderLine('Content-Length');
+        if (preg_match('/^\d{1,12}$/D', $length) === 1) {
+            $result['content_length'] = (int) $length;
+        }
+        foreach (['Transfer-Encoding' => 'transfer_encoding', 'Content-Encoding' => 'content_encoding'] as $header => $key) {
+            $value = strtolower($response->getHeaderLine($header));
+            if (preg_match('/^[a-z0-9, -]{1,40}$/D', $value) === 1) {
+                $result[$key] = $value;
+            }
+        }
+        return $result;
+    }
+
+    private function safeStreamError(\RuntimeException $e): string
+    {
+        $message = strtolower($e->getMessage());
+        foreach (['made no progress' => 'no_progress', 'unable to read' => 'unable_to_read', 'detached' => 'detached', 'non-readable' => 'not_readable', 'timed out' => 'timed_out'] as $needle => $code) {
+            if (str_contains($message, $needle)) {
+                return $code;
+            }
+        }
+        return 'other:' . (new \ReflectionClass($e))->getShortName();
     }
 
     private function validateToken(#[\SensitiveParameter] string $token): void

@@ -10,8 +10,10 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\PumpStream;
 use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Psr7\Utils;
 use MyInvoice\Service\Bank\Connector\BankConnector;
 use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use MyInvoice\Service\Bank\Connector\FioBankConnector;
@@ -139,6 +141,84 @@ final class FioBankConnectorTest extends TestCase
             $this->gpc(),
             $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'),
         );
+    }
+
+    public function testToleratesTransientEmptyReadsBeforeEndOfStream(): void
+    {
+        $raw = $this->gpc() . $this->gpcTransaction('0000001000000005') . $this->gpcTransaction('0000001000000005');
+        $inner = Utils::streamFor($raw);
+        $empty = true;
+        $stream = FnStream::decorate($inner, [
+            'read' => static function (int $length) use ($inner, &$empty): string {
+                $empty = !$empty;
+                return $empty ? '' : $inner->read(min($length, 50));
+            },
+        ]);
+        $connector = $this->connectorWith(new Response(200, ['Transfer-Encoding' => 'chunked'], $stream));
+
+        self::assertSame($raw, $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'));
+    }
+
+    public function testLogsExactReadFailureReasonAndTransferHeaders(): void
+    {
+        $inner = Utils::streamFor($this->gpc());
+        $stream = FnStream::decorate($inner, [
+            'read' => static fn (int $length): string => throw new \RuntimeException('Unable to read from stream'),
+        ]);
+        $logged = null;
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with(
+            'fio_statement_failed',
+            self::callback(static function (array $context) use (&$logged): bool {
+                $logged = $context;
+                return true;
+            }),
+        );
+        $http = new Client(['handler' => new MockHandler([new Response(200, [
+            'Content-Type' => 'text/plain; charset=windows-1250',
+            'Transfer-Encoding' => 'chunked',
+        ], $stream)])]);
+        $connector = new FioBankConnector($http, $logger);
+
+        try {
+            $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
+            self::fail('Read failure expected.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_RESPONSE, $e->errorCode);
+        }
+        self::assertSame('read', $logged['stage']);
+        self::assertSame('stream_error', $logged['reason']);
+        self::assertSame('unable_to_read', $logged['stream_error']);
+        self::assertSame(0, $logged['response_bytes']);
+        self::assertSame('text/plain', $logged['content_type']);
+        self::assertSame('windows-1250', $logged['content_charset']);
+        self::assertSame('chunked', $logged['transfer_encoding']);
+        self::assertStringNotContainsString(self::TOKEN, (string) json_encode($logged));
+    }
+
+    public function testLogsEmptyBodyAsDistinctReadFailure(): void
+    {
+        $logged = null;
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with(
+            'fio_statement_failed',
+            self::callback(static function (array $context) use (&$logged): bool {
+                $logged = $context;
+                return true;
+            }),
+        );
+        $http = new Client(['handler' => new MockHandler([new Response(200, ['Content-Length' => '0'], '')])]);
+        $connector = new FioBankConnector($http, $logger);
+
+        try {
+            $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
+            self::fail('Empty body expected.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_RESPONSE, $e->errorCode);
+        }
+        self::assertSame('read', $logged['stage']);
+        self::assertSame('empty_body', $logged['reason']);
+        self::assertSame(0, $logged['content_length']);
     }
 
     public function testRejectsSecondHeaderAndTransactionFromDifferentAccount(): void
