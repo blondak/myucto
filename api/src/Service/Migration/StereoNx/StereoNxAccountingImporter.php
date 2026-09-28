@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
+use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use PDO;
@@ -29,6 +30,7 @@ final class StereoNxAccountingImporter
         private readonly LoggerInterface $log,
         private readonly PayrollMigrationModuleSetup $payrollSetup,
         private readonly StereoNxReconciler $reconciler,
+        private readonly AccountingUnitSwitch $accountingUnit,
     ) {}
 
     public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false): array
@@ -200,6 +202,10 @@ final class StereoNxAccountingImporter
                 foreach ($report['reconciliation'] as $year) {
                     if (!$year['ok']) throw new StereoNxException('reconciliation_failed',
                         'Předvaha po převodu nesouhlasí se zdrojovým deníkem. Převod byl vrácen; podrobnosti jsou v kontrole převodu.');
+                }
+                if (!$dryRun && !empty($report['date_bounds']['from'])) {
+                    $this->accountingUnit->switchToDoubleEntry($supplierId,
+                        substr($report['date_bounds']['from'], 0, 4) . '-01-01', true, $report['date_bounds']['to']);
                 }
                 $report['counts']['requires_draft'] = count($report['review_documents']);
                 foreach ($report['review_documents'] as &$review) {

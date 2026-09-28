@@ -737,6 +737,9 @@ jejich kontace mohou být součástí zdrojového deníku. Konkrétní vynechan�
 Po úspěšném převodu nabízí protokol odkazy na převzaté doklady a peněžní
 pohyby k ruční kontrole. Zkouška nanečisto odkazy na dočasné záznamy
 nenabízí, protože se všechny její zápisy vracejí zpět.
+U podvojného účetnictví se po úspěšné kontrole předvahy zároveň dokončí
+aktivace účetnictví od začátku prvního převáděného roku. Zkouška nanečisto
+stav aktivace nemění.
 
 ### Správa záloh
 

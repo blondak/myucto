@@ -44,7 +44,8 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         $this->supplierId = $this->createIsolatedSupplier($pdo, (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn());
         $this->userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
         $identity = SyntheticStereoNxAccountingTables::identity();
-        $pdo->prepare("UPDATE supplier SET company_name=?, ic=?, dic=?, accounting_mode='double_entry', is_vat_payer=1 WHERE id=?")
+        $pdo->prepare("UPDATE supplier SET company_name=?, ic=?, dic=?, accounting_mode='double_entry',
+            accounting_enabled=0, accounting_starts_on=NULL, accounting_activation_status='none', is_vat_payer=1 WHERE id=?")
             ->execute([$identity['name'], $identity['ico'], $identity['dic'], $this->supplierId]);
         $this->setVatPayerAt($pdo, $this->supplierId, '1900-01-01', true);
         $pdo->prepare('INSERT INTO currencies (supplier_id,code,label,symbol,name_cs,name_en,decimals,is_active,is_default)
@@ -68,6 +69,9 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         $dry = $this->importer->run($backup, $this->supplierId, $this->userId, true, true);
         self::assertTrue($dry['ok'], json_encode($dry, JSON_UNESCAPED_UNICODE));
         self::assertSame($before, $this->snapshot());
+        $activationBefore = $this->db->pdo()->prepare('SELECT accounting_activation_status FROM supplier WHERE id=?');
+        $activationBefore->execute([$this->supplierId]);
+        self::assertSame('none', $activationBefore->fetchColumn());
         self::assertSame(4, $dry['counts']['bank_transactions']);
         self::assertSame(1, $dry['counts']['skipped_bank_transactions']);
         self::assertSame(3, $dry['counts']['payments']);
@@ -81,6 +85,11 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
 
         $actual = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
         self::assertTrue($actual['ok'], json_encode($actual, JSON_UNESCAPED_UNICODE));
+        $activation = $this->db->pdo()->prepare('SELECT accounting_enabled, accounting_starts_on, accounting_activation_status
+            FROM supplier WHERE id=?');
+        $activation->execute([$this->supplierId]);
+        self::assertSame(['accounting_enabled' => 1, 'accounting_starts_on' => '2025-01-01',
+            'accounting_activation_status' => 'completed'], $activation->fetch(\PDO::FETCH_ASSOC));
         self::assertSame(4, $actual['written']['bank_transactions']);
         self::assertSame(1, $actual['written']['cash_transactions']);
         self::assertSame(3, $actual['written']['payments']);
