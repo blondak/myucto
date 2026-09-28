@@ -45,6 +45,26 @@ final class StockValuationJobService
             $this->warehouses->lockForStockOperation($supplierId, array_keys($versions));
             $versions = $this->snapshots->versions($supplierId, array_keys($versions));
             $takeId = (int) ($filters['stock_take_id'] ?? 0);
+            if ($takeId === 0) {
+                $existing = $pdo->prepare("SELECT id, input_json FROM catalog_jobs
+                    WHERE supplier_id = ? AND kind = 'stock_valuation' AND input_version = 1
+                      AND status IN ('queued','running','completed') AND cancel_requested = 0
+                      AND JSON_VALUE(input_json, '$.date') = ?
+                    ORDER BY id DESC LIMIT 200");
+                $existing->execute([$supplierId, $date]);
+                foreach ($existing->fetchAll(PDO::FETCH_ASSOC) as $candidate) {
+                    $input = json_decode($candidate['input_json'], true, 512, JSON_THROW_ON_ERROR);
+                    if (($input['warehouse_id'] ?? null) === $warehouseId
+                        && ($input['stock_take_id'] ?? null) === null
+                        && ($input['source_versions'] ?? null) === $versions) {
+                        $result = $this->jobs->find($supplierId, (int) $candidate['id']);
+                        if ($own) {
+                            $pdo->commit();
+                        }
+                        return $result;
+                    }
+                }
+            }
             $jobId = $this->jobs->enqueue($supplierId, 'stock_valuation', [
                 'date' => $date, 'warehouse_id' => $warehouseId, 'source_versions' => $versions,
                 'stock_take_id' => $takeId > 0 ? $takeId : null,

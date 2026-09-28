@@ -112,6 +112,47 @@ final class StockHistoryTest extends StockTestCase
         self::assertSame($result['items'], $jobs->result($sid, $next['id'])['items']);
     }
 
+    public function testValuationRequestReusesQueuedAndCompletedJobUntilStockChanges(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->item($sid, 'HISTORY-REUSE');
+        $this->receiveStock($sid, $wh, $item, '2', 10, '2099-01-01');
+        $jobs = $this->container->get(StockValuationJobService::class);
+        $first = $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh]);
+        self::assertSame($first['id'], $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh])['id']);
+        self::assertNotSame($first['id'], $jobs->enqueue($sid, '2099-02-01', ['warehouse_id' => $wh])['id']);
+
+        $jobs->tick($sid);
+        self::assertSame($first['id'], $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh])['id']);
+        self::assertSame('20.00', $jobs->result($sid, $first['id'])['totals']['value_total']);
+        $jobs->tick($sid);
+
+        $this->receiveStock($sid, $wh, $item, '1', 10, '2099-01-10');
+        $changed = $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh]);
+        self::assertNotSame($first['id'], $changed['id']);
+        $jobs->tick($sid);
+        self::assertSame('30.00', $jobs->result($sid, $changed['id'])['totals']['value_total']);
+    }
+
+    public function testValuationRequestKeepsWarehouseScopeAndDoesNotReuseCancelledJob(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $otherWh = $this->warehouse($sid, 'OTHER');
+        $item = $this->item($sid, 'HISTORY-SCOPE');
+        $this->receiveStock($sid, $wh, $item, '2', 10, '2099-01-01');
+        $this->receiveStock($sid, $otherWh, $item, '1', 10, '2099-01-01');
+        $jobs = $this->container->get(StockValuationJobService::class);
+        $scoped = $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh]);
+        $all = $jobs->enqueue($sid, '2099-01-31');
+        self::assertNotSame($scoped['id'], $all['id']);
+        self::assertSame($all['id'], $jobs->enqueue($sid, '2099-01-31')['id']);
+
+        self::assertTrue($this->container->get(CatalogJobService::class)->cancel($sid, $scoped['id']));
+        self::assertNotSame($scoped['id'], $jobs->enqueue($sid, '2099-01-31', ['warehouse_id' => $wh])['id']);
+    }
+
     public function testBackdatedReceiptInvalidatesOnlyAffectedSnapshotsAndReplayUsesEarlierOne(): void
     {
         $sid = $this->createSupplier();
