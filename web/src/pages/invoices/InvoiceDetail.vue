@@ -2572,9 +2572,23 @@ const invoiceActions = computed<ActionItem[]>(() => {
         </div>
       </div>
 
-      <div v-else-if="paymentsLoaded && paymentsRelevant() && invoice.status === 'paid' && payments.length === 0"
+      <div v-else-if="paymentsLoaded && paymentsRelevant() && invoice.status === 'paid' && payments.length === 0 && !invoice.cash_documents?.length"
         class="bg-neutral-50 border border-neutral-200 rounded-lg px-5 py-4 text-sm text-neutral-600">
         {{ t('invoice.payments.imported_without_details', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
+      </div>
+
+      <div v-if="invoice.cash_documents?.length"
+        class="bg-surface border border-neutral-200 rounded-lg px-5 py-4 shadow-sm text-sm space-y-1.5" data-invoice-cash-documents>
+        <div v-for="doc in invoice.cash_documents" :key="doc.id" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span class="text-neutral-600">{{ t(doc.doc_type === 'out' ? 'invoice.cash_documents.paid_out' : 'invoice.cash_documents.paid_in') }}</span>
+          <RouterLink
+            :to="{ path: '/accounting/cash', query: { register_id: String(doc.register_id), q: doc.doc_number } }"
+            class="font-mono font-medium text-primary-600 hover:text-primary-800 hover:underline"
+          >{{ doc.doc_number }}</RouterLink>
+          <span class="text-neutral-500">{{ formatDate(doc.issue_date) }}</span>
+          <span class="font-mono">{{ formatMoney(doc.total_amount, 'CZK') }}</span>
+          <span v-if="doc.status === 'draft'" class="text-xs text-warning-700">{{ t('invoice.cash_documents.draft') }}</span>
+        </div>
       </div>
 
       <!-- CZK přepočet pro faktury v cizí měně -->

@@ -192,6 +192,16 @@ export const PAYMENT_METHODS: PaymentMethod[] = [
 /** Zdroj hodnoty `payment_method` — priorita manual > ai > vendor > default. */
 export type PaymentMethodSource = 'default' | 'vendor' | 'ai' | 'manual'
 
+export interface InvoiceCashDocument {
+  id: number
+  register_id: number
+  doc_type: 'in' | 'out'
+  doc_number: string
+  issue_date: string
+  total_amount: number
+  status: 'draft' | 'posted'
+}
+
 /**
  * § 31 a § 31a ZDPH — jedna platba rozpisu splátkového nebo platebního kalendáře.
  *
@@ -231,6 +241,8 @@ export interface Invoice {
   price_level_id?: number | null
   /** § 31/31a ZDPH — rozpis plateb kalendáře (prázdné u ostatních typů). */
   payment_schedule?: PaymentScheduleRow[]
+  /** Nestornované pokladní doklady k faktuře (úhrada PPD, výplata VPD); jen v detailu. */
+  cash_documents?: InvoiceCashDocument[]
   /** Ceny položek zadané včetně DPH (brutto) — DPH se počítá shora koeficientem. */
   prices_include_vat: boolean
   /** Doklad není základem daně z příjmů (§4 osvobození / přefakturace) → vyloučen z DPFO/DPPO i SP/ZP. DPH/KH/tržby nedotčeny. */

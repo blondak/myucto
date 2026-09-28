@@ -26845,6 +26845,19 @@ components:
         cancelled_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        cash_documents:
+          type: array
+          description: "Nestornované pokladní doklady navázané na fakturu (úhrada `in`, výplata `out`). Jen v detailu."
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              register_id: { type: integer, format: int64 }
+              doc_type: { type: string, enum: [in, out] }
+              doc_number: { type: string }
+              issue_date: { type: string, format: date }
+              total_amount: { type: number, format: float }
+              status: { type: string, enum: [draft, posted] }
         _warnings:
           type: array
           description: |

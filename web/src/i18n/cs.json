@@ -19774,6 +19774,11 @@
       },
       "imported_without_details": "Doklad je evidován jako uhrazený dne {date}, ale podrobnosti platby nejsou k dispozici."
     },
+    "cash_documents": {
+      "paid_in": "Uhrazeno pokladním dokladem",
+      "paid_out": "Vyplaceno pokladním dokladem",
+      "draft": "koncept"
+    },
     "cancel_or_credit": "Storno / dobropis",
     "cancel_credit_note": "Storno dobropisu",
     "delete_cancelled": "Smazat (storno + originál)",

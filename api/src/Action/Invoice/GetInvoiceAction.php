@@ -50,6 +50,8 @@ final class GetInvoiceAction
         // dokladů), aby editor nemusel rozlišovat „nemá rozpis" od „ještě se nenačetl".
         $invoice['payment_schedule'] = $this->paymentSchedule->forInvoice($sid, $id);
 
+        $invoice['cash_documents'] = $this->repo->cashDocumentsForInvoice($sid, $id);
+
         return Json::ok($response, $invoice);
     }
 }

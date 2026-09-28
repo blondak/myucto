@@ -2012,6 +2012,32 @@ final class InvoiceRepository
         return $this->loadVatRates();
     }
 
+    /**
+     * Nestornované pokladní doklady navázané na fakturu (úhrada PPD, výplata VPD).
+     *
+     * @return list<array{id:int, register_id:int, doc_type:string, doc_number:string, issue_date:string, total_amount:float, status:string}>
+     */
+    public function cashDocumentsForInvoice(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, register_id, doc_type, doc_number, issue_date, total_amount, status
+               FROM cash_documents
+              WHERE supplier_id = ? AND invoice_id = ? AND status <> 'reversed'
+              ORDER BY issue_date, id"
+        );
+        $stmt->execute([$supplierId, $invoiceId]);
+
+        return array_map(static fn(array $r): array => [
+            'id'           => (int) $r['id'],
+            'register_id'  => (int) $r['register_id'],
+            'doc_type'     => (string) $r['doc_type'],
+            'doc_number'   => (string) $r['doc_number'],
+            'issue_date'   => (string) $r['issue_date'],
+            'total_amount' => (float) $r['total_amount'],
+            'status'       => (string) $r['status'],
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
     /** `supplier.allow_refund_invoices` — viz {@see \MyInvoice\Service\Invoice\RefundDocument}. */
     public function refundInvoicesEnabled(int $supplierId): bool
     {

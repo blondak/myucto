@@ -19774,6 +19774,11 @@
       },
       "imported_without_details": "The document is recorded as paid on {date}, but payment details are unavailable."
     },
+    "cash_documents": {
+      "paid_in": "Paid by cash document",
+      "paid_out": "Paid out by cash document",
+      "draft": "draft"
+    },
     "cancel_or_credit": "Cancel / credit note",
     "cancel_credit_note": "Cancel credit note",
     "delete_cancelled": "Delete (cancellation + original)",
