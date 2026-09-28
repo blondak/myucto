@@ -106,7 +106,7 @@ final class BankIgnoreNoteTest extends TestCase
 
         $sqlite->exec('CREATE TABLE invoice_payments (id INTEGER, source TEXT, bank_transaction_id INTEGER, tax_document_invoice_id INTEGER)');
         $sqlite->exec('CREATE TABLE invoices (id INTEGER, status TEXT)');
-        $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER)');
+        $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER, invoice_id INTEGER)');
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
         $scope = $this->createStub(\PDOStatement::class);

@@ -28,6 +28,8 @@ use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionReleaseException;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use MyInvoice\Service\Invoice\InvoiceAlreadySettledException;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
@@ -3005,8 +3007,10 @@ final class BankStatementAction
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'invoice_not_found', 'Faktura nenalezena.', 404);
         }
+        $refundDocument = RefundDocument::isRefundDocument($invoice);
         if (
             in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)
+            && !$refundDocument
             && !InvoiceAmountPolicy::canBeMarkedPaid($invoice)
         ) {
             return Json::error($response, 'invalid_amount', InvoiceAmountPolicy::NON_POSITIVE_MARK_PAID_MESSAGE, 409);
@@ -3046,6 +3050,29 @@ final class BankStatementAction
                 409,
             );
         }
+        if ($refundDocument) {
+            if ((float) ($txRow['amount'] ?? 0) >= 0) {
+                return Json::error(
+                    $response,
+                    'refund_requires_outgoing',
+                    'Doklad k vyplacení lze spárovat jen s odchozí platbou.',
+                    409,
+                );
+            }
+            $otherMatch = $pdo->prepare(
+                'SELECT 1 FROM payment_matches
+                  WHERE bank_transaction_id = ? AND (invoice_id IS NULL OR invoice_id <> ?) LIMIT 1'
+            );
+            $otherMatch->execute([$txId, $invoiceId]);
+            if ($otherMatch->fetchColumn() !== false) {
+                return Json::error(
+                    $response,
+                    'tx_already_paired',
+                    'Transakce je už spárovaná s jiným dokladem. Nejdřív zruš stávající spárování.',
+                    409,
+                );
+            }
+        }
 
         $savepoint = 'bank_tx_manual_match';
         $own = self::beginAtomic($pdo, $savepoint);
@@ -3063,7 +3090,9 @@ final class BankStatementAction
             $taxDocId = null;
             $markedPaid = false;
             $partialPayment = false;
-            if (in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)) {
+            if ($refundDocument) {
+                $partialPayment = !$this->recordRefundMatch($pdo, $invoice, $txRow, $txId, $supplierId, $userId, $postedAt);
+            } elseif (in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)) {
                 $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
                 $txAmount = (float) ($txRow['amount'] ?? 0);
                 $txCurrency = isset($txRow['tx_currency']) && $txRow['tx_currency'] !== null
@@ -3175,6 +3204,75 @@ final class BankStatementAction
             $result['payment_thanks_sent'] = true;
         }
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Odchozí platba k dokladu k vyplacení (dobropis, faktura se zápornou částkou).
+     * Vratka se neeviduje v invoice_payments, ale alokací v payment_matches, ze které
+     * bankovní zápis účtuje 311/221, a stavem dokladu. Stejný výsledek jako
+     * {@see StatementMatcher::matchIssuedCreditRefund()}; alokace nese částku v měně dokladu.
+     * Volat uvnitř transakce.
+     *
+     * @param array<string,mixed> $invoice
+     * @param array<string,mixed> $txRow
+     * @return bool true = doklad je vyplacený celý
+     */
+    private function recordRefundMatch(
+        \PDO $pdo,
+        array $invoice,
+        array $txRow,
+        int $txId,
+        int $supplierId,
+        int $userId,
+        string $postedAt,
+    ): bool {
+        $invoiceId = (int) $invoice['id'];
+        $lock = $pdo->prepare('SELECT amount_to_pay FROM invoices WHERE id = ? FOR UPDATE');
+        $lock->execute([$invoiceId]);
+        $due = round(-(float) $lock->fetchColumn(), 2);
+
+        $prev = $pdo->prepare(
+            'SELECT COALESCE(SUM(amount), 0) FROM payment_matches
+              WHERE supplier_id = ? AND invoice_id = ? AND bank_transaction_id <> ?'
+        );
+        $prev->execute([$supplierId, $invoiceId, $txId]);
+        $remaining = round($due - (float) $prev->fetchColumn(), 2);
+        if ($remaining <= InvoicePaymentService::TOLERANCE) {
+            throw new InvoiceAlreadySettledException($invoiceId, $remaining);
+        }
+
+        $txAmount = abs((float) ($txRow['amount'] ?? 0));
+        $txCurrency = isset($txRow['tx_currency']) && $txRow['tx_currency'] !== null
+            ? (string) $txRow['tx_currency']
+            : null;
+        $invoiceCurrency = (string) ($invoice['currency'] ?? 'CZK');
+        $rate = (float) ($invoice['exchange_rate'] ?? 0);
+        $amount = min($remaining, round($this->txAmountInInvoiceCurrency(
+            $txAmount,
+            $invoiceCurrency,
+            $rate,
+            $txCurrency,
+            $remaining,
+            FxPaymentSettlement::isFullCzkSettlement($txAmount, $remaining, $invoiceCurrency, $rate, $txCurrency),
+        ), 2));
+
+        $existing = $pdo->prepare(
+            'SELECT id FROM payment_matches WHERE bank_transaction_id = ? AND invoice_id = ? LIMIT 1'
+        );
+        $existing->execute([$txId, $invoiceId]);
+        if ($existing->fetchColumn() === false) {
+            $pdo->prepare(
+                "INSERT INTO payment_matches
+                    (supplier_id, bank_transaction_id, invoice_id, amount, match_type, matched_by_user_id)
+                 VALUES (?, ?, ?, ?, 'manual', ?)"
+            )->execute([$supplierId, $txId, $invoiceId, $amount, $userId ?: null]);
+        }
+
+        $covered = $amount >= $remaining - InvoicePaymentService::TOLERANCE;
+        if ($covered && in_array((string) $invoice['status'], RefundDocument::OPEN_STATUSES, true)) {
+            $this->payments->markCreditNoteRefunded($invoiceId, $supplierId, $postedAt);
+        }
+        return $covered;
     }
 
     /**

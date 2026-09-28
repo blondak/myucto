@@ -9,6 +9,7 @@ use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\RefundDocument;
 use PDO;
 
 /**
@@ -187,6 +188,12 @@ final class BankTransactionReleaseService
         );
         $purchaseStmt->execute([$txId, $supplierId]);
         $purchaseInvoiceIds = array_values(array_unique(array_map('intval', $purchaseStmt->fetchAll(PDO::FETCH_COLUMN) ?: [])));
+        $refundStmt = $pdo->prepare(
+            'SELECT invoice_id FROM payment_matches
+              WHERE bank_transaction_id = ? AND supplier_id = ? AND invoice_id IS NOT NULL'
+        );
+        $refundStmt->execute([$txId, $supplierId]);
+        $refundInvoiceIds = array_values(array_unique(array_map('intval', $refundStmt->fetchAll(PDO::FETCH_COLUMN) ?: [])));
 
         $pdo->prepare(
             "UPDATE bank_transactions
@@ -205,6 +212,7 @@ final class BankTransactionReleaseService
         $pdo->prepare('DELETE FROM payment_matches WHERE bank_transaction_id = ? AND supplier_id = ?')
             ->execute([$txId, $supplierId]);
         $this->restorePurchaseInvoices($pdo, $supplierId, $purchaseInvoiceIds, $postedAt);
+        $this->restoreRefundDocuments($pdo, $supplierId, $refundInvoiceIds, $postedAt);
 
         if (!$deletedPayment && $invoiceId > 0 && $postedAt !== '') {
             $this->releaseLegacyInvoiceMatch($pdo, $txId, $invoiceId, $postedAt);
@@ -274,6 +282,28 @@ final class BankTransactionReleaseService
                   WHERE pi.id = ? AND pi.supplier_id = ? AND pi.status = 'paid' AND pi.paid_at = ?
                     AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)"
             )->execute([$restoredStatus, $purchaseInvoiceId, $supplierId, $postedAt]);
+        }
+    }
+
+    /**
+     * Doklad k vyplacení (dobropis, záporná faktura), který vyplatila jen tahle odchozí
+     * platba, se vrací mezi otevřené. Vratka nemá řádek v invoice_payments, přepočet
+     * z plateb by ho nechal `paid`. Ručně nastavený stav (jiné paid_at) nemění, stejně
+     * jako fakturu se zálohou (přeplatek zálohy), která je `paid` už od vystavení.
+     *
+     * @param list<int> $invoiceIds
+     */
+    private function restoreRefundDocuments(PDO $pdo, int $supplierId, array $invoiceIds, string $postedAt): void
+    {
+        foreach ($invoiceIds as $invoiceId) {
+            $pdo->prepare(
+                "UPDATE invoices i
+                    SET i.status = IF(i.sent_at IS NOT NULL, 'sent', 'issued'), i.paid_at = NULL
+                  WHERE i.id = ? AND i.supplier_id = ? AND i.status = 'paid' AND DATE(i.paid_at) = ?
+                    AND " . RefundDocument::refundDocumentSql('i') . "
+                    AND (i.invoice_type = 'credit_note' OR i.parent_invoice_id IS NULL)
+                    AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.invoice_id = i.id)"
+            )->execute([$invoiceId, $supplierId, $postedAt]);
         }
     }
 
