@@ -463,81 +463,8 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $result['xml']);
     }
 
-    /**
-     * Nad 1500 formulářů DIS jediný balík odmítne. Hlášení se proto dělí:
-     * všechny balíky nesou tentýž GUID podání i datum vyplnění, souhrn
-     * a pojistnou část jen první, počty podle kontrol 227, 235, 300 a 301.
-     */
-    public function testMoreThan1500FormsAreSplitIntoPackagesSharingTheSubmissionIdentity(): void
+    public function testSinglePackageSerializationMatchesSingleDocument(): void
     {
-        $payload = $this->payload();
-        $template = $payload['people'][0];
-        $formGuids = [101 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10'];
-        $guids = new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory();
-        for ($index = 1; $index < 1501; $index++) {
-            $employeeId = 11 + $index;
-            $employmentId = 101 + $index;
-            $person = $template;
-            $person['employee_id'] = $employeeId;
-            $person['employments'][0]['employment_id'] = $employmentId;
-            $person['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
-                = sprintf('3%021d', $index);
-            $person['employments'][0]['insurance']['relationship_id'] = "employment:{$employmentId}";
-            $person['person_summary']['statutory']['net_pay']['relationships']
-                = [['relationship_id' => "employment:{$employmentId}"]];
-            $payload['people'][] = $person;
-            $payload['ordinary_evidence'][] = [
-                'scope' => ['employee_id' => $employeeId, 'employment_id' => $employmentId],
-                'attribute_values' => ['10116' => false, '10546' => false],
-            ];
-            $formGuids[$employmentId] = $guids->next();
-        }
-        $resolution = $this->resolutionFor($payload);
-        self::assertSame('resolved', $resolution->status(), 'Nad 1500 formulářů nesmí dokument blokovat.');
-
-        $result = (new JmhzScenario1XmlValidator())->dryRunPackages(
-            $resolution,
-            JmhzSubmissionEnvelope::create(
-                '0195e2c4-1a2b-7c3d-8e4f-5a6b7c8d9e0f',
-                $formGuids,
-                '2026-08-05T09:30:00Z',
-                'MyÚčto.cz',
-                '5.6.0',
-            ),
-        );
-
-        self::assertCount(2, $result['packages']);
-        [$first, $second] = [$result['packages'][0]['xml'], $result['packages'][1]['xml']];
-        foreach ([$first, $second] as $xml) {
-            self::assertStringContainsString('<idPodani>0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E0F</idPodani>', $xml);
-            self::assertStringContainsString('<datumVyplneni>2026-08-05T09:30:00Z</datumVyplneni>', $xml);
-            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
-            self::assertStringContainsString('<formularePocetCelkem>1503</formularePocetCelkem>', $xml);
-        }
-        self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
-        self::assertStringContainsString('<formularePocetVBaliku>1502</formularePocetVBaliku>', $first);
-        self::assertSame(1500, substr_count($first, '</formularOsoby>'));
-        self::assertStringContainsString('<so:souhrn>', $first);
-        self::assertStringContainsString('<pvpoj:PVPOJ>', $first);
-        self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
-        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
-        self::assertSame(1, substr_count($second, '</formularOsoby>'));
-        self::assertStringNotContainsString('<so:souhrn>', $second);
-        self::assertStringNotContainsString('<pvpoj:PVPOJ>', $second);
-
-        $validator = JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider());
-        foreach ([$first, $second] as $xml) {
-            $report = $validator->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
-            $blocking = array_map(
-                static fn (JmhzControlFinding $finding): int => $finding->controlId,
-                $report->blocking(),
-            );
-            foreach ([84, 93, 232, 235, 240, 300, 301] as $packageControl) {
-                self::assertNotContains($packageControl, $blocking, "Kontrola {$packageControl} balíku.");
-            }
-        }
-
-        // Jediný balík zůstává bajtově shodný s dosavadní serializací.
         $single = $this->resolution();
         $envelope = $this->envelope();
         self::assertSame(

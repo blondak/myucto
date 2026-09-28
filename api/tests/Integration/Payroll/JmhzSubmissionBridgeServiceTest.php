@@ -1511,7 +1511,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
      * zmrazení vrátí tytéž balíky. Dřív se zmrazení odmítlo a hlášení se
      * muselo podat ručně přes ePortál.
      */
-    public function testSubmissionOverOneBatchIsFrozenAsPackages(): void
+    public function testSplitSubmissionFreezesRetriesAndAggregatesProtocols(): void
     {
         $people = 1501;
         $resolution = $this->resolutionFor(
@@ -1540,9 +1540,20 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertStringContainsString($guid, $second);
         self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
         self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
+        foreach ([$first, $second] as $xml) {
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>1503</formularePocetCelkem>', $xml);
+        }
+        self::assertStringContainsString('<formularePocetVBaliku>1502</formularePocetVBaliku>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
         self::assertSame(1500, substr_count($first, '</formularOsoby>'));
         self::assertSame(1, substr_count($second, '</formularOsoby>'));
+        self::assertStringContainsString('<so:souhrn>', $first);
+        self::assertStringNotContainsString('<so:souhrn>', $second);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $first);
         self::assertStringNotContainsString('<pvpoj:PVPOJ>', $second);
+        self::assertSame(1, preg_match('/<datumVyplneni>([^<]+)<\/datumVyplneni>/', $first, $firstDate));
+        self::assertStringContainsString('<datumVyplneni>' . $firstDate[1] . '</datumVyplneni>', $second);
 
         $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
         self::assertCount(1501, $reader->formGuids($this->supplierId, self::ENVIRONMENT, $frozen['submission_id']));
@@ -1567,18 +1578,9 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertFalse($replayed['created']);
         self::assertSame($frozen['packages'], $replayed['packages']);
         self::assertSame(1, $this->countRows('payroll_submissions'));
-    }
+        self::assertSame(1, preg_match('/<VENDOR productName="([^"]+)" productVersion="([^"]+)"/', $first, $vendor));
+        $this->splitSoftware = new JmhzSoftwareIdentification($vendor[1], $vendor[2]);
 
-    /**
-     * Odeslání rozděleného hlášení spadne uprostřed: první balík ČSSZ
-     * převzala, druhý se neodeslal vůbec (spojení se nenavázalo). Hlášení se
-     * musí vrátit do nabídky „připraveno k odeslání" s průběhem 1 z 2 a další
-     * odeslání smí poslat JEN druhý balík. Protokoly se pak skládají po
-     * balících: po prvním je hlášení rozpracované, po obou přijaté.
-     */
-    public function testSplitSubmissionResendsOnlyUnsentPackagesAndAggregatesProtocols(): void
-    {
-        $frozen = $this->freezeSplitSubmission();
         $submissionId = $frozen['submission_id'];
         $ready = $this->readyEntry($submissionId);
         self::assertNotNull($ready);
@@ -1609,26 +1611,64 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
         $history = [];
         $dispatch = $this->splitDispatch([
+            new Response(500, ['Content-Type' => 'text/html'], 'chyba brány'),
+        ], $history);
+        try {
+            $this->sendSplit($dispatch, $submissionId, 'split-send-2');
+            self::fail('Odpověď 5xx musí odeslání shodit.');
+        } catch (JmhzTransportException $exception) {
+            self::assertTrue($exception->possiblyDelivered);
+        }
+        self::assertCount(1, $history, 'Odeslaný první balík se nesmí poslat znovu.');
+        self::assertNull($this->readyEntry($submissionId), 'Možná doručený balík nesmí jít odeslat znovu.');
+
+        $history = [];
+        $dispatch = $this->splitDispatch([], $history);
+        try {
+            $this->sendSplit($dispatch, $submissionId, 'split-send-3');
+            self::fail('Možná doručený balík musí další odeslání zastavit.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('Dílčí balík 2 z 2', $exception->getMessage());
+        }
+        self::assertCount(0, $history);
+
+        $attempts = new PayrollSubmissionTransportAttemptRepository($this->db);
+        $confirmation = new PayrollSubmissionRetryConfirmationService(
+            $attempts,
+            new PayrollImportedJmhzProtocolRepository($this->db),
+            new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions),
+        );
+        $confirmation->confirm(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submissionId,
+            'V datové schránce ani na portálu ČSSZ protokol k balíku není.',
+        );
+        $ready = $this->readyEntry($submissionId);
+        self::assertNotNull($ready);
+        self::assertSame(1, $ready['packages_sent']);
+
+        $history = [];
+        $dispatch = $this->splitDispatch([
             new Response(200, ['Content-Type' => 'text/xml'], self::splitAcknowledgement(self::SPLIT_CORRELATION_2)),
         ], $history);
-        $outcome = $this->sendSplit($dispatch, $submissionId, 'split-send-2');
-        self::assertCount(1, $history, 'Odeslaný první balík se nesmí poslat znovu.');
+        $outcome = $this->sendSplit($dispatch, $submissionId, 'split-send-4');
+        self::assertCount(1, $history);
         self::assertSame(self::SPLIT_CORRELATION_2, $outcome->attempt['correlation_reference']);
         self::assertSame($frozen['packages'][1]['artifact_sha256'], $outcome->attempt['request_sha256']);
         self::assertNull($this->readyEntry($submissionId));
         $byPackage = $this->attemptsByPackage($submissionId, $frozen['packages']);
         self::assertSame(['awaiting_protocol'], $byPackage[1]);
-        self::assertSame(['failed', 'awaiting_protocol'], $byPackage[2]);
+        self::assertSame(['failed', 'expired', 'awaiting_protocol'], $byPackage[2]);
 
         try {
-            $this->sendSplit($dispatch, $submissionId, 'split-send-3');
+            $this->sendSplit($dispatch, $submissionId, 'split-send-5');
             self::fail('Po odeslání všech balíků se nesmí odesílat nic dalšího.');
         } catch (\DomainException $exception) {
             self::assertStringContainsString('Všechny dílčí balíky', $exception->getMessage());
         }
         self::assertCount(1, $history);
 
-        $attempts = new PayrollSubmissionTransportAttemptRepository($this->db);
         $sent = array_values(array_filter(
             $attempts->listForSubmission($this->supplierId, self::ENVIRONMENT, $submissionId),
             static fn (array $attempt): bool => $attempt['status'] === 'awaiting_protocol',
@@ -1663,67 +1703,10 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $timeline[] = [$item['package_ordinal'], $item['package_count'], $item['status']];
         }
         self::assertSame(
-            [[2, 2, 'completed'], [2, 2, 'failed'], [1, 2, 'completed']],
+            [[2, 2, 'completed'], [2, 2, 'expired'], [2, 2, 'failed'], [1, 2, 'completed']],
             $timeline,
             'Přehled odeslání ukazuje u každého pokusu jeho balík.',
         );
-    }
-
-    /**
-     * Druhý balík „možná doručen" (brána odpověděla 5xx): hlášení z nabídky
-     * zmizí a odeslání se odmítne bez jediného požadavku na VREP. Teprve
-     * výslovné potvrzení opakování ho vrátí a odejde zase jen druhý balík.
-     */
-    public function testPossiblyDeliveredPackageStopsResendUntilConfirmed(): void
-    {
-        $frozen = $this->freezeSplitSubmission();
-        $submissionId = $frozen['submission_id'];
-        $history = [];
-        $dispatch = $this->splitDispatch([
-            new Response(200, ['Content-Type' => 'text/xml'], self::splitAcknowledgement(self::SPLIT_CORRELATION_1)),
-            new Response(500, ['Content-Type' => 'text/html'], 'chyba brány'),
-        ], $history);
-        try {
-            $this->sendSplit($dispatch, $submissionId, 'split-possibly-1');
-            self::fail('Odpověď 5xx musí odeslání shodit.');
-        } catch (JmhzTransportException $exception) {
-            self::assertTrue($exception->possiblyDelivered);
-        }
-        self::assertNull($this->readyEntry($submissionId), 'Možná doručený balík nesmí jít odeslat znovu.');
-
-        $history = [];
-        $dispatch = $this->splitDispatch([], $history);
-        try {
-            $this->sendSplit($dispatch, $submissionId, 'split-possibly-2');
-            self::fail('Možná doručený balík musí další odeslání zastavit.');
-        } catch (\DomainException $exception) {
-            self::assertStringContainsString('Dílčí balík 2 z 2', $exception->getMessage());
-        }
-        self::assertCount(0, $history);
-
-        $attempts = new PayrollSubmissionTransportAttemptRepository($this->db);
-        $confirmation = new PayrollSubmissionRetryConfirmationService(
-            $attempts,
-            new PayrollImportedJmhzProtocolRepository($this->db),
-            new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions),
-        );
-        $confirmation->confirm(
-            $this->supplierId,
-            self::ENVIRONMENT,
-            $submissionId,
-            'V datové schránce ani na portálu ČSSZ protokol k balíku není.',
-        );
-        $ready = $this->readyEntry($submissionId);
-        self::assertNotNull($ready);
-        self::assertSame(1, $ready['packages_sent']);
-
-        $dispatch = $this->splitDispatch([
-            new Response(200, ['Content-Type' => 'text/xml'], self::splitAcknowledgement(self::SPLIT_CORRELATION_2)),
-        ], $history);
-        $outcome = $this->sendSplit($dispatch, $submissionId, 'split-possibly-3');
-        self::assertCount(1, $history);
-        self::assertSame($frozen['packages'][1]['artifact_sha256'], $outcome->attempt['request_sha256']);
-        self::assertSame(['awaiting_protocol'], $this->attemptsByPackage($submissionId, $frozen['packages'])[1]);
     }
 
     private const SPLIT_CORRELATION_1 = 'CCCC9999DDDD0000EEEE1111FFFF0001';
@@ -1731,30 +1714,6 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     private ?JmhzSignedProtocolFactory $protocolFactory = null;
     private ?JmhzSoftwareIdentification $splitSoftware = null;
-
-    /** @return array<string,mixed> */
-    private function freezeSplitSubmission(): array
-    {
-        $people = 1501;
-        $resolution = $this->resolutionFor(
-            $this->pvpoj(employerTotal: 248 * $people, people: $people),
-            $this->payloadWithPeople($people),
-        );
-        self::assertSame('resolved', $resolution->status(), CanonicalJson::encode($resolution->blockers));
-        $frozen = $this->bridge($resolution)->bridge(
-            $this->supplierId,
-            self::PREPARATION_ID,
-            $this->registerObligation(),
-            self::ENVIRONMENT,
-            $this->userId,
-        );
-        self::assertCount(2, $frozen['packages']);
-        $first = $this->submissions->artifactBytes($this->supplierId, $frozen['packages'][0]['artifact_id']);
-        self::assertSame(1, preg_match('/<VENDOR productName="([^"]+)" productVersion="([^"]+)"/', $first, $vendor));
-        $this->splitSoftware = new JmhzSoftwareIdentification($vendor[1], $vendor[2]);
-
-        return $frozen;
-    }
 
     /** @return array<string,mixed>|null */
     private function readyEntry(int $submissionId): ?array
