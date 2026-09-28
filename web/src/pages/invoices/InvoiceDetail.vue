@@ -1232,7 +1232,11 @@ const canIssueDraft = computed(() => {
     return true
   }
   if (invoice.value.invoice_type !== 'invoice') return true
-  return Number(invoice.value.amount_to_pay ?? 0) > 0
+  if (Number(invoice.value.amount_to_pay ?? 0) > 0) return true
+  // Faktura k vyplacení (zrcadlí backend InvoiceAmountPolicy::isAllowedRefundInvoice).
+  return (supplierStore.currentSupplier?.allow_refund_invoices ?? false)
+    && Number(invoice.value.amount_to_pay ?? 0) < 0
+    && invoice.value.items.some(it => Math.round(Number(it.quantity) * Number(it.unit_price_without_vat) * 100) > 0)
 })
 
 const canSendTestReminder = computed(() =>
@@ -1336,6 +1340,7 @@ const isOpenRefund = computed(() => {
   const inv = invoice.value
   return !!inv && (supplierStore.currentSupplier?.allow_refund_invoices ?? false)
     && ['invoice', 'credit_note'].includes(inv.invoice_type)
+    && (inv.invoice_type === 'credit_note' || !inv.parent_invoice_id)
     && ['issued', 'sent', 'reminded'].includes(inv.status)
     && Number(inv.amount_to_pay ?? 0) < 0
 })
