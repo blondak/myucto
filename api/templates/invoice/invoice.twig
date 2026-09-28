@@ -313,17 +313,39 @@
     <td class="left">
       {# QR + bankovní spojení sloučené do jednoho podbarveného „platebního" panelu —
          vizuální kotva dokladu. Renderuje se jen když je co platit/ukázat. #}
-      {% set _has_pay = qr_data_uri or is_paid or payment_method == 'card' or payment_method == 'cash' or bank %}
+      {% set _has_pay = qr_data_uri or is_paid or payment_method == 'card' or payment_method == 'cash' or bank or refund_amount is not null %}
       {% if _has_pay %}
       <table class="pay-panel{% if is_paid %} pay-panel-paid{% endif %}">
         <tr>
-          {% if qr_data_uri %}
+          {% if qr_data_uri and refund_amount is null %}
           <td class="pay-qr">
             <img src="{{ qr_data_uri }}" alt="QR" width="105" height="105">
           </td>
           {% endif %}
           <td class="pay-info">
-            {% if is_paid %}
+            {% if refund_amount is not null %}
+              {# Vyúčtování s výsledkem k vyplacení: peníze posíláme my, takže žádné
+                 platební údaje k úhradě ani QR. #}
+              {% set _vs = payment_varsymbol|default(invoice.varsymbol) %}
+              <div class="bank-label"{% if is_paid %} style="color:#2E7D32;"{% endif %}>
+                {%- if is_paid %}{{ t('VRÁCENO', 'REFUNDED') }}{% else %}{{ t('K vrácení', 'Amount to be refunded') }}{% endif -%}
+              </div>
+              <div class="spacer-3">&nbsp;</div>
+              <div class="bank-value"{% if is_paid %} style="color:#2E7D32;"{% endif %}>{{ refund_amount|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</div>
+              <div class="spacer-2">&nbsp;</div>
+              <div class="bank-meta-line">
+                {%- if payment_method == 'cash' -%}
+                  {%- if is_paid %}{{ t('Vyplaceno v hotovosti.', 'Paid out in cash.') }}{% else %}{{ t('Částku vám vyplatíme v hotovosti.', 'We will pay the amount out to you in cash.') }}{% endif -%}
+                {%- elseif is_paid -%}
+                  {{ t('Částka vám byla vrácena převodem.', 'The amount has been refunded to you by bank transfer.') }}
+                {%- else -%}
+                  {{ t('Částku vám vrátíme převodem pod variabilním symbolem', 'We will refund the amount by bank transfer under variable symbol') }} <span style="font-family:'geistmono',monospace;color:#15131D;">{{ _vs }}</span>.
+                {%- endif -%}
+              </div>
+              {% if is_paid and invoice.paid_at %}
+                <div class="bank-meta-line">{{ t('Datum vrácení', 'Refunded on') }}: {{ invoice.paid_at|date(date_format) }}</div>
+              {% endif %}
+            {% elseif is_paid %}
               <div class="bank-label" style="color:#2E7D32;margin-bottom:1.5mm;">{{ t('UHRAZENO', 'PAID') }}</div>
               <div class="bank-value" style="color:#2E7D32;">
                 {%- if payment_method == 'card' -%}{{ t('Platba kartou online', 'Paid online by card') }}
@@ -419,9 +441,17 @@
           {% endif %}
           <td class="tot-num nowrap">−{{ invoice.advance_paid_amount|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
         </tr>
+        {% if refund_amount is null %}
         <tr class="to-pay">
           <td class="tot-label">{{ t('K úhradě', 'Amount due') }}</td>
           <td class="tot-num nowrap">{{ invoice.amount_to_pay|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+        </tr>
+        {% endif %}
+        {% endif %}
+        {% if refund_amount is not null %}
+        <tr class="to-pay">
+          <td class="tot-label">{{ t('K vrácení', 'Amount to be refunded') }}</td>
+          <td class="tot-num nowrap">{{ refund_amount|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
         </tr>
         {% endif %}
         {# Částečné úhrady (#89): evidované platby snižují výzvu k platbě — znovu

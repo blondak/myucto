@@ -107,6 +107,9 @@ final class PaymentOrderAction
         $result = $this->service->candidates($supplierId, $currency, $p['per_page'], $p['offset'], $includeNonTransfer);
         $envelope = Pagination::envelope($result['candidates'], $result['total'], $p['page'], $p['per_page']);
         $envelope['payer_accounts'] = $result['payer_accounts'];
+        if (array_key_exists('refund_candidates', $result)) {
+            $envelope['refund_candidates'] = $result['refund_candidates'];
+        }
         return Json::ok($response, $envelope);
     }
 
@@ -122,12 +125,13 @@ final class PaymentOrderAction
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $result = $this->service->create($supplierId, [
-                'invoice_ids'       => (array) ($body['invoice_ids'] ?? []),
-                'payer_currency_id' => (int) ($body['payer_currency_id'] ?? 0),
-                'payment_date'      => (string) ($body['payment_date'] ?? ''),
-                'constant_symbol'   => $body['constant_symbol'] ?? null,
-                'note'              => $body['note'] ?? null,
-                'mark_paid'         => (bool) ($body['mark_paid'] ?? false),
+                'invoice_ids'        => (array) ($body['invoice_ids'] ?? []),
+                'refund_invoice_ids' => (array) ($body['refund_invoice_ids'] ?? []),
+                'payer_currency_id'  => (int) ($body['payer_currency_id'] ?? 0),
+                'payment_date'       => (string) ($body['payment_date'] ?? ''),
+                'constant_symbol'    => $body['constant_symbol'] ?? null,
+                'note'               => $body['note'] ?? null,
+                'mark_paid'          => (bool) ($body['mark_paid'] ?? false),
             ], $userId);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -170,10 +174,11 @@ final class PaymentOrderAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $ids = (array) ($body['invoice_ids'] ?? []);
-        if ($ids === []) {
+        $refundIds = (array) ($body['refund_invoice_ids'] ?? []);
+        if ($ids === [] && $refundIds === []) {
             return Json::error($response, 'validation_failed', 'Není vybrána žádná faktura.', 422);
         }
-        $count = $this->service->markOrdered($supplierId, $ids, (bool) ($body['mark_paid'] ?? false));
+        $count = $this->service->markOrdered($supplierId, $ids, (bool) ($body['mark_paid'] ?? false), $refundIds);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('payment_order.marked', $userId, null, null, [

@@ -372,7 +372,24 @@ nebo hromadně v seznamu faktur při označování plateb.
 > Neposílá se u storna ani u faktury bez e-mailu příjemce; selhání e-mailu
 > nikdy nezablokuje samotné označení platby. Vše se zapisuje do activity logu.
 
-### 95.5.6 Pohoda kódy
+### 95.5.6 Vyúčtování s částkou k vyplacení
+
+Na záložce **Fakturace** je volba **Povolit vyúčtování s částkou k vyplacení**,
+ve výchozím stavu vypnutá. Zapni ji, když vystavuješ faktury, u kterých
+odpočty převáží plnění, například vrácené obaly nebo přeplatek záloh.
+
+Se zapnutou volbou:
+
+- faktura s aspoň jedním kladným řádkem smí skončit zápornou částkou
+  (viz [§ 15.4.4](15_Faktura_editor.md#1544-vyuctovani-s-castkou-k-vyplaceni)),
+- vratky faktur i dobropisů se nabízí v [Platebních příkazech](26_Platebni_prikazy.md),
+- doklad placený hotově se zvolenou pokladnou se vyplatí výdajovým pokladním
+  dokladem a v [Pokladně](32_Pokladna.md) jde výdajový doklad s účelem
+  „Úhrada faktury" navázat na doklad k vyplacení.
+
+Bez volby se nic z toho nenabízí a editor dál vyžaduje kladnou částku k úhradě.
+
+### 95.5.7 Pohoda kódy
 
 | Pole | Sloupec | Příklad |
 |---|---|---|
@@ -395,7 +412,7 @@ je běžný a plně podporovaný stav.
 ### 95.6.1 Kde se nastavuje
 
 V **detailu dodavatele** (§ 95.5), sekce **„Daňové nastavení"** (stejný box jako EPO údaje
-a Pohoda kódy, viz [§ 95.5.6](#9556-pohoda-kody)), je pole **Režim účetnictví**:
+a Pohoda kódy, viz [§ 95.5.7](#9557-pohoda-kody)), je pole **Režim účetnictví**:
 
 | Volba | Hodnota v DB (`accounting_mode`) | Význam |
 |---|---|---|

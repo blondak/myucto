@@ -13,6 +13,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -68,9 +69,13 @@ final class MarkPaidAction
         // zůstává konzistentní (paid_total = amount_to_pay) a označení lze vrátit
         // smazáním platby. Status flip + PDF invalidace + stats řeší service.
         $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
-        if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note') {
+        // Doklad k vyplacení = vrácení peněz zákazníkovi. Faktura se zálohou (přeplatek
+        // zálohy) zůstává na bookkeeping flipu níž, jak ji zná vystavení.
+        if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note'
+            || (RefundDocument::isRefundDocument($invoice) && (int) ($invoice['parent_invoice_id'] ?? 0) <= 0)
+        ) {
             try {
-                $this->payments->markCreditNoteRefunded(
+                $this->payments->markRefunded(
                     $id,
                     (int) $invoice['supplier_id'],
                     $paidAt,

@@ -33,6 +33,8 @@ final class InvoiceValidation
      *                                z `\MyInvoice\Service\Oss\OssItemDeriver::domesticCountry($supplierId)`,
      *                                aby validace a derivace OSS mluvily o témž tuzemsku.
      *                                K čemu slouží, viz komentář u kontroly cizí sazby níž
+     * @param bool                    $allowRefundInvoice `supplier.allow_refund_invoices`
+     * @param ?string                 $currencyCode kód měny dokladu (zaokrouhlení částky k vyplacení)
      * @return array<string, string[]>
      */
     public static function invoice(
@@ -40,6 +42,8 @@ final class InvoiceValidation
         ?array $vatRates = null,
         ?array $vatRateCountries = null,
         ?string $domesticCountry = null,
+        bool $allowRefundInvoice = false,
+        ?string $currencyCode = null,
     ): array {
         $err = [];
         $domestic = self::normalizedCountry($domesticCountry) ?? self::FALLBACK_DOMESTIC_COUNTRY;
@@ -197,7 +201,7 @@ final class InvoiceValidation
         }
 
         if ($vatRates !== null) {
-            $amountError = InvoiceAmountPolicy::validatePositiveAmountToPay($data, $vatRates);
+            $amountError = InvoiceAmountPolicy::validatePositiveAmountToPay($data, $vatRates, $allowRefundInvoice, $currencyCode);
             if ($amountError !== null) {
                 $err['amount_to_pay'][] = $amountError;
             }

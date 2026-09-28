@@ -1704,8 +1704,22 @@ const requiresPositiveAmountToPay = computed(() => {
   return !form.value.parent_invoice_id
 })
 
+// Vyúčtování s výsledkem k vyplacení (supplier.allow_refund_invoices): faktura, ve které
+// odpočty převážily plnění, smí skončit zápornou částkou. Zrcadlo serverové
+// InvoiceAmountPolicy — aspoň jeden kladný řádek, jinak jde o dobropis.
+const refundInvoiceAllowed = computed(() =>
+  supplierStore.currentSupplier?.allow_refund_invoices === true
+  && form.value.invoice_type === 'invoice'
+  && !form.value.parent_invoice_id
+)
+const isRefundInvoice = computed(() =>
+  refundInvoiceAllowed.value
+  && computed_totals.value.amount_to_pay < 0
+  && form.value.items.some(it => round2((Number(it.quantity) || 0) * (Number(it.unit_price_without_vat) || 0)) > 0)
+)
+
 const hasNonPositiveAmountToPay = computed(() =>
-  requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0
+  requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2744,7 +2758,7 @@ async function deleteDraft() {
           </div>
         </div>
         <div v-if="requiresPositiveAmountToPay" class="px-5 py-3 border-b border-neutral-100 text-xs text-neutral-500">
-          {{ t('invoice.negative_item_hint') }}
+          {{ t(refundInvoiceAllowed ? 'refundInvoice.negative_item_hint' : 'invoice.negative_item_hint') }}
         </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
@@ -3213,9 +3227,16 @@ async function deleteDraft() {
               <dt>{{ t('invoice.totals.advance_deduction') }}</dt>
               <dd class="font-mono">−{{ formatMoney(form.advance_paid_amount, form.currency) }}</dd>
             </div>
-            <div v-if="form.advance_paid_amount > 0" class="flex justify-between text-base font-semibold pt-1">
+            <div v-if="form.advance_paid_amount > 0 && !isRefundInvoice" class="flex justify-between text-base font-semibold pt-1">
               <dt>{{ t('invoice.totals.amount_due') }}</dt>
               <dd class="font-mono">{{ formatMoney(computed_totals.amount_to_pay, form.currency) }}</dd>
+            </div>
+            <div v-if="isRefundInvoice" class="flex justify-between text-base font-semibold pt-1" data-test="refund-total">
+              <dt>{{ t('refundInvoice.amount_to_refund') }}</dt>
+              <dd class="font-mono">{{ formatMoney(-computed_totals.amount_to_pay, form.currency) }}</dd>
+            </div>
+            <div v-if="isRefundInvoice" class="rounded-md bg-primary-50 border border-primary-200 px-3 py-2 text-xs text-primary-700 mt-3" data-test="refund-info">
+              {{ t('refundInvoice.editor_info', { amount: formatMoney(-computed_totals.amount_to_pay, form.currency) }) }}
             </div>
             <div v-if="hasNonPositiveAmountToPay" class="rounded-md bg-warning-50 border border-warning-200 px-3 py-2 text-xs text-warning-700 mt-3">
               {{ t('invoice.amount_positive_required') }}

@@ -2012,6 +2012,23 @@ final class InvoiceRepository
         return $this->loadVatRates();
     }
 
+    /** `supplier.allow_refund_invoices` — viz {@see \MyInvoice\Service\Invoice\RefundDocument}. */
+    public function refundInvoicesEnabled(int $supplierId): bool
+    {
+        return \MyInvoice\Service\Invoice\RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId);
+    }
+
+    public function currencyCode(mixed $currencyId): ?string
+    {
+        if (!is_numeric($currencyId) || (int) $currencyId <= 0) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT code FROM currencies WHERE id = ?');
+        $stmt->execute([(int) $currencyId]);
+        $code = $stmt->fetchColumn();
+        return $code === false ? null : (string) $code;
+    }
+
     /** @return array<int, string> */
     public function vatRateCountryMap(): array
     {

@@ -12036,6 +12036,9 @@
       "amount_exceeds_remaining": "The amount exceeds the invoice's remaining balance.",
       "partial_purchase_payment": "A received invoice can only be paid in cash in the full remaining amount.",
       "partial_purchase_payment_detail": "A received invoice can only be paid in cash in the full remaining amount ({remaining}).",
+      "partial_refund": "A document can only be paid out in cash in the full amount.",
+      "partial_refund_detail": "A document can only be paid out in cash in the full amount ({remaining}).",
+      "refund_not_enabled": "Enable cash payouts in Settings with the option “Allow settlements with an amount to refund”.",
       "foreign_currency_invoice": "Paying a foreign-currency invoice from the cash register is not supported yet.",
       "foreign_register_purpose_unsupported": "A foreign-currency register currently supports only sale, purchase and other movements — keep invoice payments and transfers in a CZK register.",
       "fx_rate_unavailable": "The CNB rate for the register currency at the document date is unavailable — please add the rate.",
@@ -18056,8 +18059,55 @@
       "not_found": "invoice not found",
       "currency_mismatch": "currency differs from order",
       "nothing_to_pay": "nothing to pay",
-      "no_account": "missing payment account"
+      "no_account": "missing payment account",
+      "refund_disabled": "paying out overpayments is not enabled",
+      "cash": "paid out in cash",
+      "invalid_account": "invalid payee account"
+    },
+    "refund_title": "Refunds to customers",
+    "refund_hint": "Issued invoices and credit notes where you owe money to the customer. The variable symbol is the document number, so the outgoing payment is matched automatically after the statement import.",
+    "refund_col_client": "Customer",
+    "refund_col_amount": "To refund",
+    "refund_no_account": "Customer account missing (add it in the document detail)",
+    "refund_type": {
+      "invoice": "invoice",
+      "credit_note": "credit note"
+    },
+    "refund_source": {
+      "manual": "entered manually",
+      "vat_registry": "VAT registry",
+      "bank_statement": "from statement"
     }
+  },
+  "refundPayment": {
+    "action": "Refund money",
+    "mark_refunded": "Mark as refunded",
+    "mark_refunded_confirm": "Mark document {varsymbol} as refunded? Use this when you returned the money outside the application.",
+    "marked_refunded": "Document marked as refunded.",
+    "title": "Refund money to customer",
+    "amount": "To refund",
+    "client_account": "Customer account",
+    "manual_account": "Other account (enter manually)",
+    "account_number": "Account number (prefix-number)",
+    "bank_code": "Bank code",
+    "save_to_client": "Save the account to the client card",
+    "vs_hint": "The variable symbol is the document number and cannot be changed; the outgoing payment is matched to the document by it.",
+    "download_abo": "Download ABO",
+    "send_to_bank": "Send to bank",
+    "add_to_batch": "Add to batch payment order",
+    "added_to_batch": "You will find the document in Payment orders under refunds to customers.",
+    "order_created": "Payment order no. {id} created. The document stays open until the outgoing payment is matched.",
+    "error_no_account": "Enter the customer account (account number and bank code).",
+    "error_no_payer": "Choose the account to pay from.",
+    "error_refund_disabled": "Paying out overpayments is not enabled for this company.",
+    "error_not_refundable": "The document is not open for a refund by bank transfer."
+  },
+  "refundInvoice": {
+    "amount_to_refund": "Amount to refund",
+    "editor_info": "You will refund {amount} to the customer.",
+    "negative_item_hint": "Enter a discount or a return as a negative quantity or a negative price. When deductions exceed the supply, the document ends with an amount to refund to the customer.",
+    "settings_label": "Allow settlements with an amount to refund",
+    "settings_hint": "An invoice whose deductions (e.g. returned packaging or an overpayment) exceed the supply may end with a negative amount. Refunds are then offered in payment orders and in the cash register."
   },
   "monthly_report": {
     "title": "Monthly report",

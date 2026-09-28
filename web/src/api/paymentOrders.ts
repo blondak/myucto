@@ -79,15 +79,52 @@ export interface PageMeta {
   pages: number
 }
 
+/** Zdroj účtu klienta pro vratku (karta klienta). */
+export type RefundAccountSource = 'manual' | 'vat_registry' | 'bank_statement'
+
+/**
+ * Vratka odběrateli: vystavená faktura nebo dobropis s částkou k vyplacení.
+ * Chodí jen se zapnutým vyplácením přeplatků u firmy, jen CZK a ne hotově.
+ */
+export interface RefundCandidate {
+  id: number
+  invoice_type: 'invoice' | 'credit_note'
+  client_id: number
+  client_company_name: string | null
+  varsymbol: string | null
+  issue_date: string | null
+  due_date: string | null
+  currency: string
+  currency_symbol: string | null
+  /** Částka k vyplacení (kladná). */
+  amount_to_pay: number
+  total_with_vat: number
+  account_number: string | null
+  bank_code: string | null
+  iban: string | null
+  bic: string | null
+  variable_symbol: string
+  payment_account_source: RefundAccountSource | null
+  payment_ordered_at: string | null
+  payment_method: PaymentMethod
+  has_account: boolean
+  abo_eligible: boolean
+  account_verified: PaymentAccountVerified
+}
+
 export interface PaymentOrderCandidatesResponse {
   payer_accounts: PayerAccount[]
   data: PaymentCandidate[]
   meta: PageMeta
+  /** Jen se zapnutým vyplácením přeplatků u firmy. */
+  refund_candidates?: RefundCandidate[]
 }
 
 /** Položka uloženého platebního příkazu (detail) — kanonický pohled z backendu. */
 export interface PaymentOrderItem {
-  purchase_invoice_id: number
+  /** `null` u vratky odběrateli, ta nese `invoice_id`. */
+  purchase_invoice_id: number | null
+  invoice_id?: number
   payee_name: string | null
   account_number: string | null
   bank_code: string | null
@@ -144,6 +181,8 @@ export interface PaymentOrderListItem {
 
 export interface CreatePaymentOrderPayload {
   invoice_ids: number[]
+  /** Vratky odběratelům (vystavené doklady k vyplacení). */
+  refund_invoice_ids?: number[]
   payer_currency_id: number
   payment_date: string
   constant_symbol?: string
@@ -157,12 +196,60 @@ export type PaymentOrderSkipReason =
   | 'currency_mismatch'
   | 'nothing_to_pay'
   | 'no_account'
+  | 'refund_disabled'
+  | 'cash'
+  | 'invalid_account'
 
 export interface CreatePaymentOrderResponse {
   order_id: number
   view: PaymentOrderView
-  skipped: Array<{ id: number; reason: PaymentOrderSkipReason | string }>
+  skipped: Array<{ id: number; reason: PaymentOrderSkipReason | string; document?: 'invoice' }>
   clamped_date: boolean
+}
+
+/** Navržený účet klienta pro vratku (seřazeno: ručně, registr DPH, výpis). */
+export interface RefundSuggestedAccount {
+  id: number
+  account_number: string | null
+  bank_code: string | null
+  iban: string | null
+  bic: null
+  source: RefundAccountSource
+  account_verified: PaymentAccountVerified
+}
+
+export interface RefundOrderPrefill {
+  invoice: {
+    id: number
+    invoice_type: 'invoice' | 'credit_note'
+    varsymbol: string | null
+    client_id: number
+    client_company_name: string | null
+    currency: string
+    due_date: string | null
+    payment_ordered_at: string | null
+  }
+  amount: number
+  variable_symbol: string
+  accounts: RefundSuggestedAccount[]
+  payer_accounts: PayerAccount[]
+}
+
+export interface CreateRefundOrderPayload {
+  payer_currency_id: number
+  payment_date: string
+  account_number: string
+  bank_code: string
+  iban?: string
+  save_to_client?: boolean
+  note?: string
+}
+
+export interface CreateRefundOrderResponse {
+  order_id: number
+  view: PaymentOrderView
+  clamped_date: boolean
+  saved_account: Record<string, unknown> | null
 }
 
 export type PaymentOrderFormat = 'abo' | 'csv' | 'pdf' | 'sepa'
@@ -190,7 +277,7 @@ export const paymentOrdersApi = {
     api.post<CreatePaymentOrderResponse>('/purchase-invoices/payment-orders', payload).then(r => r.data),
 
   /** „Jen označit" — zařadí faktury k úhradě bez exportu (volitelně rovnou paid). */
-  markOrdered: (payload: { invoice_ids: number[]; mark_paid?: boolean }) =>
+  markOrdered: (payload: { invoice_ids: number[]; refund_invoice_ids?: number[]; mark_paid?: boolean }) =>
     api.post<{ count: number }>('/purchase-invoices/payment-orders/mark', payload).then(r => r.data),
 
   /** Historie dávek, stránkovaně (load-more). */
@@ -223,4 +310,12 @@ export const paymentOrdersApi = {
   downloadPaymentOrder: (id: number, format: PaymentOrderFormat): void => {
     window.open(paymentOrdersApi.downloadUrl(id, format), '_blank')
   },
+
+  /** Podklady pro „Vrátit peníze" z detailu dokladu k vyplacení. */
+  refundPrefill: (invoiceId: number) =>
+    api.get<RefundOrderPrefill>(`/invoices/${invoiceId}/refund-order/prefill`).then(r => r.data),
+
+  /** Platební příkaz s jedinou vratkou; stažení a odeslání přes běžné cesty příkazů. */
+  createRefundOrder: (invoiceId: number, payload: CreateRefundOrderPayload) =>
+    api.post<CreateRefundOrderResponse>(`/invoices/${invoiceId}/refund-order`, payload).then(r => r.data),
 }

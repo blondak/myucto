@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 
@@ -283,14 +284,25 @@ final class CashSettlementService
         }
 
         $issueDate = (string) $invoice['issue_date'];
-        // Doklad už jednou vyrovnaný drží svou vlastní úhradu v `paid_total`, takže
-        // „zbývá" by u něj vyšlo 0 a přepočet částky by ho chtěl zrušit. Zbytek se proto
-        // počítá BEZ vlastní úhrady vyrovnání.
-        $ownPaid = $existing !== null ? round((float) $existing['total_amount'], 2) : 0.0;
-        $remaining = round(
-            (float) $invoice['amount_to_pay'] - (float) $invoice['paid_total'] + $ownPaid,
-            2,
-        );
+        // Doklad k vyplacení (dobropis, vyúčtování se zápornou částkou) se se zapnutou
+        // volbou dodavatele vyplatí výdajovým dokladem. Bez volby platí dosavadní cesta,
+        // která pro zápornou částku skončí na „nothing_to_settle".
+        $refund = RefundDocument::isRefundDocument($invoice)
+            && RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId);
+        if ($refund) {
+            $docType = 'out';
+            $remaining = RefundDocument::refundAmount($invoice);
+        } else {
+            $docType = 'in';
+            // Doklad už jednou vyrovnaný drží svou vlastní úhradu v `paid_total`, takže
+            // „zbývá" by u něj vyšlo 0 a přepočet částky by ho chtěl zrušit. Zbytek se proto
+            // počítá BEZ vlastní úhrady vyrovnání.
+            $ownPaid = $existing !== null ? round((float) $existing['total_amount'], 2) : 0.0;
+            $remaining = round(
+                (float) $invoice['amount_to_pay'] - (float) $invoice['paid_total'] + $ownPaid,
+                2,
+            );
+        }
 
         if (self::cents($remaining) <= 0) {
             return self::result(
@@ -302,7 +314,7 @@ final class CashSettlementService
         }
 
         if ($existing !== null) {
-            if (self::matches($existing, $registerId, $remaining, $issueDate)) {
+            if (self::matches($existing, $registerId, $remaining, $issueDate, $docType)) {
                 return self::result(self::UNCHANGED, (int) $existing['id'], $existing['doc_number']);
             }
             $this->remove($supplierId, (int) $existing["id"], $existing);
@@ -310,10 +322,13 @@ final class CashSettlementService
 
         $created = $this->documents->create($supplierId, [
             'register_id'  => $registerId,
-            'doc_type'     => 'in',
+            'doc_type'     => $docType,
             'purpose'      => 'invoice_payment',
             'issue_date'   => $issueDate,
-            'description'  => self::description('Úhrada vydané faktury', (string) ($invoice['varsymbol'] ?? '')),
+            'description'  => self::description(
+                $refund ? 'Vyplacení dokladu' : 'Úhrada vydané faktury',
+                (string) ($invoice['varsymbol'] ?? ''),
+            ),
             'partner_name' => $invoice['client_company_name'] ?? null,
             'partner_ic'   => $invoice['client_ic'] ?? null,
             'partner_dic'  => $invoice['client_dic'] ?? null,
@@ -348,7 +363,7 @@ final class CashSettlementService
     private function existingSettlement(int $supplierId, string $column, int $documentId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, register_id, total_amount, issue_date, doc_number, status
+            "SELECT id, register_id, doc_type, total_amount, issue_date, doc_number, status
                FROM cash_documents
               WHERE supplier_id = ? AND {$column} = ? AND auto_settlement = 1 AND status <> 'reversed'
               ORDER BY id DESC LIMIT 1"
@@ -460,6 +475,13 @@ final class CashSettlementService
         if ($status === 'paid' && !$hasSettlement && self::cents($invoice['paid_total'] ?? 0) > 0) {
             return 'already_paid';
         }
+        // Doklad k vyplacení nemá `paid_total` (vrácení nese stav dokladu), takže
+        // vyplacení bankou nebo ručně pozná vyrovnání jen podle stavu.
+        if ($status === 'paid' && !$hasSettlement && RefundDocument::isRefundDocument($invoice)
+            && RefundDocument::enabledForSupplier($this->db->pdo(), (int) $invoice['supplier_id'])
+        ) {
+            return 'already_paid';
+        }
 
         return null;
     }
@@ -500,9 +522,10 @@ final class CashSettlementService
     }
 
     /** @param array<string,mixed> $existing */
-    private static function matches(array $existing, int $registerId, float $total, string $issueDate): bool
+    private static function matches(array $existing, int $registerId, float $total, string $issueDate, ?string $docType = null): bool
     {
-        return (int) $existing['register_id'] === $registerId
+        return ($docType === null || (string) $existing['doc_type'] === $docType)
+            && (int) $existing['register_id'] === $registerId
             && self::cents($existing['total_amount']) === self::cents($total)
             && substr((string) $existing['issue_date'], 0, 10) === substr($issueDate, 0, 10)
             && (string) $existing['status'] === 'posted';

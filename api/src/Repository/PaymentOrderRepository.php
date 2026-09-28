@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
@@ -143,15 +144,16 @@ final class PaymentOrderRepository
 
             $itemStmt = $pdo->prepare(
                 'INSERT INTO payment_order_items
-                   (payment_order_id, purchase_invoice_id, payee_name, payee_account_number,
+                   (payment_order_id, purchase_invoice_id, invoice_id, payee_name, payee_account_number,
                     payee_bank_code, payee_iban, payee_bic, amount, currency,
                     variable_symbol, constant_symbol, specific_symbol, message, account_verified)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($items as $it) {
                 $itemStmt->execute([
                     $orderId,
-                    (int) $it['purchase_invoice_id'],
+                    isset($it['purchase_invoice_id']) ? (int) $it['purchase_invoice_id'] : null,
+                    isset($it['invoice_id']) ? (int) $it['invoice_id'] : null,
                     $it['payee_name'] ?? null,
                     $it['payee_account_number'] ?? null,
                     $it['payee_bank_code'] ?? null,
@@ -221,6 +223,7 @@ final class PaymentOrderRepository
         $outstanding = PayablePredicate::outstandingBalanceCondition('pi');
         $remaining = '(' . PayablePredicate::remainingExpression('pi') . ') + COALESCE(pi.rounding, 0)';
         $payableDocument = PayablePredicate::advanceVatDocumentCondition('pi');
+        $openRefund = RefundDocument::openRefundSql('inv');
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) AS total_count,
                     SUM(CASE WHEN pi.id IS NOT NULL
@@ -230,14 +233,23 @@ final class PaymentOrderRepository
                                   AND cur.code = ?
                                   AND {$outstanding}
                                   AND GREATEST({$remaining}, 0) + 0.005 >= poi.amount
+                             THEN 1
+                             WHEN inv.id IS NOT NULL
+                                  AND {$openRefund}
+                                  AND inv.payment_method <> 'cash'
+                                  AND icur.code = ?
+                                  AND -inv.amount_to_pay + 0.005 >= poi.amount
                              THEN 1 ELSE 0 END) AS payable_count
                FROM payment_order_items poi
           LEFT JOIN purchase_invoices pi
                  ON pi.id = poi.purchase_invoice_id AND pi.supplier_id = ?
           LEFT JOIN currencies cur ON cur.id = pi.currency_id AND cur.supplier_id = pi.supplier_id
+          LEFT JOIN invoices inv
+                 ON inv.id = poi.invoice_id AND inv.supplier_id = ?
+          LEFT JOIN currencies icur ON icur.id = inv.currency_id AND icur.supplier_id = inv.supplier_id
               WHERE poi.payment_order_id = ?"
         );
-        $stmt->execute([strtoupper($currency), $supplierId, $orderId]);
+        $stmt->execute([strtoupper($currency), strtoupper($currency), $supplierId, $supplierId, $orderId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $total = (int) ($row['total_count'] ?? 0);
         return $total > 0 && $total === (int) ($row['payable_count'] ?? 0);
@@ -254,7 +266,8 @@ final class PaymentOrderRepository
         foreach ($rows as &$r) {
             $r['id']                  = (int) $r['id'];
             $r['payment_order_id']    = (int) $r['payment_order_id'];
-            $r['purchase_invoice_id'] = (int) $r['purchase_invoice_id'];
+            $r['purchase_invoice_id'] = $r['purchase_invoice_id'] !== null ? (int) $r['purchase_invoice_id'] : null;
+            $r['invoice_id']          = isset($r['invoice_id']) ? (int) $r['invoice_id'] : null;
             $r['amount']              = (float) $r['amount'];
         }
         return $rows;

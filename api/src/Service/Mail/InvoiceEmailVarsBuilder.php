@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
+use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Qr\PaymentQrDueDate;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
 
@@ -122,6 +123,9 @@ final class InvoiceEmailVarsBuilder
             'supplier'       => $this->loadSupplierFooter($invoice),
             'is_paid'        => ($invoice['status'] ?? '') === 'paid',
             'payment_method' => (string) ($invoice['payment_method'] ?? 'bank_transfer'),
+            // Vyúčtování s výsledkem k vyplacení: šablona místo „K úhradě" tiskne
+            // „K vrácení" s kladnou částkou (stejné pravidlo jako PDF).
+            'refund_amount'  => InvoicePdfRenderer::refundInvoiceAmount($invoice),
             // Trvalý odkaz na web fakturu do e-mailu; token vzniká lazy při
             // prvním odeslání. Null pro draft (test e-mail) a bez app.url.
             'public_url'     => $this->publicLinks->ensureUrl($invoice),

@@ -93,7 +93,7 @@ final class MeAction
                         'SELECT id, company_name, ic, dic, street, city, zip,
                                 is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat,
-                                auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
+                                allow_refund_invoices, auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
                                 accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, dimensions_enabled, ' . $ossSelect . ',
                                 ai_provider, ai_data_region, ai_eu_residency_required, '
                         // Výchozí poznámka pod položkami (#79) — editor faktury ji
@@ -151,6 +151,8 @@ final class MeAction
             $s['default_payment_due_unit'] = (string) ($s['default_payment_due_unit'] ?? 'days');
             // Výchozí režim cen u nových faktur (0 = bez DPH, 1 = ceny s DPH) — předvyplní editor.
             $s['default_prices_include_vat'] = (bool) ($s['default_prices_include_vat'] ?? false);
+            // Vyúčtování s výsledkem k vyplacení (migrace 1937) — editor povolí zápornou fakturu.
+            $s['allow_refund_invoices']    = (bool) ($s['allow_refund_invoices'] ?? false);
             // Per-faktura přepínač upomínek v editoru se skryje, když dodavatel auto-upomínky nemá.
             $s['auto_send_reminders']      = (bool) ($s['auto_send_reminders'] ?? true);
             // Děkovný e-mail (issue #57) — UI v mark-paid modalu podle nich zobrazí checkbox.

@@ -7,10 +7,14 @@ namespace MyInvoice\Tests\Integration\Accounting\Cash;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Cash\CashDocumentService;
+use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\Cash\CashSettlementService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -36,6 +40,9 @@ final class CashSettlementServiceTest extends TestCase
     private CashRegisterService $registers;
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
+    private CashDocumentService $documents;
+    private InvoiceRepository $invoiceRepo;
+    private InvoiceCalculator $calculator;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -57,6 +64,9 @@ final class CashSettlementServiceTest extends TestCase
             $this->registers  = $container->get(CashRegisterService::class);
             $this->journal    = $container->get(JournalEntryRepository::class);
             $this->periods    = $container->get(AccountingPeriodRepository::class);
+            $this->documents  = $container->get(CashDocumentService::class);
+            $this->invoiceRepo = $container->get(InvoiceRepository::class);
+            $this->calculator = $container->get(InvoiceCalculator::class);
             $seeder           = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -312,7 +322,196 @@ final class CashSettlementServiceTest extends TestCase
         self::assertFalse($this->settlement->detach($this->supplierId, 'invoice', $invoiceId));
     }
 
+    // ── doklad k vyplacení (VPD) ────────────────────────────────────────────────
+
+    public function testRefundInvoiceWithoutSwitchIsSkippedAsBefore(): void
+    {
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->saleInvoice('FV-R0', $this->client('Odběratel s.r.o.', true, false), -608.00);
+        $this->chooseRegister('invoices', $invoiceId, $register);
+
+        $res = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+        self::assertSame(CashSettlementService::SKIPPED, $res['status']);
+        self::assertSame('nothing_to_settle', $res['reason']);
+        self::assertSame(0, $this->cashDocCount('invoice_id', $invoiceId));
+        self::assertSame('issued', (string) $this->invoiceRow($invoiceId)['status']);
+    }
+
+    public function testRoundedRefundInvoiceIsPaidOutByCashVoucher(): void
+    {
+        $this->allowRefunds();
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->roundedRefundInvoice();
+        self::assertEqualsWithDelta(-608.00, (float) $this->invoiceRow($invoiceId)['amount_to_pay'], 0.001);
+        $this->chooseRegister('invoices', $invoiceId, $register);
+
+        $res = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+        self::assertSame(CashSettlementService::CREATED, $res['status']);
+        $doc = $this->documents->get($this->supplierId, (int) $res['cash_document_id']);
+        self::assertSame('out', $doc['doc_type']);
+        self::assertSame('invoice_payment', $doc['purpose']);
+        self::assertEqualsWithDelta(608.00, (float) $doc['total_amount'], 0.001);
+
+        $byAcc = $this->linesByAccountCode($this->entryOf((int) $res['cash_document_id']));
+        self::assertEqualsWithDelta(608.00, $byAcc['311']['debit'], 0.001);
+        self::assertEqualsWithDelta(608.00, $byAcc['211.100']['credit'], 0.001);
+
+        $row = $this->invoiceRow($invoiceId);
+        self::assertSame('paid', (string) $row['status']);
+        self::assertSame(self::YEAR . '-06-10', substr((string) $row['paid_at'], 0, 10));
+        self::assertSame([], $this->paymentRows($invoiceId), 'Vrácení nejde do invoice_payments.');
+
+        $again = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+        self::assertSame(CashSettlementService::UNCHANGED, $again['status']);
+        self::assertSame(1, $this->cashDocCount('invoice_id', $invoiceId));
+    }
+
+    public function testRefundCreditNoteIsPaidOutByCashVoucher(): void
+    {
+        $this->allowRefunds();
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->saleInvoice('DB-R1', $this->client('Odběratel s.r.o.', true, false), -500.00, 'credit_note');
+        $this->chooseRegister('invoices', $invoiceId, $register);
+
+        $res = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+        self::assertSame(CashSettlementService::CREATED, $res['status']);
+        self::assertSame('paid', (string) $this->invoiceRow($invoiceId)['status']);
+        $byAcc = $this->linesByAccountCode($this->entryOf((int) $res['cash_document_id']));
+        self::assertEqualsWithDelta(500.00, $byAcc['311']['debit'], 0.001);
+        self::assertEqualsWithDelta(500.00, $byAcc['211.100']['credit'], 0.001);
+    }
+
+    public function testUnsettingRefundReversesVoucherAndReopensDocument(): void
+    {
+        $this->allowRefunds();
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->saleInvoice('FV-R2', $this->client('Odběratel s.r.o.', true, false), -608.00);
+        $this->chooseRegister('invoices', $invoiceId, $register);
+        $created = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+
+        $this->chooseRegister('invoices', $invoiceId, null);
+        $removed = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+
+        self::assertSame(CashSettlementService::REMOVED, $removed['status']);
+        self::assertSame('reversed', $this->cashDocStatus((int) $created['cash_document_id']));
+        self::assertNotNull($this->reversalEntryOf((int) $created['cash_document_id']));
+        $row = $this->invoiceRow($invoiceId);
+        self::assertSame('issued', (string) $row['status']);
+        self::assertNull($row['paid_at']);
+    }
+
+    public function testDeletingRefundVoucherReopensDocument(): void
+    {
+        $this->allowRefunds();
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->saleInvoice('FV-R3', $this->client('Odběratel s.r.o.', true, false), -608.00);
+        $this->chooseRegister('invoices', $invoiceId, $register);
+        $created = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+
+        $this->documents->deleteDocument($this->supplierId, (int) $created['cash_document_id']);
+
+        self::assertSame(0, $this->cashDocCount('invoice_id', $invoiceId));
+        $row = $this->invoiceRow($invoiceId);
+        self::assertSame('issued', (string) $row['status']);
+        self::assertNull($row['paid_at']);
+    }
+
+    public function testRefundPaidElsewhereIsNotPaidOutAgain(): void
+    {
+        $this->allowRefunds();
+        $register = $this->makeRegister('211.100');
+        $invoiceId = $this->saleInvoice('FV-R4', $this->client('Odběratel s.r.o.', true, false), -608.00);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([self::YEAR . '-06-12', $invoiceId]);
+        $this->chooseRegister('invoices', $invoiceId, $register);
+
+        $res = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
+        self::assertSame(CashSettlementService::SKIPPED, $res['status']);
+        self::assertSame('already_paid', $res['reason']);
+        self::assertSame(0, $this->cashDocCount('invoice_id', $invoiceId));
+    }
+
+    public function testManualRefundVoucherNeedsSwitchRefundDocumentAndFullAmount(): void
+    {
+        $register = $this->makeRegister('211.100');
+        $clientId = $this->client('Odběratel s.r.o.', true, false);
+        $refundId = $this->saleInvoice('FV-R5', $clientId, -608.00);
+        $plainId = $this->saleInvoice('FV-R6', $clientId, 608.00);
+
+        $this->assertCashError('refund_not_enabled', fn () => $this->refundVoucher($register, $refundId, 608.00));
+        $this->allowRefunds();
+        $this->assertCashError('invalid_purpose_type', fn () => $this->refundVoucher($register, $plainId, 608.00));
+        $this->assertCashError('partial_refund', fn () => $this->refundVoucher($register, $refundId, 300.00));
+
+        $this->refundVoucher($register, $refundId, 608.00);
+        self::assertSame('paid', (string) $this->invoiceRow($refundId)['status']);
+    }
+
+    public function testCashSearchOffersRefundDocumentsOnlyWithSwitch(): void
+    {
+        $clientId = $this->client('Odběratel s.r.o.', true, false);
+        $refundId = $this->saleInvoice('FV-R7', $clientId, -608.00);
+        $this->saleInvoice('FV-R8', $clientId, 1000.00);
+
+        self::assertSame([], $this->documents->searchUnpaid($this->supplierId, 'invoice', 'FV-R', 20, true));
+        $plain = $this->documents->searchUnpaid($this->supplierId, 'invoice', 'FV-R', 20);
+        self::assertSame(['FV-R8'], array_column($plain, 'number'));
+
+        $this->allowRefunds();
+        $refunds = $this->documents->searchUnpaid($this->supplierId, 'invoice', 'FV-R', 20, true);
+        self::assertSame([$refundId], array_column($refunds, 'id'));
+        self::assertEqualsWithDelta(608.00, $refunds[0]['remaining'], 0.001);
+    }
+
     // ── pomocné ─────────────────────────────────────────────────────────────────
+
+    private function allowRefunds(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET allow_refund_invoices = 1 WHERE id = ?')
+            ->execute([$this->supplierId]);
+    }
+
+    /** Faktura 1 210,00 − 1 817,60 = −607,60 Kč, hotově s automatickým zaokrouhlením → −608. */
+    private function roundedRefundInvoice(): int
+    {
+        $invoiceId = $this->saleInvoice('FV-R1', $this->client('Odběratel s.r.o.', true, false), 0.0);
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET payment_method = 'cash', rounding_mode = 'auto', prices_include_vat = 0 WHERE id = ?"
+        )->execute([$invoiceId]);
+        $this->invoiceRepo->replaceItems($invoiceId, [
+            ['description' => 'Syntetické zboží', 'quantity' => 1, 'unit_price_without_vat' => 1000.00,
+             'vat_rate_id' => $this->vatRateId, 'vat_classification_code' => '1'],
+            ['description' => 'Syntetická vratka', 'quantity' => 1, 'unit_price_without_vat' => -1502.15,
+             'vat_rate_id' => $this->vatRateId, 'vat_classification_code' => '1'],
+        ]);
+        $this->calculator->recompute($invoiceId);
+
+        return $invoiceId;
+    }
+
+    private function refundVoucher(int $registerId, int $invoiceId, float $amount): array
+    {
+        return $this->documents->create($this->supplierId, [
+            'register_id'  => $registerId,
+            'doc_type'     => 'out',
+            'purpose'      => 'invoice_payment',
+            'issue_date'   => self::YEAR . '-06-10',
+            'description'  => 'Vyplacení dokladu',
+            'total_amount' => $amount,
+            'invoice_id'   => $invoiceId,
+            'post'         => true,
+        ], $this->userId);
+    }
+
+    private function assertCashError(string $code, callable $fn): void
+    {
+        try {
+            $fn();
+            self::fail('Očekávána CashException ' . $code);
+        } catch (CashException $e) {
+            self::assertSame($code, $e->errorCode);
+        }
+    }
 
     /** Pokladna na vlastní analytice 211.NNN (osnovu doplníme jako migrace 1322). */
     private function makeRegister(string $code): int
@@ -456,7 +655,7 @@ final class CashSettlementServiceTest extends TestCase
     /** @return array<string,mixed> */
     private function invoiceRow(int $id): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT status, paid_total, amount_to_pay FROM invoices WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT status, paid_total, amount_to_pay, paid_at FROM invoices WHERE id = ?');
         $stmt->execute([$id]);
         return (array) $stmt->fetch(PDO::FETCH_ASSOC);
     }

@@ -597,6 +597,7 @@ final class GoPayService
             && $row['bank_journal_entry_id'] !== null;
     }
 
+    /** Jen dobropisy, stejně jako GoPayMovementPoster::matchCreditNote (tam je důvod). */
     private function reconcileCreditNoteStatuses(int $supplierId, int $clearingId, ?int $userId): void
     {
         $stmt = $this->db->pdo()->prepare(

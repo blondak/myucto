@@ -44,6 +44,7 @@ function syncSupplierStore(s: Supplier) {
     default_payment_due_days: s.default_payment_due_days,
     default_payment_due_unit: s.default_payment_due_unit,
     default_prices_include_vat: s.default_prices_include_vat,
+    allow_refund_invoices: s.allow_refund_invoices ?? false,
     default_note_below_items_enabled: s.default_note_below_items_enabled ?? false,
     default_note_below_items_cs: s.default_note_below_items_cs ?? null,
     default_note_below_items_en: s.default_note_below_items_en ?? null,
@@ -542,6 +543,7 @@ async function saveSupplier() {
       default_payment_due_days: supplier.value.default_payment_due_days,
       default_payment_due_unit: supplier.value.default_payment_due_unit,
       default_prices_include_vat: supplier.value.default_prices_include_vat,
+      allow_refund_invoices: supplier.value.allow_refund_invoices ?? false,
       // Výchozí poznámka pod položkami (#79) — prázdné pole ukládá server jako NULL.
       default_note_below_items_enabled: supplier.value.default_note_below_items_enabled ?? false,
       default_note_below_items_cs: supplier.value.default_note_below_items_cs ?? null,
@@ -1069,6 +1071,13 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.default_prices_include_vat') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.default_prices_include_vat_hint') }}</p>
+          </div>
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="supplier.allow_refund_invoices" type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="allow-refund-invoices" />
+              <span class="font-medium">{{ t('refundInvoice.settings_label') }}</span>
+            </label>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('refundInvoice.settings_hint') }}</p>
           </div>
           <div class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
             <div>

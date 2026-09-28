@@ -454,6 +454,8 @@ final class SettingsAction
             // Doklad po úhradě proformy (issue #39, migrace 1565) — rychlý prodej vs.
             // zakázková výroba; výchozí hodnota drží dnešní chování.
             'proforma_payment_document',
+            // Vyúčtování s výsledkem k vyplacení (migrace 1937), viz RefundDocument.
+            'allow_refund_invoices',
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul evidence zásob + auto-výdejka
             // při vystavení FV; smí přepínat i účetní (viz bypass guard() výše).
             // `stock_in_transit_from` (migrace 1331) rozhoduje, od kterého stavu objednávky
@@ -866,7 +868,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', DefaultInvoiceNote::ENABLED_COLUMN], true)
+                $params[] = in_array($f, ['is_vat_payer', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1178,6 +1180,7 @@ final class SettingsAction
             ProformaPaymentDocuments::modes(),
             true,
         ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT;
+        $row['allow_refund_invoices']    = (bool) ($row['allow_refund_invoices'] ?? false);
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['dimensions_enabled']       = (bool) ($row['dimensions_enabled'] ?? false);

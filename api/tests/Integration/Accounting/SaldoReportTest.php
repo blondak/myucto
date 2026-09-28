@@ -868,6 +868,68 @@ final class SaldoReportTest extends TestCase
         self::assertSame(self::cents(-500.00), self::cents($before['open_items_total']));
     }
 
+    // ── T5c: faktura k vyplacení (vratné obaly, −608) je závazek, dokud se nevyplatí ──
+
+    public function testRefundInvoiceIsLiabilityUntilRefundedAndRefundPostsTo311(): void
+    {
+        $a = $this->client('Hospoda U Sudu s.r.o.');
+        $inv = $this->bottleRefundInvoice($a, self::YEAR . '-05-01');
+
+        $lines = $this->posting->buildFromInvoice($this->supplierId, $inv);
+        PostingService::assertBalanced($lines);
+        $receivable = array_values(array_filter($lines, static fn (array $l): bool => $l['account_code'] === '311'));
+        self::assertCount(1, $receivable);
+        self::assertSame('credit', $receivable[0]['side'], 'Faktura k vyplacení je na 311 jako dobropis (Dal).');
+        self::assertSame(self::cents(608.00), self::cents($receivable[0]['amount']));
+        $this->postInvoice($inv, $lines, self::YEAR . '-05-01');
+
+        $open = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($open);
+        self::assertSame(self::cents(-608.00), self::cents($open['open_items_total']), 'Nevyplacená faktura je otevřený závazek.');
+        self::assertTrue($open['matches']);
+
+        // Odchozí vratka pod VS faktury: alokace v payment_matches (jako StatementMatcher)
+        // + stav dokladu. Bankovní zápis ji zaúčtuje 311 MD / 221 D jako vratku dobropisu.
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, bank_code, statement_date)
+             VALUES (?, "gpc", "saldo-refund.gpc", ?, "1000000005", "0100", ?)'
+        )->execute([$this->supplierId, hash('sha256', 'saldo-refund-' . $inv), self::YEAR . '-05-20']);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, source, posted_at, amount, currency, counterparty_name, description, match_status, matched_invoice_id)
+             VALUES (?, "statement", ?, -608, "CZK", "Hospoda U Sudu", "Vratka zálohy na obaly", "manual", ?)'
+        )->execute([$statementId, self::YEAR . '-05-20', $inv]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payment_matches (supplier_id, bank_transaction_id, invoice_id, amount, match_type)
+             VALUES (?, ?, ?, 608, "manual")'
+        )->execute([$this->supplierId, $txId, $inv]);
+        $this->invoicePayments->markRefunded($inv, $this->supplierId, self::YEAR . '-05-20');
+
+        $bankPosting = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Bank\BankPostingService::class);
+        $preview = $bankPosting->previewTransaction($this->supplierId, $txId);
+        self::assertNull($preview['reason'], 'Vratka k faktuře k vyplacení se musí dát zaúčtovat: ' . (string) $preview['reason']);
+        $sides = [];
+        foreach ($preview['lines'] as $line) {
+            $sides[substr((string) $line['account_code'], 0, 3) . ':' . $line['side']] = self::cents($line['amount']);
+        }
+        self::assertSame(self::cents(608.00), $sides['311:debit'] ?? null);
+        self::assertSame(self::cents(608.00), $sides['221:credit'] ?? null);
+
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('311', 'debit', 608.00),
+            self::l('221', 'credit', 608.00),
+        ], ['entry_date' => self::YEAR . '-05-20', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $closed = $this->accBlock($this->saldo->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '311'), '311');
+        self::assertNotNull($closed);
+        self::assertSame(0, self::cents($closed['gl_balance']));
+        self::assertSame(0, $closed['open_items_count'], 'Vyplacená faktura k vyplacení není otevřená položka.');
+        self::assertTrue($closed['matches']);
+    }
+
     // ── T6 (H4): storno DATOVANÉ PO rozvahovém dni nezmizí ze seznamu k asOf ─
 
     public function testReversalAfterAsOfDoesNotHideOpenItem(): void
@@ -1197,6 +1259,41 @@ final class SaldoReportTest extends TestCase
         )->execute([$this->supplierId, $invoiceId, $paidOn, $amount, $txId]);
 
         return $txId;
+    }
+
+    /**
+     * Vyúčtování vratných obalů: 24× limonáda 25 Kč (21 %) + 24× záloha lahev 3 Kč
+     * + přepravka 94 Kč − vrácený sud 1 500 Kč (0 %) = −608 Kč k vyplacení.
+     */
+    private function bottleRefundInvoice(int $clientId, string $date): int
+    {
+        $pdo = $this->db->pdo();
+        $vat21 = (int) ($pdo->query('SELECT id FROM vat_rates WHERE rate_percent = 21 AND is_reverse_charge = 0 ORDER BY valid_from DESC LIMIT 1')->fetchColumn() ?: 0);
+        $vat0 = (int) ($pdo->query('SELECT id FROM vat_rates WHERE rate_percent = 0 AND is_reverse_charge = 0 ORDER BY valid_from DESC LIMIT 1')->fetchColumn() ?: 0);
+        if ($vat21 === 0 || $vat0 === 0) {
+            $this->markTestSkipped('Chybí sazba DPH 21 % nebo 0 %.');
+        }
+        $pdo->prepare(
+            "INSERT INTO invoices (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date, currency_id,
+                                   created_by, total_without_vat, total_vat, total_with_vat, status)
+             VALUES (?, ?, 'invoice', ?, ?, ?, ?, ?, ?, -734, 126, -608, 'issued')"
+        )->execute([$this->supplierId, (string) random_int(1000000000, 1999999999), $clientId, $date, $date, $date, $this->currencyId, $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $item = $pdo->prepare(
+            'INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit, unit_price_without_vat,
+                 vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+             VALUES (?, ?, ?, "ks", ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ([
+            ['Limonáda 0,5 l', 24, 25, $vat21, 21, 600, 126, 726],
+            ['Záloha lahev', 24, 3, $vat0, 0, 72, 0, 72],
+            ['Záloha přepravka', 1, 94, $vat0, 0, 94, 0, 94],
+            ['Vrácený sud', 1, -1500, $vat0, 0, -1500, 0, -1500],
+        ] as $i => $row) {
+            $item->execute([$id, ...$row, $i]);
+        }
+        return $id;
     }
 
     /** Dobropis: invoice_type='credit_note', total_with_vat konvenčně záporné. */

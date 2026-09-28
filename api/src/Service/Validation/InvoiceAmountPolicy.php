@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Validation;
 
 use MyInvoice\Service\Invoice\InvoiceMath;
+use MyInvoice\Service\Invoice\InvoiceRounding;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Invoice\TimeBilling;
 
 final class InvoiceAmountPolicy
@@ -41,9 +43,16 @@ final class InvoiceAmountPolicy
 
     /**
      * @param array<int, float> $vatRates
+     * @param bool    $allowRefundInvoice `supplier.allow_refund_invoices`: faktura s aspoň
+     *                jedním kladným řádkem smí skončit zápornou částkou (doklad k vyplacení)
+     * @param ?string $currency kód měny dokladu; bez něj se k vyplacení nezaokrouhluje
      */
-    public static function validatePositiveAmountToPay(array $data, array $vatRates): ?string
-    {
+    public static function validatePositiveAmountToPay(
+        array $data,
+        array $vatRates,
+        bool $allowRefundInvoice = false,
+        ?string $currency = null,
+    ): ?string {
         $type = (string) ($data['invoice_type'] ?? 'invoice');
         if (!self::requiresPositiveDraftAmountToPay($type, $data['parent_invoice_id'] ?? null)) {
             return null;
@@ -96,7 +105,57 @@ final class InvoiceAmountPolicy
         $advance = round((float) ($data['advance_paid_amount'] ?? 0), 2);
         $amountToPay = round($withVat - $advance, 2);
 
-        return $amountToPay > 0 ? null : self::NON_POSITIVE_DRAFT_MESSAGE;
+        if ($amountToPay > 0) {
+            return null;
+        }
+        if ($allowRefundInvoice && $amountToPay < 0 && $type === 'invoice' && self::hasPositiveItem($items)) {
+            $mode = (string) ($data['rounding_mode'] ?? 'auto');
+            if ($currency !== null && in_array($mode, InvoiceRounding::MODES, true)) {
+                $amountToPay = round($amountToPay + InvoiceRounding::adjustment(
+                    $amountToPay,
+                    $mode,
+                    $currency,
+                    (string) ($data['payment_method'] ?? ''),
+                    $type,
+                ), 2);
+            }
+            if ($amountToPay < 0) {
+                return null;
+            }
+        }
+
+        return self::NON_POSITIVE_DRAFT_MESSAGE;
+    }
+
+    /**
+     * Aspoň jeden řádek s kladnou částkou (množství × cena). Rozlišuje vyúčtování,
+     * ve kterém odpočty převážily plnění, od dokladu bez plnění, který patří na dobropis.
+     *
+     * @param array<mixed> $items
+     */
+    public static function hasPositiveItem(array $items): bool
+    {
+        foreach ($items as $item) {
+            if (!is_array($item) || !is_numeric($item['quantity'] ?? null) || !is_numeric($item['unit_price_without_vat'] ?? null)) {
+                continue;
+            }
+            if (round((float) $item['quantity'] * (float) $item['unit_price_without_vat'], 2) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Uložená faktura k vyplacení, kterou smí vystavit dodavatel se zapnutým
+     * `allow_refund_invoices` (volající to ověří sám): typ `invoice`, záporná částka
+     * k úhradě po zaokrouhlení a aspoň jeden kladný řádek. Proforma nikdy.
+     */
+    public static function isAllowedRefundInvoice(array $invoice): bool
+    {
+        return (string) ($invoice['invoice_type'] ?? 'invoice') === 'invoice'
+            && round((float) ($invoice['amount_to_pay'] ?? 0), 2) < 0
+            && self::hasPositiveItem((array) ($invoice['items'] ?? []));
     }
 
     /**
@@ -124,7 +183,8 @@ final class InvoiceAmountPolicy
         if ($type === 'invoice' && (int) ($invoice['parent_invoice_id'] ?? 0) > 0) {
             return true;
         }
-        return self::hasPositiveAmountToPay($invoice);
+        // Doklad k vyplacení se „zaplatí" vrácením peněz zákazníkovi (InvoicePaymentService::markRefunded).
+        return self::hasPositiveAmountToPay($invoice) || RefundDocument::isRefundDocument($invoice);
     }
 
     /**
@@ -134,6 +194,8 @@ final class InvoiceAmountPolicy
      * se totiž promítá přes daňový doklad, ne přes proformu, a doklad by jinak zbytečně
      * visel jako nezaplacený/po splatnosti. Dobropisy (type=credit_note, rovněž nekladný
      * amount_to_pay) sem NEpatří — automaticky „zaplacené" být nesmí (vrácení peněz).
+     * Totéž platí pro fakturu k vyplacení bez parent_invoice_id; se zálohou (přeplatek
+     * zálohy) se označí jako dosud.
      */
     public static function shouldAutoMarkPaidOnIssue(array $invoice): bool
     {

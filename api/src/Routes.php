@@ -695,6 +695,8 @@ final class Routes
         $app->post   ('/api/invoices/bulk-oss/preview',      [\MyInvoice\Action\Invoice\BulkOssUpdateAction::class, 'preview']);
         $app->post   ('/api/invoices/bulk-oss',              [\MyInvoice\Action\Invoice\BulkOssUpdateAction::class, 'apply']);
         $app->post   ('/api/invoices/{id:[0-9]+}/clone',     CloneInvoiceAction::class);
+        $app->get    ('/api/invoices/{id:[0-9]+}/refund-order/prefill', [\MyInvoice\Action\Invoice\RefundPaymentOrderAction::class, 'prefill']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/refund-order',         [\MyInvoice\Action\Invoice\RefundPaymentOrderAction::class, 'create']);
         $app->get    ('/api/documents/{entity_type:invoice|work_report}/{id:[0-9]+}/signature-selection', [SignatureDocumentSelectionAction::class, 'get']);
         $app->put    ('/api/documents/{entity_type:invoice|work_report}/{id:[0-9]+}/signature-selection', [SignatureDocumentSelectionAction::class, 'put']);
         $app->delete ('/api/documents/{entity_type:invoice|work_report}/{id:[0-9]+}/signature-selection', [SignatureDocumentSelectionAction::class, 'delete']);

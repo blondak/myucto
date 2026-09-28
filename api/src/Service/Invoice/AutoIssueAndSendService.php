@@ -72,6 +72,8 @@ final class AutoIssueAndSendService
                     $invoice['parent_invoice_id'] ?? null,
                 )
                 && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
+                && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
+                    && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
             ) {
                 throw new \DomainException(InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE);
             }

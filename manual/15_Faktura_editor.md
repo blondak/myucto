@@ -186,6 +186,13 @@ jen uloží a čeká) systém automaticky:
 Toast potvrdí **„Pokladní doklad {číslo} byl vystaven a zaúčtován."** Doklad
 najdeš normálně v [Pokladně](32_Pokladna.md) i v pokladní knize.
 
+**Doklad k vyplacení.** Faktura se zápornou výslednou částkou nebo dobropis
+(se zapnutou volbou z [§ 15.4.4](#1544-vyuctovani-s-castkou-k-vyplaceni))
+dostane místo PPD **výdajový pokladní doklad (VPD)** na částku k vrácení,
+zaúčtovaný MD 311 / D analytika pokladny. Doklad se označí jako vyplacený.
+Zrušení volby, storno i smazání VPD ho vrátí mezi otevřené. Bez volby se
+u záporné částky nic nevystaví.
+
 **Je to plně vratné.** Když volbu zrušíš — přepneš způsob úhrady jinam, nebo
 vybereš „Nepoužít pokladnu" — systém při uložení **smaže pokladní doklad
 i jeho zápis v deníku**, zruší evidovanou úhradu a faktura se vrátí do
@@ -401,6 +408,43 @@ V **Nastavení → Firma → Fakturace → Výchozí poznámka pod položkami** 
 > „Zboží zůstává až do úplného uhrazení majetkem dodavatele. Při zpožděné úhradě
 > Vám budeme účtovat penále ve výši 0,05 % za každý započatý den prodlení."
 > Výchozí nastavení je prázdné — text si napíšeš vlastní.
+
+### 15.4.4 Vyúčtování s částkou k vyplacení
+
+Někdy odpočty na faktuře převáží plnění: zákazníkovi dodáš zboží za 892 Kč,
+ale zároveň od něj převezmeš vrácený sud za 1 500 Kč. Výsledek je, že
+zákazníkovi **dlužíš 608 Kč**. Takový doklad vystavíš jako jednu běžnou fakturu
+se zápornou výslednou částkou, bez dobropisu a zápočtu.
+
+Funkci zapneš v **Nastavení → Firma → Fakturace** volbou **Povolit vyúčtování
+s částkou k vyplacení** (viz [§ 95.5.6](95_Multi_supplier.md#9556-vyuctovani-s-castkou-k-vyplaceni)). Bez ní editor dál vyžaduje
+kladnou částku k úhradě.
+
+Se zapnutou volbou:
+
+- Faktura (ne zálohová, ne finální doklad ze zálohy) smí skončit zápornou
+  částkou, pokud má **aspoň jeden kladný řádek**. Místo chyby se v sumáři ukáže
+  informační box **„Zákazníkovi vrátíte 608 Kč"** a řádek **K vrácení**.
+- Doklad **jen se zápornými řádky** není vyúčtování. Editor ho dál odmítne
+  a odkáže na dobropis.
+- DPH se nemění: výkazy sčítají řádky, znaménko součtu je nezajímá.
+- Zaokrouhlení na celé koruny ([Zaokrouhlení úhrady](#zaokrouhleni-uhrady))
+  platí i pro vyplácenou částku: −607,60 Kč hotově je −608 Kč.
+
+**PDF a e-mail.** Místo „K úhradě" se tiskne **K vrácení** s kladnou částkou
+a bez QR platby i bez našeho bankovního spojení. U převodu věta „Částku vám
+vrátíme převodem pod variabilním symbolem {VS}.", u hotovosti „Částku vám
+vyplatíme v hotovosti.", po vyplacení „Vyplaceno v hotovosti.". Dobropisy si
+ponechávají své texty.
+
+**Jak peníze vrátit.** Podle způsobu úhrady na faktuře:
+
+| Způsob úhrady | Co se stane |
+|---|---|
+| **Hotově** se zvolenou pokladnou | Při vystavení vznikne **výdajový pokladní doklad (VPD)** na částku k vrácení, zaúčtuje se MD 311 / D analytika pokladny a faktura je rovnou **vyplacená** ([§ 15.2.7](#1527-zpusob-uhrady-a-platba-hotove)). |
+| **Převodem** | Faktura zůstane otevřená jako závazek vůči zákazníkovi. Vrácení zadáš z detailu faktury akcí **Vrátit peníze** nebo v [Platebních příkazech](26_Platebni_prikazy.md); odchozí platba s VS faktury se z výpisu spáruje sama. |
+
+Stejně se se zapnutou volbou vyplácí i **dobropis** placený hotově.
 
 ## 15.5 Tlačítka
 

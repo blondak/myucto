@@ -10,6 +10,7 @@ import {
   type PaymentOrderListItem,
   type PaymentAccountVerified,
   type PaymentOrderFormat,
+  type RefundCandidate,
 } from '@/api/paymentOrders'
 import {
   purchaseInvoicesApi,
@@ -37,6 +38,10 @@ const toast = useToast()
 const payerAccounts = ref<PayerAccount[]>([])
 const candidates = ref<PaymentCandidate[]>([])
 const selectedIds = ref<number[]>([])
+// Vratky odběratelům: chodí jen se zapnutým vyplácením přeplatků u firmy.
+const refundCandidates = ref<RefundCandidate[]>([])
+const selectedRefundIds = ref<number[]>([])
+const selectedCount = computed(() => selectedIds.value.length + selectedRefundIds.value.length)
 const selectedPayerId = ref<number | ''>('')
 
 const loading = ref(true)
@@ -145,6 +150,7 @@ async function loadCandidates(reset = true) {
     candidates.value = reset ? res.data : [...candidates.value, ...res.data]
     candTotal.value = res.meta.total
     candPages.value = res.meta.pages
+    if (reset) refundCandidates.value = res.refund_candidates ?? []
     if (payerAccounts.value.length === 0) {
       payerAccounts.value = res.payer_accounts
       selectedPayerId.value = pickDefaultPayer(res.payer_accounts)
@@ -169,6 +175,10 @@ function onPayerChange() {
   selectedIds.value = selectedIds.value.filter(id => {
     const c = candidates.value.find(x => x.id === id)
     return c ? isSelectable(c) : false
+  })
+  selectedRefundIds.value = selectedRefundIds.value.filter(id => {
+    const r = refundCandidates.value.find(x => x.id === id)
+    return r ? isRefundSelectable(r) : false
   })
 }
 
@@ -266,11 +276,50 @@ function toggleGroup(rows: PaymentCandidate[]) {
   }
 }
 
+/** Vratka jde jen převodem v CZK a jen na známý účet odběratele. */
+function isRefundSelectable(r: RefundCandidate): boolean {
+  return r.has_account && isCzk.value
+}
+
+const visibleRefunds = computed(() =>
+  hideOrdered.value ? refundCandidates.value.filter(r => !r.payment_ordered_at) : refundCandidates.value,
+)
+
+function toggleRefund(r: RefundCandidate) {
+  if (!isRefundSelectable(r)) return
+  const idx = selectedRefundIds.value.indexOf(r.id)
+  if (idx >= 0) selectedRefundIds.value.splice(idx, 1)
+  else selectedRefundIds.value.push(r.id)
+}
+
+const refundsAllSelected = computed(() => {
+  const ids = visibleRefunds.value.filter(isRefundSelectable).map(r => r.id)
+  return ids.length > 0 && ids.every(id => selectedRefundIds.value.includes(id))
+})
+
+function toggleAllRefunds() {
+  const ids = visibleRefunds.value.filter(isRefundSelectable).map(r => r.id)
+  selectedRefundIds.value = refundsAllSelected.value
+    ? selectedRefundIds.value.filter(id => !ids.includes(id))
+    : Array.from(new Set([...selectedRefundIds.value, ...ids]))
+}
+
+function clearSelection() {
+  selectedIds.value = []
+  selectedRefundIds.value = []
+}
+
 const selectedTotal = computed(() =>
   candidates.value
     .filter(c => selectedIds.value.includes(c.id))
-    .reduce((sum, c) => sum + (c.amount_to_pay || 0), 0),
+    .reduce((sum, c) => sum + (c.amount_to_pay || 0), 0)
+  + refundCandidates.value
+    .filter(r => selectedRefundIds.value.includes(r.id))
+    .reduce((sum, r) => sum + (r.amount_to_pay || 0), 0),
 )
+
+const refundSourceKey = (s: RefundCandidate['payment_account_source']): string =>
+  s ? `payment_order.refund_source.${s}` : ''
 
 // Pro ABO: vybrané faktury, které nejsou abo_eligible (chybí CZ účet u CZK příkazu).
 const selectedNotAboEligible = computed(() =>
@@ -380,6 +429,9 @@ async function refreshCandidatesKeepSelection() {
     candPages.value = res.meta.pages
     const stillSelectable = new Set(res.data.filter(isSelectable).map(c => c.id))
     selectedIds.value = keep.filter(id => stillSelectable.has(id))
+    refundCandidates.value = res.refund_candidates ?? []
+    const refundsSelectable = new Set(refundCandidates.value.filter(isRefundSelectable).map(r => r.id))
+    selectedRefundIds.value = selectedRefundIds.value.filter(id => refundsSelectable.has(id))
   } catch {
     // ponech stávající stav
   }
@@ -472,7 +524,7 @@ async function verifyAccountRow(c: PaymentCandidate) {
 // ── Jen označit (bez exportu) ─────────────────────────────────────────
 async function markOnly() {
   if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
-  if (selectedIds.value.length === 0) {
+  if (selectedCount.value === 0) {
     toast.error(t('payment_order.no_selection'))
     return
   }
@@ -480,10 +532,11 @@ async function markOnly() {
   try {
     const res = await paymentOrdersApi.markOrdered({
       invoice_ids: selectedIds.value,
+      ...(selectedRefundIds.value.length ? { refund_invoice_ids: selectedRefundIds.value } : {}),
       mark_paid: markPaid.value || undefined,
     })
     toast.success(t('payment_order.marked_ordered', { n: res.count }))
-    selectedIds.value = []
+    clearSelection()
     await refreshCandidatesKeepSelection()
     await loadHistory()
   } catch (e) {
@@ -503,7 +556,7 @@ const reasonText = (reason: string): string => {
 async function createAndDownload(format: PaymentOrderFormat | 'bank') {
   if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
   if (format === 'bank' && (!auth.canWrite('settings.bank_accounts') || !isCzk.value)) return
-  if (selectedIds.value.length === 0) {
+  if (selectedCount.value === 0) {
     toast.error(t('payment_order.no_selection'))
     return
   }
@@ -523,6 +576,7 @@ async function createAndDownload(format: PaymentOrderFormat | 'bank') {
   try {
     const res = await paymentOrdersApi.create({
       invoice_ids: selectedIds.value,
+      ...(selectedRefundIds.value.length ? { refund_invoice_ids: selectedRefundIds.value } : {}),
       payer_currency_id: selectedPayer.value!.id,
       payment_date: paymentDate.value,
       constant_symbol: constantSymbol.value || undefined,
@@ -542,7 +596,7 @@ async function createAndDownload(format: PaymentOrderFormat | 'bank') {
     if (format !== 'bank') paymentOrdersApi.downloadPaymentOrder(res.order_id, format)
 
     // Reset výběru + přenačtení (uhrazené/zařazené faktury vypadnou) a historie.
-    selectedIds.value = []
+    clearSelection()
     await refreshCandidatesKeepSelection()
     await loadHistory()
     if (format === 'bank') bankOrderId.value = res.order_id
@@ -643,43 +697,43 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     </div>
 
     <!-- Hromadné akce nad vybranými fakturami v plovoucí liště u spodní hrany (BulkActionBar). -->
-    <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
+    <BulkActionBar :count="selectedCount" @clear="clearSelection">
       <span class="px-1.5 text-sm font-mono font-semibold text-neutral-900 whitespace-nowrap">
         {{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}
       </span>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders') && auth.canWrite('settings.bank_accounts') && isCzk" type="button" @click="createAndDownload('bank')"
-        :disabled="creating || selectedIds.length === 0" :class="btnFilled('primary')">
+        :disabled="creating || selectedCount === 0" :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>
         {{ t('bank_connection.payment_prepare') }}
       </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="markOnly"
-        :disabled="creating || selectedIds.length === 0"
+        :disabled="creating || selectedCount === 0"
         :title="t('payment_order.mark_only_hint')"
         :class="btnOutline('neutral')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.checkCircle" /></svg>
         {{ t('payment_order.mark_only') }}
       </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('csv')"
-        :disabled="creating || selectedIds.length === 0"
+        :disabled="creating || selectedCount === 0"
         :class="btnOutline('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
         {{ t('payment_order.export_csv') }}
       </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('pdf')"
-        :disabled="creating || selectedIds.length === 0"
+        :disabled="creating || selectedCount === 0"
         :class="btnOutline('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
         {{ t('payment_order.export_pdf') }}
       </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders')" type="button" @click="createAndDownload('abo')"
-        :disabled="creating || selectedIds.length === 0 || !isCzk"
+        :disabled="creating || selectedCount === 0 || !isCzk"
         :title="!isCzk ? t('payment_order.abo_only_czk') : ''"
         :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
         {{ creating ? '…' : t('payment_order.export_abo') }}
       </button>
       <button v-if="auth.canWrite('purchase_invoices.payment_orders') && isEur" type="button" @click="createAndDownload('sepa')"
-        :disabled="creating || selectedIds.length === 0 || !selectedPayer?.iban"
+        :disabled="creating || selectedCount === 0 || !selectedPayer?.iban"
         :title="!selectedPayer?.iban ? t('payment_order.no_payer_iban') : ''"
         :class="btnFilled('primary')">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
@@ -1041,6 +1095,138 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </button>
       </div>
     </div>
+
+    <!-- ═══ Vratky odběratelům (jen se zapnutým vyplácením přeplatků) ═══ -->
+    <section v-if="!loading && refundCandidates.length" class="mt-6">
+      <div class="flex items-center gap-2 mb-2 flex-wrap">
+        <h3 class="text-sm font-semibold text-neutral-800">{{ t('payment_order.refund_title') }}</h3>
+        <span class="text-[11px] px-2 py-0.5 rounded font-medium bg-primary-50 text-primary-700 border border-primary-500/30">
+          {{ t('payment_order.group_czk_via') }}
+        </span>
+        <span class="text-xs text-neutral-500">{{ t('payment_order.candidates_count', { n: visibleRefunds.length }) }}</span>
+      </div>
+      <p class="text-xs text-neutral-500 mb-2">{{ t('payment_order.refund_hint') }}</p>
+
+      <div v-if="visibleRefunds.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <EmptyState dense accent="neutral" :title="t('payment_order.empty')" />
+      </div>
+      <template v-else>
+        <!-- Desktop: tabulka -->
+        <div class="hidden md:block bg-surface border border-primary-500/30 rounded-lg overflow-hidden shadow-sm">
+          <table class="w-full text-sm table-fixed">
+            <colgroup>
+              <col class="w-10" />
+              <col class="w-56" />
+              <col class="w-28" />
+              <col class="w-80" />
+              <col class="w-28" />
+              <col class="w-32" />
+              <col />
+            </colgroup>
+            <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+              <tr>
+                <th class="px-2 py-2 text-center">
+                  <input type="checkbox" :checked="refundsAllSelected" @change="toggleAllRefunds"
+                    :title="t('common.select_all')"
+                    class="w-4 h-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30" />
+                </th>
+                <th class="text-left px-4 py-2 font-medium">{{ t('payment_order.refund_col_client') }}</th>
+                <th class="text-center px-2 py-2 font-medium">{{ t('payment_order.col_due_date') }}</th>
+                <th class="text-left px-4 py-2 font-medium">{{ t('payment_order.col_account') }}</th>
+                <th class="text-left px-2 py-2 font-medium">{{ t('payment_order.col_vs') }}</th>
+                <th class="text-right px-3 py-2 font-medium">{{ t('payment_order.refund_col_amount') }}</th>
+                <th class="text-center px-2 py-2 font-medium">{{ t('payment_order.col_actions') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="r in visibleRefunds" :key="`r-${r.id}`" class="transition"
+                :class="!r.has_account ? 'bg-warning-50/50' : 'hover:bg-neutral-50'">
+                <td class="px-2 py-2.5 text-center align-top">
+                  <input type="checkbox" :checked="selectedRefundIds.includes(r.id)" :disabled="!isRefundSelectable(r)"
+                    @change="toggleRefund(r)"
+                    :title="!r.has_account ? t('payment_order.refund_no_account') : (!isCzk ? t('payment_order.currency_mismatch') : '')"
+                    class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30 disabled:opacity-40 disabled:cursor-not-allowed" />
+                </td>
+                <td class="px-4 py-2.5 align-top">
+                  <div class="font-medium text-neutral-900 truncate">{{ r.client_company_name }}</div>
+                  <div class="text-xs text-neutral-500 font-mono truncate">{{ r.varsymbol }}</div>
+                  <span class="inline-flex items-center mt-1 text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 whitespace-nowrap">
+                    {{ t(`payment_order.refund_type.${r.invoice_type}`) }}
+                  </span>
+                </td>
+                <td class="px-3 py-2.5 text-center text-xs text-neutral-600 align-top">
+                  <div>{{ formatDate(r.due_date) }}</div>
+                  <span v-if="r.payment_ordered_at"
+                    class="inline-flex items-center gap-0.5 mt-1 text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 border border-teal-500/30 whitespace-nowrap"
+                    :title="t('payment_order.ordered_badge_tooltip', { date: formatDate(r.payment_ordered_at) })">
+                    {{ t('payment_order.ordered_badge') }}
+                  </span>
+                </td>
+                <td class="px-4 py-2.5 text-xs align-top">
+                  <template v-if="r.has_account">
+                    <div class="text-neutral-700 whitespace-nowrap overflow-hidden text-ellipsis">
+                      <span class="font-mono">{{ accountDisplay(r) }}</span><span v-if="bankLabel(r.bank_code)" class="text-[10px] text-neutral-500 ml-1.5">{{ bankLabel(r.bank_code) }}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-wrap mt-1">
+                      <span v-if="r.payment_account_source" class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
+                        {{ t(refundSourceKey(r.payment_account_source)) }}
+                      </span>
+                      <span v-if="r.account_verified !== 'na'" class="text-[10px] px-1.5 py-0.5 rounded" :class="verifiedBadgeClass(r.account_verified)">
+                        {{ t(`payment_order.verified.${r.account_verified}`) }}
+                      </span>
+                    </div>
+                  </template>
+                  <span v-else class="text-warning-600">{{ t('payment_order.refund_no_account') }}</span>
+                </td>
+                <td class="px-2 py-2.5 font-mono text-xs text-neutral-600 align-top">{{ r.variable_symbol || '—' }}</td>
+                <td class="px-3 py-2.5 text-right font-mono align-top whitespace-nowrap">{{ formatMoney(r.amount_to_pay, r.currency) }}</td>
+                <td class="px-3 py-2.5 text-center align-top">
+                  <RouterLink :to="`/invoices/${r.id}`" target="_blank"
+                    class="cursor-pointer text-[11px] px-2 py-1 border border-neutral-300 rounded hover:bg-neutral-100 text-neutral-600 whitespace-nowrap">
+                    {{ t('payment_order.detail') }}
+                  </RouterLink>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Mobile: karty -->
+        <div class="md:hidden bg-surface border border-primary-500/30 rounded-lg divide-y divide-neutral-100 overflow-hidden shadow-sm">
+          <div v-for="r in visibleRefunds" :key="`mr-${r.id}`" class="px-3 py-3"
+            :class="!r.has_account ? 'bg-warning-50/50' : ''">
+            <div class="flex items-start gap-3">
+              <input type="checkbox" :checked="selectedRefundIds.includes(r.id)" :disabled="!isRefundSelectable(r)"
+                @change="toggleRefund(r)"
+                class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30 disabled:opacity-40" />
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline justify-between gap-2">
+                  <div class="font-medium text-neutral-900 truncate">{{ r.client_company_name }}</div>
+                  <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(r.amount_to_pay, r.currency) }}</div>
+                </div>
+                <div class="text-xs text-neutral-500 mt-0.5">
+                  <span class="font-mono">{{ r.varsymbol }}</span>
+                  <span class="text-neutral-400"> · </span>
+                  <span>{{ t(`payment_order.refund_type.${r.invoice_type}`) }}</span>
+                  <span class="text-neutral-400"> · </span>
+                  <span>{{ t('payment_order.col_due_date') }}: {{ formatDate(r.due_date) }}</span>
+                </div>
+                <div class="text-xs mt-1">
+                  <span v-if="r.has_account" class="font-mono text-neutral-700">{{ accountDisplay(r) }}</span>
+                  <span v-else class="text-warning-600">{{ t('payment_order.refund_no_account') }}</span>
+                </div>
+                <div class="flex items-center gap-2 mt-2 flex-wrap">
+                  <RouterLink :to="`/invoices/${r.id}`" target="_blank"
+                    class="cursor-pointer text-[11px] px-2 py-1 border border-neutral-300 rounded hover:bg-neutral-100 text-neutral-600">
+                    {{ t('payment_order.detail') }}
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
 
     <!-- ═══ Historie příkazů ═══ -->
     <section class="mt-8">

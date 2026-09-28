@@ -78,6 +78,9 @@ final class RoutePermissionMap
         // faktury; navíc je v akci tvrdý admin-only check (superadmin).
         ['POST', '#^/api/invoices/[0-9]+/rebuild-snapshots$#', 'invoices.create', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/clone$#', 'invoices.clone', AccessLevel::WRITE],
+        // Příkaz k vyplacení vratky z detailu dokladu = platební příkaz s jednou položkou.
+        ['GET', '#^/api/invoices/[0-9]+/refund-order(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/refund-order(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/bulk-reminder$#', 'invoices.reminder', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/bulk-reissue$#', 'invoices.clone', AccessLevel::WRITE],
         ['DELETE', '#^/api/invoices/[0-9]+$#', 'invoices.delete', AccessLevel::WRITE],

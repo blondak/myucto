@@ -139,7 +139,14 @@ Nabídka účelů se liší podle typu dokladu:
 | Typ | Dostupné účely |
 |---|---|
 | Příjem (PPD) | Prodej (tržba), Úhrada faktury, Úhrada přijaté faktury (= **vratka**), Převod, Ostatní |
-| Výdej (VPD) | Nákup, Úhrada přijaté faktury, Převod, Ostatní |
+| Výdej (VPD) | Nákup, Úhrada faktury (= **výplata dokladu k vyplacení**, jen se zapnutou volbou), Úhrada přijaté faktury, Převod, Ostatní |
+
+**Výplata dokladu k vyplacení.** Se zapnutou volbou **Povolit vyúčtování s částkou
+k vyplacení** ([§ 95.5.6](95_Multi_supplier.md#9556-vyuctovani-s-castkou-k-vyplaceni))
+nabídne VPD s účelem *Úhrada faktury* otevřené dobropisy a faktury se zápornou částkou
+k úhradě. Vyplácí se vždy celá částka k vrácení, zaúčtuje se MD 311 / D analytika pokladny
+a doklad se označí jako vyplacený. Storno nebo smazání VPD ho vrátí mezi otevřené.
+V daňové evidenci jde výplata do peněžního deníku jako záporný příjem.
 
 U **valutové pokladny** jsou záměrně dostupné jen účely, které lze bezpečně
 zaúčtovat bez saldokontního nebo převodového protějšku: PPD **Prodej/Ostatní** a

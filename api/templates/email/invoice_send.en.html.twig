@@ -29,18 +29,38 @@
           <td style="padding:4px 0;color:#7A748C;">Due date</td>
           <td style="padding:4px 0;font-weight:600;">{{ invoice.due_date|date('M j, Y') }}</td>
         </tr>
+        {% if refund_amount is defined and refund_amount is not null %}
+        <tr>
+          <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">{% if is_paid %}Refunded{% else %}Amount to be refunded{% endif %}</td>
+          <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{% if is_paid %}#2E7D32{% else %}{{ accent }}{% endif %};font-family:monospace;">
+            {{ refund_amount|number_format(2, '.', ',') }} {{ invoice.currency }}{% if is_paid %} ✓{% endif %}
+          </td>
+        </tr>
+        {% else %}
         <tr>
           <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">{% if is_paid %}Paid{% else %}Amount due{% endif %}</td>
           <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{% if is_paid %}#2E7D32{% else %}{{ accent }}{% endif %};font-family:monospace;">
             {{ amount_to_pay|number_format(2, '.', ',') }} {{ invoice.currency }}{% if is_paid %} ✓{% endif %}
           </td>
         </tr>
+        {% endif %}
       </table>
     </td>
   </tr>
 </table>
 
-{% if is_paid %}
+{% if refund_amount is defined and refund_amount is not null %}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0 8px;">
+  <tr>
+    <td style="padding:14px 18px;background:#E8F5E9;border-left:3px solid #2E7D32;border-radius:4px;font-size:14px;color:#1B5E20;">
+      {% if payment_method == 'cash' %}{% if is_paid %}Paid out in cash.{% else %}We will pay the amount out to you in cash.{% endif %}
+      {% elseif is_paid %}The amount has been refunded to you by bank transfer.
+      {% else %}We will refund the amount by bank transfer under variable symbol <strong>{{ payment_varsymbol|default(invoice.varsymbol) }}</strong>.
+      {% endif %}
+    </td>
+  </tr>
+</table>
+{% elseif is_paid %}
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:24px 0 8px;">
   <tr>
     <td style="padding:14px 18px;background:#E8F5E9;border-left:3px solid #2E7D32;border-radius:4px;font-size:14px;color:#1B5E20;">

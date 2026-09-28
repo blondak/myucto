@@ -210,6 +210,12 @@ export interface Supplier {
   purchase_invoice_qr_include_due_date: boolean
   proforma_payment_document: 'final_on_full_payment' | 'always_tax_document' | 'manual'
   /**
+   * Vyúčtování s výsledkem k vyplacení (migrace 1937): faktura smí skončit zápornou
+   * částkou k úhradě, pokud má aspoň jeden kladný řádek. Zapíná i vratky dobropisů
+   * v platebních příkazech a výplatu v hotovosti.
+   */
+  allow_refund_invoices: boolean
+  /**
    * Datum přijetí u importovaných přijatých dokladů (migrace 1848). 'issue_date' =
    * datum z dokladu (vystavení, jinak DUZP) — výchozí; 'import_date' = den importu.
    * Platí pro všechny formáty importu, ne jen AI extrakci.

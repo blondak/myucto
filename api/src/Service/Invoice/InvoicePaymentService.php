@@ -168,7 +168,7 @@ final class InvoicePaymentService
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'SELECT i.id, i.supplier_id, i.client_id, i.invoice_type, i.status, i.amount_to_pay, i.paid_total,
-                    cur.code AS currency
+                    i.parent_invoice_id, cur.code AS currency
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ?'
@@ -183,6 +183,11 @@ final class InvoicePaymentService
         }
         if (!in_array((string) $invoice['status'], ['issued', 'sent', 'reminded', 'paid'], true)) {
             throw new \RuntimeException('Platby lze evidovat jen u vystaveného dokladu.');
+        }
+        // Přijatá platba by fakturu k vyplacení „uhradila" (paid_total >= záporný dluh).
+        // Faktura se zálohou (přeplatek zálohy) zůstává, jak byla.
+        if (RefundDocument::isRefundDocument($invoice) && (int) ($invoice['parent_invoice_id'] ?? 0) <= 0) {
+            throw new \RuntimeException('Faktura k vyplacení nepřijímá platby. Vrácení peněz označte jako vyplacené.');
         }
 
         $ownsTransaction = !$pdo->inTransaction();
@@ -271,7 +276,18 @@ final class InvoicePaymentService
         ];
     }
 
+    /** @deprecated Použij {@see markRefunded()}; zůstává kvůli volajícím z doby jen dobropisů. */
     public function markCreditNoteRefunded(int $invoiceId, int $supplierId, string $paidOn): bool
+    {
+        return $this->markRefunded($invoiceId, $supplierId, $paidOn);
+    }
+
+    /**
+     * Vrácení peněz k dokladu k vyplacení ({@see RefundDocument}): dobropis, nebo faktura
+     * se zápornou částkou k úhradě. Vratka se neeviduje v invoice_payments, jen stavem.
+     * Dobropis s nulovou částkou projde jako dosud.
+     */
+    public function markRefunded(int $invoiceId, int $supplierId, string $paidOn): bool
     {
         if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $paidOn, $dm)
             || !checkdate((int) $dm[2], (int) $dm[3], (int) $dm[1])) {
@@ -282,8 +298,10 @@ final class InvoicePaymentService
         $update = $pdo->prepare(
             "UPDATE invoices
                 SET status = 'paid', paid_at = COALESCE(paid_at, ?)
-              WHERE id = ? AND supplier_id = ? AND invoice_type = 'credit_note'
-                AND amount_to_pay <= 0 AND status IN ('issued', 'sent', 'reminded', 'paid')"
+              WHERE id = ? AND supplier_id = ?
+                AND ((invoice_type = 'credit_note' AND amount_to_pay <= 0)
+                     OR (invoice_type = 'invoice' AND amount_to_pay < 0))
+                AND status IN ('issued', 'sent', 'reminded', 'paid')"
         );
         $update->execute([$paidOn, $invoiceId, $supplierId]);
         if ($update->rowCount() === 0) {
@@ -296,7 +314,11 @@ final class InvoicePaymentService
             if ($invoice === false) {
                 throw new \RuntimeException('Dobropis nenalezen.');
             }
-            if ((string) $invoice['invoice_type'] !== 'credit_note') {
+            if ((string) $invoice['invoice_type'] === 'invoice') {
+                if (!RefundDocument::isRefundDocument($invoice)) {
+                    throw new \RuntimeException('Faktura nemá částku k vrácení.');
+                }
+            } elseif ((string) $invoice['invoice_type'] !== 'credit_note') {
                 throw new \RuntimeException('Doklad není dobropis.');
             }
             if ((float) $invoice['amount_to_pay'] > 0) {

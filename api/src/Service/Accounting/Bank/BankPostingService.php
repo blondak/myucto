@@ -33,6 +33,7 @@ use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\FixedExchangeRateService;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Ai\AiKillSwitchService;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Service\Ai\AnomalyDetector;
@@ -1118,9 +1119,10 @@ final class BankPostingService
         if ($inv === null) {
             throw new PostingException('document_not_posted', 'Vydaný dobropis #' . $invoiceId . ' neexistuje.');
         }
-        // P1.15: doklad reálně existuje, jen není dobropis — platba je vratka, patří na
-        // dobropis, ne na běžnou fakturu (stalo se u vratky Adaptic, bt 1171).
-        if ((string) $inv['invoice_type'] !== 'credit_note') {
+        // P1.15: doklad reálně existuje, jen není doklad k vyplacení — platba je vratka, patří
+        // na dobropis (nebo fakturu se zápornou částkou), ne na běžnou fakturu (stalo se
+        // u vratky Adaptic, bt 1171). Dobropis s nekladnou částkou prochází jako dosud.
+        if ((string) $inv['invoice_type'] !== 'credit_note' && !RefundDocument::isRefundDocument($inv)) {
             throw new PostingException(
                 'refund_target_not_credit_note',
                 'Platba je navázaná na vydanou fakturu #' . $invoiceId . ', ne na dobropis — vratka patří na dobropis.',

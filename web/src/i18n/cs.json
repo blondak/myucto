@@ -12036,6 +12036,9 @@
       "amount_exceeds_remaining": "Částka převyšuje zbývající úhradu faktury.",
       "partial_purchase_payment": "Přijatou fakturu lze hotově uhradit jen v plné zbývající výši.",
       "partial_purchase_payment_detail": "Přijatou fakturu lze hotově uhradit jen v plné zbývající výši ({remaining}).",
+      "partial_refund": "Doklad lze v hotovosti vyplatit jen v plné výši.",
+      "partial_refund_detail": "Doklad lze v hotovosti vyplatit jen v plné výši ({remaining}).",
+      "refund_not_enabled": "Výplatu dokladu v hotovosti povolíte v Nastavení volbou „Povolit vyúčtování s částkou k vyplacení“.",
       "foreign_currency_invoice": "Úhrada cizoměnové faktury z pokladny zatím není podporována.",
       "foreign_register_purpose_unsupported": "Valutová pokladna zatím podporuje jen prodej, nákup a ostatní pohyb — úhrady faktur a převody veďte v korunové pokladně.",
       "fx_rate_unavailable": "Kurz ČNB pro měnu pokladny k datu dokladu není k dispozici — doplňte kurz.",
@@ -18056,8 +18059,55 @@
       "not_found": "faktura nenalezena",
       "currency_mismatch": "jiná měna než příkaz",
       "nothing_to_pay": "nic k úhradě",
-      "no_account": "chybí platební účet"
+      "no_account": "chybí platební účet",
+      "refund_disabled": "vyplácení přeplatků není zapnuté",
+      "cash": "vyplácí se hotově",
+      "invalid_account": "neplatný účet příjemce"
+    },
+    "refund_title": "Vratky odběratelům",
+    "refund_hint": "Vystavené faktury a dobropisy, u kterých dlužíte peníze odběrateli. Variabilní symbol je číslo dokladu, odchozí platba se po importu výpisu spáruje sama.",
+    "refund_col_client": "Odběratel",
+    "refund_col_amount": "K vrácení",
+    "refund_no_account": "Chybí účet odběratele (doplňte ho v detailu dokladu)",
+    "refund_type": {
+      "invoice": "faktura",
+      "credit_note": "dobropis"
+    },
+    "refund_source": {
+      "manual": "zadáno ručně",
+      "vat_registry": "registr DPH",
+      "bank_statement": "z výpisu"
     }
+  },
+  "refundPayment": {
+    "action": "Vrátit peníze",
+    "mark_refunded": "Označit jako vyplaceno",
+    "mark_refunded_confirm": "Označit doklad {varsymbol} jako vyplacený? Použijte, když jste peníze vrátili mimo aplikaci.",
+    "marked_refunded": "Doklad označen jako vyplacený.",
+    "title": "Vrátit peníze odběrateli",
+    "amount": "K vrácení",
+    "client_account": "Účet odběratele",
+    "manual_account": "Jiný účet (zadat ručně)",
+    "account_number": "Číslo účtu (předčíslí-číslo)",
+    "bank_code": "Kód banky",
+    "save_to_client": "Uložit účet do karty klienta",
+    "vs_hint": "Variabilní symbol je číslo dokladu a nejde změnit, podle něj se odchozí platba spáruje s dokladem.",
+    "download_abo": "Stáhnout ABO",
+    "send_to_bank": "Odeslat do banky",
+    "add_to_batch": "Přidat do hromadného příkazu",
+    "added_to_batch": "Doklad najdete v Platebních příkazech mezi vratkami odběratelům.",
+    "order_created": "Platební příkaz č. {id} vytvořen. Doklad zůstává otevřený, dokud se nespáruje odchozí platba.",
+    "error_no_account": "Zadejte účet odběratele (číslo účtu a kód banky).",
+    "error_no_payer": "Vyberte účet, ze kterého se platí.",
+    "error_refund_disabled": "Vyplácení přeplatků není u firmy zapnuté.",
+    "error_not_refundable": "Doklad není otevřený k vyplacení převodem."
+  },
+  "refundInvoice": {
+    "amount_to_refund": "K vrácení",
+    "editor_info": "Zákazníkovi vrátíte {amount}.",
+    "negative_item_hint": "Slevu nebo vratku zadej záporným množstvím nebo zápornou cenou. Když odpočty převáží plnění, doklad skončí částkou k vrácení zákazníkovi.",
+    "settings_label": "Povolit vyúčtování s částkou k vyplacení",
+    "settings_hint": "Faktura, u které odpočty (např. vrácené obaly nebo přeplatek) převáží plnění, smí skončit zápornou částkou. Vratky se pak nabízí v platebních příkazech a v pokladně."
   },
   "monthly_report": {
     "title": "Měsíční přehled",

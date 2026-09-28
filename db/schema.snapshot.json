@@ -917,7 +917,9 @@
         "1933_payroll_migration_stereo_nx_source.sql",
         "1934_abra_flexi_migration.sql",
         "1935_imported_purchase_tax_snapshot.sql",
-        "1936_abra_vat_projection_overrides.sql"
+        "1936_abra_vat_projection_overrides.sql",
+        "1937_supplier_allow_refund_invoices.sql",
+        "1938_payment_order_refund_items.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5999,6 +6001,7 @@
                 "paid_total": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "parent_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "payment_method": "enum('bank_transfer','direct_debit','card','cash','cash_on_delivery','offset','other') NOT NULL DEFAULT 'bank_transfer'",
+                "payment_ordered_at": "timestamp NULL DEFAULT NULL",
                 "payment_thanks_sent_at": "timestamp NULL DEFAULT NULL",
                 "payment_thanks_sent_to": "varchar(512) NULL DEFAULT NULL",
                 "payment_variable_symbol": "varchar(10) NULL DEFAULT NULL",
@@ -7399,6 +7402,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency": "char(3) NOT NULL DEFAULT 'CZK'",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "message": "varchar(140) NULL DEFAULT NULL",
                 "payee_account_number": "varchar(34) NULL DEFAULT NULL",
                 "payee_bank_code": "varchar(10) NULL DEFAULT NULL",
@@ -7406,17 +7410,22 @@
                 "payee_iban": "varchar(34) NULL DEFAULT NULL",
                 "payee_name": "varchar(255) NULL DEFAULT NULL",
                 "payment_order_id": "bigint(20) unsigned NOT NULL",
-                "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
+                "purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "specific_symbol": "varchar(10) NULL DEFAULT NULL",
                 "variable_symbol": "varchar(10) NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_poi_invoice": "BTREE (purchase_invoice_id)",
+                "idx_poi_issued_invoice": "BTREE (invoice_id)",
                 "idx_poi_order": "BTREE (payment_order_id)"
             },
-            "foreign_keys": [],
-            "checks": []
+            "foreign_keys": {
+                "fk_poi_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_poi_single_target": "`purchase_invoice_id` is null <> (`invoice_id` is null)"
+            }
         },
         "payment_orders": {
             "type": "BASE TABLE",
@@ -20797,6 +20806,7 @@
                 "ai_extraction_notes": "text NULL DEFAULT NULL",
                 "ai_provider": "enum('anthropic','azure_openai','openai','gemini') NOT NULL DEFAULT 'anthropic'",
                 "ai_pseudo_salt": "varbinary(32) NULL DEFAULT NULL",
+                "allow_refund_invoices": "tinyint(1) NOT NULL DEFAULT 0",
                 "anthropic_api_key_enc": "varbinary(512) NULL DEFAULT NULL",
                 "anthropic_default_model": "varchar(64) NULL DEFAULT 'claude-haiku-4-5'",
                 "anthropic_extractions_count": "int(10) unsigned NOT NULL DEFAULT 0",

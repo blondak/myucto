@@ -283,7 +283,14 @@ final class GoPayMovementPoster
         return $rows[0];
     }
 
-    /** @param array<string,mixed> $movement @return array<string,mixed> */
+    /**
+     * Záměrně jen dobropis, ne celý {@see \MyInvoice\Service\Invoice\RefundDocument}: storno
+     * GoPay vrací kartou zaplacenou objednávku, jejíž opravou je dobropis. Faktura
+     * k vyplacení (vyúčtování s přeplatkem) kartou zaplacená není, vrací se převodem
+     * nebo hotově.
+     *
+     * @param array<string,mixed> $movement @return array<string,mixed>
+     */
     private function matchCreditNote(int $supplierId, array $movement): array
     {
         $orderId = trim((string) ($movement['order_id'] ?? ''));

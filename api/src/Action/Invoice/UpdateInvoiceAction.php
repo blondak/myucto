@@ -323,11 +323,14 @@ final class UpdateInvoiceAction
         // se kterou pracuje derivace OSS ({@see OssItemDeriver::domesticCountry()}).
         // Dvě různá tuzemska by u dodavatele identifikovaného mimo ČR znamenala, že
         // validace zakáže sazbu, kterou import a výkazy považují za domácí.
+        $allowRefund = $this->repo->refundInvoicesEnabled(SupplierGuard::currentId($request));
         $errors = InvoiceValidation::invoice(
             $body,
             $this->repo->vatRateMap(),
             $this->repo->vatRateCountryMap(),
             $this->ossDeriver->domesticCountry(SupplierGuard::currentId($request)),
+            $allowRefund,
+            $allowRefund ? $this->repo->currencyCode($body['currency_id'] ?? $existing['currency_id'] ?? null) : null,
         );
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);

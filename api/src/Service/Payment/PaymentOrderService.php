@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payment;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Repository\PaymentOrderRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\RefundPaymentRepository;
 use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Export\ExportFilename;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Pdf\PaymentOrderPdfRenderer;
 use MyInvoice\Support\PaymentMethods;
 
@@ -36,7 +39,17 @@ final class PaymentOrderService
 
     public function delete(int $id, int $supplierId): string
     {
-        return $this->orders->deleteUnsubmitted($id, $supplierId);
+        $refundIds = [];
+        foreach ((array) ($this->orders->find($id, $supplierId)['items'] ?? []) as $item) {
+            if (($item['invoice_id'] ?? null) !== null) {
+                $refundIds[] = (int) $item['invoice_id'];
+            }
+        }
+        $result = $this->orders->deleteUnsubmitted($id, $supplierId);
+        if ($result === 'deleted' && $refundIds !== []) {
+            $this->refunds->clearPaymentOrdered($refundIds, $supplierId);
+        }
+        return $result;
     }
 
     public function __construct(
@@ -49,6 +62,9 @@ final class PaymentOrderService
         private readonly SepaPaymentOrderWriter $sepa,
         private readonly IbanValidator $ibanValidator,
         private readonly Connection $db,
+        private readonly RefundPaymentRepository $refunds,
+        private readonly ClientBankAccountRepository $clientAccounts,
+        private readonly CzechBankAccountValidator $czechAccounts,
     ) {}
 
     /**
@@ -118,7 +134,155 @@ final class PaymentOrderService
             ];
         }
 
-        return ['payer_accounts' => $payerAccounts, 'candidates' => $candidates, 'total' => $total];
+        $result = ['payer_accounts' => $payerAccounts, 'candidates' => $candidates, 'total' => $total];
+        if (RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId)) {
+            $result['refund_candidates'] = $currency === null || strtoupper($currency) === 'CZK'
+                ? $this->refundCandidates($supplierId)
+                : [];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Vystavené doklady k vyplacení (vratky odběratelům) do platebního příkazu.
+     * Volající ručí za zapnutý `supplier.allow_refund_invoices`.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function refundCandidates(int $supplierId): array
+    {
+        $out = [];
+        foreach ($this->refunds->listCandidates($supplierId) as $r) {
+            $payee = $this->suggestedRefundAccounts((int) $r['client_id'], $supplierId)[0] ?? null;
+            $out[] = $this->refundCandidateRow($r, $payee);
+        }
+        return $out;
+    }
+
+    /**
+     * Účty klienta pro vratku, seřazené podle důvěryhodnosti: ručně zadaný, z registru
+     * plátců DPH, naučený z výpisu. Jen aktivní.
+     *
+     * @return list<array{id:int, account_number:?string, bank_code:?string, iban:?string, bic:null,
+     *                    source:string, account_verified:string}>
+     */
+    public function suggestedRefundAccounts(int $clientId, int $supplierId): array
+    {
+        $rows = array_values(array_filter(
+            $this->clientAccounts->listForClient($clientId, $supplierId),
+            static fn (array $a): bool => (bool) ($a['is_active'] ?? false),
+        ));
+        $rank = static fn (array $a): int => !empty($a['source_manual']) ? 0 : (!empty($a['source_vat_registry']) ? 1 : 2);
+        usort($rows, static fn (array $a, array $b): int => [$rank($a), $a['id']] <=> [$rank($b), $b['id']]);
+
+        $out = [];
+        foreach ($rows as $a) {
+            $payee = $this->czechPayee((string) ($a['account_number'] ?? ''), $a['bank_code'] ?? null, $a['iban'] ?? null);
+            $out[] = [
+                'id'               => (int) $a['id'],
+                'account_number'   => $payee['account_number'],
+                'bank_code'        => $payee['bank_code'],
+                'iban'             => $payee['iban'],
+                'bic'              => null,
+                'source'           => match ($rank($a)) { 0 => 'manual', 1 => 'vat_registry', default => 'bank_statement' },
+                'account_verified' => !empty($a['source_vat_registry']) ? 'verified' : 'na',
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed>      $r
+     * @param array<string,mixed>|null $payee
+     * @return array<string,mixed>
+     */
+    private function refundCandidateRow(array $r, ?array $payee): array
+    {
+        $hasCz = ($payee['account_number'] ?? '') !== '' && ($payee['bank_code'] ?? '') !== '';
+        $hasIban = ($payee['iban'] ?? '') !== '';
+
+        return [
+            'id'                     => $r['id'],
+            'invoice_type'           => $r['invoice_type'],
+            'client_id'              => $r['client_id'],
+            'client_company_name'    => $r['client_company_name'],
+            'varsymbol'              => $r['varsymbol'],
+            'issue_date'             => $r['issue_date'],
+            'due_date'               => $r['due_date'],
+            'currency'               => $r['currency'],
+            'currency_symbol'        => $r['currency_symbol'],
+            'amount_to_pay'          => RefundDocument::refundAmount($r),
+            'total_with_vat'         => $r['total_with_vat'],
+            'account_number'         => $payee['account_number'] ?? null,
+            'bank_code'              => $payee['bank_code'] ?? null,
+            'iban'                   => $payee['iban'] ?? null,
+            'bic'                    => null,
+            'variable_symbol'        => VariableSymbolNormalizer::forPayment((string) ($r['varsymbol'] ?? '')),
+            'payment_account_source' => $payee['source'] ?? null,
+            'payment_ordered_at'     => $r['payment_ordered_at'] ?? null,
+            'payment_method'         => PaymentMethods::normalize($r['payment_method'] ?? null),
+            'has_account'            => $hasCz || $hasIban,
+            'abo_eligible'           => $hasCz,
+            'account_verified'       => $payee['account_verified'] ?? 'na',
+        ];
+    }
+
+    /**
+     * Rozloží uložený účet na český tvar pro ABO. CZ IBAN převede na předčíslí-číslo/kód.
+     *
+     * @return array{account_number:?string, bank_code:?string, iban:?string}
+     */
+    private function czechPayee(string $account, ?string $bankCode, ?string $iban): array
+    {
+        $account = trim($account);
+        $bankCode = trim((string) $bankCode);
+        $iban = strtoupper((string) preg_replace('/\s+/', '', (string) $iban));
+        $compact = strtoupper((string) preg_replace('/[^A-Z0-9]/i', '', $account));
+        if ($iban === '' && preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]+$/', $compact) === 1) {
+            $iban = $compact;
+        }
+        if (str_contains($account, '/')) {
+            [$account, $inline] = array_pad(explode('/', $account, 2), 2, '');
+            $account = trim($account);
+            $bankCode = $bankCode !== '' ? $bankCode : trim($inline);
+        }
+        if ($iban !== '' && ($account === '' || $compact === $iban)) {
+            $account = '';
+            if (str_starts_with($iban, 'CZ') && strlen($iban) === 24) {
+                $prefix = ltrim(substr($iban, 8, 6), '0');
+                $account = ($prefix !== '' ? $prefix . '-' : '') . ltrim(substr($iban, 14, 10), '0');
+                $bankCode = substr($iban, 4, 4);
+            }
+        }
+
+        return [
+            'account_number' => $account !== '' ? $account : null,
+            'bank_code'      => $bankCode !== '' ? $bankCode : null,
+            'iban'           => $iban !== '' ? $iban : null,
+        ];
+    }
+
+    /**
+     * Ručně zadaný účet příjemce vratky: český účet s kontrolou modulo 11, nebo CZ IBAN.
+     *
+     * @param array<string,mixed> $input
+     * @return array{account_number:string, bank_code:string, iban:?string}
+     * @throws \InvalidArgumentException
+     */
+    public function refundPayeeFromInput(array $input): array
+    {
+        $iban = strtoupper((string) preg_replace('/\s+/', '', (string) ($input['iban'] ?? '')));
+        $payee = $this->czechPayee((string) ($input['account_number'] ?? ''), $input['bank_code'] ?? null, $iban !== '' ? $iban : null);
+        if ($payee['iban'] !== null && !$this->ibanValidator->isValid($payee['iban'])) {
+            throw new \InvalidArgumentException('IBAN není platný.');
+        }
+        if ($payee['account_number'] === null || $payee['bank_code'] === null) {
+            throw new \InvalidArgumentException('Zadejte český účet příjemce (číslo a kód banky).');
+        }
+        $parsed = $this->czechAccounts->parse($payee['account_number'] . '/' . $payee['bank_code']);
+
+        return ['account_number' => $parsed['account_number'], 'bank_code' => $parsed['bank_code'], 'iban' => $payee['iban']];
     }
 
     /**
@@ -134,10 +298,11 @@ final class PaymentOrderService
     public function create(int $supplierId, array $input, ?int $userId): array
     {
         $ids = array_values(array_unique(array_map('intval', (array) ($input['invoice_ids'] ?? []))));
-        if ($ids === []) {
+        $refundIds = array_values(array_unique(array_map('intval', (array) ($input['refund_invoice_ids'] ?? []))));
+        if ($ids === [] && $refundIds === []) {
             throw new \InvalidArgumentException('Není vybrána žádná faktura.');
         }
-        if (count($ids) > 500) {
+        if (count($ids) + count($refundIds) > 500) {
             throw new \InvalidArgumentException('Najednou lze zařadit maximálně 500 faktur.');
         }
 
@@ -223,6 +388,19 @@ final class PaymentOrderService
             $validIds[] = $id;
         }
 
+        $refundValidIds = [];
+        if ($refundIds !== []) {
+            [$refundItems, $refundValidIds, $refundSkipped] = $this->refundItems(
+                $supplierId,
+                $refundIds,
+                $orderCurrency,
+                (array) ($input['refund_accounts'] ?? []),
+                $batchKs,
+            );
+            array_push($items, ...$refundItems);
+            array_push($skipped, ...$refundSkipped);
+        }
+
         if ($items === []) {
             throw new \InvalidArgumentException('Žádná z vybraných faktur není pro příkaz použitelná.');
         }
@@ -255,6 +433,9 @@ final class PaymentOrderService
                 $this->invoices->setStatus($id, 'paid', $supplierId, $paymentDate);
             }
         }
+        // Vratka se jako vyplacená NEoznačuje ani s mark_paid: vyplaceno je až
+        // spárováním odchozí platby z výpisu, nebo ručním označením na dokladu.
+        $this->refunds->markPaymentOrdered($refundValidIds, $supplierId);
 
         $view = $this->view($orderId, $supplierId);
 
@@ -264,6 +445,87 @@ final class PaymentOrderService
             'skipped'      => $skipped,
             'clamped_date' => $clamped,
         ];
+    }
+
+    /**
+     * Položky vratek odběratelům. Příjemce = klient dokladu, účet z `$accounts[id]`
+     * (ruční volba), jinak nejdůvěryhodnější účet z karty klienta. VS = číslo dokladu,
+     * aby se odchozí platba z výpisu spárovala sama.
+     *
+     * @param list<int>                        $ids
+     * @param array<int|string,mixed>          $accounts
+     * @return array{0:list<array<string,mixed>>, 1:list<int>, 2:list<array<string,mixed>>}
+     */
+    private function refundItems(int $supplierId, array $ids, string $orderCurrency, array $accounts, ?string $batchKs): array
+    {
+        $items = [];
+        $valid = [];
+        $skipped = [];
+        $enabled = RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId);
+        foreach ($ids as $id) {
+            $skip = static function (string $reason) use (&$skipped, $id): void {
+                $skipped[] = ['id' => $id, 'reason' => $reason, 'document' => 'invoice'];
+            };
+            if (!$enabled) {
+                $skip('refund_disabled');
+                continue;
+            }
+            $inv = $this->refunds->find($id, $supplierId);
+            if ($inv === null) {
+                $skip('not_found');
+                continue;
+            }
+            if (!RefundDocument::isOpenRefund($inv)) {
+                $skip('nothing_to_pay');
+                continue;
+            }
+            if (strtoupper((string) $inv['currency']) !== 'CZK' || $orderCurrency !== 'CZK') {
+                $skip('currency_mismatch');
+                continue;
+            }
+            if (PaymentMethods::normalize($inv['payment_method'] ?? null) === 'cash') {
+                $skip('cash');
+                continue;
+            }
+
+            $manual = $accounts[$id] ?? $accounts[(string) $id] ?? null;
+            if (is_array($manual)) {
+                try {
+                    $payee = $this->refundPayeeFromInput($manual) + ['account_verified' => 'na'];
+                } catch (\InvalidArgumentException) {
+                    $skip('invalid_account');
+                    continue;
+                }
+            } else {
+                $payee = $this->suggestedRefundAccounts((int) $inv['client_id'], $supplierId)[0] ?? null;
+            }
+            $hasCz = ($payee['account_number'] ?? '') !== '' && ($payee['bank_code'] ?? '') !== '';
+            if ($payee === null || (!$hasCz && ($payee['iban'] ?? '') === '')) {
+                $skip('no_account');
+                continue;
+            }
+
+            $vs = VariableSymbolNormalizer::forPayment((string) ($inv['varsymbol'] ?? ''));
+            $items[] = [
+                'purchase_invoice_id'  => null,
+                'invoice_id'           => $id,
+                'payee_name'           => $inv['client_company_name'] ?? null,
+                'payee_account_number' => $payee['account_number'] ?? null,
+                'payee_bank_code'      => $payee['bank_code'] ?? null,
+                'payee_iban'           => $payee['iban'] ?? null,
+                'payee_bic'            => null,
+                'amount'               => RefundDocument::refundAmount($inv),
+                'currency'             => $orderCurrency,
+                'variable_symbol'      => $vs !== '' ? $vs : null,
+                'constant_symbol'      => $batchKs,
+                'specific_symbol'      => null,
+                'message'              => $this->nullableString($inv['varsymbol'] ?? null),
+                'account_verified'     => (string) ($payee['account_verified'] ?? 'na'),
+            ];
+            $valid[] = $id;
+        }
+
+        return [$items, $valid, $skipped];
     }
 
     /**
@@ -281,7 +543,7 @@ final class PaymentOrderService
 
         $items = [];
         foreach ((array) $order['items'] as $it) {
-            $items[] = [
+            $item = [
                 'purchase_invoice_id' => $it['purchase_invoice_id'],
                 'payee_name'          => $it['payee_name'],
                 'account_number'      => $it['payee_account_number'],
@@ -296,6 +558,10 @@ final class PaymentOrderService
                 'message'             => $it['message'],
                 'account_verified'    => $it['account_verified'],
             ];
+            if (($it['invoice_id'] ?? null) !== null) {
+                $item['invoice_id'] = $it['invoice_id'];
+            }
+            $items[] = $item;
         }
 
         return [
@@ -336,10 +602,29 @@ final class PaymentOrderService
      * „Jen označit" — zařadí vybrané faktury k úhradě (payment_ordered_at) BEZ vytvoření
      * dávky/exportu. Volitelně rovnou paid. Vrací počet skutečně označených (vlastněných).
      *
+     * Vratky odběratelům (`$refundInvoiceIds`) dostanou jen razítko „předáno k vyplacení",
+     * `$markPaid` se na ně neuplatní.
+     *
      * @param list<int> $invoiceIds
+     * @param list<int> $refundInvoiceIds
      */
-    public function markOrdered(int $supplierId, array $invoiceIds, bool $markPaid): int
+    public function markOrdered(int $supplierId, array $invoiceIds, bool $markPaid, array $refundInvoiceIds = []): int
     {
+        $refundValid = [];
+        if ($refundInvoiceIds !== [] && RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId)) {
+            foreach (array_unique(array_map('intval', $refundInvoiceIds)) as $id) {
+                $refund = $this->refunds->find($id, $supplierId);
+                if ($refund !== null && RefundDocument::isOpenRefund($refund)
+                    && PaymentMethods::normalize($refund['payment_method'] ?? null) !== 'cash') {
+                    $refundValid[] = $id;
+                }
+            }
+            $this->refunds->markPaymentOrdered($refundValid, $supplierId);
+        }
+        if ($invoiceIds === []) {
+            return count($refundValid);
+        }
+
         $valid = [];
         foreach (array_unique(array_map('intval', $invoiceIds)) as $id) {
             $invoice = $this->invoices->find($id, $supplierId);
@@ -356,7 +641,7 @@ final class PaymentOrderService
             $valid[] = $id;
         }
         if ($valid === []) {
-            return 0;
+            return count($refundValid);
         }
         $this->invoices->markPaymentOrdered($valid, $supplierId);
         if ($markPaid) {
@@ -364,7 +649,7 @@ final class PaymentOrderService
                 $this->invoices->setStatus($id, 'paid', $supplierId);
             }
         }
-        return count($valid);
+        return count($valid) + count($refundValid);
     }
 
     /**

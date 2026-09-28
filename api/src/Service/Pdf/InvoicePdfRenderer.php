@@ -15,6 +15,7 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\Invoice\CzkRecap;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Oss\OssInvoiceClause;
 use MyInvoice\Service\Qr\PaymentQrDueDate;
@@ -384,6 +385,9 @@ final class InvoicePdfRenderer
             'payment_varsymbol' => VariableSymbolNormalizer::forInvoicePayment($invoice),
             'is_paid'           => $isPaid,
             'payment_method'    => $paymentMethod,
+            // Vyúčtování s výsledkem k vyplacení: místo výzvy k úhradě „K vrácení"
+            // s kladnou částkou. Dobropis má vlastní texty a sem nepatří.
+            'refund_amount'     => self::refundInvoiceAmount($invoice),
             'locale'            => $locale,
             'doc_type_label'    => $this->docTypeLabel($invoice, $locale, $supplierData),
             'doc_title'         => $this->docTitle($invoice),
@@ -427,6 +431,22 @@ final class InvoicePdfRenderer
      * @param array<string,mixed> $invoice
      * @return array{all_items:bool, countries:list<array{iso2:string,name_cs:string,name_en:string}>}|null
      */
+    /**
+     * Částka k vrácení u faktury se zápornou částkou k úhradě ({@see RefundDocument}),
+     * null u všech ostatních dokladů. Finální faktura ze zálohy (parent) sem nepatří.
+     */
+    public static function refundInvoiceAmount(array $invoice): ?float
+    {
+        if (($invoice['invoice_type'] ?? '') !== 'invoice'
+            || (int) ($invoice['parent_invoice_id'] ?? 0) > 0
+            || !RefundDocument::isRefundDocument($invoice)
+        ) {
+            return null;
+        }
+
+        return RefundDocument::refundAmount($invoice);
+    }
+
     public function ossClause(array $invoice): ?array
     {
         $items = (array) ($invoice['items'] ?? []);

@@ -41,6 +41,7 @@ import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifi
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import RefundPaymentDialog from '@/components/invoices/RefundPaymentDialog.vue'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -1329,6 +1330,30 @@ const canMarkPaid = computed(() => {
   if (invoice.value.invoice_type === 'invoice' && invoice.value.parent_invoice_id) return true
   return hasPositiveAmountToPay.value
 })
+// Doklad k vyplacení (zrcadlí backend RefundDocument::isOpenRefund): jen se zapnutým
+// vyplácením přeplatků u firmy, jinak dobropis zůstává u dosavadního „Uhradit".
+const isOpenRefund = computed(() => {
+  const inv = invoice.value
+  return !!inv && (supplierStore.currentSupplier?.allow_refund_invoices ?? false)
+    && ['invoice', 'credit_note'].includes(inv.invoice_type)
+    && ['issued', 'sent', 'reminded'].includes(inv.status)
+    && Number(inv.amount_to_pay ?? 0) < 0
+})
+const refundDialogOpen = ref(false)
+
+async function markRefunded() {
+  if (!invoice.value) return
+  if (!window.confirm(t('refundPayment.mark_refunded_confirm', { varsymbol: invoice.value.varsymbol || '' }))) return
+  busy.value = 'mark-refunded'
+  try {
+    invoice.value = await invoicesApi.markPaid(invoice.value.id, appIsoDate())
+    toast.success(t('refundPayment.marked_refunded'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('invoice.operation_failed')))
+  } finally {
+    busy.value = null
+  }
+}
 const canCancel = computed(() => invoice.value && ['issued', 'sent', 'reminded', 'paid'].includes(invoice.value.status)
   && invoice.value.invoice_type !== 'cancellation')
 // Dobropisu nelze vystavit další dobropis — v modalu skryjeme tu volbu.
@@ -1612,7 +1637,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canIssueFinal.value && canIssue, disabled: b, loading: busy.value === 'issue-final', run: issueFinalFromProforma },
     { key: 'mark-paid', label: t('invoice.mark_paid'), icon: 'checkCircle',
       tier: markPaidPrimary ? 'primary' : 'secondary', variant: 'success',
-      show: isIssued.value && canMarkPaid.value && canMarkPaidPermission && !lockedForMe.value, disabled: b, run: openMarkPaid },
+      show: isIssued.value && canMarkPaid.value && canMarkPaidPermission && !lockedForMe.value && !isOpenRefund.value, disabled: b, run: openMarkPaid },
+    { key: 'refund', label: t('refundPayment.action'), icon: 'upload', tier: 'primary', variant: 'primary',
+      show: isOpenRefund.value && inv.payment_method !== 'cash' && auth.canRead('purchase_invoices.payment_orders'),
+      disabled: b, run: () => { refundDialogOpen.value = true } },
     { key: 'reminder', label: t('invoice.send_reminder'), icon: 'bell', tier: 'primary', variant: 'warning',
       show: canSendReminder.value && canRemind, disabled: b,
       title: t('invoice.reminder_tooltip', { days: daysOverdue.value }) as string, run: openReminderModal },
@@ -1641,6 +1669,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'posting-rule', label: t('accounting.template.create_posting_rule'), icon: 'doc', tier: 'overflow', variant: 'neutral',
       show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } },
     // ── overflow ──
+    { key: 'mark-refunded', label: t('refundPayment.mark_refunded'), icon: 'checkCircle', tier: 'overflow', variant: 'success',
+      show: isOpenRefund.value && canMarkPaidPermission, disabled: b, loading: busy.value === 'mark-refunded', run: markRefunded },
     { key: 'public-link', label: t('invoice.public_link.btn'), icon: 'link', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && w, disabled: b,
       title: t('invoice.public_link.btn_title') as string, run: openPublicLink },
@@ -1774,6 +1804,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
         :thanks="{ enabled: thanksEnabled, hasRecipient: thanksHasRecipient, defaultChecked: sendThanks }"
         :busy="busy === 'paid'"
         @close="markPaidOpen = false" @done="onAltPayDone" @mark-paid="onPlainMarkPaid" />
+
+      <!-- Vrátit peníze odběrateli — platební příkaz s jednou vratkou -->
+      <RefundPaymentDialog v-if="refundDialogOpen && invoice" :invoice-id="invoice.id"
+        @close="refundDialogOpen = false" />
 
       <!-- Modal web faktury (trvalý veřejný odkaz) -->
       <div v-if="publicLinkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

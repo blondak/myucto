@@ -95,7 +95,11 @@ const purposeOptions = computed<CashPurpose[]>(() => {
     // `purchase_payment` na příjmovém dokladu = VRATKA úhrady přijaté faktury
     // (vrácené zboží, přeplatek) — účtuje se opačným směrem a snižuje daňový výdaj.
     ? ['sale', 'invoice_payment', 'purchase_payment', 'transfer', 'other']
-    : ['purchase', 'purchase_payment', 'transfer', 'other']
+    // `invoice_payment` na výdajovém dokladu = výplata dokladu k vyplacení (dobropis,
+    // vyúčtování se zápornou částkou), jen se zapnutou volbou dodavatele.
+    : supplierStore.currentSupplier?.allow_refund_invoices === true
+      ? ['purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other']
+      : ['purchase', 'purchase_payment', 'transfer', 'other']
 })
 
 const isTaxDoc = computed(() => form.purpose === 'sale' || form.purpose === 'purchase')
@@ -313,7 +317,7 @@ function onUnpaidSearch() {
     unpaidLoading.value = true
     unpaidError.value = ''
     try {
-      const res = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20, isPurchaseRefund.value)
+      const res = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20, isPurchaseRefund.value || isInvoiceRefund.value)
       unpaidOptions.value = res.items
       unpaidTruncated.value = res.truncated
     } catch (e: any) {
@@ -347,11 +351,14 @@ const czkEquivalent = computed<number | null>(() => {
 
 /** Vratka úhrady přijaté faktury — příjmový doklad s účelem `purchase_payment`. */
 const isPurchaseRefund = computed(() => form.purpose === 'purchase_payment' && form.doc_type === 'in')
+/** Výplata dokladu k vyplacení — výdajový doklad s účelem `invoice_payment`, jen v plné výši. */
+const isInvoiceRefund = computed(() => form.purpose === 'invoice_payment' && form.doc_type === 'out')
 
 // PF: úhrada jen v plné výši (R4) → částka readonly. U vratky se naopak vrací
 // libovolná část, takže částka zůstává editovatelná.
 const amountReadonly = computed(() =>
-  form.purpose === 'purchase_payment' && !isPurchaseRefund.value && selectedUnpaid.value !== null,
+  (form.purpose === 'purchase_payment' && !isPurchaseRefund.value || isInvoiceRefund.value)
+  && selectedUnpaid.value !== null,
 )
 
 // ── Našeptávač partnera z číselníku klientů ─────────────────────────────────
@@ -452,8 +459,13 @@ const previewLines = computed<PreviewLine[]>(() => {
       push(cash, 'credit', total)
       break
     case 'invoice_payment':
-      push(cash, 'debit', total)
-      push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', total)
+      if (isInvoiceRefund.value) {
+        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'debit', total)
+        push(cash, 'credit', total)
+      } else {
+        push(cash, 'debit', total)
+        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', total)
+      }
       break
     case 'purchase_payment':
       if (isPurchaseRefund.value) {

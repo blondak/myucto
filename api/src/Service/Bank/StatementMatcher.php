@@ -11,6 +11,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
@@ -531,7 +532,7 @@ final class StatementMatcher
 
         // ── Outgoing → purchase_invoice (přijaté faktury) ────────────────
         if ($isOutgoing) {
-            // Vrácení peněz odběrateli k vydanému dobropisu: 311/221.
+            // Vrácení peněz odběrateli k dokladu k vyplacení (dobropis, záporná faktura): 311/221.
             if ($vs) {
                 $refund = $this->matchIssuedCreditRefund(
                     $pdo,
@@ -1528,8 +1529,7 @@ final class StatementMatcher
             "SELECT i.id, i.amount_to_pay, i.exchange_rate, cur.code AS currency,
                     CASE WHEN i.varsymbol = ? THEN 2 ELSE 1 END AS vs_match_rank
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.supplier_id = ? AND i.invoice_type = 'credit_note'
-                AND i.status IN ('issued','sent','reminded')
+              WHERE i.supplier_id = ? AND " . RefundDocument::openRefundSql('i') . "
                 AND (i.varsymbol = ? OR (i.varsymbol REGEXP '[1-9]'
                      AND CAST(REGEXP_REPLACE(i.varsymbol, '[^0-9]', '') AS UNSIGNED) = CAST(? AS UNSIGNED)))"
         );

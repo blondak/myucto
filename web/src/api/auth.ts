@@ -52,6 +52,8 @@ export interface SupplierBrief {
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
   default_prices_include_vat: boolean
+  /** Vyúčtování s výsledkem k vyplacení (migrace 1937): editor povolí zápornou fakturu. */
+  allow_refund_invoices: boolean
   /**
    * Výchozí poznámka pod položkami na nových dokladech (#79, migrace 1855) — editor
    * ji předvyplní podle jazyka dokladu. Chodí přes `/me`, protože editor faktury běží

@@ -1012,7 +1012,7 @@ final class SaldoRepository
             )
             SELECT d.id AS doc_id,
                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
-                   d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at,
+                   d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at, d.parent_invoice_id,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
                    {$toPayExpr} AS amount_to_pay,
@@ -1039,7 +1039,7 @@ final class SaldoRepository
                AND d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
-             GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at,
+             GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at, d.parent_invoice_id,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
                       paid.paid_sum, adv.advance_sum, man.settled
             HAVING " . self::openFilterSql($bookedExpr, $ratio) . "
@@ -1077,6 +1077,8 @@ final class SaldoRepository
                                 (string) $r['status'],
                                 $r['paid_at'] === null ? null : (string) $r['paid_at'],
                                 $asOf,
+                                (float) $r['amount_to_pay'],
+                                $r['parent_invoice_id'] === null ? null : (int) $r['parent_invoice_id'],
                             ),
                             (float) $r['paid_as_of'] + $advance,
                             (float) $r['amount_to_pay'] + $advance,

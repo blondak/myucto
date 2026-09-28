@@ -213,6 +213,53 @@ nikoli o ověření bankovním API. Stav faktur a označení k úhradě se nemě
 - Účty si nech **ověřit proti CRPDPH** zejména u nových dodavatelů.
 - Pro readonly uživatele je tvorba příkazů a editace účtů zakázána (jen čtení a stažení).
 
+## 26.12 Vratky odběratelům
+
+Když má firma v nastavení fakturace zapnuté **vyplácení přeplatků**, umí platební
+příkazy vracet peníze i odběratelům. Vratkou je vystavená **faktura** nebo **dobropis**,
+u kterých po odečtení (vrácené obaly, přeplatek záloh) dlužíš zákazníkovi peníze.
+Bez zapnuté volby se vratky v příkazech neukazují, ani u běžných dobropisů.
+
+Na stránce Platební příkazy se vratky zobrazí v samostatné tabulce **„Vratky
+odběratelům"** pod fakturami k úhradě. Vybrat je jdou do stejné dávky jako přijaté
+faktury, pokud platíš z účtu v CZK:
+
+- **příjemcem** je odběratel dokladu, účet se bere z karty klienta. Přednost má účet
+  zadaný ručně, pak účet z registru plátců DPH a nakonec účet naučený z bankovních výpisů,
+- **částka** je částka k vrácení na dokladu,
+- **variabilní symbol** je číslo dokladu a nejde změnit. Podle něj se odchozí platba
+  po importu výpisu s dokladem spáruje sama,
+- vratky se posílají jen v **CZK** a jen převodem. Doklad s formou úhrady hotově do
+  příkazu nepatří, vyplácí se přes pokladnu.
+
+Vratka bez známého účtu odběratele vybrat nejde, účet doplníš v detailu dokladu.
+
+### Vrátit peníze z detailu dokladu
+
+V detailu faktury nebo dobropisu k vyplacení je hlavní akce **Vrátit peníze**.
+Otevře okno, kde:
+
+- vybereš **účet odběratele** z nabídnutých účtů, nebo zadáš **jiný účet** ručně.
+  Ručně zadaný účet se kontroluje (modulo 11) a volbou **Uložit účet do karty klienta**
+  se zapamatuje pro příště,
+- zvolíš **účet, ze kterého platíš**, a **datum splatnosti**,
+- variabilní symbol je předvyplněný číslem dokladu.
+
+Tlačítka **Stáhnout ABO**, **CSV** a **PDF** vytvoří platební příkaz s touto jedinou
+vratkou a stáhnou ho. Je-li účet napojený na bankovní API, jde příkaz rovnou
+**Odeslat do banky**. Volba **Přidat do hromadného příkazu** příkaz nevytváří, jen
+uloží ručně zadaný účet ke klientovi a doklad pak najdeš mezi vratkami na stránce
+Platební příkazy. Vytvořený příkaz se objeví v historii příkazů.
+
+### Kdy je vratka vyplacená
+
+Zařazení do příkazu doklad jen označí jako předaný k vyplacení, doklad zůstává
+otevřený. Vyplacený je až po **spárování odchozí platby** z bankovního výpisu, nebo
+když ho v detailu dokladu v nabídce **…** označíš volbou **Označit jako vyplaceno**.
+Volba „Označit při exportu faktury rovnou jako zaplacené" se na vratky nevztahuje.
+Smazáním příkazu se u vratky zruší i označení „předáno k vyplacení", pokud doklad
+není v jiném příkazu.
+
 > [!TIP]
 > Rychlý postup: v [Přijatých fakturách](23_Prijate_faktury.md) zaškrtni faktury
 > a klikni **„Do příkazu k úhradě"** — předvybrané doklady se otevřou přímo zde.

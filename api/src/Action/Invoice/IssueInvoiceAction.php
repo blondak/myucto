@@ -118,6 +118,8 @@ final class IssueInvoiceAction
                 $invoice['parent_invoice_id'] ?? null,
             )
             && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
+            && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
+                && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
         ) {
             return Json::error($response, 'invalid_amount', InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE, 409);
         }

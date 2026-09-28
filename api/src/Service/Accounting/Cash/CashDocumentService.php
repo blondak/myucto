@@ -16,6 +16,8 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\Invoice\RefundDocument;
+use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
@@ -37,7 +39,9 @@ final class CashDocumentService
     private const PURPOSE_MATRIX = [
         'sale'             => ['in'],
         'purchase'         => ['out'],
-        'invoice_payment'  => ['in'],
+        // `out` = výplata dokladu k vyplacení ({@see RefundDocument}), jen se zapnutým
+        // `supplier.allow_refund_invoices`; hlídá validateInvoiceRefund().
+        'invoice_payment'  => ['in', 'out'],
         // `in` = VRATKA úhrady (vrácené zboží, přeplatek): peněžní deník s ní počítá
         // (snižuje daňový výdaj) a bez ní nemá vrácená hotovost jak vzniknout s vazbou
         // na fakturu — jako „ostatní pohyb" by se párování ztratilo.
@@ -69,6 +73,7 @@ final class CashDocumentService
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly DocumentLockService $documentLocks,
         private readonly VatStatusService $vatStatus,
+        private readonly InvoicePdfRenderer $invoicePdf,
     ) {}
 
     /**
@@ -188,6 +193,7 @@ final class CashDocumentService
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
                 $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
+            $this->reopenRefund($supplierId, $doc);
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // Stejné pravidlo jako u storna: PF zpět do stavu před úhradou dle
                 // tvaru dokladu (zaúčtovaný → 'booked', journal-free DE → 'received').
@@ -391,6 +397,7 @@ final class CashDocumentService
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
                 $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
+            $this->reopenRefund($supplierId, $doc);
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // PF vrátit do stavu PŘED úhradou dle tvaru dokladu: zaúčtovaný (journal) byl
                 // 'booked', journal-free (daňová evidence, PF se neúčtuje) byl 'received'.
@@ -485,6 +492,45 @@ final class CashDocumentService
         $limit = max(1, min(50, $limit));
         $like = '%' . addcslashes(trim($q), '%_\\') . '%';
         $pdo = $this->db->pdo();
+
+        if ($kind === 'invoice' && $refundable) {
+            // Výdajový doklad k vydanému dokladu = výplata dokladu k vyplacení (dobropis
+            // nebo vyúčtování se zápornou částkou). Bez zapnuté volby dodavatele nic.
+            if (!RefundDocument::enabledForSupplier($pdo, $supplierId)) {
+                return [];
+            }
+            $stmt = $pdo->prepare(
+                "SELECT i.id, i.varsymbol AS number, i.issue_date, i.amount_to_pay, i.paid_total,
+                        i.invoice_type, cur.code AS currency, c.company_name AS partner_name
+                   FROM invoices i
+                   JOIN currencies cur ON cur.id = i.currency_id
+                   JOIN clients c ON c.id = i.client_id
+                  WHERE i.supplier_id = ?
+                    AND " . RefundDocument::openRefundSql('i') . "
+                    AND cur.code = 'CZK'
+                    AND (i.varsymbol LIKE ? OR c.company_name LIKE ?)
+                  ORDER BY i.issue_date DESC, i.id DESC
+                  LIMIT " . $limit
+            );
+            $stmt->execute([$supplierId, $like, $like]);
+            return array_map(static function (array $r): array {
+                $refund = RefundDocument::refundAmount($r);
+                return [
+                    'id'            => (int) $r['id'],
+                    'kind'          => 'invoice',
+                    'number'        => (string) ($r['number'] ?? ''),
+                    'partner_name'  => (string) ($r['partner_name'] ?? ''),
+                    'total'         => $refund,
+                    'paid'          => 0.0,
+                    'remaining'     => $refund,
+                    'currency_code' => (string) $r['currency'],
+                    'issued_on'     => (string) $r['issue_date'],
+                    'invoice_type'  => (string) $r['invoice_type'],
+                    'is_proforma'   => false,
+                    'is_refund'     => true,
+                ];
+            }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        }
 
         if ($kind === 'invoice') {
             $stmt = $pdo->prepare(
@@ -728,7 +774,15 @@ final class CashDocumentService
     /** Side-effecty úhrad faktur (v téže transakci). */
     private function applySideEffects(int $supplierId, int $id, array $doc, string $docNumber, ?int $userId): void
     {
-        if ($doc['purpose'] === 'invoice_payment' && $doc['invoice_id'] !== null) {
+        if ($doc['purpose'] === 'invoice_payment' && $doc['invoice_id'] !== null && $doc['doc_type'] === 'out') {
+            // Výplata dokladu k vyplacení: `invoice_payments` nese jen kladné úhrady,
+            // vrácení se eviduje stavem dokladu stejně jako u dobropisu.
+            $this->invoicePayments->markCreditNoteRefunded(
+                (int) $doc['invoice_id'],
+                $supplierId,
+                (string) $doc['issue_date'],
+            );
+        } elseif ($doc['purpose'] === 'invoice_payment' && $doc['invoice_id'] !== null) {
             $res = $this->invoicePayments->recordPayment(
                 (int) $doc['invoice_id'],
                 (float) $doc['total_amount'],
@@ -942,6 +996,14 @@ final class CashDocumentService
      */
     private function buildInvoicePayment(int $supplierId, array $doc, string $cashAccount, float $total): array
     {
+        if ($doc['doc_type'] === 'out') {
+            // Výplata dokladu k vyplacení: předpis na 311 je dal (záporná pohledávka),
+            // výplata ho vyrovná 311 MD / 211 D. Zrcadlo bankovní vratky dobropisu.
+            return [
+                $this->line($this->ruleAccount($supplierId, 'payment.receivable.cash', 'credit', '311'), 'debit', $total),
+                $this->line($cashAccount, 'credit', $total),
+            ];
+        }
         if ($doc['invoice_id'] !== null && $this->invoiceType($supplierId, (int) $doc['invoice_id']) === 'proforma') {
             return [
                 $this->line($cashAccount, 'debit', $total),
@@ -1165,7 +1227,11 @@ final class CashDocumentService
             if ($doc['invoice_id'] === null || $doc['purchase_invoice_id'] !== null) {
                 throw new CashException('validation', 'Úhrada FV vyžaduje právě jedno invoice_id.');
             }
-            $this->validateInvoicePayment($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
+            if ($docType === 'out') {
+                $this->validateInvoiceRefund($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
+            } else {
+                $this->validateInvoicePayment($supplierId, (int) $doc['invoice_id'], (float) $doc['total_amount']);
+            }
         } elseif ($purpose === 'purchase_payment') {
             if ($doc['purchase_invoice_id'] === null || $doc['invoice_id'] !== null) {
                 throw new CashException('validation', 'Úhrada PF vyžaduje právě jedno purchase_invoice_id.');
@@ -1242,6 +1308,75 @@ final class CashDocumentService
         $remaining = self::cents($inv['amount_to_pay']) - self::cents($inv['paid_total']);
         if (self::cents($amount) > $remaining) {
             throw new CashException('amount_exceeds_remaining', 'Částka převyšuje zbývající úhradu faktury.');
+        }
+    }
+
+    /**
+     * Výplata dokladu k vyplacení v hotovosti (výdajový doklad s účelem `invoice_payment`).
+     * Jen se zapnutým `supplier.allow_refund_invoices` a jen v plné výši: vrácení se
+     * eviduje stavem dokladu, částečnou výplatu by nebylo kde držet.
+     */
+    private function validateInvoiceRefund(int $supplierId, int $invoiceId, float $amount): void
+    {
+        if (!RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId)) {
+            throw new CashException(
+                'refund_not_enabled',
+                'Výplatu dokladu v hotovosti povolíte v Nastavení volbou „Povolit vyúčtování s částkou k vyplacení“.',
+            );
+        }
+        $this->lockRow('invoices', $invoiceId, $supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.status, i.invoice_type, i.amount_to_pay, cur.code AS currency
+               FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
+              WHERE i.id = ? AND i.supplier_id = ?'
+        );
+        $stmt->execute([$invoiceId, $supplierId]);
+        $inv = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($inv === false) {
+            throw new CashException('invoice_not_found', 'Vydaná faktura nenalezena.', 404);
+        }
+        if (!RefundDocument::isRefundDocument($inv)) {
+            throw new CashException('invalid_purpose_type', 'Výdajový doklad lze navázat jen na doklad k vyplacení (záporná částka k úhradě).');
+        }
+        if (!RefundDocument::isOpenRefund($inv)) {
+            throw new CashException('invoice_invalid_status', 'Doklad v tomto stavu nelze vyplatit v hotovosti.');
+        }
+        if ((string) $inv['currency'] !== 'CZK') {
+            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
+        }
+        $refund = self::cents(RefundDocument::refundAmount($inv));
+        if (self::cents($amount) !== $refund) {
+            throw new CashException(
+                'partial_refund',
+                sprintf('Doklad lze v hotovosti vyplatit jen v plné výši (%.2f Kč).', $refund / 100),
+                422,
+                ['remaining' => round($refund / 100, 2)],
+            );
+        }
+    }
+
+    /**
+     * Storno nebo smazání výplaty dokladu k vyplacení vrátí doklad mezi otevřené,
+     * stejně jako smazaná úhrada vrací fakturu u příjmového dokladu.
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function reopenRefund(int $supplierId, array $doc): void
+    {
+        if (($doc['purpose'] ?? null) !== 'invoice_payment' || ($doc['doc_type'] ?? null) !== 'out'
+            || ($doc['invoice_id'] ?? null) === null
+        ) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE invoices
+                SET status = IF(sent_at IS NOT NULL, 'sent', 'issued'), paid_at = NULL
+              WHERE id = ? AND supplier_id = ? AND status = 'paid'
+                AND " . RefundDocument::refundDocumentSql('')
+        );
+        $stmt->execute([(int) $doc['invoice_id'], $supplierId]);
+        if ($stmt->rowCount() > 0) {
+            $this->invoicePdf->invalidate((int) $doc['invoice_id'], 'invalidate_unmark_paid');
         }
     }
 
