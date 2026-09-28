@@ -28,7 +28,7 @@ import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -2583,8 +2583,11 @@ const invoiceActions = computed<ActionItem[]>(() => {
           <span class="text-neutral-600">{{ t(doc.doc_type === 'out' ? 'invoice.cash_documents.paid_out' : 'invoice.cash_documents.paid_in') }}</span>
           <RouterLink
             :to="{ path: '/accounting/cash', query: { register_id: String(doc.register_id), q: doc.doc_number } }"
-            class="font-mono font-medium text-primary-600 hover:text-primary-800 hover:underline"
-          >{{ doc.doc_number }}</RouterLink>
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+            <span class="font-mono">{{ doc.doc_number }}</span>
+          </RouterLink>
           <span class="text-neutral-500">{{ formatDate(doc.issue_date) }}</span>
           <span class="font-mono">{{ formatMoney(doc.total_amount, 'CZK') }}</span>
           <span v-if="doc.status === 'draft'" class="text-xs text-warning-700">{{ t('invoice.cash_documents.draft') }}</span>
