@@ -57,6 +57,7 @@ final class GlobalSeedTables
         'backup_schedule_contract' => 'parametry sjednané s poskytovatelem hostingu',
         'instance_storage_usage'   => 'podklad pro měření úložiště u poskytovatele',
         'cron_settings'            => 'režim plánovaných úloh, migrace 1184/1320',
+        'mcp_server_settings'      => 'stav serverového MCP, migrace ho po resetu znovu nevloží',
     ];
 
     /**
@@ -193,6 +194,7 @@ final class GlobalSeedTables
         'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
         // API tokeny (PAT) včetně povolených IP.
         'api_tokens', 'api_token_ips',
+        'mcp_server_settings', 'mcp_oauth_clients', 'mcp_oauth_grants',
         // Podepisování PDF a podání (konfigurace + klíče).
         'signing_profiles', 'signing_credentials', 'signing_settings',
         'signature_role_profiles', 'signature_user_profiles', 'signature_document_overrides',
@@ -348,6 +350,7 @@ final class GlobalSeedTables
         'logbook_fuel_scans',
         'login_attempts',
         'mail_outbox', 'mail_rate_limit_events', 'mail_send_log',
+        'mcp_oauth_codes',
         'manufacturers',
         'mfa_step_up_proofs',
         'migration_batch_items', 'migration_parallel_checks',

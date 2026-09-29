@@ -141,7 +141,7 @@ final class ApiTokenService
         $hash = hash('sha256', $plaintext);
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope,
+            'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
                     t.allow_payroll_submission_docs,
                     t.expires_at, t.revoked_at,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,

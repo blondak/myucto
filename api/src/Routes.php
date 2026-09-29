@@ -363,6 +363,9 @@ use MyInvoice\Action\License\PurchaseCompleteAction;
 use MyInvoice\Action\System\HealthAction;
 use MyInvoice\Action\System\OpenApiAction;
 use MyInvoice\Action\System\VersionAction;
+use MyInvoice\Action\Mcp\HostedMcpEndpointAction;
+use MyInvoice\Action\Mcp\HostedMcpSettingsAction;
+use MyInvoice\Action\Mcp\McpOAuthAction;
 use MyInvoice\Action\Admin\UpdateAction;
 use Slim\App;
 
@@ -372,6 +375,16 @@ final class Routes
     {
         $app->get('/api/health',  HealthAction::class);
         $app->get('/api/version', VersionAction::class);
+
+        $app->get   ('/api/mcp/settings', [HostedMcpSettingsAction::class, 'show']);
+        $app->put   ('/api/mcp/settings', [HostedMcpSettingsAction::class, 'update']);
+        $app->map   (['GET', 'POST', 'DELETE'], '/mcp', [HostedMcpEndpointAction::class, 'handle']);
+        $app->get   ('/.well-known/oauth-protected-resource', [McpOAuthAction::class, 'protectedResource']);
+        $app->get   ('/.well-known/oauth-protected-resource/mcp', [McpOAuthAction::class, 'protectedResource']);
+        $app->get   ('/.well-known/oauth-authorization-server', [McpOAuthAction::class, 'serverMetadata']);
+        $app->post  ('/oauth/register', [McpOAuthAction::class, 'register']);
+        $app->map   (['GET', 'POST'], '/oauth/authorize', [McpOAuthAction::class, 'authorize']);
+        $app->post  ('/oauth/token', [McpOAuthAction::class, 'token']);
 
         // Public REST API v1 — dokumentace
         $app->get('/api/openapi.yaml', [OpenApiAction::class, 'spec']);

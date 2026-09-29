@@ -31,6 +31,7 @@ Options -Indexes -MultiViews
     # (dostane '.', ne '/'). Pokrývá i `private.bak/`, `db.old/` apod. Suffix se
     # kotví na tečku, takže legitimní `/dbxyz` zůstává dostupné.
     RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|shared|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
+    RewriteRule ^mcp/ - [F,L,NC]
 
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
     # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné
@@ -105,6 +106,8 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^api/(.*)$ api/public/index.php [L,QSA]
 
+    RewriteRule ^(mcp|oauth/(authorize|token|register)|\.well-known/oauth-(protected-resource(?:/mcp)?|authorization-server))/?$ api/public/index.php [L,QSA]
+
     # 4) SPA fallback (vše co není reálný soubor a není /api/* → front controller).
     # Front controller ověří hostname proti supplier_domains a teprve potom vydá
     # web/dist/index.html; neznámý Host tak nedostane ani vstupní HTML aplikace.
@@ -159,7 +162,7 @@ Options -Indexes -MultiViews
 # takže používáme rewrite-env trick: nastavíme proměnnou NOCACHE pro /api/*
 # a PWA soubory a Header Cache-Control podle ní pošleme.
 <IfModule mod_rewrite.c>
-    RewriteCond %{REQUEST_URI} ^/api/
+    RewriteCond %{REQUEST_URI} ^/(api/|mcp/?$|oauth/|\.well-known/oauth-)
     RewriteRule ^ - [E=NOCACHE:1]
 </IfModule>
 <IfModule mod_headers.c>

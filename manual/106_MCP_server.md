@@ -1,28 +1,31 @@
 # 106. MCP server (napojení AI asistenta)
 
-MCP server propojí **AI asistenta** — Claude, ChatGPT přes Codex, Gemini,
-Copilota — s daty tvé firmy. Po zprovoznění se ptáš běžnou češtinou
+MCP server propojí **AI asistenta** jako Claude, ChatGPT, Codex, Gemini nebo
+Copilot s daty tvé firmy. Po zprovoznění se ptáš běžnou češtinou
 („kolik zaplatíme na DPH“, „kdo nám dluží“, „jaký byl loni zisk“) a asistent
 si sám vybere správný nástroj a zavolá ho přes [REST API](104_API.md).
 
-Nastavení najdeš v aplikaci: **Firma → MCP server**. Ta stránka ukazuje adresu
-API konkrétně tvojí instance a hotovou konfiguraci pro vybraného asistenta.
+Nastavení najdeš v aplikaci: **Firma → MCP server**. Stránka má dvě záložky:
+**Připojit online** pro vzdálený MCP server běžící přímo v této instalaci a
+**Spustit lokálně (.mjs)** pro server na tvém počítači. Každá instalace má
+vlastní adresu; žádný společný server MyÚčta není potřeba.
 
 ## 106.1 Co je MCP
 
 **Model Context Protocol** je otevřený standard pro připojení nástrojů k AI
-modelům. Server je malý program, který běží u tebe na počítači, mluví s aplikací
-přes REST API a asistentovi nabízí sadu pojmenovaných **nástrojů**
+modelům. Server běží buď přímo v instalaci MyÚčta, nebo jako malý program na tvém
+počítači. Asistentovi nabízí sadu pojmenovaných **nástrojů**
 (`list_unpaid_invoices`, `vat_return_preview`, `trial_balance`, …).
 
 Podstatné vlastnosti:
 
-- **MCP server nevytváří vlastní kopii dat.** Běží lokálně a volá přímo tvoji
-  instanci. Výsledek nástroje ale dostane připojený AI asistent a může jej podle
+- **MCP server nevytváří vlastní kopii dat.** Pracuje přímo s tvojí instancí.
+  Výsledek nástroje ale dostane připojený AI asistent a může jej podle
   svého provozního modelu odeslat poskytovateli AI. Citlivost dotazu proto
   posuzuj stejně jako při ručním vložení údajů do daného asistenta.
-- **Asistent má jen to, co má token.** Rozsah, vazba na firmu, omezení podle IP
-  i oprávnění role uživatele platí beze změny.
+- **Asistent má jen schválený přístup.** U online připojení ho omezuje souhlas
+  uživatele, vybraná firma, rozsah a role. U lokálního připojení platí rozsah,
+  vazba na firmu, omezení podle IP a oprávnění role vydaného API tokenu.
 - **Všechno je vidět v logu.** Každé volání se zapíše včetně názvu nástroje.
 
 ## 106.2 Rozsah — co asistent umí
@@ -64,6 +67,9 @@ data a server je vůbec nezveřejní. Přesný počet vypíše server při start
 > k posouzení a schválí ji člověk v aplikaci.
 
 ## 106.3 Zprovoznění
+
+Pro online připojení použij [§ 106.3.5](#10635-vzdalene-pripojeni-bez-stahovani).
+Následující čtyři kroky popisují lokální soubor `.mjs`.
 
 ### 106.3.1 Krok 1 — API token
 
@@ -143,18 +149,77 @@ Na stránce v aplikaci se dá přepnout, jestli má konfigurace ukazovat na hoto
 ve všech ukázkách naráz.
 
 > [!NOTE]
-> **Webový ani desktopový ChatGPT tenhle server připojit neumí** — pracuje jen
-> se vzdálenými MCP servery přes HTTP, zatímco tenhle běží lokálně. Pro práci
-> s daty MyÚčta v prostředí OpenAI použij **Codex CLI**.
+> **Tento lokální soubor nelze přidat do ChatGPT na webu.** ChatGPT používá
+> vzdálený MCP server. Pro připojení bez souboru zvol záložku **Připojit online**,
+> případně pro lokální soubor použij **Codex CLI**.
 
 ### 106.3.4 Krok 4 — ověření
 
 Napiš asistentovi „ověř připojení k MyÚčtu“. Zavolá nástroj `whoami` a vrátí
 uživatele, roli a firmu. Volání se hned objeví v logu na stránce MCP serveru.
 
+### 106.3.5 Vzdálené připojení bez stahování
+
+V záložce **Připojit online** zkopíruj adresu MCP serveru své instalace, například
+`https://ucto.tvoje-firma.cz/mcp`. Do asistenta zadávej adresu **své** instalace,
+ne `dev.myucto.cz` ani adresu jiné firmy. Instalace musí být dostupná z internetu
+přes HTTPS s důvěryhodným certifikátem. ChatGPT a Claude se připojují ze svých
+serverů, nikoli přímo z počítače nebo telefonu, na kterém používáš jejich aplikaci.
+
+Vzdálený server je po instalaci **vypnutý**. V záložce se ukazuje jeho stav a
+**superadmin** ho zapne tlačítkem **Zapnout server**. Před zapnutím musí být v
+prostředí, které spouští MCP, dostupný **Node.js**; když chybí, stránka ukáže
+upozornění a zapnutí nedovolí. Nainstaluj Node.js do tohoto prostředí, ověř jeho dostupnost pro aplikaci a stránku
+znovu načti. Na počítači ani telefonu uživatele Node.js potřeba není.
+Stejným přepínačem může superadmin server později vypnout.
+V Dockeru lze stav řídit proměnnou `MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
+nastavení je přepínač ve webu jen informativní. Bez této proměnné platí nastavení
+uložené v aplikaci. Dockerový obraz už Node.js obsahuje.
+MCP obsluhuje REST API přes samostatný PHP CLI proces na stejném serveru. Nevyžaduje
+další síťový port ani dostupnost vlastní veřejné domény z Docker kontejneru.
+Na IIS a Apache musí mít PHP povolenou funkci `proc_open` a účet webového
+serveru musí umět spustit Node.js. Pokud Node není v jeho `PATH`, nastav
+`MYINVOICE_MCP_NODE_BINARY` na úplnou cestu k `node.exe` nebo binárnímu souboru
+Node na daném serveru. Server potřebuje také PHP CLI; není-li ve standardním
+adresáři PHP, nastav `MYINVOICE_MCP_PHP_BINARY` na úplnou cestu k `php.exe`.
+Na počítači uživatele Node pro online připojení není třeba.
+
+1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
+2. Při připojení se v prohlížeči přihlas do MyÚčta, vyber firmu a schval rozsah
+   přístupu passkey, kódem ověřovací aplikace nebo aktuálním heslem podle nastavení účtu. Pro běžné dotazy stačí **čtení**. **Čtení a zápis** povol jen tehdy,
+   když má asistent opravdu měnit data.
+3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
+   Nástroj `whoami` vrátí uživatele, roli a firmu.
+
+Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém zařízení
+neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,
+rozsah a oprávnění účtu. Připojení lze v MyÚčtu odvolat a v asistentovi odebrat.
+
+**ChatGPT:** V [ChatGPT na webu](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+otevři **Settings → Apps → Advanced Settings** a zapni vývojářský režim, pokud je
+pro tvůj účet nebo pracovní prostor dostupný. Pak v **Apps → Create** vytvoř
+vlastní MCP aplikaci, vlož adresu `/mcp`, zvol OAuth přihlášení, načti nástroje a
+dokonči přihlášení do MyÚčta. V konverzaci vytvořenou aplikaci vyber. Ve firemním
+pracovním prostoru může být potřeba přístup schválený správcem.
+
+> [!IMPORTANT]
+> OpenAI v aktuální dokumentaci uvádí vlastní MCP aplikace **pouze na webu**.
+> Mobilní aplikace ChatGPT je nyní nepodporují. Dokud OpenAI tuto možnost
+> nezpřístupní, nelze přes ni vzdálené MCP MyÚčta používat.
+
+**Claude:** Na webu nebo v desktopové aplikaci otevři
+**Customize → Connectors**. U osobního účtu zvol **+ → Add custom connector**,
+vlož adresu `/mcp`, přidej konektor a tlačítkem **Connect** dokonči přihlášení.
+V organizaci musí vlastní konektor nejprve přidat vlastník v nastavení organizace.
+V konverzaci jej zapni přes **+ → Connectors**. Anthropic potvrzuje, že jednou
+přidaný [vzdálený konektor funguje také v mobilní aplikaci Claude](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
+
+Přístup pro člověka bez účtu v MyÚčtu, například pouze ke statistikám, v této
+verzi není součástí online připojení.
+
 ## 106.4 Nastavení
 
-Server se konfiguruje proměnnými prostředí:
+Lokální server `.mjs` se konfiguruje proměnnými prostředí:
 
 | Proměnná | Výchozí | Význam |
 |---|---|---|
@@ -549,6 +614,9 @@ Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
 jsou v [§ 104.8](104_API.md#1049-log-volani-api).
 
 ## 106.11 Bezpečnost
+
+Následující pravidla pro API tokeny se týkají lokálního souboru `.mjs`.
+Online připojení používá přihlášení a souhlas popsané v [§ 106.3.5](#10635-vzdalene-pripojeni-bez-stahovani).
 
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omez token na IP** — uniklý token je pak mimo tvou síť k ničemu.

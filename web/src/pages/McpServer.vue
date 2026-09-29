@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { api } from '@/api/client'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -21,6 +22,49 @@ const isDemo = computed(() => auth.isDemo)
 // API má stejný původ jako aplikace — návod tak ukazuje adresu, na kterou se
 // uživatel právě dívá, a ne natvrdo zadanou produkční doménu.
 const apiBase = `${window.location.origin}/api/v1`
+interface RemoteSettings {
+  enabled: boolean
+  node_available: boolean
+  endpoint: string
+  managed_by_environment: boolean
+}
+const remoteSettings = ref<RemoteSettings | null>(null)
+const remoteSettingsLoading = ref(false)
+const remoteSettingsSaving = ref(false)
+const remoteSettingsError = ref('')
+const remoteUrl = computed(() => remoteSettings.value?.endpoint || `${window.location.origin}/mcp`)
+type ConnectionMode = 'local' | 'remote'
+const connectionMode = ref<ConnectionMode>('remote')
+
+async function loadRemoteSettings() {
+  remoteSettingsLoading.value = true
+  remoteSettingsError.value = ''
+  try {
+    const { data } = await api.get<RemoteSettings>('/mcp/settings')
+    remoteSettings.value = data
+  } catch {
+    remoteSettingsError.value = t('mcp_server_page.connection.settings_load_error')
+  } finally {
+    remoteSettingsLoading.value = false
+  }
+}
+
+async function toggleRemote() {
+  if (!auth.isSuperadmin || !remoteSettings.value || remoteSettingsSaving.value || remoteSettings.value.managed_by_environment) return
+  remoteSettingsSaving.value = true
+  remoteSettingsError.value = ''
+  try {
+    const { data } = await api.put<RemoteSettings>('/mcp/settings', {
+      enabled: !remoteSettings.value.enabled,
+    })
+    remoteSettings.value = data
+    toast.success(t('mcp_server_page.connection.settings_saved'))
+  } catch {
+    remoteSettingsError.value = t('mcp_server_page.connection.settings_save_error')
+  } finally {
+    remoteSettingsSaving.value = false
+  }
+}
 
 // Server jde provozovat dvěma způsoby a liší se jen cestou, kterou dostane
 // asistent. Přepínač mění cestu ve VŠECH konfiguracích najednou, ať ji uživatel
@@ -113,10 +157,8 @@ args = ["${winPathJson.value}"]
 [mcp_servers.myucto.env]
 MYUCTO_API_URL = "${apiBase}"
 MYUCTO_API_TOKEN = "mi_pat_vas_token"`,
-    warn: 'Webový a desktopový ChatGPT umí připojit jen VZDÁLENÉ MCP servery přes HTTP — '
-      + 'tenhle server je lokální proces, takže se do nich napojit nedá. '
-      + 'Pro práci s daty MyÚčta z prostředí OpenAI použijte Codex CLI, '
-      + 'nebo si server vystavte vlastním HTTP mostem.',
+    warn: 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server. '
+      + 'Pro něj zvolte záložku Připojit online.',
   },
   {
     key: 'gemini',
@@ -448,6 +490,7 @@ const TOOL_GROUPS = computed(() => [
 onMounted(() => {
   loadTokens()
   loadLog()
+  loadRemoteSettings()
 })
 </script>
 
@@ -464,7 +507,7 @@ onMounted(() => {
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4 text-sm text-neutral-700">
       <p class="mb-2">
         <strong>MCP (Model Context Protocol)</strong> je otevřený standard, kterým se AI asistentovi
-        zpřístupní data aplikace. Podporuje ho Claude, Gemini, Copilot i Codex. Po zprovoznění se
+        zpřístupní data aplikace. Podporuje ho ChatGPT, Claude, Gemini, Copilot i Codex. Po zprovoznění se
         ptáte běžnou češtinou — „kolik zaplatíme na DPH“, „kdo nám dluží“, „jaký byl loni zisk“ —
         a asistent si sám vybere správné nástroje a zavolá je přes veřejné API.
       </p>
@@ -503,6 +546,24 @@ onMounted(() => {
       přesně takový, jaký je popsaný níže.
     </div>
 
+    <div class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
+      <div class="flex flex-wrap gap-1">
+        <button id="mcp-remote-tab" type="button" role="tab" :aria-selected="connectionMode === 'remote'"
+          aria-controls="mcp-remote-panel" @click="connectionMode = 'remote'"
+          class="cursor-pointer px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap"
+          :class="connectionMode === 'remote' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
+          {{ t('mcp_server_page.connection.remote_tab') }}
+        </button>
+        <button id="mcp-local-tab" type="button" role="tab" :aria-selected="connectionMode === 'local'"
+          aria-controls="mcp-local-panel" @click="connectionMode = 'local'"
+          class="cursor-pointer px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap"
+          :class="connectionMode === 'local' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
+          {{ t('mcp_server_page.connection.local_tab') }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="connectionMode === 'local'" id="mcp-local-panel" role="tabpanel" aria-labelledby="mcp-local-tab">
     <!-- Adresa API -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">
       <div class="flex flex-wrap items-center gap-3">
@@ -941,6 +1002,109 @@ npm install</pre>
         <span v-if="!hasMcpTraffic && activeTokens.length > 0" class="text-neutral-400">
           Zatím žádné volání z MCP serveru — zkontrolujte krok 4 výše.
         </span>
+      </div>
+    </div>
+    </div>
+
+    <div v-else id="mcp-remote-panel" role="tabpanel" aria-labelledby="mcp-remote-tab">
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold mb-1">{{ t('mcp_server_page.connection.status_title') }}</h2>
+            <span v-if="remoteSettingsLoading" class="text-sm text-neutral-500">{{ t('mcp_server_page.connection.status_loading') }}</span>
+            <span v-else-if="remoteSettings" class="inline-flex rounded px-2 py-1 text-xs font-medium"
+              :class="remoteSettings.enabled ? 'bg-success-50 text-success-700' : 'bg-neutral-100 text-neutral-600'">
+              {{ t(remoteSettings.enabled ? 'mcp_server_page.connection.status_on' : 'mcp_server_page.connection.status_off') }}
+            </span>
+          </div>
+          <button v-if="auth.isSuperadmin && remoteSettings" type="button" @click="toggleRemote"
+            :disabled="remoteSettingsSaving || remoteSettings.managed_by_environment || (!remoteSettings.enabled && !remoteSettings.node_available)"
+            class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 rounded-md text-sm font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            :class="remoteSettings.enabled ? 'border border-danger-500 text-danger-600 hover:bg-danger-50' : 'bg-success-600 hover:bg-success-700 text-white'">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 2v10M6.3 5.7a8 8 0 1 0 11.4 0" />
+            </svg>
+            {{ t(remoteSettings.enabled ? 'mcp_server_page.connection.disable' : 'mcp_server_page.connection.enable') }}
+          </button>
+        </div>
+        <p v-if="remoteSettings && !remoteSettings.node_available" class="mt-3 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+          {{ t('mcp_server_page.connection.node_missing') }}
+        </p>
+        <p v-if="remoteSettings?.managed_by_environment" class="mt-3 text-sm text-neutral-500">
+          {{ t('mcp_server_page.connection.env_managed') }}
+        </p>
+        <p v-if="remoteSettingsError" role="alert" class="mt-3 text-sm text-danger-600">{{ remoteSettingsError }}</p>
+        <p v-if="!auth.isSuperadmin" class="mt-3 text-xs text-neutral-500">{{ t('mcp_server_page.connection.admin_only') }}</p>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
+        <h2 class="text-lg font-semibold mb-1">{{ t('mcp_server_page.connection.remote_title') }}</h2>
+        <p class="text-sm text-neutral-700 mb-4">{{ t('mcp_server_page.connection.remote_intro') }}</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="min-w-0">
+            <div class="text-xs text-neutral-500 mb-1">{{ t('mcp_server_page.connection.remote_url_label') }}</div>
+            <code class="block px-3 py-2 bg-neutral-100 rounded font-mono text-sm break-all">{{ remoteUrl }}</code>
+          </div>
+          <button type="button" @click="copy(remoteUrl)"
+            class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-sm font-medium whitespace-nowrap">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+            </svg>
+            {{ t('mcp_server_page.connection.copy_url') }}
+          </button>
+        </div>
+        <p class="text-xs text-neutral-500 mt-3">{{ t('mcp_server_page.connection.url_requirement') }}</p>
+      </div>
+
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
+        <h2 class="text-lg font-semibold mb-3">{{ t('mcp_server_page.connection.how_to_title') }}</h2>
+        <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
+          <li>{{ t('mcp_server_page.connection.step_copy') }}</li>
+          <li>{{ t('mcp_server_page.connection.step_add') }}</li>
+          <li>{{ t('mcp_server_page.connection.step_authorize') }}</li>
+          <li>{{ t('mcp_server_page.connection.step_verify') }}</li>
+        </ol>
+        <p class="mt-3 rounded-md bg-primary-50 border border-primary-600/40 px-3 py-2 text-sm text-primary-700">
+          {{ t('mcp_server_page.connection.no_pat') }}
+        </p>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2 mb-4">
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+          <h3 class="font-semibold mb-2">ChatGPT</h3>
+          <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
+            <li>{{ t('mcp_server_page.connection.chatgpt_1') }}</li>
+            <li>{{ t('mcp_server_page.connection.chatgpt_2') }}</li>
+            <li>{{ t('mcp_server_page.connection.chatgpt_3') }}</li>
+          </ol>
+          <p class="mt-3 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+            {{ t('mcp_server_page.connection.chatgpt_mobile') }}
+          </p>
+          <a href="https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt"
+            target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs text-primary-600 hover:underline">
+            {{ t('mcp_server_page.connection.provider_guide') }} →
+          </a>
+        </div>
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+          <h3 class="font-semibold mb-2">Claude</h3>
+          <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
+            <li>{{ t('mcp_server_page.connection.claude_1') }}</li>
+            <li>{{ t('mcp_server_page.connection.claude_2') }}</li>
+            <li>{{ t('mcp_server_page.connection.claude_3') }}</li>
+          </ol>
+          <p class="mt-3 rounded-md bg-success-50 border border-success-500/40 px-3 py-2 text-sm text-success-700">
+            {{ t('mcp_server_page.connection.claude_mobile') }}
+          </p>
+          <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp"
+            target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs text-primary-600 hover:underline">
+            {{ t('mcp_server_page.connection.provider_guide') }} →
+          </a>
+        </div>
+      </div>
+
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4 text-sm text-neutral-700">
+        <h2 class="text-lg font-semibold mb-2">{{ t('mcp_server_page.connection.permissions_title') }}</h2>
+        <p>{{ t('mcp_server_page.connection.permissions') }}</p>
+        <p class="mt-2">{{ t('mcp_server_page.connection.revoke') }}</p>
       </div>
     </div>
   </div>

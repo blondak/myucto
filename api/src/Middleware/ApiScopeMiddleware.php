@@ -211,6 +211,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // RequestPath) — obojí musí platit přesně tam, kam router request doručí.
         $path   = RequestPath::normalize($request->getUri()->getPath());
         $method = strtoupper($request->getMethod());
+        if ($path === '/mcp') {
+            return $handler->handle($request);
+        }
 
         // 1) Path allowlist — token mimo veřejný subset → 403 (vrací se 403, ne 404,
         //    aby integrátor dostal jasný signál; samotná existence interních cest

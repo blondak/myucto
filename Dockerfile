@@ -39,6 +39,8 @@ COPY api/ ./
 RUN composer dump-autoload --optimize --classmap-authoritative \
  && php bin/cleanup-mpdf-fonts.php
 
+FROM node:24-bookworm-slim AS mcp-node
+
 # ---------- Stage 3: runtime ----------
 FROM php:8.5-apache AS runtime
 
@@ -60,7 +62,7 @@ COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensio
 RUN install-php-extensions \
         pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium soap imagick \
  && apt-get update \
- && apt-get install -y --no-install-recommends tini cron mariadb-client \
+ && apt-get install -y --no-install-recommends tini cron mariadb-client libstdc++6 \
  && if [ "$INSTALL_RSVG" = "1" ]; then \
         apt-get install -y --no-install-recommends librsvg2-bin; \
     fi \
@@ -115,6 +117,7 @@ RUN sed -ri \
 
 # Copy application code
 WORKDIR /var/www/html
+COPY --from=mcp-node /usr/local/bin/node /usr/local/bin/node
 COPY --chown=www-data:www-data . .
 RUN chmod +x /var/www/html/docker-entrypoint.sh
 COPY --from=web-build --chown=www-data:www-data /app/dist ./web/dist

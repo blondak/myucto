@@ -59,6 +59,9 @@ final class AnonymizationPolicy
         'login_otps' => 'jednorázové kódy',
         'mail_outbox' => 'fronta odchozí pošty — v kopii se nic odeslat nesmí',
         'mail_rate_limit_events' => 'technický záznam odesílání',
+        'mcp_oauth_clients' => 'registrace externích MCP klientů',
+        'mcp_oauth_codes' => 'jednorázové autorizační kódy',
+        'mcp_oauth_grants' => 'obnovovací tokeny externích MCP klientů',
         'mfa_recovery_codes' => 'záchranné kódy 2FA',
         'mfa_step_up_proofs' => 'doklady o ověření relace',
         'password_resets' => 'tokeny pro obnovu hesla',
@@ -96,6 +99,7 @@ final class AnonymizationPolicy
         "UPDATE integration_connections SET status = 'paused' WHERE status = 'active'",
         'UPDATE submission_channel_credentials SET inbox_polling_enabled = 0',
         'UPDATE isds_gateway_registrations SET is_active = 0',
+        'UPDATE mcp_server_settings SET enabled = 0',
         'UPDATE users SET totp_enabled = 0',
     ];
 

@@ -108,7 +108,11 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 try {
     $requestPath = RequestPath::normalize((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/'));
-    if (!str_starts_with($requestPath, '/api/')) {
+    if (!str_starts_with($requestPath, '/api/')
+        && $requestPath !== '/mcp'
+        && !in_array($requestPath, ['/oauth/authorize', '/oauth/token', '/oauth/register'], true)
+        && !str_starts_with($requestPath, '/.well-known/oauth-')
+    ) {
         // H-03: zámek údržby pro SPA fallback.
         //
         // Tahle větev se do Slim pipeline NIKDY nedostane — front controller

@@ -63,6 +63,10 @@ final class CsrfMiddleware implements MiddlewareInterface
         // kam router request doručí, ani o cestu víc.
         $path = RequestPath::normalize($request->getUri()->getPath());
 
+        if (in_array($path, ['/mcp', '/oauth/token', '/oauth/register'], true)) {
+            return $handler->handle($request);
+        }
+
         // Public schvalovací endpointy — bez Origin/CSRF (klient přijde z emailu, Origin
         // bude jiný nebo prázdný). Anti-bot ochrana = token v URL + CAPTCHA.
         if (str_starts_with($path, '/api/public/')) {
@@ -132,6 +136,10 @@ final class CsrfMiddleware implements MiddlewareInterface
         $session = $request->getAttribute(AuthMiddleware::ATTR_SESSION);
         $expectedToken = is_array($session) ? (string) ($session['csrf_token'] ?? '') : '';
         $providedToken = $request->getHeaderLine('X-CSRF-Token');
+        if ($path === '/oauth/authorize' && $providedToken === '') {
+            parse_str((string) $request->getBody(), $form);
+            $providedToken = (string) ($form['csrf_token'] ?? '');
+        }
 
         if ($expectedToken === '' || $providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
             $response = $this->responseFactory->createResponse(403);

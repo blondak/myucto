@@ -54,6 +54,7 @@ const routes: RouteRecordRaw[] = [
     children: createWorkspaceRoutes(),
   },
   { path: '/login',  name: 'login',  component: () => import('@/pages/Login.vue'),          meta: { public: true } },
+  { path: '/oauth/continue', name: 'mcp-oauth-continue', component: () => import('@/pages/McpOAuthContinue.vue'), meta: { requiresAuth: true } },
   { path: '/domain-login/callback', name: 'domain-login-callback', component: () => import('@/pages/DomainLoginCallback.vue'), meta: { public: true } },
   { path: '/setup',  name: 'setup',  component: () => import('@/pages/Setup.vue'),          meta: { public: true } },
   { path: '/setup-mfa', name: 'setup-mfa', component: () => import('@/pages/ForcedMfaSetup.vue'), meta: { requiresAuth: true, mfaSetupOnly: true } },
@@ -186,7 +187,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'credit-cards': ['bank'], 'credit-card-detail': ['bank'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
-  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
+  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'mcp-oauth-continue': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
 }
 
 const superadminRouteNames = new Set([

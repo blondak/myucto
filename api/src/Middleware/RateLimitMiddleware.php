@@ -232,6 +232,14 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:api:tok:' . $tokenId, $limit, 60];
         }
 
+        if ($method === 'POST' && in_array($path, ['/oauth/register', '/oauth/token'], true)) {
+            return ['rl:mcp-oauth:' . sha1($path) . ':ip:' . $this->ipBucket($ip),
+                $path === '/oauth/register' ? 10 : 30, 60];
+        }
+        if ($path === '/oauth/authorize' && $method === 'POST') {
+            return ['rl:mcp-consent:user:' . $userId, 10, 60];
+        }
+
         // Login — všichni
         if ($path === '/api/auth/login' && $method === 'POST') {
             return ['rl:login:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10), 60];

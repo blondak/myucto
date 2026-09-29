@@ -141,6 +141,7 @@ export class MyUctoClient {
     this.supplierId = cfg.supplierId ?? null;
     this.readOnly = Boolean(cfg.readOnly);
     this.version = cfg.version;
+    this.fetcher = cfg.fetcher ?? fetch;
     this.timeoutMs = cfg.timeoutMs ?? DEFAULTS.timeoutMs;
     this.throttle = new Throttle(
       cfg.maxRps ?? DEFAULTS.maxRps,
@@ -218,7 +219,7 @@ export class MyUctoClient {
 
       let response;
       try {
-        response = await fetch(url, {
+        response = await this.fetcher(url, {
           method,
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),

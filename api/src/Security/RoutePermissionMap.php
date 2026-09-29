@@ -25,6 +25,9 @@ final class RoutePermissionMap
         // autentizace je Ed25519 podpis obálky ověřený zabudovaným veřejným
         // klíčem (ManagedLicenseAction), takže bez podpisu endpoint neudělá nic.
         '/api/managed/license',
+        '/mcp', '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server',
+        '/oauth/register', '/oauth/authorize', '/oauth/token',
     ];
 
     /** @var list<string> */
@@ -46,6 +49,7 @@ final class RoutePermissionMap
         // Výchozí firma je volba vlastního účtu; přístup k firmě ověřuje akce.
         '/api/auth/default-supplier',
         '/api/auth/domain-login/authorize',
+        '/api/mcp/settings',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
 
@@ -895,6 +899,9 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
+        if ($path === '/api/mcp/settings' && $method !== 'GET') {
+            return new RoutePermission(self::SUPERADMIN);
+        }
         if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)
             && preg_match('#^/api/(settings/(vat-rates|units|countries)|accounting/repo-rates)(/|$)#', $path) === 1
         ) {

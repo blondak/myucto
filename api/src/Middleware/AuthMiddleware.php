@@ -66,6 +66,13 @@ final class AuthMiddleware implements MiddlewareInterface
         // (bez oprávnění). Zapsat routu jen do jednoho znamená 401 ještě
         // před akcí — přesně tak endpoint po vydání 5.28.2 mlčel.
         '/api/managed/license',
+        '/mcp',
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-authorization-server',
+        '/oauth/register',
+        '/oauth/authorize',
+        '/oauth/token',
     ];
 
     /**
@@ -115,7 +122,33 @@ final class AuthMiddleware implements MiddlewareInterface
                 // plně pod kontrolou útočníka, takže by šlo tabulku libovolně nafouknout.
                 // Stopu po takových pokusech nese aplikační log a rate limiter.
                 $response = $this->responseFactory->createResponse(401);
-                return Json::error($response, 'invalid_token', 'Neplatný nebo expirovaný API token.', 401);
+                $response = Json::error($response, 'invalid_token', 'Neplatný nebo expirovaný API token.', 401);
+                if (RequestPath::normalize($request->getUri()->getPath()) === '/mcp') {
+                    $base = rtrim((string) $this->config->get('app.url', ''), '/');
+                    return $response->withHeader('WWW-Authenticate',
+                        'Bearer resource_metadata="' . $base . '/.well-known/oauth-protected-resource"');
+                }
+                return $response;
+            }
+
+            if (($tokenRow['audience'] ?? 'api') === 'mcp') {
+                $grant = $this->db->pdo()->prepare(
+                    'SELECT resource, revoked_at, (expires_at > NOW()) AS active
+                       FROM mcp_oauth_grants WHERE access_token_id = ?'
+                );
+                $grant->execute([$tokenRow['id']]);
+                $binding = $grant->fetch(\PDO::FETCH_ASSOC);
+                $path = RequestPath::normalize($request->getUri()->getPath());
+                $resource = rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
+                if (!is_array($binding) || $binding['revoked_at'] !== null
+                    || (int) $binding['active'] !== 1
+                    || (string) $binding['resource'] !== $resource
+                    || ($path !== '/mcp' && !($request->getAttribute('mcp.internal') === true
+                        && str_starts_with($path, '/api/')))
+                ) {
+                    return Json::error($this->responseFactory->createResponse(401),
+                        'invalid_token', 'Token není určený pro tento zdroj.', 401);
+                }
             }
 
             $ip = $this->ipMatcher->clientIp(

@@ -58,6 +58,7 @@ final class TenantScopeResolver
         'password_resets', 'login_attempts', 'login_otps',
         'mfa_recovery_codes', 'mfa_step_up_proofs',
         'api_tokens', 'api_token_ips', 'api_request_log',
+        'mcp_server_settings', 'mcp_oauth_clients', 'mcp_oauth_codes', 'mcp_oauth_grants',
         'sessions', 'activity_log_chain_head',
         'countries', 'vat_rates',
         'ares_cache', 'crpdph_cache',
