@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({
+  route: { query: {} as Record<string, string>, hash: '' },
   api: Object.fromEntries([
     'overview', 'monthly', 'yearly', 'topClients', 'topVendors', 'agingReceivables',
     'agingPayables', 'dso', 'punctuality', 'concentration', 'vendorConcentration',
@@ -12,6 +13,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/crm', () => ({ crmApi: mocks.api }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({}) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
+vi.mock('vue-router', async importOriginal => ({
+  ...await importOriginal<typeof import('vue-router')>(),
+  useRoute: () => mocks.route,
+}))
 vi.mock('vue-i18n', async importOriginal => ({
   ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({ t: (key: string) => key }),
@@ -20,6 +25,8 @@ import CrmDashboard from '../CrmDashboard.vue'
 
 describe('CRM dashboard loading', () => {
   beforeEach(() => {
+    mocks.route.query = {}
+    mocks.route.hash = ''
     for (const method of Object.values(mocks.api)) method.mockReset().mockResolvedValue([])
   })
 
@@ -33,6 +40,18 @@ describe('CRM dashboard loading', () => {
     expect(mocks.api.monthly).toHaveBeenCalledWith(12, currency)
     expect(mocks.api.monthly).toHaveBeenCalledWith(24, currency)
     expect(mocks.api.topClients).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('preserves the period and currency supplied by a risk drilldown', async () => {
+    mocks.route.query = { months: '6', currency: 'EUR' }
+    mocks.route.hash = '#client_concentration'
+    mocks.api.overview.mockResolvedValue({ currencies: ['CZK', 'EUR'] })
+    const wrapper = mount({ ...CrmDashboard, render: () => null })
+    await flushPromises()
+    expect(mocks.api.overview).toHaveBeenCalledTimes(1)
+    expect(mocks.api.monthly).toHaveBeenCalledWith(6, 'EUR')
+    expect(mocks.api.topClients).toHaveBeenCalledWith(6, 10, 'EUR')
     wrapper.unmount()
   })
 
