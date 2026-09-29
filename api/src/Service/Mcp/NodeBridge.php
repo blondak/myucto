@@ -71,11 +71,11 @@ final class NodeBridge
         if ($exit !== 0 || $output === false || strlen($output) > 4 * 1024 * 1024) {
             throw new \RuntimeException('Node.js MCP proces selhal: ' . substr((string) $error, 0, 500));
         }
-        $decoded = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($decoded)) {
+        $decoded = json_decode($output, false, 512, JSON_THROW_ON_ERROR);
+        if (!$decoded instanceof \stdClass) {
             throw new \RuntimeException('Node.js MCP proces vrátil neplatnou odpověď.');
         }
-        return $decoded;
+        return (array) $decoded;
     }
 
     private function nodeEnvironment(): ?array

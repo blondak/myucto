@@ -196,6 +196,14 @@ proměnnou dostanou všechny jejich PHP procesy. Server potřebuje také PHP CLI
 adresáři PHP, nastav `MYINVOICE_MCP_PHP_BINARY` na úplnou cestu k `php.exe`.
 Na počítači uživatele Node pro online připojení není třeba.
 
+Na IIS nastav u webu **Authentication → Anonymous Authentication → Edit →
+Application pool identity**. Výchozí účet `IUSR` může při spuštění Node z PHP
+FastCGI způsobit `Access is denied` u potomkových procesů a pád Node s hláškou
+`ncrypto::CSPRNG(nullptr, 0)`. Pro instalaci použij vlastní aplikační pool,
+aby nastavení identity nezasáhlo jiné weby. Na poolu ponech
+**ApplicationPoolIdentity** a zapni **Load User Profile**. Práva k adresáři
+aplikace a `node.exe` musí této identitě umožnit čtení a spuštění.
+
 1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
 2. Při připojení se v prohlížeči přihlas do MyÚčta a vyber firmu. Když asistent
    požaduje čtení a zápis, můžeš v poli **Udělit přístup** zvolit **Pouze čtení**
@@ -210,8 +218,9 @@ Na počítači uživatele Node pro online připojení není třeba.
 3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
    Nástroj `whoami` vrátí uživatele, roli a firmu.
 
-Katalog online připojení se načítá po stránkách. Asistent si další stránky
-načte automaticky podle MCP kurzoru.
+Server odešle celý katalog dostupný pro schválený rozsah přístupu v jedné
+odpovědi. Asistent může v konkrétní konverzaci nabídnout jen nástroje relevantní
+pro aktuální úkol.
 
 Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém zařízení
 neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,

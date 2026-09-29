@@ -14,18 +14,13 @@ function list(scope, cursor) {
   return JSON.parse(child.stdout);
 }
 
-test('hostovaný katalog vrací všechny povolené nástroje po stránkách', () => {
+test('hostovaný katalog vrací všechny povolené nástroje v jedné odpovědi', () => {
   for (const scope of ['read', 'read_write']) {
-    const names = [];
-    let cursor;
-    do {
-      const page = list(scope, cursor);
-      assert.ok(page.tools.length > 0 && page.tools.length <= 30);
-      names.push(...page.tools.map((tool) => tool.name));
-      cursor = page.nextCursor;
-    } while (cursor);
+    const page = list(scope);
+    const names = page.tools.map((tool) => tool.name);
     const expected = TOOLS.filter((tool) => scope === 'read_write' || !tool.write).map((tool) => tool.name);
     assert.deepEqual(names, expected);
+    assert.equal(page.nextCursor, undefined);
     assert.equal(new Set(names).size, names.length);
   }
 });

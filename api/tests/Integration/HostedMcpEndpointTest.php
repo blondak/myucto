@@ -52,17 +52,23 @@ final class HostedMcpEndpointTest extends TestCase
         $initialize = $this->send($action, $factory, 'initialize', ['protocolVersion' => '2025-06-18']);
         self::assertSame('2025-06-18', $initialize['result']['protocolVersion']);
 
+        $list = $this->send($action, $factory, 'tools/list', []);
+        self::assertArrayNotHasKey('nextCursor', $list['result']);
+        $rawList = json_decode((string) $this->sendResponse($action, $factory, 'tools/list')->getBody(), false, 512, JSON_THROW_ON_ERROR);
+        foreach ($rawList->result->tools as $tool) {
+            self::assertIsObject($tool->inputSchema->properties);
+        }
+        $readWriteList = json_decode((string) $this->sendResponse($action, $factory, 'tools/list', [], 'read_write')->getBody(), false, 512, JSON_THROW_ON_ERROR);
+        self::assertGreaterThan(200, count($readWriteList->result->tools));
+        self::assertObjectNotHasProperty('nextCursor', $readWriteList->result);
+        foreach ($readWriteList->result->tools as $tool) {
+            self::assertIsObject($tool->inputSchema->properties);
+        }
         $names = [];
-        $cursor = null;
-        do {
-            $list = $this->send($action, $factory, 'tools/list', $cursor === null ? [] : ['cursor' => $cursor]);
-            self::assertLessThanOrEqual(30, count($list['result']['tools']));
-            foreach ($list['result']['tools'] as $tool) {
-                self::assertTrue($tool['annotations']['readOnlyHint']);
-                $names[] = $tool['name'];
-            }
-            $cursor = $list['result']['nextCursor'] ?? null;
-        } while ($cursor !== null);
+        foreach ($list['result']['tools'] as $tool) {
+            self::assertTrue($tool['annotations']['readOnlyHint']);
+            $names[] = $tool['name'];
+        }
         self::assertGreaterThan(100, count($names));
         self::assertCount(count(array_unique($names)), $names);
 
@@ -104,16 +110,26 @@ final class HostedMcpEndpointTest extends TestCase
         string $method,
         array $params = [],
     ): array {
+        return json_decode((string) $this->sendResponse($action, $factory, $method, $params)->getBody(), true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    private function sendResponse(
+        HostedMcpEndpointAction $action,
+        ResponseFactory $factory,
+        string $method,
+        array $params = [],
+        string $scope = 'read',
+    ): \Psr\Http\Message\ResponseInterface {
         $request = (new ServerRequestFactory())->createServerRequest('POST', 'https://example.test/mcp')
             ->withHeader('Authorization', 'Bearer mi_pat_synthetic')
             ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
-            ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read']);
+            ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => $scope]);
         $request->getBody()->write(json_encode([
             'jsonrpc' => '2.0', 'id' => 1, 'method' => $method, 'params' => $params,
         ], JSON_THROW_ON_ERROR));
         $request->getBody()->rewind();
         $response = $action->handle($request, $factory->createResponse());
         self::assertSame(200, $response->getStatusCode());
-        return json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        return $response;
     }
 }

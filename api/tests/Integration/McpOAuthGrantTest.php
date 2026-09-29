@@ -123,31 +123,25 @@ final class McpOAuthGrantTest extends TestCase
             'serverParams' => ['REMOTE_ADDR' => '127.0.0.1'],
         ]);
         self::assertNotTrue($called['isError'] ?? false, json_encode($called));
-        self::assertIsArray($called['structuredContent'] ?? null);
+        self::assertIsObject($called['structuredContent'] ?? null);
         $base = rtrim((string) Config::load(dirname(__DIR__, 3))->get('app.url'), '/');
         $previousEnabled = getenv('MYINVOICE_MCP_ENABLED');
         putenv('MYINVOICE_MCP_ENABLED=1');
         try {
             $app = Bootstrap::buildApp();
-            $names = [];
-            $cursor = null;
-            do {
-                $params = $cursor === null ? (object) [] : ['cursor' => $cursor];
-                $request = (new ServerRequestFactory())->createServerRequest(
-                    'POST', $base . '/mcp', ['REMOTE_ADDR' => '127.0.0.1'],
-                )->withHeader('Authorization', 'Bearer ' . $first['access_token'])
-                    ->withHeader('Content-Type', 'application/json')
-                    ->withBody((new StreamFactory())->createStream(json_encode([
-                        'jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/list', 'params' => $params,
-                    ], JSON_THROW_ON_ERROR)));
-                $response = $app->handle($request);
-                self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-                $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
-                self::assertNotEmpty($body['result']['tools'] ?? []);
-                self::assertLessThanOrEqual(30, count($body['result']['tools']));
-                $names = array_merge($names, array_column($body['result']['tools'], 'name'));
-                $cursor = $body['result']['nextCursor'] ?? null;
-            } while ($cursor !== null);
+            $request = (new ServerRequestFactory())->createServerRequest(
+                'POST', $base . '/mcp', ['REMOTE_ADDR' => '127.0.0.1'],
+            )->withHeader('Authorization', 'Bearer ' . $first['access_token'])
+                ->withHeader('Content-Type', 'application/json')
+                ->withBody((new StreamFactory())->createStream(json_encode([
+                    'jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/list', 'params' => (object) [],
+                ], JSON_THROW_ON_ERROR)));
+            $response = $app->handle($request);
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+            self::assertNotEmpty($body['result']['tools'] ?? []);
+            self::assertArrayNotHasKey('nextCursor', $body['result']);
+            $names = array_column($body['result']['tools'], 'name');
             self::assertContains('whoami', $names);
             self::assertContains('list_unpaid_invoices', $names);
             self::assertCount(count(array_unique($names)), $names);
