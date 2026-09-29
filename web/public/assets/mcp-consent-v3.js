@@ -4,8 +4,22 @@ const proof = document.getElementById('mcp-step-up-token')
 const csrf = document.querySelector('input[name="csrf_token"]')
 const form = document.getElementById('mcp-consent-form')
 const totp = form.querySelector('input[name="totp_code"]')
+const supplier = form.querySelector('select[name="supplier_id"]')
+const grant = form.querySelector('select[name="grant_scope"]')
+const writeOption = grant?.querySelector('option[value="read_write"]')
 let proofIssuedAt = 0
 let submitting = false
+
+const syncWriteOption = () => {
+  if (!writeOption || !supplier) return
+  const canWrite = supplier.selectedOptions[0]?.dataset.canWrite === '1'
+  writeOption.disabled = !canWrite
+  writeOption.hidden = !canWrite
+  if (!canWrite && grant.value === 'read_write') grant.value = 'read'
+}
+
+supplier?.addEventListener('change', syncWriteOption)
+syncWriteOption()
 
 const decode = value => {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4)

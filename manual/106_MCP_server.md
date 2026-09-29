@@ -220,16 +220,26 @@ aplikace a `node.exe` musí této identitě umožnit čtení a spuštění.
 
 Server odešle celý katalog dostupný pro schválený rozsah přístupu v jedné
 odpovědi. Asistent může v konkrétní konverzaci nabídnout jen nástroje relevantní
-pro aktuální úkol.
+pro aktuální úkol. Katalog se zatím nefiltruje podle jednotlivých práv role.
+Nástroj mimo její oprávnění se může zobrazit, ale API jeho volání odmítne.
 
 Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém zařízení
 neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,
 rozsah a oprávnění účtu. Aktivní povolení se zobrazují ve stejné záložce pod
 stavem serveru. Tlačítko **Odvolat přístup** okamžitě zneplatní přístupový token
 i možnost jeho obnovy. Konektor můžeš navíc odebrat v nastavení asistenta.
+Uživatel s rolí pouze pro čtení může připojení povolit jen pro čtení. Pro sdílení
+samotných statistik mu nastav roli s přístupem pouze k příslušným přehledům
+a právem číst správu vlastních API tokenů.
 Správce může tlačítkem **Otestovat nástroje** ověřit, že serverový Node most
 skutečně nabízí nástroje. Pokud asistent hlásí nedostupný konektor nebo nula
 nástrojů, spusť tento test a zkontroluj uvedenou chybu.
+
+Online MCP se aktualizuje spolu s MyÚčtem na této instalaci. Adresa `/mcp`
+i schválené připojení zůstávají stejné; na zařízení se nic nestahuje.
+Server při připojení hlásí verzi instalace. Po přidání nebo změně nástrojů
+obnov jejich seznam v asistentovi a začni nový chat. V ChatGPT připojeném
+ve vývojářském režimu použij u serveru akci **Refresh**.
 
 **ChatGPT:** V **Nastavení → Integrace → Pluginy** zvol **Přidat → Přidat server MCP**
 a typ **Streamovatelné HTTP**. Zadej název a adresu své instalace končící
@@ -253,9 +263,6 @@ vlož adresu `/mcp`, přidej konektor a tlačítkem **Connect** dokonči přihl�
 V organizaci musí vlastní konektor nejprve přidat vlastník v nastavení organizace.
 V konverzaci jej zapni přes **+ → Connectors**. Anthropic potvrzuje, že jednou
 přidaný [vzdálený konektor funguje také v mobilní aplikaci Claude](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp).
-
-Přístup pro člověka bez účtu v MyÚčtu, například pouze ke statistikám, v této
-verzi není součástí online připojení.
 
 ## 106.4 Nastavení
 

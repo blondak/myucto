@@ -301,6 +301,8 @@ final class McpOAuthGrantTest extends TestCase
             self::assertSame(200, $initialized->getStatusCode(), (string) $initialized->getBody());
             $result = json_decode((string) $initialized->getBody(), true, 512, JSON_THROW_ON_ERROR);
             self::assertSame('myucto', $result['result']['serverInfo']['name']);
+            self::assertSame(trim((string) file_get_contents(dirname(__DIR__, 3) . '/VERSION')),
+                $result['result']['serverInfo']['version']);
         } finally {
             putenv($previous === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $previous);
         }
@@ -511,6 +513,76 @@ final class McpOAuthGrantTest extends TestCase
         return html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
+    public function testReadOnlyUserCanAuthorizeReadScopeButCannotGrantWrite(): void
+    {
+        $pdo = $this->db->pdo();
+        $readonlyRole = (int) $pdo->query("SELECT id FROM roles WHERE system_key = 'readonly' AND is_active = 1 LIMIT 1")->fetchColumn();
+        self::assertGreaterThan(0, $readonlyRole);
+        $pdo->prepare('UPDATE users SET role_id = ? WHERE id = ?')->execute([$readonlyRole, $this->userId]);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$this->userId, $this->supplierId, $readonlyRole]);
+
+        $config = Config::load(dirname(__DIR__, 3));
+        $sessions = new SessionManager($this->db, $config, new DatabaseSecurityClock());
+        $session = $sessions->create($this->userId, '127.0.0.1', 'synthetic-readonly-mcp');
+        $client = $this->oauth->register('Synthetic assistant', ['https://client.example.test/callback']);
+        $this->clientIds[] = $client;
+        $prior = getenv('MYINVOICE_MCP_ENABLED');
+        putenv('MYINVOICE_MCP_ENABLED=1');
+        try {
+            $base = rtrim((string) $config->get('app.url'), '/');
+            $verifier = str_repeat('e', 64);
+            $params = [
+                'client_id' => $client,
+                'redirect_uri' => 'https://client.example.test/callback',
+                'response_type' => 'code',
+                'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='),
+                'code_challenge_method' => 'S256',
+                'resource' => $base . '/mcp',
+                'scope' => 'read_write',
+            ];
+            $cookie = (string) $config->get('session.cookie_name', '__Host-myinvoice_session');
+            $factory = new ServerRequestFactory();
+            $request = $factory->createServerRequest('GET', $base . '/oauth/authorize?' . http_build_query($params),
+                ['REMOTE_ADDR' => '127.0.0.1'])->withCookieParams([$cookie => $session['token']]);
+            $app = Bootstrap::buildApp();
+            $consent = $app->handle($request);
+            self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
+            self::assertStringContainsString('value="read"', (string) $consent->getBody());
+            self::assertStringNotContainsString('<option value="read_write">', (string) $consent->getBody());
+
+            $post = static function (array $form) use ($app, $factory, $base, $cookie, $session): \Psr\Http\Message\ResponseInterface {
+                return $app->handle($factory->createServerRequest('POST', $base . '/oauth/authorize',
+                    ['REMOTE_ADDR' => '127.0.0.1'])
+                    ->withCookieParams([$cookie => $session['token']])
+                    ->withHeader('Origin', $base)
+                    ->withHeader('Content-Type', 'application/x-www-form-urlencoded')
+                    ->withParsedBody($form)
+                    ->withBody((new StreamFactory())->createStream(http_build_query($form))));
+            };
+            $form = $params + [
+                'supplier_id' => (string) $this->supplierId,
+                'decision' => 'approve',
+                'csrf_token' => $session['csrf_token'],
+            ];
+            $forged = $post($form + ['grant_scope' => 'read_write']);
+            self::assertSame(403, $forged->getStatusCode(), (string) $forged->getBody());
+
+            $approved = $post($form + ['grant_scope' => 'read']);
+            self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+            parse_str((string) parse_url(self::consentTarget($approved), PHP_URL_QUERY), $callback);
+            $grant = $this->oauth->exchange($callback['code'], $client, $params['redirect_uri'], $verifier, $params['resource']);
+            self::assertIsArray($grant);
+            self::assertSame('read', $this->tokens->validate($grant['access_token'])['scope']);
+            self::assertSame($this->userId, $this->tokens->validate($grant['access_token'])['user_id']);
+            self::assertSame($this->supplierId, $this->tokens->validate($grant['access_token'])['supplier_id']);
+        } finally {
+            $sessions->destroy($session['token']);
+            putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
+            $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$this->userId]);
+        }
+    }
+
     public function testConsentOffersSupplierWithTokenPermissionWhenDefaultDeniesIt(): void
     {
         $pdo = $this->db->pdo();
@@ -565,7 +637,7 @@ final class McpOAuthGrantTest extends TestCase
             )->withCookieParams([$cookie => $session['token']]);
             $response = Bootstrap::buildApp()->handle($request);
             self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-            self::assertStringContainsString('value="' . $otherSupplierId . '" selected', (string) $response->getBody());
+            self::assertStringContainsString('value="' . $otherSupplierId . '" data-can-write="1" selected', (string) $response->getBody());
             self::assertStringNotContainsString('value="' . $this->supplierId . '"', (string) $response->getBody());
         } finally {
             $sessions->destroy($session['token']);

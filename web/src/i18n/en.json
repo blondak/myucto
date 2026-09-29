@@ -27800,7 +27800,7 @@
       "provider_guide": "Current provider guide",
       "permissions_title": "Access and revocation",
       "permissions": "Every call is limited by the selected company, read or read and write scope, and your account permissions. Accounting and taxes remain read only.",
-      "revoke": "Revoke a connection in the list above, and remove it from the assistant's settings if needed. Sharing statistics with someone who has no MyÚčto account is a separate future feature."
+      "revoke": "Revoke a connection in the list above, and remove it from the assistant's settings if needed."
     },
     "capabilities": {
       "projects": "projects",

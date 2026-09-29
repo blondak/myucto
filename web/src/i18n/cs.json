@@ -27800,7 +27800,7 @@
       "provider_guide": "Aktuální návod poskytovatele",
       "permissions_title": "Přístup a odvolání",
       "permissions": "Každé volání se omezuje zvolenou firmou, rozsahem čtení nebo čtení a zápis a oprávněními vašeho účtu. Účetnictví a daně zůstávají jen pro čtení.",
-      "revoke": "Připojení odvoláte v seznamu výše a můžete je odebrat také v nastavení asistenta. Sdílení statistik s osobou bez účtu v MyÚčtu bude samostatná další funkce."
+      "revoke": "Připojení odvoláte v seznamu výše a můžete je odebrat také v nastavení asistenta."
     },
     "capabilities": {
       "projects": "zakázky",

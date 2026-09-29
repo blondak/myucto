@@ -171,9 +171,12 @@ final class McpOAuthAction
                 $access = $this->suppliers->resolve($candidateRequest);
                 if (!$access->denied && $access->supplierId === $candidateId
                     && $this->permissions->allows(
-                        $this->roles->resolve($candidateRequest), 'profile.tokens', AccessLevel::WRITE,
+                        $this->roles->resolve($candidateRequest), 'profile.tokens', AccessLevel::READ,
                     )
                 ) {
+                    $choice['can_write'] = $this->permissions->allows(
+                        $this->roles->resolve($candidateRequest), 'profile.tokens', AccessLevel::WRITE,
+                    );
                     $choices[] = $choice;
                 }
             }
@@ -188,7 +191,7 @@ final class McpOAuthAction
                 return $this->html($response, '<h1>Uživatel nemá přístup k žádné firmě.</h1>', 403);
             }
             $selectedRequest = $request->withQueryParams(['supplier_id' => $supplierId]);
-            if (!$this->permissions->allows($this->roles->resolve($selectedRequest), 'profile.tokens', AccessLevel::WRITE)) {
+            if (!$this->permissions->allows($this->roles->resolve($selectedRequest), 'profile.tokens', AccessLevel::READ)) {
                 return $this->html($response, '<h1>Nemáte oprávnění k vydání API tokenu.</h1>', 403);
             }
         }
@@ -217,11 +220,12 @@ final class McpOAuthAction
             foreach ($choices as $choice) {
                 $id = (int) $choice['supplier_id'];
                 $selected = $id === $supplierId ? ' selected' : '';
-                $select .= '<option value="' . $id . '"' . $selected . '>'
+                $select .= '<option value="' . $id . '" data-can-write="' . ($choice['can_write'] ? '1' : '0') . '"' . $selected . '>'
                     . self::escape((string) $choice['name']) . '</option>';
             }
             $select .= '</select></label>';
-            $grantChoice = $scope === 'read_write'
+            $canGrantWrite = $scope === 'read_write' && in_array(true, array_column($choices, 'can_write'), true);
+            $grantChoice = $canGrantWrite
                 ? '<label class="field">Udělit přístup<select name="grant_scope">'
                     . '<option value="read" selected>Pouze čtení</option>'
                     . '<option value="read_write">Čtení a zápis</option>'
@@ -267,6 +271,10 @@ final class McpOAuthAction
         if (!in_array($grantScope, ['read', 'read_write'], true)
             || ($scope === 'read' && $grantScope !== 'read')) {
             return $this->html($response, '<h1>Neplatný rozsah přístupu.</h1>', 400);
+        }
+        if ($grantScope === 'read_write'
+            && !$this->permissions->allows($this->roles->resolve($selectedRequest), 'profile.tokens', AccessLevel::WRITE)) {
+            return $this->html($response, '<h1>Pro zápis nemáte oprávnění.</h1>', 403);
         }
         $proof = (string) ($params['step_up_token'] ?? '');
         $totpCode = trim((string) ($params['totp_code'] ?? ''));

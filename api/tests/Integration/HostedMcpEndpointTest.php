@@ -15,6 +15,8 @@ use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
+use MyInvoice\Service\Update\NativeUpdateService;
+use MyInvoice\Service\Update\VersionService;
 use Psr\Log\NullLogger;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -46,11 +48,14 @@ final class HostedMcpEndpointTest extends TestCase
             new TenantUrlResolver($config, new SupplierDomainRepository($db, EntityCache::disabled())),
             new ManagedModeGuard($config),
         );
-        $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config), new NullLogger());
+        $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config),
+            new VersionService($db, new NativeUpdateService()), new NullLogger());
         $factory = new ResponseFactory();
 
         $initialize = $this->send($action, $factory, 'initialize', ['protocolVersion' => '2025-06-18']);
         self::assertSame('2025-06-18', $initialize['result']['protocolVersion']);
+        self::assertSame(trim((string) file_get_contents(dirname(__DIR__, 3) . '/VERSION')),
+            $initialize['result']['serverInfo']['version']);
 
         $list = $this->send($action, $factory, 'tools/list', []);
         self::assertArrayNotHasKey('nextCursor', $list['result']);
@@ -92,7 +97,8 @@ final class HostedMcpEndpointTest extends TestCase
         $factory = new ResponseFactory();
         $request = (new ServerRequestFactory())->createServerRequest('POST', 'https://example.test/mcp');
         $bridge = new NodeBridge($hosted, $config);
-        $endpoint = new HostedMcpEndpointAction($hosted, $bridge, new NullLogger());
+        $endpoint = new HostedMcpEndpointAction($hosted, $bridge,
+            new VersionService($db, new NativeUpdateService()), new NullLogger());
         $disabled = $endpoint->handle($request, $factory->createResponse());
         self::assertSame(404, $disabled->getStatusCode());
 

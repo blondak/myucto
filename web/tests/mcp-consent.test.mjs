@@ -6,10 +6,11 @@ import { JSDOM } from 'jsdom'
 
 const script = readFileSync(join(import.meta.dirname, '../public/assets/mcp-consent-v3.js'), 'utf8')
 
-function consentPage(passkey = false) {
+function consentPage(passkey = false, accessFields = '') {
   const dom = new JSDOM(`<!doctype html><form id="mcp-consent-form">
     <input name="csrf_token" value="synthetic-csrf">
     <input name="totp_code">
+    ${accessFields}
     ${passkey ? '<input id="mcp-step-up-token"><button type="button" id="mcp-passkey-button">Passkey</button><span id="mcp-passkey-status"></span>' : ''}
     <button type="submit" name="decision" value="approve">Povolit</button>
     <button type="submit" name="decision" value="deny">Zamítnout</button>
@@ -18,6 +19,28 @@ function consentPage(passkey = false) {
   dom.window.eval(script)
   return dom
 }
+
+test('výběr firmy bez práva zápisu odebere zápis z nabídky souhlasu', () => {
+  const dom = consentPage(false, `<select name="supplier_id">
+    <option value="1" data-can-write="1">Firma se zápisem</option>
+    <option value="2" data-can-write="0">Firma pro čtení</option>
+  </select><select name="grant_scope">
+    <option value="read">Pouze čtení</option>
+    <option value="read_write">Čtení a zápis</option>
+  </select>`)
+  const supplier = dom.window.document.querySelector('select[name="supplier_id"]')
+  const grant = dom.window.document.querySelector('select[name="grant_scope"]')
+  const writeOption = grant.querySelector('option[value="read_write"]')
+  grant.value = 'read_write'
+  supplier.value = '2'
+  supplier.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+  assert.equal(grant.value, 'read')
+  assert.equal(writeOption.disabled, true)
+  supplier.value = '1'
+  supplier.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+  assert.equal(writeOption.disabled, false)
+  dom.window.close()
+})
 
 function submit(dom, decision) {
   const form = dom.window.document.getElementById('mcp-consent-form')

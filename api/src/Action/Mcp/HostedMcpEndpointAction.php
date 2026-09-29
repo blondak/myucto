@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
+use MyInvoice\Service\Update\VersionService;
 use Psr\Log\LoggerInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -18,6 +19,7 @@ final class HostedMcpEndpointAction
     public function __construct(
         private readonly HostedMcp $hosted,
         private readonly NodeBridge $bridge,
+        private readonly VersionService $version,
         private readonly LoggerInterface $logger,
     ) {}
 
@@ -71,7 +73,7 @@ final class HostedMcpEndpointAction
                 'initialize' => [
                     'protocolVersion' => $this->protocolVersion($message['params']['protocolVersion'] ?? null),
                     'capabilities' => ['tools' => ['listChanged' => false]],
-                    'serverInfo' => ['name' => 'myucto', 'version' => '1.0.0'],
+                    'serverInfo' => ['name' => 'myucto', 'version' => $this->version->getCurrentVersion()],
                     'instructions' => 'Nástroje pracují s daty jedné firmy dle uděleného přístupu. Účetnictví a daně jsou pouze ke čtení. Zápisové a mazací akce vyžadují potvrzení uživatele.',
                 ],
                 'ping' => (object) [],
