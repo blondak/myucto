@@ -186,7 +186,6 @@
     ],
     "portal": [
       "portal",
-      "purchase_submissions",
       "reports"
     ],
     "portal-document-requests": [
