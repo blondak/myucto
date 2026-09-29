@@ -27768,7 +27768,7 @@
       "how_to_title": "How to connect",
       "step_copy": "Copy this installation's MCP server address.",
       "step_add": "Add a custom remote connector in ChatGPT or Claude and enter this address.",
-      "step_authorize": "In the browser window, sign in to MyÚčto, choose a company, and approve the requested access with a passkey, authenticator code, or current password according to your account settings. Choose read access for ordinary questions; allow read and write only when needed.",
+      "step_authorize": "In the browser window, sign in to MyÚčto, choose a company, and review the requested access. If MFA is enabled, verify with a passkey or a fresh authenticator code. Without MFA, simply approve access. Choose read access for ordinary questions; allow read and write only when needed.",
       "step_verify": "Enable the connector in a new chat and ask the assistant to verify its connection to MyÚčto. The whoami tool returns your user, role, and company.",
       "no_pat": "Online connections do not require copying an API token. Sign-in and consent take place in the browser through MyÚčto.",
       "chatgpt_1": "Under Settings → Integrations → Plugins, choose Add → Add MCP server and select Streamable HTTP. Enter a name and the address shown above.",

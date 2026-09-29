@@ -228,6 +228,7 @@ final class McpOAuthGrantTest extends TestCase
             self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
             self::assertStringContainsString('Synthetic assistant', (string) $consent->getBody());
             self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $consent->getBody());
+            self::assertStringNotContainsString('name="password"', (string) $consent->getBody());
 
             $form = $params + [
                 'supplier_id' => (string) $this->supplierId,
@@ -241,11 +242,8 @@ final class McpOAuthGrantTest extends TestCase
                 ->withHeader('Content-Type', 'application/x-www-form-urlencoded')
                 ->withParsedBody($form)
                 ->withBody((new StreamFactory())->createStream(http_build_query($form)));
-            $unverified = $app->handle($post);
-            self::assertSame(401, $unverified->getStatusCode());
-            $form['password'] = 'synthetic-test-password';
-            $post = $post->withParsedBody($form)
-                ->withBody((new StreamFactory())->createStream(http_build_query($form)));
+            $approvedWithoutMfa = $app->handle($post);
+            self::assertSame(302, $approvedWithoutMfa->getStatusCode(), (string) $approvedWithoutMfa->getBody());
             $credential = random_bytes(32);
             $this->db->pdo()->prepare(
                 'INSERT INTO webauthn_credentials
@@ -256,8 +254,8 @@ final class McpOAuthGrantTest extends TestCase
                 $this->userId, $credential, hash('sha256', $credential, true),
                 'synthetic-public-key', '["internal"]', 'Synthetic passkey',
             ]);
-            $passwordBypass = $app->handle($post);
-            self::assertSame(401, $passwordBypass->getStatusCode());
+            $passkeyRequired = $app->handle($post);
+            self::assertSame(401, $passkeyRequired->getStatusCode());
             $passkeyConsent = $app->handle($get);
             self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $passkeyConsent->getBody());
             $this->db->pdo()->prepare('DELETE FROM webauthn_credentials WHERE user_id = ?')
@@ -357,6 +355,13 @@ final class McpOAuthGrantTest extends TestCase
             self::assertSame(403, $replayed->getStatusCode());
             self::assertStringContainsString('Zkusit znovu', (string) $replayed->getBody());
             self::assertStringNotContainsString($proof, (string) $replayed->getBody());
+
+            $nextSecret = TotpService::generateSecret();
+            $this->db->pdo()->prepare('UPDATE users SET totp_secret = ? WHERE id = ?')
+                ->execute([$nextSecret, $this->userId]);
+            $form['totp_code'] = (new TotpService())->currentCode($nextSecret);
+            $approvedWithStalePasskey = $post($form);
+            self::assertSame(302, $approvedWithStalePasskey->getStatusCode(), (string) $approvedWithStalePasskey->getBody());
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);

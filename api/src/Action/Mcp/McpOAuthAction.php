@@ -11,11 +11,9 @@ use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
-use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\Auth\StepUpOperationException;
-use MyInvoice\Service\IpMatcher;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Repository\PasskeyCredentialRepository;
@@ -38,11 +36,9 @@ final class McpOAuthAction
         private readonly SupplierAccessResolver $suppliers,
         private readonly PermissionResolver $roles,
         private readonly PermissionChecker $permissions,
-        private readonly PasswordHasher $hasher,
         private readonly TotpService $totp,
         private readonly SecretEncryption $crypto,
         private readonly BruteForceGuard $bruteForce,
-        private readonly IpMatcher $ipMatcher,
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly MfaStepUpService $stepUp,
@@ -197,7 +193,7 @@ final class McpOAuthAction
             }
         }
         $identity = $this->db->pdo()->prepare(
-            'SELECT email, password_hash, totp_secret, totp_enabled FROM users WHERE id = ? AND is_active = 1'
+            'SELECT totp_secret, totp_enabled FROM users WHERE id = ? AND is_active = 1'
         );
         $identity->execute([(int) $user['id']]);
         $credentials = $identity->fetch(\PDO::FETCH_ASSOC);
@@ -237,7 +233,7 @@ final class McpOAuthAction
                     . ($passkeyAvailable ? '' : ' required') . '></label>'
                     . '<p class="field-hint">Použijte nový šestimístný kód. Kód použitý při přihlášení už nelze použít znovu.</p>';
             } elseif (!$passkeyAvailable) {
-                $verification = '<label class="field">Aktuální heslo<input type="password" name="password" autocomplete="current-password" required></label>';
+                $verification = '<p class="field-hint">Jste přihlášeni. Pro připojení stačí potvrdit přístup.</p>';
             }
             $permission = $scope === 'read_write' ? 'čtení a zápis' : 'pouze čtení';
             $content = '<h1>Připojit MyÚčto k AI asistentovi</h1>'
@@ -261,9 +257,23 @@ final class McpOAuthAction
                 'error' => 'access_denied', 'state' => $state,
             ]))->withHeader('Cache-Control', 'no-store');
         }
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $proof = (string) ($params['step_up_token'] ?? '');
-        if ($proof !== '') {
+        $totpCode = trim((string) ($params['totp_code'] ?? ''));
+        if ($totpRequired && $totpCode !== '') {
+            if ($this->bruteForce->isTotpLocked((int) $user['id'])) {
+                return $this->consentError($response, $params, 'Příliš mnoho pokusů. Zkuste to později.', 429);
+            }
+            try {
+                $secret = $this->crypto->decrypt((string) $credentials['totp_secret']);
+            } catch (\RuntimeException) {
+                return $this->html($response, '<h1>Ověření nyní není dostupné.</h1>', 500);
+            }
+            if (!$this->totp->verifyAndConsume($this->db, $secret, $totpCode)) {
+                $this->bruteForce->recordTotpFailure((int) $user['id']);
+                return $this->consentError($response, $params, 'Kód je neplatný nebo už byl použit. Zadejte nový kód.', 401);
+            }
+            $this->bruteForce->recordTotpSuccess((int) $user['id']);
+        } elseif ($proof !== '') {
             try {
                 $this->stepUp->consume(
                     $proof, (int) $user['id'],
@@ -273,34 +283,8 @@ final class McpOAuthAction
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return $this->consentError($response, $params, 'Ověření passkey už neplatí. Ověřte ji znovu.', 403);
             }
-        } elseif ($totpRequired) {
-            if ($this->bruteForce->isTotpLocked((int) $user['id'])) {
-                return $this->consentError($response, $params, 'Příliš mnoho pokusů. Zkuste to později.', 429);
-            }
-            try {
-                $secret = $this->crypto->decrypt((string) $credentials['totp_secret']);
-            } catch (\RuntimeException) {
-                return $this->html($response, '<h1>Ověření nyní není dostupné.</h1>', 500);
-            }
-            if (!$this->totp->verifyAndConsume($this->db, $secret, (string) ($params['totp_code'] ?? ''))) {
-                $this->bruteForce->recordTotpFailure((int) $user['id']);
-                return $this->consentError($response, $params, 'Kód je neplatný nebo už byl použit. Zadejte nový kód.', 401);
-            }
-            $this->bruteForce->recordTotpSuccess((int) $user['id']);
-        } elseif ($passkeyAvailable) {
-            return $this->consentError($response, $params, 'Pro připojení je nutné ověřit passkey.', 401);
-        } else {
-            $email = (string) $credentials['email'];
-            if (in_array($this->bruteForce->check($email, $ip), [
-                BruteForceGuard::STATE_LOCKED_15M, BruteForceGuard::STATE_LOCKED_24H,
-            ], true)) {
-                return $this->consentError($response, $params, 'Příliš mnoho pokusů. Zkuste to později.', 429);
-            }
-            if (!$this->hasher->verify((string) ($params['password'] ?? ''), (string) $credentials['password_hash'])) {
-                $this->hasher->dummyVerify();
-                $this->bruteForce->recordFailure($email, $ip);
-                return $this->consentError($response, $params, 'Neplatné heslo.', 401);
-            }
+        } elseif ($totpRequired || $passkeyAvailable) {
+            return $this->consentError($response, $params, 'Ověřte passkey nebo zadejte nový kód ověřovací aplikace.', 401);
         }
         $code = $this->oauth->createCode(
             $clientId, (int) $user['id'], $supplierId, $redirect, $challenge, $scope, $resource,

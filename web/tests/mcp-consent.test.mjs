@@ -43,3 +43,18 @@ test('bez passkey důkazu nebo TOTP kódu se souhlas neodešle', () => {
   assert.equal(submit(dom, 'approve'), false)
   dom.window.close()
 })
+
+test('zadání TOTP odstraní starý passkey důkaz i při automatickém vyplnění', () => {
+  const dom = consentPage(true)
+  const proof = dom.window.document.getElementById('mcp-step-up-token')
+  const totp = dom.window.document.querySelector('input[name="totp_code"]')
+  proof.value = 'synthetic-old-proof'
+  totp.value = '123456'
+  totp.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  assert.equal(proof.value, '')
+  assert.match(dom.window.document.getElementById('mcp-passkey-status').textContent, /Použije se kód/)
+  proof.value = 'synthetic-autofill-proof'
+  assert.equal(submit(dom, 'approve'), false)
+  assert.equal(proof.value, '')
+  dom.window.close()
+})

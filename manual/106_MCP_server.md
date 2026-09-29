@@ -191,9 +191,10 @@ Na počítači uživatele Node pro online připojení není třeba.
 
 1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
 2. Při připojení se v prohlížeči přihlas do MyÚčta, vyber firmu a schval rozsah
-   přístupu passkey, novým kódem ověřovací aplikace nebo aktuálním heslem podle
-   nastavení účtu. Kód použitý při přihlášení nelze znovu použít. Před souhlasem
-   zkontroluj požadovaný rozsah: pro běžné dotazy stačí **čtení**; požadavek na
+   přístupu. Pokud máš zapnuté MFA, ověř se passkey nebo novým kódem ověřovací
+   aplikace. Bez MFA stačí přístup potvrdit. Kód použitý při přihlášení nelze
+   znovu použít. Před souhlasem zkontroluj požadovaný rozsah: pro běžné dotazy
+   stačí **čtení**; požadavek na
    **čtení a zápis** schvaluj jen tehdy, když má asistent opravdu měnit data.
 3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
    Nástroj `whoami` vrátí uživatele, roli a firmu.

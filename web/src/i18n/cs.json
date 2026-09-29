@@ -27768,7 +27768,7 @@
       "how_to_title": "Jak připojení funguje",
       "step_copy": "Zkopírujte adresu MCP serveru této instalace.",
       "step_add": "V nastavení ChatGPT nebo Claude přidejte vlastní vzdálený konektor a vložte tuto adresu.",
-      "step_authorize": "V otevřeném okně se přihlaste do MyÚčta, vyberte firmu a potvrďte požadovaný rozsah přístupu passkey, kódem ověřovací aplikace nebo aktuálním heslem podle nastavení účtu. Pro běžné dotazy zvolte čtení; čtení a zápis povolte jen podle potřeby.",
+      "step_authorize": "V otevřeném okně se přihlaste do MyÚčta, vyberte firmu a zkontrolujte požadovaný rozsah. Máte-li zapnuté MFA, ověřte se passkey nebo novým kódem ověřovací aplikace. Bez MFA stačí přístup potvrdit. Pro běžné dotazy zvolte čtení; čtení a zápis povolte jen podle potřeby.",
       "step_verify": "V novém chatu konektor zapněte a požádejte asistenta: „Ověř připojení k MyÚčtu.“ Nástroj whoami vrátí uživatele, roli a firmu.",
       "no_pat": "Pro online připojení se API token ručně nekopíruje. Přihlášení a souhlas probíhají v prohlížeči přes MyÚčto.",
       "chatgpt_1": "V Nastavení → Integrace → Pluginy zvolte Přidat → Přidat server MCP a typ Streamovatelné HTTP. Vyplňte název a adresu uvedenou výše.",

@@ -38,6 +38,10 @@ form.addEventListener('submit', event => {
     return
   }
   if (event.submitter?.value === 'deny') return
+  if (totp?.value.trim() && proof?.value) {
+    proof.value = ''
+    proofIssuedAt = 0
+  }
   if (proof?.value && Date.now() - proofIssuedAt > 270000) {
     proof.value = ''
     status.textContent = 'Ověření passkey vypršelo. Ověřte ji prosím znovu.'
@@ -52,6 +56,13 @@ form.addEventListener('submit', event => {
   window.setTimeout(() => {
     for (const submit of form.querySelectorAll('button[type="submit"]')) submit.disabled = true
   }, 0)
+})
+
+totp?.addEventListener('input', () => {
+  if (!totp.value.trim() || !proof?.value) return
+  proof.value = ''
+  proofIssuedAt = 0
+  status.textContent = 'Použije se kód ověřovací aplikace.'
 })
 
 button?.addEventListener('click', async () => {
