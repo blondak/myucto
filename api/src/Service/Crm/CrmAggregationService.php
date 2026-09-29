@@ -206,6 +206,43 @@ final class CrmAggregationService
      *
      * @return list<array<string,mixed>>
      */
+    public function documentRange(int $supplierId, string $from, string $toExclusive, ?string $period = null): array
+    {
+        $payer = $this->isVatPayer($supplierId);
+        $rows = $this->aggregateRange($supplierId, $payer, $from, $toExclusive, $period);
+        $conversions = [];
+        foreach ([
+            ['revenue', 'invoices', 'i', self::REV_DATE, ' AND i.status IN ' . self::REV_STATUS . ' AND i.invoice_type IN ' . self::REV_TYPES],
+            ['costs', 'purchase_invoices', 'pi', self::COST_DATE, ' AND pi.status IN ' . self::COST_STATUS . $this->advanceCostExclude()],
+        ] as [$metric, $table, $alias, $date, $predicate]) {
+            $amount = $alias . ($payer ? '.total_without_vat' : '.total_with_vat');
+            $known = "(cur.code = 'CZK' OR {$alias}.exchange_rate > 0 OR COALESCE({$amount}, 0) = 0)";
+            $find = $this->db->pdo()->prepare("SELECT cur.code AS currency,
+                SUM(CASE WHEN {$known} THEN COALESCE({$amount}, 0) * IF(cur.code = 'CZK', 1, COALESCE({$alias}.exchange_rate, 1)) ELSE 0 END) AS known_amount,
+                SUM(CASE WHEN {$known} THEN 1 ELSE 0 END) AS known_count,
+                SUM(CASE WHEN {$known} THEN 0 ELSE 1 END) AS missing_count
+                FROM {$table} {$alias} JOIN currencies cur ON cur.id = {$alias}.currency_id
+                WHERE {$alias}.supplier_id = ? AND {$date} >= ? AND {$date} < ? {$predicate}
+                GROUP BY cur.code");
+            $find->execute([$supplierId, $from, $toExclusive]);
+            foreach ($find->fetchAll(\PDO::FETCH_ASSOC) as $r) $conversions[$r['currency']][$metric] = $r;
+        }
+        foreach ($rows as &$row) {
+            $missing = 0;
+            foreach (['revenue', 'costs'] as $metric) {
+                $conversion = $conversions[$row['currency']][$metric] ?? null;
+                $row[$metric . '_czk'] = $conversion === null ? 0.0
+                    : ((int) $conversion['known_count'] > 0 ? (float) $conversion['known_amount'] : null);
+                $missing += (int) ($conversion['missing_count'] ?? 0);
+            }
+            $row['profit_czk'] = $row['revenue_czk'] !== null && $row['costs_czk'] !== null
+                ? $row['revenue_czk'] - $row['costs_czk'] : null;
+            $row['conversion_missing'] = $missing;
+        }
+        unset($row);
+        return $rows;
+    }
+
     private function aggregateRange(int $supplierId, bool $payer, string $from, string $toExcl, ?string $period = null): array
     {
         $pdo = $this->db->pdo();

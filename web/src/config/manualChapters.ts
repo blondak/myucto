@@ -94,6 +94,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/profile(?:\/|$)/, '101_Bezpecnost'],
   [/^\/portal(?:\/|$)/, '09_Klientsky_portal'],
   [/^\/crm(?:\/|$)/, '11_Zisk'],
+  [/^\/group-stats(?:\/|$)/, '12_Trzby'],
   [/^\/stats(?:\/|$)/, '12_Trzby'],
   [/^\/purchase-stats(?:\/|$)/, '13_Naklady'],
   [/^\/$/, '10_Prehled'],

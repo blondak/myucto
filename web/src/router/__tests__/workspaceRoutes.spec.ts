@@ -61,11 +61,14 @@ describe('workspace route factory', () => {
     applyAuthorizationMeta(paneRecords)
     const paneRoutes = paneRecords[0]!.children ?? []
 
-    for (const name of ['purchase-invoices', 'purchase-invoice-edit', 'accounting-journal', 'payroll-runs']) {
+    for (const name of ['purchase-invoices', 'purchase-invoice-edit', 'accounting-journal', 'payroll-runs', 'group-stats']) {
       const globalMeta = router.getRoutes().find(route => route.name === name)?.meta
       const paneMeta = paneRoutes.find(route => route.name === name)?.meta
       expect(paneMeta, name).toEqual(globalMeta)
     }
+    expect(paneRoutes.find(route => route.name === 'group-stats')?.meta).toMatchObject({
+      permission: 'dashboard.portfolio', access: 'read', commercialOnly: true,
+    })
   })
 
   it('řídí importy a firemní číselníky jejich skutečnými oprávněními', () => {

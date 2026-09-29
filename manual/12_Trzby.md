@@ -40,3 +40,27 @@ ani samotné inkaso tržbu nezvyšují.
 > [!TIP]
 > Pro **souhrnný** pohled na tržby i náklady vedle sebe (zisk, marže, zdraví firmy)
 > použij [Zisk](11_Zisk.md). Tato kapitola je čistě o příjmové straně.
+
+## 12.3 Všechny firmy
+
+Poslední položka **Grafy > Všechny firmy** se zobrazuje při přístupu k více firmám a s oprávněním k manažerskému pohledu. Souhrn zahrnuje přístupné firmy; jednotlivé části respektují oprávnění v každé firmě.
+
+- **Přehled**: dokladové tržby, náklady a zisk za zvolené období se srovnáním proti stejným datům loňského roku, srovnání firem a samostatný účetní výsledek aktuálního období.
+- **Vývoj tržeb a zisku**: měsíční tržby, náklady a zisk za zvolené období, souhrn nebo vybraná firma. Krajní měsíce zahrnují jen zvolené dny; měsíce bez dokladové aktivity mají nulové hodnoty.
+- **Predikce**: odhad tržeb, nákladů a zisku běžného kalendářního roku. Používá stejné fakturové modely jako firemní grafy a samostatně přidává známý dopad ostatních položek na výsledek podle nákladových a výnosových účtů. Rozpětí představuje rozdíl modelů tržeb, nikoli interval spolehlivosti. Predikce je nezávislá na období historických grafů.
+- **Cashflow**: očekávané příjmy a výdaje po týdnech na 4 až 12 týdnů. Kumulovaný čistý tok začíná nulou a není předpovědí zůstatku účtu. Daňové a mzdové závazky se zahrnují podle oprávnění; jejich vynechání je uvedeno v přehledu.
+- **Peníze**: bankovní účty a pokladny v původních měnách nebo společně v CZK. Banka ukazuje poslední importovaný nebo evidovaný zůstatek včetně jeho data; pokladny jsou k dnešnímu dni.
+- **Pohledávky a závazky**: stáří neuhrazených dokladů před splatností a po splatnosti, souhrn i rozpad po firmách.
+- **Rizika**: pohledávky a závazky po splatnosti, dokladová ztráta a závislost na největším odběrateli nebo dodavateli.
+
+Výchozí období zahrnuje **posledních 12 kalendářních měsíců do dneška**. Pole **Od / Do** a tlačítko **Použít období** umožňují přesný rozsah do 36 kalendářních měsíců. Tlačítko **Posledních 12 měsíců** obnoví výchozí rozsah. Zůstatky a stáří pohledávek jsou aktuální; cashflow má vlastní počet týdnů. Koncentrace odběratelů a dodavatelů používá vlastní měsíční okno, uvedené v záložce Rizika.
+
+Výchozí měnová volba je **Vše · CZK**. Jednotlivé měny lze zobrazit samostatně. Dokladové výsledky používají evidované kurzy dokladů; pokladny jejich evidovaný přepočet. Bankovní zůstatky, pohledávky, závazky a predikce se přepočítávají posledním dostupným kurzem nejpozději k datu přehledu. Chybějící kurzy se nevydávají za kurz 1 a součet je označen jako neúplný.
+
+Jde o **manažerský součet bez eliminace transakcí mezi firmami**, nikoli o konsolidovanou účetní závěrku. Účetní součty spojují pouze stejnou měnu a stejný začátek i konec období. Dokladové částky jsou u plátců bez DPH, u neplátců včetně DPH; základ je uveden u každé firmy.
+
+**Detail** u rizika přepne firmu včetně nového načtení oprávnění. U pohledávek a závazků otevře doklady po splatnosti v původní měně bez omezení na rok; seznam lze dále filtrovat. U dokladové ztráty zachová přesné období a nabídne zdrojové faktury. Koncentrace otevře odpovídající část firemního zisku v původní měně.
+
+Cashflow zahrnuje ostatní položky i jejich splátkové kalendáře a odečítá již zaplacené splátky. Splátky jistiny úvěru ovlivňují peníze; samy o sobě nejsou náklad. Pravidelné rozvrhy se zahrnou až po vytvoření jednotlivých položek.
+
+Chybějící oprávnění, chyby výpočtu a chybějící účetní období mají vlastní označení. Neznámý zůstatek se nezobrazuje jako nula. Částečné součty uvádějí počet zahrnutých firem a chybějících příspěvků. Záložky načítají data až při otevření; **Obnovit** načte aktuální záložku znovu.
