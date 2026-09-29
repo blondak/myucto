@@ -23161,6 +23161,9 @@
   "users": {
     "title": "Users",
     "subtitle": "Roles, account status, and explicit company access.",
+    "delete": "Delete",
+    "delete_confirm": "Permanently delete inactive user {email}? This cannot be undone. The app will refuse deletion if the user has linked data.",
+    "deleted": "The inactive user was deleted.",
     "new": "New user",
     "name": "Name",
     "role": "Role",

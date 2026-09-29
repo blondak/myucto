@@ -212,6 +212,9 @@ archivuje, aby zůstaly zachované vazby a pevné snapshoty šablon.
 ![Uživatelé](img/15_users.webp)
 
 Tabulka uživatelů, kteří se mohou přihlásit. Tlačítko **+ Nový uživatel**.
+Aktivního uživatele lze nejdřív **deaktivovat**. U neaktivního se pak zobrazí
+**Smazat**. Smazání je trvalé a aplikace ho odmítne, pokud jsou na uživatele
+navázaná firemní, účetní nebo auditní data. V takovém případě účet ponech deaktivovaný.
 
 ### 96.2.1 Pole formuláře
 

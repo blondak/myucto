@@ -30,6 +30,7 @@ const roles = ref<RoleListItem[]>([])
 const loading = ref(false)
 const showForm = ref(false)
 const saving = ref(false)
+const deletingUserId = ref<number | null>(null)
 const error = ref('')
 const supplierQuery = ref('')
 const supplierResults = ref<AdminSupplierSearchItem[]>([])
@@ -204,6 +205,21 @@ async function deactivate(user: AdminUser) {
   catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 
+async function deleteInactive(user: AdminUser) {
+  if (user.is_active || deletingUserId.value !== null) return
+  if (!confirm(t('users.delete_confirm', { email: user.email }))) return
+  deletingUserId.value = user.id
+  try {
+    await adminApi.purgeUser(user.id)
+    toast.success(t('users.deleted'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    deletingUserId.value = null
+  }
+}
+
 function roleBadge(role: AdminUser['role']): string {
   if (role.type === 'superadmin') return 'bg-primary-100 text-primary-700'
   if (role.type === 'client') return 'bg-success-50 text-success-600'
@@ -225,6 +241,10 @@ onMounted(load)
         <button :class="btnOutline('primary')" @click="openEdit(user)">{{ t('common.edit') }}</button>
         <span v-if="isLastActiveSuperadmin(user)" class="text-xs text-neutral-500 whitespace-nowrap">{{ t('users.is_last_admin_lock') }}</span>
         <button v-else-if="user.is_active" :class="btnOutline('danger')" @click="deactivate(user)">{{ t('users.deactivate') }}</button>
+        <button v-else :class="btnOutline('danger')" :disabled="deletingUserId === user.id" @click="deleteInactive(user)">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+          {{ t('users.delete') }}
+        </button>
       </div>
     </div>
 

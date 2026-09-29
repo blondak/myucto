@@ -38,6 +38,12 @@ final class UserAdminTest extends TestCase
     private array $userIds = [];
     /** @var list<string> */
     private array $sessionTokens = [];
+    /** @var list<int> */
+    private array $templateIds = [];
+    /** @var list<int> */
+    private array $credentialIds = [];
+    /** @var list<int> */
+    private array $cardIds = [];
 
     protected function setUp(): void
     {
@@ -76,6 +82,16 @@ final class UserAdminTest extends TestCase
             } catch (\Throwable) {
                 // best-effort úklid
             }
+        }
+
+        foreach ($this->templateIds as $id) {
+            $pdo->prepare('DELETE FROM email_templates WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->credentialIds as $id) {
+            $pdo->prepare('DELETE FROM epo_signing_credentials WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->cardIds as $id) {
+            $pdo->prepare('DELETE FROM payment_cards WHERE id = ?')->execute([$id]);
         }
 
         if ($this->userIds !== []) {
@@ -199,6 +215,95 @@ final class UserAdminTest extends TestCase
         self::assertNull($stmt->fetchColumn() ?: null);
         $stmt->execute([$active]);
         self::assertSame('enc:ACTIVE', $stmt->fetchColumn());
+    }
+
+    public function testInactiveUserCanBePermanentlyDeletedAfterDeactivation(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $target = $this->mkUser('readonly');
+        $this->mkSession($target);
+        $this->db->pdo()->prepare('INSERT INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')
+            ->execute([$target, $this->supplierA]);
+
+        $activeDeletion = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(409, $activeDeletion->getStatusCode());
+        self::assertSame('user_active', $this->json($activeDeletion)['error']['code']);
+
+        $deactivated = $this->sessionRequest('DELETE', '/api/admin/users/' . $target, $session);
+        self::assertSame(200, $deactivated->getStatusCode(), (string) $deactivated->getBody());
+        self::assertTrue($this->json($deactivated)['deactivated']);
+        $stmt = $this->db->pdo()->prepare('SELECT is_active FROM users WHERE id = ?');
+        $stmt->execute([$target]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+
+        $deleted = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        self::assertTrue($this->json($deleted)['deleted']);
+        $stmt->execute([$target]);
+        self::assertFalse($stmt->fetchColumn());
+    }
+
+    public function testInactiveUserWithLinkedDataCannotBeDeleted(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $target = $this->mkUser('readonly');
+        $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$target]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO email_templates (code, locale, subject, body_html, body_text, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute(['__test_user_delete_' . bin2hex(random_bytes(4)), 'cs', 'Synthetic', 'Synthetic', 'Synthetic', $target]);
+        $this->templateIds[] = (int) $this->db->pdo()->lastInsertId();
+
+        $blocked = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(409, $blocked->getStatusCode(), (string) $blocked->getBody());
+        self::assertSame('user_in_use', $this->json($blocked)['error']['code']);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM users WHERE id = ?');
+        $stmt->execute([$target]);
+        self::assertSame($target, (int) $stmt->fetchColumn());
+
+        $this->db->pdo()->prepare('DELETE FROM email_templates WHERE id = ?')->execute([$this->templateIds[0]]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO epo_signing_credentials
+             (owner_user_id, label, pfx_ciphertext, passphrase_ciphertext, fingerprint_sha256,
+              subject_dn, issuer_dn, valid_from, valid_to)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $target, 'Synthetic certificate', 'synthetic-ciphertext', 'synthetic-passphrase',
+            hash('sha256', random_bytes(16)), 'CN=synthetic', 'CN=synthetic issuer',
+            '2026-01-01 00:00:00', '2027-01-01 00:00:00',
+        ]);
+        $this->credentialIds[] = (int) $this->db->pdo()->lastInsertId();
+        $certificateBlocked = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(409, $certificateBlocked->getStatusCode());
+        self::assertSame('user_in_use', $this->json($certificateBlocked)['error']['code']);
+
+        $this->db->pdo()->prepare('DELETE FROM epo_signing_credentials WHERE id = ?')->execute([$this->credentialIds[0]]);
+        $this->db->pdo()->prepare('INSERT INTO activity_log (user_id, action) VALUES (?, ?)')
+            ->execute([$target, '__test_user_delete_audit']);
+        $auditBlocked = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(409, $auditBlocked->getStatusCode());
+        self::assertSame('user_in_use', $this->json($auditBlocked)['error']['code']);
+    }
+
+    public function testInactiveUserWithImplicitCardReferenceCannotBeDeleted(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $target = $this->mkUser('readonly');
+        $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$target]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payment_cards (supplier_id, label, last4, user_id) VALUES (?, ?, ?, ?)'
+        )->execute([$this->supplierA, 'Synthetic card', '1234', $target]);
+        $this->cardIds[] = (int) $this->db->pdo()->lastInsertId();
+
+        $blocked = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(409, $blocked->getStatusCode(), (string) $blocked->getBody());
+        self::assertSame('user_in_use', $this->json($blocked)['error']['code']);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM users WHERE id = ?');
+        $stmt->execute([$target]);
+        self::assertSame($target, (int) $stmt->fetchColumn());
     }
 
     // ------------------------------------------------------------- fixtures

@@ -23161,6 +23161,9 @@
   "users": {
     "title": "Uživatelé",
     "subtitle": "Role, stav účtu a explicitní přístup k firmám.",
+    "delete": "Smazat",
+    "delete_confirm": "Trvale smazat neaktivního uživatele {email}? Akci nelze vrátit. Pokud má navázaná data, aplikace smazání odmítne.",
+    "deleted": "Neaktivní uživatel byl smazán.",
     "new": "Nový uživatel",
     "name": "Jméno",
     "role": "Role",

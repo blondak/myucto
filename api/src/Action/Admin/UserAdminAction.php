@@ -23,6 +23,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class UserAdminAction
 {
+    private const DISPOSABLE_USER_TABLES = [
+        'api_tokens', 'bank_oauth_sessions', 'crm_action_item_dismissals',
+        'login_otps', 'mcp_oauth_codes', 'mcp_oauth_grants',
+        'mfa_recovery_codes', 'mfa_step_up_proofs', 'password_resets',
+        'saved_filters', 'sessions', 'trusted_devices', 'user_preferences',
+        'user_suppliers', 'webauthn_ceremonies', 'webauthn_credentials',
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
@@ -299,6 +307,101 @@ final class UserAdminAction
         $this->sessions->destroyAllForUser($id);
         $this->log($request, 'user.deactivated', $id, []);
         return Json::ok($response, ['deactivated' => true]);
+    }
+
+    public function purge(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->guard($request, $response)) !== null) return $error;
+        $id = (int) ($args['id'] ?? 0);
+        $row = $this->fetchUser($id);
+        if ($row === null) return Json::error($response, 'not_found', 'Uživatel nenalezen.', 404);
+        $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if ((int) ($actor['id'] ?? 0) === $id) return Json::error($response, 'self_delete_forbidden', 'Nelze smazat vlastní účet.', 409);
+        if ($row['is_active']) {
+            return Json::error($response, 'user_active', 'Uživatele nejdřív deaktivujte.', 409);
+        }
+        return $this->deleteInactive($request, $response, $id, (string) $row['email']);
+    }
+
+    private function deleteInactive(Request $request, Response $response, int $id, string $email): Response
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $locked = $pdo->prepare('SELECT is_active FROM users WHERE id = ? FOR UPDATE');
+            $locked->execute([$id]);
+            $active = $locked->fetchColumn();
+            if ($active === false || (int) $active === 1) {
+                $pdo->rollBack();
+                return Json::error($response, 'user_changed', 'Stav uživatele se změnil. Obnovte seznam.', 409);
+            }
+            if ($this->hasUserData($id)) {
+                $pdo->rollBack();
+                return Json::error($response, 'user_in_use', 'Uživatel má navázaná data. Ponechte ho deaktivovaného.', 409);
+            }
+            $delete = $pdo->prepare('DELETE FROM users WHERE id = ? AND is_active = 0');
+            $delete->execute([$id]);
+            $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($e->getCode() === '23000') {
+                return Json::error($response, 'user_in_use', 'Uživatel má navázaná data. Ponechte ho deaktivovaného.', 409);
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        $this->log($request, 'user.deleted', $id, ['email' => $email]);
+        return Json::ok($response, ['deleted' => true]);
+    }
+
+    private function hasUserData(int $id): bool
+    {
+        $pdo = $this->db->pdo();
+        $relations = $pdo->query(
+            "SELECT k.TABLE_NAME, k.COLUMN_NAME, r.DELETE_RULE
+               FROM information_schema.KEY_COLUMN_USAGE k
+               JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+                 ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
+                AND r.TABLE_NAME = k.TABLE_NAME
+                AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+              WHERE k.TABLE_SCHEMA = DATABASE()
+                AND k.REFERENCED_TABLE_SCHEMA = DATABASE()
+                AND k.REFERENCED_TABLE_NAME = 'users'"
+        );
+        foreach ($relations->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
+            if ($relation['DELETE_RULE'] === 'CASCADE'
+                && in_array($relation['TABLE_NAME'], self::DISPOSABLE_USER_TABLES, true)) continue;
+            $table = str_replace('`', '``', (string) $relation['TABLE_NAME']);
+            $column = str_replace('`', '``', (string) $relation['COLUMN_NAME']);
+            $reference = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `{$column}` = ? LIMIT 1");
+            $reference->execute([$id]);
+            if ($reference->fetchColumn() !== false) return true;
+        }
+        $implicitRelations = $pdo->query(
+            "SELECT c.TABLE_NAME, c.COLUMN_NAME
+               FROM information_schema.COLUMNS c
+               LEFT JOIN information_schema.KEY_COLUMN_USAGE k
+                ON k.TABLE_SCHEMA = c.TABLE_SCHEMA
+                AND k.TABLE_NAME = c.TABLE_NAME
+                AND k.COLUMN_NAME = c.COLUMN_NAME
+                AND k.REFERENCED_TABLE_NAME IS NOT NULL
+              WHERE c.TABLE_SCHEMA = DATABASE()
+                AND c.TABLE_NAME <> 'users'
+                AND c.DATA_TYPE IN ('tinyint', 'smallint', 'mediumint', 'int', 'bigint')
+                AND (c.COLUMN_NAME REGEXP '(^|_)user_id$' OR c.COLUMN_NAME REGEXP '_by$'
+                     OR c.COLUMN_NAME IN ('actor_id', 'assigned_to'))
+                AND k.COLUMN_NAME IS NULL"
+        );
+        foreach ($implicitRelations->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
+            $table = str_replace('`', '``', (string) $relation['TABLE_NAME']);
+            $column = str_replace('`', '``', (string) $relation['COLUMN_NAME']);
+            $reference = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `{$column}` = ? LIMIT 1");
+            $reference->execute([$id]);
+            if ($reference->fetchColumn() !== false) return true;
+        }
+        return false;
     }
 
     private function guard(Request $request, Response $response): ?Response

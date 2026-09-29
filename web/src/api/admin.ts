@@ -215,6 +215,7 @@ export const adminApi = {
   updateUser: (id: number, payload: Partial<{ name: string; role_id: number; locale: 'cs' | 'en'; is_active: boolean; password: string }>) =>
     api.put<AdminUser>(`/admin/users/${id}`, payload).then(r => r.data),
   deleteUser: (id: number) => api.delete(`/admin/users/${id}`),
+  purgeUser: (id: number) => api.delete(`/admin/users/${id}/permanent`),
   /** Pošle existujícímu uživateli jednorázový odkaz na nastavení hesla. */
   sendUserPasswordLink: (id: number) =>
     api.post<{ ok: boolean }>(`/admin/users/${id}/password-link`).then(r => r.data),

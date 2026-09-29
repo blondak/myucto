@@ -3085,6 +3085,7 @@ final class Routes
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
         $app->post   ('/api/admin/users/{id:[0-9]+}/password-link', [UserAdminAction::class, 'sendPasswordSetup']);
         $app->delete ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'delete']);
+        $app->delete ('/api/admin/users/{id:[0-9]+}/permanent', [UserAdminAction::class, 'purge']);
         // Epic F0 — membership uživatel ↔ supplier (fine-grained tenant přístup)
         $app->get    ('/api/admin/users/{id:[0-9]+}/suppliers', [\MyInvoice\Action\Admin\UserSupplierAdminAction::class, 'list']);
         $app->put    ('/api/admin/users/{id:[0-9]+}/suppliers', [\MyInvoice\Action\Admin\UserSupplierAdminAction::class, 'replace']);
