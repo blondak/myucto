@@ -379,9 +379,7 @@ final class BankPostingService
             return ['action' => 'skipped', 'reason' => 'zero_amount'];
         }
 
-        if ($amount > 0.0 && $this->legacyPayments !== null) {
-            $this->legacyPayments->reconcileMatchedIncoming($supplierId, $txId);
-        }
+        $this->reconcileLegacyIncoming($supplierId, $tx);
 
         // Haléřový nedoplatek/přeplatek (protistrana platí zaokrouhleně na koruny) → srovnat
         // alokaci na nominál předpisu, ať appendRounding() níž vytvoří 548/648 nohu a doklad
@@ -2468,6 +2466,52 @@ final class BankPostingService
 
     // ── approve / reject / postManual / unpost ──────────────────────────────────
 
+    /**
+     * Naváže historickou úhradu zaplacené faktury na příchozí pohyb, dřív než se staví
+     * řádky. Import, schválení návrhu i náhled musí projít touž cestou: bez ní skončí
+     * pohyb, jehož předpis se zaúčtoval až po importu výpisu, v `already_paid_verify`
+     * a z UI se s ním nedá pohnout.
+     *
+     * @param array<string,mixed> $tx
+     */
+    private function reconcileLegacyIncoming(int $supplierId, array $tx): void
+    {
+        if ((float) $tx['amount'] > 0.0 && $this->legacyPayments !== null) {
+            $this->legacyPayments->reconcileMatchedIncoming($supplierId, (int) $tx['id']);
+        }
+    }
+
+    /**
+     * Řádky náhledu po rekonciliaci, kterou by provedlo zaúčtování. Náhled nic
+     * nezapisuje, takže se rekonciliace po sestavení řádků vrátí zpět.
+     *
+     * @param array<string,mixed> $tx
+     * @return list<array<string,mixed>>
+     */
+    private function previewMatchedLines(int $supplierId, array $tx): array
+    {
+        if ((float) $tx['amount'] <= 0.0 || $this->legacyPayments === null) {
+            return $this->buildMatched($supplierId, $tx)['lines'];
+        }
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT preview_legacy_reconcile');
+        }
+        try {
+            $this->reconcileLegacyIncoming($supplierId, $tx);
+            return $this->buildMatched($supplierId, $tx)['lines'];
+        } finally {
+            if ($ownTx) {
+                $pdo->rollBack();
+            } else {
+                $pdo->exec('ROLLBACK TO SAVEPOINT preview_legacy_reconcile');
+            }
+        }
+    }
+
     public function previewTransaction(int $supplierId, int $txId): array
     {
         if (!$this->txOwnedBySupplier($txId, $supplierId)) {
@@ -2490,7 +2534,7 @@ final class BankPostingService
             }
             $this->assertPostableTx($tx, true);
             if (!$matched) return $result;
-            $lines = $this->buildMatched($supplierId, $tx)['lines'];
+            $lines = $this->previewMatchedLines($supplierId, $tx);
             PostingService::assertBalanced($lines);
             foreach ($lines as $i => $line) {
                 $preview = $this->previews?->code($supplierId, $tx, (string) $line['account_code']);
@@ -2722,9 +2766,12 @@ final class BankPostingService
                 if ($overrides !== []) {
                     throw new PostingException('override_not_allowed', 'Kontaci spárované platby nelze přepsat.', 422);
                 }
-                $lines = (string) ($sug['note'] ?? '') === 'fee_gap'
-                    ? $this->buildIncomingFeeGap($supplierId, $tx, (float) $sug['amount'])['lines']
-                    : $this->buildMatched($supplierId, $tx, null, true)['lines'];
+                if ((string) ($sug['note'] ?? '') === 'fee_gap') {
+                    $lines = $this->buildIncomingFeeGap($supplierId, $tx, (float) $sug['amount'])['lines'];
+                } else {
+                    $this->reconcileLegacyIncoming($supplierId, $tx);
+                    $lines = $this->buildMatched($supplierId, $tx, null, true)['lines'];
+                }
             } else {
                 $debit = $overrides['debit_account_code'] ?? (string) $sug['debit_account_code'];
                 $credit = $overrides['credit_account_code'] ?? (string) $sug['credit_account_code'];

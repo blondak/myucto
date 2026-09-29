@@ -921,7 +921,8 @@
         "1937_supplier_allow_refund_invoices.sql",
         "1938_payment_order_refund_items.sql",
         "1939_client_bank_accounts_canonical_czech_number.sql",
-        "1940_deferred_revenue_accrual.sql"
+        "1940_deferred_revenue_accrual.sql",
+        "1941_imported_paid_invoices_legacy_payment.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

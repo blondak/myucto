@@ -54,6 +54,12 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
      * chybí" — a ta věta přestane platit o pár vteřin později, aniž by ji kdokoli
      * přepsal. Po přepočtu se buď zaúčtuje, nebo aspoň dostane pravdivý důvod.
      *
+     * `already_paid_verify` je stejný případ z druhé strany: historickou úhradu zaplacené
+     * faktury {@see \MyInvoice\Service\Accounting\Bank\LegacyBankPaymentReconciler}
+     * naváže na pohyb teprve tehdy, když je předpis faktury zaúčtovaný. Pohyb vyhodnocený
+     * před zaúčtováním předpisu by jinak zůstal ve frontě navždy. Skutečná duplicita
+     * (dvě úhrady, víc plateb, rozdílná částka) rekonciliací neprojde a důvod zůstane.
+     *
      * Zbytek poznámek sem ZÁMĚRNĚ nepatří: `low_confidence`, `no_rule`, `anomaly`,
      * `rule_conflict` ani `duplicate_suspect` přepočet nezmění (chce to jiná vstupní
      * data, ne další zápis v deníku), `period_closed` řeší otevření období a odmítnutý
@@ -68,6 +74,7 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
     public const TRANSIENT_NOTES = [
         'liability_prescription_missing',
         'liability_prescription_short',
+        'already_paid_verify',
     ];
 
     /**

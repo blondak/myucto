@@ -244,6 +244,7 @@ final class FakturoidImportService
                 $invoiceId = $this->createIssued($inv, $supplierId, $userId);
                 $this->db->pdo()->prepare('UPDATE invoices SET fakturoid_id = ? WHERE id = ?')->execute([$fakturoidId, $invoiceId]);
                 $this->invCalc->recompute($invoiceId);
+                ImportedPaidInvoicePayment::record($this->db->pdo(), $invoiceId);
                 if ($downloadAttachments) {
                     $this->archiveIssuedPdf($supplierId, $invoiceId, $fakturoidId, $inv);
                 }

@@ -430,6 +430,7 @@ final class IdokladImportService
                     'UPDATE invoices SET idoklad_id = ? WHERE id = ?'
                 )->execute([$idokladId, $invoiceId]);
                 $this->invCalc->recompute($invoiceId);
+                ImportedPaidInvoicePayment::record($this->db->pdo(), $invoiceId);
                 if ($downloadAttachments) {
                     $this->archiveIssuedPdf($supplierId, $invoiceId, $idokladId, $idoklad);
                 }

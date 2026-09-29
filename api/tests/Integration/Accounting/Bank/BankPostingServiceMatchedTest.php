@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
+use MyInvoice\Service\Accounting\Bank\StaleSuggestionSweep;
+use MyInvoice\Service\Import\ImportedPaidInvoicePayment;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -180,6 +182,115 @@ final class BankPostingServiceMatchedTest extends BankPostingTestCase
         $byAcc = $this->linesByAccountCode((int) $res['entry_id']);
         self::assertEqualsWithDelta(12100.00, $byAcc['221']['debit'], 0.001);
         self::assertEqualsWithDelta(12100.00, $byAcc['311']['credit'], 0.001);
+    }
+
+    public function testImportedPaidInvoiceGetsLegacyPaymentAndMatchedTransferPosts(): void
+    {
+        $client = $this->client('Odběratel z Fakturoidu');
+        $inv = $this->saleInvoice('FV-2099-FAKTUROID', $client, 7260.00, 'invoice', 'paid');
+        $this->db->pdo()->prepare('UPDATE invoices SET paid_at = ?, fakturoid_id = 990108 WHERE id = ?')
+            ->execute([self::YEAR . '-06-14', $inv]);
+
+        ImportedPaidInvoicePayment::record($this->db->pdo(), $inv);
+        ImportedPaidInvoicePayment::record($this->db->pdo(), $inv);
+
+        $payments = $this->db->pdo()->query(
+            "SELECT source, amount, paid_on, bank_transaction_id FROM invoice_payments WHERE invoice_id = {$inv}"
+        )->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(1, $payments);
+        self::assertSame('legacy', $payments[0]['source']);
+        self::assertEqualsWithDelta(7260.00, (float) $payments[0]['amount'], 0.001);
+        self::assertSame(self::YEAR . '-06-14', $payments[0]['paid_on']);
+        self::assertEqualsWithDelta(7260.00, (float) $this->db->pdo()->query(
+            "SELECT paid_total FROM invoices WHERE id = {$inv}"
+        )->fetchColumn(), 0.001);
+
+        $this->postPredpis('invoice', $inv, '311', '602', 7260.00);
+        $tx = $this->transaction($this->statement(), 7260.00, ['match_status' => 'auto_exact', 'matched_invoice_id' => $inv]);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action']);
+        $byAcc = $this->linesByAccountCode((int) $res['entry_id']);
+        self::assertEqualsWithDelta(7260.00, $byAcc['221']['debit'], 0.001);
+        self::assertEqualsWithDelta(7260.00, $byAcc['311']['credit'], 0.001);
+    }
+
+    public function testImportedPaidInvoiceCoveredByAdvanceGetsNoPayment(): void
+    {
+        $client = $this->client('Odběratel se zálohou');
+        $inv = $this->saleInvoice('FV-2099-ZALOHA', $client, 1500.00, 'invoice', 'paid');
+        $this->db->pdo()->prepare('UPDATE invoices SET advance_paid_amount = total_with_vat WHERE id = ?')
+            ->execute([$inv]);
+
+        ImportedPaidInvoicePayment::record($this->db->pdo(), $inv);
+
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$inv}"
+        )->fetchColumn());
+    }
+
+    public function testAlreadyPaidVerifySuggestionIsApprovedOncePredpisIsPosted(): void
+    {
+        [$inv, $paymentId, $tx, $suggestionId] = $this->legacyPaidTransferBeforePredpis('FV-2099-APPROVE');
+
+        $preview = $this->service->previewTransaction($this->supplierId, $tx);
+        self::assertNull($preview['reason']);
+        self::assertNotSame([], $preview['lines']);
+        self::assertNull($this->paymentTxId($paymentId), 'Náhled nesmí platbu navázat natrvalo.');
+
+        $entryId = $this->service->approveSuggestion($this->supplierId, $suggestionId, $this->meta());
+
+        self::assertSame($tx, $this->paymentTxId($paymentId));
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(3025.00, $byAcc['221']['debit'], 0.001);
+        self::assertEqualsWithDelta(3025.00, $byAcc['311']['credit'], 0.001);
+    }
+
+    public function testStaleSweepPostsAlreadyPaidVerifyOncePredpisIsPosted(): void
+    {
+        [, $paymentId, $tx] = $this->legacyPaidTransferBeforePredpis('FV-2099-SWEEP');
+
+        $report = $this->container->get(StaleSuggestionSweep::class)->run(false, $this->supplierId);
+
+        self::assertSame(1, $report['posted'], json_encode($report, JSON_UNESCAPED_UNICODE));
+        self::assertSame($tx, $this->paymentTxId($paymentId));
+        self::assertSame(1, $this->entryCountForTx($tx));
+    }
+
+    /**
+     * Zaplacená faktura s historickou úhradou, jejíž pohyb se vyhodnotil DŘÍV, než se
+     * zaúčtoval předpis — rekonciliace tehdy neprojde a vznikne `already_paid_verify`.
+     *
+     * @return array{0:int,1:int,2:int,3:int} [faktura, platba, pohyb, návrh]
+     */
+    private function legacyPaidTransferBeforePredpis(string $varsymbol): array
+    {
+        $client = $this->client('Odběratel ' . $varsymbol);
+        $inv = $this->saleInvoice($varsymbol, $client, 3025.00, 'invoice', 'paid');
+        $this->db->pdo()->prepare('UPDATE invoices SET paid_at = ?, fakturoid_id = ? WHERE id = ?')
+            ->execute([self::YEAR . '-06-12', crc32($varsymbol), $inv]);
+        ImportedPaidInvoicePayment::record($this->db->pdo(), $inv);
+        $paymentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM invoice_payments WHERE invoice_id = {$inv}"
+        )->fetchColumn();
+
+        $tx = $this->transaction($this->statement(), 3025.00, ['match_status' => 'auto_exact', 'matched_invoice_id' => $inv]);
+        $res = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('suggested', $res['action']);
+        self::assertSame('already_paid_verify', $res['reason']);
+
+        $this->postPredpis('invoice', $inv, '311', '602', 3025.00);
+
+        return [$inv, $paymentId, $tx, (int) $res['suggestion_id']];
+    }
+
+    private function paymentTxId(int $paymentId): ?int
+    {
+        $value = $this->db->pdo()->query(
+            "SELECT bank_transaction_id FROM invoice_payments WHERE id = {$paymentId}"
+        )->fetchColumn();
+        return $value === null ? null : (int) $value;
     }
 
     public function testOutgoingIssuedCreditNoteRefundPosts311Over221(): void
