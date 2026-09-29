@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { TOOLS } from '../src/tools.mjs';
 
-function run(input) {
+function run(input, env = process.env) {
   const child = spawnSync(process.execPath, ['src/hosted-bridge.mjs'], {
     cwd: new URL('..', import.meta.url),
     input: JSON.stringify(input),
     encoding: 'utf8',
+    env,
   });
   assert.equal(child.status, 0, child.stderr);
   return JSON.parse(child.stdout);
@@ -24,6 +28,32 @@ test('hostovaný katalog vrací všechny povolené nástroje v jedné odpovědi'
     assert.deepEqual(names, expected);
     assert.equal(page.nextCursor, undefined);
     assert.equal(new Set(names).size, names.length);
+  }
+});
+
+test('interní PHP požadavky nepoužívají OPcache file cache hostitele', (t) => {
+  const php = process.env.MYINVOICE_MCP_PHP_BINARY || 'php';
+  if (spawnSync(php, ['-v']).error) return t.skip('PHP CLI není dostupné.');
+  const directory = mkdtempSync(join(tmpdir(), 'myucto-mcp-opcache-'));
+  try {
+    writeFileSync(join(directory, 'php.ini'), `opcache.file_cache="${directory.replaceAll('\\', '/')}"\n`);
+    const env = { ...process.env, PHPRC: directory, PHP_INI_SCAN_DIR: '' };
+    const configured = spawnSync(php, ['-r', "echo get_cfg_var('opcache.file_cache');"], { env, encoding: 'utf8' });
+    assert.equal(configured.status, 0, configured.stderr);
+    assert.ok(configured.stdout.length > 0);
+    const apiScript = join(directory, 'api.php');
+    writeFileSync(apiScript, `<?php
+      $input = json_decode(stream_get_contents(STDIN), true);
+      echo json_encode(['status' => 200, 'headers' => ['Content-Type' => 'application/json'],
+        'body' => json_encode(['cache_disabled' => get_cfg_var('opcache.file_cache') === '',
+          'method' => $input['method']])]);
+    `);
+    const result = run({ operation: 'call', scope: 'read', name: 'whoami',
+      arguments: {}, phpBinary: php, apiScript, apiUrl: 'https://example.test/api/v1', token: 'synthetic-token' }, env);
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(result.structuredContent, { cache_disabled: true, method: 'GET' });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

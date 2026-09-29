@@ -10,7 +10,9 @@ for await (const chunk of stdin) chunks.push(chunk);
 
 function internalFetch(input, url, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn(input.phpBinary, [input.apiScript], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(input.phpBinary, ['-d', 'opcache.file_cache=', input.apiScript], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     const chunks = [];
     let size = 0;
     let error = '';
