@@ -11,7 +11,7 @@ Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
 const { t, locale } = useI18n()
 const props = defineProps<{ counts: Record<string, number> }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
-let chart: Chart | null = null
+let chart: Chart<'doughnut', number[], string> | null = null
 const colors = useChartColors()
 
 /** Stavy zakázky sémanticky, ze sdílených chart tokenů (viz StatusDoughnutChart).

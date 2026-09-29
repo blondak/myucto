@@ -14,7 +14,7 @@ Chart.register(DoughnutController, ArcElement, Tooltip, Legend)
  */
 const props = defineProps<{ counts: Record<string, number> }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
-let chart: Chart | null = null
+let chart: Chart<'doughnut', number[], string> | null = null
 const { t, locale } = useI18n()
 const colors = useChartColors()
 

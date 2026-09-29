@@ -34,7 +34,7 @@ const props = defineProps<{
 }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
-let chart: Chart | null = null
+let chart: Chart<'line', number[], string> | null = null
 const { locale, t } = useI18n()
 const colors = useChartColors()
 

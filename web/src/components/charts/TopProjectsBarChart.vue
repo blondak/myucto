@@ -19,7 +19,7 @@ const props = defineProps<{
 }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
-let chart: Chart | null = null
+let chart: Chart<'bar', number[], string> | null = null
 const { locale } = useI18n()
 const colors = useChartColors()
 

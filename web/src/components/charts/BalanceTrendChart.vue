@@ -46,7 +46,7 @@ const props = defineProps<{
 }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
-let chart: Chart | null = null
+let chart: Chart<'line', number[], string> | null = null
 const { locale } = useI18n()
 const colors = useChartColors()
 const resolvedDatasets = computed<BalanceTrendDataset[]>(() => props.datasets?.length
