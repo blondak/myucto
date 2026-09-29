@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Mcp;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -25,7 +26,7 @@ final class HostedMcpSettingsAction
 
     public function update(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return Json::sessionRequired($response);
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
@@ -51,7 +52,7 @@ final class HostedMcpSettingsAction
 
     public function diagnostics(Request $request, Response $response): Response
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return Json::sessionRequired($response);
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
