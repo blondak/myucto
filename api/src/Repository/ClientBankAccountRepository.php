@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Payment\IbanValidator;
 use PDO;
 
@@ -304,6 +305,11 @@ final class ClientBankAccountRepository
         } else {
             $digits = preg_replace('/\D/', '', $accountNumber) ?? '';
             $accountKey = ltrim($digits, '0');
+            // Český účet ukládej kanonicky (`předčíslí-číslo` bez vodicích nul), ne jako
+            // 16místný tvar z GPC výpisu. Klíč účtu se tím nemění.
+            if (preg_match('/^\d{4}$/D', $bankCode) === 1) {
+                $accountNumber = AccountNumberNormalizer::czechNational($accountNumber) ?? $accountNumber;
+            }
         }
         $bankKey = strtoupper((string) preg_replace('/[^A-Z0-9]/i', '', $bankCode));
         if ($accountKey === '') {

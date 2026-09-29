@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payment;
 
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Export\ExportFilename;
 
 /**
@@ -238,7 +239,8 @@ final class AboPaymentOrderWriter
 
     /**
      * Rozdělí číslo účtu na předčíslí (6 míst) a číslo (10 míst), obojí zleva nulami.
-     * Akceptuje „prefix-číslo", „prefix-číslo/kód" i samotné „číslo".
+     * Akceptuje „prefix-číslo", „prefix-číslo/kód", samotné „číslo" i 16místný tvar
+     * z GPC výpisu (`0000002000145305`), který se ukládá účtům naučeným z plateb.
      *
      * @return array{0:string,1:string} [prefix(6), number(10)] — number '' když nerozpoznáno
      */
@@ -250,22 +252,17 @@ final class AboPaymentOrderWriter
         if ($slash !== false) {
             $account = substr($account, 0, $slash);
         }
-        if (str_contains($account, '-')) {
-            [$p, $n] = explode('-', $account, 2);
-        } else {
-            $p = '';
-            $n = $account;
-        }
-        $p = $this->digits($p);
-        $n = $this->digits($n);
-        if ($n === '') {
+        if ($this->digits($account) === '') {
             return ['000000', ''];
         }
-        if (strlen($p) > 6 || strlen($n) > 10) {
+        $national = AccountNumberNormalizer::czechNational($account);
+        if ($national === null) {
             throw new \InvalidArgumentException(
-                'Číslo účtu překračuje pevnou délku ABO pole.',
+                'Číslo účtu „' . $account . '" není platný český účet'
+                . ' (předčíslí nejvýš 6 číslic, číslo nejvýš 10 číslic).',
             );
         }
+        [$p, $n] = str_contains($national, '-') ? explode('-', $national, 2) : ['', $national];
         return [$this->padLeft($p, 6), $this->padLeft($n, 10)];
     }
 

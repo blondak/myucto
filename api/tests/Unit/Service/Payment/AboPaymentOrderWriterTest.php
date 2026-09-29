@@ -226,6 +226,46 @@ final class AboPaymentOrderWriterTest extends TestCase
         );
     }
 
+    /**
+     * Účet partnera naučený ze spárované platby nese 16místný tvar z GPC výpisu.
+     * Dřív ho writer vzal jako 16místné číslo bez předčíslí a stažení ABO
+     * vratky skončilo chybou 500.
+     */
+    public function testAcceptsZeroPaddedGpcAccountNumbers(): void
+    {
+        $order = $this->orderWith([
+            'account_number' => '0000002000145305',
+            'bank_code' => '0100',
+            'amount' => 250.00,
+            'variable_symbol' => '2026001',
+        ]);
+        $order['items'][] = [
+            'account_number' => '0000192000145399',
+            'bank_code' => '0800',
+            'amount' => 100.00,
+            'variable_symbol' => '2026002',
+        ];
+        $order['payer_account_number'] = '0000192000145399';
+
+        $lines = explode("\r\n", $this->writer->build($order));
+
+        self::assertSame('2 000019-2000145399 00000000035000 120626', $lines[2]);
+        self::assertSame('000000-2000145305 000000025000 2026001 01000000 0000000000 AV:2026001', $lines[3]);
+        self::assertSame('000019-2000145399 000000010000 2026002 08000000 0000000000 AV:2026002', $lines[4]);
+    }
+
+    public function testRejectsInvalidAccountWithReadableMessage(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('není platný český účet');
+        $this->writer->build($this->orderWith([
+            'account_number' => '12345678901234567',
+            'bank_code' => '0100',
+            'amount' => 100.00,
+            'variable_symbol' => '1',
+        ]));
+    }
+
     public function testRejectsEveryOversizedFixedNumericField(): void
     {
         $base = [

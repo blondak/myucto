@@ -184,6 +184,37 @@ final class AccountNumberNormalizer
         return $base === '' ? null : $base;
     }
 
+    /**
+     * Kanonický národní zápis českého účtu: `předčíslí-číslo`, bez předčíslí jen
+     * `číslo`, vše bez vodicích nul (`0000192000145399` → `19-2000145399`,
+     * `0000002000145305` → `2000145305`).
+     *
+     * Přijme zápis s pomlčkou, GPC tvar (16 cifer) i předčíslí slepené s číslem bez
+     * nul (`account_key`, 11–15 cifer): číslo účtu má nejvýš 10 cifer, zbytek zleva
+     * je tedy předčíslí. Kód banky za lomítkem se ignoruje. NULL, když vstup není
+     * český národní zápis nebo je číslo nulové.
+     */
+    public static function czechNational(string $raw): ?string
+    {
+        $value = (string) preg_replace('/\s+/', '', $raw);
+        $value = (string) preg_replace('#/\d{4}$#D', '', $value);
+        if (preg_match('/^(\d+)-(\d+)$/D', $value, $m) === 1) {
+            $prefix = ltrim($m[1], '0');
+            $base = ltrim($m[2], '0');
+        } elseif (preg_match('/^\d{1,16}$/D', $value) === 1) {
+            $padded = str_pad($value, 16, '0', STR_PAD_LEFT);
+            $prefix = ltrim(substr($padded, 0, 6), '0');
+            $base = ltrim(substr($padded, 6), '0');
+        } else {
+            return null;
+        }
+        if ($base === '' || strlen($prefix) > 6 || strlen($base) > 10) {
+            return null;
+        }
+
+        return ($prefix !== '' ? $prefix . '-' : '') . $base;
+    }
+
     /** Kód banky (4 cifry) z českého IBANu, NULL pokud vstup není CZ IBAN. */
     public static function czechIbanBankCode(string $iban): ?string
     {

@@ -29,6 +29,32 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertNull(AccountNumberNormalizer::czechIbanAccountPart($iban));
     }
 
+    /** @return iterable<string,array{string,?string}> */
+    public static function czechNationalCases(): iterable
+    {
+        yield 'GPC bez předčíslí' => ['0000002000145305', '2000145305'];
+        yield 'GPC s předčíslím' => ['0000192000145399', '19-2000145399'];
+        yield 'GPC s kódem banky' => ['0000002000145305/0100', '2000145305'];
+        yield 'slepené předčíslí z account_key' => ['192000145399', '19-2000145399'];
+        yield 'pomlčka s nulami' => ['000019-0002000145399', '19-2000145399'];
+        yield 'nulové předčíslí' => ['0-1000000005', '1000000005'];
+        yield 'kanonický tvar beze změny' => ['35-6233260257', '35-6233260257'];
+        yield 'krátké číslo s nulami' => ['0123456789', '123456789'];
+        yield 'mezery' => ['2000 145 305', '2000145305'];
+        yield 'předčíslí přes 6 číslic' => ['1234567-1234567890', null];
+        yield 'číslo přes 10 číslic' => ['123456-12345678901', null];
+        yield '17 číslic' => ['12345678901234567', null];
+        yield 'nulové číslo' => ['0000000000000000', null];
+        yield 'IBAN' => ['CZ6508000000192000145399', null];
+        yield 'prázdné' => ['', null];
+    }
+
+    #[DataProvider('czechNationalCases')]
+    public function testCzechNationalCanonicalForm(string $raw, ?string $expected): void
+    {
+        self::assertSame($expected, AccountNumberNormalizer::czechNational($raw));
+    }
+
     public function testPrefixedShortAccountMatchesPaddedGpcWithoutLosingPrefix(): void
     {
         self::assertTrue(AccountNumberNormalizer::matchesAny('0000190000000019', '19-19'));

@@ -157,6 +157,20 @@ final class StatementMatcherPaymentVsTest extends TestCase
         self::assertSame($id, $res['invoice_id'] ?? null);
     }
 
+    /** mBank posílá VS doplněný nulami zleva; číslo dokladu i platební VS se musí spárovat. */
+    public function testBankVsWithLeadingZerosMatches(): void
+    {
+        $byDocument = $this->invoice('011', null, 640.00);
+        $res = $this->matcher->match($this->transaction('002099249011', 640.00));
+        self::assertSame('auto_exact', $res['status'] ?? null);
+        self::assertSame($byDocument, $res['invoice_id'] ?? null);
+
+        $byPaymentVs = $this->invoice('012', '82490023', 330.00);
+        $res = $this->matcher->match($this->transaction('0082490023', 330.00));
+        self::assertSame('auto_exact', $res['status'] ?? null);
+        self::assertSame($byPaymentVs, $res['invoice_id'] ?? null);
+    }
+
     public function testSharedPaymentVsIsResolvedByAmountAmongUnpaid(): void
     {
         $this->invoice('004', '8249000018', 1500.00, 'paid');

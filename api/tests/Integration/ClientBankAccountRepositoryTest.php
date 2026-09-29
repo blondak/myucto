@@ -115,6 +115,28 @@ final class ClientBankAccountRepositoryTest extends TestCase
         self::assertCount(1, $this->accounts->listForClient($this->clientId, $this->supplierId));
     }
 
+    /**
+     * Účet ze spárované platby z GPC výpisu se na kartu ukládá kanonicky, ne jako
+     * 16místný řetězec, který pak rozbil ABO vratky. Klíč účtu zůstává stejný,
+     * takže se sloučí s ručně zadaným tvarem.
+     */
+    public function testGpcAccountFromStatementIsStoredCanonically(): void
+    {
+        $plainId = $this->accounts->captureFromBank($this->clientId, $this->supplierId, '0000001000000005', '0100');
+        $prefixedId = $this->accounts->captureFromBank($this->clientId, $this->supplierId, '0000190000000019', '0800');
+
+        $byId = array_column($this->accounts->listForClient($this->clientId, $this->supplierId), null, 'id');
+        self::assertSame('1000000005', $byId[$plainId]['account_number']);
+        self::assertSame('19-19', $byId[$prefixedId]['account_number']);
+
+        $manual = $this->accounts->addManual($this->clientId, $this->supplierId, [
+            'account_number' => '1000000005',
+            'bank_code' => '0100',
+        ]);
+        self::assertSame($plainId, $manual['id']);
+        self::assertCount(2, $this->accounts->listForClient($this->clientId, $this->supplierId));
+    }
+
     public function testAccountsAreSupplierScoped(): void
     {
         $this->accounts->addManual($this->clientId, $this->supplierId, [

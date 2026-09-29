@@ -919,7 +919,8 @@
         "1935_imported_purchase_tax_snapshot.sql",
         "1936_abra_vat_projection_overrides.sql",
         "1937_supplier_allow_refund_invoices.sql",
-        "1938_payment_order_refund_items.sql"
+        "1938_payment_order_refund_items.sql",
+        "1939_client_bank_accounts_canonical_czech_number.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

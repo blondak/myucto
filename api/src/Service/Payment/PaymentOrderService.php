@@ -10,6 +10,7 @@ use MyInvoice\Repository\PaymentOrderRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\RefundPaymentRepository;
 use MyInvoice\Service\Ares\CrpDphClient;
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Invoice\RefundDocument;
@@ -255,12 +256,26 @@ final class PaymentOrderService
                 $bankCode = substr($iban, 4, 4);
             }
         }
+        $account = (string) $this->czechAccount($account, $bankCode);
 
         return [
             'account_number' => $account !== '' ? $account : null,
             'bank_code'      => $bankCode !== '' ? $bankCode : null,
             'iban'           => $iban !== '' ? $iban : null,
         ];
+    }
+
+    /**
+     * Český účet (kód banky = 4 číslice) v kanonickém tvaru `předčíslí-číslo` bez
+     * vodicích nul. Účty naučené z GPC výpisu jsou uložené 16místně
+     * (`0000002000145305`); ostatní hodnoty zůstávají, jak jsou.
+     */
+    private function czechAccount(?string $account, ?string $bankCode): ?string
+    {
+        if ($account === null || preg_match('/^\d{4}$/D', trim((string) $bankCode)) !== 1) {
+            return $account;
+        }
+        return AccountNumberNormalizer::czechNational($account) ?? $account;
     }
 
     /**
@@ -546,7 +561,7 @@ final class PaymentOrderService
             $item = [
                 'purchase_invoice_id' => $it['purchase_invoice_id'],
                 'payee_name'          => $it['payee_name'],
-                'account_number'      => $it['payee_account_number'],
+                'account_number'      => $this->czechAccount($it['payee_account_number'], $it['payee_bank_code']),
                 'bank_code'           => $it['payee_bank_code'],
                 'iban'                => $it['payee_iban'],
                 'bic'                 => $it['payee_bic'],
@@ -574,7 +589,7 @@ final class PaymentOrderService
             'total_amount' => $order['total_amount'],
             'item_count'   => $order['item_count'],
             'payer'        => [
-                'account_number' => $order['payer_account_number'],
+                'account_number' => $this->czechAccount($order['payer_account_number'], $order['payer_bank_code']),
                 'bank_code'      => $order['payer_bank_code'],
                 'iban'           => $order['payer_iban'],
                 'bic'            => $order['payer_bic'],
@@ -665,8 +680,31 @@ final class PaymentOrderService
             return null;
         }
         $datePart = ExportFilename::sanitize((string) $view['payment_date'], 'prikaz');
-        $base = 'platebni-prikaz-' . $orderId . '-' . $datePart;
+        return $this->render($view, $format, 'platebni-prikaz-' . $orderId . '-' . $datePart);
+    }
 
+    /**
+     * @param array<string,mixed> $view
+     * @return array{filename:string, content_type:string, bytes:string}
+     * @throws \RuntimeException
+     */
+    private function render(array $view, string $format, string $base): array
+    {
+        // Writery odmítají nevhodná data InvalidArgumentException (LogicException);
+        // ven jde jako RuntimeException, kterou akce vrací jako 422 s textem chyby.
+        try {
+            return $this->renderFormat($view, $format, $base);
+        } catch (\InvalidArgumentException $e) {
+            throw new \RuntimeException($e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $view
+     * @return array{filename:string, content_type:string, bytes:string}
+     */
+    private function renderFormat(array $view, string $format, string $base): array
+    {
         return match ($format) {
             'csv' => [
                 'filename'     => $base . '.csv',
