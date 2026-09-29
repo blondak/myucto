@@ -18,6 +18,8 @@ use MyInvoice\Support\CompanyIdNormalizer;
 final class PohodaExport
 {
     private ?PohodaMdbAccounting $mdb = null;
+    private array $warnings = [];
+    private bool $warningsScanned = false;
 
     public const FILES = [
         'journal' => '01_ucetni_denik.xml',
@@ -155,7 +157,45 @@ final class PohodaExport
         if ($path === null) {
             return;
         }
-        yield from PohodaXml::records($path, $tag);
+        foreach (PohodaXml::records($path, $tag) as $record) {
+            $prefix = match ($tag) { 'invoice' => 'invoice', 'voucher' => 'voucher', 'bank' => 'bank', default => null };
+            if ($prefix !== null) {
+                $header = PohodaXml::get($record, $prefix . 'Header');
+                $type = PohodaXml::text($header, $prefix . 'Type');
+                $expected = $tag === 'invoice'
+                    ? preg_replace('/^\d+_faktury_|\.xml$/', '', self::FILES[$key]) : null;
+                if (($tag === 'invoice' && ($key === 'penalty' || ($type !== '' && $type !== $expected)))
+                    || ($tag !== 'invoice' && !in_array($type, ['receipt', 'expense'], true))) {
+                    $number = PohodaXml::text($header, 'number/numberRequested') ?: PohodaXml::text($header, 'number');
+                    $id = PohodaXml::text($header, 'id');
+                    $this->warnings[$key . '|' . $id . '|' . $number] = [
+                        'level' => 'warning', 'code' => 'xml_document_type',
+                        'message' => "Doklad {$number} má nepodporovaný typ {$type} v souboru " . basename($path)
+                            . '. Nepřevede se; ostatní doklady a případný zápis v účetním deníku se převedou.',
+                        'context' => ['file' => basename($path), 'document_no' => $number, 'source_id' => $id, 'source_type' => $type],
+                    ];
+                    continue;
+                }
+            }
+            yield $record;
+        }
+    }
+
+    public function sourceWarnings(): array
+    {
+        if (!$this->warningsScanned) {
+            if ($this->mdb !== null) {
+                $this->counts();
+            } else {
+                foreach (self::FILES as $key => $file) {
+                    $tag = str_contains($file, '_faktury_') ? 'invoice'
+                        : match ($key) { 'cash' => 'voucher', 'bank' => 'bank', default => null };
+                    if ($tag !== null) foreach ($this->records($key, $tag) as $_) {}
+                }
+            }
+            $this->warningsScanned = true;
+        }
+        return array_merge(array_values($this->warnings), $this->mdb?->warnings() ?? []);
     }
 
     /**

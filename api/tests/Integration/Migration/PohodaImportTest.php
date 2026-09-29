@@ -153,6 +153,35 @@ final class PohodaImportTest extends TestCase
         self::assertSame('completed', $again->status(), $this->explain($again));
     }
 
+    public function testUnknownDocumentTypesWarnAndKeepImportingKnownDocuments(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        foreach (['issued' => ['invoice', 'inv:invoiceType'], 'bank' => ['bank', 'bnk:bankType']] as $key => [$tag, $typeTag]) {
+            $path = $dir . '/' . PohodaExport::FILES[$key];
+            $xml = (string) file_get_contents($path);
+            self::assertSame(1, preg_match('/<lst:' . $tag . '\b.*?<\/lst:' . $tag . '>/s', $xml, $m, PREG_OFFSET_CAPTURE));
+            $unknown = preg_replace('/<' . $typeTag . '>.*?<\/' . $typeTag . '>/', '<' . $typeTag . '>unknownTestType</' . $typeTag . '>', $m[0][0]);
+            $xml = substr_replace($xml, $unknown, $m[0][1], 0);
+            file_put_contents($path, $xml);
+        }
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('completed_with_warnings', $protocol->status());
+        self::assertSame(2, self::stepCounts($protocol, 'preflight')['skipped_documents']);
+        $warnings = array_values(array_filter((array) $protocol->get('preflight'), static fn (array $m): bool => $m['level'] === 'warning'));
+        self::assertCount(2, $warnings);
+        self::assertSame(['xml_document_type', 'xml_document_type'], array_column($warnings, 'code'));
+        self::assertSame(['unknownTestType', 'unknownTestType'], array_column(array_column($warnings, 'context'), 'source_type'));
+        self::assertSame(2, $this->rows('invoices', $supplierId));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId));
+        self::assertSame(6, $this->rows('journal_entries', $supplierId));
+        self::assertSame(2, $this->rows('payment_matches', $supplierId));
+        self::assertTrue($protocol->get('reconciliation')[0]['ok']);
+    }
+
     public function testOtherItemsReuseImportedJournalAndDoNotDuplicateOnRerun(): void
     {
         $supplierId = $this->supplier();

@@ -175,6 +175,12 @@ s Linuxem. Server pro tuto cestu nepotřebuje ovladač Access ani přístup
 k původnímu MDB. Mzdy se nadále převádějí samostatným průvodcem
 [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
+Přijaté proforma faktury se převádějí jako přijaté zálohy včetně úhrad.
+Neznámý typ faktury, bankovního nebo pokladního dokladu či zdroj úhrady
+neblokuje převod ostatních dokladů. Konkrétní doklad se přeskočí a protokol
+uvede jeho číslo a důvod. Případné zápisy dokladu v účetním deníku se zachovají.
+Totéž platí pro neznámé typy dokladů v běžném XML exportu.
+
 ### 107.1.6 Cesta 3: export z POHODA SQL
 
 POHODA SQL ukládá každou účetní jednotku a rok do vlastní databáze na Microsoft

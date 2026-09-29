@@ -19,6 +19,7 @@ final class PohodaMdbAccounting
         11 => 'received',
         14 => 'received_advance',
         15 => 'commitment',
+        16 => 'received_proforma',
         18 => 'received_corrective',
     ];
     private const SOURCES = [
@@ -66,6 +67,7 @@ final class PohodaMdbAccounting
 
     private array $indexes = [];
     private array $groups = [];
+    private array $warnings = [];
 
     /**
      * Otevře XML převodu: úvodní průchod souborem ověří strukturu a zároveň sebere řádky
@@ -106,7 +108,7 @@ final class PohodaMdbAccounting
             throw new PohodaException('mdb_source_mismatch', 'Firma nebo rok neodpovídá údajům zdrojové MDB. Vytvořte nový export.');
         }
         foreach (self::VALIDATED as $table) {
-            if (isset($checked['errors'][$table])) {
+            if (isset($checked['errors'][$table]) && !self::skippable($checked['errors'][$table])) {
                 throw $checked['errors'][$table];
             }
         }
@@ -143,7 +145,7 @@ final class PohodaMdbAccounting
             throw new PohodaException('mdb_historical_vat', 'Doklad s historickými sazbami vyžaduje standardní XML export.');
         }
         if ($table === 'FA' && (($r['Cislo'] ?? '') !== '' || ($r['Datum'] ?? '') !== '') && !isset(self::INVOICES[(int) ($r['RelTpFak'] ?? 0)])) {
-            throw new PohodaException('mdb_invoice_type', 'MDB obsahuje dosud nepodporovaný typ faktury. Použijte standardní XML export.');
+            throw new PohodaException('mdb_invoice_type', 'Nepodporovaný typ faktury ' . ($r['RelTpFak'] ?? '0') . '.');
         }
         if ($table === 'BV' || $table === 'HO') {
             self::direction($r['RelTp' . $table] ?? '');
@@ -153,6 +155,16 @@ final class PohodaMdbAccounting
     public function has(string $key): bool
     {
         return isset(self::TABLES[$key]) || in_array($key, array_values(self::INVOICES), true);
+    }
+
+    public function warnings(): array
+    {
+        return array_values($this->warnings);
+    }
+
+    private static function skippable(PohodaException $error): bool
+    {
+        return in_array($error->errorCode, ['mdb_invoice_type', 'mdb_direction', 'mdb_payment_source'], true);
     }
 
     public function records(string $key): \Generator
@@ -184,24 +196,40 @@ final class PohodaMdbAccounting
             return;
         }
         foreach ($this->tables->each(array_keys($byTable)) as $table => $r) {
-            if ($table === 'FA') {
-                if ($this->isPlaceholder($r)) {
+            try {
+                if (in_array($table, self::VALIDATED, true)) {
+                    self::validate($table, $r);
+                }
+                if ($table === 'FA') {
+                    if ($this->isPlaceholder($r)) {
+                        continue;
+                    }
+                    $kind = self::INVOICES[(int) ($r['RelTpFak'] ?? 0)] ?? null;
+                    if ($kind === null) {
+                        throw new PohodaException('mdb_invoice_type', 'Nepodporovaný typ faktury ' . ($r['RelTpFak'] ?? '0') . '.');
+                    }
+                    if (in_array($kind, $byTable['FA'], true)) {
+                        yield $kind => $this->document($r, 'invoice', 'FApol');
+                    }
                     continue;
                 }
-                $kind = self::INVOICES[(int) ($r['RelTpFak'] ?? 0)] ?? null;
-                if ($kind === null) {
-                    throw new PohodaException('mdb_invoice_type', 'MDB obsahuje dosud nepodporovaný typ faktury. Použijte standardní XML export.');
+                foreach ($byTable[$table] as $key) {
+                    $record = $this->record($key, $r);
+                    if ($record !== null) {
+                        yield $key => $record;
+                    }
                 }
-                if (in_array($kind, $byTable['FA'], true)) {
-                    yield $kind => $this->document($r, 'invoice', 'FApol');
-                }
-                continue;
-            }
-            foreach ($byTable[$table] as $key) {
-                $record = $this->record($key, $r);
-                if ($record !== null) {
-                    yield $key => $record;
-                }
+            } catch (PohodaException $error) {
+                if (!self::skippable($error)) throw $error;
+                $number = (string) ($r['Cislo'] ?? $r['ID'] ?? '');
+                $this->warnings[$table . '|' . ($r['ID'] ?? $number) . '|' . $error->errorCode] = [
+                    'level' => 'warning', 'code' => $error->errorCode,
+                    'message' => "Doklad {$number} se nepřevede: " . $error->getMessage()
+                        . ' Ostatní doklady se převedou; případný zápis tohoto dokladu v účetním deníku zůstává zachovaný.',
+                    'context' => ['table' => $table, 'document_no' => $number,
+                        'source_id' => (string) ($r['ID'] ?? ''),
+                        'source_type' => (string) ($r['RelTpFak'] ?? $r['RelTpBV'] ?? $r['RelTpHO'] ?? '')],
+                ];
             }
         }
     }
@@ -360,14 +388,14 @@ final class PohodaMdbAccounting
             }
         }
         if ($prefix === 'invoice') {
-            $source = match ((int) $r['RelTpFak']) { 1, 8 => 2, 4, 6 => 43, 5 => 18, 11, 18 => 3, 14 => 44, 15 => 19 };
+            $source = match ((int) $r['RelTpFak']) { 1, 8 => 2, 4, 6 => 43, 5 => 18, 11, 18 => 3, 14, 16 => 44, 15 => 19 };
             foreach ($this->group('Uhrady', 'RelIDH')[$r['ID']] ?? [] as $u) {
                 if ((int) ($u['RelAgH'] ?? 0) !== $source) {
                     continue;
                 }
                 $agenda = (int) ($u['RelAgU'] ?? 0);
                 if ($agenda !== 0 && !isset(self::LINKS[$agenda])) {
-                    throw new PohodaException('mdb_payment_source', 'MDB obsahuje nepodporovaný zdroj úhrady. Použijte standardní XML export.');
+                    throw new PohodaException('mdb_payment_source', 'MDB obsahuje nepodporovaný zdroj úhrady ' . $agenda . '.');
                 }
                 $d['liquidations']['liquidation'][] = [
                     'id' => $u['ID'],
@@ -556,7 +584,7 @@ final class PohodaMdbAccounting
 
     private static function direction(string $type): string
     {
-        return match ($type) { '1' => 'receipt', '2' => 'expense', default => throw new PohodaException('mdb_direction', 'Neznámý směr dokladu v MDB exportu.') };
+        return match ($type) { '1' => 'receipt', '2' => 'expense', default => throw new PohodaException('mdb_direction', 'Neznámý směr dokladu ' . $type . ' v MDB exportu.') };
     }
 
     private static function lowRate(array $r): int

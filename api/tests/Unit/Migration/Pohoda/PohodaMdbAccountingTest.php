@@ -50,6 +50,38 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('2026-02-03', $records[0]['date']);
     }
 
+    public function testReceivedProformaAndCorrectiveDocumentsKeepTheirTypesAndPayments(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [
+                ['ID' => '10', 'Cislo' => 'TEST-PROFORMA', 'RelTpFak' => '16', 'Datum' => '2026-02-03',
+                    'Kc2' => '100', 'KcDPH2' => '21', 'KcLikv' => '121', 'DatLikv' => '2026-02-10'],
+                ['ID' => '11', 'Cislo' => 'TEST-CORRECTION', 'RelTpFak' => '18', 'Datum' => '2026-02-04',
+                    'Kc2' => '-50', 'KcDPH2' => '-10.50'],
+            ],
+            'BV' => [['ID' => '1', 'RelTpBV' => '2', 'Cislo' => 'TEST-B1', 'Kc0' => '121']],
+            'Uhrady' => [
+                ['ID' => '7', 'RelIDH' => '10', 'RelAgH' => '44', 'RelAgU' => '28', 'RelIDU' => '1',
+                    'DatumU' => '2026-02-10', 'KcU' => '121'],
+                ['ID' => '8', 'RelIDH' => '10', 'RelAgH' => '3', 'RelAgU' => '28', 'RelIDU' => '1', 'KcU' => '999'],
+            ],
+        ]);
+        self::assertTrue($mapper->has('received_proforma'));
+        $proforma = iterator_to_array($mapper->records('received_proforma'), false)[0];
+        self::assertSame('TEST-PROFORMA', $proforma['invoiceHeader']['number']['numberRequested']);
+        self::assertSame('121', $proforma['invoiceSummary']['homeCurrency']['priceHighSum']);
+        self::assertSame('121', $proforma['invoiceHeader']['liquidation']['amountHome']);
+        self::assertCount(1, $proforma['liquidations']['liquidation']);
+        self::assertSame('121', $proforma['liquidations']['liquidation'][0]['amount']);
+        self::assertSame(['id' => '1', 'number' => 'TEST-B1'], $proforma['liquidations']['liquidation'][0]['sourceDocument']);
+        $corrective = iterator_to_array($mapper->records('received_corrective'), false)[0];
+        self::assertSame('-60.5', $corrective['invoiceSummary']['homeCurrency']['priceHighSum']);
+        $agenda = $this->dir . '/12345678_2026';
+        mkdir($agenda);
+        copy($this->path, $agenda . '/' . PohodaMdbAccounting::FILE);
+        self::assertSame(2, PohodaExport::open($agenda)->counts()['purchase']);
+    }
+
     public function testInvoicePreservesVatBucketsAndSeparatesAdvanceDeduction(): void
     {
         $mapper = $this->mapper([
@@ -201,9 +233,56 @@ final class PohodaMdbAccountingTest extends TestCase
 
     public static function unknownTypes(): iterable
     {
-        yield 'invoice' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '999']]], 'issued', 'mdb_invoice_type'];
-        yield 'bank' => [['BV' => [['ID' => '1', 'RelTpBV' => '999']]], 'bank', 'mdb_direction'];
         yield 'historical VAT' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'HistSzDPH' => 'true']]], 'issued', 'mdb_historical_vat'];
+    }
+
+    public function testUnknownDocumentAndPaymentTypesAreReportedAndDoNotStopOtherRecords(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [
+                ['ID' => '1', 'Cislo' => 'TEST-UNKNOWN', 'RelTpFak' => '999', 'Datum' => '2026-02-03'],
+                ['ID' => '2', 'Cislo' => 'TEST-PAYMENT', 'RelTpFak' => '11', 'Datum' => '2026-02-04'],
+                ['ID' => '3', 'Cislo' => 'TEST-OK', 'RelTpFak' => '11', 'Datum' => '2026-02-05', 'Kc0' => '100'],
+            ],
+            'Uhrady' => [['ID' => '1', 'RelIDH' => '2', 'RelAgH' => '3', 'RelAgU' => '999', 'KcU' => '100']],
+            'BV' => [
+                ['ID' => '1', 'RelTpBV' => '999', 'Cislo' => 'TEST-BAD-BANK'],
+                ['ID' => '2', 'RelTpBV' => '2', 'Cislo' => 'TEST-OK-BANK', 'Kc0' => '100'],
+            ],
+            'pUD' => [['ID' => '1', 'RelUdAg' => '3', 'Cislo' => 'TEST-UNKNOWN', 'Kc' => '100', 'UMD' => '518', 'UD' => '321']],
+        ]);
+        $agenda = $this->dir . '/12345678_2026';
+        mkdir($agenda);
+        copy($this->path, $agenda . '/' . PohodaMdbAccounting::FILE);
+        $export = PohodaExport::open($agenda);
+        self::assertSame(1, $export->counts()['purchase']);
+        self::assertSame(1, $export->counts()['bank']);
+        self::assertSame('TEST-OK', iterator_to_array($export->records('received', 'invoice'), false)[0]['invoiceHeader']['number']['numberRequested']);
+        self::assertCount(1, iterator_to_array($export->records('journal', 'accountingItem'), false));
+        $warnings = $export->sourceWarnings();
+        self::assertCount(3, $warnings);
+        self::assertSame(['mdb_invoice_type', 'mdb_payment_source', 'mdb_direction'], array_column($warnings, 'code'));
+        self::assertSame('999', $warnings[0]['context']['source_type']);
+        self::assertSame('TEST-UNKNOWN', $warnings[0]['context']['document_no']);
+        self::assertSame($warnings, $export->sourceWarnings());
+    }
+
+    public function testUnknownXmlDocumentTypesAreReportedBeforeYieldAndOtherRecordsContinue(): void
+    {
+        $agenda = $this->dir . '/12345678_2026';
+        mkdir($agenda);
+        file_put_contents($agenda . '/' . PohodaExport::FILES['issued'], '<root><invoice><invoiceHeader><invoiceType>unknownType</invoiceType><number><numberRequested>TEST-UNKNOWN</numberRequested></number></invoiceHeader></invoice><invoice><invoiceHeader><invoiceType>issuedInvoice</invoiceType><number><numberRequested>TEST-OK</numberRequested></number></invoiceHeader></invoice></root>');
+        file_put_contents($agenda . '/' . PohodaExport::FILES['bank'], '<root><bank><bankHeader><bankType>unknownDirection</bankType><number>TEST-BAD</number></bankHeader></bank><bank><bankHeader><bankType>expense</bankType><number>TEST-OK-BANK</number></bankHeader></bank></root>');
+        file_put_contents($agenda . '/' . PohodaExport::FILES['journal'], '<root/>');
+        file_put_contents($agenda . '/' . PohodaExport::FILES['chart'], '<root/>');
+        file_put_contents($agenda . '/' . PohodaExport::FILES['vat_classes'], '<root/>');
+        $export = PohodaExport::open($agenda);
+        self::assertCount(1, iterator_to_array($export->records('issued', 'invoice'), false));
+        self::assertCount(1, iterator_to_array($export->records('bank', 'bank'), false));
+        $warnings = $export->sourceWarnings();
+        self::assertCount(2, $warnings);
+        self::assertSame('unknownType', $warnings[0]['context']['source_type']);
+        self::assertSame('unknownDirection', $warnings[1]['context']['source_type']);
     }
 
     public function testZipAutomaticallySelectsMdbReaderAndProducesOverview(): void

@@ -87,7 +87,7 @@ final class PohodaImporter
      */
     public function preflight(int $supplierId, PohodaExport $export, array $skipYears = [], ?array $laterYears = null): array
     {
-        $out = [];
+        $out = $export->sourceWarnings();
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
             $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
         };
@@ -181,6 +181,9 @@ final class PohodaImporter
         foreach ($preflight as $m) {
             if ($m['level'] === 'error') {
                 $protocol->error(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
+            } elseif ($m['level'] === 'warning') {
+                $protocol->warn(self::STEP_PREFLIGHT, $m['code'], $m['message'], $m['context']);
+                $protocol->count(self::STEP_PREFLIGHT, 'skipped_documents');
             }
         }
         if ($protocol->hasErrors()) {
