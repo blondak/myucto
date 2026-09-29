@@ -217,7 +217,7 @@ final class McpOAuthGrantTest extends TestCase
                 'code_challenge_method' => 'S256',
                 'state' => 'synthetic-state',
                 'resource' => $base . '/mcp',
-                'scope' => 'read',
+                'scope' => 'read_write',
             ];
             $factory = new ServerRequestFactory();
             $cookie = (string) $config->get('session.cookie_name', '__Host-myinvoice_session');
@@ -227,7 +227,8 @@ final class McpOAuthGrantTest extends TestCase
             $consent = $app->handle($get);
             self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
             self::assertStringContainsString('Synthetic assistant', (string) $consent->getBody());
-            self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $consent->getBody());
+            self::assertStringContainsString('/assets/mcp-consent-v3.js', (string) $consent->getBody());
+            self::assertStringContainsString('<option value="read" selected>Pouze čtení</option>', (string) $consent->getBody());
             self::assertStringNotContainsString('name="password"', (string) $consent->getBody());
 
             $form = $params + [
@@ -243,7 +244,9 @@ final class McpOAuthGrantTest extends TestCase
                 ->withParsedBody($form)
                 ->withBody((new StreamFactory())->createStream(http_build_query($form)));
             $approvedWithoutMfa = $app->handle($post);
-            self::assertSame(302, $approvedWithoutMfa->getStatusCode(), (string) $approvedWithoutMfa->getBody());
+            self::assertSame(200, $approvedWithoutMfa->getStatusCode(), (string) $approvedWithoutMfa->getBody());
+            self::assertStringContainsString('/assets/mcp-oauth-redirect-v1.js', (string) $approvedWithoutMfa->getBody());
+            self::assertSame('no-referrer', $approvedWithoutMfa->getHeaderLine('Referrer-Policy'));
             $credential = random_bytes(32);
             $this->db->pdo()->prepare(
                 'INSERT INTO webauthn_credentials
@@ -257,18 +260,43 @@ final class McpOAuthGrantTest extends TestCase
             $passkeyRequired = $app->handle($post);
             self::assertSame(401, $passkeyRequired->getStatusCode());
             $passkeyConsent = $app->handle($get);
-            self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $passkeyConsent->getBody());
+            self::assertStringContainsString('/assets/mcp-consent-v3.js', (string) $passkeyConsent->getBody());
             $this->db->pdo()->prepare('DELETE FROM webauthn_credentials WHERE user_id = ?')
                 ->execute([$this->userId]);
             $approved = $app->handle($post);
-            self::assertSame(302, $approved->getStatusCode(), (string) $approved->getBody());
-            parse_str((string) parse_url($approved->getHeaderLine('Location'), PHP_URL_QUERY), $callback);
+            self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+            parse_str((string) parse_url(self::consentTarget($approved), PHP_URL_QUERY), $callback);
             self::assertSame('synthetic-state', $callback['state']);
             $grant = $this->oauth->exchange(
                 $callback['code'], $client, $params['redirect_uri'], str_repeat('c', 64), $params['resource'],
             );
             self::assertIsArray($grant);
             self::assertSame($this->supplierId, $this->tokens->validate($grant['access_token'])['supplier_id']);
+            self::assertSame('read', $this->tokens->validate($grant['access_token'])['scope']);
+
+            $form['grant_scope'] = 'read_write';
+            $writeApproval = $app->handle($post->withParsedBody($form)
+                ->withBody((new StreamFactory())->createStream(http_build_query($form))));
+            self::assertSame(200, $writeApproval->getStatusCode());
+            parse_str((string) parse_url(self::consentTarget($writeApproval), PHP_URL_QUERY), $writeCallback);
+            $writeGrant = $this->oauth->exchange(
+                $writeCallback['code'], $client, $params['redirect_uri'], str_repeat('c', 64), $params['resource'],
+            );
+            self::assertIsArray($writeGrant);
+            self::assertSame('read_write', $this->tokens->validate($writeGrant['access_token'])['scope']);
+
+            $form['scope'] = 'read';
+            $invalidApproval = $app->handle($post->withParsedBody($form)
+                ->withBody((new StreamFactory())->createStream(http_build_query($form))));
+            self::assertSame(400, $invalidApproval->getStatusCode());
+
+            $form['decision'] = 'deny';
+            $denied = $app->handle($post->withParsedBody($form)
+                ->withBody((new StreamFactory())->createStream(http_build_query($form))));
+            self::assertSame(200, $denied->getStatusCode());
+            parse_str((string) parse_url(self::consentTarget($denied), PHP_URL_QUERY), $denial);
+            self::assertSame('access_denied', $denial['error']);
+            self::assertSame('synthetic-state', $denial['state']);
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
@@ -337,7 +365,7 @@ final class McpOAuthGrantTest extends TestCase
                 return $app->handle($request);
             };
             $approvedTotp = $post($form);
-            self::assertSame(302, $approvedTotp->getStatusCode(), (string) $approvedTotp->getBody());
+            self::assertSame(200, $approvedTotp->getStatusCode(), (string) $approvedTotp->getBody());
             $reusedTotp = $post($form);
             self::assertSame(401, $reusedTotp->getStatusCode());
             self::assertStringContainsString('Kód je neplatný nebo už byl použit', (string) $reusedTotp->getBody());
@@ -350,7 +378,7 @@ final class McpOAuthGrantTest extends TestCase
             unset($form['totp_code']);
             $form['step_up_token'] = $proof;
             $approvedPasskey = $post($form);
-            self::assertSame(302, $approvedPasskey->getStatusCode(), (string) $approvedPasskey->getBody());
+            self::assertSame(200, $approvedPasskey->getStatusCode(), (string) $approvedPasskey->getBody());
             $replayed = $post($form);
             self::assertSame(403, $replayed->getStatusCode());
             self::assertStringContainsString('Zkusit znovu', (string) $replayed->getBody());
@@ -361,11 +389,18 @@ final class McpOAuthGrantTest extends TestCase
                 ->execute([$nextSecret, $this->userId]);
             $form['totp_code'] = (new TotpService())->currentCode($nextSecret);
             $approvedWithStalePasskey = $post($form);
-            self::assertSame(302, $approvedWithStalePasskey->getStatusCode(), (string) $approvedWithStalePasskey->getBody());
+            self::assertSame(200, $approvedWithStalePasskey->getStatusCode(), (string) $approvedWithStalePasskey->getBody());
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
         }
+    }
+
+    private static function consentTarget(\Psr\Http\Message\ResponseInterface $response): string
+    {
+        self::assertMatchesRegularExpression('/id="mcp-oauth-continue"[^>]+href="([^"]+)"/', (string) $response->getBody());
+        preg_match('/id="mcp-oauth-continue"[^>]+href="([^"]+)"/', (string) $response->getBody(), $matches);
+        return html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
     public function testConsentOffersSupplierWithTokenPermissionWhenDefaultDeniesIt(): void

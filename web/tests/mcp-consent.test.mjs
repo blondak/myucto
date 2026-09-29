@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
 
-const script = readFileSync(join(import.meta.dirname, '../public/assets/mcp-consent-v2.js'), 'utf8')
+const script = readFileSync(join(import.meta.dirname, '../public/assets/mcp-consent-v3.js'), 'utf8')
 
 function consentPage(passkey = false) {
   const dom = new JSDOM(`<!doctype html><form id="mcp-consent-form">

@@ -53,9 +53,6 @@ form.addEventListener('submit', event => {
   }
   submitting = true
   status.textContent = 'Povoluji přístup…'
-  window.setTimeout(() => {
-    for (const submit of form.querySelectorAll('button[type="submit"]')) submit.disabled = true
-  }, 0)
 })
 
 totp?.addEventListener('input', () => {

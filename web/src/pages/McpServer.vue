@@ -157,8 +157,9 @@ args = ["${winPathJson.value}"]
 [mcp_servers.myucto.env]
 MYUCTO_API_URL = "${apiBase}"
 MYUCTO_API_TOKEN = "mi_pat_vas_token"`,
-    warn: 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server. '
-      + 'Pro něj zvolte záložku Připojit online.',
+    warn: auth.isManagedInstallation
+      ? 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server, který na spravované instalaci není dostupný.'
+      : 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server. Pro něj zvolte záložku Připojit online.',
   },
   {
     key: 'gemini',
@@ -490,7 +491,7 @@ const TOOL_GROUPS = computed(() => [
 onMounted(() => {
   loadTokens()
   loadLog()
-  loadRemoteSettings()
+  if (!auth.isManagedInstallation) loadRemoteSettings()
 })
 </script>
 
@@ -546,7 +547,7 @@ onMounted(() => {
       přesně takový, jaký je popsaný níže.
     </div>
 
-    <div class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
+    <div v-if="!auth.isManagedInstallation" class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
       <div class="flex flex-wrap gap-1">
         <button id="mcp-local-tab" type="button" role="tab" :aria-selected="connectionMode === 'local'"
           aria-controls="mcp-local-panel" @click="connectionMode = 'local'"
@@ -563,7 +564,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="connectionMode === 'local'" id="mcp-local-panel" role="tabpanel" aria-labelledby="mcp-local-tab">
+    <div v-if="auth.isManagedInstallation || connectionMode === 'local'" id="mcp-local-panel" role="tabpanel" :aria-labelledby="auth.isManagedInstallation ? undefined : 'mcp-local-tab'">
     <!-- Adresa API -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">
       <div class="flex flex-wrap items-center gap-3">
@@ -1006,7 +1007,7 @@ npm install</pre>
     </div>
     </div>
 
-    <div v-else id="mcp-remote-panel" role="tabpanel" aria-labelledby="mcp-remote-tab">
+    <div v-else-if="!auth.isManagedInstallation" id="mcp-remote-panel" role="tabpanel" aria-labelledby="mcp-remote-tab">
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>

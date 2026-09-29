@@ -28,6 +28,9 @@ final class HostedMcpSettingsAction
         if (($user['is_superadmin'] ?? false) !== true) {
             return Json::error($response, 'forbidden_permission', 'Nastavení MCP může změnit pouze správce.', 403);
         }
+        if ($this->hosted->managedInstallation()) {
+            return Json::error($response, 'managed_installation', 'Serverový MCP není ve spravované instalaci dostupný.', 409);
+        }
         $body = (array) $request->getParsedBody();
         if (!array_key_exists('enabled', $body) || !is_bool($body['enabled'])) {
             return Json::error($response, 'invalid_enabled', 'Pole enabled musí být boolean.', 422);

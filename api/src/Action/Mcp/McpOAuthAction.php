@@ -118,7 +118,7 @@ final class McpOAuthAction
             : $request->getQueryParams();
         foreach (['client_id', 'redirect_uri', 'response_type', 'code_challenge',
             'code_challenge_method', 'state', 'resource', 'scope', 'supplier_id', 'decision',
-            'password', 'totp_code', 'step_up_token'] as $key) {
+            'password', 'totp_code', 'step_up_token', 'grant_scope'] as $key) {
             if (isset($params[$key]) && !is_string($params[$key]) && !is_int($params[$key])) {
                 return $this->html($response, '<h1>Neplatný požadavek na připojení MCP.</h1>', 400);
             }
@@ -221,6 +221,12 @@ final class McpOAuthAction
                     . self::escape((string) $choice['name']) . '</option>';
             }
             $select .= '</select></label>';
+            $grantChoice = $scope === 'read_write'
+                ? '<label class="field">Udělit přístup<select name="grant_scope">'
+                    . '<option value="read" selected>Pouze čtení</option>'
+                    . '<option value="read_write">Čtení a zápis</option>'
+                    . '</select></label>'
+                : '<input type="hidden" name="grant_scope" value="read">';
             $verification = '';
             if ($passkeyAvailable) {
                 $verification .= '<input type="hidden" name="step_up_token" id="mcp-step-up-token">'
@@ -241,21 +247,26 @@ final class McpOAuthAction
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
                 . '<div class="access-summary"><span>Požadovaný rozsah</span><strong>' . $permission . '</strong></div>'
                 . '<p class="muted">Přístup platí jen pro zvolenou firmu. Kdykoli jej můžete odvolat v API tokenech.</p>'
-                . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $select
+                . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $select . $grantChoice
                 . '<div class="verification"><h2>Ověření identity</h2>'
                 . ($passkeyAvailable && $totpRequired ? '<p class="field-hint">Zvolte passkey nebo nový kód z ověřovací aplikace.</p>' : '')
                 . $verification . '</div>'
                 . '<div class="actions"><button type="submit" name="decision" value="approve">Povolit přístup</button>'
                 . '<button type="submit" name="decision" value="deny" formnovalidate>Zamítnout</button></div>'
                 . '<span id="mcp-form-status" class="field-hint" role="status" aria-live="polite"></span></form>'
-                . '<script src="/assets/mcp-consent-v2.js" defer></script>';
+                . '<script src="/assets/mcp-consent-v3.js" defer></script>';
             return $this->html($response, $content);
         }
 
         if (($params['decision'] ?? '') !== 'approve') {
-            return $response->withStatus(302)->withHeader('Location', self::redirectWith($redirect, [
+            return $this->finishConsent($response, self::redirectWith($redirect, [
                 'error' => 'access_denied', 'state' => $state,
-            ]))->withHeader('Cache-Control', 'no-store');
+            ]));
+        }
+        $grantScope = (string) ($params['grant_scope'] ?? 'read');
+        if (!in_array($grantScope, ['read', 'read_write'], true)
+            || ($scope === 'read' && $grantScope !== 'read')) {
+            return $this->html($response, '<h1>Neplatný rozsah přístupu.</h1>', 400);
         }
         $proof = (string) ($params['step_up_token'] ?? '');
         $totpCode = trim((string) ($params['totp_code'] ?? ''));
@@ -287,11 +298,11 @@ final class McpOAuthAction
             return $this->consentError($response, $params, 'Ověřte passkey nebo zadejte nový kód ověřovací aplikace.', 401);
         }
         $code = $this->oauth->createCode(
-            $clientId, (int) $user['id'], $supplierId, $redirect, $challenge, $scope, $resource,
+            $clientId, (int) $user['id'], $supplierId, $redirect, $challenge, $grantScope, $resource,
         );
-        return $response->withStatus(302)->withHeader('Location', self::redirectWith($redirect, [
+        return $this->finishConsent($response, self::redirectWith($redirect, [
             'code' => $code, 'state' => $state,
-        ]))->withHeader('Cache-Control', 'no-store');
+        ]));
     }
 
     public function token(Request $request, Response $response): Response
@@ -399,6 +410,15 @@ final class McpOAuthAction
         $response->getBody()->write($body);
         return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8')
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    private function finishConsent(Response $response, string $destination): Response
+    {
+        $content = '<h1>Vracíme vás do AI asistenta</h1>'
+            . '<p class="muted">Pokud se stránka sama nepřesměruje, pokračujte tlačítkem.</p>'
+            . '<a id="mcp-oauth-continue" class="retry-link" href="' . self::escape($destination) . '">Pokračovat do asistenta</a>'
+            . '<script src="/assets/mcp-oauth-redirect-v1.js" defer></script>';
+        return $this->html($response, $content)->withHeader('Referrer-Policy', 'no-referrer');
     }
 
     private function consentError(Response $response, array $params, string $message, int $status): Response

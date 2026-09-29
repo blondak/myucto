@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Mcp;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
 
 final class HostedMcp
@@ -12,10 +13,12 @@ final class HostedMcp
     public function __construct(
         private readonly Connection $db,
         private readonly TenantUrlResolver $urls,
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function enabled(): bool
     {
+        if ($this->managed->isManaged()) return false;
         $override = $this->envOverride();
         if ($override !== null) return $override;
         return (int) $this->db->pdo()->query('SELECT enabled FROM mcp_server_settings WHERE id = 1')->fetchColumn() === 1;
@@ -23,6 +26,9 @@ final class HostedMcp
 
     public function setEnabled(bool $enabled): void
     {
+        if ($this->managed->isManaged()) {
+            throw new \LogicException('Serverový MCP není ve spravované instalaci dostupný.');
+        }
         if ($this->envOverride() !== null) {
             throw new \LogicException('Nastavení MCP řídí proměnná prostředí.');
         }
@@ -33,6 +39,11 @@ final class HostedMcp
     public function managedByEnvironment(): bool
     {
         return $this->envOverride() !== null;
+    }
+
+    public function managedInstallation(): bool
+    {
+        return $this->managed->isManaged();
     }
 
     public function endpoint(): string

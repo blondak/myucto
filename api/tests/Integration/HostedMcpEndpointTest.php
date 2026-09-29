@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration;
 
 use MyInvoice\Action\Mcp\HostedMcpEndpointAction;
+use MyInvoice\Action\Mcp\HostedMcpSettingsAction;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -12,6 +13,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -41,6 +43,7 @@ final class HostedMcpEndpointTest extends TestCase
         $hosted = new HostedMcp(
             $db,
             new TenantUrlResolver($config, new SupplierDomainRepository($db, EntityCache::disabled())),
+            new ManagedModeGuard($config),
         );
         $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config));
         $factory = new ResponseFactory();
@@ -58,6 +61,31 @@ final class HostedMcpEndpointTest extends TestCase
             'name' => 'create_client', 'arguments' => [],
         ]);
         self::assertTrue($call['result']['isError']);
+    }
+
+    public function testManagedInstallationKeepsServerDisabledEvenWithEnvironmentOverride(): void
+    {
+        $config = Config::load(dirname(__DIR__, 3));
+        $db = new Connection($config);
+        $hosted = new HostedMcp(
+            $db,
+            new TenantUrlResolver($config, new SupplierDomainRepository($db, EntityCache::disabled())),
+            new ManagedModeGuard(new Config(['app' => ['managed' => true]])),
+        );
+        self::assertFalse($hosted->enabled());
+
+        $factory = new ResponseFactory();
+        $request = (new ServerRequestFactory())->createServerRequest('POST', 'https://example.test/mcp');
+        $endpoint = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config));
+        $disabled = $endpoint->handle($request, $factory->createResponse());
+        self::assertSame(404, $disabled->getStatusCode());
+
+        $settings = new HostedMcpSettingsAction($hosted);
+        $change = $settings->update($request->withParsedBody(['enabled' => true])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['is_superadmin' => true]), $factory->createResponse());
+        self::assertSame(409, $change->getStatusCode());
+        self::assertStringContainsString('managed_installation', (string) $change->getBody());
     }
 
     private function send(

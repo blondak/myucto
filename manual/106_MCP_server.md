@@ -173,10 +173,13 @@ prostředí, které spouští MCP, dostupný **Node.js**; když chybí, stránka
 upozornění a zapnutí nedovolí. Nainstaluj Node.js do tohoto prostředí, ověř jeho dostupnost pro aplikaci a stránku
 znovu načti. Na počítači ani telefonu uživatele Node.js potřeba není.
 Stejným přepínačem může superadmin server později vypnout.
-V `cfg.php` se server nezapíná. V Dockeru, na IIS a v jiných spravovaných
-instalacích lze stav řídit proměnnou `MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
+V `cfg.php` se server nezapíná. V Dockeru a na IIS lze stav řídit proměnnou
+`MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
 nastavení je přepínač ve webu jen informativní. Bez této proměnné platí nastavení
 uložené v aplikaci. Dockerový obraz už Node.js obsahuje.
+Ve spravované SaaS instalaci (`app.managed = true`) je serverový MCP vypnutý
+bez ohledu na proměnnou prostředí i uložený přepínač. Záložka Připojit online
+se tam nezobrazuje a dostupný zůstává lokální postup se souborem `.mjs`.
 Pokud Claude při přidávání konektoru hlásí, že na adrese žádný server neodpověděl,
 zkontroluj nejdřív tento přepínač. Vypnutý `/mcp` vrací chybu `404 mcp_disabled`
 a klient proto nemůže zjistit přihlašovací údaje OAuth.
@@ -190,12 +193,14 @@ adresáři PHP, nastav `MYINVOICE_MCP_PHP_BINARY` na úplnou cestu k `php.exe`.
 Na počítači uživatele Node pro online připojení není třeba.
 
 1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
-2. Při připojení se v prohlížeči přihlas do MyÚčta, vyber firmu a schval rozsah
-   přístupu. Pokud máš zapnuté MFA, ověř se passkey nebo novým kódem ověřovací
+2. Při připojení se v prohlížeči přihlas do MyÚčta a vyber firmu. Když asistent
+   požaduje čtení a zápis, můžeš v poli **Udělit přístup** zvolit **Pouze čtení**
+   (výchozí volba) nebo **Čtení a zápis**. Pokud asistent požaduje jen čtení,
+   širší přístup mu udělit nelze. Pokud máš zapnuté MFA, ověř se passkey nebo novým kódem ověřovací
    aplikace. Bez MFA stačí přístup potvrdit. Kód použitý při přihlášení nelze
-   znovu použít. Před souhlasem zkontroluj požadovaný rozsah: pro běžné dotazy
-   stačí **čtení**; požadavek na
-   **čtení a zápis** schvaluj jen tehdy, když má asistent opravdu měnit data.
+   znovu použít. Pro běžné dotazy stačí **čtení**; **čtení a zápis** schvaluj jen
+   tehdy, když má asistent opravdu měnit data. Po schválení se prohlížeč vrátí
+   do asistenta. Když se nepřesměruje automaticky, zvol **Pokračovat do asistenta**.
 3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
    Nástroj `whoami` vrátí uživatele, roli a firmu.
 

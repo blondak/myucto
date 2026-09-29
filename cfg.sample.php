@@ -22,9 +22,10 @@
  *
  * Serverový MCP je výchozně vypnutý. Superadmin jej zapíná v aplikaci na
  * /profile/mcp-server, v záložce Připojit online. Přepínač není v cfg.php;
- * pro Docker, IIS a další spravované instalace lze stav vynutit proměnnou
- * prostředí MYINVOICE_MCP_ENABLED=1 (nebo =0). Při nastavení ENV má
- * přednost před přepínačem v aplikaci.
+ * pro Docker a IIS lze stav vynutit proměnnou prostředí
+ * MYINVOICE_MCP_ENABLED=1 (nebo =0). Při nastavení ENV má přednost před
+ * přepínačem v aplikaci. Při app.managed = true je serverový MCP vždy
+ * vypnutý bez ohledu na ENV i databázový přepínač.
  */
 
 return [
