@@ -30,6 +30,7 @@ final class McpOAuthGrantTest extends TestCase
     private int $userId;
     private int $supplierId;
     private array $clientIds = [];
+    private array $extraSupplierIds = [];
 
     protected function setUp(): void
     {
@@ -73,6 +74,9 @@ final class McpOAuthGrantTest extends TestCase
         }
         foreach ($this->clientIds as $id) {
             $pdo->prepare('DELETE FROM mcp_oauth_clients WHERE client_id = ?')->execute([$id]);
+        }
+        foreach ($this->extraSupplierIds as $id) {
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$id]);
         }
         if (isset($this->supplierId)) {
             $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierId]);
@@ -124,6 +128,17 @@ final class McpOAuthGrantTest extends TestCase
         ]);
         self::assertNotTrue($called['isError'] ?? false, json_encode($called));
         self::assertIsObject($called['structuredContent'] ?? null);
+        $this->db->pdo()->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO supplier (company_name, street, city, zip, country_id, email,
+                                       default_currency_id, default_vat_rate_id)
+                 VALUES (?, ?, ?, ?, 1, ?, 0, 0)'
+            )->execute(['MCP other test s.r.o.', 'Testovací 2', 'Brno', '60200', 'mcp-other@example.test']);
+            $this->extraSupplierIds[] = (int) $this->db->pdo()->lastInsertId();
+        } finally {
+            $this->db->pdo()->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
         $base = rtrim((string) Config::load(dirname(__DIR__, 3))->get('app.url'), '/');
         $previousEnabled = getenv('MYINVOICE_MCP_ENABLED');
         putenv('MYINVOICE_MCP_ENABLED=1');
@@ -145,6 +160,15 @@ final class McpOAuthGrantTest extends TestCase
             self::assertContains('whoami', $names);
             self::assertContains('list_unpaid_invoices', $names);
             self::assertCount(count(array_unique($names)), $names);
+            $limited = $app->handle($request->withBody((new StreamFactory())->createStream(json_encode([
+                'jsonrpc' => '2.0', 'id' => 8, 'method' => 'tools/call',
+                'params' => ['name' => 'list_suppliers', 'arguments' => (object) []],
+            ], JSON_THROW_ON_ERROR))));
+            self::assertSame(200, $limited->getStatusCode(), (string) $limited->getBody());
+            $limitedBody = json_decode((string) $limited->getBody(), true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame([$this->supplierId], array_column(
+                $limitedBody['result']['structuredContent']['result'], 'id',
+            ));
         } finally {
             putenv($previousEnabled === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $previousEnabled);
         }
@@ -308,7 +332,7 @@ final class McpOAuthGrantTest extends TestCase
         }
     }
 
-    public function testBrowserConsentIssuesCodeForSelectedSupplier(): void
+    public function testBrowserConsentIssuesUnboundCode(): void
     {
         $config = Config::load(dirname(__DIR__, 3));
         $sessions = new SessionManager($this->db, $config, new DatabaseSecurityClock());
@@ -339,10 +363,11 @@ final class McpOAuthGrantTest extends TestCase
             self::assertStringContainsString('Synthetic assistant', (string) $consent->getBody());
             self::assertStringContainsString('/assets/mcp-consent-v3.js', (string) $consent->getBody());
             self::assertStringContainsString('<option value="read" selected>Pouze čtení</option>', (string) $consent->getBody());
+            self::assertStringNotContainsString('name="supplier_id"', (string) $consent->getBody());
+            self::assertStringContainsString('včetně těch přidaných později', (string) $consent->getBody());
             self::assertStringNotContainsString('name="password"', (string) $consent->getBody());
 
             $form = $params + [
-                'supplier_id' => (string) $this->supplierId,
                 'decision' => 'approve',
                 'csrf_token' => $session['csrf_token'],
             ];
@@ -353,6 +378,10 @@ final class McpOAuthGrantTest extends TestCase
                 ->withHeader('Content-Type', 'application/x-www-form-urlencoded')
                 ->withParsedBody($form)
                 ->withBody((new StreamFactory())->createStream(http_build_query($form)));
+            $staleForm = $form + ['supplier_id' => (string) $this->supplierId];
+            $stale = $app->handle($post->withParsedBody($staleForm)
+                ->withBody((new StreamFactory())->createStream(http_build_query($staleForm))));
+            self::assertSame(409, $stale->getStatusCode());
             $approvedWithoutMfa = $app->handle($post);
             self::assertSame(200, $approvedWithoutMfa->getStatusCode(), (string) $approvedWithoutMfa->getBody());
             self::assertStringContainsString('/assets/mcp-oauth-redirect-v1.js', (string) $approvedWithoutMfa->getBody());
@@ -381,7 +410,7 @@ final class McpOAuthGrantTest extends TestCase
                 $callback['code'], $client, $params['redirect_uri'], str_repeat('c', 64), $params['resource'],
             );
             self::assertIsArray($grant);
-            self::assertSame($this->supplierId, $this->tokens->validate($grant['access_token'])['supplier_id']);
+            self::assertNull($this->tokens->validate($grant['access_token'])['supplier_id']);
             self::assertSame('read', $this->tokens->validate($grant['access_token'])['scope']);
 
             $form['grant_scope'] = 'read_write';
@@ -410,6 +439,132 @@ final class McpOAuthGrantTest extends TestCase
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
+        }
+    }
+
+    public function testUnboundGrantUsesCurrentMembershipAndRejectsRemovedCompany(): void
+    {
+        $pdo = $this->db->pdo();
+        $readonlyRole = (int) $pdo->query("SELECT id FROM roles WHERE system_key = 'readonly' AND is_active = 1 LIMIT 1")->fetchColumn();
+        self::assertGreaterThan(0, $readonlyRole);
+        $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $pdo->prepare(
+                'INSERT INTO supplier (company_name, street, city, zip, country_id, email,
+                 default_currency_id, default_vat_rate_id) VALUES (?, ?, ?, ?, 1, ?, 0, 0)'
+            )->execute(['MCP druhá testovací s.r.o.', 'Testovací 2', 'Praha', '11000', 'mcp-second@example.test']);
+            $secondSupplierId = (int) $pdo->lastInsertId();
+        } finally {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+        $pdo->prepare('UPDATE users SET role_id = ? WHERE id = ?')->execute([$readonlyRole, $this->userId]);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$this->userId, $this->supplierId, $readonlyRole]);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$this->userId, $secondSupplierId, $readonlyRole]);
+        $pdo->prepare("INSERT INTO roles (name, role_type, is_active) VALUES (?, 'staff', 1)")
+            ->execute(['MCP omezená role ' . bin2hex(random_bytes(4))]);
+        $restrictedRole = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'profile.tokens', 1)")
+            ->execute([$restrictedRole]);
+
+        $config = Config::load(dirname(__DIR__, 3));
+        $base = rtrim((string) $config->get('app.url'), '/');
+        $resource = $base . '/mcp';
+        $client = $this->oauth->register('Synthetic assistant', ['https://client.example.test/callback']);
+        $this->clientIds[] = $client;
+        $verifier = str_repeat('f', 64);
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $code = $this->oauth->createCode($client, $this->userId, null,
+            'https://client.example.test/callback', $challenge, 'read', $resource);
+        $grant = $this->oauth->exchange($code, $client, 'https://client.example.test/callback', $verifier, $resource);
+        self::assertIsArray($grant);
+        self::assertNull($this->tokens->validate($grant['access_token'])['supplier_id']);
+
+        $prior = getenv('MYINVOICE_MCP_ENABLED');
+        putenv('MYINVOICE_MCP_ENABLED=1');
+        try {
+            $app = Bootstrap::buildApp();
+            $call = static function (string $method, array $params = []) use (&$app, $base, $grant): array {
+                $request = (new ServerRequestFactory())->createServerRequest('POST', $base . '/mcp',
+                    ['REMOTE_ADDR' => '127.0.0.1'])
+                    ->withHeader('Authorization', 'Bearer ' . $grant['access_token'])
+                    ->withHeader('Content-Type', 'application/json')
+                    ->withBody((new StreamFactory())->createStream(json_encode([
+                        'jsonrpc' => '2.0', 'id' => 1, 'method' => $method, 'params' => $params,
+                    ], JSON_THROW_ON_ERROR)));
+                $response = $app->handle($request);
+                return [$response->getStatusCode(), json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR)];
+            };
+            [$status, $catalog] = $call('tools/list');
+            self::assertSame(200, $status);
+            $invoiceTool = array_values(array_filter($catalog['result']['tools'],
+                static fn (array $tool): bool => $tool['name'] === 'list_invoices'))[0];
+            self::assertContains('supplier_id', $invoiceTool['inputSchema']['required']);
+            [$status, $companies] = $call('tools/call', ['name' => 'list_suppliers', 'arguments' => []]);
+            self::assertSame(200, $status);
+            self::assertNotTrue($companies['result']['isError'] ?? false, json_encode($companies));
+            $companyRows = $companies['result']['structuredContent']['result'];
+            self::assertContains($this->supplierId, array_column($companyRows, 'id'));
+            self::assertContains($secondSupplierId, array_column($companyRows, 'id'));
+
+            foreach ([$this->supplierId, $secondSupplierId] as $supplierId) {
+                [$status, $result] = $call('tools/call', [
+                    'name' => 'list_invoices', 'arguments' => ['supplier_id' => $supplierId],
+                ]);
+                self::assertSame(200, $status);
+                self::assertNotTrue($result['result']['isError'] ?? false, json_encode($result));
+            }
+            $missingSupplierId = (int) $pdo->query('SELECT MAX(id) FROM supplier')->fetchColumn() + 1;
+            [$status, $missingCompany] = $call('tools/call', [
+                'name' => 'list_invoices', 'arguments' => ['supplier_id' => $missingSupplierId],
+            ]);
+            self::assertSame(200, $status);
+            self::assertTrue($missingCompany['result']['isError'] ?? false);
+            self::assertStringContainsString('supplier_id', $missingCompany['result']['content'][0]['text']);
+            $pdo->prepare('UPDATE user_suppliers SET role_id = ? WHERE user_id = ? AND supplier_id = ?')
+                ->execute([$restrictedRole, $this->userId, $secondSupplierId]);
+            $app = Bootstrap::buildApp();
+            [$status, $roleDenied] = $call('tools/call', [
+                'name' => 'list_invoices', 'arguments' => ['supplier_id' => $secondSupplierId],
+            ]);
+            self::assertSame(200, $status);
+            self::assertTrue($roleDenied['result']['isError'] ?? false);
+            self::assertStringContainsString('HTTP 403', $roleDenied['result']['content'][0]['text']);
+            [$status, $listedWithRestrictedRole] = $call('tools/call', ['name' => 'list_suppliers', 'arguments' => []]);
+            self::assertSame(200, $status);
+            self::assertContains($secondSupplierId,
+                array_column($listedWithRestrictedRole['result']['structuredContent']['result'], 'id'));
+            $pdo->prepare('UPDATE user_suppliers SET role_id = ? WHERE user_id = ? AND supplier_id = ?')
+                ->execute([$readonlyRole, $this->userId, $secondSupplierId]);
+            $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ? AND supplier_id = ?')
+                ->execute([$this->userId, $secondSupplierId]);
+            $app = Bootstrap::buildApp();
+            [$status, $removed] = $call('tools/call', [
+                'name' => 'list_invoices', 'arguments' => ['supplier_id' => $secondSupplierId],
+            ]);
+            self::assertSame(200, $status);
+            self::assertTrue($removed['result']['isError'] ?? false);
+            self::assertStringContainsString('supplier_id', $removed['result']['content'][0]['text']);
+            $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+                ->execute([$this->userId, $secondSupplierId, $readonlyRole]);
+            $app = Bootstrap::buildApp();
+            [$status, $restored] = $call('tools/call', [
+                'name' => 'list_invoices', 'arguments' => ['supplier_id' => $secondSupplierId],
+            ]);
+            self::assertSame(200, $status);
+            self::assertNotTrue($restored['result']['isError'] ?? false, json_encode($restored));
+
+            $pdo->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$this->userId]);
+            self::assertNull($this->tokens->validate($grant['access_token']));
+            self::assertNull($this->oauth->refresh($grant['refresh_token'], $client));
+            [$status] = $call('tools/list');
+            self::assertSame(401, $status);
+        } finally {
+            putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
+            $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$this->userId]);
+            $pdo->prepare('DELETE FROM roles WHERE id = ?')->execute([$restrictedRole]);
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$secondSupplierId]);
         }
     }
 
@@ -460,7 +615,6 @@ final class McpOAuthGrantTest extends TestCase
             self::assertStringContainsString('value="deny" formnovalidate', (string) $consent->getBody());
 
             $form = $params + [
-                'supplier_id' => (string) $this->supplierId,
                 'decision' => 'approve',
                 'csrf_token' => $session['csrf_token'],
                 'totp_code' => (new TotpService())->currentCode($secret),
@@ -561,7 +715,6 @@ final class McpOAuthGrantTest extends TestCase
                     ->withBody((new StreamFactory())->createStream(http_build_query($form))));
             };
             $form = $params + [
-                'supplier_id' => (string) $this->supplierId,
                 'decision' => 'approve',
                 'csrf_token' => $session['csrf_token'],
             ];
@@ -575,7 +728,7 @@ final class McpOAuthGrantTest extends TestCase
             self::assertIsArray($grant);
             self::assertSame('read', $this->tokens->validate($grant['access_token'])['scope']);
             self::assertSame($this->userId, $this->tokens->validate($grant['access_token'])['user_id']);
-            self::assertSame($this->supplierId, $this->tokens->validate($grant['access_token'])['supplier_id']);
+            self::assertNull($this->tokens->validate($grant['access_token'])['supplier_id']);
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
@@ -583,7 +736,7 @@ final class McpOAuthGrantTest extends TestCase
         }
     }
 
-    public function testConsentOffersSupplierWithTokenPermissionWhenDefaultDeniesIt(): void
+    public function testConsentAllowsUnboundGrantWhenDefaultSupplierDeniesTokenPermission(): void
     {
         $pdo = $this->db->pdo();
         $superadminRole = (int) $pdo->query("SELECT id FROM roles WHERE system_key = 'superadmin'")->fetchColumn();
@@ -637,8 +790,8 @@ final class McpOAuthGrantTest extends TestCase
             )->withCookieParams([$cookie => $session['token']]);
             $response = Bootstrap::buildApp()->handle($request);
             self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-            self::assertStringContainsString('value="' . $otherSupplierId . '" data-can-write="1" selected', (string) $response->getBody());
-            self::assertStringNotContainsString('value="' . $this->supplierId . '"', (string) $response->getBody());
+            self::assertStringContainsString('včetně těch přidaných později', (string) $response->getBody());
+            self::assertStringNotContainsString('name="supplier_id"', (string) $response->getBody());
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);

@@ -923,7 +923,8 @@
         "1939_client_bank_accounts_canonical_czech_number.sql",
         "1940_deferred_revenue_accrual.sql",
         "1941_imported_paid_invoices_legacy_payment.sql",
-        "1942_hosted_mcp_oauth.sql"
+        "1942_hosted_mcp_oauth.sql",
+        "1943_unbound_mcp_oauth.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6754,7 +6755,7 @@
                 "redirect_uri": "varchar(2048) NOT NULL",
                 "resource": "varchar(2048) NOT NULL",
                 "scope": "enum('read','read_write') NOT NULL",
-                "supplier_id": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL",
                 "user_id": "bigint(20) unsigned NOT NULL"
             },
             "indexes": {
@@ -6785,7 +6786,7 @@
                 "resource": "varchar(2048) NOT NULL DEFAULT ''",
                 "revoked_at": "datetime NULL DEFAULT NULL",
                 "scope": "enum('read','read_write') NOT NULL",
-                "supplier_id": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL",
                 "user_id": "bigint(20) unsigned NOT NULL"
             },
             "indexes": {

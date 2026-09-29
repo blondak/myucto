@@ -6,7 +6,6 @@ namespace MyInvoice\Action\Mcp;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
-use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaStepUpService;
@@ -151,49 +150,32 @@ final class McpOAuthAction
             return $this->html($response, '<h1>Připojení vyžaduje přihlášení v prohlížeči.</h1>', 401);
         }
 
-        $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
-        if ($request->getMethod() === 'POST') {
-            $requestedSupplier = (int) ($params['supplier_id'] ?? 0);
-            $access = $this->suppliers->resolve($request->withQueryParams(['supplier_id' => $requestedSupplier]));
-            if ($requestedSupplier < 1 || $access->denied || $access->supplierId !== $requestedSupplier) {
-                return $this->html($response, '<h1>K této firmě nemáte přístup.</h1>', 403);
-            }
-            $supplierId = $requestedSupplier;
+        if ($request->getMethod() === 'POST' && isset($params['supplier_id'])) {
+            return $this->html($response, '<h1>Obnovte stránku pro nové připojení MCP.</h1>', 409);
         }
         $choices = [];
-        if ($request->getMethod() === 'GET') {
-            $available = ($user['is_superadmin'] ?? false) === true
-                ? $this->db->pdo()->query('SELECT id AS supplier_id, COALESCE(NULLIF(display_name, \'\'), company_name) AS name FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC)
-                : $this->memberships->listForUser((int) $user['id']);
-            foreach ($available as $choice) {
-                $candidateId = (int) $choice['supplier_id'];
-                $candidateRequest = $request->withQueryParams(['supplier_id' => $candidateId]);
-                $access = $this->suppliers->resolve($candidateRequest);
-                if (!$access->denied && $access->supplierId === $candidateId
-                    && $this->permissions->allows(
-                        $this->roles->resolve($candidateRequest), 'profile.tokens', AccessLevel::READ,
-                    )
-                ) {
-                    $choice['can_write'] = $this->permissions->allows(
-                        $this->roles->resolve($candidateRequest), 'profile.tokens', AccessLevel::WRITE,
-                    );
+        $accessibleCount = 0;
+        $canGrantWrite = false;
+        $available = ($user['is_superadmin'] ?? false) === true
+            ? $this->db->pdo()->query('SELECT id AS supplier_id, COALESCE(NULLIF(display_name, \'\'), company_name) AS name FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC)
+            : $this->memberships->listForUser((int) $user['id']);
+        foreach ($available as $choice) {
+            $candidateId = (int) $choice['supplier_id'];
+            $candidateRequest = $request->withQueryParams(['supplier_id' => $candidateId]);
+            $access = $this->suppliers->resolve($candidateRequest);
+            if (!$access->denied && $access->supplierId === $candidateId) {
+                $accessibleCount++;
+                $role = $this->roles->resolve($candidateRequest);
+                if ($this->permissions->allows($role, 'profile.tokens', AccessLevel::READ)) {
                     $choices[] = $choice;
+                    $canGrantWrite = $canGrantWrite || $this->permissions->allows(
+                        $role, 'profile.tokens', AccessLevel::WRITE,
+                    );
                 }
             }
-            if ($choices === []) {
-                return $this->html($response, '<h1>Nemáte oprávnění k vydání API tokenu pro žádnou firmu.</h1>', 403);
-            }
-            if (!in_array($supplierId, array_map(static fn (array $choice): int => (int) $choice['supplier_id'], $choices), true)) {
-                $supplierId = (int) $choices[0]['supplier_id'];
-            }
-        } else {
-            if ($supplierId < 1) {
-                return $this->html($response, '<h1>Uživatel nemá přístup k žádné firmě.</h1>', 403);
-            }
-            $selectedRequest = $request->withQueryParams(['supplier_id' => $supplierId]);
-            if (!$this->permissions->allows($this->roles->resolve($selectedRequest), 'profile.tokens', AccessLevel::READ)) {
-                return $this->html($response, '<h1>Nemáte oprávnění k vydání API tokenu.</h1>', 403);
-            }
+        }
+        if ($choices === []) {
+            return $this->html($response, '<h1>Nemáte oprávnění k vydání API tokenu pro žádnou firmu.</h1>', 403);
         }
         $identity = $this->db->pdo()->prepare(
             'SELECT totp_secret, totp_enabled FROM users WHERE id = ? AND is_active = 1'
@@ -216,16 +198,7 @@ final class McpOAuthAction
                 $fields .= '<input type="hidden" name="' . $key . '" value="' . self::escape($value) . '">';
             }
             $fields .= '<input type="hidden" name="csrf_token" value="' . self::escape($csrf) . '">';
-            $select = '<label class="field">Firma<select name="supplier_id" required>';
-            foreach ($choices as $choice) {
-                $id = (int) $choice['supplier_id'];
-                $selected = $id === $supplierId ? ' selected' : '';
-                $select .= '<option value="' . $id . '" data-can-write="' . ($choice['can_write'] ? '1' : '0') . '"' . $selected . '>'
-                    . self::escape((string) $choice['name']) . '</option>';
-            }
-            $select .= '</select></label>';
-            $canGrantWrite = $scope === 'read_write' && in_array(true, array_column($choices, 'can_write'), true);
-            $grantChoice = $canGrantWrite
+            $grantChoice = $scope === 'read_write' && $canGrantWrite
                 ? '<label class="field">Udělit přístup<select name="grant_scope">'
                     . '<option value="read" selected>Pouze čtení</option>'
                     . '<option value="read_write">Čtení a zápis</option>'
@@ -250,8 +223,9 @@ final class McpOAuthAction
                 . '<p class="lead">Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
                 . '<div class="access-summary"><span>Asistent požaduje nejvýše</span><strong>' . $permission . '</strong></div>'
-                . '<p class="muted">Přístup platí jen pro zvolenou firmu. Kdykoli jej můžete odvolat v API tokenech.</p>'
-                . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $select . $grantChoice
+                . '<p class="muted">Přístup se vztahuje na všechny firmy, ke kterým máte práva, včetně těch přidaných později. Aktuálně jich můžete použít '
+                . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat v API tokenech.</p>'
+                . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $grantChoice
                 . '<div class="verification"><h2>Ověření identity</h2>'
                 . ($passkeyAvailable && $totpRequired ? '<p class="field-hint">Zvolte passkey nebo nový kód z ověřovací aplikace.</p>' : '')
                 . $verification . '</div>'
@@ -272,8 +246,7 @@ final class McpOAuthAction
             || ($scope === 'read' && $grantScope !== 'read')) {
             return $this->html($response, '<h1>Neplatný rozsah přístupu.</h1>', 400);
         }
-        if ($grantScope === 'read_write'
-            && !$this->permissions->allows($this->roles->resolve($selectedRequest), 'profile.tokens', AccessLevel::WRITE)) {
+        if ($grantScope === 'read_write' && !$canGrantWrite) {
             return $this->html($response, '<h1>Pro zápis nemáte oprávnění.</h1>', 403);
         }
         $proof = (string) ($params['step_up_token'] ?? '');
@@ -306,7 +279,7 @@ final class McpOAuthAction
             return $this->consentError($response, $params, 'Ověřte passkey nebo zadejte nový kód ověřovací aplikace.', 401);
         }
         $code = $this->oauth->createCode(
-            $clientId, (int) $user['id'], $supplierId, $redirect, $challenge, $grantScope, $resource,
+            $clientId, (int) $user['id'], null, $redirect, $challenge, $grantScope, $resource,
         );
         return $this->finishConsent($response, self::redirectWith($redirect, [
             'code' => $code, 'state' => $state,

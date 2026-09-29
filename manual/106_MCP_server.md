@@ -24,7 +24,7 @@ Podstatné vlastnosti:
   svého provozního modelu odeslat poskytovateli AI. Citlivost dotazu proto
   posuzuj stejně jako při ručním vložení údajů do daného asistenta.
 - **Asistent má jen schválený přístup.** U online připojení ho omezuje souhlas
-  uživatele, vybraná firma, rozsah a role. U lokálního připojení platí rozsah,
+  uživatele, aktuálně dostupné firmy, rozsah a role. U lokálního připojení platí rozsah,
   vazba na firmu, omezení podle IP a oprávnění role vydaného API tokenu.
 - **Všechno je vidět v logu.** Každé volání se zapíše včetně názvu nástroje.
 
@@ -205,7 +205,8 @@ aby nastavení identity nezasáhlo jiné weby. Na poolu ponech
 aplikace a `node.exe` musí této identitě umožnit čtení a spuštění.
 
 1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
-2. Při připojení se v prohlížeči přihlas do MyÚčta a vyber firmu. Když asistent
+2. Při připojení se v prohlížeči přihlas do MyÚčta. Připojení platí pro všechny
+   firmy, ke kterým máš aktuálně práva, včetně firem přidělených později. Když asistent
    požaduje čtení a zápis, můžeš v poli **Udělit přístup** zvolit **Pouze čtení**
    (výchozí volba) nebo **Čtení a zápis**. Pokud asistent požaduje jen čtení,
    širší přístup mu udělit nelze. I při povolení zápisu platí oprávnění tvého účtu.
@@ -215,8 +216,10 @@ aplikace a `node.exe` musí této identitě umožnit čtení a spuštění.
    znovu použít. Pro běžné dotazy stačí **čtení**; **čtení a zápis** schvaluj jen
    tehdy, když má asistent opravdu měnit data. Po schválení se prohlížeč vrátí
    do asistenta. Když se nepřesměruje automaticky, zvol **Pokračovat do asistenta**.
-3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
-   Nástroj `whoami` vrátí uživatele, roli a firmu.
+3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu a vypiš dostupné firmy“.
+   Nástroje `whoami` a `list_suppliers` vrátí účet a firmy, ke kterým máš přístup.
+   V dalších dotazech asistent předává `supplier_id` vybrané firmy. Pokud jsi
+   připojení schválil dříve jen pro jednu firmu, odvolej ho a připoj asistenta znovu.
 
 Server odešle celý katalog dostupný pro schválený rozsah přístupu v jedné
 odpovědi. Asistent může v konkrétní konverzaci nabídnout jen nástroje relevantní
@@ -224,8 +227,9 @@ pro aktuální úkol. Katalog se zatím nefiltruje podle jednotlivých práv rol
 Nástroj mimo její oprávnění se může zobrazit, ale API jeho volání odmítne.
 
 Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém zařízení
-neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,
-rozsah a oprávnění účtu. Aktivní povolení se zobrazují ve stejné záložce pod
+neinstaluješ Node ani soubor `.mjs`. Každé volání ověřuje aktuální členství ve
+zvolené firmě, rozsah a oprávnění účtu. Odebrání firmy nebo práv se projeví při
+dalším volání. Aktivní povolení se zobrazují ve stejné záložce pod
 stavem serveru. Tlačítko **Odvolat přístup** okamžitě zneplatní přístupový token
 i možnost jeho obnovy. Konektor můžeš navíc odebrat v nastavení asistenta.
 Uživatel s rolí pouze pro čtení může připojení povolit jen pro čtení. Pro sdílení

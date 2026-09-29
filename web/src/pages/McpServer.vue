@@ -38,9 +38,9 @@ const connectionMode = ref<ConnectionMode>('local')
 interface RemoteGrant {
   id: number
   client_name: string
-  supplier_id: number
+  supplier_id: number | null
   supplier_name: string | null
-  supplier_company: string
+  supplier_company: string | null
   scope: 'read' | 'read_write'
   created_at: string
   expires_at: string
@@ -1123,7 +1123,7 @@ npm install</pre>
           <div v-for="grant in activeGrants" :key="grant.id" class="flex flex-wrap items-center justify-between gap-3 p-3">
             <div class="min-w-0">
               <div class="font-medium text-sm">{{ grant.client_name }}</div>
-              <div class="text-xs text-neutral-500">{{ grant.supplier_name || grant.supplier_company }} · {{ t(grant.scope === 'read' ? 'mcp_server_page.connection.scope_read' : 'mcp_server_page.connection.scope_write') }}</div>
+              <div class="text-xs text-neutral-500">{{ grant.supplier_id === null ? t('mcp_server_page.connection.all_accessible_companies') : (grant.supplier_name || grant.supplier_company) }} · {{ t(grant.scope === 'read' ? 'mcp_server_page.connection.scope_read' : 'mcp_server_page.connection.scope_write') }}</div>
               <div class="text-xs text-neutral-500">{{ t('mcp_server_page.connection.grant_created') }} {{ fmtTime(grant.created_at) }} · {{ t('mcp_server_page.connection.grant_expires') }} {{ fmtTime(grant.expires_at) }}</div>
             </div>
             <button type="button" :disabled="revokingGrantId === grant.id" @click="revokeGrant(grant)"
@@ -1179,7 +1179,7 @@ npm install</pre>
           </p>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
-          <h3 class="font-semibold mb-2">Claude</h3>
+          <h3 class="font-semibold mb-2">{{ t('mcp_server_page.connection.claude_title') }}</h3>
           <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
             <li>{{ t('mcp_server_page.connection.claude_1') }}</li>
             <li>{{ t('mcp_server_page.connection.claude_2') }}</li>

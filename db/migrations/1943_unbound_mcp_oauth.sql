@@ -1,0 +1,4 @@
+SET NAMES utf8mb4;
+
+ALTER TABLE mcp_oauth_codes MODIFY COLUMN supplier_id INT UNSIGNED NULL;
+ALTER TABLE mcp_oauth_grants MODIFY COLUMN supplier_id INT UNSIGNED NULL;

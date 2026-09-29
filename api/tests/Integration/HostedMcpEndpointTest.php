@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
+use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
 use MyInvoice\Service\System\ManagedModeGuard;
@@ -49,7 +50,8 @@ final class HostedMcpEndpointTest extends TestCase
             new ManagedModeGuard($config),
         );
         $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config),
-            new VersionService($db, new NativeUpdateService()), new NullLogger());
+            new VersionService($db, new NativeUpdateService()), new NullLogger(),
+            $db, new UserSupplierRepository($db));
         $factory = new ResponseFactory();
 
         $initialize = $this->send($action, $factory, 'initialize', ['protocolVersion' => '2025-06-18']);
@@ -98,7 +100,8 @@ final class HostedMcpEndpointTest extends TestCase
         $request = (new ServerRequestFactory())->createServerRequest('POST', 'https://example.test/mcp');
         $bridge = new NodeBridge($hosted, $config);
         $endpoint = new HostedMcpEndpointAction($hosted, $bridge,
-            new VersionService($db, new NativeUpdateService()), new NullLogger());
+            new VersionService($db, new NativeUpdateService()), new NullLogger(),
+            $db, new UserSupplierRepository($db));
         $disabled = $endpoint->handle($request, $factory->createResponse());
         self::assertSame(404, $disabled->getStatusCode());
 

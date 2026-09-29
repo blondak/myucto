@@ -550,8 +550,9 @@ export const TOOLS = [
     name: 'list_suppliers',
     title: 'Seznam firem',
     description:
-      'Firmy (supplier), ke kterým má token přístup. Když je token vázaný na jednu firmu, '
-      + 'vrátí jen ji. ID použij v proměnné MYUCTO_SUPPLIER_ID, pokud chceš pracovat s jinou firmou.',
+      'Firmy (supplier), ke kterým má uživatel aktuálně přístup. Starší token vázaný '
+      + 'na jednu firmu vrátí jen ji. U vzdáleného MCP použij ID jako supplier_id v dalších nástrojích; '
+      + 'u lokálního .mjs lze nastavit MYUCTO_SUPPLIER_ID.',
     inputSchema: schema(),
     write: false,
     run: (c, _a, tool) => c.get('/suppliers', null, tool),

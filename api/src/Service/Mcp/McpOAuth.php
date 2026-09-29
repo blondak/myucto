@@ -41,7 +41,7 @@ final class McpOAuth
     public function createCode(
         string $clientId,
         int $userId,
-        int $supplierId,
+        ?int $supplierId,
         string $redirectUri,
         string $challenge,
         string $scope,
@@ -96,7 +96,7 @@ final class McpOAuth
                 ->execute([hash('sha256', $code)]);
             $refresh = self::randomToken('mi_mcp_rt_');
             $access = $this->tokens->generateInTransaction(
-                $pdo, (int) $row['user_id'], (int) $row['supplier_id'],
+                $pdo, (int) $row['user_id'], $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null,
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
             );
@@ -147,7 +147,7 @@ final class McpOAuth
 
             $nextRefresh = self::randomToken('mi_mcp_rt_');
             $access = $this->tokens->generateInTransaction(
-                $pdo, (int) $row['user_id'], (int) $row['supplier_id'],
+                $pdo, (int) $row['user_id'], $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null,
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
             );
@@ -184,7 +184,7 @@ final class McpOAuth
                     g.revoked_at, t.revoked_at AS token_revoked_at, t.last_used_at
                FROM mcp_oauth_grants g
                JOIN mcp_oauth_clients c ON c.client_id = g.client_id
-               JOIN supplier s ON s.id = g.supplier_id
+               LEFT JOIN supplier s ON s.id = g.supplier_id
                JOIN api_tokens t ON t.id = g.access_token_id
               WHERE g.user_id = ?
               ORDER BY g.revoked_at IS NOT NULL, g.created_at DESC, g.id DESC'
@@ -193,7 +193,7 @@ final class McpOAuth
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($rows as &$row) {
             $row['id'] = (int) $row['id'];
-            $row['supplier_id'] = (int) $row['supplier_id'];
+            $row['supplier_id'] = $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null;
             $row['is_active'] = $row['revoked_at'] === null
                 && $row['token_revoked_at'] === null
                 && strtotime((string) $row['expires_at']) > time();

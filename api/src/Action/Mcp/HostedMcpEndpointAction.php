@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Mcp;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
-use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
+use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Log\LoggerInterface;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -21,6 +24,8 @@ final class HostedMcpEndpointAction
         private readonly NodeBridge $bridge,
         private readonly VersionService $version,
         private readonly LoggerInterface $logger,
+        private readonly Connection $db,
+        private readonly UserSupplierRepository $memberships,
     ) {}
 
     public function handle(Request $request, Response $response): Response
@@ -61,10 +66,13 @@ final class HostedMcpEndpointAction
 
         $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
         $scope = (string) ($token['scope'] ?? 'read');
+        $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
         $input = [
             'scope' => $scope,
             'token' => substr($request->getHeaderLine('Authorization'), 7),
-            'supplierId' => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
+            'boundSupplierId' => ($token['supplier_id'] ?? null) !== null ? (int) $token['supplier_id'] : null,
+            'lockedSupplierId' => $domain instanceof TenantDomainContext && $domain->locksSupplier()
+                ? $domain->supplierId : null,
             'serverParams' => $request->getServerParams(),
         ];
 
@@ -74,11 +82,11 @@ final class HostedMcpEndpointAction
                     'protocolVersion' => $this->protocolVersion($message['params']['protocolVersion'] ?? null),
                     'capabilities' => ['tools' => ['listChanged' => false]],
                     'serverInfo' => ['name' => 'myucto', 'version' => $this->version->getCurrentVersion()],
-                    'instructions' => 'Nástroje pracují s daty jedné firmy dle uděleného přístupu. Účetnictví a daně jsou pouze ke čtení. Zápisové a mazací akce vyžadují potvrzení uživatele.',
+                    'instructions' => 'Nástrojem list_suppliers načtěte firmy dostupné uživateli. U firemních nástrojů zadejte supplier_id; členství a práva se ověřují při každém volání. Účetnictví a daně jsou pouze ke čtení. Zápisové a mazací akce vyžadují potvrzení uživatele.',
                 ],
                 'ping' => (object) [],
                 'tools/list' => $this->listTools($message['params'] ?? null, $input),
-                'tools/call' => $this->call($message['params'] ?? null, $input),
+                'tools/call' => $this->call($message['params'] ?? null, $input, $request),
                 default => null,
             };
         } catch (\InvalidArgumentException $e) {
@@ -113,7 +121,7 @@ final class HostedMcpEndpointAction
         return $result;
     }
 
-    private function call(mixed $params, array $input): array
+    private function call(mixed $params, array $input, Request $request): array
     {
         if (!is_array($params) || !is_string($params['name'] ?? null) || strlen($params['name']) > 128) {
             throw new \InvalidArgumentException('Neplatné jméno nástroje.');
@@ -122,11 +130,67 @@ final class HostedMcpEndpointAction
         if (!is_array($arguments)) {
             throw new \InvalidArgumentException('Neplatné argumenty nástroje.');
         }
+        if ($params['name'] === 'list_suppliers') {
+            return $this->listAccessibleSuppliers($request, $input['boundSupplierId']);
+        }
+        if ($input['boundSupplierId'] === null && $params['name'] !== 'whoami') {
+            $supplierId = $arguments['supplier_id'] ?? null;
+            if (!is_int($supplierId) || $supplierId < 1 || !in_array(
+                $supplierId, array_column($this->accessibleSuppliers($request, null), 'id'), true,
+            )) {
+                return [
+                    'content' => [['type' => 'text', 'text' => 'Zadejte supplier_id firmy, ke které máte přístup.']],
+                    'isError' => true,
+                ];
+            }
+        }
         return $this->bridge->execute($input + [
             'operation' => 'call',
             'name' => $params['name'],
             'arguments' => $arguments,
         ]);
+    }
+
+    private function listAccessibleSuppliers(Request $request, ?int $boundSupplierId): array
+    {
+        return $this->supplierListResult($this->accessibleSuppliers($request, $boundSupplierId));
+    }
+
+    private function accessibleSuppliers(Request $request, ?int $boundSupplierId): array
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        if ($domain instanceof TenantDomainContext && $domain->locksSupplier()) {
+            if ($boundSupplierId !== null && $boundSupplierId !== $domain->supplierId) {
+                return [];
+            }
+            $boundSupplierId = $domain->supplierId;
+        }
+        if (($user['is_superadmin'] ?? false) === true) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, COALESCE(NULLIF(display_name, \'\'), company_name) AS name
+                   FROM supplier' . ($boundSupplierId !== null ? ' WHERE id = ?' : '') . ' ORDER BY id'
+            );
+            $stmt->execute($boundSupplierId !== null ? [$boundSupplierId] : []);
+            $companies = array_map(static fn (array $row): array => [
+                'id' => (int) $row['id'], 'name' => (string) $row['name'],
+            ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+        } else {
+            $companies = [];
+            foreach ($this->memberships->listForUser((int) ($user['id'] ?? 0)) as $row) {
+                if ($boundSupplierId !== null && (int) $row['supplier_id'] !== $boundSupplierId) continue;
+                $companies[] = ['id' => (int) $row['supplier_id'], 'name' => (string) $row['name']];
+            }
+        }
+        return $companies;
+    }
+
+    private function supplierListResult(array $companies): array
+    {
+        return [
+            'content' => [['type' => 'text', 'text' => json_encode($companies, JSON_THROW_ON_ERROR)]],
+            'structuredContent' => ['result' => $companies],
+        ];
     }
 
     private function protocolVersion(mixed $requested): string
