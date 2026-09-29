@@ -124,6 +124,9 @@ export interface InvoiceItem {
   small_asset_id?: number | null
   /** Prodávaná karta dlouhodobého majetku (1177) — výnos 641 a po vystavení vyřazení type=sold. */
   asset_id?: number | null
+  /** Období časového rozlišení výnosu (384) — RRRR-MM-DD, obojí nebo nic; čte ho uzávěrka. */
+  accrual_from?: string | null
+  accrual_to?: string | null
   /** Název karty z JOINu (read-only) — našeptávač jím zobrazí vybranou položku bez dalšího dotazu. */
   small_asset_name?: string | null
   asset_name?: string | null
@@ -551,6 +554,8 @@ export interface InvoicePayload {
     warehouse_id?: number | null
     small_asset_id?: number | null
     asset_id?: number | null
+    accrual_from?: string | null
+    accrual_to?: string | null
     oss_applicable?: boolean
     oss_consumer_country?: string | null
     oss_rate_type?: string | null
@@ -779,6 +784,9 @@ export const invoicesApi = {
     }),
 
   get:    (id: number) => api.get<Invoice>(`/invoices/${id}`).then(r => r.data),
+  /** Období časového rozlišení výnosu u řádků — smí i u vystavené a zaúčtované faktury. */
+  setAccrual: (id: number, items: Array<{ id: number; accrual_from: string | null; accrual_to: string | null }>) =>
+    api.put<Invoice>(`/invoices/${id}/accrual`, { items }).then(r => r.data),
   /**
    * Vrátí náhled, jaké číslo faktura dostane při Vystavení (BEZ inkrementu counteru).
    * Používá se v editoru jako placeholder „automaticky: JD2026-01".

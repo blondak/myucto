@@ -95,6 +95,17 @@ final class InvoiceValidation
                 }
                 $err = array_merge($err, InvoiceAmountPolicy::validateItem($item, $i));
 
+                // Časové rozlišení výnosu (384): obě data, nebo žádné; od <= do.
+                $accrualFrom = trim((string) ($item['accrual_from'] ?? ''));
+                $accrualTo = trim((string) ($item['accrual_to'] ?? ''));
+                if ($accrualFrom !== '' || $accrualTo !== '') {
+                    if (!self::isValidDate($accrualFrom) || !self::isValidDate($accrualTo)) {
+                        $err["items.{$i}.accrual_from"][] = 'Období časového rozlišení potřebuje obě data ve formátu RRRR-MM-DD';
+                    } elseif ($accrualFrom > $accrualTo) {
+                        $err["items.{$i}.accrual_to"][] = 'Konec období časového rozlišení nesmí předcházet jeho začátku';
+                    }
+                }
+
                 // POZOR, co tenhle test JE a co NENÍ.
                 //
                 // Je to kontrola KONZISTENCE ZADÁNÍ: uživatel vybral sazbu, kterou si sám

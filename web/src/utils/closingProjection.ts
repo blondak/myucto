@@ -8,6 +8,7 @@ import type { RouteLocationRaw } from 'vue-router'
 export const CLOSING_PROJECTION_LABELS: Record<string, string> = {
   small_asset_accrual: 'taxReturn.proj_small_asset',
   prepaid_expense_accrual: 'taxReturn.proj_prepaid',
+  deferred_revenue_accrual: 'taxReturn.proj_deferred_revenue',
   fx_revaluation: 'taxReturn.proj_fx',
   prior_deferral_release: 'taxReturn.proj_prior_release',
   provision: 'taxReturn.proj_provision',

@@ -298,6 +298,7 @@ export interface RunStepPayload {
   small_asset_accrual?: { mode: SmallAssetAccrualMode; pct?: number | null }
   /** §DČR / Task 12 — časové rozlišení nákladů příštích období (deferrals): trigger, částky z faktur. */
   prepaid_expense_accrual?: boolean
+  deferred_revenue_accrual?: boolean
 }
 
 // ── §DM / Task 11: časové rozlišení drobného majetku (381 = volitelná politika) ──
@@ -360,6 +361,36 @@ export interface PrepaidExpenseAccrualPreview {
   next_period_start: string
   items: PrepaidExpenseAccrualItem[]
   documents: { purchase_invoice_id: number; vendor_invoice_number: string; deferred_amount: number }[]
+  by_account: Record<string, number>
+  total: number
+  existing: { entry_id: number; amount: number | null } | null
+}
+
+/** Časové rozlišení výnosů příštích období (384) z řádků vydaných faktur. */
+export interface DeferredRevenueAccrualItem {
+  item_id: number
+  invoice_id: number
+  invoice_number: string
+  description: string
+  currency_code: string
+  total_without_vat: number
+  total_czk: number
+  debit_account: string
+  accrual_from: string
+  accrual_to: string
+  total_days: number
+  deferred_days: number
+  fraction: number
+  deferred_amount: number
+  release_schedule: { fiscal_year: number; amount: number }[]
+}
+
+export interface DeferredRevenueAccrualPreview {
+  as_of: string
+  period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
+  next_period_start: string
+  items: DeferredRevenueAccrualItem[]
+  documents: { invoice_id: number; invoice_number: string; deferred_amount: number }[]
   by_account: Record<string, number>
   total: number
   existing: { entry_id: number; amount: number | null } | null
@@ -694,6 +725,8 @@ export const closingApi = {
   // §DČR / Task 12 — náhled časového rozlišení nákladů příštích období (381/5xx z faktur).
   prepaidExpenseAccrualPreview: (periodId: number) =>
     api.get<PrepaidExpenseAccrualPreview>(`/accounting/periods/${periodId}/closing/prepaid-expense-accrual-preview`).then(r => r.data),
+  deferredRevenueAccrualPreview: (periodId: number) =>
+    api.get<DeferredRevenueAccrualPreview>(`/accounting/periods/${periodId}/closing/deferred-revenue-accrual-preview`).then(r => r.data),
   // D10 — rozdělení výsledku hospodaření (431 → 428/429/364…).
   profitDistributionPreview: (periodId: number) =>
     api.get<ProfitDistributionPreview>(`/accounting/periods/${periodId}/profit-distribution/preview`).then(r => r.data),

@@ -1034,10 +1034,7 @@ final class PostingService
         // dlouhodobého majetku); default invoice.services.issued (602). Řeší se TADY, ne u
         // jednotlivých volajících, aby doklad účtoval stejně bez ohledu na cestu (auto-post,
         // ruční post, re-post po editaci) a stávající faktury (revenue_rule_key NULL) se nehnuly.
-        $headerRuleKey = ($inv['revenue_rule_key'] ?? null) !== null && (string) $inv['revenue_rule_key'] !== ''
-            ? (string) $inv['revenue_rule_key']
-            : self::DEFAULT_ISSUED_RULE_KEY;
-        $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? $headerRuleKey);
+        $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? self::issuedHeaderRuleKey($inv));
         $receivable = $rule['debit_account_code'] ?? '311';
         $revenue    = $rule['credit_account_code'] ?? '602';
         $cc = $opts['cost_center'] ?? null;
@@ -1664,17 +1661,8 @@ final class PostingService
             if (in_array((int) $row['id'], $excludeItemIds, true)) {
                 continue;
             }
-            // asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant to zakazuje,
-            // CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
-            if ($row['asset_id'] !== null) {
-                $anyClassified = true;
-                $account = $this->ruleCode($supplierId, 'asset.sale.revenue', 'credit', '641');
-            } elseif ($row['small_asset_id'] !== null) {
-                $anyClassified = true;
-                $account = $this->ruleCode($supplierId, 'small_asset.sale.revenue', 'credit', '642');
-            } else {
-                $account = $defaultAccount;
-            }
+            $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null;
+            $account = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount);
             $this->itemAccountTrace['invoice|' . $invoiceId][(int) $row['id']] = $account;
 
             $w = round((float) $row['total_without_vat'] * $rate, 2);
@@ -1694,6 +1682,56 @@ final class PostingService
             return null;
         }
         return $weights;
+    }
+
+    /** @param array<string,mixed> $inv */
+    private static function issuedHeaderRuleKey(array $inv): string
+    {
+        return ($inv['revenue_rule_key'] ?? null) !== null && (string) $inv['revenue_rule_key'] !== ''
+            ? (string) $inv['revenue_rule_key']
+            : self::DEFAULT_ISSUED_RULE_KEY;
+    }
+
+    /**
+     * Výnosový účet řádku vydané faktury: asset_id → 641, small_asset_id → 642, jinak
+     * $defaultAccount. asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant
+     * to zakazuje, CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
+     *
+     * @param array{asset_id:mixed,small_asset_id:mixed} $item
+     */
+    private function issuedItemRevenueAccount(int $supplierId, array $item, string $defaultAccount): string
+    {
+        if ($item['asset_id'] !== null) {
+            return $this->ruleCode($supplierId, 'asset.sale.revenue', 'credit', '641');
+        }
+        if ($item['small_asset_id'] !== null) {
+            return $this->ruleCode($supplierId, 'small_asset.sale.revenue', 'credit', '642');
+        }
+        return $defaultAccount;
+    }
+
+    /**
+     * Kurz a výnosové účty řádků vydané faktury tak, jak je zaúčtuje {@see buildFromInvoice}
+     * bez explicitní předkontace. Pro uzávěrku (časové rozlišení výnosů 384), která musí
+     * odložit výnos z téhož účtu, na který ho faktura zaúčtovala.
+     *
+     * @return array{rate:float, accounts:array<int,string>}
+     */
+    public function issuedItemRevenueAccounts(int $supplierId, int $invoiceId): array
+    {
+        $inv = $this->fetchDocHeader('invoices', $supplierId, $invoiceId);
+        if ($inv === null) {
+            throw new PostingException('entry_not_found', 'Vydaná faktura #' . $invoiceId . ' neexistuje.', 404);
+        }
+        $rule = $this->rules->resolve($supplierId, self::issuedHeaderRuleKey($inv));
+        $default = (string) ($rule['credit_account_code'] ?? '602');
+        $stmt = $this->db->pdo()->prepare('SELECT id, small_asset_id, asset_id FROM invoice_items WHERE invoice_id = ?');
+        $stmt->execute([$invoiceId]);
+        $accounts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $accounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $default);
+        }
+        return ['rate' => $this->fxRate($inv), 'accounts' => $accounts];
     }
 
     /**

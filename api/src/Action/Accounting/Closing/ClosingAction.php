@@ -432,6 +432,26 @@ final class ClosingAction
     }
 
     /**
+     * Náhled časového rozlišení výnosů příštích období — návrh 6xx/384 z řádků vydaných
+     * faktur označených obdobím od–do (accrual_from/accrual_to).
+     *   GET /api/accounting/periods/{id}/closing/deferred-revenue-accrual-preview
+     */
+    public function deferredRevenueAccrualPreview(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $periodId = (int) ($args['id'] ?? 0);
+
+        try {
+            $data = $this->closing->deferredRevenueAccrualPreview($supplierId, $periodId);
+        } catch (\Throwable $e) {
+            return $this->mapError($response, $e, 'Náhled časového rozlišení výnosů příštích období selhal');
+        }
+
+        return Json::ok($response, $data);
+    }
+
+    /**
      * Heuristický návrh dohadných položek pasivních (389) — opakující se náklad, jehož
      * faktura za poslední měsíc roku k rozvahovému dni nedorazila. Read-only, žádný zápis.
      *   GET /api/accounting/periods/{id}/closing/estimates-suggest
@@ -750,6 +770,9 @@ final class ClosingAction
                 // §DČR / Task 12 — zaúčtování časového rozlišení nákladů příštích období (381/5xx)
                 // v rámci kroku deferrals. Bez parametrů — částky jsou dané z označených faktur.
                 $data = $this->closing->runPrepaidExpenseAccrual($supplierId, $periodId, $rowVersion, $meta);
+            } elseif ($step === 'deferrals' && array_key_exists('deferred_revenue_accrual', $body)) {
+                // Zaúčtování časového rozlišení výnosů příštích období (6xx/384) v kroku deferrals.
+                $data = $this->closing->runDeferredRevenueAccrual($supplierId, $periodId, $rowVersion, $meta);
             } else {
                 $status = trim((string) ($body['status'] ?? ''));
                 if (!in_array($status, ['done', 'skipped'], true)) {

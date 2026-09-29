@@ -233,6 +233,10 @@ final class DppoReturnDataProvider
         } catch (\Throwable) {
         }
         try {
+            $sources['deferred_revenue'] = $this->closing->deferredRevenueAccrualPreview($supplierId, $periodId);
+        } catch (\Throwable) {
+        }
+        try {
             // fx jen když ještě NENÍ zaúčtováno k rozvahovému dni (jinak už je ve vh_posted).
             if (!$this->hasPostedFxRevaluation($supplierId, $endsOn)) {
                 $sources['fx'] = $this->closing->fxPreview($supplierId, $periodId);

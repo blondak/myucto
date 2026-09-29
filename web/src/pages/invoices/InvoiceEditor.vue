@@ -48,6 +48,7 @@ import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
@@ -792,7 +793,15 @@ function hydrateAssetSelections() {
   if (form.value.items.some(it => it.small_asset_id || it.asset_id)) {
     assetSaleMode.value = true
   }
+  if (form.value.items.some(it => it.accrual_from || it.accrual_to)) {
+    showAccrual.value = true
+  }
 }
+
+// ─── ČASOVÉ ROZLIŠENÍ VÝNOSU (384) ──────────────────────────────────────
+// Stejně jako u přijatých faktur: odkaz zapne pole od–do u položek. Období čte až
+// uzávěrka, faktura se zaúčtuje celá do výnosu dne plnění.
+const showAccrual = ref(false)
 
 // Vypnutí přepínače je zároveň zrušení vazeb — jinak by řádky dál mířily na 641/642,
 // aniž by to bylo v UI vidět, a automat by po vystavení kartu prodal „bez příčiny".
@@ -2255,6 +2264,8 @@ async function submit() {
         // Totéž pro vazbu na kartu majetku (1177) — bez round-tripu by prodej zmizel.
         small_asset_id: it.small_asset_id ?? null,
         asset_id: it.asset_id ?? null,
+        accrual_from: it.accrual_from || null,
+        accrual_to: it.accrual_to || null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         // Prázdný typ sazby se posílá jako null, ne jako „standard" — dosazení základní
@@ -2734,6 +2745,11 @@ async function deleteDraft() {
         <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.items') }}</h3>
           <div class="flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="cursor-pointer text-xs hover:underline whitespace-nowrap mr-1"
+              :class="showAccrual ? 'text-danger-600' : 'text-primary-700'"
+              :title="t('accrual_period.hint')" data-test="accrual-toggle" @click="showAccrual = !showAccrual">
+              {{ showAccrual ? t('accrual_period.hide') : t('accrual_period.show') }}
+            </button>
             <label v-if="assetSaleAvailable" class="inline-flex items-center gap-1.5 text-sm text-neutral-700 mr-1"
               :title="t('invoice.asset_sale.hint')">
               <input v-model="assetSaleMode" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
@@ -2820,6 +2836,8 @@ async function deleteDraft() {
                     </option>
                   </select>
                 </label>
+                <ItemAccrualFields v-if="showAccrual" :description="item.description"
+                  v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
                 <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" data-test="stock-row-meta"
                   class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                   <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
@@ -3018,6 +3036,8 @@ async function deleteDraft() {
                   </option>
                 </select>
               </label>
+              <ItemAccrualFields v-if="showAccrual" stacked :description="item.description"
+                v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
               <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                 <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
                 <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"

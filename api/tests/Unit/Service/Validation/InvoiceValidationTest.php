@@ -9,6 +9,28 @@ use PHPUnit\Framework\TestCase;
 
 final class InvoiceValidationTest extends TestCase
 {
+    public function testAccrualPeriodNeedsBothValidDatesInOrder(): void
+    {
+        $base = [
+            'invoice_type' => 'invoice',
+            'client_id'    => 1,
+            'currency_id'  => 1,
+            'issue_date'   => '2026-09-28',
+            'due_date'     => '2026-10-12',
+            'tax_date'     => '2026-09-28',
+        ];
+        $item = ['description' => 'Roční předplatné', 'quantity' => 1, 'unit_price_without_vat' => 12900, 'vat_rate_id' => 1];
+
+        $ok = $base + ['items' => [$item + ['accrual_from' => '2026-09-28', 'accrual_to' => '2027-09-28']]];
+        self::assertSame([], InvoiceValidation::invoice($ok));
+
+        $half = $base + ['items' => [$item + ['accrual_from' => '2026-09-28']]];
+        self::assertArrayHasKey('items.0.accrual_from', InvoiceValidation::invoice($half));
+
+        $reversed = $base + ['items' => [$item + ['accrual_from' => '2027-09-28', 'accrual_to' => '2026-09-28']]];
+        self::assertArrayHasKey('items.0.accrual_to', InvoiceValidation::invoice($reversed));
+    }
+
     public function testValidInvoicePasses(): void
     {
         $data = [

@@ -305,6 +305,30 @@ vyřazená, uložení faktury skončí chybou. Storno faktury karty vrátí do u
 (u dlouhodobého majetku jen dokud je období vyřazení otevřené — jinak zůstane
 záznam v auditu a kartu vrátí účetní ručně).
 
+### 15.3.4 Časové rozlišení výnosu
+
+Faktura za plnění na delší období (roční předplatné, nájem, servisní smlouva) se
+zaúčtuje celá do výnosu ke dni zdanitelného plnění. Část, která patří do dalšího
+účetního období, odloží až uzávěrka na účet **384 Výnosy příštích období**
+(viz [§ 72.2.4](72_Uzaverka.md#7224-kroky-4-5-dohadne-polozky-a-casove-rozliseni)).
+K tomu stačí u položky vyplnit období, do kterého výnos patří:
+
+1. Nad tabulkou položek klikni na odkaz **„Časové rozlišení"**.
+2. U položky zvol **„+ období rozlišení"** a vyplň data **Od** a **Do**.
+
+Obsahuje-li text položky období (například `období 28. 9. 2026 – 28. 9. 2027`,
+`10/2026 – 09/2027` nebo `předplatné na rok 2027`), aplikace ho pod položkou nabídne
+k použití. Návrh se nikdy nepoužije sám.
+
+U vystavené a zaúčtované faktury se období nastaví v jejím **detailu**: stejný odkaz
+**„Časové rozlišení"** nad položkami otevře pole Od a Do u všech řádků a tlačítko
+**„Uložit časové rozlišení"** je uloží. Zápis faktury v deníku se tím nemění.
+Fakturu z uzavřeného účetního období takto upravit nelze.
+
+Období se přenáší ze zálohové faktury na vyúčtovací fakturu. Přes API se nastaví
+poli `accrual_from` a `accrual_to` u položky, u vystavené faktury endpointem
+`PUT /api/v1/invoices/{id}/accrual`.
+
 ## 15.4 Sumář (vpravo)
 
 Automaticky se přepočítává:

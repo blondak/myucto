@@ -2038,12 +2038,11 @@ final class PurchaseInvoiceRepository
     }
 
     /**
-     * Normalizace data časového rozlišení řádku (§DČR) — přijme YYYY-MM-DD, jinak NULL.
-     * Prázdný řetězec / null / neplatný formát = NULL (bez rozlišení, dosavadní chování).
-     */
-    /**
      * Období řádku jako dvojice. Obrácené období (od > do) uzávěrka neumí rozpustit,
      * takže se neuloží vůbec místo toho, aby tiše vyrobilo nesmyslný odklad na 381.
+     * Na rozdíl od vydané strany ({@see InvoiceRepository::accrualPeriod()}) se neúplná
+     * dvojice zachovává: editor přijaté faktury ji ukládá jako rozpracovaný stav a
+     * uzávěrka řádek bez obou dat nebere.
      *
      * @return array{0:?string,1:?string}
      */
@@ -2057,6 +2056,10 @@ final class PurchaseInvoiceRepository
         return [$f, $t];
     }
 
+    /**
+     * Normalizace data časového rozlišení řádku (§DČR) — přijme YYYY-MM-DD, jinak NULL.
+     * Prázdný řetězec / null / neplatný formát = NULL (bez rozlišení, dosavadní chování).
+     */
     private static function normalizeAccrualDate(mixed $value): ?string
     {
         if ($value === null) {

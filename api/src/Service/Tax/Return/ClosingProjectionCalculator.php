@@ -32,6 +32,7 @@ final class ClosingProjectionCalculator
      * @param array{
      *   small_asset?:array<string,mixed>|null,
      *   prepaid?:array<string,mixed>|null,
+     *   deferred_revenue?:array<string,mixed>|null,
      *   fx?:array<string,mixed>|null,
      *   prior_release?:array<string,mixed>|null,
      *   provisions?:array<string,mixed>|null,
@@ -69,6 +70,16 @@ final class ClosingProjectionCalculator
             }
         }
 
+        // Výnosy příštích období 384: odklad sníží výnos 6xx → −VH. Dobropisy s obdobím
+        // mohou návrh otočit do záporu (+VH).
+        $dr = $sources['deferred_revenue'] ?? null;
+        if (is_array($dr) && ($dr['existing'] ?? null) === null) {
+            $amount = round((float) ($dr['total'] ?? 0), 2);
+            if (self::cents($amount) !== 0) {
+                $items[] = self::item('deferred_revenue_accrual', 'taxReturn.proj_deferred_revenue', abs($amount), $amount >= 0 ? -1 : 1, false);
+            }
+        }
+
         // Kurzové rozdíly: zisk 663 (+VH) − ztráta 563 (−VH). Volající předá null, když je fx k
         // rozvahovému dni už zaúčtováno (jinak už je ve vh_posted).
         $fx = $sources['fx'] ?? null;
@@ -87,7 +98,8 @@ final class ClosingProjectionCalculator
         if (is_array($rel)) {
             $amount = round((float) ($rel['total'] ?? 0), 2);
             if (self::cents($amount) !== 0) {
-                $items[] = self::item('prior_deferral_release', 'taxReturn.proj_prior_release', abs($amount), -1, false);
+                // Kladný total = rozpuštěný náklad (−VH); záporný = převažuje rozpuštěný výnos 384 (+VH).
+                $items[] = self::item('prior_deferral_release', 'taxReturn.proj_prior_release', abs($amount), $amount >= 0 ? -1 : 1, false);
             }
         }
 

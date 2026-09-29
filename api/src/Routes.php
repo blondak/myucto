@@ -653,6 +653,8 @@ final class Routes
         $app->post   ('/api/invoices/{id:[0-9]+}/unmark-paid', UnmarkPaidAction::class);
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/invoices/{id:[0-9]+}/project',   SetInvoiceProjectAction::class);
+        // Období časového rozlišení výnosu (384) — smí i u zaúčtovaného dokladu, čte ho až uzávěrka.
+        $app->put    ('/api/invoices/{id:[0-9]+}/accrual',   \MyInvoice\Action\Invoice\SetInvoiceAccrualAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/rebuild-snapshots', \MyInvoice\Action\Invoice\RebuildInvoiceSnapshotsAction::class);
         // Evidence plateb / částečné úhrady (#89) + daňový doklad k přijaté platbě (zálohy)
         $app->get    ('/api/invoices/{id:[0-9]+}/payments', ListPaymentsAction::class);
@@ -2627,6 +2629,7 @@ final class Routes
             $g->get   ('/periods/{id:[0-9]+}/closing/deferred-tax-preview',     [ClosingAction::class, 'deferredTaxPreview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/small-asset-accrual-preview', [ClosingAction::class, 'smallAssetAccrualPreview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/prepaid-expense-accrual-preview', [ClosingAction::class, 'prepaidExpenseAccrualPreview']);
+            $g->get   ('/periods/{id:[0-9]+}/closing/deferred-revenue-accrual-preview', [ClosingAction::class, 'deferredRevenueAccrualPreview']);
             $g->post  ('/periods/{id:[0-9]+}/closing/book-depreciation',        [ClosingAction::class, 'bookDepreciation']);
             // EP-6: povinná inventarizace rozvahových účtů (§29–30 ZoÚ) — náhled + uložení
             // skutečného stavu / rozdílů / odpovědné osoby / protokolu (blokuje uzavření knih).

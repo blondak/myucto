@@ -920,7 +920,8 @@
         "1936_abra_vat_projection_overrides.sql",
         "1937_supplier_allow_refund_invoices.sql",
         "1938_payment_order_refund_items.sql",
-        "1939_client_bank_accounts_canonical_czech_number.sql"
+        "1939_client_bank_accounts_canonical_czech_number.sql",
+        "1940_deferred_revenue_accrual.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5760,6 +5761,8 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "accrual_from": "date NULL DEFAULT NULL",
+                "accrual_to": "date NULL DEFAULT NULL",
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
@@ -6198,7 +6201,7 @@
                 "reversed_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "source_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel') NOT NULL DEFAULT 'manual'",
+                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel','deferred_revenue_accrual') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },

@@ -44,6 +44,14 @@ final class ClosingSourceId
      */
     public const PREPAID_EXPENSE_RELEASE_BASE = 3_000_000_000_000;
 
+    /**
+     * Odsazení rozpouštěcího zápisu časového rozlišení výnosů příštích období (384) v N+1.
+     * Vlastní source_type 'deferred_revenue_accrual' by kolizi vyloučil i bez něj, pásmo
+     * 5e12 (nad PROVISION_BASE) drží stejné pravidlo jako u nákladů: odklad = plain
+     * period_id, rozpuštění = base + period_id.
+     */
+    public const DEFERRED_REVENUE_RELEASE_BASE = 5_000_000_000_000;
+
     /** FX přecenění saldokonta (311/321) k rozvahovému dni (R10a). */
     public const SLOT_FX_SALDO = 1;
 
@@ -122,6 +130,18 @@ final class ClosingSourceId
     public static function prepaidExpenseAccrualRelease(int $periodId): int
     {
         return self::PREPAID_EXPENSE_RELEASE_BASE + $periodId;
+    }
+
+    /** Časové rozlišení výnosů příštích období — odklad MD 6xx / D 384 v období N. */
+    public static function deferredRevenueAccrual(int $periodId): int
+    {
+        return $periodId;
+    }
+
+    /** Rozpuštění časového rozlišení výnosů příštích období (MD 384 / D 6xx) v N+1 — disjunktní klíč. */
+    public static function deferredRevenueAccrualRelease(int $periodId): int
+    {
+        return self::DEFERRED_REVENUE_RELEASE_BASE + $periodId;
     }
 
     /**

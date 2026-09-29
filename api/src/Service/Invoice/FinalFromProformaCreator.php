@@ -236,9 +236,9 @@ final class FinalFromProformaCreator
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
-                    stock_item_id, warehouse_id, small_asset_id, asset_id'
+                    stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?'
                 . $this->ossCarry->placeholders()
                 . ')'
             );
@@ -263,6 +263,9 @@ final class FinalFromProformaCreator
                     // faktura (proforma není doklad o prodeji), takže vazba musí přejít s ní.
                     $item['small_asset_id'] ?? null,
                     $item['asset_id'] ?? null,
+                    // Období výnosu (časové rozlišení 384) je vlastností plnění, ne dokladu —
+                    // účtuje se až z finálu, takže z proformy musí přejít.
+                    ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($item),
                     // Místo plnění se vyúčtováním nemění — přenáší se z proformy, protože
                     // ta už derivací i případnou ruční opravou prošla (viz OssItemCarryOver).
                     ...$this->ossCarry->values($item),
@@ -316,6 +319,10 @@ final class FinalFromProformaCreator
                     ++$maxOrder,
                     'standard',
                     // Odpočtový řádek není zboží ani majetek — bez skladové vazby i bez karty.
+                    // Ani bez období výnosu: jeho základ vrací zaúčtování zpět do výnosu,
+                    // takže odklad se počítá z kladných řádků v plné výši.
+                    null,
+                    null,
                     null,
                     null,
                     null,
@@ -416,11 +423,13 @@ final class FinalFromProformaCreator
             $dominant['vat_rate_snapshot'],
             ++$maxOrder,
             'standard',
-            // Dopočtený řádek není konkrétní zboží ani majetek — bez vazeb.
+            // Dopočtený řádek není konkrétní zboží ani majetek — bez vazeb; období výnosu
+            // dědí po dominantním řádku stejně jako OSS profil.
             null,
             null,
             null,
             null,
+            ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($dominant),
             // OSS profil dědí po dominantním řádku: zbytek téže zakázky patří do téže
             // evidence jako to, co už bylo fakturováno zálohou.
             ...$this->ossCarry->values($dominant),

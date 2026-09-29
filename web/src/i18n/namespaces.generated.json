@@ -30,6 +30,7 @@
   ],
   "lazy": [
     "abra_flexi",
+    "accrual_period",
     "accrual_suggest",
     "activation",
     "activity_log",
@@ -258,6 +259,8 @@
       "integrations"
     ],
     "invoice-new": [
+      "accrual_period",
+      "accrual_suggest",
       "cash",
       "cash_settlement",
       "dimensions",
@@ -273,6 +276,8 @@
       "time_billing"
     ],
     "invoice-detail": [
+      "accrual_period",
+      "accrual_suggest",
       "activation",
       "automation",
       "bank",
@@ -294,6 +299,8 @@
       "time_billing"
     ],
     "invoice-edit": [
+      "accrual_period",
+      "accrual_suggest",
       "cash",
       "cash_settlement",
       "dimensions",

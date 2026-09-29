@@ -22,6 +22,7 @@ import {
   type SmallAssetAccrualPreview,
   type SmallAssetAccrualMode,
   type PrepaidExpenseAccrualPreview,
+  type DeferredRevenueAccrualPreview,
   type StockTotals,
   type StockTotalsGroup,
   type StockWarning,
@@ -506,6 +507,30 @@ function runPrepaidExpenseAccrual() {
   })
 }
 
+// ── Časové rozlišení výnosů příštích období (384 z označených vydaných faktur) ──
+const drAccrualPreview = ref<DeferredRevenueAccrualPreview | null>(null)
+const drAccrualLoading = ref(false)
+
+async function loadDeferredRevenueAccrual() {
+  drAccrualLoading.value = true
+  try {
+    drAccrualPreview.value = await closingApi.deferredRevenueAccrualPreview(periodId)
+  } catch {
+    toast.error(t('accounting.closing.deferred_revenue.load_failed'))
+  } finally {
+    drAccrualLoading.value = false
+  }
+}
+
+function runDeferredRevenueAccrual() {
+  mutate(() => closingApi.runStep(periodId, 'deferrals', {
+    row_version: rowVersion.value,
+    deferred_revenue_accrual: true,
+  }), t('accounting.closing.deferred_revenue.posted')).then(ok => {
+    if (ok) loadDeferredRevenueAccrual()
+  })
+}
+
 // ── K10: návrh dohadných položek pasivních (389) ───────────────────────────
 const estimatesSuggest = ref<EstimatesSuggest | null>(null)
 const estimatesSuggestLoading = ref(false)
@@ -605,6 +630,7 @@ watch(selected, (k) => {
   if (k === 'provisions' && !provisionsPreview.value) loadProvisions()
   if (k === 'income_tax' && !incomeTaxPreview.value) loadIncomeTax()
   if (k === 'deferrals' && !peAccrualPreview.value) loadPrepaidExpenseAccrual()
+  if (k === 'deferrals' && !drAccrualPreview.value) loadDeferredRevenueAccrual()
   // Task 14: předvyplň účetní politiku rozlišení drobného majetku z uloženého nastavení firmy.
   if (k === 'deferrals' && !saAccrualPreview.value) loadSmallAssetAccrual(true)
 })
@@ -1237,6 +1263,54 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 <button v-if="isClosing" @click="runPrepaidExpenseAccrual" :disabled="busy" :class="btnFilled('primary')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                   {{ t('accounting.closing.prepaid_expense.post') }}
+                </button>
+              </template>
+            </div>
+
+            <!-- Časové rozlišení výnosů příštích období (384) z označených vydaných faktur -->
+            <div v-if="selected === 'deferrals'" class="border border-neutral-200 rounded-md p-3 space-y-3" data-test="deferred-revenue-block">
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-sm font-medium text-neutral-700 mr-auto">{{ t('accounting.closing.deferred_revenue.title') }}</h3>
+                <button @click="loadDeferredRevenueAccrual" :disabled="busy || drAccrualLoading" :class="btnOutline('neutral')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+                  {{ t('accounting.closing.deferred_revenue.reload') }}
+                </button>
+              </div>
+              <p class="text-xs text-neutral-500">{{ t('accounting.closing.deferred_revenue.hint') }}</p>
+              <template v-if="drAccrualPreview">
+                <div class="overflow-x-auto" v-if="drAccrualPreview.items.length">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="text-left text-neutral-500 border-b border-neutral-200">
+                        <th class="py-1 pr-2">{{ t('accounting.closing.deferred_revenue.col_document') }}</th>
+                        <th class="py-1 px-2">{{ t('accounting.closing.deferred_revenue.col_period') }}</th>
+                        <th class="py-1 px-2 text-right">{{ t('accounting.closing.deferred_revenue.col_account') }}</th>
+                        <th class="py-1 pl-2 text-right">{{ t('accounting.closing.deferred_revenue.col_deferred') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="it in drAccrualPreview.items" :key="it.item_id" class="border-b border-neutral-100">
+                        <td class="py-1 pr-2">
+                          <RouterLink :to="`/invoices/${it.invoice_id}`" class="text-primary-700 hover:underline">{{ it.invoice_number }}</RouterLink>
+                          <span class="block text-xs text-neutral-400">{{ it.description }}</span>
+                        </td>
+                        <td class="py-1 px-2 whitespace-nowrap">{{ formatDate(it.accrual_from) }} – {{ formatDate(it.accrual_to) }}</td>
+                        <td class="py-1 px-2 text-right font-mono">{{ it.debit_account }}</td>
+                        <td class="py-1 pl-2 text-right font-mono">{{ formatMoney(it.deferred_amount) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <EmptyState v-else dense accent="neutral" icon="doc" :title="t('accounting.closing.deferred_revenue.no_items')" />
+                <div class="text-sm space-y-1">
+                  <div class="flex justify-between"><span>{{ t('accounting.closing.deferred_revenue.total_deferred') }}</span><span class="font-mono font-medium">{{ formatMoney(drAccrualPreview.total) }}</span></div>
+                </div>
+                <div v-if="drAccrualPreview.existing" class="text-xs text-success-600">
+                  {{ t('accounting.closing.deferred_revenue.existing', { amount: formatMoney(drAccrualPreview.existing.amount ?? 0) }) }}
+                </div>
+                <button v-if="isClosing" @click="runDeferredRevenueAccrual" :disabled="busy" :class="btnFilled('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                  {{ t('accounting.closing.deferred_revenue.post') }}
                 </button>
               </template>
             </div>

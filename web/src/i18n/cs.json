@@ -1,4 +1,16 @@
 {
+  "accrual_period": {
+    "show": "Časové rozlišení",
+    "hide": "Skrýt časové rozlišení",
+    "hint": "Období, do kterého výnos patří (roční předplatné, nájem, servis). Faktura se zaúčtuje celá, část za koncem roku odloží uzávěrka na 384.",
+    "add": "+ období rozlišení",
+    "remove": "× zrušit rozlišení",
+    "from": "Od",
+    "to": "Do",
+    "save": "Uložit časové rozlišení",
+    "saved": "Časové rozlišení bylo uloženo.",
+    "badge": "Časové rozlišení {from} – {to}"
+  },
   "accrual_suggest": {
     "detected": "Rozpoznáno období {from} – {to}",
     "apply": "Použít jako časové rozlišení",
@@ -16997,6 +17009,21 @@
         "posted": "Časové rozlišení nákladů příštích období bylo zaúčtováno.",
         "load_failed": "Náhled rozlišení nákladů se nepodařilo načíst."
       },
+      "deferred_revenue": {
+        "title": "Časové rozlišení výnosů příštích období (384)",
+        "hint": "Z řádků vydaných faktur označených obdobím od–do, jejichž výnos přesahuje konec roku (roční předplatné, nájem, servisní smlouvy). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 384 (MD výnosový účet / D 384). V N+1 se rozpustí automaticky.",
+        "reload": "Načíst návrh",
+        "col_document": "Faktura",
+        "col_period": "Období rozlišení",
+        "col_account": "Výnosový účet",
+        "col_deferred": "Odklad na 384",
+        "total_deferred": "Odloženo celkem (MD 6xx / D 384)",
+        "no_items": "V období nejsou žádné řádky vydaných faktur označené k časovému rozlišení.",
+        "existing": "Zaúčtováno {amount}.",
+        "post": "Zaúčtovat rozlišení výnosů",
+        "posted": "Časové rozlišení výnosů příštích období bylo zaúčtováno.",
+        "load_failed": "Náhled rozlišení výnosů se nepodařilo načíst."
+      },
       "estimates": {
         "suggest": "Navrhnout dohady",
         "suggest_hint": "Systém vyhledá opakující se měsíční náklady (energie, nájem, telco, cloud), u kterých za poslední měsíc roku k rozvahovému dni chybí faktura, a navrhne dohad pasivní (389) ve výši průměru posledních faktur. Návrh per dodavatel upravte a potvrďte — systém neúčtuje automaticky.",
@@ -25217,6 +25244,7 @@
     "proj_source_assets": "Majetek",
     "proj_small_asset": "Časové rozlišení drobného majetku (381)",
     "proj_prepaid": "Časové rozlišení nákladů příštích období (381)",
+    "proj_deferred_revenue": "Časové rozlišení výnosů příštích období (384)",
     "proj_fx": "Kurzové rozdíly k rozvahovému dni",
     "proj_prior_release": "Rozpuštění časového rozlišení z minulého období",
     "proj_provision": "Opravné položky k pohledávkám",

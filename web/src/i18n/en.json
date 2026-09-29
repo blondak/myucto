@@ -1,4 +1,16 @@
 {
+  "accrual_period": {
+    "show": "Accrual period",
+    "hide": "Hide accrual period",
+    "hint": "Period the revenue belongs to (annual subscription, rent, service). The invoice is posted in full; year-end closing defers the part beyond the year end to account 384.",
+    "add": "+ accrual period",
+    "remove": "× remove accrual",
+    "from": "From",
+    "to": "To",
+    "save": "Save accrual period",
+    "saved": "Accrual period saved.",
+    "badge": "Accrual period {from} – {to}"
+  },
   "accrual_suggest": {
     "detected": "Detected period {from} – {to}",
     "apply": "Use as accrual",
@@ -16997,6 +17009,21 @@
         "posted": "Prepaid expenses were posted.",
         "load_failed": "Failed to load the accrual preview."
       },
+      "deferred_revenue": {
+        "title": "Deferred revenue (384)",
+        "hint": "From issued invoice lines marked with a from–to period whose revenue extends beyond the year end (annual subscriptions, rent, service contracts). The part belonging to future periods is computed pro rata by days and deferred to 384 (debit revenue account / credit 384). It is released automatically in the next year.",
+        "reload": "Load proposal",
+        "col_document": "Invoice",
+        "col_period": "Accrual period",
+        "col_account": "Revenue account",
+        "col_deferred": "Deferred to 384",
+        "total_deferred": "Total deferred (Dr 6xx / Cr 384)",
+        "no_items": "No issued invoice lines in this period are marked for accrual.",
+        "existing": "Posted {amount}.",
+        "post": "Post revenue deferral",
+        "posted": "Deferred revenue was posted.",
+        "load_failed": "Failed to load the deferred revenue preview."
+      },
       "estimates": {
         "suggest": "Suggest estimates",
         "suggest_hint": "The system finds recurring monthly costs (energy, rent, telco, cloud) whose invoice for the last month of the year is missing at the balance-sheet date, and proposes a passive estimate (389) equal to the average of the recent invoices. Review and confirm each proposal per vendor — the system never posts automatically.",
@@ -25217,6 +25244,7 @@
     "proj_source_assets": "Assets",
     "proj_small_asset": "Small asset accrual (381)",
     "proj_prepaid": "Prepaid expense accrual (381)",
+    "proj_deferred_revenue": "Deferred revenue (384)",
     "proj_fx": "FX revaluation at balance sheet date",
     "proj_prior_release": "Release of prior period accrual",
     "proj_provision": "Receivable provisions",

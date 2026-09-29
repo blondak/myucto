@@ -4,7 +4,7 @@ import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
@@ -28,7 +28,7 @@ import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -41,6 +41,7 @@ import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifi
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import RefundPaymentDialog from '@/components/invoices/RefundPaymentDialog.vue'
 
 const { t, te, locale } = useI18n()
@@ -207,6 +208,47 @@ const signatureSelectionRows = computed(() => {
   if (workReport.value) rows.push({ entityType: 'work_report', label: t('invoice.signing.output_work_report') as string })
   return rows
 })
+
+// ─── Časové rozlišení výnosu (384) ───────────────────────────────────────
+// Období u řádků jde nastavit i u vystavené a zaúčtované faktury: zápis faktury se
+// nemění, období čte až uzávěrka. Vzhled drží editor (odkaz → pole u položek).
+const accrualEditing = ref(false)
+const accrualSaving = ref(false)
+const accrualDraft = reactive<Record<number, { from: string | null; to: string | null }>>({})
+const canEditAccrual = computed(() => !!invoice.value
+  && auth.canWrite('invoices')
+  && invoice.value.status !== 'cancelled'
+  && invoice.value.invoice_type !== 'cancellation'
+  && invoice.value.invoice_type !== 'proforma')
+
+function startAccrualEdit() {
+  for (const key of Object.keys(accrualDraft)) delete accrualDraft[Number(key)]
+  for (const item of invoice.value?.items ?? []) {
+    if (item.id == null || item.item_kind === 'discount') continue
+    accrualDraft[item.id] = { from: item.accrual_from ?? null, to: item.accrual_to ?? null }
+  }
+  accrualEditing.value = true
+}
+
+async function saveAccrual() {
+  if (!invoice.value) return
+  accrualSaving.value = true
+  try {
+    await invoicesApi.setAccrual(invoice.value.id, Object.entries(accrualDraft).map(([id, period]) => ({
+      id: Number(id),
+      accrual_from: period.from || null,
+      accrual_to: period.to || null,
+    })))
+    const reloaded = await invoicesApi.get(invoice.value.id)
+    invoice.value = reloaded
+    accrualEditing.value = false
+    toast.success(t('accrual_period.saved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    accrualSaving.value = false
+  }
+}
 
 async function load() {
   const generation = ++loadGeneration
@@ -2266,8 +2308,24 @@ const invoiceActions = computed<ActionItem[]>(() => {
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="px-5 py-3 border-b border-neutral-200">
+        <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.items') }}</h3>
+          <div v-if="canEditAccrual" class="flex flex-wrap items-center justify-end gap-2">
+            <button v-if="!accrualEditing" type="button" class="cursor-pointer text-xs text-primary-700 hover:underline whitespace-nowrap"
+              :title="t('accrual_period.hint')" data-test="accrual-edit" @click="startAccrualEdit">
+              {{ t('accrual_period.show') }}
+            </button>
+            <template v-else>
+              <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" :disabled="accrualSaving" @click="accrualEditing = false">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.x" /></svg>
+                {{ t('common.cancel') }}
+              </button>
+              <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="accrualSaving" data-test="accrual-save" @click="saveAccrual">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.check" /></svg>
+                {{ t('accrual_period.save') }}
+              </button>
+            </template>
+          </div>
         </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
@@ -2299,6 +2357,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
                   :title="t('invoice.oss.needs_review_hint')">
                   {{ t('invoice.oss.needs_review') }}
                 </span>
+                <ItemAccrualFields v-if="accrualEditing && item.id != null && accrualDraft[item.id]" class="whitespace-normal"
+                  :description="item.description"
+                  v-model:from="accrualDraft[item.id]!.from" v-model:to="accrualDraft[item.id]!.to" />
+                <div v-else-if="item.accrual_from && item.accrual_to" class="mt-0.5 text-xs text-neutral-500 whitespace-normal">
+                  {{ t('accrual_period.badge', { from: formatDate(item.accrual_from), to: formatDate(item.accrual_to) }) }}
+                </div>
               </td>
               <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity) }}</td>
               <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
@@ -2325,6 +2389,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
                 :title="t('invoice.oss.needs_review_hint')">
                 {{ t('invoice.oss.needs_review') }}
               </span>
+            </div>
+            <ItemAccrualFields v-if="accrualEditing && item.id != null && accrualDraft[item.id]" stacked
+              :description="item.description"
+              v-model:from="accrualDraft[item.id]!.from" v-model:to="accrualDraft[item.id]!.to" />
+            <div v-else-if="item.accrual_from && item.accrual_to" class="text-xs text-neutral-500">
+              {{ t('accrual_period.badge', { from: formatDate(item.accrual_from), to: formatDate(item.accrual_to) }) }}
             </div>
             <div v-if="item.item_kind !== 'discount'" class="flex items-baseline justify-between text-xs text-neutral-500">
               <span>

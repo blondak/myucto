@@ -601,7 +601,7 @@ final class InvoiceRepository
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
                     ii.order_index, ii.item_kind, ii.linked_work_report_id,
                     ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id,
-                    ii.small_asset_id, ii.asset_id,
+                    ii.small_asset_id, ii.asset_id, ii.accrual_from, ii.accrual_to,
                     sa.name AS small_asset_name, a.name AS asset_name' . $ossSelect . ',
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM invoice_items ii
@@ -1530,6 +1530,24 @@ final class InvoiceRepository
         }
     }
 
+    /**
+     * Období časového rozlišení výnosu řádku (accrual_from/accrual_to, 384). Jen úplná
+     * a platná dvojice Y-m-d s from <= to; cokoli jiného = bez rozlišení. Validace na
+     * vstupu API ({@see \MyInvoice\Service\Validation\InvoiceValidation}) chybu vrací
+     * uživateli, tady je poslední pojistka pro interní cesty.
+     *
+     * @param array<string,mixed> $item
+     * @return array{0:?string,1:?string}
+     */
+    public static function accrualPeriod(array $item): array
+    {
+        $pair = \MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector::normalizePair(
+            $item['accrual_from'] ?? null,
+            $item['accrual_to'] ?? null,
+        );
+        return $pair !== null ? [$pair['from'], $pair['to']] : [null, null];
+    }
+
     public function replaceItems(int $invoiceId, array $items): void
     {
         $pdo = $this->db->pdo();
@@ -1576,9 +1594,9 @@ final class InvoiceRepository
                 (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                 stock_item_id, warehouse_id, small_asset_id, asset_id'
+                 stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to'
             . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?'
             . str_repeat(', ?', count($ossColumns))
             . ')'
         );
@@ -1613,6 +1631,7 @@ final class InvoiceRepository
         // round(qty*price, 2) jednotlivých řádků (stejné zaokrouhlení jako InvoiceMath).
         $discountGroups = [];
         $maxOrder = -1;
+        $accrualPeriods = [];
 
         foreach (array_values($items) as $i => $item) {
             // Systémové slevové řádky z UI ignorujeme — generují se z header pole níže.
@@ -1671,7 +1690,9 @@ final class InvoiceRepository
                 // Vazba na prodávanou kartu majetku (1177) — řídí výnosový účet i automat prodeje.
                 self::positiveIdOrNull($item['small_asset_id'] ?? null),
                 $assetId,
+                ...self::accrualPeriod($item),
             ];
+            $accrualPeriods[implode('|', self::accrualPeriod($item))] = self::accrualPeriod($item);
             if ($supportsOss) {
                 $params = array_merge($params, self::ossItemParams($item, $supportsManualReview));
             }
@@ -1719,6 +1740,7 @@ final class InvoiceRepository
                 $maxOrder + 1,
                 $language,
                 $supportsOss,
+                count($accrualPeriods) === 1 ? reset($accrualPeriods) : [null, null],
             );
         }
     }
@@ -1739,6 +1761,7 @@ final class InvoiceRepository
         int $startOrder,
         string $language,
         bool $supportsOss,
+        array $accrualPeriod = [null, null],
     ): void {
         $label = self::discountLabel($discountPercent, $language);
         $order = $startOrder;
@@ -1765,6 +1788,9 @@ final class InvoiceRepository
                 null,
                 null,
                 null,
+                // Období časového rozlišení: sleva z hlavičky snižuje výnos všech řádků,
+                // takže jejich společné období zdědí; při různých obdobích zůstane bez něj.
+                ...$accrualPeriod,
             ];
             if ($supportsOss && isset($g['oss']) && is_array($g['oss'])) {
                 $oss = $g['oss'];

@@ -19,7 +19,7 @@ use PDO;
  *
  * ── PAST 1: syntetická source_id ──────────────────────────────────────────────
  * Uzávěrkové typy ('closing', 'opening', 'fx_revaluation', 'stock',
- * 'small_asset_accrual', 'prepaid_expense_accrual', 'income_tax',
+ * 'small_asset_accrual', 'prepaid_expense_accrual', 'deferred_revenue_accrual', 'income_tax',
  * 'profit_distribution') NEMAJÍ source_id ukazující na doklad — nesou syntetický
  * idempotenční klíč odvozený z period_id (viz ClosingSourceId: `period_id*10+SLOT`,
  * `1e12+`, `2e12+`, `3e12+`). Kdyby se takové číslo použilo jako id dokladu,
@@ -56,7 +56,7 @@ final class JournalSourceSummaryService
      */
     private const CLOSING_TYPES = [
         'closing', 'opening', 'fx_revaluation', 'stock',
-        'small_asset_accrual', 'prepaid_expense_accrual',
+        'small_asset_accrual', 'prepaid_expense_accrual', 'deferred_revenue_accrual',
         'income_tax', 'profit_distribution',
     ];
 

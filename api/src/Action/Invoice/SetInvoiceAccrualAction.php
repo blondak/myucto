@@ -1,0 +1,122 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Invoice;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+/**
+ * PUT /api/invoices/{id}/accrual — období časového rozlišení výnosu (384) u řádků.
+ *
+ * Smí i u vystavené a zaúčtované faktury: zápis faktury se nemění (výnos jde celý do
+ * dne plnění), období čte až uzávěrka. Proto netřeba force-edit s přeúčtováním jako
+ * u změny částek. Odmítá se jen doklad v UZAVŘENÉM účetním období — jeho odklad už
+ * je součástí uzavřených čísel.
+ *
+ * Body: { items: [{ id: number, accrual_from: "RRRR-MM-DD"|null, accrual_to: "RRRR-MM-DD"|null }] }
+ * Řádky, které v těle nejsou, se nemění.
+ */
+final class SetInvoiceAccrualAction
+{
+    public function __construct(
+        private readonly InvoiceRepository $repo,
+        private readonly AccountingPeriodRepository $periods,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+        private readonly Connection $db,
+    ) {}
+
+    public function __invoke(Request $request, Response $response, array $args): Response
+    {
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0) {
+            return Json::error($response, 'invalid_id', 'Neplatné ID', 400);
+        }
+
+        $supplierId = SupplierGuard::currentId($request);
+        $existing = $this->repo->find($id);
+        if ($existing === null || (int) ($existing['supplier_id'] ?? 0) !== $supplierId) {
+            return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        }
+        if (in_array((string) ($existing['status'] ?? ''), ['cancelled'], true)
+            || in_array((string) ($existing['invoice_type'] ?? ''), ['cancellation'], true)) {
+            return Json::error($response, 'not_editable', 'Stornovaný doklad nelze časově rozlišit.', 409);
+        }
+        $docDate = (string) ($existing['tax_date'] ?? $existing['issue_date'] ?? '');
+        $period = $docDate !== '' ? $this->periods->findForDate($supplierId, substr($docDate, 0, 10)) : null;
+        if ($period !== null && (string) $period['status'] === 'closed') {
+            return Json::error(
+                $response,
+                'period_closed',
+                'Faktura patří do uzavřeného účetního období, její časové rozlišení už je součástí uzávěrky.',
+                409,
+            );
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $items = $body['items'] ?? null;
+        if (!is_array($items) || $items === []) {
+            return Json::error($response, 'validation_failed', 'Pole items s řádky faktury je povinné.', 400);
+        }
+        $known = [];
+        foreach ((array) ($existing['items'] ?? []) as $item) {
+            $known[(int) $item['id']] = $item;
+        }
+
+        $changes = [];
+        $errors = [];
+        foreach (array_values($items) as $i => $item) {
+            $itemId = is_array($item) ? (int) ($item['id'] ?? 0) : 0;
+            if (!isset($known[$itemId])) {
+                $errors["items.{$i}.id"][] = 'Řádek nepatří k této faktuře';
+                continue;
+            }
+            $from = trim((string) ($item['accrual_from'] ?? ''));
+            $to = trim((string) ($item['accrual_to'] ?? ''));
+            if ($from === '' && $to === '') {
+                $changes[$itemId] = [null, null];
+                continue;
+            }
+            [$validFrom, $validTo] = InvoiceRepository::accrualPeriod(['accrual_from' => $from, 'accrual_to' => $to]);
+            if ($validFrom === null) {
+                $errors["items.{$i}.accrual_from"][] = 'Období potřebuje obě data ve formátu RRRR-MM-DD a začátek nejpozději v den konce';
+                continue;
+            }
+            $changes[$itemId] = [$validFrom, $validTo];
+        }
+        if ($errors !== []) {
+            return Json::error($response, 'validation_failed', 'Neplatné období časového rozlišení.', 400, ['fields' => $errors]);
+        }
+
+        $update = $this->db->pdo()->prepare('UPDATE invoice_items SET accrual_from = ?, accrual_to = ? WHERE id = ? AND invoice_id = ?');
+        $log = [];
+        foreach ($changes as $itemId => [$from, $to]) {
+            $before = [$known[$itemId]['accrual_from'] ?? null, $known[$itemId]['accrual_to'] ?? null];
+            if ($before === [$from, $to]) {
+                continue;
+            }
+            $update->execute([$from, $to, $itemId, $id]);
+            $log[] = ['item_id' => $itemId, 'from' => $before, 'to' => [$from, $to]];
+        }
+
+        if ($log !== []) {
+            $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $this->logger->log('invoice.accrual_changed', $user['id'] ?? null, 'invoice', $id, [
+                'items' => $log,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+
+        return Json::ok($response, $this->repo->find($id));
+    }
+}

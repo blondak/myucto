@@ -1662,6 +1662,300 @@ final class ClosingService
         return '518';
     }
 
+    // ── časové rozlišení výnosů příštích období — 384 z označených řádků vydaných faktur ──
+
+    /**
+     * Náhled časového rozlišení výnosů příštích období (384) k rozvahovému dni (GET).
+     * Zrcadlo {@see prepaidExpenseAccrualPreview}: řádek vydané faktury nese období od–do
+     * (accrual_from/accrual_to), do kterého výnos patří (roční předplatné, nájem, servis).
+     * Faktura se zaúčtovala celá do výnosu dne plnění; uzávěrka odloží na 384 tu část, která
+     * připadá na dny ZA koncem období, pro-rata dle dnů. Cizí měna kurzem, jakým se faktura
+     * zaúčtovala.
+     *
+     * Bere jen faktury, jejichž zaúčtovaný (nestornovaný) zápis leží v tomto období — odkládá
+     * se jen výnos, který je ve VH tohoto roku. Dobropis s obdobím odkládá zápornou částku,
+     * takže rozlišení původní faktury sníží.
+     *
+     * Výnosový účet řádku: má-li zápis faktury jediný výnosový účet (6xx), platí pro všechny
+     * řádky (zachytí i ručně zvolenou předkontaci); jinak účet řádku stejným pravidlem, jakým
+     * výnos rozkládá {@see \MyInvoice\Service\Accounting\PostingService::issuedItemRevenueAccounts}.
+     *
+     * @return array<string,mixed>
+     */
+    public function deferredRevenueAccrualPreview(int $supplierId, int $periodId): array
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null) {
+            throw new ClosingException('not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
+        }
+        $startsOn = (string) $period['starts_on'];
+        $endsOn = (string) $period['ends_on'];
+        $nextStart = (new \DateTimeImmutable($endsOn))->modify('+1 day')->format('Y-m-d');
+
+        $items = [];
+        $documents = [];
+        $byAccount = [];
+        $total = 0.0;
+        $contexts = [];
+        foreach ($this->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn) as $row) {
+            $from = substr((string) $row['accrual_from'], 0, 10);
+            $to = substr((string) $row['accrual_to'], 0, 10);
+            $totalDays = self::daysInclusive($from, $to);
+            if ($totalDays <= 0) {
+                continue;
+            }
+            $deferFrom = $from < $nextStart ? $nextStart : $from;
+            $deferDays = self::daysInclusive($deferFrom, $to);
+            [$netCzk, $account] = $this->deferredRevenueItem($supplierId, $row, $contexts);
+            $deferred = round($netCzk - self::prepaidCumRecognized($netCzk, $from, $to, $endsOn), 2);
+            if ((int) round($deferred * 100) === 0) {
+                continue;
+            }
+            $schedule = [];
+            $toYear = (int) substr($to, 0, 4);
+            for ($fy = (int) substr($nextStart, 0, 4); $fy <= $toYear; $fy++) {
+                $rel = round(
+                    self::prepaidCumRecognized($netCzk, $from, $to, $fy . '-12-31')
+                    - self::prepaidCumRecognized($netCzk, $from, $to, ($fy - 1) . '-12-31'),
+                    2,
+                );
+                if ((int) round($rel * 100) !== 0) {
+                    $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
+                }
+            }
+
+            $total = round($total + $deferred, 2);
+            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $deferred, 2);
+            $invoiceId = (int) $row['invoice_id'];
+            $documents[$invoiceId] = [
+                'invoice_id' => $invoiceId,
+                'invoice_number' => (string) $row['varsymbol'],
+                'deferred_amount' => round(($documents[$invoiceId]['deferred_amount'] ?? 0.0) + $deferred, 2),
+            ];
+            $items[] = [
+                'item_id' => (int) $row['item_id'],
+                'invoice_id' => $invoiceId,
+                'invoice_number' => (string) $row['varsymbol'],
+                'description' => (string) $row['description'],
+                'currency_code' => (string) $row['currency_code'],
+                'total_without_vat' => round((float) $row['total_without_vat'], 2),
+                'total_czk' => $netCzk,
+                'debit_account' => $account,
+                'accrual_from' => $from,
+                'accrual_to' => $to,
+                'total_days' => $totalDays,
+                'deferred_days' => $deferDays,
+                'fraction' => round(min(1.0, $deferDays / $totalDays), 6),
+                'deferred_amount' => $deferred,
+                'release_schedule' => $schedule,
+            ];
+        }
+
+        $existingEntry = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($periodId));
+        $existingPayload = $this->stepsMap($supplierId, $periodId)['deferrals']['payload']['deferred_revenue_accrual'] ?? null;
+
+        return [
+            'as_of' => $endsOn,
+            'period' => ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'starts_on' => $startsOn, 'ends_on' => $endsOn],
+            'next_period_start' => $nextStart,
+            'items' => $items,
+            'documents' => array_values($documents),
+            'by_account' => $byAccount,
+            'total' => $total,
+            'existing' => $existingEntry === null ? null : [
+                'entry_id' => (int) $existingEntry['id'],
+                'amount' => is_array($existingPayload) ? round((float) ($existingPayload['total'] ?? 0), 2) : null,
+            ],
+        ];
+    }
+
+    /**
+     * Zaúčtování časového rozlišení výnosů příštích období — jeden agregátní idempotentní
+     * zápis MD 6xx / D 384 (source ('deferred_revenue_accrual', period_id), entry_date =
+     * ends_on). Re-run přepíše zápis na místě, nulový návrh smaže stale zápis. Rozpuštění
+     * v N+1 (MD 384 / D 6xx) řeší {@see openNext}.
+     *
+     * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array<string,mixed>
+     */
+    public function runDeferredRevenueAccrual(int $supplierId, int $periodId, int $rowVersion, array $meta = []): array
+    {
+        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta): array {
+            $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            $this->assertStatus($period, ['closing']);
+            $endsOn = (string) $period['ends_on'];
+            $fiscalYear = (int) $period['fiscal_year'];
+
+            $preview = $this->deferredRevenueAccrualPreview($supplierId, $periodId);
+            $total = round((float) $preview['total'], 2);
+            $sourceId = ClosingSourceId::deferredRevenueAccrual($periodId);
+
+            $step = $this->stepsMap($supplierId, $periodId)['deferrals'];
+            $payload = $step['payload'] ?? [];
+            $stepStatus = (string) $step['status'];
+
+            if ((int) round($total * 100) === 0) {
+                $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', $sourceId);
+                unset($payload['deferred_revenue_accrual']);
+                $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
+                $this->bumpVersion($supplierId, $periodId, $rowVersion);
+                $this->audit($supplierId, 'accounting.closing_step_done', $periodId, ['step' => 'deferrals', 'status' => 'done'], $meta);
+                return ['entry_id' => null, 'total' => 0.0, 'items' => $preview['items'], 'removed' => true];
+            }
+
+            $lines = $this->deferredRevenueLines($supplierId, $preview['by_account'], $total, false);
+            $this->assertKnownCodes($supplierId, $lines);
+
+            $existing = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $sourceId);
+            $docNo = $existing !== null && $existing['document_no'] !== null
+                ? (string) $existing['document_no']
+                : $this->series->next($supplierId, 'manual', $fiscalYear);
+
+            $entryId = $this->posting->postDocument($supplierId, 'deferred_revenue_accrual', $sourceId, $lines, [
+                'entry_date' => $endsOn,
+                'document_no' => $docNo,
+                'description' => 'Časové rozlišení výnosů příštích období ' . $fiscalYear,
+                'posted' => true,
+                'posted_by' => $meta['posted_by'] ?? null,
+                'user_id' => $meta['user_id'] ?? null,
+                'ip' => $meta['ip'] ?? null,
+                'user_agent' => $meta['user_agent'] ?? null,
+                'allow_closing_period' => true,
+            ]);
+
+            $payload['deferred_revenue_accrual'] = [
+                'entry_id' => $entryId,
+                'document_no' => $docNo,
+                'total' => $total,
+                'by_account' => $preview['by_account'],
+                'ran_at' => date('Y-m-d H:i:s'),
+            ];
+            $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
+            $this->bumpVersion($supplierId, $periodId, $rowVersion);
+            $this->audit($supplierId, 'accounting.closing_step_done', $periodId, ['step' => 'deferrals', 'status' => 'done'], $meta);
+            return ['entry_id' => $entryId, 'document_no' => $docNo, 'total' => $total, 'items' => $preview['items']];
+        });
+    }
+
+    /**
+     * Řádky zápisu odkladu (MD 6xx / D 384) nebo rozpuštění (MD 384 / D 6xx). Částky jsou
+     * se znaménkem: záporná (dobropis převažuje) převrací stranu, aby zápis zůstal vyvážený
+     * a bez záporných částek. Účet 384 je kredit pravidla accrual.deferred.revenue.
+     *
+     * @param array<string,float> $byAccount
+     * @return list<array{account_code:string,side:string,amount:float}>
+     */
+    private function deferredRevenueLines(int $supplierId, array $byAccount, float $total, bool $release): array
+    {
+        $rule = $this->rules->resolve($supplierId, 'accrual.deferred.revenue');
+        $deferAccount = (string) ($rule['credit_account_code'] ?? '384');
+        $revenueSide = static fn (float $amount): string => (($amount >= 0.0) !== $release) ? 'debit' : 'credit';
+        $lines = [];
+        foreach ($byAccount as $account => $amount) {
+            $amount = round((float) $amount, 2);
+            if ((int) round($amount * 100) === 0) {
+                continue;
+            }
+            $lines[] = ['account_code' => (string) $account, 'side' => $revenueSide($amount), 'amount' => abs($amount)];
+        }
+        $lines[] = [
+            'account_code' => $deferAccount,
+            'side' => $revenueSide($total) === 'debit' ? 'credit' : 'debit',
+            'amount' => abs(round($total, 2)),
+        ];
+        return $lines;
+    }
+
+    /**
+     * Řádky vydaných faktur s obdobím výnosu přesahujícím `afterDate`, jejichž zaúčtovaný
+     * a nestornovaný zápis faktury leží v [postedFrom..postedTo]. Odklad: zápis v uzavíraném
+     * období; rozpuštění: zápis kdykoli do konce období, ze kterého se otevírá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function deferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy = null): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ii.id AS item_id, ii.invoice_id, ii.description, ii.total_without_vat,
+                    ii.accrual_from, ii.accrual_to, i.varsymbol, cur.code AS currency_code
+               FROM invoice_items ii
+               JOIN invoices i     ON i.id = ii.invoice_id
+               JOIN currencies cur ON cur.id = i.currency_id
+              WHERE i.supplier_id = ?
+                AND ii.accrual_from IS NOT NULL
+                AND ii.accrual_to IS NOT NULL
+                AND ii.accrual_to > ?
+                AND (? IS NULL OR ii.accrual_from <= ?)
+                AND EXISTS (SELECT 1 FROM journal_entries je
+                             WHERE je.supplier_id = i.supplier_id
+                               AND je.source_type = \'invoice\' AND je.source_id = i.id
+                               AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                               AND je.entry_date <= ?
+                               AND (? IS NULL OR je.entry_date >= ?))
+              ORDER BY i.id, ii.order_index, ii.id'
+        );
+        $stmt->execute([$supplierId, $afterDate, $startsBy, $startsBy, $postedTo, $postedFrom, $postedFrom]);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * Základ řádku v Kč a výnosový účet, ze kterého se odkládá.
+     *
+     * @param array<string,mixed> $row
+     * @param array<int,array{rate:float,accounts:array<int,string>,single:?string}> $contexts
+     * @return array{0:float,1:string}
+     */
+    private function deferredRevenueItem(int $supplierId, array $row, array &$contexts): array
+    {
+        $invoiceId = (int) $row['invoice_id'];
+        if (!isset($contexts[$invoiceId])) {
+            $resolved = $this->posting->issuedItemRevenueAccounts($supplierId, $invoiceId);
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT coa.account_code
+                   FROM journal_entries je
+                   JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
+                   JOIN chart_of_accounts coa   ON coa.id = jel.account_id
+                  WHERE je.supplier_id = ? AND je.source_type = \'invoice\' AND je.source_id = ?
+                    AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                    AND coa.account_code LIKE \'6%\''
+            );
+            $stmt->execute([$supplierId, $invoiceId]);
+            $posted = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+            $contexts[$invoiceId] = $resolved + ['single' => count($posted) === 1 ? (string) $posted[0] : null];
+        }
+        $context = $contexts[$invoiceId];
+        $account = $context['single'] ?? ($context['accounts'][(int) $row['item_id']] ?? '602');
+        return [round((float) $row['total_without_vat'] * $context['rate'], 2), $account];
+    }
+
+    /**
+     * Tranše odloženého výnosu (384), která se rozpouští do cílového období. Zrcadlo
+     * {@see prepaidExpenseReleaseForPeriod}: kumulativně uznáno k konci cílového období
+     * minus k `originEndsOn`, takže víceletý zbytek zůstává na 384 do dalšího openNext.
+     *
+     * @return array{by_account: array<string,float>, total: float}
+     */
+    private function deferredRevenueReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetEnd): array
+    {
+        $byAccount = [];
+        $total = 0.0;
+        $contexts = [];
+        foreach ($this->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd) as $row) {
+            $from = substr((string) $row['accrual_from'], 0, 10);
+            $to = substr((string) $row['accrual_to'], 0, 10);
+            [$netCzk, $account] = $this->deferredRevenueItem($supplierId, $row, $contexts);
+            $upper = self::prepaidCumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
+            $lower = self::prepaidCumRecognized($netCzk, $from, $to, $originEndsOn);
+            $release = round($upper - $lower, 2);
+            if ((int) round($release * 100) === 0) {
+                continue;
+            }
+            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $release, 2);
+            $total = round($total + $release, 2);
+        }
+        return ['by_account' => $byAccount, 'total' => $total];
+    }
+
     /**
      * Odložená částka + odložený podíl (pro_rata) pro jednu kartu. Formule pro_rata dle
      * zadání §DM při rovnoměrném užitku: náklad se vztahuje k intervalu délky `periodDays`
@@ -1873,11 +2167,14 @@ final class ClosingService
      * náklad podhodnotil. Vrací JEN dosud NErozpuštěnou (pending) část; jakmile je release
      * zaúčtovaný, je už ve VH a vrací 0. Read-only.
      *
-     * @return array{applicable:bool, prior_period_id:?int, small_asset:float, prepaid:float, total:float}
+     * Časové rozlišení výnosů (384) se rozpouští opačně: zvyšuje výnos, `total` ho proto
+     * odečítá (total = dodatečný náklad N+1, záporný = dodatečný výnos).
+     *
+     * @return array{applicable:bool, prior_period_id:?int, small_asset:float, prepaid:float, deferred_revenue:float, total:float}
      */
     public function priorDeferralReleaseProjection(int $supplierId, int $periodId): array
     {
-        $empty = ['applicable' => false, 'prior_period_id' => null, 'small_asset' => 0.0, 'prepaid' => 0.0, 'total' => 0.0];
+        $empty = ['applicable' => false, 'prior_period_id' => null, 'small_asset' => 0.0, 'prepaid' => 0.0, 'deferred_revenue' => 0.0, 'total' => 0.0];
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             return $empty;
@@ -1908,12 +2205,23 @@ final class ClosingService
             ClosingSourceId::prepaidExpenseAccrualRelease($priorId),
         );
 
-        $total = round($small + $prepaid, 2);
+        // Rozpuštění 384 výnos ZVYŠUJE, náklad tedy snižuje — proto se odečítá.
+        $deferredRevenue = $this->pendingDeferralRelease(
+            $supplierId,
+            'deferred_revenue_accrual',
+            ClosingSourceId::deferredRevenueAccrual($priorId),
+            ClosingSourceId::deferredRevenueAccrualRelease($priorId),
+            '384',
+            'credit',
+        );
+
+        $total = round($small + $prepaid - $deferredRevenue, 2);
         return [
-            'applicable' => (int) round($total * 100) !== 0,
+            'applicable' => (int) round($total * 100) !== 0 || (int) round($deferredRevenue * 100) !== 0,
             'prior_period_id' => $priorId,
             'small_asset' => $small,
             'prepaid' => $prepaid,
+            'deferred_revenue' => $deferredRevenue,
             'total' => $total,
         ];
     }
@@ -1923,7 +2231,7 @@ final class ClosingService
      * rozpuštění (release) do tohoto období ještě NE → vrátí odloženou částku (debet 381),
      * jinak 0. Read-only.
      */
-    private function pendingDeferralRelease(int $supplierId, string $sourceType, int $deferSourceId, int $releaseSourceId): float
+    private function pendingDeferralRelease(int $supplierId, string $sourceType, int $deferSourceId, int $releaseSourceId, string $accountPrefix = '381', string $side = 'debit'): float
     {
         $defer = $this->findEntryWithLines($supplierId, $sourceType, $deferSourceId);
         if ($defer === null || $defer['posted_at'] === null || ($defer['lines'] ?? []) === []) {
@@ -1933,11 +2241,13 @@ final class ClosingService
         if ($release !== null && $release['posted_at'] !== null) {
             return 0.0; // rozpuštění už zaúčtováno → náklad je ve VH
         }
-        // Odložená částka = debetní strana 381 defer zápisu (MD 381 / D 5xx).
+        // Odložená částka = strana účtu časového rozlišení v defer zápisu (MD 381 / D 5xx,
+        // resp. MD 6xx / D 384). Opačná strana (dobropisy převažují) jde se záporným znaménkem.
         $amount = 0.0;
         foreach ($defer['lines'] as $l) {
-            if ((string) $l['side'] === 'debit' && str_starts_with((string) $l['account_code'], '381')) {
-                $amount += JournalLineAmount::signed($l);
+            if (str_starts_with((string) $l['account_code'], $accountPrefix)) {
+                $signed = JournalLineAmount::signed($l);
+                $amount += (string) $l['side'] === $side ? $signed : -$signed;
             }
         }
         return round($amount, 2);
@@ -3640,12 +3950,39 @@ final class ClosingService
                 $this->closing->deleteClosingEntry($supplierId, 'prepaid_expense_accrual', $relSourceId);
             }
 
+            // Rozpuštění časového rozlišení výnosů (MD 384 / D 6xx) — tranše N+1, zrcadlo
+            // nákladové strany výše. Reverte se s open_next.
+            $deferredRevenueReleaseId = null;
+            $revRelSourceId = ClosingSourceId::deferredRevenueAccrualRelease($periodId);
+            $revRelease = $this->deferredRevenueReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextEnds);
+            if ((int) round($revRelease['total'] * 100) !== 0) {
+                $revRelLines = $this->deferredRevenueLines($supplierId, $revRelease['by_account'], $revRelease['total'], true);
+                $this->assertKnownCodes($supplierId, $revRelLines);
+                $existingRevRel = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $revRelSourceId);
+                $revRelDocNo = $existingRevRel !== null && $existingRevRel['document_no'] !== null
+                    ? (string) $existingRevRel['document_no']
+                    : $this->series->next($supplierId, 'opening', $nextFy);
+                $deferredRevenueReleaseId = $this->posting->postDocument($supplierId, 'deferred_revenue_accrual', $revRelSourceId, $revRelLines, [
+                    'entry_date' => $nextStart,
+                    'document_no' => $revRelDocNo,
+                    'description' => 'Rozpuštění časového rozlišení výnosů příštích období ' . $nextFy,
+                    'posted' => true,
+                    'posted_by' => $meta['posted_by'] ?? null,
+                    'user_id' => $meta['user_id'] ?? null,
+                    'ip' => $meta['ip'] ?? null,
+                    'user_agent' => $meta['user_agent'] ?? null,
+                ]);
+            } else {
+                $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', $revRelSourceId);
+            }
+
             $payload = [
                 'entry_id' => $entryId,
                 'fx_reversal_entry_id' => $fxReversalId,
                 'stock_release_entry_id' => $stockReleaseId,
                 'small_asset_release_entry_id' => $smallAssetReleaseId,
                 'prepaid_expense_release_entry_id' => $prepaidExpenseReleaseId,
+                'deferred_revenue_release_entry_id' => $deferredRevenueReleaseId,
                 'next_period_id' => $nextId,
                 'document_no' => $docNo,
                 'opening_source' => $openingSource,
@@ -3754,6 +4091,10 @@ final class ClosingService
                     $dump = $this->closing->deleteClosingEntry($supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($periodId));
                     if ($dump !== null) {
                         $dumps['prepaid_expense_release'] = $dump;
+                    }
+                    $dump = $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($periodId));
+                    if ($dump !== null) {
+                        $dumps['deferred_revenue_release'] = $dump;
                     }
                     if ($keptTakenOver !== null) {
                         // Krok zpět na pending, ale s evidencí převzatých zápisů (vzor

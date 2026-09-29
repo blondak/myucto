@@ -257,6 +257,12 @@ V obou krocích jsou automatické návrhy oddělené od zaúčtování:
 - u **nákladů příštích období** se nabídnou řádky přijatých faktur s vyplněným
   obdobím plnění přesahujícím rozvahový den; systém vypočte část připadající na další
   období a po potvrzení ji zaúčtuje na 381 proti původnímu nákladovému účtu,
+- u **výnosů příštích období** se nabídnou řádky vydaných faktur s vyplněným
+  obdobím výnosu přesahujícím rozvahový den, jejichž zápis leží v uzavíraném roce;
+  systém vypočte poměrně podle dnů část připadající na další období a po potvrzení
+  ji zaúčtuje na vrub výnosového účtu, na který se faktura zaúčtovala, a ve prospěch
+  384. Dobropis se stejným obdobím odklad sníží. Otevření dalšího roku odloženou část
+  rozpustí zpět do výnosů (víceleté plnění po ročních tranších),
 - pro **drobný majetek** lze zvolit politiku *bez rozlišení* (`none`), *poměr podle
   budoucí (nespotřebované) doby užitku* (`pro_rata`) nebo *pevné procento* (`flat_pct`);
   náhled porovná cenu karet s rozpisem nákladů 501 a po potvrzení vytvoří časové
