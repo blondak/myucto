@@ -176,6 +176,58 @@ final class McpOAuth
         }
     }
 
+    public function listForUser(int $userId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT g.id, c.client_name, g.supplier_id, s.display_name AS supplier_name,
+                    s.company_name AS supplier_company, g.scope, g.created_at, g.expires_at,
+                    g.revoked_at, t.revoked_at AS token_revoked_at, t.last_used_at
+               FROM mcp_oauth_grants g
+               JOIN mcp_oauth_clients c ON c.client_id = g.client_id
+               JOIN supplier s ON s.id = g.supplier_id
+               JOIN api_tokens t ON t.id = g.access_token_id
+              WHERE g.user_id = ?
+              ORDER BY g.revoked_at IS NOT NULL, g.created_at DESC, g.id DESC'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        foreach ($rows as &$row) {
+            $row['id'] = (int) $row['id'];
+            $row['supplier_id'] = (int) $row['supplier_id'];
+            $row['is_active'] = $row['revoked_at'] === null
+                && $row['token_revoked_at'] === null
+                && strtotime((string) $row['expires_at']) > time();
+            unset($row['token_revoked_at']);
+        }
+        return $rows;
+    }
+
+    public function revokeForUser(int $grantId, int $userId): bool
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT access_token_id FROM mcp_oauth_grants WHERE id = ? AND user_id = ? FOR UPDATE'
+            );
+            $stmt->execute([$grantId, $userId]);
+            $tokenId = $stmt->fetchColumn();
+            if ($tokenId === false) {
+                $pdo->rollBack();
+                return false;
+            }
+            $pdo->prepare('UPDATE mcp_oauth_grants SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = ?')
+                ->execute([$grantId]);
+            $pdo->prepare('UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = ?')
+                ->execute([$tokenId]);
+            $pdo->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
     private static function tokenResponse(string $access, string $refresh, string $scope): array
     {
         return [

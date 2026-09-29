@@ -7,12 +7,16 @@ namespace MyInvoice\Action\Mcp;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\Mcp\HostedMcp;
+use MyInvoice\Service\Mcp\NodeBridge;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class HostedMcpSettingsAction
 {
-    public function __construct(private readonly HostedMcp $hosted) {}
+    public function __construct(
+        private readonly HostedMcp $hosted,
+        private readonly NodeBridge $bridge,
+    ) {}
 
     public function show(Request $request, Response $response): Response
     {
@@ -43,6 +47,40 @@ final class HostedMcpSettingsAction
         }
         $this->hosted->setEnabled($body['enabled']);
         return Json::ok($response, $this->state());
+    }
+
+    public function diagnostics(Request $request, Response $response): Response
+    {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+            return Json::sessionRequired($response);
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if (($user['is_superadmin'] ?? false) !== true) {
+            return Json::error($response, 'forbidden_permission', 'Diagnostika MCP je dostupná pouze správci.', 403);
+        }
+        if (!$this->hosted->enabled()) {
+            return Json::error($response, 'mcp_disabled', 'Serverový MCP není zapnutý.', 409);
+        }
+        try {
+            $cursor = null;
+            $count = 0;
+            for ($page = 0; $page < 20; $page++) {
+                $result = $this->bridge->execute([
+                    'operation' => 'list', 'scope' => 'read', 'cursor' => $cursor === null ? 0 : (int) $cursor,
+                ]);
+                if (!isset($result['tools']) || !is_array($result['tools']) || $result['tools'] === []) {
+                    throw new \RuntimeException('Most nevrátil žádné nástroje.');
+                }
+                $count += count($result['tools']);
+                $cursor = $result['nextCursor'] ?? null;
+                if ($cursor === null) return Json::ok($response, ['available' => true, 'tools_count' => $count]);
+            }
+            throw new \RuntimeException('Seznam nástrojů má příliš mnoho stránek.');
+        } catch (\Throwable $e) {
+            return Json::error($response, 'mcp_bridge_unavailable', 'MCP most nelze spustit.', 503, [
+                'detail' => substr($e->getMessage(), 0, 500),
+            ]);
+        }
     }
 
     private function state(): array

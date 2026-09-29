@@ -49,7 +49,7 @@ final class RoutePermissionMap
         // Výchozí firma je volba vlastního účtu; přístup k firmě ověřuje akce.
         '/api/auth/default-supplier',
         '/api/auth/domain-login/authorize',
-        '/api/mcp/settings',
+        '/api/mcp/settings', '/api/mcp/grants',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
 
@@ -901,6 +901,12 @@ final class RoutePermissionMap
         $method = strtoupper($method);
         if ($path === '/api/mcp/settings' && $method !== 'GET') {
             return new RoutePermission(self::SUPERADMIN);
+        }
+        if ($path === '/api/mcp/diagnostics') {
+            return new RoutePermission(self::SUPERADMIN);
+        }
+        if (preg_match('#^/api/mcp/grants/[0-9]+$#', $path) === 1) {
+            return new RoutePermission(self::SELF_SERVICE);
         }
         if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)
             && preg_match('#^/api/(settings/(vat-rates|units|countries)|accounting/repo-rates)(/|$)#', $path) === 1

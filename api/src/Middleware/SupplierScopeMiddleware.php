@@ -73,6 +73,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             // membership zablokovat — klient bez membershipu (Epic F6, fail-closed)
             // musí umět načíst vlastní účet a odhlásit se. Scope se nepropíše (0).
             if (in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)
+                || preg_match('#^/api/mcp/grants/[0-9]+$#', $path) === 1
                 || str_starts_with($path, '/api/public/')
             ) {
                 return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));

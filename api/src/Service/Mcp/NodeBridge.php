@@ -17,8 +17,17 @@ final class NodeBridge
     public function execute(array $input): array
     {
         $script = dirname(__DIR__, 4) . '/MCP/src/hosted-bridge.mjs';
-        if (!is_file($script) || !$this->hosted->nodeAvailable()) {
-            throw new \RuntimeException('Serverový MCP vyžaduje dostupný Node.js a soubory mcp/src.');
+        if (!is_file($script)) {
+            throw new \RuntimeException('Chybí soubor MCP/src/hosted-bridge.mjs.');
+        }
+        if (!function_exists('proc_open')) {
+            throw new \RuntimeException('PHP má vypnutou funkci proc_open.');
+        }
+        if (!is_file($this->hosted->phpBinary()) || !is_executable($this->hosted->phpBinary())) {
+            throw new \RuntimeException('PHP CLI není dostupné; nastavte MYINVOICE_MCP_PHP_BINARY.');
+        }
+        if (!$this->hosted->nodeAvailable()) {
+            throw new \RuntimeException('Node.js není dostupný pro webový proces; nastavte MYINVOICE_MCP_NODE_BINARY na úplnou cestu k node.exe.');
         }
 
         $input['apiUrl'] = rtrim((string) $this->config->get('app.url', ''), '/') . '/api/v1';

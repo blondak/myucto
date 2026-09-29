@@ -204,9 +204,17 @@ Na počítači uživatele Node pro online připojení není třeba.
 3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
    Nástroj `whoami` vrátí uživatele, roli a firmu.
 
+Katalog online připojení se načítá po stránkách. Asistent si další stránky
+načte automaticky podle MCP kurzoru.
+
 Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém zařízení
 neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,
-rozsah a oprávnění účtu. Připojení lze v MyÚčtu odvolat a v asistentovi odebrat.
+rozsah a oprávnění účtu. Aktivní povolení se zobrazují ve stejné záložce pod
+stavem serveru. Tlačítko **Odvolat přístup** okamžitě zneplatní přístupový token
+i možnost jeho obnovy. Konektor můžeš navíc odebrat v nastavení asistenta.
+Správce může tlačítkem **Otestovat nástroje** ověřit, že serverový Node most
+skutečně nabízí nástroje. Pokud asistent hlásí nedostupný konektor nebo nula
+nástrojů, spusť tento test a zkontroluj uvedenou chybu.
 
 **ChatGPT:** V **Nastavení → Integrace → Pluginy** zvol **Přidat → Přidat server MCP**
 a typ **Streamovatelné HTTP**. Zadej název a adresu své instalace končící

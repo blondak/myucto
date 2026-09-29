@@ -366,6 +366,7 @@ use MyInvoice\Action\System\VersionAction;
 use MyInvoice\Action\Mcp\HostedMcpEndpointAction;
 use MyInvoice\Action\Mcp\HostedMcpSettingsAction;
 use MyInvoice\Action\Mcp\McpOAuthAction;
+use MyInvoice\Action\Mcp\McpOAuthGrantsAction;
 use MyInvoice\Action\Admin\UpdateAction;
 use Slim\App;
 
@@ -378,6 +379,9 @@ final class Routes
 
         $app->get   ('/api/mcp/settings', [HostedMcpSettingsAction::class, 'show']);
         $app->put   ('/api/mcp/settings', [HostedMcpSettingsAction::class, 'update']);
+        $app->get   ('/api/mcp/diagnostics', [HostedMcpSettingsAction::class, 'diagnostics']);
+        $app->get   ('/api/mcp/grants', [McpOAuthGrantsAction::class, 'listing']);
+        $app->delete('/api/mcp/grants/{id:[0-9]+}', [McpOAuthGrantsAction::class, 'revoke']);
         $app->map   (['GET', 'POST', 'DELETE'], '/mcp', [HostedMcpEndpointAction::class, 'handle']);
         $app->get   ('/.well-known/oauth-protected-resource', [McpOAuthAction::class, 'protectedResource']);
         $app->get   ('/.well-known/oauth-protected-resource/mcp', [McpOAuthAction::class, 'protectedResource']);

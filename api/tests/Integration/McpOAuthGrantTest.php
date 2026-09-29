@@ -110,6 +110,35 @@ final class McpOAuthGrantTest extends TestCase
         self::assertNotTrue($called['isError'] ?? false, json_encode($called));
         self::assertIsArray($called['structuredContent'] ?? null);
         $base = rtrim((string) Config::load(dirname(__DIR__, 3))->get('app.url'), '/');
+        $previousEnabled = getenv('MYINVOICE_MCP_ENABLED');
+        putenv('MYINVOICE_MCP_ENABLED=1');
+        try {
+            $app = Bootstrap::buildApp();
+            $names = [];
+            $cursor = null;
+            do {
+                $params = $cursor === null ? (object) [] : ['cursor' => $cursor];
+                $request = (new ServerRequestFactory())->createServerRequest(
+                    'POST', $base . '/mcp', ['REMOTE_ADDR' => '127.0.0.1'],
+                )->withHeader('Authorization', 'Bearer ' . $first['access_token'])
+                    ->withHeader('Content-Type', 'application/json')
+                    ->withBody((new StreamFactory())->createStream(json_encode([
+                        'jsonrpc' => '2.0', 'id' => 7, 'method' => 'tools/list', 'params' => $params,
+                    ], JSON_THROW_ON_ERROR)));
+                $response = $app->handle($request);
+                self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+                $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+                self::assertNotEmpty($body['result']['tools'] ?? []);
+                self::assertLessThanOrEqual(30, count($body['result']['tools']));
+                $names = array_merge($names, array_column($body['result']['tools'], 'name'));
+                $cursor = $body['result']['nextCursor'] ?? null;
+            } while ($cursor !== null);
+            self::assertContains('whoami', $names);
+            self::assertContains('list_unpaid_invoices', $names);
+            self::assertCount(count(array_unique($names)), $names);
+        } finally {
+            putenv($previousEnabled === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $previousEnabled);
+        }
         $direct = Bootstrap::buildApp()->handle((new ServerRequestFactory())->createServerRequest(
             'GET', $base . '/api/v1/auth/api-me', ['REMOTE_ADDR' => '127.0.0.1'],
         )->withHeader('Authorization', 'Bearer ' . $first['access_token']));
@@ -137,6 +166,76 @@ final class McpOAuthGrantTest extends TestCase
 
         self::assertTrue($this->tokens->revoke($firstTokenId, $this->userId));
         self::assertNull($this->oauth->refresh($second['refresh_token'], $client));
+    }
+
+    public function testUserCanListAndRevokeOwnOAuthConnection(): void
+    {
+        $config = Config::load(dirname(__DIR__, 3));
+        $base = rtrim((string) $config->get('app.url'), '/');
+        $resource = $base . '/mcp';
+        $client = $this->oauth->register('Synthetic assistant', ['https://client.example.test/callback']);
+        $this->clientIds[] = $client;
+        $verifier = str_repeat('a', 64);
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $code = $this->oauth->createCode(
+            $client, $this->userId, $this->supplierId,
+            'https://client.example.test/callback', $challenge, 'read', $resource,
+        );
+        $grant = $this->oauth->exchange(
+            $code, $client, 'https://client.example.test/callback', $verifier, $resource,
+        );
+        self::assertIsArray($grant);
+        $sessions = new SessionManager($this->db, $config, new DatabaseSecurityClock());
+        $session = $sessions->create($this->userId, '127.0.0.1', 'synthetic-mcp-test');
+        try {
+            $cookie = (string) $config->get('session.cookie_name', '__Host-myinvoice_session');
+            $request = (new ServerRequestFactory())->createServerRequest(
+                'GET', $base . '/api/mcp/grants', ['REMOTE_ADDR' => '127.0.0.1'],
+            )->withCookieParams([$cookie => $session['token']]);
+            $app = Bootstrap::buildApp();
+            $listed = $app->handle($request);
+            self::assertSame(200, $listed->getStatusCode(), (string) $listed->getBody());
+            $rows = json_decode((string) $listed->getBody(), true, 512, JSON_THROW_ON_ERROR)['grants'];
+            self::assertCount(1, $rows);
+            self::assertSame('Synthetic assistant', $rows[0]['client_name']);
+            self::assertTrue($rows[0]['is_active']);
+            self::assertArrayNotHasKey('refresh_hash', $rows[0]);
+
+            $previousEnabled = getenv('MYINVOICE_MCP_ENABLED');
+            putenv('MYINVOICE_MCP_ENABLED=1');
+            try {
+                $diagnostics = $app->handle($request->withUri(
+                    $request->getUri()->withPath('/api/mcp/diagnostics'),
+                ));
+                self::assertSame(200, $diagnostics->getStatusCode(), (string) $diagnostics->getBody());
+                $health = json_decode((string) $diagnostics->getBody(), true, 512, JSON_THROW_ON_ERROR);
+                self::assertTrue($health['available']);
+                self::assertGreaterThan(0, $health['tools_count']);
+            } finally {
+                putenv($previousEnabled === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $previousEnabled);
+            }
+
+            $readonlyRole = (int) $this->db->pdo()->query(
+                "SELECT id FROM roles WHERE system_key = 'readonly' AND is_active = 1 LIMIT 1"
+            )->fetchColumn();
+            $this->db->pdo()->prepare('UPDATE users SET role_id = ? WHERE id = ?')
+                ->execute([$readonlyRole, $this->userId]);
+            $listedWithoutMembership = $app->handle($request);
+            self::assertSame(200, $listedWithoutMembership->getStatusCode(), (string) $listedWithoutMembership->getBody());
+
+            $revoked = $app->handle($request->withMethod('DELETE')
+                ->withUri($request->getUri()->withPath('/api/mcp/grants/' . $rows[0]['id']))
+                ->withHeader('Origin', $base)
+                ->withHeader('X-CSRF-Token', $session['csrf_token']));
+            self::assertSame(200, $revoked->getStatusCode(), (string) $revoked->getBody());
+            self::assertNull($this->tokens->validate($grant['access_token']));
+            self::assertNull($this->oauth->refresh($grant['refresh_token'], $client));
+            $listedAgain = $app->handle($request);
+            $rows = json_decode((string) $listedAgain->getBody(), true, 512, JSON_THROW_ON_ERROR)['grants'];
+            self::assertFalse($rows[0]['is_active']);
+        } finally {
+            $sessions->destroy($session['token']);
+        }
     }
 
     public function testDiscoveryRegistrationAndMcpChallengePassFullMiddleware(): void

@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
+use Psr\Log\LoggerInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -17,6 +18,7 @@ final class HostedMcpEndpointAction
     public function __construct(
         private readonly HostedMcp $hosted,
         private readonly NodeBridge $bridge,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function handle(Request $request, Response $response): Response
@@ -73,17 +75,40 @@ final class HostedMcpEndpointAction
                     'instructions' => 'Nástroje pracují s daty jedné firmy dle uděleného přístupu. Účetnictví a daně jsou pouze ke čtení. Zápisové a mazací akce vyžadují potvrzení uživatele.',
                 ],
                 'ping' => (object) [],
-                'tools/list' => $this->bridge->execute($input + ['operation' => 'list']),
+                'tools/list' => $this->listTools($message['params'] ?? null, $input),
                 'tools/call' => $this->call($message['params'] ?? null, $input),
                 default => null,
             };
-        } catch (\Throwable) {
+        } catch (\InvalidArgumentException $e) {
+            return $this->rpc($response, $id, -32602, $e->getMessage(), 400);
+        } catch (\Throwable $e) {
+            $this->logger->error('mcp_backend_failed', [
+                'method' => $method,
+                'error_type' => $e::class,
+                'error' => substr($e->getMessage(), 0, 500),
+            ]);
             return $this->rpc($response, $id, -32603, 'MCP nástroj se nepodařilo dokončit.', 500);
         }
         if ($result === null) {
             return $this->rpc($response, $id, -32601, 'Neznámá metoda.', 200);
         }
         return Json::ok($response, ['jsonrpc' => '2.0', 'id' => $id, 'result' => $result]);
+    }
+
+    private function listTools(mixed $params, array $input): array
+    {
+        $cursor = is_array($params) ? ($params['cursor'] ?? null) : null;
+        if ($params !== null && !is_array($params)) {
+            throw new \InvalidArgumentException('Neplatné parametry seznamu nástrojů.');
+        }
+        if ($cursor !== null && (!is_string($cursor) || preg_match('/^(0|[1-9][0-9]{0,3})$/D', $cursor) !== 1)) {
+            throw new \InvalidArgumentException('Neplatný kurzor seznamu nástrojů.');
+        }
+        $result = $this->bridge->execute($input + ['operation' => 'list', 'cursor' => $cursor === null ? 0 : (int) $cursor]);
+        if (!isset($result['tools']) || !is_array($result['tools'])) {
+            throw new \InvalidArgumentException('Neplatný kurzor seznamu nástrojů.');
+        }
+        return $result;
     }
 
     private function call(mixed $params, array $input): array

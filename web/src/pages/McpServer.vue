@@ -35,6 +35,70 @@ const remoteSettingsError = ref('')
 const remoteUrl = computed(() => remoteSettings.value?.endpoint || `${window.location.origin}/mcp`)
 type ConnectionMode = 'local' | 'remote'
 const connectionMode = ref<ConnectionMode>('local')
+interface RemoteGrant {
+  id: number
+  client_name: string
+  supplier_id: number
+  supplier_name: string | null
+  supplier_company: string
+  scope: 'read' | 'read_write'
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+  last_used_at: string | null
+  is_active: boolean
+}
+const grants = ref<RemoteGrant[]>([])
+const activeGrants = computed(() => grants.value.filter((grant) => grant.is_active))
+const grantsLoading = ref(false)
+const grantsError = ref('')
+const revokingGrantId = ref<number | null>(null)
+const diagnosticsLoading = ref(false)
+const diagnosticsCount = ref<number | null>(null)
+const diagnosticsError = ref('')
+
+async function loadGrants() {
+  grantsLoading.value = true
+  grantsError.value = ''
+  try {
+    const { data } = await api.get<{ grants: RemoteGrant[] }>('/mcp/grants')
+    grants.value = data.grants
+  } catch (e: any) {
+    grantsError.value = e?.response?.data?.error?.message || t('mcp_server_page.connection.grants_load_error')
+  } finally {
+    grantsLoading.value = false
+  }
+}
+
+async function revokeGrant(grant: RemoteGrant) {
+  if (revokingGrantId.value !== null || !confirm(t('mcp_server_page.connection.grant_revoke_confirm', { name: grant.client_name }))) return
+  revokingGrantId.value = grant.id
+  try {
+    await api.delete(`/mcp/grants/${grant.id}`)
+    toast.success(t('mcp_server_page.connection.grant_revoked'))
+    await loadGrants()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    revokingGrantId.value = null
+  }
+}
+
+async function runDiagnostics() {
+  if (diagnosticsLoading.value) return
+  diagnosticsLoading.value = true
+  diagnosticsError.value = ''
+  diagnosticsCount.value = null
+  try {
+    const { data } = await api.get<{ available: boolean; tools_count: number }>('/mcp/diagnostics')
+    diagnosticsCount.value = data.tools_count
+  } catch (e: any) {
+    const detail = e?.response?.data?.error?.detail
+    diagnosticsError.value = detail || e?.response?.data?.error?.message || t('mcp_server_page.connection.diagnostics_failed')
+  } finally {
+    diagnosticsLoading.value = false
+  }
+}
 
 async function loadRemoteSettings() {
   remoteSettingsLoading.value = true
@@ -491,7 +555,10 @@ const TOOL_GROUPS = computed(() => [
 onMounted(() => {
   loadTokens()
   loadLog()
-  if (!auth.isManagedInstallation) loadRemoteSettings()
+  if (!auth.isManagedInstallation) {
+    loadRemoteSettings()
+    loadGrants()
+  }
 })
 </script>
 
@@ -1036,6 +1103,36 @@ npm install</pre>
         </p>
         <p v-if="remoteSettingsError" role="alert" class="mt-3 text-sm text-danger-600">{{ remoteSettingsError }}</p>
         <p v-if="!auth.isSuperadmin" class="mt-3 text-xs text-neutral-500">{{ t('mcp_server_page.connection.admin_only') }}</p>
+        <div v-if="auth.isSuperadmin && remoteSettings?.enabled" class="mt-4 flex flex-wrap items-center gap-3">
+          <button type="button" :disabled="diagnosticsLoading" @click="runDiagnostics"
+            class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 border border-primary-500 text-primary-700 rounded-md text-sm font-medium whitespace-nowrap disabled:opacity-50">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8m-7.2 7.2-2.8 2.8" /></svg>
+            {{ t('mcp_server_page.connection.diagnostics_run') }}
+          </button>
+          <span v-if="diagnosticsCount !== null" class="text-sm text-success-700">{{ t('mcp_server_page.connection.diagnostics_ok', { count: diagnosticsCount }) }}</span>
+          <span v-if="diagnosticsError" role="alert" class="text-sm text-danger-600 break-all">{{ diagnosticsError }}</span>
+        </div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
+        <h2 class="text-lg font-semibold mb-1">{{ t('mcp_server_page.connection.grants_title') }}</h2>
+        <p class="text-sm text-neutral-600 mb-4">{{ t('mcp_server_page.connection.grants_intro') }}</p>
+        <p v-if="grantsLoading" class="text-sm text-neutral-500">{{ t('mcp_server_page.connection.grants_loading') }}</p>
+        <p v-else-if="grantsError" role="alert" class="text-sm text-danger-600">{{ grantsError }}</p>
+        <p v-else-if="activeGrants.length === 0" class="text-sm text-neutral-500">{{ t('mcp_server_page.connection.grants_empty') }}</p>
+        <div v-else class="divide-y divide-neutral-200 border border-neutral-200 rounded-md">
+          <div v-for="grant in activeGrants" :key="grant.id" class="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div class="min-w-0">
+              <div class="font-medium text-sm">{{ grant.client_name }}</div>
+              <div class="text-xs text-neutral-500">{{ grant.supplier_name || grant.supplier_company }} · {{ t(grant.scope === 'read' ? 'mcp_server_page.connection.scope_read' : 'mcp_server_page.connection.scope_write') }}</div>
+              <div class="text-xs text-neutral-500">{{ t('mcp_server_page.connection.grant_created') }} {{ fmtTime(grant.created_at) }} · {{ t('mcp_server_page.connection.grant_expires') }} {{ fmtTime(grant.expires_at) }}</div>
+            </div>
+            <button type="button" :disabled="revokingGrantId === grant.id" @click="revokeGrant(grant)"
+              class="cursor-pointer inline-flex items-center gap-2 h-9 px-3 border border-danger-500 text-danger-600 rounded-md text-sm font-medium whitespace-nowrap disabled:opacity-50">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              {{ t('mcp_server_page.connection.grant_revoke') }}
+            </button>
+          </div>
+        </div>
       </div>
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
         <h2 class="text-lg font-semibold mb-1">{{ t('mcp_server_page.connection.remote_title') }}</h2>

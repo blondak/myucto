@@ -50,7 +50,13 @@ try {
 
   if (input.operation === 'list') {
     const exposed = readOnly ? TOOLS.filter((tool) => !tool.write) : TOOLS;
-    stdout.write(JSON.stringify({ tools: exposed.map((tool) => ({
+    const offset = input.cursor === undefined ? 0 : Number(input.cursor);
+    if (!Number.isInteger(offset) || offset < 0 || offset >= exposed.length) {
+      throw new Error('Neplatný kurzor seznamu nástrojů.');
+    }
+    const pageSize = 30;
+    const page = exposed.slice(offset, offset + pageSize);
+    stdout.write(JSON.stringify({ tools: page.map((tool) => ({
       name: tool.name,
       title: tool.title,
       description: tool.write
@@ -65,7 +71,7 @@ try {
         idempotentHint: !tool.write,
         openWorldHint: true,
       },
-    })) }));
+    })), ...(offset + pageSize < exposed.length ? { nextCursor: String(offset + pageSize) } : {}) }));
   } else if (input.operation === 'call') {
     const tool = TOOLS_BY_NAME.get(input.name);
     if (!tool) throw new Error(`Neznámý nástroj "${input.name}".`);

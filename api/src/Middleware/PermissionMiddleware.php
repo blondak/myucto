@@ -29,7 +29,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         '/api/auth/totp/enable', '/api/csrf-token',
         '/mcp', '/.well-known/oauth-protected-resource',
         '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server',
-        '/oauth/register', '/oauth/authorize', '/oauth/token', '/api/mcp/settings',
+        '/oauth/register', '/oauth/authorize', '/oauth/token', '/api/mcp/settings', '/api/mcp/grants',
     ];
 
     public function __construct(
