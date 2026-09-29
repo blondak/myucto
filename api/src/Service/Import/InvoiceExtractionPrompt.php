@@ -82,7 +82,9 @@ JSON schema:
       "vat_rate": number,
       "expense_kind": "service"|"material"|"small_asset"|"fixed_asset"|null,
       "expense_kind_confidence": number,
-      "expense_kind_reasoning": string|null
+      "expense_kind_reasoning": string|null,
+      "accrual_from": "YYYY-MM-DD"|null,
+      "accrual_to": "YYYY-MM-DD"|null
     }
   ],
   "unit_prices_include_vat": boolean,
@@ -324,7 +326,26 @@ DŮLEŽITÉ k poli `total_with_vat`:
 - NIKDY ze subtotalu sekce/skupiny. Pokud si nejsi jistý → NULL.
 - Když doklad finální "K úhradě" NEUVÁDÍ VŮBEC (typicky souhrnný doklad hrazený
   inkasem nebo kartou), ale MÁ daňovou rekapitulaci → vezmi celkem s DPH z rekapitulace.
-EOT . "\n\n" . self::scanFieldRules();
+EOT . "\n\n" . self::accrualFieldRules() . "\n\n" . self::scanFieldRules();
+    }
+
+    /**
+     * Pravidla pro období plnění položky (časové rozlišení 381/384). Sdílí je všichni
+     * provideři včetně inline promptu {@see AnthropicClient}. Když model období nevrátí,
+     * importér ho zkusí rozpoznat z popisu přes AccrualPeriodDetector.
+     */
+    public static function accrualFieldRules(): string
+    {
+        return <<<'EOT'
+DŮLEŽITÉ k polím `accrual_from` a `accrual_to` (OBDOBÍ PLNĚNÍ POLOŽKY):
+- Vyplň JEN tehdy, když položka výslovně uvádí období, za které se služba poskytuje:
+  předplatné, licence, pojištění, nájem/pronájem, podpora, hosting, paušál („období
+  1. 10. 2026 – 30. 9. 2027", „10/2026–09/2027", „za rok 2027", „za září 2026").
+- `accrual_from` = první den období, `accrual_to` = poslední den období, obojí YYYY-MM-DD.
+  Měsíc znamená od prvního do posledního dne měsíce, rok od 1. 1. do 31. 12.
+- Datum vystavení, DUZP, splatnost ani datum dodání období NEJSOU. Když položka období
+  neuvádí, vrať u obou polí null. NEODHADUJ délku předplatného.
+EOT;
     }
 
     /**
@@ -498,6 +519,10 @@ EOT;
                             'expense_kind'            => ['type' => ['string', 'null'], 'enum' => ['service', 'material', 'small_asset', 'fixed_asset', null]],
                             'expense_kind_confidence' => ['type' => ['number', 'null'], 'minimum' => 0, 'maximum' => 1],
                             'expense_kind_reasoning'  => ['type' => ['string', 'null'], 'maxLength' => 300],
+                            // Období plnění položky (časové rozlišení); znovu se validuje
+                            // v AccrualPeriodDetector::resolveForItem().
+                            'accrual_from'            => ['type' => ['string', 'null']],
+                            'accrual_to'              => ['type' => ['string', 'null']],
                         ],
                     ],
                 ],

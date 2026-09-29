@@ -231,7 +231,9 @@ JSON schema:
       "vat_rate": number,
       "expense_kind": "service"|"material"|"small_asset"|"fixed_asset"|null,
       "expense_kind_confidence": number,
-      "expense_kind_reasoning": string|null
+      "expense_kind_reasoning": string|null,
+      "accrual_from": "YYYY-MM-DD"|null,
+      "accrual_to": "YYYY-MM-DD"|null
     }
   ],
   "unit_prices_include_vat": boolean,
@@ -613,7 +615,7 @@ Příklad — faktura NC Auto s.r.o. (BMW Service), struktura:
   DPH 21 %                     483.00 Kč
   K úhradě                   2 783.00 Kč      →  total_with_vat = 2783.00
 Výsledek: items = 4 řádky (NE 6 a NE 7); total_with_vat = 2783.00.
-EOT . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
+EOT . "\n\n" . InvoiceExtractionPrompt::accrualFieldRules() . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
 
         try {
             ['code' => $code, 'body' => $body] = $this->postWithRetry([

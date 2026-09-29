@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -324,13 +325,20 @@ final class AiIssuedInvoiceExtractor
      * ne tichá náhrada.
      *
      * @param list<array<string,mixed>> $lines
-     * @return list<array{description:string, quantity:float, unit:string, unit_price_without_vat:float, vat_rate:float, order_index:int}>
+     * @return list<array{description:string, quantity:float, unit:string, unit_price_without_vat:float, vat_rate:float, order_index:int, accrual_from:?string, accrual_to:?string}>
      */
     private function mapItems(array $lines): array
     {
         $items = [];
         foreach (array_values($lines) as $idx => $line) {
             $line = (array) $line;
+            // Období plnění (časové rozlišení 384): hodnota z modelu, jinak rozpoznání
+            // z popisu. ISDOC období nenese, u něj rozhoduje jen popis.
+            $accrual = AccrualPeriodDetector::resolveForItem(
+                $line['accrual_from'] ?? null,
+                $line['accrual_to'] ?? null,
+                (string) ($line['description'] ?? ''),
+            );
             $items[] = [
                 'description'            => (string) ($line['description'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
@@ -340,6 +348,8 @@ final class AiIssuedInvoiceExtractor
                 'unit_price_without_vat' => (float) ($line['unit_price_without_vat'] ?? 0),
                 'vat_rate'               => (float) ($line['vat_rate'] ?? 0),
                 'order_index'            => $idx,
+                'accrual_from'           => $accrual['from'] ?? null,
+                'accrual_to'             => $accrual['to'] ?? null,
             ];
         }
         return $items;

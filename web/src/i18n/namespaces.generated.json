@@ -30,6 +30,7 @@
   ],
   "lazy": [
     "abra_flexi",
+    "accrual_suggest",
     "activation",
     "activity_log",
     "aiGateway",
@@ -390,6 +391,7 @@
       "purchase_invoice"
     ],
     "purchase-invoice-new": [
+      "accrual_suggest",
       "automation",
       "cash",
       "cash_settlement",
@@ -420,6 +422,7 @@
       "vendor"
     ],
     "purchase-invoice-edit": [
+      "accrual_suggest",
       "automation",
       "cash",
       "cash_settlement",

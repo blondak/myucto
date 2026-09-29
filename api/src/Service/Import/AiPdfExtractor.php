@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
@@ -638,6 +639,13 @@ final class AiPdfExtractor
                 $unmappedRates[] = $rate;
             }
 
+            // Období plnění (časové rozlišení 381): hodnota z modelu, jinak rozpoznání z popisu.
+            $accrual = AccrualPeriodDetector::resolveForItem(
+                $line['accrual_from'] ?? null,
+                $line['accrual_to'] ?? null,
+                (string) $line['description'],
+            );
+
             $items[] = [
                 'description'            => (string) $line['description'],
                 'quantity'               => $qty,
@@ -645,6 +653,8 @@ final class AiPdfExtractor
                 'unit_price_without_vat' => $price,
                 'vat_rate_id'            => $matchedRateId ?? $defaultVatRateId,
                 'order_index'            => $idx,
+                'accrual_from'           => $accrual['from'] ?? null,
+                'accrual_to'             => $accrual['to'] ?? null,
                 // vat_classification_code tady nesetujeme — PurchaseInvoiceRepository::replaceItems()
                 // auto-derive based on rate + RC + vendor country (lookup z DB). Výjimka:
                 // reverse charge doklady dostanou explicitní kód níže (issue #116).

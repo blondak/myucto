@@ -2003,6 +2003,8 @@ final class PurchaseInvoiceRepository
                 ? ($kind === ExpenseKind::FixedAsset ? 1 : 0)
                 : ($legacyFixed ? 1 : 0);
 
+            [$accrualFrom, $accrualTo] = self::normalizeAccrualRange($item['accrual_from'] ?? null, $item['accrual_to'] ?? null);
+
             $stmt->execute([
                 $purchaseInvoiceId,
                 (string) ($item['description'] ?? ''),
@@ -2023,8 +2025,8 @@ final class PurchaseInvoiceRepository
                     : null,
                 // Časové rozlišení nákladu (§DČR) — období od–do. Prázdné → NULL (bez rozlišení).
                 // Odklad na 381 dělá až uzávěrka; tady se jen ULOŽÍ zadané období.
-                self::normalizeAccrualDate($item['accrual_from'] ?? null),
-                self::normalizeAccrualDate($item['accrual_to'] ?? null),
+                $accrualFrom,
+                $accrualTo,
                 $stockItemId,
             ]);
         }
@@ -2039,6 +2041,22 @@ final class PurchaseInvoiceRepository
      * Normalizace data časového rozlišení řádku (§DČR) — přijme YYYY-MM-DD, jinak NULL.
      * Prázdný řetězec / null / neplatný formát = NULL (bez rozlišení, dosavadní chování).
      */
+    /**
+     * Období řádku jako dvojice. Obrácené období (od > do) uzávěrka neumí rozpustit,
+     * takže se neuloží vůbec místo toho, aby tiše vyrobilo nesmyslný odklad na 381.
+     *
+     * @return array{0:?string,1:?string}
+     */
+    public static function normalizeAccrualRange(mixed $from, mixed $to): array
+    {
+        $f = self::normalizeAccrualDate($from);
+        $t = self::normalizeAccrualDate($to);
+        if ($f !== null && $t !== null && $f > $t) {
+            return [null, null];
+        }
+        return [$f, $t];
+    }
+
     private static function normalizeAccrualDate(mixed $value): ?string
     {
         if ($value === null) {

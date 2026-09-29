@@ -1,4 +1,9 @@
 {
+  "accrual_suggest": {
+    "detected": "Detected period {from} – {to}",
+    "apply": "Use as accrual",
+    "dismiss": "Dismiss"
+  },
   "other_items": {
     "title": "Other receivables and payables",
     "subtitle": "Manual items, taxes and payroll liabilities in one place.",

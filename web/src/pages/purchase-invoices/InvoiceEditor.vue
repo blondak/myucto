@@ -46,6 +46,8 @@ import { apiErrorMessage } from '@/api/errors'
 import StockDescriptionField from '@/components/ui/StockDescriptionField.vue'
 import { rowKey } from '@/utils/rowKey'
 import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
+import AccrualSuggestionHint from '@/components/accounting/AccrualSuggestionHint.vue'
+import { detectAccrualPeriod, type AccrualPeriod } from '@/utils/accrualPeriod'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
@@ -938,6 +940,26 @@ function toggleAccrual(it: PurchaseInvoiceItem, i: number) {
   } else {
     accrualOpen.add(i)
   }
+}
+
+// Období rozpoznané z textu položky se jen NABÍZÍ; zapíše se až na klik. Odmítnutí platí
+// pro daný text, po změně popisu na jiné období se návrh ukáže znovu.
+const dismissedAccrual = reactive(new WeakMap<PurchaseInvoiceItem, string>())
+function accrualSuggestionFor(it: PurchaseInvoiceItem): AccrualPeriod | null {
+  if (it.accrual_from || it.accrual_to) return null
+  const text = it.description ?? ''
+  if (dismissedAccrual.get(it) === text) return null
+  return detectAccrualPeriod(text)
+}
+function applyAccrualSuggestion(it: PurchaseInvoiceItem) {
+  const period = accrualSuggestionFor(it)
+  if (!period) return
+  it.accrual_from = period.from
+  it.accrual_to = period.to
+  showAccrual.value = true
+}
+function dismissAccrualSuggestion(it: PurchaseInvoiceItem) {
+  dismissedAccrual.set(it, it.description ?? '')
 }
 
 function addItem(hideDropzone = true) {
@@ -1980,6 +2002,9 @@ function fieldErr(key: string): string | null {
                   @toggle="docDims.toggleItem(it)" />
                 </div>
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+                <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
+                  :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
+                  @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
               </td>
               <td class="py-2 px-1">
                 <DurationInput v-if="isTimeItem(it)" v-model="it.quantity" v-model:duration-minutes="it.duration_minutes" :allow-negative="true" />
@@ -2091,6 +2116,9 @@ function fieldErr(key: string): string | null {
                 @select="(v: number | null) => onStockSelect(i, v)"
               />
               <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+              <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
+                :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
+                @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>

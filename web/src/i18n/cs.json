@@ -1,4 +1,9 @@
 {
+  "accrual_suggest": {
+    "detected": "Rozpoznáno období {from} – {to}",
+    "apply": "Použít jako časové rozlišení",
+    "dismiss": "Nepoužívat"
+  },
   "other_items": {
     "title": "Ostatní pohledávky a závazky",
     "subtitle": "Ručně evidované položky, daně a mzdové závazky na jednom místě.",

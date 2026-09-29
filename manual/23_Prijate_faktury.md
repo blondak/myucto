@@ -220,6 +220,17 @@ u položek) se zadávají ve formátu jazyka aplikace — česky `d. m. rrrr`, a
 `mm/dd/yyyy`, stejně jako všude jinde v aplikaci (viz [§ 1.1](01_Uvod.md)).
 Ikona v poli otevře kalendář.
 
+**Časové rozlišení položky** (období od–do, ze kterého uzávěrka odloží náklad
+příštích období na 381) zapneš přepínačem **Časové rozlišení** u rekapitulace DPH
+a u položky volbou **Časově rozlišit**. Když text položky uvádí období plnění
+(„pojištění 28. 9. 2026 – 27. 9. 2027", „předplatné 10/2026 – 09/2027",
+„za rok 2027", „nájem za září 2026"), editor ho pod položkou rovnou nabídne:
+**Použít jako časové rozlišení** období doplní a otevře řádek s daty,
+**Nepoužívat** návrh u daného textu skryje. Samotné datum v textu (například DUZP)
+období není a návrh nevyvolá. Při vytěžení dokladu přes AI i při importu ISDOC se
+období položky doplní samo, pokud ho doklad u položky uvádí; zkontroluj ho
+v editoru před přijetím dokladu.
+
 > [!NOTE]
 > **Datum přijetí a období odpočtu DPH.** U ručně založené (tzn. **ne** importované)
 > tuzemské přijaté faktury se datum přijetí počítá i do určení **období, ve kterém

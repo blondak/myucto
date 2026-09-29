@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
@@ -105,6 +106,8 @@ final class IsdocToPurchaseInvoiceMapper
                 throw new \InvalidArgumentException(sprintf('Položka č. %d: %s', $i + 1, $match->message));
             }
             $vatRateId = $match->id;
+            // ISDOC období plnění nenese; časové rozlišení 381 se rozpozná z popisu položky.
+            $accrual = AccrualPeriodDetector::detect((string) ($line['description'] ?? ''));
             $items[] = [
                 'description'            => (string) ($line['description'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
@@ -114,6 +117,8 @@ final class IsdocToPurchaseInvoiceMapper
                 'unit_price_without_vat' => (float) ($line['unit_price_without_vat'] ?? 0),
                 'vat_rate_id'            => $vatRateId,
                 'order_index'            => $i,
+                'accrual_from'           => $accrual['from'] ?? null,
+                'accrual_to'             => $accrual['to'] ?? null,
             ];
         }
 
