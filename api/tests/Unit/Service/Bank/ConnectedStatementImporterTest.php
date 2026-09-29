@@ -45,6 +45,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $db->method('pdo')->willReturn($this->pdo);
         $this->pdo->exec('CREATE TABLE bank_api_months (supplier_id INTEGER, account_key TEXT, currency TEXT, month_start TEXT, statement_id INTEGER UNIQUE, PRIMARY KEY (supplier_id, account_key, currency, month_start))');
         $this->pdo->exec('CREATE TABLE bank_api_evidence_months (supplier_id INTEGER, evidence_statement_id INTEGER, monthly_statement_id INTEGER, PRIMARY KEY (evidence_statement_id, monthly_statement_id))');
+        $this->pdo->exec('CREATE TABLE bank_connections (supplier_id INTEGER, currency_id INTEGER, verified_account_number TEXT, verified_bank_code TEXT)');
         $this->matcher = $this->createMock(StatementMatcher::class);
         $reconciler = $this->createStub(EmailNoticeReconciler::class);
         $reconciler->method('takeOverFromEmailNotice')->willReturn(null);
@@ -134,6 +135,35 @@ final class ConnectedStatementImporterTest extends TestCase
         $currency = $this->importer->importConnectedParsed($parsed, 'synthetic-other-currency', 'currency.json', null, 3, 10);
         self::assertNotSame($first['statement_id'], $currency['statement_id']);
         self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_api_months')->fetchColumn());
+    }
+
+    public function testConnectedGpcFeedFoldsNightlyWindowsIntoOneMonthlyStatement(): void
+    {
+        // Fio: každé noční stažení je GPC za okno od posledního watermarku, i když
+        // v něm nic nového není. Samostatně by každé bylo vidět jako další výpis
+        // a pohyby z překryvu oken by se opakovaly ve výpisech po sobě (#109).
+        $this->pdo->exec("INSERT INTO bank_connections VALUES (10, 1, '1000000005', '2010')");
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $header = explode("\r\n", $this->gpc())[0];
+
+        $first = $this->importer->importConnected($this->gpc(), 'fio-1-2026-01-10-2026-01-31.gpc', null, 1, 10);
+        $overlap = $this->importer->importConnected(str_replace('+001310126', '+001300126', $this->gpc()), 'fio-1-2026-01-12-2026-01-30.gpc', null, 1, 10);
+        $empty = $this->importer->importConnected(str_replace('+001310126', '+001290126', $header) . "\r\n", 'fio-1-2026-01-27-2026-01-29.gpc', null, 1, 10);
+
+        self::assertSame($first['statement_id'], $overlap['statement_id']);
+        self::assertSame($first['statement_id'], $empty['statement_id']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_statements bs WHERE ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql())->fetchColumn());
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql($first['statement_id']))->fetchColumn());
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        self::assertSame(3, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_api_evidence_months')->fetchColumn());
+    }
+
+    public function testUnconnectedGpcUploadStaysStandaloneStatement(): void
+    {
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $result = $this->importer->importConnected($this->gpc(), 'manual.gpc', null, 1, 10);
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_api_months')->fetchColumn());
+        self::assertSame('gpc', $this->pdo->query('SELECT source FROM bank_statements WHERE id = ' . (int) $result['statement_id'])->fetchColumn());
     }
 
     public function testReconstructedExportCannotBecomeConfirmedBankEvidence(): void

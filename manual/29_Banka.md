@@ -923,9 +923,11 @@ Každý měnový účet má vlastní přístupové údaje a vlastní stav napoje
 
 ### 29.9.2 Co napojení dělá s pohyby
 
-Stažené pohyby se ukládají jako `bank_api` a slučují do **jednoho měsíčního
-výpisu** pro danou firmu, účet, kód banky a měnu — opakované načtení stejného
-období doplní tentýž výpis, překrývající se pohyby se nezapočítají podruhé.
+Stažené pohyby se slučují do **jednoho měsíčního výpisu** pro danou firmu, účet,
+kód banky a měnu, ať banka posílá data jako API odpověď, nebo jako GPC (Fio,
+výpisy KB). Opakované načtení stejného období doplní tentýž výpis, překrývající
+se pohyby se nezapočítají podruhé a stažení bez nového pohybu nezaloží další
+řádek v přehledu. Každé stažení zůstává jako podklad měsíce v detailu výpisu.
 Dál se s nimi pracuje úplně stejně jako s nahraným GPC: párování na faktury
 ([§ 29.4.2](#2943-manualni-parovani)), automatické zaúčtování v podvojném
 účetnictví ([§ 29.7](#297-automaticke-zauctovani-sparovanych-plateb-jen-podvojne-ucetnictvi))

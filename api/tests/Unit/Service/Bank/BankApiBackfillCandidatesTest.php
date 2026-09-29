@@ -20,6 +20,8 @@ final class BankApiBackfillCandidatesTest extends TestCase
         $this->pdo->exec("CREATE TABLE bank_statements (id INTEGER PRIMARY KEY, source TEXT, period_kind TEXT DEFAULT 'period', supplier_id INTEGER, account_number TEXT, bank_code TEXT, currency TEXT)");
         $this->pdo->exec('CREATE TABLE bank_api_months (statement_id INTEGER, supplier_id INTEGER, account_key TEXT, currency TEXT)');
         $this->pdo->exec('CREATE TABLE bank_api_evidence_months (evidence_statement_id INTEGER)');
+        $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INTEGER, account_number TEXT, bank_code TEXT, code TEXT)');
+        $this->pdo->exec('CREATE TABLE bank_connections (supplier_id INTEGER, currency_id INTEGER, verified_account_number TEXT, verified_bank_code TEXT)');
         $this->monthly = new BankApiMonthlyStatements($this->pdo);
     }
 
@@ -61,6 +63,24 @@ final class BankApiBackfillCandidatesTest extends TestCase
     {
         $this->pdo->prepare('INSERT INTO bank_statements VALUES (?, ?, ?, ?, ?, ?, ?)')
             ->execute([$id, $source, $periodKind, $supplier, $account, '0100', $currency]);
+    }
+
+    public function testConnectedGpcFeedTriggersBackfill(): void
+    {
+        // Fio posílá strojový feed jako GPC. Bez napojení by jeho noční stažení
+        // zůstala samostatnými výpisy a backfill by je nikdy nesložil.
+        $this->statement(1, 'gpc');
+        $this->statement(2, 'gpc');
+        $this->pdo->exec("INSERT INTO currencies VALUES (7, 1, '1000000005', '0100', 'CZK')");
+        self::assertSame([], $this->monthly->pendingBackfillAccounts());
+
+        $this->pdo->exec("INSERT INTO bank_connections VALUES (1, 7, NULL, NULL)");
+        self::assertSame([], $this->monthly->pendingBackfillAccounts(), 'Neověřené napojení feed ještě nemá.');
+
+        $this->pdo->exec("UPDATE bank_connections SET verified_account_number = '0000001000000005', verified_bank_code = '0100'");
+        self::assertSame(2, $this->pendingCount());
+        self::assertFalse($this->monthly->hasApiAccount(2, '1000000005', '0100', 'CZK'), 'Napojení jiné firmy se nepočítá.');
+        self::assertFalse($this->monthly->hasApiAccount(1, '1000000005', '0100', 'EUR'), 'Napojení jiného měnového účtu se nepočítá.');
     }
 
     public function testDailyPdfStatementMakesAccountMonthlyAggregated(): void

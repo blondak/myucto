@@ -194,6 +194,12 @@ final class BankApiMonthlyStatements
         return false;
     }
 
+    /**
+     * Má účet strojový feed? Rozhoduje napojení na banku, ne formát, ve kterém feed
+     * chodí: Fio posílá GPC za okno od posledního stažení, takže bez napojení by se
+     * každé noční stažení (i prázdné) ukázalo jako samostatný výpis a pohyby z překryvu
+     * oken by se opakovaly v několika výpisech po sobě.
+     */
     public function hasApiAccount(int $supplierId, string $account, string $bank, string $currency): bool
     {
         $key = AuthoritativeTransactionReconciler::account($account, $bank);
@@ -205,6 +211,24 @@ final class BankApiMonthlyStatements
         $query->execute([$supplierId, $currency]);
         foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key) return true;
+        }
+        return $this->hasBankConnection($supplierId, $key, $currency);
+    }
+
+    /** Ověřené napojení na banku pro tento účet (i odpojené: jeho výpisy už feed jsou). */
+    private function hasBankConnection(int $supplierId, string $key, string $currency): bool
+    {
+        $query = $this->pdo->prepare('SELECT bc.verified_account_number, bc.verified_bank_code, c.account_number, c.bank_code
+            FROM bank_connections bc
+            JOIN currencies c ON c.id = bc.currency_id AND c.supplier_id = bc.supplier_id
+            WHERE bc.supplier_id = ? AND c.code = ? AND bc.verified_account_number IS NOT NULL');
+        $query->execute([$supplierId, $currency]);
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $bank = (string) ($row['verified_bank_code'] ?? $row['bank_code']);
+            if (AuthoritativeTransactionReconciler::account((string) $row['verified_account_number'], $bank) === $key
+                || AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key) {
+                return true;
+            }
         }
         return false;
     }
