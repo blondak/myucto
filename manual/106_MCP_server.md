@@ -188,7 +188,11 @@ další síťový port ani dostupnost vlastní veřejné domény z Docker kontej
 Na IIS a Apache musí mít PHP povolenou funkci `proc_open` a účet webového
 serveru musí umět spustit Node.js. Pokud Node není v jeho `PATH`, nastav
 `MYINVOICE_MCP_NODE_BINARY` na úplnou cestu k `node.exe` nebo binárnímu souboru
-Node na daném serveru. Server potřebuje také PHP CLI; není-li ve standardním
+Node na daném serveru. Na IIS s PHP přes FastCGI tuto proměnnou přidej v
+**Správce IIS → server → Nastavení FastCGI → php-cgi.exe → Proměnné prostředí**.
+Vyber položku `php-cgi.exe`, kterou používá mapování handleru daného webu, změnu
+ulož a recykluj jeho aplikační pool. Sdílí-li stejnou položku FastCGI více webů,
+proměnnou dostanou všechny jejich PHP procesy. Server potřebuje také PHP CLI; není-li ve standardním
 adresáři PHP, nastav `MYINVOICE_MCP_PHP_BINARY` na úplnou cestu k `php.exe`.
 Na počítači uživatele Node pro online připojení není třeba.
 
