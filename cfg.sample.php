@@ -19,6 +19,12 @@
  * jediný volume — zbytek kontejneru pak může běžet read-only a image updaty
  * jsou bezbolestné. `${MYINVOICE_DATA_DIR}/cfg.local.php` se navíc auto-loaduje,
  * takže per-instance konfigurace přežije image update.
+ *
+ * Serverový MCP je výchozně vypnutý. Superadmin jej zapíná v aplikaci na
+ * /profile/mcp-server, v záložce Připojit online. Přepínač není v cfg.php;
+ * pro Docker, IIS a další spravované instalace lze stav vynutit proměnnou
+ * prostředí MYINVOICE_MCP_ENABLED=1 (nebo =0). Při nastavení ENV má
+ * přednost před přepínačem v aplikaci.
  */
 
 return [

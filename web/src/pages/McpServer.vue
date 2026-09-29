@@ -34,7 +34,7 @@ const remoteSettingsSaving = ref(false)
 const remoteSettingsError = ref('')
 const remoteUrl = computed(() => remoteSettings.value?.endpoint || `${window.location.origin}/mcp`)
 type ConnectionMode = 'local' | 'remote'
-const connectionMode = ref<ConnectionMode>('remote')
+const connectionMode = ref<ConnectionMode>('local')
 
 async function loadRemoteSettings() {
   remoteSettingsLoading.value = true
@@ -548,17 +548,17 @@ onMounted(() => {
 
     <div class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
       <div class="flex flex-wrap gap-1">
-        <button id="mcp-remote-tab" type="button" role="tab" :aria-selected="connectionMode === 'remote'"
-          aria-controls="mcp-remote-panel" @click="connectionMode = 'remote'"
-          class="cursor-pointer px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap"
-          :class="connectionMode === 'remote' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
-          {{ t('mcp_server_page.connection.remote_tab') }}
-        </button>
         <button id="mcp-local-tab" type="button" role="tab" :aria-selected="connectionMode === 'local'"
           aria-controls="mcp-local-panel" @click="connectionMode = 'local'"
           class="cursor-pointer px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap"
           :class="connectionMode === 'local' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
           {{ t('mcp_server_page.connection.local_tab') }}
+        </button>
+        <button id="mcp-remote-tab" type="button" role="tab" :aria-selected="connectionMode === 'remote'"
+          aria-controls="mcp-remote-panel" @click="connectionMode = 'remote'"
+          class="cursor-pointer px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap"
+          :class="connectionMode === 'remote' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
+          {{ t('mcp_server_page.connection.remote_tab') }}
         </button>
       </div>
     </div>
@@ -1075,6 +1075,12 @@ npm install</pre>
             <li>{{ t('mcp_server_page.connection.chatgpt_1') }}</li>
             <li>{{ t('mcp_server_page.connection.chatgpt_2') }}</li>
             <li>{{ t('mcp_server_page.connection.chatgpt_3') }}</li>
+          </ol>
+          <h4 class="font-medium mt-4 mb-2">{{ t('mcp_server_page.connection.chatgpt_desktop_title') }}</h4>
+          <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
+            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_1') }}</li>
+            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_2') }}</li>
+            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_3') }}</li>
           </ol>
           <p class="mt-3 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
             {{ t('mcp_server_page.connection.chatgpt_mobile') }}

@@ -162,8 +162,9 @@ uživatele, roli a firmu. Volání se hned objeví v logu na stránce MCP server
 
 V záložce **Připojit online** zkopíruj adresu MCP serveru své instalace, například
 `https://ucto.tvoje-firma.cz/mcp`. Do asistenta zadávej adresu **své** instalace,
-ne `dev.myucto.cz` ani adresu jiné firmy. Instalace musí být dostupná z internetu
-přes HTTPS s důvěryhodným certifikátem. ChatGPT a Claude se připojují ze svých
+ne `dev.myucto.cz` ani adresu jiné firmy. Doména musí mít veřejný DNS záznam,
+být dostupná z internetu a mít HTTPS certifikát od veřejně důvěryhodné autority.
+Lokální vývojová adresa nebo certifikát vlastní CA nestačí. ChatGPT a Claude se připojují ze svých
 serverů, nikoli přímo z počítače nebo telefonu, na kterém používáš jejich aplikaci.
 
 Vzdálený server je po instalaci **vypnutý**. V záložce se ukazuje jeho stav a
@@ -172,9 +173,13 @@ prostředí, které spouští MCP, dostupný **Node.js**; když chybí, stránka
 upozornění a zapnutí nedovolí. Nainstaluj Node.js do tohoto prostředí, ověř jeho dostupnost pro aplikaci a stránku
 znovu načti. Na počítači ani telefonu uživatele Node.js potřeba není.
 Stejným přepínačem může superadmin server později vypnout.
-V Dockeru lze stav řídit proměnnou `MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
+V `cfg.php` se server nezapíná. V Dockeru, na IIS a v jiných spravovaných
+instalacích lze stav řídit proměnnou `MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
 nastavení je přepínač ve webu jen informativní. Bez této proměnné platí nastavení
 uložené v aplikaci. Dockerový obraz už Node.js obsahuje.
+Pokud Claude při přidávání konektoru hlásí, že na adrese žádný server neodpověděl,
+zkontroluj nejdřív tento přepínač. Vypnutý `/mcp` vrací chybu `404 mcp_disabled`
+a klient proto nemůže zjistit přihlašovací údaje OAuth.
 MCP obsluhuje REST API přes samostatný PHP CLI proces na stejném serveru. Nevyžaduje
 další síťový port ani dostupnost vlastní veřejné domény z Docker kontejneru.
 Na IIS a Apache musí mít PHP povolenou funkci `proc_open` a účet webového
@@ -201,6 +206,16 @@ pro tvůj účet nebo pracovní prostor dostupný. Pak v **Apps → Create** vyt
 vlastní MCP aplikaci, vlož adresu `/mcp`, zvol OAuth přihlášení, načti nástroje a
 dokonči přihlášení do MyÚčta. V konverzaci vytvořenou aplikaci vyber. Ve firemním
 pracovním prostoru může být potřeba přístup schválený správcem.
+
+**ChatGPT desktop, formulář Pluginy → MCP:** Zvol **Streamovatelné HTTP**, zadej
+název a adresu své instalace končící `/mcp`. Pole **Proměnná prostředí tokenu
+nositele** a záhlaví nech prázdné. Slouží pro ručně dodaný bearer token, ne pro
+nastavení OAuth. Server ulož, restartuj aplikaci a v seznamu serverů zvol
+**Authenticate (Ověřit)**, až se tato akce zobrazí. Tím začne přihlášení do
+MyÚčta. Pokud se akce nezobrazí, nejdřív zkontroluj, že je vzdálený MCP server
+v MyÚčtu zapnutý. Při vypnutém serveru vrací `/mcp` odpověď 404 a klient OAuth
+nezahájí. Ručně přidaný desktopový MCP server se podle dokumentace OpenAI
+nepřenáší do mobilní aplikace.
 
 > [!IMPORTANT]
 > OpenAI v aktuální dokumentaci uvádí vlastní MCP aplikace **pouze na webu**.
