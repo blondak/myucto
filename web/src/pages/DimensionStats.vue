@@ -34,8 +34,8 @@ const trendCanvas = ref<HTMLCanvasElement | null>(null)
 const comparisonCanvas = ref<HTMLCanvasElement | null>(null)
 const cumulativeCanvas = ref<HTMLCanvasElement | null>(null)
 let trendChart: Chart | null = null
-let comparisonChart: Chart | null = null
-let cumulativeChart: Chart | null = null
+let comparisonChart: Chart<'bar', number[], string> | null = null
+let cumulativeChart: Chart<'line', (number | null)[], string> | null = null
 let requestId = 0
 
 const types = computed(() => dims.types.value.filter(type => type.is_active))
