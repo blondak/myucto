@@ -225,7 +225,7 @@ final class McpOAuthAction
                 ? '<label class="field">Udělit přístup<select name="grant_scope">'
                     . '<option value="read" selected>Pouze čtení</option>'
                     . '<option value="read_write">Čtení a zápis</option>'
-                    . '</select></label>'
+                    . '</select></label><p class="field-hint">Výchozí je pouze čtení. I při povolení zápisu platí oprávnění vašeho účtu.</p>'
                 : '<input type="hidden" name="grant_scope" value="read">';
             $verification = '';
             if ($passkeyAvailable) {
@@ -245,7 +245,7 @@ final class McpOAuthAction
             $content = '<h1>Připojit MyÚčto k AI asistentovi</h1>'
                 . '<p class="lead">Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
-                . '<div class="access-summary"><span>Požadovaný rozsah</span><strong>' . $permission . '</strong></div>'
+                . '<div class="access-summary"><span>Asistent požaduje nejvýše</span><strong>' . $permission . '</strong></div>'
                 . '<p class="muted">Přístup platí jen pro zvolenou firmu. Kdykoli jej můžete odvolat v API tokenech.</p>'
                 . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $select . $grantChoice
                 . '<div class="verification"><h2>Ověření identity</h2>'

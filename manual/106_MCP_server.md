@@ -200,7 +200,9 @@ Na počítači uživatele Node pro online připojení není třeba.
 2. Při připojení se v prohlížeči přihlas do MyÚčta a vyber firmu. Když asistent
    požaduje čtení a zápis, můžeš v poli **Udělit přístup** zvolit **Pouze čtení**
    (výchozí volba) nebo **Čtení a zápis**. Pokud asistent požaduje jen čtení,
-   širší přístup mu udělit nelze. Pokud máš zapnuté MFA, ověř se passkey nebo novým kódem ověřovací
+   širší přístup mu udělit nelze. I při povolení zápisu platí oprávnění tvého účtu.
+   Rozsah již uděleného připojení změníš jeho odvoláním a novým připojením.
+   Pokud máš zapnuté MFA, ověř se passkey nebo novým kódem ověřovací
    aplikace. Bez MFA stačí přístup potvrdit. Kód použitý při přihlášení nelze
    znovu použít. Pro běžné dotazy stačí **čtení**; **čtení a zápis** schvaluj jen
    tehdy, když má asistent opravdu měnit data. Po schválení se prohlížeč vrátí

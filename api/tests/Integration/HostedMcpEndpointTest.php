@@ -15,6 +15,7 @@ use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
+use Psr\Log\NullLogger;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -45,17 +46,25 @@ final class HostedMcpEndpointTest extends TestCase
             new TenantUrlResolver($config, new SupplierDomainRepository($db, EntityCache::disabled())),
             new ManagedModeGuard($config),
         );
-        $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config));
+        $action = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config), new NullLogger());
         $factory = new ResponseFactory();
 
         $initialize = $this->send($action, $factory, 'initialize', ['protocolVersion' => '2025-06-18']);
         self::assertSame('2025-06-18', $initialize['result']['protocolVersion']);
 
-        $list = $this->send($action, $factory, 'tools/list');
-        self::assertGreaterThan(100, count($list['result']['tools']));
-        foreach ($list['result']['tools'] as $tool) {
-            self::assertTrue($tool['annotations']['readOnlyHint']);
-        }
+        $names = [];
+        $cursor = null;
+        do {
+            $list = $this->send($action, $factory, 'tools/list', $cursor === null ? [] : ['cursor' => $cursor]);
+            self::assertLessThanOrEqual(30, count($list['result']['tools']));
+            foreach ($list['result']['tools'] as $tool) {
+                self::assertTrue($tool['annotations']['readOnlyHint']);
+                $names[] = $tool['name'];
+            }
+            $cursor = $list['result']['nextCursor'] ?? null;
+        } while ($cursor !== null);
+        self::assertGreaterThan(100, count($names));
+        self::assertCount(count(array_unique($names)), $names);
 
         $call = $this->send($action, $factory, 'tools/call', [
             'name' => 'create_client', 'arguments' => [],
@@ -76,11 +85,12 @@ final class HostedMcpEndpointTest extends TestCase
 
         $factory = new ResponseFactory();
         $request = (new ServerRequestFactory())->createServerRequest('POST', 'https://example.test/mcp');
-        $endpoint = new HostedMcpEndpointAction($hosted, new NodeBridge($hosted, $config));
+        $bridge = new NodeBridge($hosted, $config);
+        $endpoint = new HostedMcpEndpointAction($hosted, $bridge, new NullLogger());
         $disabled = $endpoint->handle($request, $factory->createResponse());
         self::assertSame(404, $disabled->getStatusCode());
 
-        $settings = new HostedMcpSettingsAction($hosted);
+        $settings = new HostedMcpSettingsAction($hosted, $bridge);
         $change = $settings->update($request->withParsedBody(['enabled' => true])
             ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['is_superadmin' => true]), $factory->createResponse());

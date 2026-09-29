@@ -46,7 +46,7 @@ final class NodeBridge
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
-        ], $pipes, dirname($script));
+        ], $pipes, dirname($script), $this->nodeEnvironment());
         if (!is_resource($process)) {
             throw new \RuntimeException('Node.js MCP proces se nepodařilo spustit.');
         }
@@ -76,5 +76,29 @@ final class NodeBridge
             throw new \RuntimeException('Node.js MCP proces vrátil neplatnou odpověď.');
         }
         return $decoded;
+    }
+
+    private function nodeEnvironment(): ?array
+    {
+        if (PHP_OS_FAMILY !== 'Windows') return null;
+        $systemRoot = trim((string) (getenv('SystemRoot') ?: getenv('windir') ?: ''));
+        if ($systemRoot === '') {
+            $comspec = (string) (getenv('ComSpec') ?: '');
+            if ($comspec !== '' && is_file($comspec)) $systemRoot = dirname(dirname($comspec));
+        }
+        if ($systemRoot === '') {
+            $drive = rtrim((string) (getenv('SystemDrive') ?: 'C:'), '/\\');
+            $systemRoot = $drive . '\\Windows';
+        }
+        if (!is_dir($systemRoot)) {
+            throw new \RuntimeException('Node.js vyžaduje platnou proměnnou SystemRoot v prostředí IIS FastCGI.');
+        }
+        $environment = getenv();
+        if (!is_array($environment)) return ['SystemRoot' => $systemRoot];
+        foreach (array_keys($environment) as $name) {
+            if (strcasecmp($name, 'SystemRoot') === 0) unset($environment[$name]);
+        }
+        $environment['SystemRoot'] = $systemRoot;
+        return $environment;
     }
 }

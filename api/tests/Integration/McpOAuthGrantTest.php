@@ -79,6 +79,21 @@ final class McpOAuthGrantTest extends TestCase
         }
     }
 
+    public function testNodeBridgeStartsWithoutSystemRootInParentEnvironment(): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') self::markTestSkipped('Test prostředí procesu je určený pro IIS na Windows.');
+        $prior = getenv('SystemRoot');
+        putenv('SystemRoot');
+        try {
+            $result = Bootstrap::buildContainer()->get(NodeBridge::class)->execute([
+                'operation' => 'list', 'scope' => 'read',
+            ]);
+            self::assertNotEmpty($result['tools'] ?? []);
+        } finally {
+            putenv($prior === false ? 'SystemRoot' : 'SystemRoot=' . $prior);
+        }
+    }
+
     public function testPkceCodeIsSingleUseAndRefreshRotatesAndRevocationStopsAccess(): void
     {
         $client = $this->oauth->register('Synthetic assistant', ['https://client.example.test/callback']);
