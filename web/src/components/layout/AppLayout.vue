@@ -406,6 +406,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/stats',           label: t('nav.stats'),          icon: ICONS.stats },
         { to: '/purchase-stats',  label: t('nav.purchase_stats'), icon: ICONS.purchase },
         ...(dimensionsEnabled && isDoubleEntry ? [{ to: '/dimension-stats', label: t('nav.dimensions'), icon: ICONS.tag, permission: 'accounting' as PermissionKey }] : []),
+        ...(auth.hasCommercialFeatures && supplierStore.hasMultiple && auth.canRead('dashboard.portfolio') ? [{ to: '/group-stats', label: t('nav.group_stats'), icon: ICONS.stock_warehouses, permission: 'dashboard.portfolio' as PermissionKey }] : []),
       ],
     },
     {

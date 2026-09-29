@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { crmApi, type CrmKpi, type CrmOverview, type CrmMonthlyRow, type TopClient, type TopVendor,
@@ -17,8 +17,10 @@ import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import OtherItemResultImpact from '@/components/accounting/OtherItemResultImpact.vue'
+import GroupDocumentLossDetail from '@/components/group-dashboard/GroupDocumentLossDetail.vue'
 
 const { t } = useI18n()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -47,8 +49,9 @@ const loading = ref(true)
 const recomputing = ref(false)
 
 // Filters
-const periodMonths = ref(12)
-const currencyFilter = ref<string>('')
+const initialMonths = Number(route.query.months)
+const periodMonths = ref(Number.isInteger(initialMonths) && initialMonths >= 1 && initialMonths <= 36 ? initialMonths : 12)
+const currencyFilter = ref<string>(typeof route.query.currency === 'string' && /^[A-Z]{3}$/.test(route.query.currency) ? route.query.currency : '')
 
 // Sentinel pro volbu „Vše" — agreguje všechny měny přepočtené na CZK (*_czk pole).
 const ALL_CURRENCIES = '__ALL__'
@@ -411,11 +414,16 @@ watch([periodMonths, currencyFilter], (_values, previous) => {
   if (previous[1] && currencyFilter.value) loadAll()
 })
 
-onMounted(loadAll)
+onMounted(async () => {
+  await loadAll()
+  await nextTick()
+  if (['#profit', '#client_concentration', '#vendor_concentration'].includes(route.hash)) document.getElementById(route.hash.slice(1))?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+})
 </script>
 
 <template>
   <div>
+    <GroupDocumentLossDetail v-if="route.query.group_risk === '1'" />
     <!-- Topbar -->
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div>
@@ -548,7 +556,7 @@ onMounted(loadAll)
         </div>
 
         <!-- Profit -->
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+        <div id="profit" class="scroll-mt-20 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs uppercase tracking-wide text-neutral-500 font-medium">{{ t('crm.kpi.profit') }}</span>
             <svg class="w-5 h-5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -879,7 +887,7 @@ onMounted(loadAll)
         </div>
 
         <!-- Concentration risk -->
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+        <div id="client_concentration" class="scroll-mt-20 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">
             {{ t('crm.concentration.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>
@@ -910,7 +918,7 @@ onMounted(loadAll)
         </div>
 
         <!-- Vendor concentration risk -->
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
+        <div id="vendor_concentration" class="scroll-mt-20 bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">
             {{ t('crm.vendor_concentration.title') }} <span class="normal-case font-normal text-neutral-400">· {{ periodChip }}</span>
           </div>

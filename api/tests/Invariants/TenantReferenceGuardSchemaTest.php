@@ -44,6 +44,7 @@ final class TenantReferenceGuardSchemaTest extends TestCase
      * @var array<string, list<string>>
      */
     private const AMBIGUOUS_TARGETS = [
+        'client_id' => ['clients', 'mcp_oauth_clients'],
         // `trips.category_id` → trip_categories (to je ta větev, kterou guard obsluhuje),
         // ale `stock_category_i18n.category_id` a `stock_item_categories.category_id`
         // → stock_categories. Právě kvůli tomuhle je seznam sloupců na volajícím.

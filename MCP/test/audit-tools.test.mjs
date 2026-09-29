@@ -27,6 +27,7 @@ const routes = [
   ['document_completeness', {}, '/accounting/reports/document-completeness'],
   ['year_end_tax_estimate', { period_id: 5 }, '/accounting/reports/statement-accounts/tax-estimate'],
   ['portfolio_overview', {}, '/portfolio/overview'],
+  ['group_dashboard', { section: 'forecast', months: 24, weeks: 12, from: '2094-03-15', to: '2094-06-10' }, '/portfolio/group-dashboard'],
   ['portfolio_monthly_check', { company_id: 11 }, '/portfolio/monthly-check/11'],
   ['automation_overview', {}, '/automation/overview'],
   ['automation_stats', {}, '/automation/stats'],

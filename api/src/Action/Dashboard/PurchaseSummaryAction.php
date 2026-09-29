@@ -47,6 +47,14 @@ final class PurchaseSummaryAction
         private readonly ExistingObligationSourceService $obligationSources,
     ) {}
 
+    public function annualCostsForecast(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $year = (int) date('Y');
+        return $this->costsForecast($pdo, $year, $year - 1, $supplierId,
+            $this->fetchIsVatPayer($pdo, $supplierId));
+    }
+
     public function __invoke(Request $request, Response $response): Response
     {
         $pdo = $this->db->pdo();

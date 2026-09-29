@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Mcp;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\McpOAuth;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -35,7 +36,7 @@ final class McpOAuthGrantsAction
 
     private function sessionUserId(Request $request): int
     {
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') return 0;
+        if (!RequestAuthorization::isSessionAuth($request)) return 0;
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         return (int) ($user['id'] ?? 0);
     }

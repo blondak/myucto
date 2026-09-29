@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\NodeBridge;
 use MyInvoice\Service\Tenant\TenantDomainContext;
@@ -33,7 +34,7 @@ final class HostedMcpEndpointAction
         if (!$this->hosted->enabled()) {
             return Json::error($response, 'mcp_disabled', 'Serverový MCP není zapnutý.', 404);
         }
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'bearer') {
+        if (!RequestAuthorization::isBearerAuth($request)) {
             return $this->unauthorized($response);
         }
         if ($request->getMethod() === 'GET') {

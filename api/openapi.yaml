@@ -27360,6 +27360,76 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
 
+  /api/v1/portfolio/group-dashboard:
+    get:
+      tags:
+      - Portfolio
+      operationId: getGroupDashboard
+      summary: Manager dashboard across authorized companies
+      description: Read-only overview, trends, cash flow, bank/cash balances, aging and risks. Available companies are resolved
+        server-side using membership and independent company role overrides. Token supplier binding and verified custom domain
+        locks remain authoritative. Requires dashboard.portfolio READ in every included company; client roles are excluded.
+        Existing commercial portfolio entitlement applies. No supplier selector can expand the scope. Defaults to twelve calendar
+        months through today; from/to is inclusive. Native currency values remain available, and converted_czk provides a
+        separate CZK projection with explicit missing-rate coverage. Forecast uses the current calendar year and existing
+        revenue/cost models plus known other-item result impact. Principal installments affect cash flow, not profit merely
+        because cash moves.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - name: section
+        in: query
+        schema:
+          type: string
+          enum:
+          - overview
+          - trends
+          - cashflow
+          - forecast
+          - balances
+          - receivables
+          - risks
+          default: overview
+      - name: months
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 36
+          default: 12
+      - name: weeks
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 8
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+        description: Both from and to required together. Inclusive date boundary, maximum 36 calendar months. Controls financial,
+          trends and document_loss only; accounting, aging, cash flow and concentration retain explicitly separate periods.
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+        description: Both from and to required together. Inclusive date boundary, maximum 36 calendar months. Controls financial,
+          trends and document_loss only; accounting, aging, cash flow and concentration retain explicitly separate periods.
+      responses:
+        '200':
+          description: Selected dashboard section with separated native currencies and company coverage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupDashboard'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 components:
   securitySchemes:
     BearerAuth:
@@ -44463,3 +44533,1095 @@ components:
           type: string
         balance:
           type: number
+    GroupDashboardFinancial:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        previous_revenue:
+          type:
+          - number
+          - 'null'
+        previous_costs:
+          type:
+          - number
+          - 'null'
+        previous_profit:
+          type:
+          - number
+          - 'null'
+        revenue_czk:
+          type:
+          - number
+          - 'null'
+        costs_czk:
+          type:
+          - number
+          - 'null'
+        profit_czk:
+          type:
+          - number
+          - 'null'
+        previous_revenue_czk:
+          type:
+          - number
+          - 'null'
+        previous_costs_czk:
+          type:
+          - number
+          - 'null'
+        previous_profit_czk:
+          type:
+          - number
+          - 'null'
+        conversion_missing:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - previous_revenue
+      - previous_costs
+      - previous_profit
+    GroupDashboardAccounting:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - from
+      - to
+    GroupDashboardMonthly:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        period:
+          type: string
+          pattern: ^[0-9]{4}-[0-9]{2}$
+        revenue_czk:
+          type:
+          - number
+          - 'null'
+        costs_czk:
+          type:
+          - number
+          - 'null'
+        profit_czk:
+          type:
+          - number
+          - 'null'
+        conversion_missing:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - period
+    GroupDashboardBalance:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        currency:
+          type: string
+        balance:
+          type:
+          - number
+          - 'null'
+        date:
+          type:
+          - string
+          - 'null'
+          format: date
+        balance_czk:
+          type:
+          - number
+          - 'null'
+        conversion_missing:
+          type: integer
+          minimum: 0
+        source_currency:
+          type: string
+      required:
+      - id
+      - name
+      - currency
+      - balance
+      - date
+    GroupDashboardAging:
+      type: object
+      properties:
+        currency:
+          type: string
+        bucket:
+          type: string
+          enum:
+          - not_due
+          - overdue_30
+          - overdue_60
+          - overdue_90
+          - overdue_90_plus
+        count:
+          type: integer
+        total:
+          type:
+          - number
+          - 'null'
+      required:
+      - currency
+      - bucket
+      - count
+      - total
+    GroupDashboardCashWeek:
+      type: object
+      properties:
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        in:
+          type:
+          - number
+          - 'null'
+        out:
+          type:
+          - number
+          - 'null'
+        net:
+          type:
+          - number
+          - 'null'
+        running:
+          type:
+          - number
+          - 'null'
+      required:
+      - week_start
+      - week_end
+      - in
+      - out
+      - net
+      - running
+      description: Expected flows. running is cumulative net flow, not a projected bank balance.
+    GroupDashboardForecast:
+      type: object
+      properties:
+        currency:
+          type: string
+        weeks:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardCashWeek'
+        total_in:
+          type:
+          - number
+          - 'null'
+        total_out:
+          type:
+          - number
+          - 'null'
+        total_net:
+          type:
+          - number
+          - 'null'
+      required:
+      - currency
+      - weeks
+      - total_in
+      - total_out
+      - total_net
+    GroupDashboardRisk:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - overdue_receivables
+          - overdue_payables
+          - document_loss
+          - client_concentration
+          - vendor_concentration
+        currency:
+          type: string
+        amount:
+          type:
+          - number
+          - 'null'
+        count:
+          type: integer
+        bucket:
+          type: string
+          enum:
+          - not_due
+          - overdue_30
+          - overdue_60
+          - overdue_90
+          - overdue_90_plus
+        percentage:
+          type:
+          - number
+          - 'null'
+        level:
+          type: string
+          enum:
+          - medium
+          - high
+        amount_czk:
+          type:
+          - number
+          - 'null'
+        conversion_missing:
+          type: integer
+          minimum: 0
+        source_currency:
+          type: string
+      required:
+      - kind
+      - currency
+    GroupDashboardAvailability:
+      type: object
+      properties:
+        documents:
+          type: boolean
+        accounting:
+          type: boolean
+        bank:
+          type: boolean
+        cash:
+          type: boolean
+        receivables:
+          type: boolean
+        payables:
+          type: boolean
+        cashflow:
+          type: boolean
+        cashflow_tax:
+          type: boolean
+        cashflow_payroll:
+          type: boolean
+        forecast:
+          type: boolean
+      required:
+      - documents
+      - accounting
+      - bank
+      - cash
+      - receivables
+      - payables
+      - cashflow
+      - cashflow_tax
+      - cashflow_payroll
+      - forecast
+      description: Rights of this company, independently resolved. cashflow requires invoices, purchase_invoices and other_items.
+        Tax additions require reports, payroll additions require payroll.payments.
+    GroupDashboardCompany:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        accounting_mode:
+          type: string
+          enum:
+          - tax_evidence
+          - double_entry
+        document_basis:
+          type: string
+          enum:
+          - net
+          - gross
+        available:
+          $ref: '#/components/schemas/GroupDashboardAvailability'
+        issues:
+          type: array
+          items:
+            type: string
+            enum:
+            - financial
+            - accounting
+            - monthly
+            - cashflow
+            - bank
+            - cash
+            - receivables
+            - payables
+            - risks
+            - forecast
+            - conversion.financial
+            - conversion.monthly
+            - conversion.bank
+            - conversion.cash
+            - conversion.receivables
+            - conversion.payables
+            - conversion.cashflow
+            - conversion.forecast
+            - conversion.risks
+        financial:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardFinancial'
+        accounting:
+          anyOf:
+          - $ref: '#/components/schemas/GroupDashboardAccounting'
+          - type: 'null'
+        monthly:
+          description: Všechny měsíce zvoleného období pro každou měnu s dokladovou aktivitou v tomto období; měsíce bez aktivity mají nuly. Nedostupný zdroj je null.
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardMonthly'
+        bank:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardBalance'
+        cash:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardBalance'
+        receivables:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardAging'
+        payables:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardAging'
+        cashflow:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardForecast'
+        risks:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardRisk'
+        forecast:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/GroupDashboardAnnualForecast'
+      required:
+      - id
+      - name
+      - accounting_mode
+      - document_basis
+      - available
+      - issues
+      description: Only selected section fields are returned. Absent field means no source rights. A failed source is null
+        with its key in issues. Accounting null without an issue means no current accounting period. Document selected period
+        is net for VAT payers, gross otherwise. Not a consolidated financial statement.
+    GroupDashboardFinancialTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        previous_revenue:
+          type:
+          - number
+          - 'null'
+        previous_costs:
+          type:
+          - number
+          - 'null'
+        previous_profit:
+          type:
+          - number
+          - 'null'
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - previous_revenue
+      - previous_costs
+      - previous_profit
+      - companies
+      - missing_values
+    GroupDashboardAccountingTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - from
+      - to
+      - companies
+      - missing_values
+    GroupDashboardMonthlyTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        period:
+          type: string
+          pattern: ^[0-9]{4}-[0-9]{2}$
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - revenue
+      - costs
+      - profit
+      - period
+      - companies
+      - missing_values
+    GroupDashboardAgingTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        bucket:
+          type: string
+          enum:
+          - not_due
+          - overdue_30
+          - overdue_60
+          - overdue_90
+          - overdue_90_plus
+        count:
+          type: integer
+        total:
+          type:
+          - number
+          - 'null'
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - bucket
+      - count
+      - total
+      - companies
+      - missing_values
+    GroupDashboardBalanceTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        balance:
+          type:
+          - number
+          - 'null'
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - balance
+      - companies
+      - missing_values
+      description: Sum of known balances in the same native currency. null if no balance is known; missing_values counts unknown
+        balances. companies counts distinct contributing companies, not accounts.
+    GroupDashboardCashWeekTotal:
+      type: object
+      properties:
+        currency:
+          type: string
+        week_start:
+          type: string
+          format: date
+        week_end:
+          type: string
+          format: date
+        in:
+          type:
+          - number
+          - 'null'
+        out:
+          type:
+          - number
+          - 'null'
+        net:
+          type:
+          - number
+          - 'null'
+        running:
+          type:
+          - number
+          - 'null'
+        companies:
+          type: integer
+          minimum: 1
+        missing_values:
+          type: integer
+          minimum: 0
+      required:
+      - currency
+      - week_start
+      - week_end
+      - in
+      - out
+      - net
+      - running
+      - companies
+      - missing_values
+    GroupDashboardTotals:
+      type: object
+      properties:
+        financial:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardFinancialTotal'
+        accounting:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardAccountingTotal'
+        monthly:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardMonthlyTotal'
+        bank:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardBalanceTotal'
+        cash:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardBalanceTotal'
+        receivables:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardAgingTotal'
+        payables:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardAgingTotal'
+        cashflow:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardCashWeekTotal'
+        forecast:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardAnnualForecastTotal'
+      required:
+      - financial
+      - accounting
+      - monthly
+      - bank
+      - cash
+      - receivables
+      - payables
+      - cashflow
+      - forecast
+      description: Totals only combine identical currencies, and accounting additionally identical from/to periods. Includes
+        companies with successful available data only; inspect company issues and rights for coverage. No exchange conversion
+        or elimination of transactions between companies.
+    GroupDashboard:
+      type: object
+      properties:
+        section:
+          type: string
+          enum:
+          - overview
+          - trends
+          - cashflow
+          - forecast
+          - balances
+          - receivables
+          - risks
+        months:
+          type: integer
+          minimum: 1
+          maximum: 36
+        weeks:
+          type: integer
+          minimum: 1
+          maximum: 12
+        as_of:
+          type: string
+          format: date
+        generated_at:
+          type: string
+          format: date-time
+        company_count:
+          type: integer
+          minimum: 0
+        companies:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardCompany'
+        totals:
+          $ref: '#/components/schemas/GroupDashboardTotals'
+        period:
+          $ref: '#/components/schemas/GroupDashboardPeriod'
+        concentration_period:
+          $ref: '#/components/schemas/GroupDashboardConcentrationPeriod'
+        converted_czk:
+          $ref: '#/components/schemas/GroupDashboardConvertedCzk'
+        forecast_period:
+          $ref: '#/components/schemas/GroupDashboardForecastPeriod'
+      required:
+      - section
+      - months
+      - weeks
+      - as_of
+      - generated_at
+      - company_count
+      - companies
+      - totals
+      - period
+      - concentration_period
+      - converted_czk
+      - forecast_period
+    GroupDashboardPeriod:
+      type: object
+      required:
+      - from
+      - to
+      - previous_from
+      - previous_to
+      - mode
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        previous_from:
+          type: string
+          format: date
+        previous_to:
+          type: string
+          format: date
+        mode:
+          type: string
+          enum:
+          - rolling
+          - custom
+      description: Inclusive exact document history range, maximum 36 calendar months. Without from/to, first day of this
+        month minus (months-1) months through today. Prior comparison shifts each boundary one year back, clamping Feb 29
+        to Feb 28.
+    GroupDashboardConcentrationPeriod:
+      type: object
+      required:
+      - months
+      - from
+      - to
+      - basis
+      properties:
+        months:
+          type: integer
+          const: 12
+        from:
+          type: string
+          format: date
+        to:
+          type: 'null'
+        basis:
+          type: string
+          const: crm_months
+      description: Independent legacy concentration ranking, first day of current month minus 12 months onward. Existing CRM
+        query has no upper date bound and uses issue_date; this is not the custom financial history range.
+    GroupDashboardAnnualForecast:
+      type: object
+      properties:
+        year:
+          type: integer
+        currency:
+          type: string
+        revenue_model:
+          type:
+          - number
+          - 'null'
+        costs_model:
+          type:
+          - number
+          - 'null'
+        revenue_current_year:
+          type:
+          - number
+          - 'null'
+        costs_current_year:
+          type:
+          - number
+          - 'null'
+        other_revenue:
+          type:
+          - number
+          - 'null'
+        other_costs:
+          type:
+          - number
+          - 'null'
+        other_posted:
+          type:
+          - number
+          - 'null'
+        other_draft:
+          type:
+          - number
+          - 'null'
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        revenue_low:
+          type:
+          - number
+          - 'null'
+        revenue_high:
+          type:
+          - number
+          - 'null'
+        profit_low:
+          type:
+          - number
+          - 'null'
+        profit_high:
+          type:
+          - number
+          - 'null'
+      required:
+      - year
+      - currency
+      - revenue_model
+      - costs_model
+      - revenue_current_year
+      - costs_current_year
+      - other_revenue
+      - other_costs
+      - other_posted
+      - other_draft
+      - revenue
+      - costs
+      - profit
+      - revenue_low
+      - revenue_high
+      - profit_low
+      - profit_high
+      description: Current calendar-year legacy models plus known annual other-item result impact. Current-year source figures
+        include future-dated documents already recorded. Other posted/draft figures are explanatory, not an additional amount
+        to add. Model spread is not a confidence interval. Loan principal installments remain cash flow, not revenue/cost.
+    GroupDashboardAnnualForecastTotal:
+      type: object
+      properties:
+        year:
+          type: integer
+        currency:
+          type: string
+        revenue_model:
+          type:
+          - number
+          - 'null'
+        costs_model:
+          type:
+          - number
+          - 'null'
+        revenue_current_year:
+          type:
+          - number
+          - 'null'
+        costs_current_year:
+          type:
+          - number
+          - 'null'
+        other_revenue:
+          type:
+          - number
+          - 'null'
+        other_costs:
+          type:
+          - number
+          - 'null'
+        other_posted:
+          type:
+          - number
+          - 'null'
+        other_draft:
+          type:
+          - number
+          - 'null'
+        revenue:
+          type:
+          - number
+          - 'null'
+        costs:
+          type:
+          - number
+          - 'null'
+        profit:
+          type:
+          - number
+          - 'null'
+        revenue_low:
+          type:
+          - number
+          - 'null'
+        revenue_high:
+          type:
+          - number
+          - 'null'
+        profit_low:
+          type:
+          - number
+          - 'null'
+        profit_high:
+          type:
+          - number
+          - 'null'
+        companies:
+          type: integer
+        missing_values:
+          type: integer
+      required:
+      - year
+      - currency
+      - revenue_model
+      - costs_model
+      - revenue_current_year
+      - costs_current_year
+      - other_revenue
+      - other_costs
+      - other_posted
+      - other_draft
+      - revenue
+      - costs
+      - profit
+      - revenue_low
+      - revenue_high
+      - profit_low
+      - profit_high
+      - companies
+      - missing_values
+    GroupDashboardForecastPeriod:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        basis:
+          type: string
+          const: annual_model
+        includes_future_documents:
+          type: boolean
+          const: true
+        range_kind:
+          type: string
+          const: signal_spread
+      required:
+      - from
+      - to
+      - basis
+      - includes_future_documents
+      - range_kind
+    GroupDashboardCurrencyRate:
+      type: object
+      properties:
+        supplier_id:
+          type: integer
+        currency:
+          type: string
+        rate:
+          type:
+          - number
+          - 'null'
+        date:
+          type:
+          - string
+          - 'null'
+          format: date
+        basis:
+          type: string
+          const: cached_rate
+      required:
+      - supplier_id
+      - currency
+      - rate
+      - date
+      - basis
+    GroupDashboardConvertedCzk:
+      type: object
+      properties:
+        companies:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardCompany'
+        totals:
+          $ref: '#/components/schemas/GroupDashboardTotals'
+        as_of:
+          type: string
+          format: date
+        rates:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDashboardCurrencyRate'
+        missing_currencies:
+          type: array
+          items:
+            type: string
+        bases:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+            - document_recorded
+            - balance_recorded
+            - cached_rate
+      required:
+      - companies
+      - totals
+      - as_of
+      - rates
+      - missing_currencies
+      - bases
+      description: 'Separate CZK projection retaining native data in the main payload. Company rows merge original currencies
+        by matching month/year/bucket/week dimensions. Financial history uses actual document rates; cash uses recorded CZK
+        book/evidence balances. Bank balances, aging, cash flow and annual forecasts use local recorded exchange-rate cache:
+        latest positive rate on or before as_of, without network fetch or writes. Unknown conversions stay null when all contributions
+        are unknown; partial known sums carry missing_values and conversion issues. Risks retain source_currency for source
+        navigation. rates describes only cached conversions, while bases describes each metric source. A month with no activity
+        is absent. Accounting retains its own official current-period metadata. Individual bank/cash rows retain their original
+        ids, names, evidence dates and source_currency; only totals merge their currencies.'

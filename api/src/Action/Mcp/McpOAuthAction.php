@@ -19,6 +19,7 @@ use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\McpOAuth;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
@@ -146,7 +147,7 @@ final class McpOAuthAction
             $location = '/login?return_to=' . rawurlencode('/oauth/continue?target=' . rawurlencode($target));
             return $response->withStatus(302)->withHeader('Location', $location)->withHeader('Cache-Control', 'no-store');
         }
-        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+        if (!RequestAuthorization::isSessionAuth($request)) {
             return $this->html($response, '<h1>Připojení vyžaduje přihlášení v prohlížeči.</h1>', 401);
         }
 

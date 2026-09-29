@@ -70,6 +70,7 @@
     "export",
     "foreign_income",
     "gopay",
+    "group_stats",
     "imports",
     "instance_export",
     "integrations",
@@ -186,7 +187,6 @@
     ],
     "portal": [
       "portal",
-      "purchase_submissions",
       "reports"
     ],
     "portal-document-requests": [
@@ -798,6 +798,10 @@
       "logbook",
       "logbook_fuel"
     ],
+    "group-stats": [
+      "errors",
+      "group_stats"
+    ],
     "stats": [
       "dashboard",
       "errors",
@@ -955,6 +959,8 @@
       "integrations"
     ],
     "crm-dashboard": [
+      "errors",
+      "group_stats",
       "other_items"
     ],
     "portfolio-overview": [

@@ -163,6 +163,11 @@ final class ActionTenantReferenceTest extends TestCase
         'VendorOfferAction.php:client_id' => 'StockItemVendorRepository::filterOwnedVendors($supplierId, …) (StockItemVendorRepository:313)',
     ];
 
+    private const METHOD_ALTERNATIVE_GUARDS = [
+        'McpOAuthAction.php::authorize:client_id' => 'OAuth string client id: McpOAuth::client(), registered redirect URI and S256 challenge; not clients.id',
+        'McpOAuthAction.php::token:client_id' => 'OAuth string client id: McpOAuth::client(), exchange() binds client/redirect/resource/PKCE, refresh() binds client; not clients.id',
+    ];
+
     /**
      * (1) Discovery — Action nesmí číst tenant-scoped FK z těla requestu bez vazby.
      */
@@ -173,24 +178,7 @@ final class ActionTenantReferenceTest extends TestCase
         foreach ($this->actionFiles() as $file) {
             $base = basename($file);
             $code = self::stripComments((string) file_get_contents($file));
-
-            $bodyVars = self::parsedBodyVariables($code);
-            if ($bodyVars === []) {
-                continue;
-            }
-
-            $guarded = self::guardedColumns($code);
-
-            foreach (array_keys(TenantReferenceGuard::SCOPES) as $column) {
-                if (!self::readsColumnFromBody($code, $bodyVars, $column)) {
-                    continue;
-                }
-                if (in_array($column, $guarded, true)) {
-                    continue;
-                }
-                if (isset(self::ALTERNATIVE_GUARDS[$base . ':' . $column])) {
-                    continue;
-                }
+            foreach (self::unguardedBodyColumns($base, $code) as $column) {
                 $violations[] = "{$base} čte '{$column}' z těla requestu bez vazby na tenanta";
             }
         }
@@ -325,6 +313,102 @@ $text = '$guard->violations(1, [], ["ignored_id"])';
 $guard->violations($id, ["note" => "literal ), [ ] { }, {$body['note']}"], ['vendor_id']);
 PHP;
         self::assertSame(["['vendor_id']"], self::guardCallArguments($code));
+    }
+
+    public function testOAuthExceptionsDoNotHideNewBodyReferenceMethodsOrOtherColumns(): void
+    {
+        $code = <<<'PHP'
+<?php
+final class McpOAuthAction {
+    public function authorize($request) {
+        $body = (array) $request->getParsedBody();
+        $label = "client {$body['client_id']}";
+        $callback = function () { return ['literal' => '}']; };
+        return $body['client_id'];
+    }
+    public function token($request) {
+        $params = (array) $request->getParsedBody();
+        return $params['client_id'];
+    }
+}
+PHP;
+        self::assertSame([], self::unguardedBodyColumns('McpOAuthAction.php', $code));
+        $mutant = str_replace("\n}", <<<'PHP'
+
+    public function saveClient($request) {
+        $body = (array) $request->getParsedBody();
+        return $body['client_id'];
+    }
+}
+PHP, $code);
+        self::assertSame(['client_id'], self::unguardedBodyColumns('McpOAuthAction.php', $mutant));
+        self::assertSame(['currency_id'], self::unguardedBodyColumns('McpOAuthAction.php',
+            str_replace("return \$body['client_id'];", "return \$body['currency_id'];", $code)));
+        self::assertSame(['client_id'], self::unguardedBodyColumns('OtherOAuthAction.php', $code));
+    }
+
+    private static function unguardedBodyColumns(string $base, string $code): array
+    {
+        $bodyVars = self::parsedBodyVariables($code);
+        if ($bodyVars === []) return [];
+        $guarded = self::guardedColumns($code);
+        $methods = [];
+        foreach (array_keys(self::METHOD_ALTERNATIVE_GUARDS) as $symbol) {
+            if (str_starts_with($symbol, $base . '::')) {
+                $methods = self::methodRanges($code);
+                break;
+            }
+        }
+        $out = [];
+        foreach (array_keys(TenantReferenceGuard::SCOPES) as $column) {
+            if (in_array($column, $guarded, true) || isset(self::ALTERNATIVE_GUARDS[$base . ':' . $column])) continue;
+            $checked = $code;
+            foreach ($methods as $method => [$start, $length]) {
+                if (isset(self::METHOD_ALTERNATIVE_GUARDS[$base . '::' . $method . ':' . $column])) {
+                    $checked = substr_replace($checked, str_repeat(' ', $length), $start, $length);
+                }
+            }
+            $checkedBodyVars = $checked === $code ? $bodyVars : self::parsedBodyVariables($checked);
+            if (self::readsColumnFromBody($checked, $checkedBodyVars, $column)) $out[] = $column;
+        }
+        return $out;
+    }
+
+    private static function methodRanges(string $code): array
+    {
+        $tokens = token_get_all($code);
+        $offsets = [];
+        $offset = 0;
+        foreach ($tokens as $i => $token) {
+            $offsets[$i] = $offset;
+            $offset += strlen(is_array($token) ? $token[1] : $token);
+        }
+        $out = [];
+        $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) continue;
+            $name = null;
+            for ($j = $i + 1; $j < $count; $j++) {
+                if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+                    $name = $tokens[$j][1];
+                    break;
+                }
+                if ($tokens[$j] === '(') break;
+            }
+            if ($name === null) continue;
+            for (; $j < $count && $tokens[$j] !== '{' && $tokens[$j] !== ';'; $j++);
+            if ($j === $count || $tokens[$j] === ';') continue;
+            $depth = 1;
+            for ($end = $j + 1; $end < $count; $end++) {
+                $token = $tokens[$end];
+                if ($token === '{' || (is_array($token) && in_array($token[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) $depth++;
+                if ($token === '}' && --$depth === 0) break;
+            }
+            if ($end === $count) continue;
+            $out[$name] = [$offsets[$i], $offsets[$end] + 1 - $offsets[$i]];
+            $i = $end;
+        }
+        return $out;
     }
 
     /**

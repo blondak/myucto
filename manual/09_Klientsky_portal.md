@@ -156,16 +156,14 @@ zobrazí analogický „zatím tu nejsou žádná data" stav.
 
 ## 9.4 Rychlé akce
 
-Pod záhlavím je výrazná akce **Předat doklad účetní**. Otevře bezpečnou podatelnu,
-kde stačí vybrat soubor; klient nemusí opisovat dodavatele, částky ani DPH. Běžné
-rychlé odkazy **Vystavit fakturu**, **Nahrát přijatou fakturu** a **Přidat kontakt**
+Rychlé odkazy **Vystavit fakturu**, **Nahrát přijatou fakturu** a **Přidat kontakt**
 zůstávají k dispozici podle oprávnění a vedou na plné editory
 [Faktur](14_Faktury.md), [Přijatých faktur](23_Prijate_faktury.md) a
 [Klientů](18_Klienti.md). Když klient v editoru přijaté faktury nahraje běžné PDF
 nebo fotografii, ze kterých se údaje automaticky nenačtou, může je stále vyplnit
 ručně. Druhou možností je jediné tlačítko **Uložit a předat účetní**: formulář se
 nezaloží jako neúplná faktura a původní soubor se přesune do stejné bezpečné
-podatelny jako při rychlé akci.
+podatelny dostupné přes **Dokumenty → Předat doklady účetní**.
 
 ## 9.5 Zámek zaúčtovaných dokladů
 

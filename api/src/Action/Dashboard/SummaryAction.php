@@ -47,6 +47,15 @@ final class SummaryAction
         private readonly SupplierDataCache $cache,
     ) {}
 
+    public function annualRevenueForecast(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $year = (int) date('Y');
+        $isVatPayer = $this->fetchIsVatPayer($pdo, $supplierId);
+        return $this->revenueForecast($pdo, $year, $year - 1, $supplierId, $isVatPayer,
+            $this->revenueByYear($pdo, $supplierId, $isVatPayer));
+    }
+
     public function __invoke(Request $request, Response $response): Response
     {
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
