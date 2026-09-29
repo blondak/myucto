@@ -12,6 +12,8 @@ use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\DatabaseSecurityClock;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\MfaStepUpService;
+use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\Mcp\McpOAuth;
 use MyInvoice\Service\Mcp\NodeBridge;
 use PHPUnit\Framework\Attributes\Group;
@@ -225,6 +227,7 @@ final class McpOAuthGrantTest extends TestCase
             $consent = $app->handle($get);
             self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
             self::assertStringContainsString('Synthetic assistant', (string) $consent->getBody());
+            self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $consent->getBody());
 
             $form = $params + [
                 'supplier_id' => (string) $this->supplierId,
@@ -256,7 +259,7 @@ final class McpOAuthGrantTest extends TestCase
             $passwordBypass = $app->handle($post);
             self::assertSame(401, $passwordBypass->getStatusCode());
             $passkeyConsent = $app->handle($get);
-            self::assertStringContainsString('/assets/mcp-consent-v1.js', (string) $passkeyConsent->getBody());
+            self::assertStringContainsString('/assets/mcp-consent-v2.js', (string) $passkeyConsent->getBody());
             $this->db->pdo()->prepare('DELETE FROM webauthn_credentials WHERE user_id = ?')
                 ->execute([$this->userId]);
             $approved = $app->handle($post);
@@ -268,6 +271,92 @@ final class McpOAuthGrantTest extends TestCase
             );
             self::assertIsArray($grant);
             self::assertSame($this->supplierId, $this->tokens->validate($grant['access_token'])['supplier_id']);
+        } finally {
+            $sessions->destroy($session['token']);
+            putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);
+        }
+    }
+
+    public function testBrowserConsentAcceptsFreshTotpAndPasskeyProofFromRealFormBody(): void
+    {
+        $config = Config::load(dirname(__DIR__, 3));
+        $sessions = new SessionManager($this->db, $config, new DatabaseSecurityClock());
+        $session = $sessions->create($this->userId, '127.0.0.1', 'synthetic-mcp-mfa');
+        $client = $this->oauth->register('Synthetic assistant', ['https://client.example.test/callback']);
+        $this->clientIds[] = $client;
+        $prior = getenv('MYINVOICE_MCP_ENABLED');
+        putenv('MYINVOICE_MCP_ENABLED=1');
+        try {
+            $base = rtrim((string) $config->get('app.url'), '/');
+            $params = [
+                'client_id' => $client,
+                'redirect_uri' => 'https://client.example.test/callback',
+                'response_type' => 'code',
+                'code_challenge' => rtrim(strtr(base64_encode(hash('sha256', str_repeat('c', 64), true)), '+/', '-_'), '='),
+                'code_challenge_method' => 'S256',
+                'state' => 'synthetic-state',
+                'resource' => $base . '/mcp',
+                'scope' => 'read_write',
+            ];
+            $cookie = (string) $config->get('session.cookie_name', '__Host-myinvoice_session');
+            $factory = new ServerRequestFactory();
+            $app = Bootstrap::buildApp();
+            $get = $factory->createServerRequest('GET', $base . '/oauth/authorize?' . http_build_query($params),
+                ['REMOTE_ADDR' => '127.0.0.1'])->withCookieParams([$cookie => $session['token']]);
+            $secret = TotpService::generateSecret();
+            $this->db->pdo()->prepare('UPDATE users SET totp_enabled = 1, totp_secret = ?, webauthn_user_handle = ? WHERE id = ?')
+                ->execute([$secret, random_bytes(32), $this->userId]);
+            $credential = random_bytes(32);
+            $this->db->pdo()->prepare(
+                'INSERT INTO webauthn_credentials
+                 (user_id, credential_id, credential_id_hash, public_key, sign_count,
+                  transports_json, aaguid, label, created_at)
+                 VALUES (?, ?, ?, ?, 0, ?, ?, ?, UTC_TIMESTAMP(6))'
+            )->execute([
+                $this->userId, $credential, hash('sha256', $credential, true),
+                random_bytes(77), '["internal"]', str_repeat("\0", 16), 'Synthetic passkey',
+            ]);
+            $credentialId = (int) $this->db->pdo()->lastInsertId();
+            $consent = $app->handle($get);
+            self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
+            self::assertStringContainsString('Aktuální kód ověřovací aplikace', (string) $consent->getBody());
+            self::assertStringContainsString('Ověřit passkey', (string) $consent->getBody());
+            self::assertStringContainsString('value="deny" formnovalidate', (string) $consent->getBody());
+
+            $form = $params + [
+                'supplier_id' => (string) $this->supplierId,
+                'decision' => 'approve',
+                'csrf_token' => $session['csrf_token'],
+                'totp_code' => (new TotpService())->currentCode($secret),
+            ];
+            $post = static function (array $body) use ($factory, $base, $cookie, $session, $app): \Psr\Http\Message\ResponseInterface {
+                $request = $factory->createServerRequest('POST', $base . '/oauth/authorize',
+                    ['REMOTE_ADDR' => '127.0.0.1'])
+                    ->withCookieParams([$cookie => $session['token']])
+                    ->withHeader('Origin', $base)
+                    ->withHeader('Content-Type', 'application/x-www-form-urlencoded')
+                    ->withBody((new StreamFactory())->createStream(http_build_query($body)));
+                return $app->handle($request);
+            };
+            $approvedTotp = $post($form);
+            self::assertSame(302, $approvedTotp->getStatusCode(), (string) $approvedTotp->getBody());
+            $reusedTotp = $post($form);
+            self::assertSame(401, $reusedTotp->getStatusCode());
+            self::assertStringContainsString('Kód je neplatný nebo už byl použit', (string) $reusedTotp->getBody());
+
+            $stepUp = Bootstrap::buildContainer()->get(MfaStepUpService::class);
+            $proof = $stepUp->issue(
+                $this->userId, $session['token'], MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+                'passkey', $credentialId,
+            );
+            unset($form['totp_code']);
+            $form['step_up_token'] = $proof;
+            $approvedPasskey = $post($form);
+            self::assertSame(302, $approvedPasskey->getStatusCode(), (string) $approvedPasskey->getBody());
+            $replayed = $post($form);
+            self::assertSame(403, $replayed->getStatusCode());
+            self::assertStringContainsString('Zkusit znovu', (string) $replayed->getBody());
+            self::assertStringNotContainsString($proof, (string) $replayed->getBody());
         } finally {
             $sessions->destroy($session['token']);
             putenv($prior === false ? 'MYINVOICE_MCP_ENABLED' : 'MYINVOICE_MCP_ENABLED=' . $prior);

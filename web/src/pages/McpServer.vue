@@ -1076,19 +1076,9 @@ npm install</pre>
             <li>{{ t('mcp_server_page.connection.chatgpt_2') }}</li>
             <li>{{ t('mcp_server_page.connection.chatgpt_3') }}</li>
           </ol>
-          <h4 class="font-medium mt-4 mb-2">{{ t('mcp_server_page.connection.chatgpt_desktop_title') }}</h4>
-          <ol class="list-decimal pl-5 space-y-2 text-sm text-neutral-700">
-            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_1') }}</li>
-            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_2') }}</li>
-            <li>{{ t('mcp_server_page.connection.chatgpt_desktop_3') }}</li>
-          </ol>
           <p class="mt-3 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
             {{ t('mcp_server_page.connection.chatgpt_mobile') }}
           </p>
-          <a href="https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt"
-            target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs text-primary-600 hover:underline">
-            {{ t('mcp_server_page.connection.provider_guide') }} →
-          </a>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <h3 class="font-semibold mb-2">Claude</h3>

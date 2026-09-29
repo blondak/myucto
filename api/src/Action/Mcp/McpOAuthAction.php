@@ -217,7 +217,7 @@ final class McpOAuthAction
                 $fields .= '<input type="hidden" name="' . $key . '" value="' . self::escape($value) . '">';
             }
             $fields .= '<input type="hidden" name="csrf_token" value="' . self::escape($csrf) . '">';
-            $select = '<label>Firma <select name="supplier_id" required>';
+            $select = '<label class="field">Firma<select name="supplier_id" required>';
             foreach ($choices as $choice) {
                 $id = (int) $choice['supplier_id'];
                 $selected = $id === $supplierId ? ' selected' : '';
@@ -228,23 +228,31 @@ final class McpOAuthAction
             $verification = '';
             if ($passkeyAvailable) {
                 $verification .= '<input type="hidden" name="step_up_token" id="mcp-step-up-token">'
-                    . '<button type="button" id="mcp-passkey-button">Ověřit passkey</button>'
-                    . '<span id="mcp-passkey-status" role="status"></span>';
+                    . '<button type="button" id="mcp-passkey-button" class="passkey-button">Ověřit passkey</button>'
+                    . '<span id="mcp-passkey-status" class="field-hint" role="status" aria-live="polite"></span>';
             }
             if ($totpRequired) {
-                $verification .= '<label>Aktuální kód ověřovací aplikace <input name="totp_code" autocomplete="one-time-code" inputmode="numeric"></label>';
+                $verification .= '<label class="field">Aktuální kód ověřovací aplikace'
+                    . '<input name="totp_code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"'
+                    . ($passkeyAvailable ? '' : ' required') . '></label>'
+                    . '<p class="field-hint">Použijte nový šestimístný kód. Kód použitý při přihlášení už nelze použít znovu.</p>';
             } elseif (!$passkeyAvailable) {
-                $verification = '<label>Aktuální heslo <input type="password" name="password" autocomplete="current-password" required></label>';
+                $verification = '<label class="field">Aktuální heslo<input type="password" name="password" autocomplete="current-password" required></label>';
             }
             $permission = $scope === 'read_write' ? 'čtení a zápis' : 'pouze čtení';
-            $content = '<h1>Připojit MyÚčto k AI asistentovi?</h1>'
-                . '<p>Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
-                . self::escape((string) $host) . ') žádá o přístup: <strong>' . $permission . '</strong>.</p>'
-                . '<p>Rozsah platí pro aktuální firmu. Přístup můžete zrušit v API tokenech.</p>'
-                . '<form method="post" action="/oauth/authorize">' . $fields . $select . $verification
-                . '<button type="submit" name="decision" value="approve">Povolit přístup</button> '
-                . '<button type="submit" name="decision" value="deny">Zamítnout</button></form>'
-                . ($passkeyAvailable ? '<script src="/assets/mcp-consent-v1.js" defer></script>' : '');
+            $content = '<h1>Připojit MyÚčto k AI asistentovi</h1>'
+                . '<p class="lead">Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
+                . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
+                . '<div class="access-summary"><span>Požadovaný rozsah</span><strong>' . $permission . '</strong></div>'
+                . '<p class="muted">Přístup platí jen pro zvolenou firmu. Kdykoli jej můžete odvolat v API tokenech.</p>'
+                . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $select
+                . '<div class="verification"><h2>Ověření identity</h2>'
+                . ($passkeyAvailable && $totpRequired ? '<p class="field-hint">Zvolte passkey nebo nový kód z ověřovací aplikace.</p>' : '')
+                . $verification . '</div>'
+                . '<div class="actions"><button type="submit" name="decision" value="approve">Povolit přístup</button>'
+                . '<button type="submit" name="decision" value="deny" formnovalidate>Zamítnout</button></div>'
+                . '<span id="mcp-form-status" class="field-hint" role="status" aria-live="polite"></span></form>'
+                . '<script src="/assets/mcp-consent-v2.js" defer></script>';
             return $this->html($response, $content);
         }
 
@@ -263,11 +271,11 @@ final class McpOAuthAction
                     MfaStepUpService::OPERATION_API_TOKEN_CREATE,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
-                return $this->html($response, '<h1>Ověření passkey je neplatné nebo vypršelo.</h1>', 403);
+                return $this->consentError($response, $params, 'Ověření passkey už neplatí. Ověřte ji znovu.', 403);
             }
         } elseif ($totpRequired) {
             if ($this->bruteForce->isTotpLocked((int) $user['id'])) {
-                return $this->html($response, '<h1>Příliš mnoho pokusů. Zkuste to později.</h1>', 429);
+                return $this->consentError($response, $params, 'Příliš mnoho pokusů. Zkuste to později.', 429);
             }
             try {
                 $secret = $this->crypto->decrypt((string) $credentials['totp_secret']);
@@ -276,22 +284,22 @@ final class McpOAuthAction
             }
             if (!$this->totp->verifyAndConsume($this->db, $secret, (string) ($params['totp_code'] ?? ''))) {
                 $this->bruteForce->recordTotpFailure((int) $user['id']);
-                return $this->html($response, '<h1>Neplatný ověřovací kód.</h1>', 401);
+                return $this->consentError($response, $params, 'Kód je neplatný nebo už byl použit. Zadejte nový kód.', 401);
             }
             $this->bruteForce->recordTotpSuccess((int) $user['id']);
         } elseif ($passkeyAvailable) {
-            return $this->html($response, '<h1>Pro připojení je nutné ověřit passkey.</h1>', 401);
+            return $this->consentError($response, $params, 'Pro připojení je nutné ověřit passkey.', 401);
         } else {
             $email = (string) $credentials['email'];
             if (in_array($this->bruteForce->check($email, $ip), [
                 BruteForceGuard::STATE_LOCKED_15M, BruteForceGuard::STATE_LOCKED_24H,
             ], true)) {
-                return $this->html($response, '<h1>Příliš mnoho pokusů. Zkuste to později.</h1>', 429);
+                return $this->consentError($response, $params, 'Příliš mnoho pokusů. Zkuste to později.', 429);
             }
             if (!$this->hasher->verify((string) ($params['password'] ?? ''), (string) $credentials['password_hash'])) {
                 $this->hasher->dummyVerify();
                 $this->bruteForce->recordFailure($email, $ip);
-                return $this->html($response, '<h1>Neplatné heslo.</h1>', 401);
+                return $this->consentError($response, $params, 'Neplatné heslo.', 401);
             }
         }
         $code = $this->oauth->createCode(
@@ -362,14 +370,65 @@ final class McpOAuthAction
 
     private function html(Response $response, string $content, int $status = 200): Response
     {
+        $css = <<<'CSS'
+            :root{color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#fbfafd;color:#15131d}
+            *{box-sizing:border-box}
+            body{margin:0;min-height:100vh;padding:clamp(1.25rem,5vw,4rem) 1rem;display:grid;place-items:start center}
+            main{width:min(100%,34rem);margin:auto;background:#fff;border:1px solid #e7e3ee;border-radius:14px;box-shadow:0 20px 55px rgba(33,26,75,.09);padding:clamp(1.5rem,5vw,2.5rem)}
+            .brand{display:flex;align-items:center;gap:.75rem;margin-bottom:2rem;color:#3b2d83;font-weight:700;letter-spacing:-.02em}
+            .brand-mark{display:grid;place-items:center;width:2.5rem;height:2.5rem;border-radius:10px;background:#3b2d83;color:#fff;font-size:1.35rem}
+            .brand small{display:block;color:#7a748c;font-size:.73rem;font-weight:500;letter-spacing:0}
+            h1{font-size:clamp(1.55rem,4vw,1.95rem);line-height:1.2;letter-spacing:-.035em;margin:0 0 1rem}
+            h2{font-size:1rem;margin:0 0 .75rem}
+            p{line-height:1.55;margin:.75rem 0}
+            .lead{font-size:.98rem;color:#403b52}
+            .muted,.field-hint{font-size:.82rem;color:#5a5470}
+            .access-summary{display:flex;justify-content:space-between;gap:1rem;align-items:center;background:#f4f2fb;border:1px solid #c9c0e9;border-radius:10px;padding:.9rem 1rem;margin:1.5rem 0 .75rem}
+            .access-summary span{font-size:.82rem;color:#5a5470}
+            .access-summary strong{color:#3b2d83;text-align:right}
+            .retry-link{display:inline-flex;align-items:center;min-height:2.7rem;margin-top:1rem;padding:.55rem .95rem;border-radius:7px;background:#3b2d83;color:#fff;text-decoration:none;font-weight:600}
+            .retry-link:hover{background:#2e2367}
+            form{display:grid;gap:1.2rem;margin-top:1.7rem}
+            .field{display:grid;gap:.45rem;font-size:.88rem;font-weight:600}
+            input,select{width:100%;min-height:2.65rem;padding:.55rem .75rem;border:1px solid #d2ccdf;border-radius:7px;background:#fff;color:#15131d;font:inherit;font-weight:400}
+            input:focus,select:focus,button:focus-visible{outline:2px solid #6753ae;outline-offset:2px}
+            input[name=totp_code]{max-width:13rem;font-variant-numeric:tabular-nums;letter-spacing:.12em}
+            .verification{display:grid;gap:.75rem;border-top:1px solid #e7e3ee;padding-top:1.35rem}
+            .verification .field-hint{margin:0}
+            button{min-height:2.7rem;padding:.55rem .95rem;border:1px solid transparent;border-radius:7px;font:inherit;font-weight:600;cursor:pointer}
+            button:disabled{opacity:.6;cursor:wait}
+            .passkey-button{justify-self:start;background:#fff;border-color:#c9c0e9;color:#3b2d83}
+            .passkey-button:hover{background:#f4f2fb}
+            .actions{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:.3rem}
+            .actions button[value=approve]{background:#3b9665;color:#fff}
+            .actions button[value=approve]:hover{background:#2e7b53}
+            .actions button[value=deny]{background:#fff;border-color:#d2ccdf;color:#5a5470}
+            .actions button[value=deny]:hover{background:#f4f2f8}
+            @media(max-width:480px){.access-summary{align-items:flex-start;flex-direction:column;gap:.3rem}.access-summary strong{text-align:left}.actions button{flex:1}}
+            @media(prefers-color-scheme:dark){:root{color-scheme:dark;background:#15131d;color:#f4f2f8}main{background:#211e2b;border-color:#403b52;box-shadow:none}.brand{color:#c9c0e9}.brand-mark{background:#6753ae}.brand small,.muted,.field-hint,.lead,.access-summary span{color:#c4bfd0}.access-summary{background:#2e293c;border-color:#5a5470}.access-summary strong{color:#e5e0f4}.verification{border-color:#403b52}input,select{background:#2a2638;border-color:#5a5470;color:#fff}.passkey-button,.actions button[value=deny]{background:#2a2638;color:#e5e0f4;border-color:#5a5470}.passkey-button:hover,.actions button[value=deny]:hover{background:#403b52}}
+            CSS;
         $body = '<!doctype html><html lang="cs"><meta charset="utf-8"><meta name="viewport" '
             . 'content="width=device-width, initial-scale=1"><title>MyÚčto MCP</title>'
-            . '<style>body{font:16px system-ui;max-width:44rem;margin:4rem auto;padding:0 1rem;line-height:1.5}'
-            . 'button{padding:.7rem 1rem;margin:.5rem .5rem .5rem 0;cursor:pointer}</style>'
-            . '<main>' . $content . '</main></html>';
+            . '<style>' . $css . '</style>'
+            . '<main><div class="brand"><span class="brand-mark" aria-hidden="true">M</span><span>MyÚčto<small>Bezpečné propojení</small></span></div>'
+            . $content . '</main></html>';
         $response->getBody()->write($body);
         return $response->withStatus($status)->withHeader('Content-Type', 'text/html; charset=utf-8')
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    private function consentError(Response $response, array $params, string $message, int $status): Response
+    {
+        $retry = [];
+        foreach (['client_id', 'redirect_uri', 'response_type', 'code_challenge',
+            'code_challenge_method', 'state', 'resource', 'scope', 'supplier_id'] as $key) {
+            if (isset($params[$key]) && (is_string($params[$key]) || is_int($params[$key]))) {
+                $retry[$key] = (string) $params[$key];
+            }
+        }
+        $url = '/oauth/authorize?' . http_build_query($retry, '', '&', PHP_QUERY_RFC3986);
+        return $this->html($response, '<h1>Ověření se nepodařilo</h1><p>' . self::escape($message)
+            . '</p><a class="retry-link" href="' . self::escape($url) . '">Zkusit znovu</a>', $status);
     }
 
     private function oauthError(Response $response, string $error, int $status): Response

@@ -191,8 +191,10 @@ Na počítači uživatele Node pro online připojení není třeba.
 
 1. Přidej adresu jako **vlastní vzdálený MCP konektor** v asistentovi.
 2. Při připojení se v prohlížeči přihlas do MyÚčta, vyber firmu a schval rozsah
-   přístupu passkey, kódem ověřovací aplikace nebo aktuálním heslem podle nastavení účtu. Pro běžné dotazy stačí **čtení**. **Čtení a zápis** povol jen tehdy,
-   když má asistent opravdu měnit data.
+   přístupu passkey, novým kódem ověřovací aplikace nebo aktuálním heslem podle
+   nastavení účtu. Kód použitý při přihlášení nelze znovu použít. Před souhlasem
+   zkontroluj požadovaný rozsah: pro běžné dotazy stačí **čtení**; požadavek na
+   **čtení a zápis** schvaluj jen tehdy, když má asistent opravdu měnit data.
 3. Konektor zapni v konverzaci a napiš „Ověř připojení k MyÚčtu“.
    Nástroj `whoami` vrátí uživatele, roli a firmu.
 
@@ -200,27 +202,21 @@ Pro online připojení **nevytváříš ani nekopíruješ API token** a na svém
 neinstaluješ Node ani soubor `.mjs`. Každé volání se omezuje na schválenou firmu,
 rozsah a oprávnění účtu. Připojení lze v MyÚčtu odvolat a v asistentovi odebrat.
 
-**ChatGPT:** V [ChatGPT na webu](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
-otevři **Settings → Apps → Advanced Settings** a zapni vývojářský režim, pokud je
-pro tvůj účet nebo pracovní prostor dostupný. Pak v **Apps → Create** vytvoř
-vlastní MCP aplikaci, vlož adresu `/mcp`, zvol OAuth přihlášení, načti nástroje a
-dokonči přihlášení do MyÚčta. V konverzaci vytvořenou aplikaci vyber. Ve firemním
-pracovním prostoru může být potřeba přístup schválený správcem.
-
-**ChatGPT desktop, formulář Pluginy → MCP:** Zvol **Streamovatelné HTTP**, zadej
-název a adresu své instalace končící `/mcp`. Pole **Proměnná prostředí tokenu
-nositele** a záhlaví nech prázdné. Slouží pro ručně dodaný bearer token, ne pro
-nastavení OAuth. Server ulož, restartuj aplikaci a v seznamu serverů zvol
-**Authenticate (Ověřit)**, až se tato akce zobrazí. Tím začne přihlášení do
-MyÚčta. Pokud se akce nezobrazí, nejdřív zkontroluj, že je vzdálený MCP server
-v MyÚčtu zapnutý. Při vypnutém serveru vrací `/mcp` odpověď 404 a klient OAuth
-nezahájí. Ručně přidaný desktopový MCP server se podle dokumentace OpenAI
-nepřenáší do mobilní aplikace.
+**ChatGPT:** V **Nastavení → Integrace → Pluginy** zvol **Přidat → Přidat server MCP**
+a typ **Streamovatelné HTTP**. Zadej název a adresu své instalace končící
+`/mcp`. Pole **Proměnná prostředí tokenu nositele** a záhlaví nech prázdné.
+OAuth se v tomto formuláři nevybírá. Server ulož; v desktopové aplikaci ji
+případně restartuj. Pokud se v seznamu serverů zobrazí **Authenticate
+(Ověřit)**, zvol tuto akci a dokonči souhlas v MyÚčtu. Pak server zapni v
+konverzaci. Pokud ověření chybí, zkontroluj, že je vzdálený MCP server v MyÚčtu
+zapnutý. Při vypnutém serveru vrací `/mcp` odpověď 404 a klient OAuth nezahájí.
 
 > [!IMPORTANT]
-> OpenAI v aktuální dokumentaci uvádí vlastní MCP aplikace **pouze na webu**.
-> Mobilní aplikace ChatGPT je nyní nepodporují. Dokud OpenAI tuto možnost
-> nezpřístupní, nelze přes ni vzdálené MCP MyÚčta používat.
+> Ručně přidaný server je uložený u desktopového hostitele. Do běžného mobilního
+> chatu se nepřenáší. Z mobilní aplikace jej lze použít přes funkci **Remote**,
+> která ovládá připojený počítač; ten musí být zapnutý a dostupný. Dostupnost
+> Remote závisí na účtu a pracovním prostoru. Samostatné mobilní připojení touto
+> cestou zatím není ověřené.
 
 **Claude:** Na webu nebo v desktopové aplikaci otevři
 **Customize → Connectors**. U osobního účtu zvol **+ → Add custom connector**,
