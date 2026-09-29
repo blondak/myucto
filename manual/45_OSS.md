@@ -664,7 +664,7 @@ Postup je tedy:
 1. V **Daně → OSS přiznání** projdi náhled a varování.
 2. **Stáhni XML** tlačítkem *Stáhnout XML*.
 3. Na Daňovém portálu se přihlas do aplikace **MOSS/OSS** a nahraj soubor tam.
-4. Vrať se do MyÚčta a v **Nástroje → EPO podání a archiv** označ snapshot jako
+4. Vrať se do MyÚčta a v **Daně → EPO podání a archív** označ snapshot jako
    podaný, případně k němu přilož potvrzení.
 
 > [!NOTE]
@@ -682,7 +682,7 @@ Postup je tedy:
 Záložka **Archiv podání** vypisuje všechny archivované OSS snapshoty s časem
 vzniku, stavem, výsledkem validace, **SHA-256 otiskem** a odkazem na stažení
 uloženého souboru. Tytéž snapshoty leží ve společném archivu v
-**Nástroje → EPO podání a archiv** ([kapitola 70](49_Archiv_podani_a_rekonciliace.md)),
+**Daně → EPO podání a archív** ([kapitola 70](49_Archiv_podani_a_rekonciliace.md)),
 kde se k nim připojují pokusy o podání, doručenky a označení „podáno".
 
 > Archivovaný soubor prokazuje, **co vzniklo — ne že bylo podáno**. Po odeslání

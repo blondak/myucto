@@ -147,7 +147,7 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   revizi; původní uložené XML zůstává zachované. Soubor nahraješ na
   [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru". Ostrý export se
   **archivuje**. Pokud jsou nalezeny nesrovnalosti, stránka po stažení zůstane
-  otevřená s varováním; jinak aplikace otevře **Nástroje → EPO podání a archív**.
+  otevřená s varováním; jinak aplikace otevře **Daně → EPO podání a archív**.
   Selhání kontroly XSD ani obsahové kontroly stažení nezakáže. V archivu lze snapshot předat do
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen

@@ -10,6 +10,22 @@ Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo s
 
 **Prostředí podání.** Podání ČSSZ, zdravotním pojišťovnám i datovou schránkou jdou vždy do ostrého provozu úřadu; výchozí volba je všude **Ostrý provoz**. Výběr testovacího prostředí se nabízí jen ve vývojové instalaci (v `cfg.php` `app.env = development`), jinde se místo přepínače zobrazí jen štítek ostrého provozu a server požadavek na test odmítne. Zvolený test je na obrazovce zvýrazněný varovnou barvou. Výjimkou je daňové podání na EPO: akce **Zkontrolovat na EPO** pošle výkaz jen ke kontrole chyb a je dostupná vždy.
 
+### 85.2.1 Podání přes VREP: zmocnění a registrace certifikátu
+
+Odeslání JMHZ a registrací zaměstnanců přes VREP podepisuje osobní kvalifikovaný certifikát toho, kdo podává. ČSSZ podání přijme, jen když je předem vyřízeno následující. Aplikace si to ověřit nemůže, chybu ukáže až protokol ČSSZ.
+
+1. **Zmocnění od každého zaměstnavatele.** Firma (typicky statutár) zmocní účetní v aplikaci [Správa plných mocí](https://eportal.cssz.cz/web/portal/-/sluzby/sprava-plnych-moci) na ePortálu ČSSZ, případně tiskopisem **Plná moc ke službám a tiskopisům ČSSZ**. V rozsahu zmocnění musí být položka **JMHZ – Jednotné měsíční hlášení zaměstnavatele** (zahrnuje měsíční hlášení, registrace zaměstnanců i změny registrace zaměstnavatele), nebo zmocnění ke všem úkonům.
+2. **Registrace zmocněnce a certifikátu.** Účetní podá tiskopis **Oznámení o zmocnění k úkonům a službám ČSSZ a Úřadu práce ČR (pro zmocněnou osobu)** s kopií plné moci. Uvede v něm vystavitele a sériové číslo certifikátu přesně podle certifikátu (decimálně nebo hexadecimálně) a variabilní symboly zastupovaných zaměstnavatelů. Při zastupování více firem stačí registrace na jedné OSSZ, místně příslušné zastupující osobě. Jeden certifikát pak pokryje všechny zastupované variabilní symboly.
+3. **Variabilní symbol.** Každá mzdová účtárna má od OSSZ přidělený desetimístný variabilní symbol. Vyplňte ho v **Mzdy → Nastavení mezd → Zaměstnavatel** u účtárny.
+4. **Obnova certifikátu.** Nový certifikát je potřeba ČSSZ oznámit ještě před vypršením starého (e-Podání USRCERT), po vypršení už jen přes podatelnu OSSZ. Pak ho v MyÚčtu nahrajte, povolte a vyberte znovu ve všech firmách, včetně nového sériového čísla.
+
+Nastavení v MyÚčtu:
+
+1. V **Daně → EPO podání a archív → Certifikáty EPO** nahrajte certifikát P12/PFX (jednou, patří přihlášenému uživateli) a v každé zastupované firmě ho tlačítkem **Povolit pro tuto firmu** povolte. Mzdy i EPO používají stejný trezor, nic se nenahrává dvakrát.
+2. V každé firmě otevřete **Mzdy → Podání a hlášení → Certifikát**, vyberte certifikát a do pole **Sériové číslo registrované u ČSSZ** opište číslo z Oznámení o zmocnění. Aplikace ho porovná se sériovým číslem certifikátu v obou zápisech a při neshodě volbu neuloží. Uložte tlačítkem **Uložit volbu**.
+
+Podání přes datovou schránku registraci certifikátu nevyžaduje, zmocnění ano. Datovou schránku zmocněnce je vhodné uvést na Oznámení o zmocnění, jinak ČSSZ podání dohledává ručně a odpověď přijde se zpožděním.
+
 ## 85.3 Měsíční přehled — co následuje
 
 Záložka **Měsíční přehled** (a tentýž panel pod uzavřeným mzdovým během) skládá

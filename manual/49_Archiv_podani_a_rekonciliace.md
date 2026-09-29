@@ -17,7 +17,7 @@ Související výpočty jsou popsány v kapitolách [Výkazy DPH](41_Vykazy_DPH.
 | **Odesláno** | Uživatel doložil čas odeslání, případně identifikátor potvrzení. | Konečné přijetí bez chyb nebo vyměření daně. |
 | **Přijato / odmítnuto** | Stav převzatý z potvrzení portálu či podatelny. | Věcnou správnost všech daňových údajů. |
 
-Samostatnou obrazovku otevřeš v **Nástroje → EPO podání a archív**. Zobrazuje
+Samostatnou obrazovku otevřeš v **Daně → EPO podání a archív**. Zobrazuje
 vygenerované snapshoty, výsledek lokální validace, historii předání do EPO,
 uložené důkazní dokumenty a stav podání.
 
@@ -128,7 +128,9 @@ podpis ZAREP založený na kvalifikovaném certifikátu. V žádosti výslovně 
 vložení **identifikátoru klienta MPSV (IK MPSV)**; nevymýšlej ani nezadávej
 vlastní identifikátor. Poskytovatel jej ověří nebo zajistí v rámci vydání.
 Finanční správa uvádí, že IK MPSV není v certifikátu automaticky a jeho vložení
-je bezplatné.
+je bezplatné. Její novější podpora připouští i kvalifikovaný certifikát bez IK
+MPSV, starší technické požadavky ZAREP ho ale výslovně žádají. Bezpečnější je
+proto o něj požádat. Když ho MyÚčto v certifikátu nerozpozná, upozorní na to.
 
 Praktický postup:
 
@@ -177,6 +179,14 @@ jednat za každou firmu. Jednatel může podepisovat za společnost v rozsahu sv
 oprávnění; účetní nebo daňový poradce musí mít odpovídající pověření či plnou
 moc. Certifikát se u finančního úřadu předem samostatně neregistruje, rozhodující
 je identita z podpisu a existující právní oprávnění zastupovat daňový subjekt.
+
+Účetní, která podává za více firem, vystačí s jedním certifikátem. Plnou moc
+ale musí mít uplatněnou u příslušného finančního úřadu **každé** zastupované
+firmy, a to nejpozději v okamžiku podání. Plná moc uplatněná u jednoho
+finančního úřadu se ostatním nepředává. V MyÚčtu certifikát nahraje jednou a
+v každé firmě ho povolí (viz postup níže). Pro podání mezd na ČSSZ platí jiná
+pravidla, včetně registrace certifikátu, viz
+[Podání přes VREP: zmocnění a registrace certifikátu](85_Podani_a_hlaseni.md#8521-podani-pres-vrep-zmocneni-a-registrace-certifikatu).
 
 Správce instalace musí před použitím nastavit samostatný
 `app.secret_encryption_key`. Bez něj MyÚčto soukromý klíč nepřijme. P12/PFX i
@@ -342,7 +352,7 @@ zastoupení, funkci nebo plné moci.
 
 1. Dokonči účetní nebo evidenční kontrolu daného období.
 2. Vygeneruj XML a ověř, že interní kontrola nehlásí blokující chybu.
-3. V **Nástroje → EPO podání a archív** najdi snapshot a zkontroluj období, formulář,
+3. V **Daně → EPO podání a archív** najdi snapshot a zkontroluj období, formulář,
    variantu, otisk a stav **Validní**.
 4. Klikni **Otevřít a podat v EPO**. MyÚčto odešle přesný snapshot na oficiální
    endpoint finanční správy a otevře předvyplněný formulář. Toto předání samo

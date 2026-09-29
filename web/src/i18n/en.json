@@ -7183,7 +7183,7 @@
       },
       "signing": {
         "title": "ČSSZ signing certificate",
-        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here — the application has a single vault, under System → Electronic signatures.",
+        "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here. The application has a single vault: upload the certificate and enable it for the company under Taxes → EPO filing & archive → EPO certificates.",
         "load_failed": "The signing certificate settings could not be loaded.",
         "state_unknown": "Until the request succeeds the system does not know whether a certificate is selected — please do not read this empty screen as proof that none is configured.",
         "storage_unavailable": "The storage for the certificate choice is not available yet — the database migration has not run. The choice cannot be saved right now.",
@@ -7206,7 +7206,7 @@
         },
         "picker": {
           "title": "Certificate choice",
-          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under System → Electronic signatures, and enabled for this company there as well.",
+          "description": "The list contains the vault certificates available to you. A new certificate is uploaded under Taxes → EPO filing & archive → EPO certificates, and enabled for this company there as well.",
           "label": "Certificate from the vault",
           "placeholder": "Select a certificate",
           "no_results": "No matching certificate",
@@ -7216,8 +7216,8 @@
           "option_not_enabled": "Not enabled for this company"
         },
         "vault": {
-          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application — System → Electronic signatures.",
-          "open": "Open electronic signatures"
+          "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application, under Taxes → EPO filing & archive → EPO certificates.",
+          "open": "Open EPO filing & archive"
         },
         "certificate": {
           "subject": "Issued to",
@@ -7237,7 +7237,7 @@
         "serial": {
           "label": "Serial number registered with ČSSZ",
           "placeholder": "Number from the authorisation notice",
-          "hint": "You will find the number on the “Oznámení o pověření” form. ČSSZ prints it in decimal while the certificate carries it in hexadecimal — compare it against both forms shown above. Separators (colons, spaces) do not matter.",
+          "hint": "The number is on the “Oznámení o zmocnění k úkonům a službám ČSSZ a Úřadu práce ČR (pro zmocněnou osobu)” form you used to register the certificate with OSSZ. ČSSZ prints it in decimal while the certificate carries it in hexadecimal — compare it against both forms shown above. Separators (colons, spaces) do not matter.",
           "hint_optional": "If the numbers do not match, the save is rejected: ČSSZ would reject a submission signed with such a certificate. The field may be left empty, but then nobody verifies the match against the registration."
         },
         "step_up": {
@@ -24393,7 +24393,7 @@
       "tab_archiv": "Filing archive",
       "tab_rekonciliace": "Reconciliation",
       "tab_evidence": "Records (§ 110f)",
-      "archive_note": "Every OSS XML download is archived with its SHA-256 digest and the underlying data it was built from. An archived file proves what was generated — not that it was filed. Record the actual filing in Tools → EPO filings and archive.",
+      "archive_note": "Every OSS XML download is archived with its SHA-256 digest and the underlying data it was built from. An archived file proves what was generated — not that it was filed. Record the actual filing in Taxes → EPO filing & archive.",
       "archive_empty": "No OSS filing has been archived yet.",
       "archive_generated_at": "Generated",
       "archive_status": "Status",

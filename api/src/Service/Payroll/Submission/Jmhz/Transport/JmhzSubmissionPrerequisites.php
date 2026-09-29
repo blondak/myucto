@@ -46,12 +46,11 @@ final readonly class JmhzSubmissionPrerequisites
             [
                 'code' => 'cssz_power_of_attorney',
                 'title' => 'Registrované zmocnění podávat za zaměstnavatele',
-                'detail' => 'Na místně příslušné správě sociálního zabezpečení musí být'
-                    . ' registrovaná plná moc s uvedeným rozsahem zmocnění. Nejrychleji'
-                    . ' přes službu Správa plných mocí na ePortálu ČSSZ, kterou má'
-                    . ' k dispozici oprávněná osoba zaměstnavatele (typicky statutár).'
-                    . ' Alternativou je formulář Oznámení o zmocnění k úkonům a službám'
-                    . ' ČSSZ a Úřadu práce ČR podaný na ÚSSZ.',
+                'detail' => 'U ČSSZ musí být registrovaná plná moc s rozsahem JMHZ'
+                    . ' (nebo ke všem úkonům). Nejrychleji přes službu Správa plných mocí'
+                    . ' na ePortálu ČSSZ, kterou má k dispozici oprávněná osoba'
+                    . ' zaměstnavatele (typicky statutár). Alternativou je tiskopis Plná'
+                    . ' moc ke službám a tiskopisům ČSSZ.',
             ],
             [
                 'code' => 'cssz_variable_symbol',
@@ -67,8 +66,10 @@ final readonly class JmhzSubmissionPrerequisites
                 'title' => 'Kvalifikovaný certifikát zmocněné osoby registrovaný u ČSSZ',
                 'detail' => 'VREP ověřuje podávajícího podle certifikátu, kterým je podání'
                     . ' podepsané. Certifikát (nebo jeho sériové číslo a vydavatel) musí'
-                    . ' být u ČSSZ registrovaný předem — u účetní nebo daňového poradce'
-                    . ' se registrace zajišťuje spolu se zmocněním.',
+                    . ' být u ČSSZ registrovaný předem. Zmocněnec ho registruje tiskopisem'
+                    . ' Oznámení o zmocnění k úkonům a službám ČSSZ a Úřadu práce ČR'
+                    . ' (pro zmocněnou osobu); při zastupování více firem stačí jedna'
+                    . ' registrace na OSSZ příslušné zmocněnci.',
             ]],
             'isds' => [[
                 'code' => 'cssz_data_box_registration',

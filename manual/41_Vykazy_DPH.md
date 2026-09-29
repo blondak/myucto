@@ -134,7 +134,7 @@ Pole sestavitele jsou relevantní jen pokud **přiznání za tebe podává jiná
 
 1. **Vygeneruj XML** v aplikaci: `Daně → DPH přiznání` (resp. KH/SH), vyber období
    a klikni **Stáhnout XML**.
-2. V **Nástroje → EPO podání a archív** zkontroluj lokální validaci a otevři detail
+2. V **Daně → EPO podání a archív** zkontroluj lokální validaci a otevři detail
    příslušného snapshotu.
 3. Volitelně **zkontroluj v textovém editoru**:
    - **VetaD** — ověř `rok`, `mesic`/`ctvrt`, `typ_platce`, `c_okec`, `d_poddp`
@@ -149,7 +149,7 @@ Pole sestavitele jsou relevantní jen pokud **přiznání za tebe podává jiná
 6. **Stáhni odeslané XML a potvrzení**. Přetáhni je zpět do detailu podání;
    aplikace je uloží do Dokumentů ve složce daného období a dostupné potvrzení ověří.
 
-Stažení XML vytvoří v **Nástroje → EPO podání a archív** záznam se stavem staženo. Tento stav
+Stažení XML vytvoří v **Daně → EPO podání a archív** záznam se stavem staženo. Tento stav
 neznamená, že soubor odešel správci daně. Backend rozlišuje rozpracované, vygenerované,
 stažené a odeslané podání; teprve explicitní označení jako **odeslané** může sloužit
 jako základ pro dodatečné přiznání a uzamknout skončené období DPH/KH. Po nahrání
@@ -262,7 +262,7 @@ s přiznáním k DPH srovnat** — podrobně
 - **Month / Year picker** — pro měsíční; **Q1/Q2/Q3/Q4 picker** pro kvartální
 - **Typ podání** — Řádné / Opravné / Dodatečné (viz [níže](#typ-podani-radne-opravne-dodatecne))
 - **Stáhnout XML** — vytvoří XML formuláře DPHDP3 pro EPO portál a po dokončení
-  stažení otevře **Nástroje → EPO podání a archív**. Stejně se chová export
+  stažení otevře **Daně → EPO podání a archív**. Stejně se chová export
   kontrolního a souhrnného hlášení.
 
 #### Typ podání — řádné, opravné, dodatečné

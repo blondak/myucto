@@ -242,7 +242,7 @@ blížící se daňové termíny aktuálního dodavatele do jednoho seznamu:
   OSVČ v paušálním režimu se nezobrazuje (nepodává DPFO).
 
 Každá položka nese odznak **Podáno** / **Nepodáno**, odvozený z toho, zda pro
-dané období existuje archivované podání (menu **Nástroje → EPO podání a archív**) —
+dané období existuje archivované podání (menu **Daně → EPO podání a archív**) —
 generování EPO XML se tam ukládá automaticky. U záloh odznak místo toho
 ukazuje **Zaplaceno** / **Splatné**. Klik na položku otevře příslušný výkaz.
 

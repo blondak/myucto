@@ -7183,7 +7183,7 @@
       },
       "signing": {
         "title": "Podpisový certifikát ČSSZ",
-        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají — trezor je v aplikaci jeden, v Systém → Elektronické podpisy.",
+        "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají. Trezor je v aplikaci jeden: certifikát nahrajete a pro firmu povolíte v Daně → EPO podání a archív → Certifikáty EPO.",
         "load_failed": "Nastavení podpisového certifikátu se nepodařilo načíst.",
         "state_unknown": "Dokud se načtení nepovede, systém neví, jestli je certifikát zvolený — neberte prosím prázdnou obrazovku jako důkaz, že nastavený není.",
         "storage_unavailable": "Úložiště volby certifikátu zatím není k dispozici — neproběhla migrace databáze. Volbu teď uložit nelze.",
@@ -7206,7 +7206,7 @@
         },
         "picker": {
           "title": "Volba certifikátu",
-          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → Elektronické podpisy a tam se také povoluje pro tuhle firmu.",
+          "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Daně → EPO podání a archív → Certifikáty EPO a tam se také povoluje pro tuhle firmu.",
           "label": "Certifikát z trezoru",
           "placeholder": "Vyberte certifikát",
           "no_results": "Žádný odpovídající certifikát",
@@ -7216,8 +7216,8 @@
           "option_not_enabled": "Pro tuhle firmu není povolený"
         },
         "vault": {
-          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci — v Systém → Elektronické podpisy.",
-          "open": "Otevřít elektronické podpisy"
+          "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci, v Daně → EPO podání a archív → Certifikáty EPO.",
+          "open": "Otevřít EPO podání a archív"
         },
         "certificate": {
           "subject": "Vydán pro",
@@ -7236,8 +7236,8 @@
         },
         "serial": {
           "label": "Sériové číslo registrované u ČSSZ",
-          "placeholder": "Číslo z oznámení o pověření",
-          "hint": "Číslo najdete na formuláři „Oznámení o pověření“. ČSSZ ho tiskne decimálně, certifikát ho nese hexadecimálně — porovnejte ho s oběma tvary vypsanými výše. Oddělovače (dvojtečky, mezery) nevadí.",
+          "placeholder": "Číslo z oznámení o zmocnění",
+          "hint": "Číslo je na formuláři „Oznámení o zmocnění k úkonům a službám ČSSZ a Úřadu práce ČR (pro zmocněnou osobu)“, kterým jste certifikát registrovali u OSSZ. ČSSZ ho tiskne decimálně, certifikát ho nese hexadecimálně — porovnejte ho s oběma tvary vypsanými výše. Oddělovače (dvojtečky, mezery) nevadí.",
           "hint_optional": "Když se čísla neshodují, uložení se odmítne: podání podepsané takovým certifikátem by ČSSZ zamítla. Pole lze nechat prázdné, pak ale shodu s registrací nikdo neověří."
         },
         "step_up": {
@@ -24393,7 +24393,7 @@
       "tab_archiv": "Archiv podání",
       "tab_rekonciliace": "Rekonciliace",
       "tab_evidence": "Evidence § 110f",
-      "archive_note": "Každé stažení OSS XML se archivuje se svým SHA-256 otiskem a podkladem, ze kterého vzniklo. Archivovaný soubor prokazuje, co vzniklo — ne že bylo podáno. Podání doložte v Nástroje → EPO podání a archiv.",
+      "archive_note": "Každé stažení OSS XML se archivuje se svým SHA-256 otiskem a podkladem, ze kterého vzniklo. Archivovaný soubor prokazuje, co vzniklo — ne že bylo podáno. Podání doložte v Daně → EPO podání a archív.",
       "archive_empty": "Zatím není archivováno žádné OSS podání.",
       "archive_generated_at": "Vygenerováno",
       "archive_status": "Stav",

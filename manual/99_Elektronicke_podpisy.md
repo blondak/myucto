@@ -99,12 +99,12 @@ U vlastního profilu jsou dostupné dva zdroje:
 
 | Zdroj | Kdy použít |
 |---|---|
-| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru v **Nástroje → EPO podání a archív**. PFX ani heslo se neukládají podruhé. |
+| **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru v **Daně → EPO podání a archív**. PFX ani heslo se neukládají podruhé. |
 | **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechceš používat pro EPO. |
 
 ### 99.4.1 Použití osobního certifikátu EPO
 
-1. V **Nástroje → EPO podání a archív** otevři **Certifikáty EPO**, nahraj P12/PFX
+1. V **Daně → EPO podání a archív** otevři **Certifikáty EPO**, nahraj P12/PFX
    a povol ho pro aktuální firmu.
 2. Založ nebo uprav profil s vlastníkem **Můj profil**.
 3. V části **Certifikát profilu** zvol **Použít osobní certifikát EPO** a vyber

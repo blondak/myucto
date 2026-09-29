@@ -89,7 +89,7 @@ chybějící kurz operaci zablokují a vysvětlí proč. Detail:
 ### EPO podání a archív
 
 Každé vygenerované XML se uloží jako neměnný snapshot s otiskem, výsledkem
-validace a auditní historií. V **Nástroje → EPO podání a archív** jsou dostupné dvě
+validace a auditní historií. V **Daně → EPO podání a archív** jsou dostupné dvě
 cesty:
 
 - **Asistované podání** předá archivovaný XML snapshot do předvyplněného
