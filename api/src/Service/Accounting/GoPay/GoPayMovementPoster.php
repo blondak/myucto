@@ -335,8 +335,13 @@ final class GoPayMovementPoster
         return preg_match('/(?:^|\R)\s*Objednávka:\s*' . preg_quote($orderId, '/') . '\s*(?:\R|$)/iu', $note) === 1;
     }
 
-    /** @param array<string,mixed> $document */
-    private function documentHasOrder(array $document, string $orderId): bool
+    /**
+     * Doklad nese číslo objednávky: přesně v čísle objednávky dodavatele, u historických
+     * dokladů bez něj na řádku „Objednávka: …" v poznámce.
+     *
+     * @param array<string,mixed> $document
+     */
+    public function documentHasOrder(array $document, string $orderId): bool
     {
         $stored = trim((string) ($document['supplier_order_number'] ?? ''));
         if ($stored !== '') {

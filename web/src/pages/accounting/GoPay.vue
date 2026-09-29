@@ -375,7 +375,7 @@ onMounted(load)
         <div class="mt-4 flex flex-wrap items-end gap-3">
           <label class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
             {{ t('gopay.import.file') }}
-            <input ref="xmlFileInput" class="form-input mt-1 block w-full" type="file" accept=".xml,application/xml,text/xml" :disabled="importing || !canImport" @change="chooseXmlFile">
+            <input ref="xmlFileInput" class="form-input mt-1 block w-full" type="file" accept=".xml,.xlsx,.xls,application/xml,text/xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" :disabled="importing || !canImport" @change="chooseXmlFile">
           </label>
           <label class="min-w-[16rem] flex-1 text-sm font-medium text-neutral-700">
             {{ t('gopay.import.pdf_file') }}
@@ -488,9 +488,9 @@ onMounted(load)
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.eye" /></svg>
                       {{ selected?.id === clearing.id ? t('gopay.close') : t('common.detail') }}
                     </button>
-                    <button type="button" :class="btnOutlineSm('neutral')" @click="downloadFile(gopayApi.downloadUrl(clearing.id), 'gopay.xml')">
+                    <button type="button" :class="btnOutlineSm('neutral')" @click="downloadFile(gopayApi.downloadUrl(clearing.id), clearing.file_name || `gopay.${clearing.file_format}`)">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
-                      XML
+                      {{ clearing.file_format.toUpperCase() }}
                     </button>
                     <button v-if="clearing.has_pdf" type="button" :class="btnOutlineSm('neutral')" @click="downloadFile(gopayApi.pdfDownloadUrl(clearing.id), 'gopay.pdf')">
                       <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>

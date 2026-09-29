@@ -155,15 +155,15 @@ final class GoPayAction
         }
         $file = $request->getUploadedFiles()['file'] ?? null;
         if ($file === null || $file->getError() !== UPLOAD_ERR_OK) {
-            return Json::error($response, 'gopay.no_file', 'Vyber GoPay XML soubor.', 400);
+            return Json::error($response, 'gopay.no_file', 'Vyber GoPay XML vyúčtování nebo výpis XLS/XLSX.', 400);
         }
         if (($file->getSize() ?? 0) > 2_097_152) {
-            return Json::error($response, 'gopay.invalid_file_size', 'GoPay XML překračuje limit 2 MB.', 413);
+            return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 2 MB.', 413);
         }
         try {
             $content = $file->getStream()->getContents();
             if (strlen($content) > 2_097_152) {
-                return Json::error($response, 'gopay.invalid_file_size', 'GoPay XML překračuje limit 2 MB.', 413);
+                return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 2 MB.', 413);
             }
             $uploadedPdf = $request->getUploadedFiles()['pdf'] ?? null;
             $pdf = $uploadedPdf instanceof UploadedFileInterface
@@ -172,7 +172,7 @@ final class GoPayAction
             $result = $this->service->import(
                 $this->currentSupplierId($request),
                 $this->userId($request),
-                $file->getClientFilename() ?: 'GoPay-clearing.xml',
+                $file->getClientFilename() ?: '',
                 $content,
                 $pdf,
             );
@@ -238,10 +238,10 @@ final class GoPayAction
     {
         try {
             $file = $this->service->download($this->currentSupplierId($request), (int) ($args['id'] ?? 0));
-            $safeName = preg_replace('/[\x00-\x1f"\\\\]/', '_', $file['file_name']) ?: 'GoPay-clearing.xml';
+            $safeName = preg_replace('/[\x00-\x1f"\\\\]/', '_', $file['file_name']) ?: 'GoPay-clearing.' . $file['file_format'];
             $response->getBody()->write($file['content']);
             return $response
-                ->withHeader('Content-Type', 'application/xml; charset=UTF-8')
+                ->withHeader('Content-Type', $file['content_type'])
                 ->withHeader('Content-Disposition', 'attachment; filename="' . $safeName . '"')
                 ->withHeader('Content-Length', (string) strlen($file['content']))
                 ->withHeader('X-Content-Type-Options', 'nosniff')

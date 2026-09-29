@@ -20,6 +20,7 @@ final class GoPayService
     public function __construct(
         private readonly Connection $db,
         private readonly GoPayClearingXmlParser $parser,
+        private readonly GoPayStatementXlsxParser $statementParser,
         private readonly BankPostingService $bankPosting,
         private readonly JournalEntryRepository $journal,
         private readonly InvoicePaymentService $invoicePayments,
@@ -206,7 +207,7 @@ final class GoPayService
         return $result;
     }
 
-    /** @return array{content:string,file_name:string} */
+    /** @return array{content:string,file_name:string,file_format:string,content_type:string} */
     public function download(int $supplierId, int $clearingId): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT file_content,file_name FROM gopay_clearings WHERE id=? AND supplier_id=?');
@@ -215,7 +216,24 @@ final class GoPayService
         if (!is_array($row)) {
             throw new GoPayException('not_found', 'GoPay vyúčtování nebylo nalezeno.', 404);
         }
-        return ['content' => (string) $row['file_content'], 'file_name' => (string) $row['file_name']];
+        $format = self::fileFormat((string) $row['file_name']);
+        return [
+            'content' => (string) $row['file_content'],
+            'file_name' => (string) $row['file_name'],
+            'file_format' => $format,
+            'content_type' => match ($format) {
+                'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'xls' => 'application/vnd.ms-excel',
+                default => 'application/xml; charset=UTF-8',
+            },
+        ];
+    }
+
+    /** Formát původního souboru podle přípony uloženého názvu: xml (Clearing), xlsx/xls (výpis). */
+    public static function fileFormat(string $fileName): string
+    {
+        $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        return in_array($extension, ['xlsx', 'xls'], true) ? $extension : 'xml';
     }
 
     /** @return array{content:string,file_name:string} */
@@ -396,10 +414,14 @@ final class GoPayService
     public function import(int $supplierId, ?int $userId, string $fileName, string $xml, ?array $pdf = null): array
     {
         $this->assertDoubleEntry($supplierId);
-        $parsed = $this->parser->parse($xml);
+        $statement = GoPayStatementXlsxParser::isSpreadsheet($xml);
+        $parsed = $statement ? $this->statementParser->parse($xml) : $this->parser->parse($xml);
         $this->requireSettings($supplierId, $parsed['currency']);
-        $hash = hash('sha256', $xml);
-        $fileName = $this->safeFileName($fileName);
+        // Výpis stažený znovu má jiné bajty (datum vytvoření, zip), ale stejný obsah.
+        $hash = $statement
+            ? hash('sha256', json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))
+            : hash('sha256', $xml);
+        $fileName = $this->safeFileName($fileName, $parsed['file_format'] ?? 'xml');
 
         $existing = $this->findExistingClearing($supplierId, $parsed['clearing_id'], $hash);
         if ($existing !== null) {
@@ -413,6 +435,20 @@ final class GoPayService
             }
             $this->process($supplierId, $id, $userId);
             return ['duplicate' => true, 'clearing' => $this->detail($supplierId, $id)];
+        }
+
+        $movements = $this->withoutRecordedMovements($supplierId, $parsed['movements']);
+        if ($parsed['movements'] !== [] && $movements === []) {
+            throw new GoPayException(
+                'already_recorded',
+                'Všechny pohyby souboru už jsou evidované v dříve načteném vyúčtování nebo výpisu GoPay.',
+                409,
+            );
+        }
+        if ($statement) {
+            $parsed = GoPayStatementXlsxParser::summarize(
+                $parsed['clearing_id'], $parsed['cleared_from'], $parsed['cleared_to'], $movements,
+            ) + $parsed;
         }
 
         $pdo = $this->db->pdo();
@@ -437,7 +473,7 @@ final class GoPayService
                 $pdf !== null ? hash('sha256', $pdf['content']) : null,
                 $pdf !== null ? strlen($pdf['content']) : null,
                 $pdf['content'] ?? null,
-                count($parsed['movements']), $userId,
+                count($movements), $userId,
             ]);
             $clearingPk = (int) $pdo->lastInsertId();
             $insertMovement = $pdo->prepare(
@@ -446,7 +482,7 @@ final class GoPayService
                      payment_session_id,account_movement_id,payment_channel,counterparty_name)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?)'
             );
-            foreach ($parsed['movements'] as $movement) {
+            foreach ($movements as $movement) {
                 $insertMovement->execute([
                     $supplierId, $clearingPk, $movement['external_id'], $movement['movement_type'],
                     $movement['performed_on'], $movement['amount'], $movement['order_id'],
@@ -648,7 +684,7 @@ final class GoPayService
             if (!is_array($clearing)) {
                 throw new GoPayException('not_found', 'GoPay vyúčtování nebylo nalezeno.', 404);
             }
-            if ((float) $clearing['amount_sent'] <= 0.0) {
+            if ((float) $clearing['amount_sent'] <= 0.0 || !$this->ownsPayout($supplierId, $clearingId)) {
                 $pdo->prepare('UPDATE gopay_clearings SET payout_issue_code=NULL,payout_issue_message=NULL WHERE id=? AND supplier_id=?')
                     ->execute([$clearingId, $supplierId]);
                 $this->commitUnit($pdo, $ownTx, 'gopay_payout');
@@ -805,6 +841,9 @@ final class GoPayService
                FROM gopay_clearings gc
                JOIN gopay_settings gs ON gs.supplier_id=gc.supplier_id AND gs.currency=gc.currency
               WHERE gc.supplier_id=? AND gc.amount_sent>0
+                AND EXISTS(SELECT 1 FROM gopay_movements gm
+                            WHERE gm.clearing_id=gc.id AND gm.supplier_id=gc.supplier_id
+                              AND gm.movement_type="payout")
                 AND ABS(gc.amount_sent-?)<=0.005 AND gc.currency=?
                 AND gc.performed_on BETWEEN DATE_SUB(?,INTERVAL 14 DAY) AND DATE_ADD(?,INTERVAL 14 DAY)
                 AND (gc.bank_transaction_id IS NULL OR gc.bank_transaction_id=?)
@@ -876,6 +915,90 @@ final class GoPayService
         }
     }
 
+    /**
+     * Výplatu clearingu páruje s bankou jen záznam, který drží její pohyb. Výplatu,
+     * kterou už dříve přinesl jiný soubor (XML clearingu i výpis ji nesou pod stejným
+     * identifikátorem), import do nového záznamu nezaloží.
+     */
+    private function ownsPayout(int $supplierId, int $clearingId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM gopay_movements WHERE clearing_id=? AND supplier_id=? AND movement_type="payout" LIMIT 1'
+        );
+        $stmt->execute([$clearingId, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Pohyby, které už eviduje dříve načtené vyúčtování nebo výpis, se znovu nezakládají.
+     * XML clearingu a výpis účtu se překrývají: výpis nemá ID pohybu ani GoPay ID
+     * platby, proto se kromě identifikátoru a GoPay ID porovnává typ, číslo objednávky,
+     * částka a datum (±3 dny). Každý evidovaný pohyb vyřadí nejvýše jeden nový.
+     *
+     * @param list<array<string,?string>> $movements
+     * @return list<array<string,?string>>
+     */
+    private function withoutRecordedMovements(int $supplierId, array $movements): array
+    {
+        if ($movements === []) {
+            return [];
+        }
+        $pdo = $this->db->pdo();
+        $externalIds = array_values(array_unique(array_map(static fn (array $m): string => (string) $m['external_id'], $movements)));
+        $known = $pdo->prepare(
+            'SELECT external_id FROM gopay_movements
+              WHERE supplier_id=? AND external_id IN (' . implode(',', array_fill(0, count($externalIds), '?')) . ')'
+        );
+        $known->execute(array_merge([$supplierId], $externalIds));
+        $knownIds = array_fill_keys($known->fetchAll(PDO::FETCH_COLUMN), true);
+
+        $dates = array_map(static fn (array $m): string => (string) $m['performed_on'], $movements);
+        $recorded = $pdo->prepare(
+            'SELECT id,movement_type,performed_on,amount,order_id,payment_session_id
+               FROM gopay_movements
+              WHERE supplier_id=? AND clearing_id IS NOT NULL
+                AND movement_type IN ("credit","storno","storno_fee")
+                AND performed_on BETWEEN DATE_SUB(?,INTERVAL 3 DAY) AND DATE_ADD(?,INTERVAL 3 DAY)
+              ORDER BY id'
+        );
+        $recorded->execute([$supplierId, min($dates), max($dates)]);
+        $candidates = $recorded->fetchAll(PDO::FETCH_ASSOC);
+        $used = [];
+
+        $out = [];
+        foreach ($movements as $movement) {
+            if (isset($knownIds[(string) $movement['external_id']])) {
+                continue;
+            }
+            $match = null;
+            foreach ($candidates as $index => $candidate) {
+                if (isset($used[$index]) || $candidate['movement_type'] !== $movement['movement_type']) {
+                    continue;
+                }
+                $session = (string) ($movement['payment_session_id'] ?? '');
+                if ($session !== '' && $session === (string) ($candidate['payment_session_id'] ?? '')) {
+                    $match = $index;
+                    break;
+                }
+                $order = trim((string) ($movement['order_id'] ?? ''));
+                $days = abs((int) (new \DateTimeImmutable((string) $candidate['performed_on']))
+                    ->diff(new \DateTimeImmutable((string) $movement['performed_on']))->format('%r%a'));
+                if ($order !== '' && strcasecmp($order, trim((string) ($candidate['order_id'] ?? ''))) === 0
+                    && number_format((float) $candidate['amount'], 2, '.', '') === number_format((float) $movement['amount'], 2, '.', '')
+                    && $days <= 3) {
+                    $match = $index;
+                    break;
+                }
+            }
+            if ($match !== null) {
+                $used[$match] = true;
+                continue;
+            }
+            $out[] = $movement;
+        }
+        return $out;
+    }
+
     /** @return array<string,mixed>|null */
     private function findExistingClearing(int $supplierId, string $clearingId, string $hash): ?array
     {
@@ -921,6 +1044,9 @@ final class GoPayService
                 $row[$field] = $row[$field] !== null ? (float) $row[$field] : null;
             }
         }
+        if (array_key_exists('file_name', $row)) {
+            $row['file_format'] = self::fileFormat((string) $row['file_name']);
+        }
         $row['has_pdf'] = array_key_exists('has_pdf', $row)
             ? (bool) $row['has_pdf']
             : $this->hasContent($row['pdf_content'] ?? null);
@@ -937,12 +1063,12 @@ final class GoPayService
         return $currency;
     }
 
-    private function safeFileName(string $fileName): string
+    private function safeFileName(string $fileName, string $format): string
     {
         $parts = preg_split('~[\\\\/]~', $fileName) ?: [];
         $name = trim((string) end($parts));
-        if ($name === '' || !str_ends_with(strtolower($name), '.xml')) {
-            $name = 'GoPay-clearing.xml';
+        if ($name === '' || !str_ends_with(strtolower($name), '.' . $format)) {
+            $name = $format === 'xml' ? 'GoPay-clearing.xml' : 'GoPay-vypis.' . $format;
         }
         return mb_substr($name, 0, 255);
     }

@@ -56,6 +56,7 @@ export interface GoPayClearing {
   amount_transfer: number
   amount_sent: number
   file_name: string
+  file_format: 'xml' | 'xlsx' | 'xls'
   has_pdf: boolean
   pdf_name: string | null
   pdf_size_bytes: number | null

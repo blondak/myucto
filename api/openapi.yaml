@@ -12930,7 +12930,7 @@ paths:
   /api/v1/accounting/gopay/clearings:
     get:
       tags: [Accounting]
-      summary: Seznam importovaných GoPay XML vyúčtování
+      summary: Seznam importovaných GoPay vyúčtování (XML) a výpisů (XLS/XLSX)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -12948,8 +12948,8 @@ paths:
   /api/v1/accounting/gopay/clearings/import:
     post:
       tags: [Accounting]
-      summary: Importuje a automaticky zaúčtuje GoPay Clearing XML
-      description: Idempotentní podle clearing ID a SHA-256 obsahu. Dostupné pouze z přihlášeného webového rozhraní.
+      summary: Importuje a automaticky zaúčtuje GoPay Clearing XML nebo výpis z obchodního účtu XLS/XLSX
+      description: Idempotentní podle clearing ID a SHA-256 obsahu (u výpisu SHA-256 načtených údajů). Pohyby evidované dříve načteným vyúčtováním nebo výpisem se znovu nezakládají; když jsou evidované všechny, vrací 409 gopay.already_recorded. Dostupné pouze z přihlášeného webového rozhraní.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -12960,7 +12960,7 @@ paths:
               type: object
               required: [file]
               properties:
-                file: { type: string, format: binary, description: GoPay Clearing XML, nejvýše 2 MB }
+                file: { type: string, format: binary, description: 'GoPay Clearing XML nebo výpis z obchodního účtu XLS/XLSX, nejvýše 2 MB' }
                 pdf: { type: string, format: binary, description: Volitelné původní PDF vyúčtování, nejvýše 10 MiB }
       responses:
         '200': { description: Vyúčtování už existovalo a bylo znovu zpracováno, content: { application/json: { schema: { $ref: '#/components/schemas/GoPayImportResult' } } } }
@@ -13005,12 +13005,17 @@ paths:
   /api/v1/accounting/gopay/clearings/{id}/download:
     get:
       tags: [Accounting]
-      summary: Stáhne původní GoPay Clearing XML
+      summary: Stáhne původní soubor vyúčtování (XML) nebo výpisu (XLS/XLSX)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
       responses:
-        '200': { description: XML, content: { application/xml: { schema: { type: string } } } }
+        '200':
+          description: Původní soubor ve formátu podle file_format
+          content:
+            application/xml: { schema: { type: string } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+            application/vnd.ms-excel: { schema: { type: string, format: binary } }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/accounting/gopay/clearings/{id}/pdf:
@@ -25355,6 +25360,7 @@ components:
         amount_transfer: { type: number, format: double }
         amount_sent: { type: number, format: double }
         file_name: { type: string }
+        file_format: { type: string, enum: [xml, xlsx, xls], description: 'xml = GoPay Clearing XML, xlsx/xls = výpis z obchodního účtu' }
         has_pdf: { type: boolean }
         pdf_name: { type: [string, "null"] }
         pdf_size_bytes: { type: [integer, "null"], minimum: 0 }

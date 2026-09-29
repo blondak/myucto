@@ -35,7 +35,7 @@ use ZipArchive;
  * Struktura ZIPu:
  *   Vystavene-faktury/PDF|ISDOC/…   Prijate-faktury/PDF|ISDOC/…
  *   Vypisy-z-uctu/PDF|GPC/…         Kniha-DPH/kniha-dph-YYYY-MM.pdf
- *   GoPay/PDF|XML/…                  Kontrolni-hlaseni/dphkh1-…xml
+ *   GoPay/PDF|XML|Vypisy/…           Kontrolni-hlaseni/dphkh1-…xml
  *   README.txt
  *   (kvartálně je Kniha DPH per měsíc — tři PDF.)
  */
@@ -315,8 +315,10 @@ final class MonthlyExportService
                         $bump('GoPay vyúčtování - PDF');
                     }
                     if (in_array('gopay_xml', $parts, true) && $this->hasContent($clearing['file_content'] ?? null)) {
-                        $name = $this->gopayFilename((string) ($clearing['file_name'] ?? ''), $clearingNumber, $id, 'xml');
-                        $zip->addFromString("GoPay/XML/{$name}", (string) $clearing['file_content']);
+                        $format = \MyInvoice\Service\Accounting\GoPay\GoPayService::fileFormat((string) ($clearing['file_name'] ?? ''));
+                        $name = $this->gopayFilename((string) ($clearing['file_name'] ?? ''), $clearingNumber, $id, $format);
+                        $folder = $format === 'xml' ? 'XML' : 'Vypisy';
+                        $zip->addFromString("GoPay/{$folder}/{$name}", (string) $clearing['file_content']);
                         $added++; $summary['gopay_xml'] = ($summary['gopay_xml'] ?? 0) + 1;
                         $bump('GoPay vyúčtování - XML');
                     }

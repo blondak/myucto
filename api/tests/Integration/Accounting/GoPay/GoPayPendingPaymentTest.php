@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Tests\Support\GoPayStatementFixture;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -193,6 +194,89 @@ final class GoPayPendingPaymentTest extends TestCase
         self::assertSame('processed', $reimport['clearing']['status']);
         self::assertSame(5, $this->goPayEntryCount());
         self::assertSame((int) $reimport['clearing']['id'], (int) $this->pendingMovement($invoiceId)['clearing_id']);
+    }
+
+    /**
+     * Výpis účtu (XLSX) nemá GoPay ID platby: čekající úhradu převezme podle čísla
+     * objednávky a částky. Výplata a poplatek clearingu přijdou až výpisem dalšího
+     * období a XML téhož clearingu už nic nezdvojí.
+     */
+    public function testStatementXlsxAdoptsPendingPaymentAndPayoutComesWithNextStatement(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payments->recordPayment($invoiceId, 1000, self::YEAR . '-01-15', [
+            'bank_reference' => 'GOPAY:' . self::SESSION,
+            'source' => 'manual',
+            'created_by' => $this->userId,
+        ]);
+        $pending = $this->pendingMovement($invoiceId);
+        $this->bankPayout();
+
+        $january = $this->service->import($this->supplierId, $this->userId, 'GOPAY-leden.xlsx', $this->statementJanuary());
+        self::assertFalse($january['duplicate']);
+        self::assertSame('xlsx', $january['clearing']['file_format']);
+        self::assertSame('processed', $january['clearing']['status']);
+        self::assertSame(3, $january['clearing']['posted_count']);
+        self::assertSame(0.0, $january['clearing']['amount_sent']);
+        $adopted = $this->pendingMovement($invoiceId);
+        self::assertSame($pending['id'], $adopted['id']);
+        self::assertSame((int) $january['clearing']['id'], (int) $adopted['clearing_id']);
+        self::assertSame($pending['journal_entry_id'], $adopted['journal_entry_id']);
+        self::assertSame(3, $this->goPayEntryCount());
+
+        $again = $this->service->import($this->supplierId, $this->userId, 'GOPAY-leden-znovu.xlsx', $this->statementJanuary());
+        self::assertTrue($again['duplicate']);
+        self::assertSame(3, $this->goPayEntryCount());
+
+        $february = $this->service->import($this->supplierId, $this->userId, 'GOPAY-unor.xlsx', $this->statementFebruary());
+        self::assertSame('processed', $february['clearing']['status']);
+        self::assertSame('20970001', $february['clearing']['variable_symbol']);
+        self::assertSame(875.0, $february['clearing']['amount_sent']);
+        self::assertNotNull($february['clearing']['bank_transaction_id']);
+        self::assertSame(5, $this->goPayEntryCount());
+
+        try {
+            $this->service->import($this->supplierId, $this->userId, 'clearing.xml', $this->xmlWithClearingId());
+            self::fail('XML clearingu pokrytého výpisy nesmí nic zaúčtovat podruhé.');
+        } catch (GoPayException $e) {
+            self::assertSame('already_recorded', $e->errorCode);
+        }
+        self::assertSame(5, $this->goPayEntryCount());
+        self::assertSame(0.0, $this->receivableInLedger($invoiceId, self::YEAR . '-01-31'));
+
+        $download = $this->service->download($this->supplierId, (int) $january['clearing']['id']);
+        self::assertSame('xlsx', $download['file_format']);
+        self::assertStringStartsWith("PK\x03\x04", $download['content']);
+    }
+
+    /** Opačné pořadí: po XML clearingu výpis s jeho výplatou nezaloží druhý zápis ani druhé párování. */
+    public function testStatementAfterXmlClearingDoesNotPostPayoutTwice(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId, $creditNoteId] = $this->documents();
+        $this->postDocuments($invoiceId, $creditNoteId);
+        $this->payments->recordPayment($invoiceId, 1000, self::YEAR . '-01-15', [
+            'bank_reference' => 'GOPAY:' . self::SESSION,
+            'source' => 'manual',
+            'created_by' => $this->userId,
+        ]);
+        $this->bankPayout();
+        $xml = $this->service->import($this->supplierId, $this->userId, 'clearing.xml', $this->xmlWithClearingId());
+        self::assertSame('xml', $xml['clearing']['file_format']);
+        self::assertNotNull($xml['clearing']['bank_transaction_id']);
+        self::assertSame(5, $this->goPayEntryCount());
+
+        foreach ([$this->statementJanuary(), $this->statementFebruary()] as $statement) {
+            try {
+                $this->service->import($this->supplierId, $this->userId, 'GOPAY.xlsx', $statement);
+                self::fail('Výpis pokrytý XML clearingem nesmí nic zaúčtovat podruhé.');
+            } catch (GoPayException $e) {
+                self::assertSame('already_recorded', $e->errorCode);
+            }
+        }
+        self::assertSame(5, $this->goPayEntryCount());
     }
 
     public function testDeletingPaymentRemovesPendingMovementAndItsEntry(): void
@@ -468,6 +552,29 @@ final class GoPayPendingPaymentTest extends TestCase
         self::assertCount(2, $rows);
         self::assertContains(['account_code' => $debit, 'side' => 'debit', 'amount' => number_format($amount, 2, '.', '')], $rows);
         self::assertContains(['account_code' => $credit, 'side' => 'credit', 'amount' => number_format($amount, 2, '.', '')], $rows);
+    }
+
+    private function statementJanuary(): string
+    {
+        return GoPayStatementFixture::xlsx('1. 1. ' . self::YEAR, '31. 1. ' . self::YEAR, 0.0, [
+            ['15. 1. ' . self::YEAR, 'GOPAY-platba', '400000******0001', 1000.0, 'TEST000001'],
+            ['20. 1. ' . self::YEAR, 'GOPAY-storno-platby', 'GOPAY', -100.0, 'TEST000001'],
+            ['20. 1. ' . self::YEAR, 'GOPAY-storno-popl', 'GOPAY', -5.0, 'TEST000001'],
+        ]);
+    }
+
+    private function statementFebruary(): string
+    {
+        return GoPayStatementFixture::xlsx('1. 2. ' . self::YEAR, '28. 2. ' . self::YEAR, 895.0, [
+            ['1. 2. ' . self::YEAR, 'GOPAY-vyuctovani', '1000000005/0100', -875.0, '20970001'],
+            ['1. 2. ' . self::YEAR, 'GOPAY-popl', 'GOPAY', -20.0, '20970001'],
+        ]);
+    }
+
+    /** Ostrý GoPay clearing má ID shodné s variabilním symbolem výplaty. */
+    private function xmlWithClearingId(): string
+    {
+        return str_replace('clearingId="TEST-CLEARING-2097"', 'clearingId="20970001"', $this->xml());
     }
 
     private function xml(): string

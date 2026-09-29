@@ -21489,7 +21489,7 @@
   },
   "gopay": {
     "title": "GoPay",
-    "subtitle": "Import měsíčních XML vyúčtování, automatické párování plateb a zaúčtování převodu i poplatků.",
+    "subtitle": "Import měsíčních XML vyúčtování nebo výpisů XLS/XLSX, automatické párování plateb a zaúčtování převodu i poplatků.",
     "close": "Zavřít",
     "settings": {
       "title": "Nastavení účtování",
@@ -21509,15 +21509,15 @@
       "saved": "Nastavení GoPay bylo uloženo."
     },
     "import": {
-      "title": "Načíst XML vyúčtování",
-      "description": "Nahraj XML Clearing exportovaný z GoPay. Každý pohyb se spáruje s dokladem a zaúčtuje, převod se dohledá v bankovních výpisech.",
-      "file": "GoPay XML",
+      "title": "Načíst vyúčtování nebo výpis",
+      "description": "Nahraj XML Clearing nebo výpis z obchodního účtu (XLS/XLSX) exportovaný z GoPay. Každý pohyb se spáruje s dokladem a zaúčtuje, převod se dohledá v bankovních výpisech. Výpis nese výplatu a poplatek vyúčtování až v období, kdy GoPay peníze poslal.",
+      "file": "GoPay XML nebo XLS/XLSX",
       "pdf_file": "GoPay PDF (volitelné)",
       "button": "Načíst a zaúčtovat",
       "importing": "Načítám a účtuji...",
       "configure_first": "Nejdřív ulož nastavení účtů.",
       "permission_missing": "Pro import potřebuješ oprávnění k importu a účtování banky.",
-      "choose_file": "Vyber XML soubor.",
+      "choose_file": "Vyber XML nebo XLS/XLSX soubor.",
       "success": "GoPay vyúčtování bylo načteno a zpracováno.",
       "duplicate": "Vyúčtování už bylo načtené, proto se pouze znovu zpracovalo."
     },
@@ -21535,8 +21535,8 @@
     },
     "clearings": {
       "title": "Importovaná vyúčtování",
-      "empty": "Zatím nebylo načteno žádné GoPay XML",
-      "empty_description": "Po uložení nastavení nahraj první měsíční Clearing XML."
+      "empty": "Zatím nebylo načteno žádné GoPay vyúčtování ani výpis",
+      "empty_description": "Po uložení nastavení nahraj první měsíční Clearing XML nebo výpis XLS/XLSX."
     },
     "pending": {
       "title": "Čeká na vyúčtování",
@@ -21605,12 +21605,16 @@
       "error": "Chyba"
     },
     "errors": {
+      "invalid_statement": "Soubor není výpis z obchodního účtu GoPay.",
+      "unsupported_movement": "Soubor obsahuje nepodporovaný typ pohybu.",
+      "multiple_payouts": "Výpis obsahuje výplaty více vyúčtování. Nahraj XML jednotlivých vyúčtování nebo výpis za kratší období.",
+      "already_recorded": "Všechny pohyby souboru už jsou evidované v dříve načteném vyúčtování nebo výpisu.",
       "invalid_xml": "Soubor není platné GoPay XML.",
       "unsafe_xml": "XML obsahuje nepovolenou deklaraci.",
-      "invalid_file_size": "XML soubor překračuje limit 2 MB.",
+      "invalid_file_size": "Soubor překračuje limit 2 MB.",
       "invalid_root": "XML nemá očekávaný formát GoPay Clearing.",
-      "currency_unknown": "Z XML nelze bezpečně určit měnu.",
-      "summary_mismatch": "Souhrnné částky XML nesouhlasí s jednotlivými pohyby.",
+      "currency_unknown": "Ze souboru nelze bezpečně určit měnu.",
+      "summary_mismatch": "Souhrnné částky nesouhlasí s jednotlivými pohyby.",
       "movement_summary_mismatch": "Kontrolní součet pohybů v XML nesouhlasí.",
       "duplicate_movement_id": "XML obsahuje duplicitní identifikátor pohybu.",
       "settings_missing": "Před importem nastav účty modulu GoPay.",

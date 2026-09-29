@@ -199,6 +199,10 @@ final class GoPayPendingService
      * převezme jeho údaje i vazbu na vyúčtování a jeho zápis ke dni platby zůstává.
      * Nesoulad částky nebo měny čekající pohyb nepřevezme; pohyb z vyúčtování pak
      * skončí u úhrady s chybou payment_amount_mismatch jako dosud.
+     *
+     * Výpis z obchodního účtu (XLS/XLSX) GoPay ID platby nenese. Jeho kreditní pohyb
+     * převezme čekající pohyb faktury se stejným číslem objednávky, částkou a měnou
+     * s datem platby nejvýše 3 dny od pohybu, a to jen když je takový právě jeden.
      */
     public function adoptIntoClearing(int $supplierId, int $clearingId): int
     {
@@ -212,10 +216,11 @@ final class GoPayPendingService
 
         $candidates = $pdo->prepare(
             'SELECT gm.id,gm.external_id,gm.payment_session_id,gm.amount,gm.order_id,gm.account_movement_id,
-                    gm.payment_channel,gm.counterparty_name
+                    gm.payment_channel,gm.counterparty_name,gm.performed_on
                FROM gopay_movements gm
               WHERE gm.supplier_id=? AND gm.clearing_id=? AND gm.origin="clearing"
-                AND gm.movement_type="credit" AND gm.payment_session_id IS NOT NULL
+                AND gm.movement_type="credit"
+                AND (gm.payment_session_id IS NOT NULL OR gm.order_id IS NOT NULL)
                 AND NOT EXISTS(SELECT 1 FROM journal_entries je
                                 WHERE je.supplier_id=gm.supplier_id AND je.source_type="gopay"
                                   AND je.source_id=gm.id)
@@ -226,14 +231,9 @@ final class GoPayPendingService
         foreach ($candidates->fetchAll(PDO::FETCH_ASSOC) as $imported) {
             $ownTx = $this->beginUnit($pdo, 'gopay_adopt');
             try {
-                $pending = $pdo->prepare(
-                    'SELECT id,amount,currency FROM gopay_movements
-                      WHERE supplier_id=? AND origin="payment" AND clearing_id IS NULL
-                        AND movement_type="credit" AND payment_session_id=?
-                      ORDER BY id LIMIT 1 FOR UPDATE'
-                );
-                $pending->execute([$supplierId, (string) $imported['payment_session_id']]);
-                $row = $pending->fetch(PDO::FETCH_ASSOC);
+                $row = $imported['payment_session_id'] !== null
+                    ? $this->pendingBySession($supplierId, (string) $imported['payment_session_id'])
+                    : $this->pendingByOrder($supplierId, $imported, (string) $currency);
                 if (!is_array($row)
                     || number_format((float) $row['amount'], 2, '.', '') !== number_format((float) $imported['amount'], 2, '.', '')
                     || (string) $row['currency'] !== (string) $currency) {
@@ -259,6 +259,46 @@ final class GoPayPendingService
             }
         }
         return $adopted;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function pendingBySession(int $supplierId, string $session): ?array
+    {
+        $pending = $this->db->pdo()->prepare(
+            'SELECT id,amount,currency FROM gopay_movements
+              WHERE supplier_id=? AND origin="payment" AND clearing_id IS NULL
+                AND movement_type="credit" AND payment_session_id=?
+              ORDER BY id LIMIT 1 FOR UPDATE'
+        );
+        $pending->execute([$supplierId, $session]);
+        $row = $pending->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /** @param array<string,mixed> $imported @return array<string,mixed>|null */
+    private function pendingByOrder(int $supplierId, array $imported, string $currency): ?array
+    {
+        $orderId = trim((string) $imported['order_id']);
+        $pending = $this->db->pdo()->prepare(
+            'SELECT gm.id,gm.amount,gm.currency,i.supplier_order_number,i.note_below_items
+               FROM gopay_movements gm
+               JOIN invoices i ON i.id=gm.invoice_id AND i.supplier_id=gm.supplier_id
+              WHERE gm.supplier_id=? AND gm.origin="payment" AND gm.clearing_id IS NULL
+                AND gm.movement_type="credit" AND gm.amount=? AND gm.currency=?
+                AND ABS(DATEDIFF(gm.performed_on,?))<=3
+                AND (i.supplier_order_number=?
+                     OR (i.supplier_order_number IS NULL AND i.note_below_items LIKE ?))
+              ORDER BY gm.id FOR UPDATE'
+        );
+        $pending->execute([
+            $supplierId, number_format((float) $imported['amount'], 2, '.', ''), $currency,
+            (string) $imported['performed_on'], $orderId, '%' . $orderId . '%',
+        ]);
+        $rows = array_values(array_filter(
+            $pending->fetchAll(PDO::FETCH_ASSOC),
+            fn (array $row): bool => $this->poster->documentHasOrder($row, $orderId),
+        ));
+        return count($rows) === 1 ? $rows[0] : null;
     }
 
     /** Smazání vyúčtování vrací převzaté pohyby mezi čekající i s jejich zápisem. */

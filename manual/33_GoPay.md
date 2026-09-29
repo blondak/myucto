@@ -1,8 +1,9 @@
 # 33. GoPay
 
-Stránka **Peníze > GoPay** zpracovává měsíční XML vyúčtování GoPay. K XML lze
-současně nebo později přiložit původní PDF vyúčtování. XML obsahuje jednotlivé
-platby, vratky, poplatky i souhrnnou částku odeslanou na bankovní účet.
+Stránka **Peníze > GoPay** zpracovává měsíční XML vyúčtování GoPay nebo výpisy
+z obchodního účtu ve formátu XLS/XLSX. K souboru lze současně nebo později
+přiložit původní PDF. XML obsahuje jednotlivé platby, vratky, poplatky i souhrnnou
+částku odeslanou na bankovní účet.
 
 Funkce je dostupná firmám s podvojným účetnictvím.
 
@@ -64,6 +65,31 @@ potřeba smazat vyúčtování.
 Stejné XML lze nahrát opakovaně. Nevzniknou duplicitní účetní zápisy, existující
 vyúčtování se pouze znovu zpracuje. To je užitečné, pokud byl bankovní výpis nebo
 některý doklad načten až později.
+
+Místo XML lze nahrát **výpis z obchodního účtu** (XLS nebo XLSX) za zvolené období.
+Aplikace ověří, že součet pohybů odpovídá počátečnímu a konečnému zůstatku výpisu.
+Výpis se od XML liší ve třech věcech:
+
+- Neobsahuje GoPay ID platby. Platbu proto převezme úhrada faktury se stejným
+  číslem objednávky, částkou a měnou, jejíž datum se od pohybu liší nejvýše o tři
+  dny. Pokud takovou úhradu nenajde, páruje se platba s fakturou podle čísla
+  objednávky stejně jako u XML.
+- Výplata vyúčtování na bankovní účet a poplatek za vyúčtování jsou ve výpisu až
+  v období, kdy je GoPay odeslal, obvykle tedy ve výpisu za další měsíc. Výplata
+  nese ve sloupci **ID objednávky/VS** číslo vyúčtování a páruje se s bankovním
+  převodem podle tohoto variabilního symbolu.
+- Výpis obsahující výplaty více vyúčtování nelze načíst. V takovém případě nahrajte
+  XML jednotlivých vyúčtování nebo výpis za kratší období.
+
+XML a výpisy lze kombinovat. Pohyb, který už eviduje dříve načtené vyúčtování nebo
+výpis, se znovu nezaloží ani nezaúčtuje. Výplatu a poplatek vyúčtování aplikace
+pozná podle čísla vyúčtování, platby a vratky podle typu, čísla objednávky, částky
+a data. Pokud jsou všechny pohyby souboru už evidované, import skončí upozorněním
+a nic nezmění. Stejný výpis stažený znovu se pozná podle obsahu a jen se znovu
+zpracuje.
+
+V seznamu vyúčtování tlačítko u každého záznamu stáhne původní soubor ve formátu,
+ve kterém byl nahrán (XML, XLS nebo XLSX).
 
 Pokud příchozí převod nejprve dorazí jen jako bankovní avízo, otevřete u něj
 **Ručně spárovat**. Aplikace nabídne odpovídající GoPay vyúčtování podle částky,

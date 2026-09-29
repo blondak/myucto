@@ -21489,7 +21489,7 @@
   },
   "gopay": {
     "title": "GoPay",
-    "subtitle": "Import monthly XML clearings, automatically match payments, and post payouts and fees.",
+    "subtitle": "Import monthly XML clearings or XLS/XLSX statements, automatically match payments, and post payouts and fees.",
     "close": "Close",
     "settings": {
       "title": "Posting settings",
@@ -21509,15 +21509,15 @@
       "saved": "GoPay settings were saved."
     },
     "import": {
-      "title": "Import XML clearing",
-      "description": "Upload the Clearing XML exported from GoPay. Each movement is matched to a document and posted, while the payout is found in bank statements.",
-      "file": "GoPay XML",
+      "title": "Import clearing or statement",
+      "description": "Upload the Clearing XML or the merchant account statement (XLS/XLSX) exported from GoPay. Each movement is matched to a document and posted, while the payout is found in bank statements. A statement contains the clearing payout and fee only in the period in which GoPay sent the money.",
+      "file": "GoPay XML or XLS/XLSX",
       "pdf_file": "GoPay PDF (optional)",
       "button": "Import and post",
       "importing": "Importing and posting...",
       "configure_first": "Save the account settings first.",
       "permission_missing": "You need bank import and posting permissions to import a clearing.",
-      "choose_file": "Select an XML file.",
+      "choose_file": "Select an XML or XLS/XLSX file.",
       "success": "The GoPay clearing was imported and processed.",
       "duplicate": "The clearing had already been imported, so it was only processed again."
     },
@@ -21535,8 +21535,8 @@
     },
     "clearings": {
       "title": "Imported clearings",
-      "empty": "No GoPay XML has been imported yet",
-      "empty_description": "Save the settings, then upload your first monthly Clearing XML."
+      "empty": "No GoPay clearing or statement has been imported yet",
+      "empty_description": "Save the settings, then upload your first monthly Clearing XML or XLS/XLSX statement."
     },
     "pending": {
       "title": "Awaiting clearing",
@@ -21605,12 +21605,16 @@
       "error": "Error"
     },
     "errors": {
+      "invalid_statement": "The file is not a GoPay merchant account statement.",
+      "unsupported_movement": "The file contains an unsupported movement type.",
+      "multiple_payouts": "The statement contains payouts of several clearings. Upload the XML of each clearing or a statement for a shorter period.",
+      "already_recorded": "All movements of the file are already recorded in a previously imported clearing or statement.",
       "invalid_xml": "The file is not valid GoPay XML.",
       "unsafe_xml": "The XML contains a forbidden declaration.",
-      "invalid_file_size": "The XML file exceeds the 2 MB limit.",
+      "invalid_file_size": "The file exceeds the 2 MB limit.",
       "invalid_root": "The XML is not in the expected GoPay Clearing format.",
-      "currency_unknown": "The currency cannot be determined safely from the XML.",
-      "summary_mismatch": "XML summary amounts do not match the individual movements.",
+      "currency_unknown": "The currency cannot be determined safely from the file.",
+      "summary_mismatch": "Summary amounts do not match the individual movements.",
       "movement_summary_mismatch": "The XML movement checksum does not match.",
       "duplicate_movement_id": "The XML contains a duplicate movement identifier.",
       "settings_missing": "Configure the GoPay module accounts before importing.",
