@@ -19,6 +19,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
+| Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury; **jen čtení** — balení, individuální ceny zákazníků, cenové hladiny, nacenění pro odběratele, šarže a sériová čísla, lokace, prodejní objednávky, cyklické inventury |
 | Ceník služeb | **jen čtení** — položky, ceny po měnách, individuální ceny zákazníků a výsledná cena (jen firmy bez skladového modulu) |

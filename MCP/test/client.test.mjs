@@ -55,6 +55,23 @@ test('čtecí POST odmítne jinou než výslovně povolenou cestu', () => {
   );
 });
 
+test('náhled Intrastatu funguje i s čtecím klientem', async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), method: init.method });
+    return new Response(JSON.stringify({ rows: [], warnings: [] }), { status: 200 });
+  };
+  try {
+    const api = client();
+    api.readOnly = true;
+    assert.deepEqual(await api.postRead('/stock/intrastat/preview', { period: '2026-09', direction: 'arrival' }, 'intrastat_preview'), { rows: [], warnings: [] });
+    assert.deepEqual(seen, [{ url: 'https://example.test/api/v1/stock/intrastat/preview', method: 'POST' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('běžný POST neopakuje ani rate limit', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;

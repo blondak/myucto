@@ -41,16 +41,44 @@ Podstatné vlastnosti:
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
 | Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník — **jen čtení** |
+| Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel — **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 106.9](#1069-e-shop-a-sklad)) |
 | Objednávky u dodavatele | **čtení i zápis** — založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 106.9](#1069-e-shop-a-sklad)) |
 | Mzdy | čtení zaměstnanců, pracovních podmínek a výsledků; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
-Nástrojů je aktuálně **220**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
-[§ 106.4](#1064-nastaveni)) se jich asistentovi nabídne **138** — zbylých 82 mění
-data a server je vůbec nezveřejní. Přesný počet vypíše server při startu do
-`stderr` ([§ 106.3](#1063-zprovozneni), krok 4).
+V režimu jen pro čtení (`MYUCTO_READ_ONLY=1`, [§ 106.4](#1064-nastaveni))
+server nezveřejňuje nástroje, které mění data. Každé použití nástroje dále omezují
+aktuální práva uživatele. Přesný počet vypíše server při startu do `stderr`
+([§ 106.3](#1063-zprovozneni), krok 4).
+
+### Dotazy podle dimenzí
+
+Asistent nejprve načte dostupné typy a hodnoty nástrojem `list_dimensions`.
+Pak se ho můžeš zeptat například:
+
+- „Jaký je zisk střediska Servis za rok 2026? Ukaž i náklady a výnosy po účtech.“
+- „Porovnej měsíční vývoj projektů v roce 2026 s minulým rokem.“
+- „Ukaž rozvahu a výsledovku k 30. červnu pro projekt Stavba A.“
+- „Jaké je cash flow tohoto projektu za první pololetí?“
+- „Sečti zisk této globální dimenze přes všechny firmy skupiny, ke kterým mám přístup.“
+
+Filtr `dimension_value_id` používá ID hodnoty z přehledu dimenzí. Standardně
+zahrnuje i podřízené hodnoty; `dimension_descendants=false` vybere pouze přesnou
+hodnotu. Filtr podporují rozvaha, obě výsledovky, výkazy po účtech, obratovka,
+hlavní kniha, účetní deník a dimenzní cash flow.
+
+`dimension_profit` a `dimension_analytics` s `scope=group` sčítají globální
+typ dimenze přes dostupné firmy jeho skupiny. U `dimension_cash_flow` je pro
+souhrn skupiny potřeba vybrat hodnotu globální dimenze. Přístup vázaný na jedinou
+firmu tento rozsah nerozšíří. Rozvaha a výsledovka se sestavují pro jednu firmu
+a její vlastní účetní období.
+
+Cash flow podle dimenze je manažerská sestava **nepřímou metodou**, která
+vychází ze zisku a změn rozvahových účtů. Ukazuje také skutečný pohyb peněz,
+nepřiřazený rozdíl a kontrolu shody. Úhrada bez dimenze proto není vydávána za
+peněžní pohyb konkrétního projektu.
 
 > [!IMPORTANT]
 > **Do účetnictví a daní asistent nezapisuje.** Zaúčtovat doklad, uzavřít období,

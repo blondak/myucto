@@ -10,17 +10,14 @@ declare(strict_types=1);
  *   - routes v kódu, které nejsou dokumentované → riziko, že je integrátoři minou
  *   - paths v openapi.yaml, které už v kódu neexistují → mrtvá dokumentace
  *
- * Záměrně ignoruje:
- *   - /api/admin/* — interní endpointy, plán je nedokumentovat
- *   - /api/auth/setup*, /api/auth/login, /logout, /forgot, /reset, /change-password,
- *     /totp/*, /me — UI/wizard scope, integrace přes bearer je neřeší
- *   - /api/public/approval/* — pro koncové zákazníky, ne pro integrace
- *   - /api/payroll/* — interní session-only mzdová agenda; veřejné API je až
- *     explicitně kurátorovaný read-only subset pod /api/v1/*
- *   - /api/openapi.yaml, /api/docs, /api/health, /api/version — self-reference / triviální
- *   - mutace na /api/settings/*, /api/suppliers (POST/PUT/DELETE) a /api/admin/update/*
- *   - /api/maintenance/* (sample data, admin), /api/settings/{pdf-signing,signing,
- *     email-profiles,bank-email-notices} — admin konfigurace, ne pro integrace
+ * Veřejnost operace ověřuje skutečný ApiScopeMiddleware nad syntetickým bearer
+ * požadavkem se scope read_write. Interní cesty a zakázané účetní/daňové zápisy
+ * nejsou mezery veřejného kontraktu. Mzdový subset se kontroluje stejně jako
+ * ostatní veřejné cesty, nikoli plošnou výjimkou pro /api/payroll/*.
+ * Další session guardy v actions jsou výjimky jednotlivých symbolů níže.
+ * Kurátorské výjimky: mutace číselníků, nastavení a firem, dokumentační endpointy
+ * a explicitní testovací tooling. Již dokumentované session-only paths dál
+ * kontroluje proti routeru, aby se z nich nestala mrtvá dokumentace.
  *
  * Extrakce routes: skupiny $app->group('/prefix', fn) se párují závorkově
  * (per-group scope). NEporovnávat $g-> globálně přes všechny prefixy —
@@ -34,8 +31,9 @@ declare(strict_types=1);
 $root = dirname(__DIR__);
 require $root . '/api/vendor/autoload.php';
 
-$routesFile  = $root . '/api/src/Routes.php';
-$openapiFile = $root . '/api/openapi.yaml';
+$options = getopt('', ['routes:', 'spec:']);
+$routesFile  = $options['routes'] ?? $root . '/api/src/Routes.php';
+$openapiFile = $options['spec'] ?? $root . '/api/openapi.yaml';
 
 if (!is_file($routesFile))  { fwrite(STDERR, "ERR: missing $routesFile\n"); exit(2); }
 if (!is_file($openapiFile)) { fwrite(STDERR, "ERR: missing $openapiFile\n"); exit(2); }
@@ -44,6 +42,18 @@ if (!is_file($openapiFile)) { fwrite(STDERR, "ERR: missing $openapiFile\n"); exi
 $src = (string) file_get_contents($routesFile);
 $len = strlen($src);
 $routes = [];
+$imports = [];
+preg_match_all('/^use\s+([\\\\\w]+)(?:\s+as\s+(\w+))?\s*;/m', $src, $uses, PREG_SET_ORDER);
+foreach ($uses as $use) {
+    $parts = explode('\\', $use[1]);
+    $imports[$use[2] ?? end($parts)] = $use[1];
+}
+$routeAction = static function (string $tail) use ($imports): ?string {
+    if (!preg_match('/^\s*,\s*(?:\[\s*)?([\\\\\w]+)::class(?:\s*,\s*[\'"](\w+)[\'"])?/', $tail, $match)) return null;
+    $class = ltrim($match[1], '\\');
+    $class = $imports[$class] ?? $class;
+    return $class . '::' . ($match[2] ?? '__invoke');
+};
 
 // 1a) Najdi každou skupinu $app->group('/prefix', function ($g) { ... }) a spáruj
 //     složené závorky, aby se $g-> routes přiřadily jen VLASTNÍ skupině.
@@ -73,10 +83,11 @@ foreach ($groupRanges as [$prefix, $start, $end]) {
         '/\$g->(get|post|put|patch|delete|any)\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
         $body,
         $im,
-        PREG_SET_ORDER
+        PREG_SET_ORDER | PREG_OFFSET_CAPTURE
     )) {
         foreach ($im as $hit) {
-            $routes[] = ['method' => strtoupper($hit[1]), 'path' => $prefix . $hit[2]];
+            $routes[] = ['method' => strtoupper($hit[1][0]), 'path' => $prefix . $hit[2][0],
+                'action' => $routeAction(substr($body, $hit[0][1] + strlen($hit[0][0])))];
         }
     }
 }
@@ -91,10 +102,11 @@ if (preg_match_all(
     '/\$app->(get|post|put|patch|delete|any)\s*\(\s*[\'"]([^\'"]+)[\'"]/i',
     $masked,
     $m,
-    PREG_SET_ORDER
+    PREG_SET_ORDER | PREG_OFFSET_CAPTURE
 )) {
     foreach ($m as $hit) {
-        $routes[] = ['method' => strtoupper($hit[1]), 'path' => $hit[2]];
+        $routes[] = ['method' => strtoupper($hit[1][0]), 'path' => $hit[2][0],
+            'action' => $routeAction(substr($masked, $hit[0][1] + strlen($hit[0][0])))];
     }
 }
 
@@ -102,10 +114,23 @@ if (preg_match_all(
 // Musí umět i jednu úroveň vnořených složených závorek (regex kvantifikátory typu
 // `{date:\d{4}-\d{2}-\d{2}}` nebo `{batchId:[a-fA-F0-9]{32}}`) — jinak se placeholder
 // oseká na první vnitřní `}` a zbytek regexu zůstane v cestě jako text.
-foreach ($routes as &$r) {
-    $r['path'] = preg_replace('/\{(\w+):(?:[^{}]|\{[^{}]*\})*\}/', '{$1}', $r['path']);
+$expanded = [];
+foreach ($routes as $r) {
+    $variants = [$r['path']];
+    preg_match_all('/\{(\w+):((?:[^{}]|\{[^{}]*\})*)\}/', $r['path'], $constraints, PREG_SET_ORDER);
+    foreach ($constraints as $constraint) {
+        $values = preg_match('/^[A-Za-z0-9._-]+(?:\|[A-Za-z0-9._-]+)+$/D', $constraint[2]) === 1
+            ? explode('|', $constraint[2]) : ['{' . $constraint[1] . '}'];
+        $next = [];
+        foreach ($variants as $variant) {
+            foreach ($values as $value) $next[] = str_replace($constraint[0], $value, $variant);
+        }
+        $variants = $next;
+    }
+    $template = preg_replace('/\{(\w+):(?:[^{}]|\{[^{}]*\})*\}/', '{$1}', $r['path']);
+    foreach ($variants as $variant) $expanded[] = array_replace($r, ['path' => $variant, 'template' => $template]);
 }
-unset($r);
+$routes = $expanded;
 
 // Dedupe (identický method+path se může objevit víckrát)
 $seen = [];
@@ -117,31 +142,6 @@ $routes = array_values(array_filter($routes, static function ($r) use (&$seen) {
 }));
 
 // --- 2) Endpoints, které vědomě neaudituji ---------------------------------
-$skipPrefixes = [
-    '/api/admin/',
-    '/api/public/',
-    '/api/auth/setup',
-    '/api/auth/login',
-    '/api/auth/domain-login/',     // jednorázové PKCE browser SSO, interní plumbing
-    '/api/auth/logout',
-    '/api/auth/me',
-    '/api/auth/forgot',
-    '/api/auth/reset',
-    '/api/auth/change-password',
-    '/api/auth/totp/',
-    '/api/auth/tokens',            // session-only, nelze volat bearer-em
-    // ApiVersionRewriteMiddleware pro ně vrací pod /api/v1 tvrdě 404 — do veřejné
-    // spec nepatří a hlásit je jako mezeru je falešný poplach (byla to pětina reportu).
-    '/api/auth/webauthn/',
-    '/api/auth/mfa/',
-    '/api/auth/session/',
-    '/api/payroll/',               // interní session-only mzdový bounded context
-    '/api/settings/email-branding/', // admin UI tooling (logo upload, preview)
-    '/api/maintenance/',           // správa sample dat, admin-only (RoleMiddleware)
-    '/api/settings/pdf-signing',   // admin konfigurace el. podpisu (certifikáty)
-    '/api/settings/signing',       // admin podpisové profily + credentials
-    '/api/settings/bank-email-notices', // admin: parsování bankovních e-mailů
-];
 $skipExact = [
     '/api/openapi.yaml',
     '/api/docs',
@@ -157,8 +157,7 @@ $skipExact = [
     '/api/{path}',  // catch-all 404 fallback
 ];
 
-$shouldSkip = function (string $path) use ($skipPrefixes, $skipExact): bool {
-    foreach ($skipPrefixes as $p) if (str_starts_with($path, $p)) return true;
+$shouldSkip = function (string $path) use ($skipExact): bool {
     return in_array($path, $skipExact, true);
 };
 
@@ -169,6 +168,64 @@ $isSettingsMutation = function (string $method, string $path): bool {
     }
     return false;
 };
+
+$policy = new \MyInvoice\Middleware\ApiScopeMiddleware(new \Slim\Psr7\Factory\ResponseFactory());
+$requestFactory = new \Slim\Psr7\Factory\ServerRequestFactory();
+$policyProbe = new class implements \Psr\Http\Server\RequestHandlerInterface {
+    public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+    {
+        return new \Slim\Psr7\Response(204);
+    }
+};
+$isPublic = static function (string $method, string $path) use ($policy, $requestFactory, $policyProbe): bool {
+    $sample = preg_replace('/\{\w+\}/', '1', $path);
+    $request = $requestFactory->createServerRequest($method, $sample)
+        ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer')
+        ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read_write']);
+    return $policy->process($request, $policyProbe)->getStatusCode() === 204;
+};
+$priceListMutations = [
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::create',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::update',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::delete',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::upsertPrice',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::deletePrice',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::upsertCustomerOverride',
+    'MyInvoice\\Action\\PriceList\\PriceListItemAction::deleteCustomerOverride',
+];
+$isCodebookMutation = static fn (array $route): bool
+    => $route['method'] !== 'GET' && (str_starts_with($route['path'], '/api/codebooks/')
+        || in_array($route['action'], $priceListMutations, true));
+$sessionActions = [
+    'MyInvoice\\Action\\Stock\\ProductAssemblyAction::list',
+    'MyInvoice\\Action\\Stock\\ProductAssemblyAction::get',
+    'MyInvoice\\Action\\Stock\\ProductAssemblyAction::create',
+    'MyInvoice\\Action\\Stock\\ProductAssemblyAction::reverse',
+    'MyInvoice\\Action\\Stock\\OpeningStockImportAction::upload',
+    'MyInvoice\\Action\\Stock\\OpeningStockImportAction::preview',
+    'MyInvoice\\Action\\Stock\\OpeningStockImportAction::apply',
+    'MyInvoice\\Action\\Eshop\\ProductSetAction::get',
+    'MyInvoice\\Action\\Eshop\\ProductSetAction::save',
+    'MyInvoice\\Action\\Eshop\\ProductSetAction::quote',
+    'MyInvoice\\Action\\Eshop\\CatalogJobAction::change',
+    'MyInvoice\\Action\\Eshop\\CatalogImportAction::upload',
+    'MyInvoice\\Action\\Eshop\\CatalogImportAction::saveProfile',
+    'MyInvoice\\Action\\Eshop\\CatalogImportAction::preview',
+    'MyInvoice\\Action\\Eshop\\CatalogImportAction::apply',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::saveSettings',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::setOrderUrl',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::clearOrderUrl',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::previewOrders',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::applyOrders',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::discardOrders',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::eraseOrders',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::markReviewed',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::importDocuments',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::rotateFeed',
+    'MyInvoice\\Action\\Eshop\\ShoptetAction::disableFeed',
+    'MyInvoice\\Action\\PurchaseInvoice\\PaymentOrderAction::archive',
+];
+$isSessionAction = static fn (array $route): bool => in_array($route['action'], $sessionActions, true);
 
 // --- 3) Načti openapi.yaml -------------------------------------------------
 $yaml = (string) file_get_contents($openapiFile);
@@ -208,8 +265,17 @@ foreach ($routes as $r) {
     if ($shouldSkip($r['path']))                     continue;
     if ($isSettingsMutation($r['method'], $r['path'])) continue;
     if ($r['method'] === 'ANY')                      continue; // 404 fallback
+    if (!$isPublic($r['method'], $r['path']))          continue;
+    if ($isCodebookMutation($r))                      continue;
+    if ($isSessionAction($r))                         continue;
 
-    $found = isset($specByPath[$r['path']]) && in_array($r['method'], $specByPath[$r['path']], true);
+    $found = false;
+    foreach ($specByPath as $path => $methods) {
+        if (in_array($r['method'], $methods, true) && ($path === $r['path'] || $path === $r['template'])) {
+            $found = true;
+            break;
+        }
+    }
     if (!$found) {
         $missingInSpec[] = $r['method'] . ' ' . $r['path'];
     }
@@ -219,14 +285,16 @@ foreach ($routes as $r) {
 $codeByPath = [];
 foreach ($routes as $r) {
     $codeByPath[$r['path']][] = $r['method'];
+    $codeByPath[$r['template']][] = $r['method'];
 }
 foreach ($specByPath as $path => $methods) {
-    if (!isset($codeByPath[$path])) {
+    $codeMethods = $codeByPath[$path] ?? [];
+    if ($codeMethods === []) {
         $staleInSpec[] = '(no methods) ' . $path;
         continue;
     }
     foreach ($methods as $method) {
-        if (!in_array($method, $codeByPath[$path], true)) {
+        if (!in_array($method, $codeMethods, true)) {
             $staleInSpec[] = $method . ' ' . $path;
         }
     }
@@ -240,7 +308,9 @@ echo "OpenAPI ↔ routes coverage\n";
 echo "==========================\n";
 echo "Routes scanned (after filters): " . count(array_filter(
     $routes,
-    static fn ($r) => !$shouldSkip($r['path']) && !$isSettingsMutation($r['method'], $r['path']) && $r['method'] !== 'ANY'
+    static fn ($r) => !$shouldSkip($r['path']) && !$isSettingsMutation($r['method'], $r['path'])
+        && $r['method'] !== 'ANY' && $isPublic($r['method'], $r['path']) && !$isCodebookMutation($r)
+        && !$isSessionAction($r)
 )) . "\n";
 echo "Spec paths: " . count($specPaths) . " (each may have multiple methods)\n\n";
 
