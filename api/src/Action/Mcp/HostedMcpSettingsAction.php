@@ -91,6 +91,7 @@ final class HostedMcpSettingsAction
             'node_available' => $this->hosted->nodeAvailable(),
             'endpoint' => $this->hosted->endpoint(),
             'managed_by_environment' => $this->hosted->managedByEnvironment(),
+            'managed_relay' => $this->hosted->managedRelay(),
         ];
     }
 }

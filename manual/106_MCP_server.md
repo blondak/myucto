@@ -206,9 +206,11 @@ V `cfg.php` se server nezapíná. V Dockeru a na IIS lze stav řídit proměnnou
 `MYINVOICE_MCP_ENABLED=1` nebo `0`; při jejím
 nastavení je přepínač ve webu jen informativní. Bez této proměnné platí nastavení
 uložené v aplikaci. Dockerový obraz už Node.js obsahuje.
-Ve spravované SaaS instalaci (`app.managed = true`) je serverový MCP vypnutý
-bez ohledu na proměnnou prostředí i uložený přepínač. Záložka Připojit online
-se tam nezobrazuje a dostupný zůstává lokální postup se souborem `.mjs`.
+Ve spravované SaaS instalaci (`app.managed = true`) záleží na provozovateli.
+Dokud most s Node.js nepřipraví, je serverový MCP vypnutý bez ohledu na proměnnou
+prostředí i uložený přepínač, záložka Připojit online se nezobrazuje a dostupný
+zůstává lokální postup se souborem `.mjs`. Jakmile ho připraví, záložka se objeví
+a superadmin server zapíná stejným přepínačem jako jinde.
 Pokud Claude při přidávání konektoru hlásí, že na adrese žádný server neodpověděl,
 zkontroluj nejdřív tento přepínač. Vypnutý `/mcp` vrací chybu `404 mcp_disabled`
 a klient proto nemůže zjistit přihlašovací údaje OAuth.

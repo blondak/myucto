@@ -183,6 +183,42 @@ a doklady; zůstává proto v aplikaci.
 údaje. `get_catalog_facets` vrací počty hodnot filtrů nad celou množinou;
 `get_catalog_job` načte průběh a souhrnný výsledek dostupné katalogové úlohy.
 
+## Serverový MCP a Node v kontejneru
+
+Serverový MCP (`/mcp`, OAuth) pouští Node z PHP. Existují dvě cesty:
+
+```
+src/hosted-core.mjs    společná logika (katalog, vazba na firmu, volání nástroje)
+src/hosted-bridge.mjs  vlastní instalace: Node si interní API volá sám přes PHP CLI
+src/hosted-relay.mjs   spravovaná instalace: volání API odbavuje PHP, které Node spustilo
+```
+
+Reléová cesta se použije jen při `app.managed = true` a nastaveném
+`MYINVOICE_MCP_NODE_BINARY`. Je určená pro hosting, kde Node nesmí běžet vedle PHP
+a provozovatel ho zavírá do kontejneru. Proměnná pak ukazuje na spouštěč, který:
+
+- dostane jediný argument, absolutní cestu k `MCP/src/hosted-relay.mjs` dané
+  instalace, a v kontejneru spustí `node` s tímto skriptem,
+- beze změny propustí standardní vstup, výstup, chybový výstup a návratový kód,
+- vidí složku `MCP` instalace pro čtení; nic dalšího z instalace, síť ani PHP
+  nepotřebuje (verzi posílá PHP v zadání),
+- jde spustit pod uživatelem webu.
+
+PHP navíc potřebuje povolené `proc_open` a PHP CLI; když ho `PhpCliLocator`
+nenajde sám, nastaví se `MYINVOICE_MCP_PHP_BINARY`.
+
+Node je v této cestě nedůvěryhodná strana. Token ani hlavičku firmy nedostane,
+doplňuje je `ManagedNodeRelay` až k požadavku na interní API podle schváleného
+připojení. Protokol je po řádcích JSON a je popsaný v hlavičce `hosted-relay.mjs`.
+
+Lokální zkouška s Dockerem, spouštěč pro Linux:
+
+```sh
+#!/bin/sh
+exec docker run --rm -i --network none --read-only \
+  -v "$(dirname "$(dirname "$1")")":/mcp:ro node:24-slim node /mcp/src/hosted-relay.mjs
+```
+
 ## Logování
 
 Každý požadavek nese `X-MyUcto-Client: mcp`, `X-MyUcto-Client-Version` a

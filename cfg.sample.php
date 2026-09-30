@@ -24,8 +24,10 @@
  * /profile/mcp-server, v záložce Připojit online. Přepínač není v cfg.php;
  * pro Docker a IIS lze stav vynutit proměnnou prostředí
  * MYINVOICE_MCP_ENABLED=1 (nebo =0). Při nastavení ENV má přednost před
- * přepínačem v aplikaci. Při app.managed = true je serverový MCP vždy
- * vypnutý bez ohledu na ENV i databázový přepínač.
+ * přepínačem v aplikaci. Při app.managed = true je serverový MCP vypnutý
+ * bez ohledu na ENV i databázový přepínač, dokud provozovatel nenastaví
+ * MYINVOICE_MCP_NODE_BINARY na spouštěč Node (typicky kontejner bez sítě).
+ * Node pak jen čte zadání a píše odpovědi; volání API odbavuje PHP.
  */
 
 return [

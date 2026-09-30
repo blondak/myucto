@@ -27,8 +27,12 @@ interface RemoteSettings {
   node_available: boolean
   endpoint: string
   managed_by_environment: boolean
+  managed_relay?: boolean
 }
 const remoteSettings = ref<RemoteSettings | null>(null)
+// Spravovaná instalace nabízí online připojení jen tehdy, když provozovatel
+// připravil most s Node. Mimo spravovaný režim je to vždy false.
+const remoteLocked = computed(() => auth.isManagedInstallation && remoteSettings.value?.managed_relay !== true)
 const remoteSettingsLoading = ref(false)
 const remoteSettingsSaving = ref(false)
 const remoteSettingsError = ref('')
@@ -221,8 +225,8 @@ args = ["${winPathJson.value}"]
 [mcp_servers.myucto.env]
 MYUCTO_API_URL = "${apiBase}"
 MYUCTO_API_TOKEN = "mi_pat_vas_token"`,
-    warn: auth.isManagedInstallation
-      ? 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server, který na spravované instalaci není dostupný.'
+    warn: remoteLocked.value
+      ?'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server, který na spravované instalaci není dostupný.'
       : 'Tato konfigurace je pro Codex CLI. ChatGPT na webu vyžaduje vzdálený MCP server. Pro něj zvolte záložku Připojit online.',
   },
   {
@@ -558,6 +562,10 @@ onMounted(() => {
   if (!auth.isManagedInstallation) {
     loadRemoteSettings()
     loadGrants()
+  } else {
+    loadRemoteSettings().then(() => {
+      if (!remoteLocked.value) loadGrants()
+    })
   }
 })
 </script>
@@ -614,7 +622,7 @@ onMounted(() => {
       přesně takový, jaký je popsaný níže.
     </div>
 
-    <div v-if="!auth.isManagedInstallation" class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
+    <div v-if="!remoteLocked" class="mb-4 border-b border-neutral-200" role="tablist" :aria-label="t('mcp_server_page.connection.tabs_label')">
       <div class="flex flex-wrap gap-1">
         <button id="mcp-local-tab" type="button" role="tab" :aria-selected="connectionMode === 'local'"
           aria-controls="mcp-local-panel" @click="connectionMode = 'local'"
@@ -631,7 +639,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="auth.isManagedInstallation || connectionMode === 'local'" id="mcp-local-panel" role="tabpanel" :aria-labelledby="auth.isManagedInstallation ? undefined : 'mcp-local-tab'">
+    <div v-if="remoteLocked || connectionMode === 'local'" id="mcp-local-panel" role="tabpanel" :aria-labelledby="remoteLocked ? undefined : 'mcp-local-tab'">
     <!-- Adresa API -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">
       <div class="flex flex-wrap items-center gap-3">
@@ -1074,7 +1082,7 @@ npm install</pre>
     </div>
     </div>
 
-    <div v-else-if="!auth.isManagedInstallation" id="mcp-remote-panel" role="tabpanel" aria-labelledby="mcp-remote-tab">
+    <div v-else-if="!remoteLocked" id="mcp-remote-panel" role="tabpanel" aria-labelledby="mcp-remote-tab">
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>

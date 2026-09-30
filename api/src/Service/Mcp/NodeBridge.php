@@ -16,6 +16,9 @@ final class NodeBridge
 
     public function execute(array $input): array
     {
+        if ($this->hosted->managedRelay()) {
+            return (new ManagedNodeRelay($this->hosted, $this->config))->execute($input);
+        }
         $script = dirname(__DIR__, 4) . '/MCP/src/hosted-bridge.mjs';
         if (!is_file($script)) {
             throw new \RuntimeException('Chybí soubor MCP/src/hosted-bridge.mjs.');

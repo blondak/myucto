@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Mcp;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\PhpCliLocator;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
 
@@ -18,7 +19,7 @@ final class HostedMcp
 
     public function enabled(): bool
     {
-        if ($this->managed->isManaged()) return false;
+        if ($this->managedInstallation()) return false;
         $override = $this->envOverride();
         if ($override !== null) return $override;
         return (int) $this->db->pdo()->query('SELECT enabled FROM mcp_server_settings WHERE id = 1')->fetchColumn() === 1;
@@ -26,7 +27,7 @@ final class HostedMcp
 
     public function setEnabled(bool $enabled): void
     {
-        if ($this->managed->isManaged()) {
+        if ($this->managedInstallation()) {
             throw new \LogicException('Serverový MCP není ve spravované instalaci dostupný.');
         }
         if ($this->envOverride() !== null) {
@@ -41,9 +42,33 @@ final class HostedMcp
         return $this->envOverride() !== null;
     }
 
+    /** Spravovaná instalace, ve které provozovatel most s Node nepřipravil. */
     public function managedInstallation(): bool
     {
-        return $this->managed->isManaged();
+        return $this->managed->isManaged() && !$this->managedRelay();
+    }
+
+    /**
+     * Spravovaná instalace s mostem připraveným provozovatelem. Node tam běží
+     * odděleně od aplikace (kontejner), takže se nepouští {@see NodeBridge}
+     * s vlastním voláním PHP, ale {@see ManagedNodeRelay}. Mimo spravovaný
+     * režim je vždy false a nic se nemění.
+     */
+    public function managedRelay(): bool
+    {
+        return $this->managed->isManaged()
+            && trim((string) (getenv('MYINVOICE_MCP_NODE_BINARY') ?: '')) !== '';
+    }
+
+    /**
+     * PHP CLI pro reléový most. Na sdíleném hostingu zakrývá `open_basedir`
+     * binárky mimo web, proto se cesta neověřuje přes `is_file()` a hledá ji
+     * {@see PhpCliLocator} spuštěním kandidátů.
+     */
+    public function relayPhpBinary(): ?string
+    {
+        $configured = trim((string) (getenv('MYINVOICE_MCP_PHP_BINARY') ?: ''));
+        return $configured !== '' ? $configured : PhpCliLocator::resolve();
     }
 
     public function endpoint(): string
@@ -68,6 +93,9 @@ final class HostedMcp
 
     public function nodeAvailable(): bool
     {
+        if ($this->managedRelay()) {
+            return function_exists('proc_open') && $this->relayPhpBinary() !== null;
+        }
         if (!function_exists('proc_open')) return false;
         if (!is_file($this->phpBinary()) || !is_executable($this->phpBinary())) return false;
         $binary = $this->nodeBinary();
