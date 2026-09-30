@@ -14,10 +14,11 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 
 V hlavním menu **Přijaté faktury**.
 
-Šipka vlevo rozbalí položky faktury přímo v seznamu. U zaúčtovaného dokladu
-je před popiskem **Popis** dostupné tlačítko **Náhled**, které otevře stejný boční
-panel se shrnutím dokladu a souvisejícími úhradami jako v účetním deníku.
-Tlačítko vyžaduje oprávnění ke čtení účetnictví.
+Šipka vlevo rozbalí položky faktury přímo v seznamu. Před popiskem **Popis**
+je tlačítko **Náhled** i u nezaúčtovaného dokladu. Otevře stejný boční panel
+se shrnutím dokladu jako v účetním deníku. Načítá se až po kliknutí.
+U zaúčtovaného dokladu zobrazí i související účetní zápisy, pokud má uživatel
+oprávnění ke čtení účetnictví.
 
 Sloupce lze přetahovat myší za záhlaví s tečkovanou ikonou. Barevná čára ukáže,
 kam se sloupec přesune. Pořadí záhlaví i buněk se změní společně, také ve
@@ -70,6 +71,9 @@ V nabídce **Sloupce** lze přepínačem **Zobrazovat popisky: Ano / Ne** popisk
 zapnout nebo vypnout. Bez vlastní volby jsou vypnuté na jednom řádku a zapnuté
 při rozložení na více řádků. Vlastní volba se ukládá pro přihlášeného uživatele
 a tento seznam ve všech jeho firmách.
+Sestava **Výchozí klient** zachovává na desktopu jeden řádek dokladu.
+Z úhrad zobrazuje **Zbývá uhradit**; **Uhrazeno celkem** lze zapnout mezi
+volitelnými sloupci.
 Při vypnutých popiscích se záhlaví rozloží do stejných řádků a šířek jako
 hodnoty pod ním. Se zapnutými popisky zůstává záhlaví kompaktní.
 Přepínač **Hustota** mění výšku řádků i rozestupy víceřádkových bloků.
@@ -230,7 +234,7 @@ Limity:
 |---|---|
 | **Dodavatel** | Vyber ze seznamu nebo začni psát. Vyhledávání nabídne i firmu vedenou pouze jako odběratel; po úspěšném uložení faktury se jí doplní role dodavatele. Bez hledaného textu se nabízejí jen dodavatelé. Pokud firma v adresáři chybí, klikni „+ Vytvořit nového dodavatele" a využij ARES lookup podle IČO. |
 | **Číslo dokladu dodavatele** | Tak jak je vytištěno na originálu (např. `FA-2026-001`). Max 50 znaků. Unique per (dodavatel, datum vystavení) — nelze importovat 2× stejnou. |
-| **Naše interní číslo** | Volitelné. Pokud necháš prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (např. `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz § 23.2.4): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je per měsíc (přeteče na 4+ místa nad 999 dokladů). Šablonu lze změnit v **Nastavení → Číslování faktur → Šablona pro přijatou fakturu** (např. `PF-{YYYY}{MM}-{CCCC}` → `PF-202605-0001`). Při ručním zadání čísla systém hlídá kolize (nepovolí duplicitu) a auto-generátor obsazená čísla přeskakuje. |
+| **Naše číslo** | Volitelné. Pokud necháš prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (např. `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz § 23.2.4): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je per měsíc (přeteče na 4+ místa nad 999 dokladů). Šablonu lze změnit v **Nastavení → Číslování faktur → Šablona pro přijatou fakturu** (např. `PF-{YYYY}{MM}-{CCCC}` → `PF-202605-0001`). Při ručním zadání čísla systém hlídá kolize (nepovolí duplicitu) a auto-generátor obsazená čísla přeskakuje. |
 | **Typ dokladu** | Faktura / Doklad o úhradě / Dobropis / Záloha (pro filtrování v seznamu). |
 | **Datum vystavení** | Z faktury. |
 | **DUZP (datum uskutečnění zdanitelného plnění)** | Klíčové pro DPH období. Default = datum vystavení. U **reverse charge** se doklad zařazuje do DPH období právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu); u **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve — editor to připomene hintem. |

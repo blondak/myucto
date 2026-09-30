@@ -744,6 +744,7 @@ final class Routes
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/items',          GetPurchaseInvoiceItemsAction::class);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/preview',        \MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoicePreviewAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}',                UpdatePurchaseInvoiceAction::class);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}',                DeletePurchaseInvoiceAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);

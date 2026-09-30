@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { accountingApi, type JournalSourceSummary, type SourceAction, type SourceFieldFormat } from '@/api/accounting'
+import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
 import type { PermissionKey } from '@/security/permissions'
 import Drawer from '@/components/ui/Drawer.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -19,11 +20,10 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
  * nabízí prokliky. Mutace (vystavení, vyřazení majetku, párování banky) sem
  * ZÁMĚRNĚ nepatří — ty žijí na detailu dokladu, kde je k nim celý kontext.
  *
- * Data tahá jediný generický endpoint /journal/{id}/source klíčovaný ID ZÁPISU;
- * FE nikdy neposílá source_type/source_id, takže přes drawer nejde dotáhnout
- * cizí doklad.
+ * Deník používá /journal/{id}/source; seznam přijatých faktur používá
+ * /purchase-invoices/{id}/preview s ověřením vlastnictví dokladu.
  */
-const props = defineProps<{ entryId: number }>()
+const props = defineProps<{ entryId?: number; purchaseInvoiceId?: number }>()
 const emit = defineEmits<{
   (e: 'close'): void
   /** Odskok na zápis v deníku — drawer visí NAD deníkem, takže to musí řešit stránka. */
@@ -43,14 +43,17 @@ const summary = ref<JournalSourceSummary | null>(null)
  * v deníku; zpět se vrací šipkou v hlavičce. Historie je jednoúrovňová záměrně:
  * graf vazeb je oboustranný, takže hlubší zanořování jen krouží mezi dvěma zápisy.
  */
-const currentId = ref(props.entryId)
-const rootId = ref(props.entryId)
+const currentId = ref(props.entryId ?? 0)
+const rootId = ref(props.entryId ?? 0)
+const relatedEntryId = computed(() => currentId.value || summary.value?.entry_id || 0)
 
 async function load(id: number) {
+  if (id <= 0 && !props.purchaseInvoiceId) return
   loading.value = true
   summary.value = null
   try {
-    summary.value = await accountingApi.getJournalSource(id)
+    summary.value = id > 0 ? await accountingApi.getJournalSource(id)
+      : await purchaseInvoicesApi.preview(props.purchaseInvoiceId!)
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     emit('close')
@@ -60,11 +63,13 @@ async function load(id: number) {
 }
 
 // Drawer se mountuje s v-if, ale entryId se může změnit klikem na jiný řádek.
-watch(() => props.entryId, id => {
-  if (id > 0) { rootId.value = id; currentId.value = id }
+watch(() => [props.entryId, props.purchaseInvoiceId], () => {
+  rootId.value = props.entryId ?? 0
+  if (currentId.value !== rootId.value) currentId.value = rootId.value
+  else void load(rootId.value)
 }, { immediate: true })
 
-watch(currentId, id => { if (id > 0) load(id) }, { immediate: true })
+watch(currentId, id => { void load(id) })
 
 const sourceTypeLabel = computed(() => {
   const type = summary.value?.source_type
@@ -224,7 +229,7 @@ function fmt(value: unknown, format: SourceFieldFormat, key?: string): string {
         zápočet) dává smysl ukázat, co s ním souvisí — a v draweru navíc umí
         přepnout náhled na protějšek.
       -->
-      <JournalRelatedPanel class="mt-6" :entry-id="currentId" show-preview
+      <JournalRelatedPanel v-if="relatedEntryId && auth.canRead('accounting')" class="mt-6" :entry-id="relatedEntryId" show-preview
                            @preview="id => currentId = id"
                            @focus-entry="id => emit('focus-entry', id)" />
     </template>

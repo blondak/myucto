@@ -1023,6 +1023,9 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       padding-top: 0.15rem !important;
       padding-bottom: 0.15rem !important;
     }
+    :is(.adaptive-table, .multirow-table).tbl-compact > thead {
+      margin-bottom: 0.35rem;
+    }
     .tbl-compact.column-labels > tbody > tr:not(.table-detail-row) > td[data-column-label]::before {
       margin-bottom: 0;
     }

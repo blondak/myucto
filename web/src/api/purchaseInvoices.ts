@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { DocumentLock } from './locks'
+import type { JournalSourceSummary } from './accounting'
 import type { DocItem } from './documents'
 import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
 import { appIsoDate } from '@/utils/date'
@@ -790,6 +791,7 @@ export const purchaseInvoicesApi = {
 
   get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
   items: (id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
+  preview: (id: number) => api.get<JournalSourceSummary>(`/purchase-invoices/${id}/preview`).then(r => r.data),
   acceptAiPostingSuggestion: (id: number, override?: Partial<AiPostingSuggestion['payload']>) =>
     api.post<{ status: 'accepted'; applied: AiPostingSuggestion['payload'] }>(
       `/ai/suggestions/${id}/accept`, override ? { override } : {},

@@ -1017,7 +1017,9 @@ function mobileExtraFields(inv: InvoiceListItem): Array<{ key: string; label: st
 watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_classification'), tbl.isVisible('vat_return_lines'), tbl.isVisible('document_tags'), tbl.isVisible('journal_notes'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
 const listBoxes = ref<HTMLElement[]>([])
-useAdaptiveTableRows(listBoxes)
+const adaptiveRowsEnabled = computed(() => COLUMNS.some(c => c.available?.() !== false
+  && tbl.isVisible(c.key) !== (c.required === true || !c.defaultHidden)))
+useAdaptiveTableRows(listBoxes, adaptiveRowsEnabled)
 const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
 useFillViewportHeight(listBox, { keepFiltersVisible: true })
 function toggleGrouping() {

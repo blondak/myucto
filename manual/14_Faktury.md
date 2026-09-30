@@ -87,6 +87,7 @@ pod nimi. Sloupce v každém řádku jsou stejně široké a využijí celou š�
   při rozložení na více řádků. Vlastní volba se ukládá do profilu přihlášeného
   uživatele pro tento seznam a platí ve všech jeho firmách. Stejný přepínač
   mají i ostatní seznamy s nabídkou Sloupce.
+  Sestava **Výchozí klient** zachovává na desktopu jeden řádek dokladu.
   Při vypnutých popiscích se záhlaví rozloží do stejných řádků a šířek jako
   hodnoty pod ním. Se zapnutými popisky zůstává záhlaví kompaktní.
   Přepínač **Hustota** mění výšku řádků i rozestupy víceřádkových bloků.

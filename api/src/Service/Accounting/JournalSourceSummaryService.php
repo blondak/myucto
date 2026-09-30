@@ -68,6 +68,14 @@ final class JournalSourceSummaryService
 
     public function __construct(private readonly Connection $db) {}
 
+    public function purchaseInvoicePreview(int $supplierId, int $id): ?array
+    {
+        $summary = $this->purchaseInvoice($supplierId, $id);
+        return $summary === null ? null : [
+            'source_type' => 'purchase_invoice', 'source_id' => $id, 'available' => true, ...$summary,
+        ];
+    }
+
     /**
      * @param  array<string,mixed> $entry ověřený řádek journal_entries daného tenanta
      * @return array<string,mixed>

@@ -8,6 +8,7 @@ use MyInvoice\Action\Invoice\ListInvoicesAction;
 use MyInvoice\Action\Invoice\GetInvoiceItemsAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceItemsAction;
+use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoicePreviewAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -185,6 +186,27 @@ final class InvoiceListOptionalColumnsTest extends TestCase
             self::assertSame([$code], $row['vat_classification_codes']);
             self::assertSame([$line], $row['vat_return_lines']);
         }
+    }
+
+    public function testPurchasePreviewWorksWithoutPostingAndRejectsForeignOrUnauthorizedRequests(): void
+    {
+        $id = $this->document('purchase_invoice', 'PREVIEW-SYNTHETIC', 'Synthetic', '100');
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/purchase-invoices/' . $id . '/preview')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $action = $this->container->get(GetPurchaseInvoicePreviewAction::class);
+        $response = $action($request, new Response(), ['id' => $id]);
+        self::assertSame(200, $response->getStatusCode());
+        $summary = json_decode((string) $response->getBody(), true);
+        self::assertTrue($summary['available']);
+        self::assertSame('purchase_invoice', $summary['source_type']);
+        self::assertSame($id, $summary['source_id']);
+        self::assertSame(0, $summary['entry_id']);
+        self::assertSame('PREVIEW-SYNTHETIC', $summary['title']);
+        $foreign = $request->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId === 1 ? 2 : 1);
+        self::assertSame(404, $action($foreign, new Response(), ['id' => $id])->getStatusCode());
+        self::assertSame(404, $action($request, new Response(), ['id' => PHP_INT_MAX])->getStatusCode());
+        self::assertSame(403, $action($request->withoutAttribute(AuthMiddleware::ATTR_USER), new Response(), ['id' => $id])->getStatusCode());
     }
 
     public function testItemsEndpointsReturnOnlyOrderedItemsAndEnforceSupplierOwnership(): void

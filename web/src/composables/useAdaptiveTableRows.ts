@@ -13,7 +13,7 @@ function gutterWidth(table: HTMLTableElement): number {
   return first?.querySelector('.workspace-row-drag-handle') && first.querySelector('input[type="checkbox"]') ? 52 : 44
 }
 
-export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>): void {
+export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>, enabled?: Readonly<Ref<boolean>>): void {
   let timer: ReturnType<typeof setTimeout> | null = null
   let resize: ResizeObserver | null = null
   let mutations: MutationObserver | null = null
@@ -46,7 +46,7 @@ export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>): voi
       const gutter = gutterWidth(table)
       table.style.setProperty('--adaptive-gutter', `${gutter}px`)
       const available = table.parentElement!.clientWidth - gutter
-      const wrapped = window.innerWidth >= 768 && widths.reduce((sum, width) => sum + width, 0) > available
+      const wrapped = enabled?.value !== false && window.innerWidth >= 768 && widths.reduce((sum, width) => sum + width, 0) > available
       const weights = Array.from(table.tHead?.rows[0]?.cells ?? []).slice(1, -1)
         .map(cell => Number(cell.dataset.adaptiveWeight) || 1)
       const layout = wrapped ? adaptiveTableWidths(widths.slice(1), available, weights) : []
@@ -101,6 +101,7 @@ export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>): voi
     void document.fonts?.ready.then(schedule)
   })
   watch(() => targets.value.slice(), bind, { flush: 'post' })
+  if (enabled) watch(enabled, schedule, { flush: 'post' })
   onBeforeUnmount(() => {
     disposed = true
     resize?.disconnect()

@@ -17464,7 +17464,7 @@
       "vendor": "Dodavatel",
       "vendor_invoice_number": "Číslo dokladu dodavatele",
       "vendor_invoice_number_hint": "Tak, jak je uvedeno na originálu (např. FA-2026-001)",
-      "varsymbol": "Naše interní číslo",
+      "varsymbol": "Naše číslo",
       "varsymbol_hint": "Volitelné — automaticky se vygeneruje jako PF2605001 (prefix dle daňového typu) při přijetí",
       "document_kind": "Typ dokladu",
       "issue_date": "Datum vystavení",

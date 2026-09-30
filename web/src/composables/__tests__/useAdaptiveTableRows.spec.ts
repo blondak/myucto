@@ -45,11 +45,16 @@ it.each(['', 'list-stacked-controls'])('adapts tables loaded after mounting and 
   Object.defineProperty(box.querySelectorAll('tbody td')[3], 'offsetTop', { value: 63 })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 180 } as DOMRect)
   const targets = ref<HTMLElement[]>([])
-  const wrapper = mount({ setup() { useAdaptiveTableRows(targets); return () => null } })
+  const enabled = ref(false)
+  const wrapper = mount({ setup() { useAdaptiveTableRows(targets, enabled); return () => null } })
   targets.value.push(box)
   await nextTick()
   await vi.runOnlyPendingTimersAsync()
   const table = box.querySelector('table')!
+  expect(table.classList.contains('adaptive-table')).toBe(false)
+  enabled.value = true
+  await nextTick()
+  await vi.runOnlyPendingTimersAsync()
   expect(table.classList.contains('adaptive-table')).toBe(true)
   expect(table.querySelectorAll('thead th')[1]!.getAttribute('style')).toBe(table.querySelectorAll('tbody td')[1]!.getAttribute('style'))
   expect(table.querySelectorAll('tbody td')[3]!.hasAttribute('data-adaptive-secondary')).toBe(true)
@@ -57,6 +62,15 @@ it.each(['', 'list-stacked-controls'])('adapts tables loaded after mounting and 
   const cells = Array.from(table.tBodies[0]!.rows[0]!.cells).slice(1, -1)
   expect(parseFloat(cells[0]!.style.flexBasis) * 2 + gutter).toBeLessThanOrEqual(width)
   if (controlsClass) expect(table.tBodies[0]!.rows[0]!.style.getPropertyValue('--adaptive-expand-top')).toBe('63px')
+  enabled.value = false
+  await nextTick()
+  await vi.runOnlyPendingTimersAsync()
+  expect(table.classList.contains('adaptive-table')).toBe(false)
+  expect(table.querySelector('[data-adaptive-secondary]')).toBeNull()
+  enabled.value = true
+  await nextTick()
+  await vi.runOnlyPendingTimersAsync()
+  expect(table.classList.contains('adaptive-table')).toBe(true)
   width = 900
   window.dispatchEvent(new Event('resize'))
   await vi.runOnlyPendingTimersAsync()

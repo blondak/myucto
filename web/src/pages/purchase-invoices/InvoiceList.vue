@@ -276,7 +276,7 @@ const { expandedId, expandedItems, expandedLoading, toggleItems, clearExpandedIt
   id => purchaseInvoicesApi.items(id),
   () => supplierStore.currentSupplier?.id,
 )
-const previewEntryId = ref<number | null>(null)
+const previewInvoiceId = ref<number | null>(null)
 
 /**
  * Šířka rozbaleného řádku = počet viditelných sloupců + zaškrtávátko + rozbalovací
@@ -307,8 +307,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'due_date', labelKey: 'purchase_invoice.fields.due_date' },
   { key: 'amount', labelKey: 'purchase_invoice.totals.with_vat', required: true },
   { key: 'status', labelKey: 'purchase_invoice.list_status' },
-  // Úhrada, defaultně viditelné: bez nich účetní částečně uhrazený doklad nepozná.
-  { key: 'paid_amount', labelKey: 'purchase_invoice.col_paid_amount' },
+  { key: 'paid_amount', labelKey: 'purchase_invoice.col_paid_amount', defaultHidden: true },
   { key: 'remaining_amount', labelKey: 'purchase_invoice.col_remaining_amount' },
   // Doplňkové sloupce — defaultně skryté, uživatel si je zapne přes ColumnPicker.
   { key: 'paid_at', labelKey: 'invoice.col_paid_at', defaultHidden: true },
@@ -389,7 +388,9 @@ function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; l
 watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_classification'), tbl.isVisible('vat_return_lines'), tbl.isVisible('document_tags'), tbl.isVisible('journal_notes'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
 const listBoxes = ref<HTMLElement[]>([])
-useAdaptiveTableRows(listBoxes)
+const adaptiveRowsEnabled = computed(() => COLUMNS.some(c => c.available?.() !== false
+  && tbl.isVisible(c.key) !== (c.required === true || !c.defaultHidden)))
+useAdaptiveTableRows(listBoxes, adaptiveRowsEnabled)
 const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
 useFillViewportHeight(listBox, { keepFiltersVisible: true })
 function toggleGrouping() {
@@ -1499,7 +1500,7 @@ async function bulkSetKind() {
                         <tr class="text-neutral-500">
                           <th class="py-1 text-left font-medium">
                             <div class="flex flex-wrap items-center gap-2">
-                              <button v-if="inv.locked?.journal_entry_id && auth.canRead('accounting')" type="button" :class="btnOutlineSm('primary')" @click.stop="previewEntryId = inv.locked.journal_entry_id">
+                              <button type="button" :class="btnOutlineSm('primary')" @click.stop="previewInvoiceId = inv.id">
                                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
                                 {{ t('accounting.journal.related.preview') }}
                               </button>
@@ -1646,7 +1647,7 @@ async function bulkSetKind() {
       </div>
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
-    <JournalSourceDrawer v-if="previewEntryId" :entry-id="previewEntryId" @close="previewEntryId = null"
+    <JournalSourceDrawer v-if="previewInvoiceId" :purchase-invoice-id="previewInvoiceId" @close="previewInvoiceId = null"
       @focus-entry="id => router.push({ name: 'accounting-journal', query: { entry_id: String(id) } })" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
   </div>
