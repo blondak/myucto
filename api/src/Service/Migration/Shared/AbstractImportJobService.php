@@ -74,6 +74,7 @@ abstract class AbstractImportJobService
         if ($job === null || !$this->jobs->markRunning($jobId)) {
             return;
         }
+        ImportWorkerMemory::raise();
         $supplierId = (int) $job['supplier_id'];
         if (static::isPrepareJob($job)) {
             if (!$this->supportsPrepareJob()) {

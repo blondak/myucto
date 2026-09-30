@@ -99,15 +99,6 @@ final class AbraImportJobService extends AbstractImportJobService
     /** @param array<string,mixed> $job */
     protected function runLocked(int $jobId, array $job, int $supplierId): void
     {
-        if (PHP_SAPI === 'cli') {
-            $limit = (string) ini_get('memory_limit');
-            if (preg_match('/^([1-9]\d*)([KMG]?)$/iD', $limit, $match) === 1) {
-                $bytes = (int) $match[1] * match (strtoupper($match[2])) {
-                    'G' => 1073741824, 'M' => 1048576, 'K' => 1024, default => 1,
-                };
-                if ($bytes < 4 * 1073741824) ini_set('memory_limit', '4096M');
-            }
-        }
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $mode = (string) ($params['mode'] ?? '');
         if ($mode === self::MODE_CATALOG) {

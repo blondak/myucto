@@ -11,6 +11,7 @@ use MyInvoice\Service\Migration\ImportYears;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
 use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\ImportWorkerMemory;
 
 /**
  * Převod z POHODY na pozadí (`import_jobs.source = pohoda_import`, migrace 1844).
@@ -92,6 +93,7 @@ final class PohodaImportJobService extends AbstractImportJobService
         $job = $this->jobs->findById($jobId);
         if ($job !== null && self::isDescribeJob($job)) {
             if ($this->jobs->markRunning($jobId)) {
+                ImportWorkerMemory::raise();
                 $this->describe($jobId, $job, (int) $job['supplier_id']);
             }
             return;

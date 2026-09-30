@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\Premier\PremierException;
 use MyInvoice\Service\Migration\Premier\PremierUploads;
 use MyInvoice\Service\Migration\Shared\AbstractImportJobService;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\ImportWorkerMemory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -116,6 +117,21 @@ final class AbstractImportJobServiceTest extends TestCase
         $job = $this->jobs->findById($jobId);
         self::assertSame('Falešný převod selhal.', $job['last_error']);
         self::assertStringNotContainsString('interní detail', (string) $job['log_text']);
+    }
+
+    /** Worker spuštěný z webu zdědí jeho `php.ini`; strop si proto zvedá každý zdroj převodu. */
+    public function testRunRaisesMemoryLimitInheritedFromWebConfiguration(): void
+    {
+        $previous = (string) ini_get('memory_limit');
+        if (ini_set('memory_limit', '768M') === false) {
+            self::markTestSkipped('memory_limit nejde v tomto prostředí změnit.');
+        }
+        try {
+            $this->service->run($this->job(['mode' => 'dry_run', 'years' => [2021]]));
+            self::assertSame(ImportWorkerMemory::LIMIT, ini_get('memory_limit'));
+        } finally {
+            ini_set('memory_limit', $previous);
+        }
     }
 
     public function testPrepareJobDoesNotTakeCompanyLock(): void
