@@ -40,6 +40,8 @@ let requestId = 0
 
 const types = computed(() => dims.types.value.filter(type => type.is_active))
 const selectedType = computed(() => types.value.find(type => type.id === typeId.value))
+const noValues = computed(() => dims.overview.value !== null && types.value.length > 0
+  && !dims.values.value.some(value => types.value.some(type => type.id === value.type_id)))
 const currentName = computed(() => supplier.currentSupplier?.company_name || t('dimensions.analytics_current'))
 const availableCompanies = computed(() => (report.value?.available_companies ?? []).filter(item => item.id !== supplier.currentSupplierId))
 const money = (amount: number) => formatMoney(amount, 'CZK')
@@ -229,6 +231,8 @@ watch(() => supplier.currentSupplierId, async () => {
       </RouterLink>
     </div>
     <EmptyState v-if="!dims.enabled.value" boxed icon="tag" :title="t('dimensions.disabled_title')" :message="t('dimensions.disabled_hint')" />
+    <EmptyState v-else-if="noValues" boxed icon="tag" :title="t('dimensions.analytics_no_values_title')" :message="t('dimensions.analytics_no_values_hint')"
+      to="/company/dimensions" :cta="t('dimensions.analytics_no_values_cta')" data-test="dimension-stats-no-values" />
     <template v-else>
       <div class="flex flex-wrap items-end gap-3 mb-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <div>

@@ -345,7 +345,7 @@ function resolveLink(it: PostingSuggestion) {
               </td>
               <td v-if="tbl.isVisible('date')" class="px-3 py-2 text-xs whitespace-nowrap">{{ formatDate(it.transaction.posted_at) }}</td>
               <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono text-xs"
-                :class="it.transaction.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+                :class="it.transaction.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
                 {{ it.transaction.amount > 0 ? '+' : '' }}{{ formatMoney(it.transaction.amount, it.transaction.currency) }}
               </td>
               <td v-if="tbl.isVisible('counterparty')" class="px-3 py-2 text-xs">
@@ -424,7 +424,7 @@ function resolveLink(it: PostingSuggestion) {
       <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="it in items" :key="`m-${it.id}`" class="p-3 space-y-2">
           <div class="flex items-baseline justify-between gap-2">
-            <span class="font-mono text-base font-semibold" :class="it.transaction.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+            <span class="font-mono text-base font-semibold" :class="it.transaction.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
               {{ it.transaction.amount > 0 ? '+' : '' }}{{ formatMoney(it.transaction.amount, it.transaction.currency) }}
             </span>
             <span class="font-mono text-xs text-neutral-500">{{ it.debit_account_code }}/{{ it.credit_account_code }}</span>

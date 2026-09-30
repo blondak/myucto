@@ -202,6 +202,37 @@ final class SetExpenseKindsTest extends TestCase
         self::assertNull($inv['extraction_review']);
     }
 
+    /** Trello MCUAD #10: hlášení z doby před `extraction_review` nese návrhy jen jako text. */
+    public function testTextOnlyWarningBulletsDisappearAsRowsGetKind(): void
+    {
+        [$id, $first, $second] = $this->createInvoice();
+        $this->seedWarning($id);
+        $this->repo->setExtractionReview($id, $this->supplierId, null);
+
+        $this->put($id, ['items' => [['id' => $first, 'expense_kind' => 'service']]]);
+        $inv = $this->repo->find($id, $this->supplierId);
+        self::assertStringContainsString(self::RC_SECTION, (string) $inv['extraction_warning']);
+        self::assertStringNotContainsString('řádek 1', (string) $inv['extraction_warning']);
+        self::assertStringContainsString('u 1 řádků', (string) $inv['extraction_warning']);
+        self::assertStringContainsString('řádek 2', (string) $inv['extraction_warning']);
+
+        $this->put($id, ['items' => [['id' => $second, 'expense_kind' => 'small_asset']]]);
+        self::assertSame(self::RC_SECTION, $this->repo->find($id, $this->supplierId)['extraction_warning']);
+    }
+
+    /** Druh nastavený dřív, než hlášení umělo mizet: potvrzení beze změny ho dočistí. */
+    public function testUnchangedSaveStillPrunesResolvedBullets(): void
+    {
+        [$id, $first, $second] = $this->createInvoice();
+        $this->seedWarning($id);
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET expense_kind = 'service' WHERE purchase_invoice_id = ?")
+            ->execute([$id]);
+
+        $res = $this->put($id, ['items' => [['id' => $first, 'expense_kind' => 'service'], ['id' => $second, 'expense_kind' => 'service']]]);
+        self::assertSame(200, $res['status']);
+        self::assertSame(self::RC_SECTION, $this->repo->find($id, $this->supplierId)['extraction_warning']);
+    }
+
     /** Uložení v editoru (replaceItems) řeší odrážky stejně jako kontrolní okno. */
     public function testEditorSaveAlsoPrunesBullets(): void
     {

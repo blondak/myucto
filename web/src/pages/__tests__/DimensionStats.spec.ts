@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
-const mocks = vi.hoisted(() => ({ analytics: vi.fn(), exportAnalytics: vi.fn(), replace: vi.fn(), chartCreated: vi.fn() }))
+const mocks = vi.hoisted(() => ({ analytics: vi.fn(), exportAnalytics: vi.fn(), replace: vi.fn(), chartCreated: vi.fn(), values: [] as { id: number; type_id: number }[] }))
 
 vi.mock('chart.js', () => ({
   Chart: class { constructor() { mocks.chartCreated() } static register() {} destroy() {} },
@@ -13,6 +13,7 @@ vi.mock('@/api/dimensions', () => ({ dimensionsApi: { analytics: mocks.analytics
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
 vi.mock('@/composables/useDimensions', () => ({ useDimensions: () => ({
   enabled: ref(true), types: ref([{ id: 7, name: 'Projekt', level: 'global', is_active: true }]), load: async () => {},
+  overview: ref({}), values: ref(mocks.values),
 }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { company_name: 'Mateřská firma' } }) }))
 vi.mock('@/composables/useTheme', () => ({ useChartColors: () => ref({ primary: '#123456', primarySoft: '#654321', neutral: '#888888', success: '#009900', warning: '#aa8800', danger: '#aa0000', tick: '#333333', grid: '#cccccc', tooltipBg: '#000000' }) }))
@@ -36,9 +37,19 @@ const report = {
   available_companies: [{ id: 1, company_name: 'Mateřská firma' }, { id: 2, company_name: 'Dceřiná firma' }],
 }
 
-beforeEach(() => { vi.clearAllMocks(); mocks.analytics.mockResolvedValue(report); mocks.exportAnalytics.mockResolvedValue(new Blob(['x'])) })
+beforeEach(() => { vi.clearAllMocks(); mocks.values.splice(0, mocks.values.length, { id: 10, type_id: 7 }); mocks.analytics.mockResolvedValue(report); mocks.exportAnalytics.mockResolvedValue(new Blob(['x'])) })
 
 describe('Grafy dimenzí', () => {
+  it('bez hodnot dimenzí pošle firmu do jejich správy', async () => {
+    mocks.values.splice(0)
+    const wrapper = mount(DimensionStats, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+    const empty = wrapper.find('[data-test="dimension-stats-no-values"]')
+    expect(empty.exists()).toBe(true)
+    expect(empty.find('a').attributes('href') ?? empty.html()).toContain('/company/dimensions')
+    expect(wrapper.find('[data-test="dimension-stats-type"]').exists()).toBe(false)
+  })
+
   it('ukáže souhrn a po volbě skupiny načte součet přístupných firem', async () => {
     const wrapper = mount(DimensionStats, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, EmptyState: true } } })
     await flushPromises()

@@ -117,7 +117,8 @@ final class SetPurchaseInvoiceExpenseKindsAction
             }
         }
         if ($changes === []) {
-            return Json::ok($response, $existing);
+            $this->reviewSync->afterItemsChanged($supplierId, $id);
+            return Json::ok($response, $this->repo->find($id, $supplierId) ?? $existing);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

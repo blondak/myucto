@@ -35,7 +35,7 @@ const transactionDetailFields = computed(() => {
 <template>
     <Modal v-if="textDetail" :title="t('bank.show_transaction_text')" width-class="max-w-xl" @close="textDetail = null">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <p class="text-xl font-semibold font-mono" :class="textDetail.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+        <p class="text-xl font-semibold font-mono" :class="textDetail.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
           {{ textDetail.amount > 0 ? '+' : '' }}{{ formatMoney(textDetail.amount, textDetail.currency ?? fallbackCurrency ?? 'CZK') }}
         </p>
         <span class="text-xs px-2 py-0.5 rounded font-medium" :class="statusBadge(textDetail.match_status)">

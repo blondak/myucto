@@ -329,7 +329,7 @@ function candidateReject() {
         </RouterLink>
       </td>
       <td class="px-3 py-2 text-right font-mono text-xs"
-        :class="tx.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+        :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </td>
       <td v-if="showAccount" class="px-3 py-2 text-xs">
@@ -462,7 +462,7 @@ function candidateReject() {
   <div v-else class="p-3 space-y-2" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
     <div class="flex items-baseline justify-between gap-2">
       <div class="font-mono text-base font-semibold whitespace-nowrap"
-        :class="tx.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+        :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
       <div class="flex flex-col items-end gap-1">

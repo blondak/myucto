@@ -231,7 +231,7 @@ defineExpose({ runDryRun, dryRun })
             <li v-for="s in dryRun.sample" :key="s.id" class="px-3 py-1.5 flex items-center justify-between gap-2">
               <span class="text-neutral-500">{{ formatDate(s.posted_at) }}</span>
               <span class="truncate flex-1 text-neutral-600">{{ s.description }}</span>
-              <span class="font-mono whitespace-nowrap" :class="s.amount > 0 ? 'text-success-600' : 'text-danger-500'">
+              <span class="font-mono whitespace-nowrap" :class="s.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
                 {{ formatMoney(s.amount, 'CZK') }}
               </span>
               <span v-if="s.already_posted" class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-neutral-200 text-neutral-600">

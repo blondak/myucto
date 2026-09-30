@@ -423,12 +423,12 @@ const COLUMNS: ColumnDef[] = [
   { key: 'status', labelKey: 'accounting.journal.status_col' },
   { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
-  { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id' },
-  { key: 'created_at', labelKey: 'accounting.journal.created_at' },
+  { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
+  { key: 'created_at', labelKey: 'accounting.journal.created_at', defaultHidden: true },
   { key: 'updated_at', labelKey: 'accounting.journal.col_updated_at', defaultHidden: true },
-  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown' },
-  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts' },
-  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts' },
+  { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
+  { key: 'debit_accounts', labelKey: 'accounting.journal.col_debit_accounts' },
+  { key: 'credit_accounts', labelKey: 'accounting.journal.col_credit_accounts' },
   { key: 'note', labelKey: 'accounting.journal.col_note', defaultHidden: true },
   { key: 'documents', labelKey: 'accounting.journal.col_documents', defaultHidden: true },
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dims.enabled.value },
@@ -437,9 +437,8 @@ const tbl = useTablePrefs('journal', COLUMNS)
 const colors = useTableColors('journal')
 const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
-  // Úzký deník v jednom řádku: jen údaje, které stačí k orientaci.
-  { key: 'simple', labelKey: 'common.columns_preset_simple', visibleKeys: ['date', 'document_no', 'description', 'source', 'amount', 'status'] },
-  { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
+  { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null, columnLabels: false },
+  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'document_no', 'description', 'source', 'amount', 'status', 'entry_id', 'created_at', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
 function onListScroll(event: Event) {

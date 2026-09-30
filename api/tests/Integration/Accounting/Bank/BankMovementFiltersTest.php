@@ -51,7 +51,7 @@ final class BankMovementFiltersTest extends BankPostingTestCase
     public function testAllAccountExportIncludesUnloadedRowsAndJournalNotes(): void
     {
         $statement = $this->statement();
-        $first = $this->transaction($statement, 1234.50, ['description' => '=synthetic formula']);
+        $first = $this->transaction($statement, 1234.50, ['description' => '=synthetic formula', 'counterparty_name' => 'Syntetická protistrana', 'counterparty_account' => '1000000005', 'counterparty_bank' => '0100']);
         $entry = $this->postPredpis('bank', $first, '221', '311', 1234.50);
         $this->db->pdo()->prepare('INSERT INTO journal_entry_notes (supplier_id, entry_id, body, created_by) VALUES (?, ?, ?, ?)')
             ->execute([$this->supplierId, $entry, 'Syntetická poznámka', $this->userId]);
@@ -71,10 +71,14 @@ final class BankMovementFiltersTest extends BankPostingTestCase
             self::assertSame(self::ACCOUNT . '/' . self::BANK_CODE, $sheet->getCell('A6')->getValue());
             self::assertSame('=synthetic formula', $sheet->getCell('C6')->getValue());
             self::assertSame('s', $sheet->getCell('C6')->getDataType());
-            self::assertSame(1234.50, (float) $sheet->getCell('D6')->getValue());
-            self::assertSame('Syntetická poznámka', $sheet->getCell('F6')->getValue());
-            self::assertSame(-10.00, (float) $sheet->getCell('D507')->getValue());
-            self::assertNull($sheet->getCell('D508')->getValue());
+            self::assertSame('Protistrana', $sheet->getCell('D5')->getValue());
+            self::assertSame('Účet protistrany', $sheet->getCell('E5')->getValue());
+            self::assertSame('Syntetická protistrana', $sheet->getCell('D6')->getValue());
+            self::assertSame('1000000005/0100', $sheet->getCell('E6')->getValue());
+            self::assertSame(1234.50, (float) $sheet->getCell('F6')->getValue());
+            self::assertSame('Syntetická poznámka', $sheet->getCell('H6')->getValue());
+            self::assertSame(-10.00, (float) $sheet->getCell('F507')->getValue());
+            self::assertNull($sheet->getCell('F508')->getValue());
             $book->disconnectWorksheets();
         } finally { @unlink($path); }
     }

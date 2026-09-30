@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
 import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 
@@ -22,6 +22,19 @@ const paneActive = usePaneActivity()
 const paneId = usePaneId()
 let scrollLocked = false
 
+/**
+ * Otevřený náhled originálu vpravo (DocumentSidePreview) modál nezakrývá: backdrop
+ * končí na jeho levé hraně a dialog se centruje do zbylé části, aby šel doklad
+ * při potvrzování vizuálně kontrolovat.
+ */
+const previewInset = ref(0)
+function measurePreview(): void {
+  const preview = document.querySelector<HTMLElement>('[data-side-preview]')
+  const rect = preview?.getBoundingClientRect()
+  previewInset.value = rect && rect.width > 0 ? Math.max(0, window.innerWidth - rect.left) : 0
+}
+const backdropStyle = computed(() => previewInset.value > 0 ? { right: `${previewInset.value}px` } : undefined)
+
 function syncBodyScrollLock(active: boolean): void {
   if (active && !scrollLocked) {
     lockBodyScroll()
@@ -38,10 +51,13 @@ function onKey(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('keydown', onKey)
+  window.addEventListener('resize', measurePreview)
+  measurePreview()
   syncBodyScrollLock(paneActive.value)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
+  window.removeEventListener('resize', measurePreview)
   syncBodyScrollLock(false)
 })
 watch(paneActive, syncBodyScrollLock)
@@ -58,7 +74,7 @@ void props
     -->
     <div v-show="paneActive" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/45 backdrop-blur-[3px]"
       role="dialog" aria-modal="true" :aria-hidden="paneActive ? undefined : true" :data-workspace-pane="paneId ?? undefined"
-      @click.self="emit('close')">
+      :style="backdropStyle" @click.self="emit('close')">
       <div class="rise-in flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden rounded-xl bg-surface-raised shadow-2xl ring-1 ring-neutral-200" :class="widthClass">
         <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between shrink-0">
           <h2 class="text-lg font-semibold">{{ title }}</h2>

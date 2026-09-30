@@ -273,6 +273,13 @@ async function startFakImport() {
 // Nastavení brány (provideři, klíče, DPA, rozsah) zůstává tady v adminu;
 // samotný AI import přijatých faktur je vytažený na /purchase-invoices/ai-import (§12b).
 const ALL_PROVIDERS: AiProvider[] = ['anthropic', 'azure_openai', 'openai', 'gemini']
+const RECOMMENDED_PROVIDER: AiProvider = 'anthropic'
+const PROVIDER_KEY_URLS: Record<AiProvider, string> = {
+  anthropic: 'https://platform.claude.com/settings/keys',
+  azure_openai: 'https://portal.azure.com/#create/Microsoft.CognitiveServicesOpenAI',
+  openai: 'https://platform.openai.com/api-keys',
+  gemini: 'https://aistudio.google.com/app/apikey',
+}
 
 const aiCreds = ref<AiCredentialsResponse | null>(null)
 const aiProvider = ref<AiProvider>('anthropic')   // aktivní provider tenanta (non-secret)
@@ -970,6 +977,11 @@ onMounted(() => {
                   :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-success-50 text-success-700'">
                   {{ t('aiGateway.active_badge') }}
                 </span>
+                <span v-if="p === RECOMMENDED_PROVIDER"
+                  class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
+                  :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-primary-50 text-primary-700'">
+                  {{ t('aiGateway.recommended_badge') }}
+                </span>
               </button>
             </div>
             <p v-if="aiCreds && aiCreds.ai_provider !== aiProvider" class="mt-2 text-xs text-warning-700">
@@ -1011,7 +1023,12 @@ onMounted(() => {
         <!-- Per-provider credentials (klíč write-only) -->
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h2 class="text-sm font-medium text-neutral-700 mb-1">{{ t('aiGateway.credentials_title', { provider: providerLabel(aiProvider) }) }}</h2>
-          <p class="text-xs text-neutral-500 mb-4">{{ t('aiGateway.credentials_hint') }}</p>
+          <p class="text-xs text-neutral-500 mb-1">{{ t('aiGateway.credentials_hint') }}</p>
+          <p class="text-xs text-neutral-500 mb-4">
+            {{ t('aiGateway.key_link') }}
+            <a :href="PROVIDER_KEY_URLS[aiProvider]" target="_blank" rel="noopener noreferrer"
+               class="text-primary-700 hover:underline break-all">{{ PROVIDER_KEY_URLS[aiProvider] }}</a>
+          </p>
 
           <div v-if="providerConfigured(aiProvider)" class="rounded-md bg-primary-50 border border-primary-200 px-3 py-2 text-sm text-primary-700 mb-4">
             <strong>✓ {{ t('integrations.idoklad.configured') }}</strong>

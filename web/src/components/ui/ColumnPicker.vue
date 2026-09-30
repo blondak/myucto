@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { onClickOutside, useEventListener } from '@vueuse/core'
 import type { TablePrefsCtrl } from '@/composables/useTablePrefs'
 
-type ColumnPreset = { key: string; labelKey: string; visibleKeys: string[] | null }
+type ColumnPreset = { key: string; labelKey: string; visibleKeys: string[] | null; columnLabels?: boolean }
 const props = defineProps<{ ctrl: TablePrefsCtrl; presets?: ColumnPreset[]; reorderable?: boolean }>()
 const { t } = useI18n()
 
@@ -45,6 +45,7 @@ useEventListener(window, 'scroll', () => { open.value = false })
 function applyPreset(preset: ColumnPreset) {
   if (preset.visibleKeys === null) props.ctrl.resetColumns()
   else props.ctrl.setVisibleColumns(preset.visibleKeys)
+  if (preset.columnLabels !== undefined) props.ctrl.setColumnLabels(preset.columnLabels)
   open.value = false
 }
 function isPresetActive(preset: ColumnPreset): boolean {

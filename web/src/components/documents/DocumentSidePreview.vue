@@ -42,6 +42,7 @@ const framedSrc = computed(
 <template>
   <aside
     data-test="document-side-preview"
+    data-side-preview
     :aria-label="t('common.preview_side_title')"
     class="shrink-0 grow-0 basis-[46%] min-w-[26rem] max-w-[56rem] flex flex-col overflow-hidden
            bg-surface border border-neutral-200 rounded-lg shadow-sm

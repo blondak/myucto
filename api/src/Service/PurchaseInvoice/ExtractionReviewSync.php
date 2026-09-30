@@ -37,18 +37,11 @@ final class ExtractionReviewSync
         [$warning, $review] = $state;
         $entries = (array) ($review['expense_kinds'] ?? []);
         if ($entries === []) {
+            $this->pruneTextOnlySection($supplierId, $invoiceId, $warning, $review);
             return;
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT order_index, description, expense_kind FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
-        );
-        $stmt->execute([$invoiceId]);
-        $rows = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $rows[(int) $r['order_index']] = $r;
-        }
-
+        $rows = $this->itemRows($invoiceId);
         $open = array_values(array_filter($entries, static fn (array $e): bool =>
             isset($rows[(int) $e['order_index']]) && ($rows[(int) $e['order_index']]['expense_kind'] ?? null) === null));
         if (count($open) === count($entries)) {
@@ -69,6 +62,65 @@ final class ExtractionReviewSync
         }
         $review['expense_kinds'] = $open;
         $this->save($supplierId, $invoiceId, $sections, $review);
+    }
+
+    /**
+     * Hlášení z doby před `extraction_review` (migrace 1893) nese návrhy jen jako text.
+     * Odrážky „• řádek N …" se tedy párují na řádek dokladu podle čísla v textu.
+     *
+     * @param array<string,mixed> $review
+     */
+    private function pruneTextOnlySection(int $supplierId, int $invoiceId, string $warning, array $review): void
+    {
+        $sections = self::sections($warning);
+        $rows = null;
+        $changed = false;
+        foreach ($sections as $i => $s) {
+            if (!self::isExpenseKindSection($s)) {
+                continue;
+            }
+            $rows ??= $this->itemRows($invoiceId);
+            $kept = [];
+            $total = 0;
+            $lines = preg_split('/\R/u', $s) ?: [];
+            foreach ($lines as $line) {
+                if (preg_match('/^\s*•\s*řádek (\d+)\b/u', $line, $m) !== 1) {
+                    continue;
+                }
+                $total++;
+                $index = (int) $m[1] - 1;
+                if (isset($rows[$index]) && ($rows[$index]['expense_kind'] ?? null) === null) {
+                    $kept[] = trim($line);
+                }
+            }
+            if ($total === 0 || count($kept) === $total) {
+                continue;
+            }
+            $changed = true;
+            if ($kept === []) {
+                unset($sections[$i]);
+                continue;
+            }
+            $header = (string) preg_replace('/ u \d+ řádků — /u', ' u ' . count($kept) . ' řádků — ', (string) $lines[0], 1);
+            $sections[$i] = $header . "\n" . implode("\n", $kept);
+        }
+        if ($changed) {
+            $this->save($supplierId, $invoiceId, array_values($sections), $review);
+        }
+    }
+
+    /** @return array<int,array<string,mixed>> order_index => řádek */
+    private function itemRows(int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT order_index, description, expense_kind FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $stmt->execute([$invoiceId]);
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $rows[(int) $r['order_index']] = $r;
+        }
+        return $rows;
     }
 
     /**

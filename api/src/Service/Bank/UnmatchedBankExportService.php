@@ -35,7 +35,7 @@ final class UnmatchedBankExportService
         [$account, $statementDate] = $this->statement($supplierId, $statementId);
         $tx = $this->db->pdo()->prepare(
             'SELECT bt.id, bt.posted_at, bt.amount, bt.currency, bt.description,
-                    bt.counterparty_name, bt.variable_symbol
+                    bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol
                FROM bank_transactions bt
               WHERE ' . $this->unmatchedWhere($supplierId, $statementId)
                 . ' ORDER BY bt.posted_at, bt.id'
@@ -73,16 +73,16 @@ final class UnmatchedBankExportService
         $sheet = $book->getActiveSheet();
         $sheet->setTitle('Nespárované pohyby');
         $sheet->setCellValue('A1', 'Nespárované bankovní pohyby');
-        $sheet->mergeCells('A1:F1');
+        $sheet->mergeCells('A1:H1');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(15);
         $sheet->setCellValueExplicit('A2', 'Účet: ' . $account, DataType::TYPE_STRING);
         $sheet->setCellValue('A3', 'Datum výpisu: ' . $statementDate);
-        $headers = ['Bankovní účet', 'Datum platby', 'Textace', 'Částka', 'Měna', 'Poznámka'];
+        $headers = ['Bankovní účet', 'Datum platby', 'Textace', 'Protistrana', 'Účet protistrany', 'Částka', 'Měna', 'Poznámka'];
         foreach ($headers as $index => $header) {
             $sheet->setCellValue([$index + 1, 5], $header);
         }
-        $sheet->getStyle('A5:F5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
-        $sheet->getStyle('A5:F5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('334155');
+        $sheet->getStyle('A5:H5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A5:H5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('334155');
         $line = 6;
         foreach ($rows as $row) {
             $description = trim((string) ($row['description'] ?? ''));
@@ -90,16 +90,19 @@ final class UnmatchedBankExportService
             $sheet->setCellValueExplicit("A{$line}", (string) $row['own_account'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit("B{$line}", (string) $row['posted_at'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit("C{$line}", $description, DataType::TYPE_STRING);
-            $sheet->setCellValue("D{$line}", (float) $row['amount']);
-            $sheet->setCellValueExplicit("E{$line}", (string) ($row['currency'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit("F{$line}", implode("\n", $notes[(int) $row['id']] ?? []), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("D{$line}", trim((string) ($row['counterparty_name'] ?? '')), DataType::TYPE_STRING);
+            $counterAccount = trim((string) ($row['counterparty_account'] ?? ''));
+            $sheet->setCellValueExplicit("E{$line}", $counterAccount === '' ? '' : $this->accountDisplay($counterAccount, $row['counterparty_bank'] ?? null), DataType::TYPE_STRING);
+            $sheet->setCellValue("F{$line}", (float) $row['amount']);
+            $sheet->setCellValueExplicit("G{$line}", (string) ($row['currency'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("H{$line}", implode("\n", $notes[(int) $row['id']] ?? []), DataType::TYPE_STRING);
             $line++;
         }
-        $sheet->getStyle('D6:D' . max(6, $line - 1))->getNumberFormat()->setFormatCode('[Green]+#,##0.00;[Red]-#,##0.00;0.00');
-        $sheet->getStyle('F6:F' . max(6, $line - 1))->getAlignment()->setWrapText(true);
+        $sheet->getStyle('F6:F' . max(6, $line - 1))->getNumberFormat()->setFormatCode('[Color10]+#,##0.00;[Red]-#,##0.00;0.00');
+        $sheet->getStyle('H6:H' . max(6, $line - 1))->getAlignment()->setWrapText(true);
         $sheet->freezePane('A6');
-        $sheet->setAutoFilter('A5:F' . max(5, $line - 1));
-        foreach (['A' => 24, 'B' => 16, 'C' => 55, 'D' => 18, 'E' => 10, 'F' => 55] as $column => $width) {
+        $sheet->setAutoFilter('A5:H' . max(5, $line - 1));
+        foreach (['A' => 24, 'B' => 16, 'C' => 55, 'D' => 32, 'E' => 24, 'F' => 18, 'G' => 10, 'H' => 55] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
         $path = tempnam(sys_get_temp_dir(), 'bank_export_');

@@ -232,7 +232,7 @@ AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI 
 čtyřmi poskytovateli, mezi kterými si každý dodavatel (tenant) vybere podle toho,
 co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci dat:
 
-- **Anthropic Claude** — BYOK (vlastní klíč z `console.anthropic.com`), výchozí
+- **Anthropic Claude** — BYOK (vlastní klíč z `platform.claude.com`), výchozí
   model `claude-haiku-4-5`; dále `claude-sonnet-5`, `claude-sonnet-4-6`,
   `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7` a `claude-fable-5`.
   Výchozí volba, na kterou je AI extrakce v celém manuálu (viz výše) primárně
