@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 
@@ -77,6 +77,27 @@ test('pravidla vazby na firmu platí i v reléovém mostu', async () => {
   assert.equal(mismatch.result.isError, true);
   assert.match(mismatch.result.content[0].text, /doména je omezená na jinou firmu/);
   assert.equal(mismatch.fetches.length, 0);
+});
+
+test('po zavření vstupu most katalog dokončí a volání API rychle vzdá', () => {
+  const piped = (input) => {
+    const child = spawnSync(process.execPath, ['src/hosted-relay.mjs'], {
+      cwd: new URL('..', import.meta.url),
+      input: `${JSON.stringify(input)}\n`,
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    assert.equal(child.status, 0, child.stderr);
+    return child.stdout.trim().split('\n').map((line) => JSON.parse(line));
+  };
+
+  const list = piped({ operation: 'list', scope: 'read' });
+  assert.equal(list.length, 1);
+  assert.ok(list[0].result.tools.length > 100);
+
+  const call = piped({ operation: 'call', scope: 'read', name: 'whoami', arguments: {}, apiUrl: 'https://example.test/api/v1' });
+  assert.equal(call.at(-1).result.isError, true);
+  assert.match(call.at(-1).result.content[0].text, /Spojení s aplikací bylo ukončeno/);
 });
 
 test('neplatné zadání skončí chybou, ne zavěšeným procesem', async () => {

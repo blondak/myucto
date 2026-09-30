@@ -20,6 +20,7 @@ import { createInterface } from 'node:readline';
 const pending = new Map();
 let nextId = 1;
 let started = false;
+let closed = false;
 
 function send(message, done) {
   stdout.write(`${JSON.stringify(message)}\n`, done);
@@ -27,6 +28,12 @@ function send(message, done) {
 
 function relayFetch(url, options) {
   return new Promise((resolve, reject) => {
+    // Po zavření vstupu už odpověď nemá kdo poslat; bez toho by každý pokus
+    // čekal na vlastní timeout a proces zbytečně visel.
+    if (closed) {
+      reject(new Error('Spojení s aplikací bylo ukončeno.'));
+      return;
+    }
     const id = nextId;
     nextId += 1;
     pending.set(id, { resolve, reject });
@@ -91,6 +98,7 @@ lines.on('line', (line) => {
 });
 
 lines.on('close', () => {
+  closed = true;
   if (!started) {
     finish(failure(new Error('MCP most nedostal zadání.')));
     return;
