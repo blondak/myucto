@@ -571,7 +571,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <DensityToggle :ctrl="tbl" />
         </div>
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.people.dependants.columns.person') }}</th>

@@ -663,7 +663,7 @@ onMounted(reloadAll)
 
       <!-- Desktop -->
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50">
             <tr>
               <SortableTh

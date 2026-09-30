@@ -14,6 +14,8 @@ export interface ColumnDef {
 export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   const prefs = getPagePrefs(pageKey)
   const ready = ref(false)
+  const columnLabelsDefault = ref(false)
+  const showColumnLabels = computed(() => prefs.value.flags?.column_labels ?? columnLabelsDefault.value)
   const orderedColumns = computed(() => {
     const byKey = new Map(columns.map(column => [column.key, column]))
     const keys = Array.isArray(prefs.value.column_order) ? prefs.value.column_order : []
@@ -122,7 +124,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   function setDensity(d: 'comfortable' | 'compact'): void {
     patchPagePrefs(pageKey, { density: d })
   }
-  const densityClass = computed(() => (density.value === 'compact' ? 'tbl-compact' : ''))
+  const densityClass = computed(() => (density.value === 'compact' ? 'tbl-compact' : 'tbl-comfortable'))
 
   // Lepkavé přepínače pohledu (např. „rozpad po analytikách"). Čtou se až po
   // ensurePrefsLoaded() — stránka si je proto bere v onMounted PŘED prvním load().
@@ -131,6 +133,9 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
   }
   function setFlag(key: string, value: boolean): void {
     patchPagePrefs(pageKey, { flags: { ...(prefs.value.flags ?? {}), [key]: value } })
+  }
+  function setColumnLabels(value: boolean): void {
+    setFlag('column_labels', value)
   }
 
   const sort = computed<SortPref | null>(() => prefs.value.sort ?? null)
@@ -155,6 +160,7 @@ export function useTablePrefs(pageKey: string, columns: ColumnDef[]) {
     density, setDensity, densityClass,
     sort, toggleSort, clearSort,
     flag, setFlag,
+    columnLabelsDefault, showColumnLabels, setColumnLabels,
     ready,
   }
 }

@@ -62,6 +62,10 @@ příkazem `php api/bin/backfill-card-last4.php --apply`.
 Platba kartou se páruje s přijatou fakturou nebo účtenkou podle koncovky karty,
 částky a data:
 
+V přehledu plateb bez dokladu otevře kliknutí na **Nespárováno** ruční párování.
+Doklad můžeš dohledat podle dodavatele, čísla, VS nebo přesné částky. Po úspěšném
+spárování se přehled obnoví. Tato akce vyžaduje čtení banky a oprávnění k párování.
+
 - **Doklad se stejnou koncovkou** a sedící částkou se spáruje automaticky.
   Doklad přitom musí být vystavený nejvýš 7 dní před zaúčtováním platby
   v bance a nejvýš 2 dny po něm.

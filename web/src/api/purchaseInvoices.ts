@@ -507,6 +507,15 @@ export interface PurchaseInvoice {
 }
 
 export interface PurchaseInvoiceListItem {
+  country?: string | null
+  note_above_items?: string | null
+  note_below_items?: string | null
+  journal_notes?: string[]
+  document_tags?: string[]
+  vat_classification_codes?: string[]
+  vat_return_lines?: string[]
+  payment_variable_symbol?: string | null
+  payment_method?: PaymentMethod
   id: number
   supplier_id: number
   vendor_id: number
@@ -653,6 +662,9 @@ export interface PurchaseInvoicePayload {
 }
 
 export interface PurchaseListFilters {
+  include_vat_classification?: boolean
+  include_journal_notes?: boolean
+  include_document_tags?: boolean
   sort_key?: string
   sort_dir?: 'asc' | 'desc'
   group_by_month?: boolean
@@ -764,6 +776,9 @@ export const purchaseInvoicesApi = {
     if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
     if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
     if (filters.include_kh) params['filter[include_kh]'] = 1
+    if (filters.include_vat_classification) params['filter[include_vat_classification]'] = 1
+    if (filters.include_journal_notes) params['filter[include_journal_notes]'] = 1
+    if (filters.include_document_tags) params['filter[include_document_tags]'] = 1
     if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
     if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
     if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
@@ -774,6 +789,7 @@ export const purchaseInvoicesApi = {
   },
 
   get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
+  items: (id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
   acceptAiPostingSuggestion: (id: number, override?: Partial<AiPostingSuggestion['payload']>) =>
     api.post<{ status: 'accepted'; applied: AiPostingSuggestion['payload'] }>(
       `/ai/suggestions/${id}/accept`, override ? { override } : {},

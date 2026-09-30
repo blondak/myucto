@@ -712,7 +712,7 @@ onMounted(async () => {
           <DensityToggle :ctrl="tbl" />
         </div>
         <div class="overflow-x-auto">
-          <table class="min-w-[1080px] divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-[1080px] divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th v-if="tbl.isVisible('institution')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution') }}</th>

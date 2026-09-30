@@ -722,6 +722,12 @@ final class BankPostingSuggestionRepository
             }
         }
 
+        $posting = $filters['posting_status'] ?? null;
+        if (!$unpostedOnly && in_array($posting, ['unposted', 'posted'], true)) {
+            $scopeSql .= ' AND ' . ($posting === 'unposted' ? 'NOT ' : '')
+                . BankTransactionPostingScope::existsSql($supplierId, 'bt.id');
+        }
+
         $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
         if ($year !== null) {
             $scopeSql .= ' AND YEAR(bt.posted_at) = ?';
@@ -737,13 +743,13 @@ final class BankPostingSuggestionRepository
         if ($q !== '') {
             // Escape wildcardů, ať uživatelský vstup nedělá slow-query ani nečekanou shodu.
             $like = '%' . addcslashes($q, '%_\\') . '%';
-            $digits = preg_replace('/\D/', '', $q) ?? '';
+            $amount = \MyInvoice\Service\Bank\BankAmountSearch::normalize($q);
             $scopeSql .= " AND (bt.counterparty_name LIKE ? OR bt.description LIKE ?
                              OR bt.counterparty_account LIKE ? OR bt.variable_symbol LIKE ?"
-                . ($digits !== '' ? " OR REPLACE(CAST(ABS(bt.amount) AS CHAR), '.00', '') = ?" : '') . ')';
+                . ($amount !== null ? ' OR ABS(bt.amount) = CAST(? AS DECIMAL(18,2))' : '') . ')';
             array_push($scopeParams, $like, $like, $like, $like);
-            if ($digits !== '') {
-                $scopeParams[] = $digits;
+            if ($amount !== null) {
+                $scopeParams[] = $amount;
             }
         }
         $sort = BankTransactionSort::fromQuery(

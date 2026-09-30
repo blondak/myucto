@@ -248,8 +248,11 @@
     ],
     "invoices": [
       "dimensions",
+      "documents",
+      "linked_documents",
       "lock",
       "oss_rates",
+      "other_items",
       "payment_method",
       "project",
       "time_billing"
@@ -327,7 +330,11 @@
     ],
     "purchase-invoices": [
       "dimensions",
+      "documents",
+      "linked_documents",
       "lock",
+      "other_items",
+      "payment_method",
       "purchase_invoice"
     ],
     "purchase-invoice-submissions": [
@@ -895,10 +902,18 @@
     "admin-suppliers": [
       "settings"
     ],
+    "payment-cards": [
+      "automation",
+      "bank",
+      "cash"
+    ],
     "credit-cards": [
       "credit_cards"
     ],
     "credit-card-detail": [
+      "automation",
+      "bank",
+      "cash",
       "credit_cards"
     ],
     "admin-codebooks": [

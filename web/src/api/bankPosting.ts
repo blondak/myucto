@@ -200,6 +200,7 @@ export const bankPostingApi = {
   listUnposted: (params: {
     page?: number; per_page?: number; year?: number; q?: string; scope?: 'unposted' | 'all'; account?: string
     status?: 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
+    posting_status?: 'unposted' | 'posted'
     sort?: BankTransactionSortKey; direction?: 'asc' | 'desc'
   } = {}) =>
     api.get<{

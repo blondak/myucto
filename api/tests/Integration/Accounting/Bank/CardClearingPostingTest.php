@@ -31,6 +31,26 @@ final class CardClearingPostingTest extends BankPostingTestCase
         $this->enableCards('2099-01-01');
     }
 
+    public function testOpenCardClearingStaysUnmatchedInListAndExportUntilWriteoff(): void
+    {
+        $card = $this->card('4321');
+        $tx = $this->cardTx(-1234.50, '4321');
+        $res = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $res['action']);
+        $filters = ['scope' => 'all', 'status' => 'unmatched', 'account' => self::ACCOUNT, 'year' => self::YEAR];
+        $list = $this->suggestionRepo->paginateUnposted($this->supplierId, 100, 0, $filters);
+        self::assertContains($tx, array_column($list['items'], 'id'));
+        $info = $this->service->transactionPostingInfo($this->supplierId, [$tx]);
+        self::assertFalse($info[$tx]['outside_saldo']);
+        self::assertSame([$this->cardCode($card)], $info[$tx]['counter_account_codes']);
+        $export = new \MyInvoice\Service\Bank\UnmatchedBankExportService($this->db);
+        self::assertSame(1, $export->preview($this->supplierId, (int) $list['items'][0]['statement_id'])['count']);
+        $this->postPredpis('card_writeoff', $tx, '548', $this->cardCode($card), 1234.50);
+        $closed = $this->suggestionRepo->paginateUnposted($this->supplierId, 100, 0, $filters);
+        self::assertNotContains($tx, array_column($closed['items'], 'id'));
+        self::assertSame(0, $export->preview($this->supplierId, (int) $list['items'][0]['statement_id'])['count']);
+    }
+
     public function testCardPaymentWithoutDocumentPostsClearingAgainstBank(): void
     {
         $card = $this->card('4321');

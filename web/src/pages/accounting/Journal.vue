@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed, watch, useId } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
 import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
+import { useAdaptiveTableRows } from '@/composables/useAdaptiveTableRows'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
@@ -60,7 +60,8 @@ const loadMoreTarget = ref<HTMLElement | null>(null)
 
 const page = ref(1)
 const listBox = ref<HTMLElement | null>(null)
-useFillViewportHeight(listBox)
+useAdaptiveTableRows(computed(() => listBox.value ? [listBox.value] : []))
+useFillViewportHeight(listBox, { keepFiltersVisible: true })
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
@@ -441,11 +442,6 @@ const COLUMN_PRESETS = [
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
-// Výchozí profil deníku má jedenáct sloupců: v jednom řádku by se popis mačkal do
-// několika řádků, tak se zápis rozloží na dva řádky mřížky. Jen velký monitor je
-// pobere v jednom řádku.
-const wideScreen = useMediaQuery('(min-width: 2200px)')
-const wrapColumns = computed(() => !wideScreen.value && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
 function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240
@@ -1016,14 +1012,14 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
            vodorovným posunem — rozbalený detail se schová do buňky široké jako
            obrazovka a čte se přes scrollbar. Proto stack karet. -->
       <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
-        <table class="w-full text-sm singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table' : '']">
+        <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-mini" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
               <th class="px-3 py-2 w-8"></th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                 <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                  :align="c.key === 'amount' ? 'right' : 'left'" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
+                  :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
               </template>
               <th class="px-1 py-2 w-8">
                 <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
@@ -1055,7 +1051,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 </td>
                 <td v-else-if="c.key === 'document_date'" :data-custom-color="!!colors.color('document_date')" :style="colors.cellStyle('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
                 <td v-else-if="c.key === 'description'" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
-                  {{ e.description || '—' }}
+                  <span class="adaptive-primary-text">{{ e.description || '—' }}</span>
                   <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
                 </td>
                 <td v-else-if="c.key === 'source'" :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')" class="px-3 py-2 whitespace-nowrap clip-cell">

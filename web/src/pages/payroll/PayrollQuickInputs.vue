@@ -1986,7 +1986,7 @@ onMounted(() => {
           posuvník, ne tabulku skrolující uvnitř sebe pod vlastní patičkou.
         -->
         <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
-          <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="sticky top-0 z-20 bg-surface">
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th v-if="tbl.isVisible('person')" class="sticky left-0 z-30 w-64 bg-surface px-3 py-2 align-bottom">{{ t('payroll.quick_inputs.person') }}</th>

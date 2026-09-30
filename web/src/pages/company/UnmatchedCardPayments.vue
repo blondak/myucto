@@ -15,6 +15,9 @@ import Modal from '@/components/ui/Modal.vue'
 import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
+import BankMatchModal from '@/components/bank/BankMatchModal.vue'
+import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
+import type { BankTransaction } from '@/api/bank'
 
 /** Detail kreditní karty: jen nákupy tohoto úvěrového účtu. Bez něj jen platební karty. */
 const props = defineProps<{ creditCardAccountId?: number | null }>()
@@ -39,9 +42,27 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const uploadTarget = ref<CardPaymentRow | null>(null)
 
 const canUpload = computed(() => auth.canWrite('purchase_invoices.scan'))
-const canMatch = computed(() => auth.canWrite('bank.match'))
+const canMatch = computed(() => auth.canRead('bank') && auth.canWrite('bank.match'))
 const canManageCards = computed(() => auth.canWrite('settings.bank_accounts'))
 const canPost = computed(() => auth.canWrite('bank.post'))
+const bankActions = useBankTransactionActions({ reload: load, refresh: load })
+
+function startManualMatch(tx: CardPaymentRow) {
+  if (!canMatch.value || busyTx.value !== null || loading.value) return
+  const transaction: BankTransaction = {
+    ...tx,
+    variable_symbol: null,
+    constant_symbol: null,
+    specific_symbol: null,
+    counterparty_account: null,
+    counterparty_bank: null,
+    bank_ref: null,
+    matched_invoice_id: null,
+    match_status: 'unmatched',
+    matched_at: null,
+  }
+  bankActions.startMatch(transaction)
+}
 
 /**
  * Uzavření platby bez dokladu: nedaňový / daňový náklad, nebo k tíži držitele karty.
@@ -249,6 +270,12 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                   <div v-if="tx.clearing_account" class="mt-0.5 font-mono text-neutral-500" data-testid="clearing-account">
                     {{ t('payment_cards.unmatched.clearing', { code: tx.clearing_account }) }}
                   </div>
+                  <button v-if="canMatch" type="button" class="mt-1 inline-flex items-center gap-1 rounded bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700 hover:bg-warning-100 disabled:opacity-50"
+                    :disabled="busyTx !== null || loading" :title="t('bank.match_badge_hint')" data-testid="manual-match-desktop" @click="startManualMatch(tx)">
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+                    {{ t('bank.match_status.unmatched') }}
+                  </button>
+                  <span v-else class="mt-1 inline-block rounded bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">{{ t('bank.match_status.unmatched') }}</span>
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex flex-wrap justify-end gap-2">
@@ -312,6 +339,12 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
             <div class="text-xs text-neutral-700 truncate">{{ tx.counterparty_name || tx.description || '—' }}</div>
             <div v-if="tx.vehicle_hint" class="text-xs" :class="tx.vehicle_hint.reason === 'ok' ? 'text-primary-700' : 'text-warning-700'"
               :title="t('payment_cards.unmatched.vehicle_hint_title')">{{ vehicleHint(tx) }}</div>
+            <button v-if="canMatch" type="button" class="inline-flex items-center gap-1 rounded bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700 hover:bg-warning-100 disabled:opacity-50"
+              :disabled="busyTx !== null || loading" :title="t('bank.match_badge_hint')" data-testid="manual-match-mobile" @click="startManualMatch(tx)">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+              {{ t('bank.match_status.unmatched') }}
+            </button>
+            <span v-else class="inline-block rounded bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">{{ t('bank.match_status.unmatched') }}</span>
             <div class="flex flex-wrap gap-2">
               <button v-if="canUpload" type="button" :class="[BTN_BASE, OUTLINE.primary]" class="whitespace-nowrap"
                 :disabled="busyTx !== null" @click="pickReceipt(tx)">
@@ -355,6 +388,8 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
         </div>
       </section>
     </template>
+
+    <BankMatchModal :actions="bankActions" />
 
     <Modal v-if="writeOffDialog" :title="t(`payment_cards.unmatched.write_off_${writeOffDialog.target}`)" width-class="max-w-lg"
       data-testid="write-off-dialog" @close="writeOffDialog = null">

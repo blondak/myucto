@@ -37,10 +37,23 @@ Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
 zaúčtuješ znovu, přiřaď ji k položce znovu ve stejné částce. Původní
 úhrada tak zůstane správně započtená v historickém saldu před stornem.
 
+Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
+splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.
+Další položky se načítají při posunu dolů. Na počítači zůstávají filtry a názvy
+sloupců viditelné, seznam má vlastní posuvníky a tlačítko **Další** nezabírá místo.
+Na dotykovém zařízení je dostupné i ruční načtení tlačítkem.
+
 Na detailu můžeš založit **opakování** z aktuální položky. Zvol měsíční,
 čtvrtletní nebo roční četnost a případné koncové datum. Denní plánovač
 vytváří termíny na 90 dní dopředu jako samostatné koncepty, které účetní před zaúčtováním
-zkontroluje; nikdy je sám nezaúčtuje. Koncepty lze vytvořit i ručně do
+zkontroluje. Volba **Automaticky účtovat vzniklé položky** je dostupná po
+potvrzení nebo zaúčtování zdrojového dokladu.
+V podvojném účetnictví zapnutí nebo obnovení automatického rozvrhu a jeho
+ruční generování navíc vyžaduje oprávnění k účtování do deníku.
+S touto volbou plánovač potvrdí položky v daňové evidenci nebo zaúčtuje položky v podvojném účetnictví nejdříve v den
+jejich vzniku. Budoucí položky zůstávají koncepty, uzamčené datum nebo uzavřené
+období automatika neobchází. Při chybě se změny daného běhu rozvrhu vrátí
+a plánovač ji zaznamená. Bez této volby se účtuje ručně. Koncepty lze vytvořit i ručně do
 zvoleného data. Opakované spuštění stejný termín nevytvoří znovu. Rozvrh lze
 pozastavit a obnovit. Každý vygenerovaný doklad má vlastní přílohy a úhrady.
 Přílohy zdrojového dokladu, například smlouva, se při vytvoření konceptu
@@ -53,6 +66,18 @@ takže jej další spuštění nevytvoří znovu.
 Součet splátek musí být přesně roven částce dokladu. V předpovědi cash-flow
 se každá splátka objeví ve svém termínu, přijaté úhrady se odečítají od
 nejstarší splátky. V účetním deníku zůstává jediný zápis za celý doklad.
+Úhrady splátek samy nevytvářejí znovu náklad nebo výnos. Pro pravidelné
+samostatné doklady použij opakování; pro splácení jednoho závazku kalendář.
+
+Obě možnosti podporuje REST API. Rozvrh založíš přes
+`POST /api/v1/accounting/other-items/{item_id}/schedule` s četností a volbou
+`auto_post`. Volbu změníš přes `PUT /api/v1/accounting/other-items/schedules/{id}/status`.
+`POST /api/v1/accounting/other-items/schedules/{id}/generate` s datem `through`
+vytvoří chybějící termíny a při zapnuté automatice potvrdí již vzniklé položky;
+odpověď obsahuje `created_ids` a `posted_ids`. Splátkový kalendář jednoho
+dokladu nastavíš přes `PUT /api/v1/accounting/other-items/{item_id}/installments`
+se seznamem `items` obsahujícím `due_on` a `amount`. Samotné založení rozvrhu
+neúčtuje a nepřiřazuje žádnou bankovní úhradu.
 Po přiřazení první úhrady už nelze kalendář změnit.
 
 Mzdy a daňové zálohy se v přehledu zobrazují ze svých modulů. Jejich částku

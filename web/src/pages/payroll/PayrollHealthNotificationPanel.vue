@@ -962,7 +962,7 @@ onMounted(() => {
         </p>
 
         <div class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                 <th v-if="tbl.isVisible('employee')" class="px-4 py-3">

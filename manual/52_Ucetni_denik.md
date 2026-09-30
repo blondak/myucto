@@ -12,6 +12,11 @@ zdroje, stavu, částky a dalších zobrazených údajů. Řazení platí pro ce
 filtrovaný výsledek před stránkováním. První kliknutí řadí sestupně, druhé
 vzestupně a třetí vrátí výchozí pořadí.
 Křížek na pravém okraji záhlaví tabulky vrátí výchozí pořadí.
+Ve víceřádkovém zobrazení má Popis dvojnásobnou šířku oproti běžnému poli
+na stejném řádku. Text zůstává na jednom řádku; celý popis ukáže najetí myší
+nebo rozbalení zápisu.
+Bez popisků hodnot má záhlaví stejné řádky a šířky jako obsah. Se zapnutými
+popisky zůstává záhlaví kompaktní.
 
 > [!NOTE]
 > Deník je jen **evidence toho, co se stalo** — nepředkontovává sám o sobě. Kterým
@@ -152,13 +157,21 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 Mezi volitelnými sloupci jsou také **Rozpad DPH** podle sazeb u faktur,
 **Účty MD/Dal** a při zapnutých dimenzích firmy také **Dimenze** z řádků zápisu.
 Tyto podrobnosti se načítají až po zapnutí
-příslušného sloupce. Při větším počtu sloupců se záhlaví i zápisy rozloží do
-několika řádků. Při posunu seznamu zůstává záhlaví viditelné a tabulka má
+příslušného sloupce. Když se údaje nevejdou na jeden řádek podle šířky okna
+nebo pracovního panelu, má každý zápis vlastní popisky hodnot. Hlavní údaje jsou
+nahoře a doplňující údaje na jemném podkladu pod nimi. Sloupce v každém řádku
+jsou stejně široké a využijí celou šířku. Záhlaví slouží k řazení a přetahování
+  sloupců. Přepínač **Zobrazovat popisky: Ano / Ne** v nabídce **Sloupce**
+  ukládá vlastní volbu pro přihlášeného uživatele a tento seznam ve všech jeho
+  firmách. Bez vlastní volby jsou popisky vypnuté na jednom řádku a zapnuté
+  při rozložení na více řádků. Při posunu seznamu zůstává záhlaví viditelné a tabulka má
 posuvník u spodního okraje. Na mobilu se zvolené údaje zobrazují v kartách.
 
 V nabídce **Sloupce** je sestava **Výchozí** se stručným seznamem a sestava
 **Kompletní** se všemi dostupnými údaji. Potom lze sloupce jednotlivě upravit.
-Přepínačem **Hustota** zvolíš kompaktnější nebo prostornější tabulku. Nastavené
+Přepínačem **Hustota** zvolíš kompaktnější nebo prostornější tabulku. Mění výšku
+řádků i rozestupy víceřádkových bloků; kompaktní režim zobrazí více zápisů.
+Volba se ukládá pro uživatele a tento seznam. Nastavené
 kombinace filtrů lze uložit a znovu použít přes **Uložené filtry**.
 
 Sloupce lze přetahovat myší za záhlaví s tečkovanou ikonou. Barevná čára ukáže,

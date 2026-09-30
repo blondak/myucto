@@ -310,7 +310,7 @@ onMounted(async () => {
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th v-if="tbl.isVisible('number')" class="px-3 py-2 text-left font-medium">{{ t('stock.orders.col_number') }}</th>

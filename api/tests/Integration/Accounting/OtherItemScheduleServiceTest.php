@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Action\Accounting\OtherItemScheduleAction;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DocumentRepository;
@@ -12,11 +15,14 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemScheduleService;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 #[Group('integration')]
 final class OtherItemScheduleServiceTest extends TestCase
@@ -29,6 +35,39 @@ final class OtherItemScheduleServiceTest extends TestCase
     private OtherItemScheduleService $schedules;
     private OtherItemForecastService $forecast;
     private int $supplierId;
+
+    public function testAutomaticScheduleRequiresJournalPostingPermission(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $action = new OtherItemScheduleAction($this->schedules, $this->items);
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, ['other_items' => 2], 'custom'))
+            ->withParsedBody(['frequency' => 'monthly', 'auto_post' => true]);
+        $response = $action->create($request, new Response(), ['item_id' => $source['id']]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame([], $this->schedules->list($this->supplierId));
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], null);
+        $response = $action->status($request->withParsedBody(['status' => 'active', 'auto_post' => true]), new Response(), ['id' => $schedule['id']]);
+        self::assertSame(403, $response->getStatusCode());
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active', true);
+        $response = $action->generate($request->withParsedBody(['through' => '2099-02-28']), new Response(), ['id' => $schedule['id']]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertCount(1, $this->schedules->get($this->supplierId, (int) $schedule['id'])['occurrences']);
+        $response = $action->status($request->withParsedBody(['status' => 'paused']), new Response(), ['id' => $schedule['id']]);
+        self::assertSame(200, $response->getStatusCode());
+        $response = $action->status($request->withParsedBody(['status' => 'active']), new Response(), ['id' => $schedule['id']]);
+        self::assertSame(403, $response->getStatusCode());
+        $authorized = $request->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true,
+            ['other_items' => 2, 'accounting.journal.post' => 2], 'custom'));
+        self::assertSame(200, $action->status($authorized->withParsedBody(['status' => 'active']), new Response(), ['id' => $schedule['id']])->getStatusCode());
+        self::assertSame(200, $action->status($request->withParsedBody(['status' => 'active', 'auto_post' => false]), new Response(), ['id' => $schedule['id']])->getStatusCode());
+    }
 
     protected function setUp(): void
     {
@@ -258,6 +297,120 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertCount(1, $remaining);
         self::assertSame('2099-03-05', $remaining[0]['due_on']);
         self::assertSame(600.0, $remaining[0]['remaining']);
+    }
+
+    public function testAutomaticPostingUsesIssueDateAndNeverPostsFutureOrDuplicates(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        (new ChartOfAccountsSeeder($this->db))->seedForSupplier($this->supplierId);
+        $anchor = new \DateTimeImmutable('first day of last month');
+        $future = new \DateTimeImmutable('first day of next month');
+        $periods = new AccountingPeriodRepository($this->db);
+        foreach (array_unique([(int) $anchor->format('Y'), (int) $future->format('Y')]) as $year) {
+            $periods->create($this->supplierId, $year, "$year-01-01", "$year-12-31");
+        }
+        $source = $this->items->create($this->supplierId, $this->input([
+            'issued_on' => $anchor->format('Y-m-d'), 'due_on' => $anchor->modify('+5 days')->format('Y-m-d'),
+        ]), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], [
+            'frequency' => 'monthly', 'auto_post' => true,
+        ], null);
+        $result = $this->schedules->generate($this->supplierId, (int) $schedule['id'], $future->format('Y-m-d'), null);
+        self::assertCount(2, $result['created_ids']);
+        $current = $this->items->get($this->supplierId, $result['created_ids'][0]);
+        self::assertSame('posted', $current['status']);
+        self::assertTrue($schedule['auto_post']);
+        self::assertSame([$result['created_ids'][0]], $result['posted_ids']);
+        $entry = $this->pdo->prepare('SELECT entry_date FROM journal_entries WHERE supplier_id = ? AND id = ?');
+        $entry->execute([$this->supplierId, $current['journal_entry_id']]);
+        self::assertSame((new \DateTimeImmutable('first day of this month'))->format('Y-m-d'), $entry->fetchColumn());
+        self::assertSame('draft', $this->items->get($this->supplierId, $result['created_ids'][1])['status']);
+        $again = $this->schedules->generate($this->supplierId, (int) $schedule['id'], $future->format('Y-m-d'), null);
+        self::assertSame([], $again['created_ids']);
+        self::assertSame([], $again['posted_ids']);
+    }
+
+    public function testEnablingAutomaticPostingPicksUpExistingDueDrafts(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $anchor = new \DateTimeImmutable('first day of last month');
+        $source = $this->items->create($this->supplierId, $this->input([
+            'issued_on' => $anchor->format('Y-m-d'), 'due_on' => $anchor->modify('+5 days')->format('Y-m-d'),
+        ]), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], null);
+        $through = date('Y-m-d');
+        $drafts = $this->schedules->generate($this->supplierId, (int) $schedule['id'], $through, null);
+        self::assertSame('draft', $this->items->get($this->supplierId, $drafts['created_ids'][0])['status']);
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active', true);
+        $result = $this->schedules->generate($this->supplierId, (int) $schedule['id'], $through, null);
+        self::assertSame('confirmed', $this->items->get($this->supplierId, $drafts['created_ids'][0])['status']);
+        self::assertFalse($drafts['schedule']['auto_post']);
+        self::assertSame([], $drafts['posted_ids']);
+        self::assertSame([], $result['created_ids']);
+        self::assertSame($drafts['created_ids'], $result['posted_ids']);
+        self::assertSame('confirmed', $this->items->get($this->supplierId, $result['posted_ids'][0])['status']);
+        self::assertTrue($this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'paused')['auto_post']);
+    }
+
+    public function testAutomaticPostingRequiresConfirmedSource(): void
+    {
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        try {
+            $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly', 'auto_post' => true], null);
+            self::fail('Nepotvrzená šablona nesmí účtovat automaticky.');
+        } catch (OtherItemException $e) {
+            self::assertSame('schedule_source_unconfirmed', $e->errorCode);
+        }
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], null);
+        try {
+            $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active', true);
+            self::fail('Nepotvrzená šablona nesmí zapnout automatiku.');
+        } catch (OtherItemException $e) {
+            self::assertSame('schedule_source_unconfirmed', $e->errorCode);
+        }
+    }
+
+    public function testClosedPeriodRejectsAutomaticPostingAndRollsBackGeneration(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        (new ChartOfAccountsSeeder($this->db))->seedForSupplier($this->supplierId);
+        $anchor = new \DateTimeImmutable('first day of last month');
+        $periods = new AccountingPeriodRepository($this->db);
+        foreach (array_unique([(int) $anchor->format('Y'), (int) date('Y')]) as $year) {
+            $periodId = $periods->create($this->supplierId, $year, "$year-01-01", "$year-12-31");
+        }
+        $source = $this->items->create($this->supplierId, $this->input([
+            'issued_on' => $anchor->format('Y-m-d'), 'due_on' => $anchor->modify('+5 days')->format('Y-m-d'),
+        ]), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly', 'auto_post' => true], null);
+        $periods->setStatus($periodId, $this->supplierId, 'closed');
+        try {
+            $this->schedules->generate($this->supplierId, (int) $schedule['id'], date('Y-m-d'), null);
+            self::fail('Uzavřené období nesmí být obejito.');
+        } catch (PostingException $e) {
+            self::assertSame('period_not_open', $e->errorCode);
+        }
+        $after = $this->schedules->get($this->supplierId, (int) $schedule['id']);
+        self::assertSame(1, (int) $after['next_index']);
+        self::assertCount(1, $after['occurrences']);
+    }
+
+    public function testListSortingRunsBeforePaginationWithStableTies(): void
+    {
+        foreach ([900, 100, 500, 100] as $amount) {
+            $this->items->create($this->supplierId, $this->input(['amount' => $amount]), null);
+        }
+        $first = $this->items->list($this->supplierId, ['sort_by' => 'amount', 'sort_dir' => 'asc'], 1, 2);
+        $second = $this->items->list($this->supplierId, ['sort_by' => 'amount', 'sort_dir' => 'asc'], 2, 2);
+        self::assertSame([100.0, 100.0], array_map('floatval', array_column($first['items'], 'amount')));
+        self::assertSame([500.0, 900.0], array_map('floatval', array_column($second['items'], 'amount')));
+        self::assertLessThan((int) $first['items'][1]['id'], (int) $first['items'][0]['id']);
     }
 
     private function input(array $changes = []): array

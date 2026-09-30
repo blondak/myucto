@@ -9,6 +9,10 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import type { SortPref } from '@/api/preferences'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -16,6 +20,11 @@ const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
+const loadingMore = ref(false)
+const listBox = ref<HTMLElement | null>(null)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+const sort = ref<SortPref | null>(null)
+useFillViewportHeight(listBox, { keepFiltersVisible: true })
 const removingId = ref<number | null>(null)
 const items = ref<OtherItem[]>([])
 const sources = ref<OtherItem[]>([])
@@ -26,12 +35,25 @@ const side = ref<'' | OtherItemSide>(route.query.side === 'receivable' || route.
 const status = ref<'open' | 'all'>('open')
 const source = ref('')
 const search = ref('')
+const searchPending = ref(false)
 const dueFrom = ref('')
 const dueTo = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let loadRequest = 0
 
 const pages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const canLoadMore = computed(() => !loading.value && !loadingMore.value && !searchPending.value && page.value < pages.value)
+useScrollLoadMore(loadMoreTarget, () => canLoadMore.value, () => load(true))
+
+function toggleSort(key: string) {
+  sort.value = sort.value?.key !== key ? { key, dir: 'desc' }
+    : sort.value.dir === 'desc' ? { key, dir: 'asc' } : null
+}
+
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (canLoadMore.value && el.scrollHeight - el.scrollTop - el.clientHeight < 240) void load(true)
+}
 const visibleItems = computed(() => source.value === '' || source.value === 'manual' ? items.value : [])
 const visibleSources = computed(() => source.value === '' ? sources.value : sources.value.filter(item =>
   source.value === 'tax'
@@ -69,35 +91,49 @@ function isEstimate(item: OtherItem): boolean {
   return item.certainty === 'estimate' || item.status === 'forecast'
 }
 
-async function load() {
+async function load(append = false) {
+  if (append && !canLoadMore.value) return
   const request = ++loadRequest
-  loading.value = true
+  if (append) loadingMore.value = true
+  else {
+    loading.value = true
+    loadingMore.value = false
+    page.value = 1
+  }
+  const nextPage = append ? page.value + 1 : 1
   try {
     const result = await otherItemsApi.list({
       ...(side.value ? { side: side.value } : {}), status: status.value,
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(dueFrom.value ? { from: dueFrom.value } : {}),
       ...(dueTo.value ? { to: dueTo.value } : {}),
-      page: page.value,
+      page: nextPage,
+      ...(sort.value ? { sort_by: sort.value.key, sort_dir: sort.value.dir } : {}),
     })
     if (request !== loadRequest) return
-    items.value = result.items
+    items.value = append ? [...items.value, ...result.items] : result.items
+    page.value = nextPage
     sources.value = result.sources || []
     total.value = result.total
     perPage.value = result.per_page || 50
   } catch (error: any) {
     if (request !== loadRequest) return
-    items.value = []
-    sources.value = []
+    if (!append) {
+      items.value = []
+      sources.value = []
+      total.value = 0
+    }
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
-    if (request === loadRequest) loading.value = false
+    if (request === loadRequest) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
 function reloadFirstPage() {
-  if (page.value !== 1) page.value = 1
-  else void load()
+  void load()
 }
 
 async function removeItem(item: OtherItem) {
@@ -108,8 +144,7 @@ async function removeItem(item: OtherItem) {
   try {
     await otherItemsApi.remove(id)
     toast.success(t('common.deleted'))
-    if (items.value.length === 1 && page.value > 1) page.value--
-    else await load()
+    await load()
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -117,14 +152,16 @@ async function removeItem(item: OtherItem) {
   }
 }
 
-watch([side, status, dueFrom, dueTo], reloadFirstPage)
+watch([side, status, dueFrom, dueTo, sort], reloadFirstPage)
 watch(search, () => {
+  loadRequest++
+  loadingMore.value = false
+  searchPending.value = true
   if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(reloadFirstPage, 300)
+  searchTimer = setTimeout(() => { searchPending.value = false; reloadFirstPage() }, 300)
 })
-watch(page, () => void load())
-onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
-onMounted(load)
+onBeforeUnmount(() => { loadRequest++; if (searchTimer) clearTimeout(searchTimer) })
+onMounted(() => void load())
 </script>
 
 <template>
@@ -181,17 +218,17 @@ onMounted(load)
     <template v-else>
       <h2 v-if="visibleSources.length && source !== 'payroll' && source !== 'tax'" class="mb-2 text-sm font-semibold">{{ t('other_items.manual_section') }}</h2>
       <EmptyState v-if="visibleItems.length === 0 && source === ''" dense accent="neutral" icon="doc" :title="t('other_items.no_manual')" />
-      <div v-if="visibleItems.length" class="hidden overflow-x-auto rounded-lg border border-neutral-200 bg-surface lg:block">
-        <table class="w-full text-sm">
-          <thead class="bg-neutral-50 text-xs text-neutral-500">
+      <div v-if="visibleItems.length" ref="listBox" class="hidden overflow-auto scrollbar-slim rounded-lg border border-neutral-200 bg-surface lg:block" @scroll.passive="onListScroll">
+        <table class="w-full text-sm table-sticky-first">
+          <thead class="sticky top-0 z-20 bg-neutral-50 text-xs text-neutral-500 shadow-sm">
             <tr>
-              <th class="px-3 py-2 text-left font-medium">{{ t('other_items.item') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('other_items.partner') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('other_items.due_on') }}</th>
+              <SortableTh :label="t('other_items.item')" sort-key="title" :sort="sort" @toggle="toggleSort" />
+              <SortableTh :label="t('other_items.partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
+              <SortableTh :label="t('other_items.due_on')" sort-key="due_on" :sort="sort" @toggle="toggleSort" />
               <th class="px-3 py-2 text-left font-medium">{{ t('other_items.source_label') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ t('other_items.amount') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ t('other_items.remaining') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('other_items.status_label') }}</th>
+              <SortableTh :label="t('other_items.amount')" sort-key="amount" :sort="sort" align="right" @toggle="toggleSort" />
+              <SortableTh :label="t('other_items.remaining')" sort-key="remaining_amount" :sort="sort" align="right" @toggle="toggleSort" />
+              <SortableTh :label="t('other_items.status_label')" sort-key="status" :sort="sort" @toggle="toggleSort" />
               <th class="px-3 py-2 text-left font-medium">{{ t('common.actions') }}</th>
             </tr>
           </thead>
@@ -257,10 +294,12 @@ onMounted(load)
           </div>
         </div>
       </div>
-      <div v-if="visibleItems.length && pages > 1" class="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm">
-        <button type="button" class="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50" :disabled="page <= 1" @click="page--">{{ t('other_items.previous') }}</button>
-        <span>{{ page }} / {{ pages }}</span>
-        <button type="button" class="rounded border border-neutral-300 px-3 py-1.5 disabled:opacity-50" :disabled="page >= pages" @click="page++">{{ t('other_items.next') }}</button>
+      <div v-if="visibleItems.length && page < pages" ref="loadMoreTarget" class="flex flex-wrap items-center justify-center gap-3 text-sm pointer-fine-hidden">
+        <button type="button" class="my-4" :class="btnOutlineSm('neutral')" :disabled="loadingMore" @click="load(true)">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t(loadingMore ? 'common.loading' : 'common.load_more') }}
+        </button>
+        <span>{{ items.length }} / {{ total }}</span>
       </div>
       <section v-if="visibleSources.length" class="mt-6">
         <h2 class="mb-1 text-lg font-semibold">{{ t('other_items.sources_section') }}</h2>

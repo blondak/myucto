@@ -64,7 +64,7 @@ má vždy přednost před oběma.
 | `cron-jmhz-poll.{cmd,sh}` | Dotažení protokolu ČSSZ k měsíčnímu hlášení a uzavření transakce u VREP; neúspěšný dotaz nikdy neuzavře podání (`--limit=N`) |
 | `cron-jmhz-source-monitor.{cmd,ps1,sh}` | Denní read-only sledování veřejných indexů dokumentace JMHZ MPSV/ČSSZ, aktualit, struktur EPO a stránek ČSSZ „Definice e-Podání" (NEMPRI, HZUPN, ELDP, REGZEC). Do **Systém → Plánované úlohy** ukládá konkrétní nový/změněný dokument, starou a novou verzi, URL a hash; nikdy samo neaktualizuje číselník (`--dry-run`) |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
-| `cron-generate-other-items.{cmd,sh}` | Denní idempotentní generování konceptů ostatních pohledávek a závazků z aktivních rozvrhů (`--dry-run`); nikdy samo neúčtuje |
+| `cron-generate-other-items.{cmd,sh}` | Denní idempotentní generování konceptů ostatních pohledávek a závazků z aktivních rozvrhů (`--dry-run`); při výslovně zapnutém `auto_post` účtuje již vzniklé položky, budoucí ponechá jako koncepty |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
 | `cron-catalog-worker.{cmd,sh}` | Dávkový přepočet cen, historické ocenění a příprava inventur; pokračuje od posledního dokončeného checkpointu |

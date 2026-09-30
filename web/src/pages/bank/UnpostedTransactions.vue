@@ -2,7 +2,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
+import { useBankFilterMemory } from '@/composables/useBankFilterMemory'
+import { useSupplierStore } from '@/stores/supplier'
+import { useToast } from '@/composables/useToast'
+import { apiErrorMessage } from '@/api/errors'
+import { downloadApiFile } from '@/utils/downloadFile'
+import ActionBar from '@/components/ui/ActionBar.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -20,11 +27,18 @@ import BankTransactionSortSelect from '@/components/bank/BankTransactionSortSele
 const props = withDefaults(defineProps<{ scope?: 'unposted' | 'all' }>(), { scope: 'unposted' })
 const emit = defineEmits<{ 'counts-changed': [] }>()
 const { t } = useI18n()
+const supplierStore = useSupplierStore()
+const toast = useToast()
+const listBox = ref<HTMLElement | null>(null)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useFillViewportHeight(listBox, { keepFiltersVisible: true })
 const items = ref<UnpostedBankTransaction[]>([])
 const page = ref(1)
 const perPage = ref(50)
 const total = ref(0)
 const loading = ref(false)
+const loadingMore = ref(false)
+let internalPageChange = false
 let silentPageChange = false
 let loadGeneration = 0
 const years = ref<number[]>([])
@@ -33,6 +47,7 @@ const search = ref('')
 const accounts = ref<BankAccountOption[]>([])
 const accountFilter = ref<string>('')
 const statusFilter = ref<'' | 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'>('')
+const postingFilter = ref<'' | 'unposted' | 'posted'>('')
 const STATUS_OPTIONS = ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] as const
 function statusLabel(status: string): string {
   return t(`bank.match_status.${status}`)
@@ -46,10 +61,43 @@ function accountLabel(a: BankAccountOption): string {
 // stejná komponenta i logika jako detail výpisu (BankTransactionRow.vue, #52).
 // reload = changed() (přepočítá i county v záložkách bank sekce).
 const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
-const colspan = computed(() => props.scope === 'all' ? 8 : 7)
+const colspan = computed(() => props.scope === 'all' ? 9 : 8)
 // Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
 const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting'])
 const sortKeys = computed(() => txSort.keys.filter(k => k !== 'account' || props.scope === 'all'))
+useBankFilterMemory(() => `${supplierStore.currentSupplierId}:movements:${props.scope}`, () => ({
+  search: search.value, year: year.value, account: accountFilter.value, status: statusFilter.value,
+  posting: postingFilter.value, sort: txSort.selectValue.value,
+}), value => {
+  search.value = typeof value.search === 'string' ? value.search : ''
+  year.value = typeof value.year === 'number' && Number.isInteger(value.year) ? value.year : null
+  accountFilter.value = typeof value.account === 'string' ? value.account : ''
+  statusFilter.value = STATUS_OPTIONS.includes(value.status as never) ? value.status! : ''
+  postingFilter.value = value.posting === 'unposted' || value.posting === 'posted' ? value.posting : ''
+  txSort.selectValue.value = typeof value.sort === 'string' ? value.sort : ''
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && page.value < totalPages.value, loadMore)
+function loadMore(): Promise<void> {
+  if (loading.value || loadingMore.value || page.value >= totalPages.value) return Promise.resolve()
+  return load(false, true)
+}
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240) void loadMore()
+}
+async function exportUnmatched() {
+  try {
+    await downloadApiFile(bankApi.unmatchedAllExportUrl({
+      ...(year.value ? { year: year.value } : {}),
+      ...(search.value.trim() ? { q: search.value.trim() } : {}),
+      ...(accountFilter.value ? { account: accountFilter.value } : {}),
+      ...(postingFilter.value ? { posting_status: postingFilter.value } : {}),
+      ...txSort.params.value,
+    }), 'nesparovane-pohyby.xlsx')
+  } catch (error) { toast.error(apiErrorMessage(error)) }
+}
+
 
 // Match v2 („⏳ návrh párování") je párovaný per-výpis na BE — „Všechny pohyby"
 // agreguje víc výpisů, takže návrhy dotáhneme dávkově (1 request na distinct
@@ -70,34 +118,49 @@ async function loadMatchSuggestions(txs: UnpostedBankTransaction[], generation: 
   bankActions.setSuggestions(map)
 }
 
-async function load(silent = false) {
+async function load(silent = false, append = false) {
   const generation = ++loadGeneration
-  if (!silent) loading.value = true
+  if (append) loadingMore.value = true
+  else if (!silent) loading.value = true
   try {
-    const result = await bankPostingApi.listUnposted({
-      page: page.value,
+    const params = {
+      page: append ? page.value + 1 : page.value,
       per_page: perPage.value,
       scope: props.scope,
       ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
       ...(year.value ? { year: year.value } : {}),
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
+      ...(props.scope === 'all' && postingFilter.value ? { posting_status: postingFilter.value } : {}),
       ...txSort.params.value,
-    })
+    }
+    const result = await bankPostingApi.listUnposted(params)
     if (generation !== loadGeneration) return
+    if (append && result.items.length === 0) {
+      total.value = result.total
+      perPage.value = result.per_page
+      const lastPage = Math.max(1, Math.ceil(result.total / result.per_page))
+      if (page.value > lastPage) { internalPageChange = true; page.value = lastPage }
+      await load(silent)
+      return
+    }
     if (result.items.length === 0 && result.total > 0 && page.value > 1) {
       silentPageChange = silent
       page.value = Math.max(1, Math.ceil(result.total / result.per_page))
       return
     }
-    items.value = result.items
+    const preceding = !append && page.value > 1
+      ? await Promise.all(Array.from({ length: page.value - 1 }, (_, index) => bankPostingApi.listUnposted({ ...params, page: index + 1 }))) : []
+    if (generation !== loadGeneration) return
+    items.value = append ? [...items.value, ...result.items] : [...preceding.flatMap(part => part.items), ...result.items]
+    if (append) { internalPageChange = true; page.value = params.page }
     total.value = result.total
     perPage.value = result.per_page
     years.value = result.years ?? []
     accounts.value = result.accounts ?? []
-    void loadMatchSuggestions(result.items, generation)
+    void loadMatchSuggestions(items.value, generation)
   } finally {
-    if (generation === loadGeneration) loading.value = false
+    if (generation === loadGeneration) { loading.value = false; loadingMore.value = false }
   }
 }
 
@@ -108,7 +171,8 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([search, year, accountFilter, statusFilter, page, () => props.scope, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
+watch([search, year, accountFilter, statusFilter, postingFilter, () => props.scope, () => supplierStore.currentSupplierId, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
+watch(page, () => { if (!internalPageChange) loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
   void load()
@@ -120,6 +184,8 @@ watch(search, () => {
 watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
 watch(statusFilter, resetAndLoad)
+watch(postingFilter, resetAndLoad)
+watch(() => supplierStore.currentSupplierId, () => { items.value = []; resetAndLoad() })
 watch(txSort.sort, resetAndLoad)
 watch(() => props.scope, () => {
   if (props.scope !== 'all' && txSort.sort.value?.key === 'account') txSort.sort.value = null
@@ -132,10 +198,11 @@ onUnmounted(() => {
   loadGeneration++
 })
 watch(page, () => {
+  if (internalPageChange) { internalPageChange = false; return }
   const silent = silentPageChange
   silentPageChange = false
   void load(silent)
-})
+}, { flush: 'sync' })
 </script>
 
 <template>
@@ -152,7 +219,7 @@ watch(page, () => {
         <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
       </select>
       <select v-if="accounts.length > 1" v-model="accountFilter"
-        class="h-9 px-2 border border-neutral-300 rounded-md text-sm">
+        class="h-9 px-2 border border-neutral-300 rounded-md text-sm min-w-0 max-w-full">
         <option value="">{{ t('bank.all_own_accounts') }}</option>
         <option v-for="a in accounts" :key="a.account_number" :value="a.account_number">{{ accountLabel(a) }}</option>
       </select>
@@ -161,18 +228,25 @@ watch(page, () => {
         <option value="">{{ t('bank.filter_all') }}</option>
         <option v-for="status in STATUS_OPTIONS" :key="status" :value="status">{{ statusLabel(status) }}</option>
       </select>
+      <select v-if="scope === 'all'" v-model="postingFilter" :aria-label="t('bank.filter_posting')"
+        class="h-9 px-2 border border-neutral-300 rounded-md text-sm max-w-full">
+        <option value="">{{ t('bank.filter_posting_all') }}</option>
+        <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
+        <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
+      </select>
+      <ActionBar v-if="scope === 'all'" :actions="[{ key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'secondary', run: exportUnmatched }]" />
       <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>
 
-    <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter || (scope === 'all' && statusFilter))" boxed variant="filtered"
+    <div v-if="loading && !items.length" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
+    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter || (scope === 'all' && (statusFilter || postingFilter)))" boxed variant="filtered"
       :title="t('bank.posting.no_match')" />
     <EmptyState v-else-if="items.length === 0" boxed icon="checkCircle" accent="success" :title="t('bank.posting.unposted_empty')" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="hidden md:block overflow-x-auto">
+      <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
         <table class="w-full text-sm">
-          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
               <SortableTh :label="t('bank.date')" sort-key="posted_at" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.amount')" sort-key="amount" :sort="txSort.sort.value" align="right" @toggle="txSort.toggle" />
@@ -181,13 +255,14 @@ watch(page, () => {
               <SortableTh :label="t('bank.counterparty')" sort-key="counterparty" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.invoice')" sort-key="invoice" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.posting_state')" sort-key="posting" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <th class="px-3 py-2">{{ t('bank.counter_account') }}</th>
               <th class="px-3 py-2 w-32"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <BankTransactionRow v-for="tx in items" :key="tx.id"
               layout="desktop" :tx="tx" :is-double-entry="true"
-              fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true"
+              fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="true"
               :colspan="colspan" :actions="bankActions"
               @changed="changed" />
           </tbody>
@@ -197,12 +272,16 @@ watch(page, () => {
       <div class="md:hidden divide-y divide-neutral-100">
         <BankTransactionRow v-for="tx in items" :key="`m-${tx.id}`"
           layout="mobile" :tx="tx" :is-double-entry="true"
-          fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true"
+          fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="true"
           :actions="bankActions"
           @changed="changed" />
       </div>
     </div>
-    <PaginationBar :page="page" :per-page="perPage" :total="total" @update:page="page = $event" />
+    <div v-if="page < totalPages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
+      <button type="button" :disabled="loading || loadingMore" class="cursor-pointer my-3 h-9 px-4 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50" @click="loadMore">
+        {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
+      </button>
+    </div>
 
     <BankTransactionDialogs :actions="bankActions" fallback-currency="CZK" />
     <BankMatchModal :actions="bankActions" fallback-currency="CZK" />

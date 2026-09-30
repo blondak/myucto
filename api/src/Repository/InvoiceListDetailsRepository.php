@@ -41,7 +41,10 @@ final class InvoiceListDetailsRepository
         foreach ($result as &$details) {
             foreach (['debit_accounts', 'credit_accounts'] as $key) {
                 $codes = array_unique($details[$key] ?? []);
-                sort($codes, SORT_NATURAL);
+                usort($codes, static function (string $a, string $b): int {
+                    $priority = static fn (string $code): int => preg_match('/^[56]/', $code) === 1 ? 0 : (str_starts_with($code, '343') ? 2 : 1);
+                    return ($priority($a) <=> $priority($b)) ?: strnatcmp($a, $b);
+                });
                 $details[$key] = array_values($codes);
             }
         }

@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import ListLoadingSpinner from '@/components/ui/ListLoadingSpinner.vue'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
+import { useAdaptiveTableRows } from '@/composables/useAdaptiveTableRows'
+import { useExpandableItems } from '@/composables/useExpandableItems'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -43,7 +45,8 @@ import { useDimensions } from '@/composables/useDimensions'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useSupplierStore } from '@/stores/supplier'
@@ -269,9 +272,11 @@ const { activeIndex } = useListKeyboard({
  * překreslil a odscrolloval. Položky se dotahují až na vyžádání (seznam je
  * nenese), takže rozbalení nic nestojí, dokud si o něj uživatel neřekne.
  */
-const expandedId = ref<number | null>(null)
-const expandedItems = ref<PurchaseInvoiceItem[] | null>(null)
-const expandedLoading = ref(false)
+const { expandedId, expandedItems, expandedLoading, toggleItems, clearExpandedItems } = useExpandableItems<PurchaseInvoiceItem>(
+  id => purchaseInvoicesApi.items(id),
+  () => supplierStore.currentSupplier?.id,
+)
+const previewEntryId = ref<number | null>(null)
 
 /**
  * Šířka rozbaleného řádku = počet viditelných sloupců + zaškrtávátko + rozbalovací
@@ -280,23 +285,8 @@ const expandedLoading = ref(false)
  */
 const expandedColspan = computed(() => COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2)
 
-async function toggleExpand(inv: PurchaseInvoiceListItem) {
-  if (expandedId.value === inv.id) {
-    expandedId.value = null
-    expandedItems.value = null
-    return
-  }
-  expandedId.value = inv.id
-  expandedItems.value = null
-  expandedLoading.value = true
-  try {
-    const full = await purchaseInvoicesApi.get(inv.id)
-    expandedItems.value = full.items
-  } catch {
-    expandedId.value = null
-  } finally {
-    expandedLoading.value = false
-  }
+function toggleExpand(inv: PurchaseInvoiceListItem) {
+  return toggleItems(inv.id)
 }
 
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
@@ -311,7 +301,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
   { key: 'vendor', labelKey: 'purchase_invoice.fields.vendor', required: true },
   { key: 'vendor_ic', labelKey: 'common.ic' },
-  { key: 'vendor_number', labelKey: 'purchase_invoice.fields.vendor_invoice_number' },
+  { key: 'vendor_number', labelKey: 'purchase_invoice.col_vendor_number' },
   { key: 'kind', labelKey: 'purchase_invoice.fields.document_kind' },
   { key: 'tax_date', labelKey: 'purchase_invoice.fields.tax_date' },
   { key: 'due_date', labelKey: 'purchase_invoice.fields.due_date' },
@@ -333,8 +323,16 @@ const COLUMNS: ColumnDef[] = [
   { key: 'received_at', labelKey: 'purchase_invoice.col_received_at', defaultHidden: true },
   { key: 'payment_ordered_at', labelKey: 'purchase_invoice.col_payment_ordered_at', defaultHidden: true },
   { key: 'vat_breakdown', labelKey: 'invoice.col_vat_breakdown', defaultHidden: true },
-  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true },
-  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true },
+  { key: 'debit_accounts', labelKey: 'invoice.col_debit_accounts', defaultHidden: true, available: () => auth.canRead('accounting') },
+  { key: 'credit_accounts', labelKey: 'invoice.col_credit_accounts', defaultHidden: true, available: () => auth.canRead('accounting') },
+  { key: 'country', labelKey: 'invoice.col_country', defaultHidden: true },
+  { key: 'vat_classification', labelKey: 'invoice.col_vat_classification', defaultHidden: true },
+  { key: 'vat_return_lines', labelKey: 'invoice.col_vat_return_lines', defaultHidden: true },
+  { key: 'document_tags', labelKey: 'invoice.col_document_tags', defaultHidden: true, available: () => auth.canRead('documents') },
+  { key: 'note', labelKey: 'invoice.col_note', defaultHidden: true },
+  { key: 'journal_notes', labelKey: 'invoice.col_journal_notes', defaultHidden: true, available: () => auth.canRead('accounting') },
+  { key: 'payment_vs', labelKey: 'invoice.col_payment_vs', defaultHidden: true },
+  { key: 'payment_method', labelKey: 'invoice.col_payment_method', defaultHidden: true },
   { key: 'kh', labelKey: 'invoice.col_kh', defaultHidden: true },
   { key: 'dimensions', labelKey: 'dimensions.title', defaultHidden: true, available: () => dimensions.enabled.value },
   { key: 'locked', labelKey: 'lock.column' },
@@ -350,14 +348,25 @@ const COLUMN_PRESETS = [
   ] },
   { key: 'complete', labelKey: 'common.columns_preset_complete', visibleKeys: COLUMNS.map(c => c.key) },
 ]
-const wrapColumns = computed(() => COLUMNS.some(c => c.defaultHidden && tbl.isVisible(c.key)) && COLUMNS.filter(c => tbl.isVisible(c.key)).length + 2 > 10)
 function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
   if (!groupByMonth.value && el.scrollTop + el.clientHeight >= el.scrollHeight - 240
     && !loading.value && !loadingMore.value && page.value < pages.value) void load(false)
 }
+function extraFieldValue(inv: PurchaseInvoiceListItem, key: string): string {
+  return mobileExtraFields(inv).find(field => field.key === key)?.value ?? '—'
+}
 function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    country: inv.country || '—',
+    vat_classification: inv.vat_classification_codes?.join(', ') || '—',
+    vat_return_lines: inv.vat_return_lines?.join(', ') || '—',
+    document_tags: inv.document_tags?.join(', ') || '—',
+    note: [inv.note_above_items, inv.note_below_items].filter(Boolean).join(' · ') || '—',
+    journal_notes: inv.journal_notes?.join(' · ') || '—',
+    payment_vs: inv.payment_variable_symbol || '—',
+    payment_method: t(`payment_method.${inv.payment_method || 'bank_transfer'}`),
+
     paid_at: inv.paid_at ? formatDate(inv.paid_at) : '—',
     booked_at: inv.booked_at ? formatDate(inv.booked_at) : '—',
     exchange_rate: inv.currency !== 'CZK' && inv.exchange_rate ? formatRate(inv.exchange_rate) : '—',
@@ -377,11 +386,12 @@ function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; l
   return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
-watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
+watch(() => [tbl.isVisible('kh'), tbl.isVisible('vat_classification'), tbl.isVisible('vat_return_lines'), tbl.isVisible('document_tags'), tbl.isVisible('journal_notes'), tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tbl.isVisible('credit_accounts'), tbl.isVisible('dimensions')], () => { if (groups.value.length) load() })
 const groupByMonth = computed(() => tbl.flag('group_by_month', true))
 const listBoxes = ref<HTMLElement[]>([])
+useAdaptiveTableRows(listBoxes)
 const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
-useFillViewportHeight(listBox)
+useFillViewportHeight(listBox, { keepFiltersVisible: true })
 function toggleGrouping() {
   tbl.setFlag('group_by_month', !groupByMonth.value)
   load()
@@ -620,6 +630,7 @@ function load(reset = true): Promise<void> {
 async function fetchPage(reset: boolean) {
   const seq = ++loadSeq
   if (reset) {
+    clearExpandedItems()
     // Hledaný text je v tomto načtení, odložené hledání z téhož textu by načítalo znovu.
     if (searchTimeout) clearTimeout(searchTimeout)
     searchTimeout = null
@@ -658,6 +669,9 @@ async function fetchPage(reset: boolean) {
       sort_dir: tbl.sort.value?.dir,
       group_by_month: groupByMonth.value,
       include_kh: tbl.isVisible('kh'),
+      include_vat_classification: tbl.isVisible('vat_classification') || tbl.isVisible('vat_return_lines'),
+      include_journal_notes: auth.canRead('accounting') && tbl.isVisible('journal_notes'),
+      include_document_tags: auth.canRead('documents') && tbl.isVisible('document_tags'),
       include_vat_breakdown: tbl.isVisible('vat_breakdown'),
       include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
       include_dimensions: tbl.isVisible('dimensions'),
@@ -1284,7 +1298,7 @@ async function bulkSetKind() {
         <!-- Desktop: tabulka -->
         <div class="hidden md:block bg-surface border border-neutral-200" :class="groupByMonth ? 'border-t-0 rounded-b-lg' : 'rounded-lg'">
           <div ref="listBoxes" class="overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
-            <table class="w-full text-sm table-sticky-first singleline-list-table" :class="[tbl.densityClass.value, wrapColumns ? 'multirow-table purchase-multirow-table' : '']">
+            <table v-column-labels="tbl" class="w-max min-w-full text-sm table-sticky-first singleline-list-table list-stacked-controls" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide" :class="groupByMonth ? '' : 'sticky top-0 z-20 shadow-sm'">
                 <tr>
                   <th class="px-2 py-2 w-10 text-center">
@@ -1299,7 +1313,7 @@ async function bulkSetKind() {
                     />
                   </th>
                   <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                    <th v-if="c.key === 'kh' || c.key === 'dimensions'" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                    <th v-if="['kh', 'dimensions', 'vat_classification', 'vat_return_lines', 'document_tags'].includes(c.key)" scope="col" class="py-2 px-3 text-xs uppercase tracking-wide font-medium text-neutral-500 text-left" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                     <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
                       :align="['amount', 'exchange_rate', 'base', 'vat', 'balance', 'paid_amount', 'remaining_amount'].includes(c.key) ? 'right' : 'left'"
                       @toggle="onSortToggle" />
@@ -1441,6 +1455,14 @@ async function bulkSetKind() {
                   <td v-else-if="c.key === 'vat_breakdown'" :data-custom-color="!!colors.color('vat_breakdown')" :style="colors.cellStyle('vat_breakdown')" class="px-3 py-2.5"><VatBreakdownCell :rows="inv.vat_breakdown" :currency="inv.currency" /></td>
                   <td v-else-if="c.key === 'debit_accounts'" :data-custom-color="!!colors.color('debit_accounts')" :style="colors.cellStyle('debit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.debit_accounts?.join(', ') || '—' }}</td>
                   <td v-else-if="c.key === 'credit_accounts'" :data-custom-color="!!colors.color('credit_accounts')" :style="colors.cellStyle('credit_accounts')" class="px-3 py-2.5 font-mono text-xs">{{ inv.credit_accounts?.join(', ') || '—' }}</td>
+                <td v-else-if="c.key === 'country'" :data-custom-color="!!colors.color('country')" :style="colors.cellStyle('country')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'country')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'country') }}</span></td>
+                <td v-else-if="c.key === 'vat_classification'" :data-custom-color="!!colors.color('vat_classification')" :style="colors.cellStyle('vat_classification')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'vat_classification')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'vat_classification') }}</span></td>
+                <td v-else-if="c.key === 'vat_return_lines'" :data-custom-color="!!colors.color('vat_return_lines')" :style="colors.cellStyle('vat_return_lines')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'vat_return_lines')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'vat_return_lines') }}</span></td>
+                <td v-else-if="c.key === 'document_tags'" :data-custom-color="!!colors.color('document_tags')" :style="colors.cellStyle('document_tags')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'document_tags')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'document_tags') }}</span></td>
+                <td v-else-if="c.key === 'note'" :data-custom-color="!!colors.color('note')" :style="colors.cellStyle('note')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'note')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'note') }}</span></td>
+                <td v-else-if="c.key === 'journal_notes'" :data-custom-color="!!colors.color('journal_notes')" :style="colors.cellStyle('journal_notes')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'journal_notes')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'journal_notes') }}</span></td>
+                <td v-else-if="c.key === 'payment_vs'" :data-custom-color="!!colors.color('payment_vs')" :style="colors.cellStyle('payment_vs')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'payment_vs')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'payment_vs') }}</span></td>
+                <td v-else-if="c.key === 'payment_method'" :data-custom-color="!!colors.color('payment_method')" :style="colors.cellStyle('payment_method')" class="px-3 py-2.5 text-xs" :title="extraFieldValue(inv, 'payment_method')"><span class="inline-block align-middle max-w-64 truncate">{{ extraFieldValue(inv, 'payment_method') }}</span></td>
                 <td v-else-if="c.key === 'kh'" :data-custom-color="!!colors.color('kh')" :style="colors.cellStyle('kh')" class="px-3 py-2.5 font-mono text-xs">{{ inv.kh_sections?.join(', ') || '—' }}</td>
                 <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2.5 text-xs max-w-64 truncate" :title="inv.dimension_labels?.join(' · ')">{{ inv.dimension_labels?.join(' · ') || '—' }}</td>
                   <td v-else-if="c.key === 'locked'" :data-custom-color="!!colors.color('locked')" :style="colors.cellStyle('locked')" class="px-2 py-2.5 text-center">
@@ -1472,18 +1494,26 @@ async function bulkSetKind() {
                      klik do náhledu neotevřel fakturu — uživatel si tu chce jen číst. -->
                 <tr v-if="expandedId === inv.id" class="table-detail-row bg-neutral-50/60">
                   <td :colspan="expandedColspan" class="px-6 py-3">
-                    <div v-if="expandedLoading" class="text-xs text-neutral-500">{{ t('common.loading') }}</div>
-                    <div v-else-if="!expandedItems || expandedItems.length === 0" class="text-xs text-neutral-500">{{ t('common.no_data') }}</div>
-                    <table v-else class="w-full text-xs table-plain">
+                    <table class="w-full text-xs table-plain">
                       <thead>
                         <tr class="text-neutral-500">
-                          <th class="py-1 text-left font-medium">{{ t('purchase_invoice.items.description') }}</th>
+                          <th class="py-1 text-left font-medium">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <button v-if="inv.locked?.journal_entry_id && auth.canRead('accounting')" type="button" :class="btnOutlineSm('primary')" @click.stop="previewEntryId = inv.locked.journal_entry_id">
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+                                {{ t('accounting.journal.related.preview') }}
+                              </button>
+                              <span>{{ t('purchase_invoice.items.description') }}</span>
+                            </div>
+                          </th>
                           <th class="py-1 text-right font-medium w-24">{{ t('purchase_invoice.items.quantity') }}</th>
                           <th class="py-1 text-right font-medium w-32">{{ t('purchase_invoice.items.unit_price') }}</th>
                           <th class="py-1 text-right font-medium w-32">{{ t('purchase_invoice.items.total_with_vat') }}</th>
                         </tr>
                       </thead>
                       <tbody>
+                        <tr v-if="expandedLoading"><td colspan="4" class="py-1 text-neutral-500">{{ t('common.loading') }}</td></tr>
+                        <tr v-else-if="!expandedItems?.length"><td colspan="4" class="py-1 text-neutral-500">{{ t('common.no_data') }}</td></tr>
                         <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
                           <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
@@ -1616,6 +1646,8 @@ async function bulkSetKind() {
       </div>
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
+    <JournalSourceDrawer v-if="previewEntryId" :entry-id="previewEntryId" @close="previewEntryId = null"
+      @focus-entry="id => router.push({ name: 'accounting-journal', query: { entry_id: String(id) } })" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
   </div>
 </template>

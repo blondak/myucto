@@ -950,9 +950,12 @@ paths:
         - { in: query, name: 'filter[include_vat_breakdown]', description: "1 = doplnit rozpad základu a DPH podle sazeb jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_posting_accounts]', description: "1 = doplnit účty MD/Dal ze zaúčtování jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_vat_classification]', description: "1 = doplnit členění plnění z evidence DPH a skutečné řádky přiznání; odvozené sloupce se neřadí", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_journal_notes]', description: "1 = živé poznámky deníku; vyžaduje oprávnění accounting read", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked] }
+          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -1280,6 +1283,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/invoices/{id}/items:
+    get:
+      tags: [Invoices]
+      summary: Položky faktury bez načtení celého detailu
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceItemsResponse' }
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/invoices/{id}/issue:
     parameters:
@@ -3217,6 +3239,27 @@ paths:
         '404': { description: Výpis nenalezen }
         '422': { description: Chybějící nebo konfliktní zůstatky či nepodporované údaje }
 
+  /api/v1/bank-statements/export-unmatched:
+    get:
+      tags: [Bank]
+      summary: XLSX skutečně nespárovaných pohybů napříč vlastními účty
+      description: Všechny stránky aktuálně filtrovaného seznamu; stav párování se vynucuje na unmatched. Zahrnuje otevřené platby kartou, vynechává vyřízené pohyby bez očekávaného dokladu. Částky jsou podepsané a barevně rozlišené, soubor obsahuje vlastní účet a živé účetní poznámky.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: query, name: year, schema: { type: integer } }
+        - { in: query, name: q, schema: { type: string, maxLength: 100 }, description: "Text nebo přesná absolutní částka; podporuje desetinnou čárku a oddělovače tisíců." }
+        - { in: query, name: account, schema: { type: string } }
+        - { in: query, name: posting_status, schema: { type: string, enum: [unposted, posted] } }
+        - { in: query, name: sort, schema: { type: string, enum: [posted_at, amount, variable_symbol, counterparty, invoice, status, posting, account], default: posted_at } }
+        - { in: query, name: direction, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: Soubor XLSX
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/bank-statements/{id}/export-unmatched:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -3224,7 +3267,7 @@ paths:
     get:
       tags: [Bank]
       summary: XLSX skutečně nespárovaných pohybů výpisu
-      description: Výpis všech stran bez stránkování; vylučuje vlastní převody, mzdy a pohyby zaúčtované mimo saldokontní účty. Obsahuje účet, směr, datum, text, částku, měnu a poznámky účetního zápisu.
+      description: Výpis všech stran bez stránkování; vylučuje vlastní převody, mzdy a pohyby zaúčtované mimo saldokontní účty. Obsahuje účet, datum, text, podepsanou a barevně rozlišenou částku, měnu a poznámky účetního zápisu. Otevřené platby kartou na mezičlenu zůstávají nespárované.
       responses:
         '200':
           description: Soubor XLSX
@@ -4024,6 +4067,7 @@ paths:
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
         - { in: query, name: scope, schema: { type: string, enum: [unposted, all] }, description: "'all' = záložka „Všechny pohyby\" (i zaúčtované, napříč účty)." }
         - { in: query, name: status, schema: { type: string, enum: [unmatched, auto_exact, auto_partial, manual, ignored] }, description: "Stav spárování pro scope=all. Hodnota unmatched ukazuje jen skutečně nevyřízené párování s dokladem." }
+        - { in: query, name: posting_status, schema: { type: string, enum: [unposted, posted] }, description: "Stav účetního zaúčtování pro scope=all." }
         - { in: query, name: year, schema: { type: integer } }
         - { in: query, name: q, schema: { type: string }, description: "Fulltext přes protistranu, VS, popis, číslo účtu a částku." }
         - { in: query, name: account, schema: { type: string }, description: Náš zdrojový účet výpisu (account_number). }
@@ -6114,9 +6158,12 @@ paths:
         - { in: query, name: 'filter[include_vat_breakdown]', description: "1 = doplnit rozpad základu a DPH podle sazeb jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_posting_accounts]', description: "1 = doplnit účty MD/Dal ze zaúčtování jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_vat_classification]', description: "1 = doplnit členění plnění z evidence DPH a skutečné řádky přiznání; odvozené sloupce se neřadí", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_journal_notes]', description: "1 = živé poznámky deníku; vyžaduje oprávnění accounting read", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked] }
+          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes, payment_vs, payment_method] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -6280,6 +6327,23 @@ paths:
         '409': { description: Lze smazat jen draft }
 
   /api/v1/purchase-invoices/{id}/items:
+    get:
+      tags: [Purchase invoices]
+      summary: Položky přijaté faktury bez načtení celého detailu
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseInvoiceItemsResponse' }
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [Purchase invoices]
       summary: Přepíše položky a přepočte sumy
@@ -13727,6 +13791,8 @@ paths:
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { in: query, name: sort_by, schema: { type: string, enum: [title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení ručních položek před stránkováním; převzaté zdroje zůstávají oddělené. }
+        - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
       responses:
         '200': { description: Stránkované ruční položky a oddělené převzaté zdroje, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemList' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -13880,7 +13946,7 @@ paths:
   /api/v1/accounting/other-items/schedules/{id}:
     get:
       tags: [Accounting]
-      summary: Rozvrh včetně vygenerovaných konceptů
+      summary: Rozvrh včetně vygenerovaných položek
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13891,7 +13957,8 @@ paths:
   /api/v1/accounting/other-items/schedules/{id}/generate:
     post:
       tags: [Accounting]
-      summary: Idempotentně vytvoří koncepty do zadaného data
+      summary: Idempotentně vytvoří položky do zadaného data
+      description: Při auto_post potvrdí nebo zaúčtuje také již vytvořené aktivní koncepty, nejdříve v den jejich vzniku a nejvýše do through. Budoucí termíny zůstávají koncepty; uzavřené období nebo zamčené datum se neobchází. Při chybě se běh rozvrhu vrátí. Automatický rozvrh v podvojném účetnictví vyžaduje accounting.journal.post write.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13899,19 +13966,21 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [through], properties: { through: { type: string, format: date } } } } }
       responses:
-        '200': { description: Identifikátory nových konceptů a rozvrh, content: { application/json: { schema: { type: object, properties: { created_ids: { type: array, items: { type: integer } }, schedule: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } }
+        '200': { description: Identifikátory nových a právě zaúčtovaných nebo potvrzených položek a rozvrh, content: { application/json: { schema: { type: object, properties: { created_ids: { type: array, items: { type: integer } }, posted_ids: { type: array, items: { type: integer } }, schedule: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/schedules/{id}/status:
     put:
       tags: [Accounting]
-      summary: Aktivuje nebo pozastaví opakování
+      summary: Aktivuje nebo pozastaví opakování a nastaví automatické účtování
+      description: Zapnutí automatického účtování nebo obnovení automatického rozvrhu v podvojném účetnictví vyžaduje accounting.journal.post write. Pozastavení a vypnutí automatiky nevyžaduje právo účtování.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, paused] } } } } }
+        content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [active, paused] }, auto_post: { type: boolean, description: Volitelné; vynechání zachová dosavadní hodnotu. Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotná změna nastavení neúčtuje. } } } } }
       responses:
         '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -13920,12 +13989,13 @@ paths:
     post:
       tags: [Accounting]
       summary: Založí opakování z existujícího dokladu
+      description: Zapnutí auto_post v podvojném účetnictví vyžaduje accounting.journal.post write.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: item_id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date } } } } }
+        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date }, auto_post: { type: boolean, default: false, description: Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotné založení rozvrhu neúčtuje. } } } } }
       responses:
         '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -19585,6 +19655,67 @@ paths:
         '200': { description: OK }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/bank-transactions/payment-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Bank]
+      summary: Vyhledá volné bankovní pohyby k vydané nebo přijaté faktuře
+      description: |
+        Zadejte právě jedno z invoice_id a purchase_invoice_id. Vyžaduje čtení
+        banky a příslušného typu dokladu. Nabízí pohyby správného směru v aktuální
+        firmě, které nejsou spárované ani přidělené jiné evidenci. Otevřený karetní
+        mezičlen lze spárovat. Neomezuje datum na automatické časové okno.
+        Přednost mají odpovídající měna, blízká částka a datum splatnosti.
+      parameters:
+        - { in: query, name: invoice_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: purchase_invoice_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: search, schema: { type: string, maxLength: 100 }, description: 'Protistrana, VS, popis, bankovní reference nebo přesná částka, například 1 234,50.' }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankPaymentCandidatePage' }
+        '400': { description: 'Zadejte právě jeden doklad.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/bank-transactions/{id}/match-document:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [Bank]
+      summary: Spáruje volný bankovní pohyb z detailu dokladu
+      description: |
+        Vyžaduje bank.match se zápisem a čtení banky a dokladu. Zadejte právě
+        jedno z invoice_id a purchase_invoice_id. Zamkne pohyb i doklad a znovu
+        ověří firmu, stav dokladu, směr platby a nepoužitou úhradu. Potom použije
+        stejné párování a účetní zpracování jako match, včetně částečných úhrad,
+        dobropisů a rekonciliace. Již použitý pohyb odmítne stavem 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              oneOf:
+                - required: [invoice_id]
+                - required: [purchase_invoice_id]
+              properties:
+                invoice_id: { type: integer, minimum: 1 }
+                purchase_invoice_id: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Spárováno
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankDocumentMatchResult' }
+        '400': { description: 'Zadejte právě jeden doklad.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Pohyb již není volný, směr platby neodpovídá nebo se změnil stav dokladu.' }
   /api/v1/bank-transactions/{id}/match-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -19601,6 +19732,13 @@ paths:
         nefiltruje (dobropisy). Cizoměnová faktura placená z CZK účtu se porovnává
         přes kurz faktury s relativní tolerancí (4 %). Zahrnuje i zaplacené faktury
         (druhá platba/doplatek). Vrací max 25 kandidátů, nejlepší shoda první.
+        S neprázdným search se místo automatických návrhů vyhledává podle čísla,
+        platebního VS, dodavatele/odběratele nebo přesné částky dokladu či zbytku.
+        České částky se skupinami tisíců a desetinnou čárkou jsou podporované.
+        Ruční hledání nemá časové okno, respektuje směr platby (včetně dobropisů),
+        firmu i oprávnění ke čtení dokladů a vrací nejvýše 50 výsledků.
+      parameters:
+        - { in: query, name: search, schema: { type: string, maxLength: 100 } }
       responses:
         '200':
           description: OK
@@ -19625,6 +19763,8 @@ paths:
                         due_date: { type: [string, "null"], format: date }
                         party: { type: [string, "null"] }
                         paid: { type: boolean }
+                        currency_mismatch: { type: boolean }
+                  fallback: { type: boolean }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/bank-transactions/{id}/split-suggestions:
     parameters:
@@ -27553,6 +27693,7 @@ components:
         ends_on: { type: [string, 'null'], format: date }
         next_index: { type: integer }
         status: { type: string, enum: [active, paused] }
+        auto_post: { type: boolean, default: false, description: Automatické účtování již vzniklých položek při generování; budoucí položky zůstávají koncepty. }
         template:
           type: object
           properties:
@@ -32657,6 +32798,11 @@ components:
     Invoice:
       type: object
       properties:
+        country: { type: [string, "null"], description: "ISO2 státu protistrany v seznamu; neurčuje místo plnění." }
+        journal_notes: { type: array, description: "Živé poznámky účetního zápisu, připnuté první; jen s filter[include_journal_notes]=1 a accounting read.", items: { type: string } }
+        document_tags: { type: array, description: "Štítky dostupných příloh; jen s filter[include_document_tags]=1 a documents read.", items: { type: string } }
+        vat_classification_codes: { type: array, description: "Členění z evidence DPH; jen s filter[include_vat_classification]=1.", items: { type: string } }
+        vat_return_lines: { type: array, description: "Skutečné řádky přiznání z Knihy DPH; jen s filter[include_vat_classification]=1.", items: { type: string } }
         id: { type: integer }
         supplier_id: { type: integer }
         branding_profile_id: { type: [integer, "null"], description: "Vizuální identita dokladu; při vystavení se uloží do supplier_snapshot." }
@@ -33950,6 +34096,47 @@ components:
         count: { type: integer }
         deferred: { type: boolean }
 
+    BankPaymentCandidate:
+      type: object
+      required: [id, statement_id, posted_at, amount, currency, account_number]
+      properties:
+        id: { type: integer, format: int64 }
+        statement_id: { type: integer, format: int64 }
+        posted_at: { type: string, format: date }
+        amount: { type: number, description: 'Skutečná částka pohybu se znaménkem v měně účtu.' }
+        currency: { type: string }
+        counterparty_name: { type: [string, "null"] }
+        variable_symbol: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        bank_ref: { type: [string, "null"] }
+        account_number: { type: string }
+        bank_code: { type: [string, "null"] }
+
+    BankPaymentCandidatePage:
+      type: object
+      required: [items, total, page, pages, limit]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BankPaymentCandidate' } }
+        total: { type: integer }
+        page: { type: integer, minimum: 1 }
+        pages: { type: integer, minimum: 0 }
+        limit: { type: integer, const: 25 }
+
+    BankDocumentMatchResult:
+      type: object
+      required: [matched]
+      properties:
+        matched: { type: boolean, const: true }
+        paid_at: { type: [string, "null"], format: date }
+        purchase_invoice_id: { type: integer, format: int64 }
+        posting: { $ref: '#/components/schemas/BankPostingSummary' }
+        partial_payment: { type: boolean }
+        remaining: { type: number }
+        currency: { type: string }
+        final_draft_id: { type: integer, format: int64 }
+        tax_document_id: { type: integer, format: int64 }
+        payment_thanks_sent: { type: boolean }
+
     BankStatement:
       type: object
       description: |
@@ -34105,6 +34292,7 @@ components:
             note: { type: [string, "null"], description: "payroll_partial_posting označuje neúplné pokrytí částky mzdovými zápisy; status je null a pohyb zůstává ve filtru unposted." }
             journal_entry_id: { type: integer, format: int64, description: "Existující bankovní nebo mzdový účetní zápis úhrady." }
             document_no: { type: [string, "null"] }
+            counter_account_codes: { type: array, description: "Protiúčty živého zaúčtování, včetně rozúčtování.", items: { type: string } }
             journal_notes:
               type: array
               description: "Živé poznámky zápisu `journal_entry_id` (připnuté první). Poznámka patří zápisu deníku; zakládá a mění se přes /api/accounting/journal/{id}/notes. Jen u pohybu se zápisem."
@@ -34392,6 +34580,14 @@ components:
         description: { type: [string, "null"] }
         bank_ref: { type: [string, "null"] }
         match_status: { type: string, enum: [unmatched, auto_exact, auto_partial, manual, ignored] }
+
+    InvoiceItemsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceItem' }
 
     InvoiceItem:
       type: object
@@ -34706,6 +34902,15 @@ components:
     PurchaseInvoiceListItem:
       type: object
       properties:
+        country: { type: [string, "null"], description: "ISO2 státu protistrany v seznamu; neurčuje místo plnění." }
+        journal_notes: { type: array, description: "Živé poznámky účetního zápisu, připnuté první; jen s filter[include_journal_notes]=1 a accounting read.", items: { type: string } }
+        document_tags: { type: array, description: "Štítky dostupných příloh; jen s filter[include_document_tags]=1 a documents read.", items: { type: string } }
+        vat_classification_codes: { type: array, description: "Členění z evidence DPH; jen s filter[include_vat_classification]=1.", items: { type: string } }
+        vat_return_lines: { type: array, description: "Skutečné řádky přiznání z Knihy DPH; jen s filter[include_vat_classification]=1.", items: { type: string } }
+        note_above_items: { type: [string, "null"] }
+        note_below_items: { type: [string, "null"] }
+        payment_variable_symbol: { type: [string, "null"] }
+        payment_method: { type: string, enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other] }
         id: { type: integer }
         supplier_id: { type: integer }
         vendor_id: { type: integer }
@@ -34754,6 +34959,14 @@ components:
         has_small_asset:
           type: boolean
           description: "§DM — aspoň jedna položka dokladu má expense_kind='small_asset' (drobný majetek). Jen v seznamu, v detailu se odvozuje z items[]."
+
+    PurchaseInvoiceItemsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PurchaseInvoiceItem' }
 
     PurchaseInvoiceItem:
       type: object

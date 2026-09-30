@@ -29,6 +29,7 @@ import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.v
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import ExpenseRuleTemplateModal from '@/components/accounting/ExpenseRuleTemplateModal.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
+import InvoiceBankMatchModal from '@/components/bank/InvoiceBankMatchModal.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockDocument, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -69,6 +70,15 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
+const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
+const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
+  && auth.canRead('bank') && auth.canWrite('bank.match')
+  && Number(invoice.value.amount_to_pay) !== 0
+  && ['received', 'booked', 'paid'].includes(invoice.value.status))
+function openBankMatch() {
+  if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.vendor_invoice_number || invoice.value.varsymbol }
+}
+watch(() => [route.params.id, supplierStore.currentSupplierId], () => { bankMatchTarget.value = null })
 const loading = ref(true)
 const error = ref('')
 const acting = ref(false)
@@ -720,6 +730,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
   const canTransition = auth.canWrite('purchase_invoices.transition')
   const canDeletePermission = auth.canWrite('purchase_invoices.delete')
   const items: ActionItem[] = []
+
+  items.push({ key: 'bank-match', label: t('bank.invoice_match.action'), icon: 'link', tier: 'secondary', variant: 'success',
+    show: canMatchBankPayment.value, disabled: acting.value, run: openBankMatch })
 
   items.push({ key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
     show: canEdit.value && w && !lockedForMe.value, to: `/purchase-invoices/${inv.id}/edit` })
@@ -1866,6 +1879,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
+      <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="purchase_invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
+        @close="bankMatchTarget = null" @done="load" />
     </Teleport>
 
 </template>

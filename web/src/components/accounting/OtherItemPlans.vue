@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { otherItemPlansApi, type OtherItemInstallment, type OtherItemSchedule } from '@/api/otherItemPlans'
 import type { OtherItem } from '@/api/otherItems'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -13,6 +14,7 @@ import { appIsoDate } from '@/utils/date'
 const props = defineProps<{ item: OtherItem }>()
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplier = useSupplierStore()
 const toast = useToast()
 const busy = ref(false)
 const loading = ref(false)
@@ -21,6 +23,9 @@ const installments = ref<OtherItemInstallment[]>([])
 const frequency = ref<OtherItemSchedule['frequency']>('monthly')
 const endsOn = ref('')
 const through = ref(appIsoDate())
+const autoPost = ref(false)
+const canAutoPost = computed(() => ['posted', 'confirmed'].includes(props.item.status))
+const canPost = computed(() => supplier.currentSupplier?.accounting_mode !== 'double_entry' || auth.canWrite('accounting.journal.post'))
 const canWrite = computed(() => auth.canWrite('other_items'))
 const sourceActive = computed(() => ['draft', 'posted', 'confirmed'].includes(props.item.status))
 const generatedOccurrences = computed(() => schedule.value?.occurrences?.filter(row => row.occurrence_index > 0) || [])
@@ -48,6 +53,7 @@ async function createSchedule() {
   try {
     schedule.value = await otherItemPlansApi.createSchedule(Number(props.item.id), {
       frequency: frequency.value, ends_on: endsOn.value || null,
+      auto_post: autoPost.value && canAutoPost.value,
     })
     toast.success(t('other_items.plans.schedule_saved'))
   } catch (error: any) {
@@ -64,6 +70,7 @@ async function generate() {
     const result = await otherItemPlansApi.generate(schedule.value.id, through.value)
     schedule.value = result.schedule
     toast.success(t('other_items.plans.generated', { count: result.created_ids.length }))
+    if (result.posted_ids.length) toast.success(t('other_items.plans.posted', { count: result.posted_ids.length }))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -77,6 +84,19 @@ async function toggleSchedule() {
   try {
     schedule.value = await otherItemPlansApi.setStatus(schedule.value.id,
       schedule.value.status === 'active' ? 'paused' : 'active')
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function toggleAutoPost() {
+  if (!schedule.value || busy.value) return
+  busy.value = true
+  try {
+    schedule.value = await otherItemPlansApi.setStatus(schedule.value.id, schedule.value.status, !schedule.value.auto_post)
+    toast.success(t('other_items.plans.schedule_saved'))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -126,16 +146,22 @@ watch(() => props.item.id, () => void load(), { immediate: true })
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else-if="schedule">
         <p class="mt-3 text-sm">{{ t(`other_items.plans.${schedule.frequency}`) }} · {{ t(`other_items.plans.${schedule.status}`) }}</p>
+        <label v-if="canWrite && sourceActive" class="mt-3 flex items-center gap-2 text-sm">
+          <input type="checkbox" :checked="schedule.auto_post" :disabled="busy || ((!canAutoPost || !canPost) && !schedule.auto_post)" @change="toggleAutoPost" />
+          {{ t('other_items.plans.auto_post') }}
+        </label>
+        <p v-else-if="schedule.auto_post" class="mt-3 text-sm font-medium text-success-700">{{ t('other_items.plans.auto_post') }}</p>
+        <p class="mt-1 text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
         <p v-if="!sourceActive" class="mt-2 text-sm text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
         <div v-if="canWrite && sourceActive" class="mt-3 flex flex-wrap items-end gap-2">
           <label class="text-sm font-medium">{{ t('other_items.plans.generate_through') }}
             <DateInput v-model="through" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
           </label>
-          <button type="button" :disabled="busy || schedule.status !== 'active'" :class="btnOutline('success')" @click="generate">
+          <button type="button" :disabled="busy || schedule.status !== 'active' || (schedule.auto_post && !canPost)" :class="btnOutline('success')" @click="generate">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('other_items.plans.generate') }}
           </button>
-          <button type="button" :disabled="busy" :class="btnOutline('warning')" @click="toggleSchedule">
+          <button type="button" :disabled="busy || (schedule.status !== 'active' && schedule.auto_post && !canPost)" :class="btnOutline('warning')" @click="toggleSchedule">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
             {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
           </button>
@@ -160,6 +186,11 @@ watch(() => props.item.id, () => void load(), { immediate: true })
         <label class="text-sm font-medium">{{ t('other_items.plans.ends_on') }}
           <DateInput v-model="endsOn" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
         </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="autoPost" type="checkbox" :disabled="!canAutoPost || !canPost || busy" />
+          {{ t('other_items.plans.auto_post') }}
+        </label>
+        <p class="w-full text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
         <button type="submit" :disabled="busy" :class="btnOutline('primary')">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
           {{ t('other_items.plans.create_schedule') }}

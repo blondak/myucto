@@ -1703,7 +1703,7 @@ onBeforeUnmount(() => {
           <DensityToggle class="hidden md:block" :ctrl="tbl" />
         </div>
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
                 <th v-if="tbl.isVisible('document')" class="px-4 py-3">{{ t('payroll.documents.document') }}</th>

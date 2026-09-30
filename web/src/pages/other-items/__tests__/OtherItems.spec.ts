@@ -31,6 +31,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import OtherItems from '../OtherItems.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
 
 function item(status: 'draft' | 'posted') {
   return {
@@ -75,5 +76,41 @@ describe('OtherItems actions', () => {
     expect(wrapper.text()).toContain('common.detail')
     expect(wrapper.text()).not.toContain('common.edit')
     expect(wrapper.text()).not.toContain('common.delete')
+  })
+
+  it('načítá další stránku bez ztráty prvních položek a řadí celý seznam přes API', async () => {
+    m.list.mockResolvedValueOnce({ items: [item('posted')], sources: [], total: 2, per_page: 1 })
+    m.list.mockResolvedValueOnce({ items: [{ ...item('posted'), id: 'manual:43', source_id: 43, title: 'Druhá položka' }], sources: [], total: 2, per_page: 1 })
+    const wrapper = shallowMount(OtherItems, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+    const more = wrapper.findAll('button').find(button => button.text().includes('common.load_more'))
+    await more!.trigger('click')
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+    expect(wrapper.text()).toContain('Syntetický závazek')
+    expect(wrapper.text()).toContain('Druhá položka')
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 2, per_page: 1 })
+    wrapper.findAllComponents(SortableTh).find(th => th.props('sortKey') === 'amount')!.vm.$emit('toggle', 'amount')
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort_by: 'amount', sort_dir: 'desc' }))
+    expect(wrapper.text()).not.toContain('Druhá položka')
+    wrapper.unmount()
+  })
+
+  it('po změně řazení zahodí opožděnou odpověď načítání další stránky', async () => {
+    let resolveMore!: (value: any) => void
+    m.list.mockResolvedValueOnce({ items: [item('posted')], sources: [], total: 2, per_page: 1 })
+    m.list.mockImplementationOnce(() => new Promise(resolve => { resolveMore = resolve }))
+    const wrapper = shallowMount(OtherItems, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('common.load_more'))!.trigger('click')
+    m.list.mockResolvedValueOnce({ items: [{ ...item('posted'), title: 'Nové pořadí' }], sources: [], total: 1, per_page: 50 })
+    wrapper.findAllComponents(SortableTh)[0]!.vm.$emit('toggle', 'title')
+    await flushPromises()
+    resolveMore({ items: [{ ...item('posted'), title: 'Zastaralá odpověď' }], sources: [], total: 2, per_page: 1 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Nové pořadí')
+    expect(wrapper.text()).not.toContain('Zastaralá odpověď')
+    wrapper.unmount()
   })
 })

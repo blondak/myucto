@@ -485,6 +485,13 @@ final class PurchaseInvoiceRepository
      *
      * @return list<array<string,mixed>>
      */
+    public function itemsForSupplier(int $purchaseInvoiceId, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        return $stmt->fetchColumn() === false ? null : $this->itemsFor($purchaseInvoiceId);
+    }
+
     public function itemsFor(int $purchaseInvoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -990,6 +997,7 @@ final class PurchaseInvoiceRepository
             'vendor_number' => 'pi.vendor_invoice_number', 'kind' => 'pi.document_kind',
             'tax_date' => 'COALESCE(pi.tax_date, pi.issue_date)', 'due_date' => 'pi.due_date',
             'amount' => 'pi.total_with_vat', 'status' => 'pi.status',
+            'payment_vs' => 'pi.payment_variable_symbol', 'payment_method' => 'pi.payment_method',
             'paid_at' => 'pi.paid_at', 'booked_at' => 'pi.booked_at',
             'exchange_rate' => 'pi.exchange_rate', 'vat_deduction' => 'pi.vat_deduction',
             'expense_category' => 'ec.label', 'base' => 'pi.total_without_vat',
@@ -999,8 +1007,11 @@ final class PurchaseInvoiceRepository
             'project' => 'prj.name', 'received_at' => 'pi.received_at',
             'payment_ordered_at' => 'pi.payment_ordered_at',
             'vat_breakdown' => 'pi.total_vat',
-            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
-            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'country' => 'co.iso2',
+            'note' => "CONCAT_WS(' ', NULLIF(pi.note_above_items, ''), NULLIF(pi.note_below_items, ''))",
+            'journal_notes' => "(SELECT n.body FROM journal_entries je JOIN journal_entry_notes n ON n.entry_id = je.id AND n.supplier_id = je.supplier_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL AND n.deleted_at IS NULL ORDER BY n.pinned DESC, n.created_at DESC, n.id DESC LIMIT 1)",
+            'debit_accounts' => "(SELECT ca.account_code FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL ORDER BY CASE WHEN ca.account_code REGEXP '^[56]' THEN 0 WHEN ca.account_code LIKE '343%' THEN 2 ELSE 1 END, ca.account_code LIMIT 1)",
+            'credit_accounts' => "(SELECT ca.account_code FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice' AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL ORDER BY CASE WHEN ca.account_code REGEXP '^[56]' THEN 0 WHEN ca.account_code LIKE '343%' THEN 2 ELSE 1 END, ca.account_code LIMIT 1)",
             'locked' => 'pi.booked_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
@@ -1015,11 +1026,13 @@ final class PurchaseInvoiceRepository
         }
 
         $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+                       pi.payment_variable_symbol, pi.payment_method,
                        pi.vendor_id, pi.supplier_id,
                        pi.issue_date, pi.tax_date, pi.due_date, pi.received_at,
                        pi.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                        pi.exchange_rate, pi.exchange_rate_date,
                        pi.total_without_vat, pi.total_vat, pi.total_with_vat,
+                       pi.note_above_items, pi.note_below_items, co.iso2 AS country,
                        pi.advance_paid_amount, pi.amount_to_pay,
                        (" . PurchaseSettledExpr::paidAmount('pi') . ") AS paid_amount,
                        (" . PurchaseSettledExpr::remainingAmount('pi') . ") AS remaining_amount,
@@ -1043,6 +1056,7 @@ final class PurchaseInvoiceRepository
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
+             LEFT JOIN countries co ON co.id = c.country_id
              LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
              LEFT JOIN projects prj ON prj.id = pi.project_id
                  WHERE $whereSql

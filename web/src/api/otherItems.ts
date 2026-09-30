@@ -100,7 +100,7 @@ export interface OtherItemRepostPayload {
 }
 
 export const otherItemsApi = {
-  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; q?: string; from?: string; to?: string; page?: number }) =>
+  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; q?: string; from?: string; to?: string; page?: number; sort_by?: string; sort_dir?: 'asc' | 'desc' }) =>
     api.get<OtherItemsResult>('/accounting/other-items', { params }).then(r => ({
       ...r.data,
       items: r.data.items.map(item => ({

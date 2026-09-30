@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import UnmatchedCardPayments from '../UnmatchedCardPayments.vue'
 import type { UnmatchedCardPayments as Overview } from '@/api/paymentCards'
@@ -10,14 +10,24 @@ const m = vi.hoisted(() => ({
   writeOff: vi.fn(),
   listAccounts: vi.fn(),
   push: vi.fn(),
+  matchCandidates: vi.fn(),
+  splitSuggestions: vi.fn(),
+  matchManual: vi.fn(),
+  canMatch: true,
+  canReadBank: true,
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock('@/api/paymentCards', () => ({
   paymentCardsApi: { unmatchedPayments: m.unmatchedPayments, uploadReceipt: m.uploadReceipt, rematch: m.rematch, writeOff: m.writeOff },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
+vi.mock('@/api/bank', () => ({ bankApi: { matchCandidates: m.matchCandidates, splitSuggestions: m.splitSuggestions, matchManual: m.matchManual } }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { props: ['title', 'widthClass'], template: '<div><slot /><slot name="footer" /></div>' } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({
+  canWrite: (permission: string) => permission !== 'bank.match' || m.canMatch,
+  canRead: (permission: string) => permission !== 'bank' || m.canReadBank,
+}) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => m.toast }))
 vi.mock('@/composables/useFormat', () => ({
   formatDate: (s: string) => s,
@@ -68,9 +78,73 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.unmatchedPayments.mockResolvedValue(overview)
   m.listAccounts.mockResolvedValue([])
+  m.canMatch = true
+  m.canReadBank = true
+  m.matchCandidates.mockResolvedValue({ candidates: [], fallback: false })
+  m.splitSuggestions.mockResolvedValue({ suggestions: [], window: 7 })
 })
+afterEach(() => { vi.useRealTimers() })
 
 describe('Platby kartou bez dokladu', () => {
+  it('vyhledá jiný doklad podle částky a nevrátí zastaralé automatické návrhy', async () => {
+    vi.useFakeTimers()
+    let resolveInitial!: (value: { candidates: unknown[]; fallback: boolean }) => void
+    m.matchCandidates.mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve }))
+    const wrapper = await render()
+    await wrapper.get('[data-testid="manual-match-desktop"]').trigger('click')
+    await flushPromises()
+    m.matchCandidates.mockResolvedValue({ candidates: [{
+      type: 'purchase_invoice', id: 12, ref: 'TEST-SEARCH-12', amount: 1234.50, currency: 'CZK',
+      issue_date: '2097-01-01', due_date: '2097-01-15', party: 'Syntetický nalezený dodavatel', paid: false,
+    }], fallback: false })
+    await wrapper.get('input[type="search"]').setValue('1 234,50')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    resolveInitial({ candidates: [], fallback: true })
+    await flushPromises()
+    expect(m.matchCandidates).toHaveBeenLastCalledWith(41, '1 234,50')
+    expect(wrapper.text()).toContain('TEST-SEARCH-12')
+    expect(wrapper.text()).toContain('bank.candidate_search_results')
+    expect(wrapper.text()).not.toContain('bank.candidates_fallback_hint')
+    wrapper.unmount()
+  })
+
+  it.each(['manual-match-desktop', 'manual-match-mobile'])('otevře manuální párování přímo přes %s a po úspěchu obnoví přehled', async badge => {
+    m.matchCandidates.mockResolvedValue({ candidates: [{
+      type: 'purchase_invoice', id: 9, ref: 'TEST-PF-9', amount: 250, currency: 'CZK',
+      converted_amount: null, converted_currency: null, issue_date: '2026-06-10', due_date: '2026-06-20',
+      party: 'Syntetický dodavatel', paid: false,
+    }], fallback: false })
+    m.matchManual.mockResolvedValue({ matched: true, posting: null })
+    const wrapper = await render()
+    await wrapper.find(`[data-testid="${badge}"]`).trigger('click')
+    await flushPromises()
+    expect(m.matchCandidates).toHaveBeenCalledWith(41)
+    expect(m.rematch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('bank.manual_match_title')
+    expect(wrapper.text()).toContain('-250.00 CZK')
+    m.unmatchedPayments.mockResolvedValue({ ...overview, count: 0, groups: [] })
+    await wrapper.findAll('button').find(button => button.text().includes('TEST-PF-9'))!.trigger('click')
+    await flushPromises()
+    expect(m.matchManual).toHaveBeenCalledWith(41, { purchaseInvoiceId: 9 })
+    expect(m.unmatchedPayments).toHaveBeenCalledTimes(2)
+    expect(wrapper.find(`[data-testid="${badge}"]`).exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('bank.manual_match_title')
+    wrapper.unmount()
+  })
+
+  it.each(['match', 'read'])('bez práva %s ponechá neinteraktivní stav a nenabídne manuální párování', async permission => {
+    m.canMatch = permission !== 'match'
+    m.canReadBank = permission !== 'read'
+    const wrapper = await render()
+    expect(wrapper.text()).toContain('bank.match_status.unmatched')
+    expect(wrapper.find('[data-testid="manual-match-desktop"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="manual-match-mobile"]').exists()).toBe(false)
+    expect(m.matchCandidates).not.toHaveBeenCalled()
+    expect(m.matchManual).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('seskupí platby po držitelích a neznámou kartu nabídne k založení', async () => {
     const wrapper = await render()
     const text = wrapper.text()

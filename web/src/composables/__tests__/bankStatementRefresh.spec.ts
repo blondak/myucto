@@ -70,7 +70,7 @@ it('does not append a stale load-more page after a mutation refresh included tha
   await page.refresh()
   complete({ transactions: [{ id: 999 }], transactions_meta: { total: 190, pages: 4 } })
   await loading
-  expect(page.statement.value.transactions.map(tx => tx.id)).toEqual([1, 2, 3, 4])
+  expect(page.statement.value.transactions.map(tx => tx.id)).toEqual([1, 2, 3])
   expect(page.txTotal.value).toBe(180)
   expect(page.loadingMore.value).toBe(false)
 })
@@ -114,7 +114,7 @@ it('shares a pending load-more request between the button and linked-transaction
   const second = page.load(false).then(() => { lookupCompleted = true })
   await Promise.resolve()
   expect(page.bankApi.get).toHaveBeenCalledTimes(1)
-  expect(page.txPage.value).toBe(2)
+  expect(page.txPage.value).toBe(1)
   expect(lookupCompleted).toBe(false)
   complete({ transactions: [{ id: 2 }], transactions_meta: { total: 120, pages: 3 } })
   await Promise.all([first, second])

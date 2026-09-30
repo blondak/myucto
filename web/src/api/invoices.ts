@@ -425,6 +425,13 @@ export interface ExchangeRateMeta {
 }
 
 export interface InvoiceListItem {
+  country?: string | null
+  note_above_items?: string | null
+  note_below_items?: string | null
+  journal_notes?: string[]
+  document_tags?: string[]
+  vat_classification_codes?: string[]
+  vat_return_lines?: string[]
   id: number
   varsymbol: string | null
   payment_varsymbol?: string
@@ -577,6 +584,9 @@ export interface InvoicePayload {
 export type OssReviewScope = 'any' | 'oss' | 'domestic'
 
 export interface ListFilters {
+  include_vat_classification?: boolean
+  include_journal_notes?: boolean
+  include_document_tags?: boolean
   sort_key?: string
   sort_dir?: 'asc' | 'desc'
   group_by_month?: boolean
@@ -741,6 +751,9 @@ export const invoicesApi = {
     if (filters.sort_dir)    params.sort_dir               = filters.sort_dir
     if (filters.group_by_month === false) params['filter[group_by_month]'] = 0
     if (filters.include_kh) params['filter[include_kh]'] = 1
+    if (filters.include_vat_classification) params['filter[include_vat_classification]'] = 1
+    if (filters.include_journal_notes) params['filter[include_journal_notes]'] = 1
+    if (filters.include_document_tags) params['filter[include_document_tags]'] = 1
     if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
     if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
     if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
@@ -784,6 +797,7 @@ export const invoicesApi = {
     }),
 
   get:    (id: number) => api.get<Invoice>(`/invoices/${id}`).then(r => r.data),
+  items: (id: number) => api.get<{ items: InvoiceItem[] }>(`/invoices/${id}/items`).then(r => r.data.items),
   /** Období časového rozlišení výnosu u řádků — smí i u vystavené a zaúčtované faktury. */
   setAccrual: (id: number, items: Array<{ id: number; accrual_from: string | null; accrual_to: string | null }>) =>
     api.put<Invoice>(`/invoices/${id}/accrual`, { items }).then(r => r.data),

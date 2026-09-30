@@ -2,6 +2,20 @@ import { api } from './client'
 
 export type { BankReconciliationCandidate } from '@/types/bankReconciliation'
 
+export interface BankPaymentCandidate {
+  id: number
+  statement_id: number
+  posted_at: string
+  amount: number
+  currency: string
+  counterparty_name: string | null
+  variable_symbol: string | null
+  description: string | null
+  bank_ref: string | null
+  account_number: string
+  bank_code: string | null
+}
+
 export interface BankStatement {
   id: number
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu, 'import' = migrace z jiného účetního systému. */
@@ -118,6 +132,7 @@ export interface BankTransaction {
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null
+    counter_account_codes?: string[]
     payroll_matched?: boolean
     /** Zaúčtováno mimo saldokontní účty (daň, odvod, poplatek, splátka) — pohyb doklad nečeká. */
     outside_saldo?: boolean
@@ -460,9 +475,21 @@ export const bankApi = {
     }).then(r => r.data)
   },
   /** `fallback=true` = v ±14 dnech nic nesedělo, vráceny širší (±90 dní) a/nebo cross-currency návrhy. */
-  matchCandidates: (txId: number) =>
-    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`)
+  matchCandidates: (txId: number, search?: string) =>
+    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`, { params: { search } })
       .then(r => r.data),
+  paymentCandidates: (params: { invoiceId?: number; purchaseInvoiceId?: number; search?: string; page?: number }) =>
+    api.get<{ items: BankPaymentCandidate[]; total: number; page: number; pages: number; limit: number }>('/bank-transactions/payment-candidates', {
+      params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page },
+    }).then(r => r.data),
+  matchDocument: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number }) =>
+    api.post<{
+      matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null
+      partial_payment?: boolean; remaining?: number; currency?: string
+    }>(`/bank-transactions/${txId}/match-document`, {
+      ...(ref.invoiceId ? { invoice_id: ref.invoiceId } : {}),
+      ...(ref.purchaseInvoiceId ? { purchase_invoice_id: ref.purchaseInvoiceId } : {}),
+    }).then(r => r.data),
   matchManual: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; varsymbol?: string }) =>
     api.post<{
       matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null
@@ -529,6 +556,10 @@ export const bankApi = {
   gpcExportUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''
     return `${base.replace(/\/$/, '')}/bank-statements/${id}/export-gpc`
+  },
+  unmatchedAllExportUrl: (params: { year?: number; q?: string; account?: string; posting_status?: PostingFilter; sort?: BankTransactionSortKey; direction?: 'asc' | 'desc' }) => {
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))
+    return `/api/bank-statements/export-unmatched?${query}`
   },
   unmatchedExportUrl: (id: number): string => {
     const base = api.defaults.baseURL ?? ''

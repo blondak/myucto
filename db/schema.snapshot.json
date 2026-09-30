@@ -925,6 +925,7 @@
         "1941_imported_paid_invoices_legacy_payment.sql",
         "1942_hosted_mcp_oauth.sql",
         "1943_unbound_mcp_oauth.sql",
+        "1944_other_item_schedule_auto_post.sql",
         "1945_activity_log_user_without_fk.sql"
     ],
     "tables": {
@@ -7301,6 +7302,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "anchor_on": "date NOT NULL",
+                "auto_post": "tinyint(1) NOT NULL DEFAULT 0",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "due_days": "smallint(5) unsigned NOT NULL",

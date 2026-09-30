@@ -32,7 +32,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
         $q = $request->getQueryParams();
         $filters = [];
-        foreach (['side', 'status', 'kind', 'q', 'from', 'to'] as $field) {
+        foreach (['side', 'status', 'kind', 'q', 'from', 'to', 'sort_by', 'sort_dir'] as $field) {
             if (isset($q[$field]) && is_scalar($q[$field])) $filters[$field] = trim((string) $q[$field]);
         }
         $hasFrom = isset($filters['from']);

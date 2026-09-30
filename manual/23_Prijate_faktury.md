@@ -14,6 +14,11 @@ odcházejí z firmy. Oproti vystaveným fakturám:
 
 V hlavním menu **Přijaté faktury**.
 
+Šipka vlevo rozbalí položky faktury přímo v seznamu. U zaúčtovaného dokladu
+je před popiskem **Popis** dostupné tlačítko **Náhled**, které otevře stejný boční
+panel se shrnutím dokladu a souvisejícími úhradami jako v účetním deníku.
+Tlačítko vyžaduje oprávnění ke čtení účetnictví.
+
 Sloupce lze přetahovat myší za záhlaví s tečkovanou ikonou. Barevná čára ukáže,
 kam se sloupec přesune. Pořadí záhlaví i buněk se změní společně, také ve
 víceřádkovém zobrazení. Pořadí se automaticky ukládá do profilu přihlášeného
@@ -32,7 +37,7 @@ u sloupce obnoví jen jeho barvu. Výběr sloupců, filtry a hustota se přitom 
 Seznam lze kliknutím na záhlaví sloupce řadit podle údajů dokladu, dodavatele,
 data či částky. Řazení se uplatní na celý filtrovaný výsledek před stránkováním.
 
-Sloupce **Uhrazeno** a **Zbývá uhradit** ukazují, kolik je z faktury zaplaceno
+Sloupce **Uhrazeno celkem** a **Zbývá uhradit** ukazují, kolik je z faktury zaplaceno
 a kolik zbývá, vždy v měně faktury. Počítají se ze všech úhrad dohromady: banka,
 pokladna, vzájemný zápočet i zápočet proti účtu. Korunová platba cizoměnové
 faktury se přepočte do měny faktury. Faktura označená jako uhrazená bez jakékoli
@@ -55,12 +60,33 @@ v nabídce **Sloupce** jsou sestavy **Výchozí klient** (dosavadní stručný s
 včetně oddílu KH). Po volbě sestavy lze jednotlivé sloupce dále měnit.
 Podrobnosti se načtou jen při zobrazení příslušného sloupce. Firma se zapnutými
 dimenzemi může přidat také sloupec **Dimenze** s hodnotami z hlavičky a položek
-dokladu; načítá se jen při zapnutí sloupce. Je-li sloupců více, záhlaví i faktury
-se rozloží do několika řádků a šipka pro náhled položek je vlevo dole u faktury.
+dokladu; načítá se jen při zapnutí sloupce. Šířka sloupců se přizpůsobuje obsahu
+a dostupné šířce okna nebo pracovního panelu. Pokud se údaje nevejdou na jeden
+řádek, zobrazí se každý doklad jako přehledný blok s vlastními popisky hodnot.
+Hlavní údaje jsou nahoře a doplňující údaje na jemném podkladu pod nimi.
+Sloupce v každém řádku jsou stejně široké a využijí celou šířku.
+Záhlaví slouží k řazení a přetahování sloupců.
+V nabídce **Sloupce** lze přepínačem **Zobrazovat popisky: Ano / Ne** popisky
+zapnout nebo vypnout. Bez vlastní volby jsou vypnuté na jednom řádku a zapnuté
+při rozložení na více řádků. Vlastní volba se ukládá pro přihlášeného uživatele
+a tento seznam ve všech jeho firmách.
+Při vypnutých popiscích se záhlaví rozloží do stejných řádků a šířek jako
+hodnoty pod ním. Se zapnutými popisky zůstává záhlaví kompaktní.
+Přepínač **Hustota** mění výšku řádků i rozestupy víceřádkových bloků.
+Kompaktní režim zobrazí více dokladů, prostornější režim nechává více místa
+kolem hodnot. Volba se ukládá pro uživatele a tento seznam.
 V souvislém seznamu zůstává záhlaví při posunu na očích a tabulka má posuvník
 na spodním okraji.
 Měsíční přehled používá běžně posuvné záhlaví. Na mobilu jsou vybrané údaje
 v kartách faktur.
+Volitelné jsou také **Platební var. symbol**, **Forma úhrady**, **Stát protistrany**
+z adresy dodavatele a **Poznámka dokladu** z textu nad a pod položkami.
+**Uhrazeno dne** ukazuje datum úhrady. **Členění DPH** a **Řádky přiznání DPH**
+se načítají z Knihy DPH po zapnutí a stejně jako oddíl KH se v seznamu neřadí.
+**Štítky příloh** obsahují štítky navázaných dokumentů dostupných uživateli.
+Uživatel s oprávněním k účetnictví může zobrazit **Poznámky deníku** a účty MD/Dal.
+Účty zachovávají všechny strany zaúčtování: nejprve nákladové a výnosové,
+potom ostatní rozvahové a nakonec účty DPH 343.
 Při vzestupném řazení podle DUZP se v měsíčním pohledu zobrazí nejstarší měsíce první.
 První kliknutí na záhlaví sloupce řadí sestupně, druhé vzestupně a třetí vrátí
 výchozí pořadí.

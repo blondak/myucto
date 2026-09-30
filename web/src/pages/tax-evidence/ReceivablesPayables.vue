@@ -184,7 +184,7 @@ onMounted(load)
         <h2 class="text-sm font-semibold text-neutral-700 mb-2">{{ t('tax_evidence.receivables_payables.title_recv') }}</h2>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
-            <table class="w-full text-sm" :class="tbl.densityClass.value">
+            <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
                   <SortableTh v-if="tbl.isVisible('currency')" :label="t('tax_evidence.receivables_payables.col_currency')" sort-key="currency" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />
@@ -214,7 +214,7 @@ onMounted(load)
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
-            <table class="w-full text-sm" :class="tbl.densityClass.value">
+            <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
                   <SortableTh v-if="tbl.isVisible('currency')" :label="t('tax_evidence.receivables_payables.col_currency')" sort-key="currency" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />

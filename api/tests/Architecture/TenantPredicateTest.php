@@ -398,6 +398,7 @@ final class TenantPredicateTest extends TestCase
         'SummaryAction.php::receivableDocTypeSql'         => 'vrací SQL fragment, ne dotaz',
         'CrmAggregationService.php::advanceCostExclude'   => 'vrací SQL fragment, ne dotaz',
         'CrmAggregationService.php::receivableDocTypeSql' => 'vrací SQL fragment, ne dotaz',
+        'BankPaymentCandidateScope.php::sql' => 'fragment koreluje vazby na globálně unikátní bt.id; BankMatchSearch::payments omezuje rodičovský výpis přes BankStatementOwnershipResolver',
 
         // Instance-wide ZÁMĚRNĚ: kontrolují integritu CELÉ instance, ne jedné firmy.
         'LedgerInvariantService.php::ledgerIsEmpty' => 'invariant nad deníkem celé instance (viz docblock služby)',

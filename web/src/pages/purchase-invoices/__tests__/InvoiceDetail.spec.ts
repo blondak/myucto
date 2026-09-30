@@ -224,6 +224,7 @@ const stubs = {
   WhyChip: true,
   PdfDropzone: true,
   LinkedDocumentsPanel: true,
+  InvoiceBankMatchModal: { name: 'InvoiceBankMatchModal', props: ['docId'], template: '<div data-test="bank-match-modal" />' },
   StockReceiptModal: {
     name: 'StockReceiptModal',
     emits: ['close', 'created'],
@@ -253,6 +254,22 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     m.stockRead = true
     m.stockWrite = true
     if (m.route) m.route.params.id = '258'
+  })
+
+  it('zavře párování s bankou při přechodu na jiný doklad', async () => {
+    m.get.mockResolvedValue(makeInvoice({ status: 'received', amount_to_pay: 1200 }))
+    const errors: unknown[] = []
+    const wrapper = mount(InvoiceDetail, { global: { stubs, config: { errorHandler: error => { errors.push(error) } } } })
+    await flushPromises()
+    expect(errors).toEqual([])
+    const actions = wrapper.findComponent({ name: 'ActionBar' }).props('actions') as { key: string; run?: () => void }[]
+    actions.find(action => action.key === 'bank-match')?.run?.()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'InvoiceBankMatchModal' }).exists()).toBe(true)
+    m.route!.params.id = '259'
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'InvoiceBankMatchModal' }).exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('zaplacená faktura s bank_payments → odkaz(y) na bankovní výpis se správným statement_id', async () => {

@@ -2176,6 +2176,18 @@ final class BankStatementAction
             return Json::ok($response, ['candidates' => [], 'fallback' => false]);
         }
 
+        $query = $request->getQueryParams();
+        $search = is_string($query['search'] ?? null) ? mb_substr(trim($query['search']), 0, 100) : '';
+        if ($search !== '') {
+            $types = [];
+            if (RequestAuthorization::allows($request, 'invoices', AccessLevel::READ)) $types[] = 'invoice';
+            if (RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ)) $types[] = 'purchase_invoice';
+            $candidates = (new \MyInvoice\Service\Bank\BankMatchSearch($this->db))->searchDocuments(
+                $sid, (float) $tx['amount'], $txCcy, $search, $types,
+            );
+            return Json::ok($response, ['candidates' => $candidates, 'fallback' => false]);
+        }
+
         $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_DAY_WINDOW, false);
         $fallback = false;
         if ($candidates === []) {
@@ -3961,7 +3973,8 @@ final class BankStatementAction
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
 
         $partial = null;
-        $pdo->beginTransaction();
+        $savepoint = 'bank_tx_purchase_match';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
             // Zbytek dokladu BEZ tohoto pohybu (opakované párování ho nesmí počítat proti
             // sobě), v měně dokladu — SSOT PurchaseSettledExpr, zamčený s dokladem.
@@ -4025,9 +4038,9 @@ final class BankStatementAction
                     ) WHERE id = ?"
                 )->execute([$statementId, $statementId]);
             }
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, $savepoint);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            self::rollbackAtomic($pdo, $own, $savepoint);
             return Json::error($response, 'match_failed', 'Párování selhalo: ' . $e->getMessage(), 500);
         }
         $this->clientBankAccounts->captureForPurchaseInvoiceTransaction($purchaseInvoiceId, $txId);

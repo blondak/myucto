@@ -42,40 +42,64 @@ final class UnmatchedBankExportService
         );
         $tx->execute();
         $rows = $tx->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$row) $row['own_account'] = $account;
+        unset($row);
+        return $this->buildRows($supplierId, $rows, $account, $statementDate, 'nesparovane-pohyby-' . $statementId . '.xlsx');
+    }
+
+    public function buildAll(int $supplierId, array $filters): array
+    {
+        $repository = new \MyInvoice\Repository\BankPostingSuggestionRepository($this->db);
+        $filters['scope'] = 'all';
+        $filters['status'] = 'unmatched';
+        $rows = [];
+        $offset = 0;
+        do {
+            $page = $repository->paginateUnposted($supplierId, 500, $offset, $filters);
+            foreach ($page['items'] as $row) {
+                $row['own_account'] = $this->accountDisplay((string) $row['account_number'], $row['bank_code'] ?? null);
+                $rows[] = $row;
+            }
+            $offset += count($page['items']);
+        } while ($page['items'] !== [] && $offset < $page['total']);
+        return $this->buildRows($supplierId, $rows, 'Všechny vlastní účty', '', 'nesparovane-pohyby.xlsx');
+    }
+
+    private function buildRows(int $supplierId, array $rows, string $account, string $statementDate, string $filename): array
+    {
         $notes = $this->notes($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $rows));
 
         $book = new Spreadsheet();
         $sheet = $book->getActiveSheet();
         $sheet->setTitle('Nespárované pohyby');
         $sheet->setCellValue('A1', 'Nespárované bankovní pohyby');
-        $sheet->mergeCells('A1:G1');
+        $sheet->mergeCells('A1:F1');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(15);
         $sheet->setCellValueExplicit('A2', 'Účet: ' . $account, DataType::TYPE_STRING);
         $sheet->setCellValue('A3', 'Datum výpisu: ' . $statementDate);
-        $headers = ['Bankovní účet', 'Směr', 'Datum platby', 'Textace', 'Částka', 'Měna', 'Poznámka'];
+        $headers = ['Bankovní účet', 'Datum platby', 'Textace', 'Částka', 'Měna', 'Poznámka'];
         foreach ($headers as $index => $header) {
             $sheet->setCellValue([$index + 1, 5], $header);
         }
-        $sheet->getStyle('A5:G5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
-        $sheet->getStyle('A5:G5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('334155');
+        $sheet->getStyle('A5:F5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A5:F5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('334155');
         $line = 6;
         foreach ($rows as $row) {
             $description = trim((string) ($row['description'] ?? ''));
             if ($description === '') $description = trim((string) ($row['counterparty_name'] ?? ''));
-            $sheet->setCellValueExplicit("A{$line}", $account, DataType::TYPE_STRING);
-            $sheet->setCellValue("B{$line}", (float) $row['amount'] < 0 ? 'Odchozí' : 'Příchozí');
-            $sheet->setCellValueExplicit("C{$line}", (string) $row['posted_at'], DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit("D{$line}", $description, DataType::TYPE_STRING);
-            $sheet->setCellValue("E{$line}", (float) $row['amount']);
-            $sheet->setCellValueExplicit("F{$line}", (string) ($row['currency'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit("G{$line}", implode("\n", $notes[(int) $row['id']] ?? []), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("A{$line}", (string) $row['own_account'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("B{$line}", (string) $row['posted_at'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("C{$line}", $description, DataType::TYPE_STRING);
+            $sheet->setCellValue("D{$line}", (float) $row['amount']);
+            $sheet->setCellValueExplicit("E{$line}", (string) ($row['currency'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("F{$line}", implode("\n", $notes[(int) $row['id']] ?? []), DataType::TYPE_STRING);
             $line++;
         }
-        $sheet->getStyle('E6:E' . max(6, $line - 1))->getNumberFormat()->setFormatCode('#,##0.00;[Red]-#,##0.00');
-        $sheet->getStyle('G6:G' . max(6, $line - 1))->getAlignment()->setWrapText(true);
+        $sheet->getStyle('D6:D' . max(6, $line - 1))->getNumberFormat()->setFormatCode('[Green]+#,##0.00;[Red]-#,##0.00;0.00');
+        $sheet->getStyle('F6:F' . max(6, $line - 1))->getAlignment()->setWrapText(true);
         $sheet->freezePane('A6');
-        $sheet->setAutoFilter('A5:G' . max(5, $line - 1));
-        foreach (['A' => 24, 'B' => 14, 'C' => 16, 'D' => 55, 'E' => 18, 'F' => 10, 'G' => 55] as $column => $width) {
+        $sheet->setAutoFilter('A5:F' . max(5, $line - 1));
+        foreach (['A' => 24, 'B' => 16, 'C' => 55, 'D' => 18, 'E' => 10, 'F' => 55] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
         $path = tempnam(sys_get_temp_dir(), 'bank_export_');
@@ -89,7 +113,7 @@ final class UnmatchedBankExportService
         }
 
         return [
-            'filename' => 'nesparovane-pohyby-' . $statementId . '.xlsx',
+            'filename' => $filename,
             'bytes' => (string) $bytes,
             'count' => count($rows),
             'account' => $account,
@@ -108,11 +132,19 @@ final class UnmatchedBankExportService
         $statement = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$statement) throw new \InvalidArgumentException('statement_not_found');
 
-        $account = trim((string) $statement['account_number']);
-        $bankCode = trim((string) ($statement['bank_code'] ?? ''));
-        if ($bankCode !== '') $account .= '/' . $bankCode;
+        $account = $this->accountDisplay((string) $statement['account_number'], $statement['bank_code'] ?? null);
 
         return [$account, (string) $statement['statement_date']];
+    }
+
+    private function accountDisplay(string $number, ?string $bankCode): string
+    {
+        $number = trim($number);
+        $bankCode = trim((string) $bankCode);
+        if ($bankCode !== '' && !str_contains($number, '/') && preg_match('/^[A-Z]{2}\d{2}/i', $number) !== 1) {
+            $number .= '/' . $bankCode;
+        }
+        return $number;
     }
 
     private function unmatchedWhere(int $supplierId, int $statementId): string

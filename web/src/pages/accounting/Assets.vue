@@ -405,7 +405,7 @@ async function runBook() {
            čtyři a za okrajem zůstávaly zrovna ceny a stav, tedy to, kvůli čemu
            se na kartu majetku kouká. -->
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <SortableTh v-if="tbl.isVisible('inventory_number')" :label="t('accounting.assets.col_inventory_number')" sort-key="inventory_number" :sort="tbl.sort.value" @toggle="tbl.toggleSort" />

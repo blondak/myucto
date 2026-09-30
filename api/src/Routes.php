@@ -186,6 +186,7 @@ use MyInvoice\Action\Invoice\DeleteInvoiceAction;
 use MyInvoice\Action\Invoice\ExportSelectedPdfAction;
 use MyInvoice\Action\Invoice\InvoiceActivityAction;
 use MyInvoice\Action\Invoice\GetInvoiceAction;
+use MyInvoice\Action\Invoice\GetInvoiceItemsAction;
 use MyInvoice\Action\Invoice\InvoiceIsdocAction;
 use MyInvoice\Action\Invoice\IssueInvoiceAction;
 use MyInvoice\Action\Invoice\ListInvoicesAction;
@@ -214,6 +215,7 @@ use MyInvoice\Action\PurchaseInvoice\OurPdfPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\ExportPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\ExportPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceAction;
+use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceItemsAction;
 use MyInvoice\Action\PurchaseInvoice\ImportStructuredPurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentQrAction;
 use MyInvoice\Action\PurchaseInvoice\PaymentOrderAction;
@@ -658,6 +660,7 @@ final class Routes
         $app->get    ('/api/invoices/preview-varsymbol', PreviewVarsymbolAction::class);
         $app->post   ('/api/invoices',              CreateInvoiceAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}',  GetInvoiceAction::class);
+        $app->get    ('/api/invoices/{id:[0-9]+}/items', GetInvoiceItemsAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/activity', InvoiceActivityAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showInvoice']);
         $app->post   ('/api/invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgeInvoice']);
@@ -740,6 +743,7 @@ final class Routes
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/items',          GetPurchaseInvoiceItemsAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}',                UpdatePurchaseInvoiceAction::class);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}',                DeletePurchaseInvoiceAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
@@ -3408,6 +3412,7 @@ final class Routes
         $app->get  ('/api/bank-statements/{id:[0-9]+}',      [BankStatementAction::class, 'detail']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/download', [BankStatementAction::class, 'download']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/export-gpc', \MyInvoice\Action\Bank\GpcExportAction::class);
+        $app->get  ('/api/bank-statements/export-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'downloadAll']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/export-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'download']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/unmatched-recipients', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'recipients']);
         $app->post ('/api/bank-statements/{id:[0-9]+}/send-unmatched', [\MyInvoice\Action\Bank\UnmatchedBankExportAction::class, 'send']);
@@ -3420,6 +3425,8 @@ final class Routes
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/accept', [BankStatementAction::class, 'acceptMatchSuggestion']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/reject', [BankStatementAction::class, 'rejectMatchSuggestion']);
         $app->get  ('/api/bank-transactions/{id:[0-9]+}/match-candidates', [BankStatementAction::class, 'matchCandidates']);
+        $app->get  ('/api/bank-transactions/payment-candidates', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'list']);
+        $app->post ('/api/bank-transactions/{id:[0-9]+}/match-document', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'match']);
         $app->get  ('/api/bank-transactions/{id:[0-9]+}/split-suggestions', [BankStatementAction::class, 'splitSuggestions']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/match',   [BankStatementAction::class, 'manualMatch']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/unmatch', [BankStatementAction::class, 'unmatch']);

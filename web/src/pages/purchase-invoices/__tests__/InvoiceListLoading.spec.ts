@@ -14,7 +14,7 @@ vi.mock('@/api/purchaseInvoices', () => ({
 vi.mock('@/api/clients', () => ({ clientsApi: { list: async () => ({ data: [] }) } }))
 vi.mock('@/api/projects', () => ({ projectsApi: { list: async () => ({ data: [] }) } }))
 vi.mock('@/api/accounting', () => ({ accountingApi: {}, postingErrorI18nKey: () => '' }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isClientRole: false, canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isClientRole: false, canRead: () => true, canWrite: () => true }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({}) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useYearOptions', () => ({ useYearOptions: () => [] }))

@@ -1372,7 +1372,7 @@ onMounted(async () => {
             <DensityToggle class="hidden md:block" :ctrl="tbl" />
           </div>
           <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th v-if="tbl.isVisible('case_kind')" class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
             <tbody class="divide-y divide-neutral-100">
               <template v-for="item in cases" :key="item.id">

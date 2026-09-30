@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(), suggestions: vi.fn(), setSuggestions: vi.fn(),
   refresh: null as null | (() => Promise<void>),
 }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
 vi.mock('@/api/bankPosting', () => ({ bankPostingApi: { listUnposted: mocks.list } }))
 vi.mock('@/api/bank', () => ({ bankApi: { matchSuggestions: mocks.suggestions } }))
 vi.mock('vue-i18n', async importOriginal => ({
@@ -32,7 +33,7 @@ async function open() {
   const wrapper = mount({ ...UnpostedTransactions, render: () => null })
   await flushPromises()
   const vm = wrapper.vm as unknown as {
-    items: { id: number }[]; total: number; loading: boolean; year: number | null; search: string; page: number
+    items: { id: number }[]; total: number; loading: boolean; year: number | null; search: string; page: number; loadingMore: boolean; loadMore: () => Promise<void>
   }
   return { wrapper, vm }
 }
@@ -41,6 +42,7 @@ describe('unposted transaction refresh ordering', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.resetAllMocks()
+    sessionStorage.clear()
     mocks.list.mockResolvedValue(result(1))
     mocks.suggestions.mockResolvedValue({ suggestions: [] })
   })
@@ -125,6 +127,57 @@ describe('unposted transaction refresh ordering', () => {
     current.resolve(result(2, 50))
     await flushPromises()
     expect(vm.items[0]?.id).toBe(2)
+    wrapper.unmount()
+  })
+
+  it('appends the next page only after a successful response and rejects stale append results', async () => {
+    mocks.list.mockResolvedValueOnce(result(1, 100))
+    const { wrapper, vm } = await open()
+    const old = deferred<ReturnType<typeof result>>()
+    mocks.list.mockReturnValueOnce(old.promise)
+    const append = vm.loadMore()
+    expect(vm.page).toBe(1)
+    expect(vm.loadingMore).toBe(true)
+    mocks.list.mockResolvedValueOnce(result(2))
+    vm.year = 2026
+    await flushPromises()
+    old.resolve(result(3, 100))
+    await append
+    expect(vm.items).toEqual([{ id: 2, statement_id: 2 }])
+    expect(vm.page).toBe(1)
+    expect(vm.loadingMore).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the next page available after a load-more failure', async () => {
+    mocks.list.mockResolvedValueOnce(result(1, 100))
+    const { wrapper, vm } = await open()
+    mocks.list.mockRejectedValueOnce(new Error('Synthetic append failure'))
+    await expect(vm.loadMore()).rejects.toThrow('Synthetic append failure')
+    expect(vm.page).toBe(1)
+    expect(vm.items[0]?.id).toBe(1)
+    mocks.list.mockResolvedValueOnce(result(2, 100))
+    await vm.loadMore()
+    expect(vm.page).toBe(2)
+    expect(vm.items.map(item => item.id)).toEqual([1, 2])
+    wrapper.unmount()
+  })
+
+  it('refreshes pagination when the remaining page disappears during append', async () => {
+    mocks.list.mockResolvedValueOnce(result(1, 150))
+    const { wrapper, vm } = await open()
+    mocks.list.mockResolvedValueOnce(result(2, 150))
+    await vm.loadMore()
+    mocks.list.mockResolvedValueOnce({ ...result(1, 100), items: [] })
+      .mockResolvedValueOnce(result(2, 100))
+      .mockResolvedValueOnce(result(1, 100))
+    await vm.loadMore()
+    await flushPromises()
+    expect(vm.page).toBe(2)
+    expect(vm.total).toBe(100)
+    const calls = mocks.list.mock.calls.length
+    await vm.loadMore()
+    expect(mocks.list).toHaveBeenCalledTimes(calls)
     wrapper.unmount()
   })
 

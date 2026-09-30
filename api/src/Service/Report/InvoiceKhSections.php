@@ -12,7 +12,7 @@ final class InvoiceKhSections
     ) {}
 
     /** @param array<int,array<string,mixed>> $groups */
-    public function addToGroups(int $supplierId, array &$groups, string $direction): void
+    public function addToGroups(int $supplierId, array &$groups, string $direction, bool $includeVat = false): void
     {
         $ids = [];
         foreach ($groups as $group) {
@@ -38,15 +38,31 @@ final class InvoiceKhSections
         }
 
         $sectionsById = [];
+        $classificationsById = [];
+        $linesById = [];
         foreach ($periods as $period => $periodIds) {
             $book = $this->book->build($supplierId, (int) substr($period, 0, 4), (int) substr($period, 5, 2));
+            if ($includeVat) {
+                foreach ($this->ledger->rows($supplierId, $book['period']['start'], $book['period']['end'], true) as $row) {
+                    $id = (int) ($row['invoice_id'] ?? 0);
+                    $source = $direction === 'issued' ? 'sale' : 'purchase';
+                    if (!isset($periodIds[$id]) || ($row['source'] ?? '') !== $source
+                        || ($row['document_kind'] ?? '') === 'cash') continue;
+                    $code = (string) ($row['code'] ?? '');
+                    if ($code !== '') $classificationsById[$id][$code] = true;
+                }
+            }
             foreach ($book['sections'] as $section) {
                 foreach ($section['rows'] as $row) {
                     $id = (int) ($row['invoice_id'] ?? 0);
                     $kh = (string) ($row['kh_section'] ?? '');
-                    if (!isset($periodIds[$id]) || $kh === '' || ($row['direction'] ?? '') !== $direction
+                    if (!isset($periodIds[$id]) || ($row['direction'] ?? '') !== $direction
                         || ($row['document_kind'] ?? '') === 'cash') continue;
-                    $sectionsById[$id][$kh] = true;
+                    if ($kh !== '') $sectionsById[$id][$kh] = true;
+                    if ($includeVat) {
+                        $line = (string) ($section['dphdp3_line'] ?? '');
+                        if ($line !== '' && $line !== '000') $linesById[$id][$line] = true;
+                    }
                 }
             }
         }
@@ -56,6 +72,14 @@ final class InvoiceKhSections
                 $sections = array_keys($sectionsById[(int) $invoice['id']] ?? []);
                 sort($sections, SORT_NATURAL);
                 $invoice['kh_sections'] = $sections;
+                if ($includeVat) {
+                    $codes = array_map('strval', array_keys($classificationsById[(int) $invoice['id']] ?? []));
+                    $lines = array_map('strval', array_keys($linesById[(int) $invoice['id']] ?? []));
+                    sort($codes, SORT_NATURAL);
+                    sort($lines, SORT_NATURAL);
+                    $invoice['vat_classification_codes'] = $codes;
+                    $invoice['vat_return_lines'] = $lines;
+                }
             }
             unset($invoice);
         }

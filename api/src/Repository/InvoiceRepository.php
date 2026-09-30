@@ -581,6 +581,13 @@ final class InvoiceRepository
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    public function itemsForSupplier(int $invoiceId, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$invoiceId, $supplierId]);
+        return $stmt->fetchColumn() === false ? null : $this->itemsFor($invoiceId);
+    }
+
     public function itemsFor(int $invoiceId): array
     {
         $ossSelect = $this->supportsOssItemColumns()
@@ -998,8 +1005,11 @@ final class InvoiceRepository
             'project' => 'p.name', 'sent_at' => 'i.sent_at', 'paid_total' => 'i.paid_total',
             'remaining_amount' => self::remainingSql('i'),
             'vat_breakdown' => 'i.total_vat',
-            'debit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
-            'credit_accounts' => "(SELECT MIN(ca.account_code) FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'country' => 'co.iso2',
+            'note' => "CONCAT_WS(' ', NULLIF(i.note_above_items, ''), NULLIF(i.note_below_items, ''))",
+            'journal_notes' => "(SELECT n.body FROM journal_entries je JOIN journal_entry_notes n ON n.entry_id = je.id AND n.supplier_id = je.supplier_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL AND n.deleted_at IS NULL ORDER BY n.pinned DESC, n.created_at DESC, n.id DESC LIMIT 1)",
+            'debit_accounts' => "(SELECT ca.account_code FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'debit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL ORDER BY CASE WHEN ca.account_code REGEXP '^[56]' THEN 0 WHEN ca.account_code LIKE '343%' THEN 2 ELSE 1 END, ca.account_code LIMIT 1)",
+            'credit_accounts' => "(SELECT ca.account_code FROM journal_entries je JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.side = 'credit' JOIN chart_of_accounts ca ON ca.id = jel.account_id WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice' AND je.source_id = i.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL ORDER BY CASE WHEN ca.account_code REGEXP '^[56]' THEN 0 WHEN ca.account_code LIKE '343%' THEN 2 ELSE 1 END, ca.account_code LIMIT 1)",
             'locked' => 'i.booked_at',
         ];
         $sortKey = (string) ($filters['sort_key'] ?? '');
@@ -1020,6 +1030,7 @@ final class InvoiceRepository
                        i.issue_date, i.tax_date, i.due_date,
                        i.currency_id, cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                        i.total_without_vat, i.total_vat, i.total_with_vat,
+                       i.note_above_items, i.note_below_items, co.iso2 AS country,
                        i.advance_paid_amount, i.amount_to_pay, i.paid_total,
                        " . self::remainingSql('i') . " AS remaining_amount,
                        i.status, i.payment_method, i.revenue_category_id, i.exchange_rate,
@@ -1033,6 +1044,7 @@ final class InvoiceRepository
                   FROM invoices i
                   JOIN clients c ON c.id = i.client_id
              LEFT JOIN projects p ON p.id = i.project_id
+             LEFT JOIN countries co ON co.id = c.country_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE $whereSql
                  ORDER BY $sortSql";

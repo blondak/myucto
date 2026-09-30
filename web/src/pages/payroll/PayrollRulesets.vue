@@ -758,7 +758,7 @@ onMounted(load)
           <DensityToggle :ctrl="tbl" />
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[42rem] table-fixed divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="w-full min-w-[42rem] table-fixed divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <colgroup>
               <col v-if="tbl.isVisible('version')" class="w-[24%]">
               <col v-if="tbl.isVisible('effective')" class="w-[26%]">

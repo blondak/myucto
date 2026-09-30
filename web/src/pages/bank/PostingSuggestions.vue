@@ -316,7 +316,7 @@ function resolveLink(it: PostingSuggestion) {
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <!-- Desktop -->
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th v-if="isPending && auth.canWrite('bank.post')" class="px-3 py-2 w-8">

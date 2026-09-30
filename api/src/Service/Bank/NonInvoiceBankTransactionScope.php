@@ -60,6 +60,7 @@ final class NonInvoiceBankTransactionScope
                AND non_invoice_je.source_id = $transactionIdSql
                AND non_invoice_je.posted_at IS NOT NULL
                AND non_invoice_je.reversed_by IS NULL
+               AND NOT " . self::openCardClearingSql($supplierId, $transactionIdSql) . "
                AND NOT EXISTS (
                    SELECT 1 FROM journal_entry_lines non_invoice_line
                      JOIN chart_of_accounts non_invoice_acc ON non_invoice_acc.id = non_invoice_line.account_id
@@ -76,6 +77,23 @@ final class NonInvoiceBankTransactionScope
             SELECT 1 FROM payroll_payment_matches non_invoice_payroll
              WHERE non_invoice_payroll.supplier_id = $supplierId
                AND non_invoice_payroll.bank_transaction_id = $transactionIdSql))";
+    }
+
+    public static function openCardClearingSql(int|string $supplierId, string $transactionIdSql): string
+    {
+        self::validate($supplierId, $transactionIdSql);
+        return "(EXISTS (
+            SELECT 1 FROM journal_entries card_bank
+              JOIN journal_entry_lines card_line ON card_line.entry_id = card_bank.id AND card_line.supplier_id = card_bank.supplier_id
+              JOIN chart_of_accounts card_acc ON card_acc.id = card_line.account_id AND card_acc.supplier_id = card_bank.supplier_id
+             WHERE card_bank.supplier_id = $supplierId AND card_bank.source_type = 'bank'
+               AND card_bank.source_id = $transactionIdSql AND card_bank.posted_at IS NOT NULL AND card_bank.reversed_by IS NULL
+               AND " . \MyInvoice\Service\Accounting\Card\CardClearingAccounts::codeSql($supplierId, 'card_acc.account_code') . ")
+            AND NOT EXISTS (
+                SELECT 1 FROM journal_entries card_closed
+                 WHERE card_closed.supplier_id = $supplierId AND card_closed.source_id = $transactionIdSql
+                   AND card_closed.source_type IN ('card_settlement', 'card_writeoff')
+                   AND card_closed.posted_at IS NOT NULL AND card_closed.reversed_by IS NULL))";
     }
 
     private static function validate(int|string $supplierId, string $transactionIdSql): void

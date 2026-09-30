@@ -45,6 +45,21 @@ final class UnmatchedBankExportAction
             ->withHeader('X-Content-Type-Options', 'nosniff');
     }
 
+    public function downloadAll(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $query = $request->getQueryParams();
+        $filters = array_intersect_key($query, array_flip(['year', 'q', 'account', 'posting_status', 'sort', 'direction']));
+        $filters = array_filter($filters, static fn (mixed $value): bool => is_string($value) || is_int($value));
+        if (isset($filters['q'])) $filters['q'] = mb_substr(trim((string) $filters['q']), 0, 100);
+        $file = $this->export->buildAll($supplierId, $filters);
+        $response->getBody()->write($file['bytes']);
+        return $response->withHeader('Content-Type', UnmatchedBankExportService::MIME)
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $file['filename'] . '"')
+            ->withHeader('Cache-Control', 'no-store')
+            ->withHeader('X-Content-Type-Options', 'nosniff');
+    }
+
     public function recipients(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);

@@ -652,7 +652,7 @@ onBeforeUnmount(() => {
     <!-- Desktop -->
     <div v-else class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="w-10 px-3 py-2"><input type="checkbox" :checked="allCurrentPageSelected" :aria-label="bulkT('select_page')" @click.stop @change="togglePage" /></th>

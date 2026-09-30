@@ -12,7 +12,7 @@ import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
  */
 export function useFillViewportHeight(
   target: Readonly<Ref<HTMLElement | null>>,
-  options: { gap?: number; min?: number; enabled?: Ref<boolean> } = {},
+  options: { gap?: number; min?: number; enabled?: Ref<boolean>; keepFiltersVisible?: boolean } = {},
 ): void {
   const gap = options.gap ?? 16
   const min = options.min ?? 240
@@ -52,7 +52,7 @@ export function useFillViewportHeight(
       return
     }
     const bars = barEdges()
-    const height = pageScrolls(el)
+    const height = pageScrolls(el) && !options.keepFiltersVisible
       ? bars.bottom - bars.top - 2 * gap
       : bars.bottom - el.getBoundingClientRect().top - gap
     el.style.maxHeight = `${Math.max(min, Math.floor(height))}px`
@@ -60,7 +60,7 @@ export function useFillViewportHeight(
 
   function onListScroll(): void {
     const el = target.value
-    if (!el || (options.enabled && !options.enabled.value) || !pageScrolls(el)) return
+    if (!el || options.keepFiltersVisible || (options.enabled && !options.enabled.value) || !pageScrolls(el)) return
     const collapseTo = Math.max(0, Math.round(listTopOnPage(el) - barEdges().top - gap))
     if (el.scrollTop > 0 && window.scrollY + 1 < collapseTo) {
       window.scrollTo({ top: collapseTo, behavior: 'smooth' })

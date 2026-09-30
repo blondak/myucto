@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\OtherItemSort;
 use PDO;
 
 final class OtherItemRepository
@@ -102,7 +103,7 @@ final class OtherItemRepository
                            WHERE reversed_on IS NULL GROUP BY other_item_id) a
                  ON a.other_item_id = oi.id
               WHERE ' . $whereSql . '
-              ORDER BY oi.due_on DESC, oi.id DESC LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset
+              ORDER BY ' . OtherItemSort::orderBy($filters) . ' LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset
         );
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);

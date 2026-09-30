@@ -41,6 +41,7 @@ const props = withDefaults(defineProps<{
   fallbackCurrency?: string | null
   /** Sloupec „Náš účet" — jen záložka „Všechny pohyby" (napříč účty, viz #51). */
   showAccount?: boolean
+  showCounterAccount?: boolean
   /** Odkaz zpět na výpis (#N) — u detailu zbytečný (jsme už v něm), u „Všechny pohyby" navigační pomůcka. */
   showStatementLink?: boolean
   /** Počet sloupců tabulky (desktop) pro colspan expand řádků. */
@@ -49,6 +50,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   fallbackCurrency: null,
   showAccount: false,
+  showCounterAccount: false,
   showStatementLink: false,
   colspan: 7,
 })
@@ -422,6 +424,9 @@ function candidateReject() {
           <span v-else class="text-[11px] text-neutral-400 whitespace-nowrap">{{ t('bank.transfer.pair_missing') }}</span>
         </div>
       </td>
+      <td v-if="showCounterAccount" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
+        {{ tx.posting?.counter_account_codes?.join(', ') || '-' }}
+      </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
         <div class="flex items-center justify-end gap-1">
           <PostingRowActions v-if="isDoubleEntry"
@@ -501,6 +506,9 @@ function candidateReject() {
         <span v-else class="text-neutral-400">—</span>
         <span v-if="tx.constant_symbol" class="text-neutral-400 ml-1">/ {{ tx.constant_symbol }}</span>
       </span>
+    </div>
+    <div v-if="showCounterAccount && tx.posting?.counter_account_codes?.length" class="text-xs text-neutral-500">
+      {{ t('bank.counter_account') }}: <span class="font-mono">{{ tx.posting.counter_account_codes.join(', ') }}</span>
     </div>
     <div v-if="showAccount" class="text-xs text-neutral-500 font-mono">
       {{ formatAccountNumber(tx.account_number, tx.bank_code) }}<span v-if="tx.account_label"> — {{ tx.account_label }}</span>

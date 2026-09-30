@@ -377,7 +377,7 @@ onMounted(load)
         <DensityToggle :ctrl="logTbl" />
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" :class="logTbl.densityClass.value">
+        <table v-column-labels="logTbl" class="w-full text-sm" :class="logTbl.densityClass.value">
           <thead class="bg-neutral-50 text-neutral-500">
             <tr>
               <th v-if="logTbl.isVisible('number')" class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.number') }}</th>
@@ -499,7 +499,7 @@ onMounted(load)
           <DensityToggle :ctrl="candidatesTbl" />
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-xs" :class="candidatesTbl.densityClass.value">
+          <table v-column-labels="candidatesTbl" class="w-full text-xs" :class="candidatesTbl.densityClass.value">
             <thead class="bg-neutral-50 text-neutral-500">
               <tr>
                 <th v-if="candidatesTbl.isVisible('person')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.person') }}</th>

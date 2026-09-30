@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { onClickOutside } from '@vueuse/core'
+import { onClickOutside, useEventListener } from '@vueuse/core'
 import type { TablePrefsCtrl } from '@/composables/useTablePrefs'
 
 type ColumnPreset = { key: string; labelKey: string; visibleKeys: string[] | null }
@@ -18,14 +18,20 @@ async function toggleOpen() {
   if (!open.value) return
   menuStyle.value = undefined
   await nextTick()
-  if (!root.value || !popup.value) return
+  positionMenu()
+  void document.fonts?.ready.then(() => { if (open.value) positionMenu() })
+}
+function positionMenu() {
+  if (!open.value || !root.value || !popup.value) return
   const trigger = root.value.getBoundingClientRect()
   const width = popup.value.offsetWidth
   const margin = 8
   const left = Math.max(margin, Math.min(trigger.right - width, window.innerWidth - width - margin))
-  const below = window.innerHeight - trigger.bottom - margin
-  const above = trigger.top - margin
-  const openAbove = below < 240 && above > below
+  const headerBottom = document.querySelector('header.nav-inverted')?.getBoundingClientRect().bottom ?? 0
+  const footerTop = document.querySelector('footer.nav-inverted')?.getBoundingClientRect().top ?? window.innerHeight
+  const below = Math.min(window.innerHeight, footerTop) - trigger.bottom - margin - 4
+  const above = trigger.top - Math.max(0, headerBottom) - margin - 4
+  const openAbove = below < 320 && above > below
   const maxHeight = Math.min(openAbove ? above : below, window.innerHeight * 0.7, 512)
   menuStyle.value = {
     left: `${left - trigger.left}px`,
@@ -34,6 +40,8 @@ async function toggleOpen() {
     ...(openAbove ? { bottom: `${trigger.height + 4}px`, marginTop: '0' } : {}),
   }
 }
+useEventListener(window, 'resize', positionMenu)
+useEventListener(window, 'scroll', () => { open.value = false })
 function applyPreset(preset: ColumnPreset) {
   if (preset.visibleKeys === null) props.ctrl.resetColumns()
   else props.ctrl.setVisibleColumns(preset.visibleKeys)
@@ -76,6 +84,17 @@ function isPresetActive(preset: ColumnPreset): boolean {
         class="absolute right-0 mt-1 w-64 max-w-[calc(100vw-1rem)] bg-surface border border-neutral-200 rounded-lg shadow-lg py-1 z-40 max-h-[min(70vh,32rem)] flex flex-col"
         :style="menuStyle"
       >
+        <div class="flex items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2">
+          <span class="text-sm text-neutral-700">{{ t('common.column_labels') }}</span>
+          <div class="inline-flex shrink-0 rounded-md border border-neutral-200 p-0.5" role="group" :aria-label="t('common.column_labels')">
+            <button v-for="value in [true, false]" :key="String(value)" type="button"
+              class="cursor-pointer whitespace-nowrap rounded px-2 py-1 text-xs font-medium transition-colors"
+              :class="ctrl.showColumnLabels.value === value ? 'bg-primary-50 text-primary-700' : 'text-neutral-500 hover:bg-neutral-50'"
+              :aria-pressed="ctrl.showColumnLabels.value === value" @click="ctrl.setColumnLabels(value)">
+              {{ t(value ? 'common.yes' : 'common.no') }}
+            </button>
+          </div>
+        </div>
         <div v-if="presets?.length" class="px-3 pt-1.5 pb-2 border-b border-neutral-100">
           <div class="text-[10px] font-semibold uppercase tracking-wide text-neutral-500 mb-1.5">{{ t('common.columns_presets') }}</div>
           <button v-for="preset in presets" :key="preset.key" type="button"

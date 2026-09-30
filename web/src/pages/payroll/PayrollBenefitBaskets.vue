@@ -365,7 +365,7 @@ onMounted(load)
       </div>
 
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50">
             <tr>
               <th v-if="tbl.isVisible('employee')" class="px-3 py-2 text-left text-xs uppercase tracking-wide font-medium text-neutral-500">{{ t('payroll.benefit_baskets.col.employee') }}</th>

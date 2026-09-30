@@ -284,6 +284,26 @@ final class CardClearingAccounts
         return $out;
     }
 
+    public static function codeSql(int|string $supplierId, string $accountCodeSql): string
+    {
+        $reference = '/^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$/D';
+        if ((is_int($supplierId) ? $supplierId <= 0 : preg_match($reference, $supplierId) !== 1)
+            || preg_match($reference, $accountCodeSql) !== 1) {
+            throw new \InvalidArgumentException('Neplatný alias mezičlenu karty.');
+        }
+        $synthetics = implode("','", \MyInvoice\Repository\CardClearingSettingsRepository::SYNTHETICS);
+        $fallback = self::FALLBACK_SUFFIX;
+        return "(SUBSTRING_INDEX($accountCodeSql, '.', 1) IN ('$synthetics')
+            AND $accountCodeSql LIKE '%.%'
+            AND (SUBSTRING_INDEX($accountCodeSql, '.', -1) = '$fallback'
+                OR EXISTS (SELECT 1 FROM payment_cards clearing_card
+                            WHERE clearing_card.supplier_id = $supplierId
+                              AND clearing_card.analytic_suffix = SUBSTRING_INDEX($accountCodeSql, '.', -1))
+                OR EXISTS (SELECT 1 FROM credit_card_accounts clearing_credit
+                            WHERE clearing_credit.supplier_id = $supplierId
+                              AND clearing_credit.clearing_suffix = SUBSTRING_INDEX($accountCodeSql, '.', -1))))";
+    }
+
     /**
      * Existující analytiky mezičlenu v osnově (nabídka ručního výběru v detailu karty).
      *

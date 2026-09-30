@@ -3132,7 +3132,7 @@ onMounted(async () => {
         <DensityToggle :ctrl="tbl" />
       </div>
       <div class="hidden overflow-x-auto md:block">
-        <table data-test="payroll-time-summary" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" data-test="payroll-time-summary" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
           <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
             <th class="w-10 px-4 py-3">
               <input

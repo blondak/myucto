@@ -1,0 +1,2 @@
+ALTER TABLE other_item_schedules
+  ADD COLUMN IF NOT EXISTS auto_post TINYINT(1) NOT NULL DEFAULT 0 AFTER status;

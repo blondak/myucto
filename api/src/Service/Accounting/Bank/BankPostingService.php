@@ -4646,6 +4646,38 @@ final class BankPostingService
                 ? $posting + ($out[$txId] ?? [])
                 : ($out[$txId] ?? []) + $posting;
         }
+        $postedRows = [];
+        foreach ($out as $txId => $posting) {
+            if (isset($posting['journal_entry_id'])) {
+                $postedRows[] = 'SELECT ' . (int) $txId . ' AS tx_id, ' . (int) $posting['journal_entry_id'] . ' AS entry_id';
+            }
+        }
+        if ($postedRows !== []) {
+            $counterAccounts = $pdo->prepare(
+                "SELECT posted_tx.tx_id, c.account_code
+                   FROM (" . implode(' UNION ALL ', $postedRows) . ") posted_tx
+                   JOIN journal_entries je ON je.id = posted_tx.entry_id
+                   JOIN bank_transactions bt ON bt.id = posted_tx.tx_id
+                   JOIN bank_statements bs ON bs.id = bt.statement_id
+                   JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+                   JOIN chart_of_accounts c ON c.id = l.account_id AND c.supplier_id = je.supplier_id
+                  WHERE je.supplier_id = ? AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                    AND c.account_code NOT LIKE '221%'
+                    AND NOT (c.account_code LIKE '231%' AND EXISTS (
+                        SELECT 1 FROM supplier_bank_accounts sba
+                         WHERE sba.supplier_id = je.supplier_id AND sba.kind = 'credit_card'
+                           AND sba.account_canonical = TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                           AND sba.bank_code_norm = COALESCE(bs.bank_code, '')))
+                  ORDER BY c.account_code"
+            );
+            $counterAccounts->execute([$supplierId]);
+            foreach ($counterAccounts->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $txId = (int) $row['tx_id'];
+                $codes = $out[$txId]['counter_account_codes'] ?? [];
+                if (!in_array((string) $row['account_code'], $codes, true)) $codes[] = (string) $row['account_code'];
+                $out[$txId]['counter_account_codes'] = $codes;
+            }
+        }
 
         $sugs = $pdo->prepare(
             "SELECT s.bank_transaction_id AS tx_id, s.id, s.source, s.rule_id,

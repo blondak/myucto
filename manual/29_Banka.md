@@ -123,6 +123,24 @@ Příklad výsledku bez přeskočených duplicit:
 Importováno: 12 transakcí, spárováno: 8, k manuálnímu párování: 4.
 ```
 
+V záložce **Všechny pohyby** lze kombinovat hledání, rok, vlastní účet, stav
+spárování a stav zaúčtování. Částku lze zadat i jako `1 234,50`; hledá se přesná
+částka bez ohledu na znaménko. Po návratu z deníku se filtry a řazení obnoví,
+pro každou firmu zvlášť. U zaúčtovaných pohybů se zobrazuje i protiúčet.
+
+Při posouvání tabulky zůstávají filtry a názvy sloupců viditelné. Další pohyby
+se načítají automaticky při přiblížení ke konci seznamu. Na počítači tlačítko
+**Další** nezabírá místo pod výpisem; na dotykovém zařízení je dostupné i ruční načtení.
+
+**Stáhnout nespárované (XLSX)** v záložce **Všechny pohyby** exportuje všechny
+nespárované pohyby odpovídající zvolenému roku, hledání, účtu a zaúčtování,
+včetně dosud nenačtených stránek a poznámek z deníku. Každý řádek nese vlastní
+bankovní účet. Směr platby vyjadřuje znaménko a barva částky.
+
+Filtr nespárovaných i export zahrnují platby kartou, které čekají na doklad
+na mezičlenu, například `378.101`. Uzavřené platby bez dokladu, daně, poplatky,
+mzdy a vlastní převody se mezi pohyby čekající na spárování nepočítají.
+
 ## 29.3 Seznam výpisů
 
 Záložka **Bankovní výpisy** ukáže historii.
@@ -360,6 +378,18 @@ Když nabídka nesedí, pokračuj klasickým ručním výběrem:
 1. Klik **Spárovat** → otevře se modal s vyhledávačem.
 2. Najdeš fakturu (číslo / klient / částka).
 3. Vyber a potvrď.
+
+Pole **Vyhledat jiný doklad** hledá podle čísla dokladu, platebního VS,
+dodavatele či odběratele nebo přesné částky dokladu či zbývající úhrady.
+Částku můžeš zadat jako `1 234,50`. Ruční hledání zahrnuje i starší doklady
+mimo časové okno automatických návrhů a respektuje směr platby včetně dobropisů.
+
+Párování můžeš zahájit také z detailu vydané či přijaté faktury akcí
+**Spárovat s bankou**. Vyber volný pohyb správného směru a potvrď přiřazení.
+Seznam lze hledat podle protistrany, VS, popisu nebo přesné částky.
+Pohyb přidělený jinému dokladu, mzdám, daním nebo vlastnímu převodu se nenabídne;
+dostupnost se znovu kontroluje při potvrzení. U ostatních pohledávek a závazků
+použij **Připojit úhradu**. Párování vyžaduje oprávnění pro čtení banky a zápis párování.
 
 Ve stejné měně se zaeviduje platba ve výši transakce. U CZK platby
 cizoměnové faktury, která odpovídá celému zbytku v devizové toleranci, se

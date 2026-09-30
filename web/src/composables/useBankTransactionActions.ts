@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
@@ -46,6 +46,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const { t } = useI18n()
   const toast = useToast()
   const router = useRouter()
+  const matchSupplier = useSupplierStore()
 
   function toastPosting(posting?: MatchPostingResult | { action: string; reason?: string } | null) {
     if (!posting) return
@@ -137,8 +138,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const matchingTx = ref<number | null>(null)
   const matchCtx = ref<BankTransaction | null>(null)
   const matchVarsymbol = ref('')
+  const matchSearch = ref('')
   const matchCandidates = ref<MatchCandidate[]>([])
   const loadingCandidates = ref(false)
+  const matchingCandidate = ref(false)
+  let candidateSearchTimer: ReturnType<typeof setTimeout> | null = null
+  let candidateLoadVersion = 0
   const gopayCandidate = ref<GoPayPayoutCandidate | null>(null)
   const loadingGoPayCandidate = ref(false)
   const matchingGoPay = ref(false)
@@ -158,10 +163,46 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     ? suggestionFor(matchingTx.value)
     : undefined)
 
+  async function loadMatchCandidates(txId: number) {
+    if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+    candidateSearchTimer = null
+    const version = ++candidateLoadVersion
+    loadingCandidates.value = true
+    try {
+      const search = matchSearch.value.trim()
+      const result = await (search ? bankApi.matchCandidates(txId, search) : bankApi.matchCandidates(txId))
+      if (version !== candidateLoadVersion || matchingTx.value !== txId) return
+      matchCandidates.value = result.candidates
+      candidatesFallback.value = result.fallback
+    } catch (error) {
+      if (version === candidateLoadVersion && matchingTx.value === txId) matchError.value = apiErrorMessage(error, t('bank.match_failed'))
+    } finally {
+      if (version === candidateLoadVersion) loadingCandidates.value = false
+    }
+  }
+
+  watch(matchSearch, () => {
+    if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+    candidateLoadVersion++
+    matchCandidates.value = []
+    candidatesFallback.value = false
+    if (!matchingTx.value) return
+    loadingCandidates.value = true
+    candidateSearchTimer = setTimeout(() => {
+      if (matchingTx.value) void loadMatchCandidates(matchingTx.value)
+    }, 300)
+  }, { flush: 'sync' })
+  watch(() => matchSupplier.currentSupplierId, () => { closeMatch(); purchaseShortfall.value = null })
+  onBeforeUnmount(() => {
+    candidateLoadVersion++
+    if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+  })
+
   function startMatch(tx: BankTransaction) {
     if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
     anchorSearchVersion++
     anchorLoading.value = false
+    matchSearch.value = ''
     matchingTx.value = tx.id
     matchCtx.value = tx
     matchVarsymbol.value = tx.variable_symbol || ''
@@ -180,15 +221,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         })
     }
     candidatesFallback.value = false
-    loadingCandidates.value = true
-    bankApi.matchCandidates(tx.id)
-      .then(r => {
-        if (matchingTx.value !== tx.id) return
-        matchCandidates.value = r.candidates
-        candidatesFallback.value = r.fallback
-      })
-      .catch(() => {})
-      .finally(() => { loadingCandidates.value = false })
+    void loadMatchCandidates(tx.id)
     splitSuggestions.value = []
     splitWindow.value = 7
     anchorInvoiceId.value = null
@@ -277,7 +310,13 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     loadSplitSuggestions(matchCtx.value, splitWindow.value, id)
   }
 
-  function closeMatch() { matchingTx.value = null }
+  function closeMatch() {
+    matchingTx.value = null
+    candidateLoadVersion++
+    if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
+    candidateSearchTimer = null
+    loadingCandidates.value = false
+  }
 
   async function confirmGoPayCandidate() {
     if (!matchingTx.value || !gopayCandidate.value || matchingGoPay.value) return
@@ -349,19 +388,34 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     await opts.reload()
   }
 
-  async function confirmCandidate(c: MatchCandidate) {
-    if (!matchingTx.value) return
+  async function matchCandidate(txId: number, c: Pick<MatchCandidate, 'id' | 'type' | 'ref'>, fromDocument = false): Promise<boolean> {
+    if (matchingCandidate.value || !useAuthStore().canWrite('bank.match')) return false
+    matchingCandidate.value = true
+    const supplierId = matchSupplier.currentSupplierId
     matchError.value = ''
     try {
-      const r = await bankApi.matchManual(matchingTx.value,
-        c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id })
-      matchingTx.value = null
+      const reference = c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id }
+      const r = await (fromDocument ? bankApi.matchDocument(txId, reference) : bankApi.matchManual(txId, reference))
+      if (supplierId !== matchSupplier.currentSupplierId) return true
+      if (matchingTx.value === txId) closeMatch()
       toastPosting(r.posting)
       notePurchaseShortfall(r, c.ref || `#${c.id}`)
       await opts.reload()
+      return true
     } catch (e: any) {
-      matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      if (supplierId === matchSupplier.currentSupplierId) matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      return false
+    } finally {
+      matchingCandidate.value = false
     }
+  }
+
+  async function confirmCandidate(c: MatchCandidate): Promise<boolean> {
+    return matchingTx.value !== null && matchCandidate(matchingTx.value, c)
+  }
+
+  function matchDocument(txId: number, document: Pick<MatchCandidate, 'id' | 'type' | 'ref'>): Promise<boolean> {
+    return matchCandidate(txId, document, true)
   }
 
   async function confirmMatch() {
@@ -526,13 +580,13 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     // docs
     expandedDocs, toggleDocs,
     // manuální match modal
-    matchingTx, matchCtx, matchVarsymbol, matchCandidates, loadingCandidates, candidatesFallback,
+    matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
     gopayCandidate, loadingGoPayCandidate, matchingGoPay,
     splitSuggestions, loadingSplit, splitWindow,
     anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
     currentSuggestion,
     startMatch, widenSplitWindow, onAnchorSearch, onAnchorSelect,
-    confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch,
+    confirmSuggestion, confirmCandidate, confirmMatch, confirmGoPayCandidate, closeMatch, matchDocument,
     // nedoplatek přijaté faktury po ručním párování
     purchaseShortfall, closePurchaseShortfall, onPurchaseShortfallSettled,
     // vytvoření přijaté faktury

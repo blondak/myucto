@@ -84,6 +84,7 @@ final class BankPostingSuggestionAction
             [
                 'scope' => $scope,
                 'status' => $matchStatus,
+                'posting_status' => $q['posting_status'] ?? null,
                 'year' => isset($q['year']) && (int) $q['year'] > 0 ? (int) $q['year'] : null,
                 'q' => isset($q['q']) ? mb_substr(trim((string) $q['q']), 0, 100) : null,
                 'account' => isset($q['account']) && $q['account'] !== '' ? (string) $q['account'] : null,

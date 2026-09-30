@@ -20,7 +20,7 @@ const auth = useAuthStore()
 // proxy), takže se tím reaktivita neztrácí a šablona je navíc auto-unwrapne
 // (a správně zúží v v-if větvích), stejně jako běžné top-level refy v <script setup>.
 const {
-  matchingTx, matchCtx, matchVarsymbol, matchCandidates, loadingCandidates, candidatesFallback,
+  matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
   gopayCandidate, loadingGoPayCandidate, matchingGoPay,
   splitSuggestions, loadingSplit, splitWindow,
   anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
@@ -93,17 +93,22 @@ const {
 
       <!-- Návrhy ke spárování dle částky (±14 dní, fallback ±90 dní) -->
       <div class="mb-4">
-        <div class="text-sm font-medium text-neutral-700 mb-1.5">{{ t('bank.candidates_title') }}</div>
+        <div class="text-sm font-medium text-neutral-700 mb-1.5">{{ t(matchSearch.trim() ? 'bank.candidate_search_results' : 'bank.candidates_title') }}</div>
+        <label class="mb-2 block">
+          <span class="mb-1 block text-xs text-neutral-500">{{ t('bank.candidate_search_label') }}</span>
+          <input v-model="matchSearch" type="search" :placeholder="t('bank.candidate_search_placeholder')"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+        </label>
         <p v-if="!loadingCandidates && candidatesFallback && matchCandidates.length > 0"
           class="text-xs text-warning-600 bg-warning-50 border border-warning-500/30 rounded-md px-2 py-1.5 mb-1.5">
           {{ t('bank.candidates_fallback_hint') }}
         </p>
         <div v-if="loadingCandidates" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
-        <div v-else-if="matchCandidates.length === 0" class="text-xs text-neutral-400 py-2">{{ t('bank.no_candidates') }}</div>
+        <div v-else-if="matchCandidates.length === 0" class="text-xs text-neutral-400 py-2">{{ t(matchSearch.trim() ? 'bank.candidate_search_empty' : 'bank.no_candidates') }}</div>
         <ul v-else class="border border-neutral-200 rounded-md divide-y divide-neutral-100 max-h-56 overflow-auto">
           <li v-for="c in matchCandidates" :key="`${c.type}-${c.id}`">
-            <button type="button" @click="confirmCandidate(c)"
-              class="w-full text-left px-3 py-2 hover:bg-primary-50 flex items-center justify-between gap-2">
+            <button type="button" @click="confirmCandidate(c)" :disabled="matchingCandidate || !auth.canWrite('bank.match')"
+              class="w-full text-left px-3 py-2 hover:bg-primary-50 flex items-center justify-between gap-2 disabled:opacity-50">
               <span class="min-w-0">
                 <span class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold"
                   :class="c.type === 'invoice' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">

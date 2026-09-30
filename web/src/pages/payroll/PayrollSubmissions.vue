@@ -633,7 +633,7 @@ onMounted(loadInboxBadge)
             <DensityToggle :ctrl="snapshotsTbl" />
           </div>
           <div class="hidden overflow-x-auto md:block">
-            <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="snapshotsTbl.densityClass.value">
+            <table v-column-labels="snapshotsTbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="snapshotsTbl.densityClass.value">
               <thead>
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                   <th v-if="snapshotsTbl.isVisible('created_at')" class="px-4 py-3">{{ t('payroll.regzel.history.created_at') }}</th>

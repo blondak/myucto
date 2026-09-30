@@ -396,7 +396,7 @@ function formatPaymentDue(c: Client): string {
         :to="roleFilter === 'vendors' ? '/clients/new?role=vendor' : '/clients/new'" />
 
       <!-- Desktop: tabulka -->
-      <div v-else class="hidden md:block overflow-x-auto"><table class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
+      <div v-else class="hidden md:block overflow-x-auto"><table v-column-labels="tbl" class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
         <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
           <tr>
             <SortableTh v-if="tbl.isVisible('company')" :label="t('client.company')" sort-key="name" :sort="tbl.sort.value" @toggle="onSortToggle" />

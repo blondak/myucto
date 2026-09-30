@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -27,6 +27,9 @@ import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
+import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
+import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
+import { useBankFilterMemory } from '@/composables/useBankFilterMemory'
 import { usePaneDom } from '@/composables/usePaneDom'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import BankTransactionSortSelect from '@/components/bank/BankTransactionSortSelect.vue'
@@ -37,6 +40,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const paneDom = usePaneDom()
+const listBox = ref<HTMLElement | null>(null)
+const loadMoreTarget = ref<HTMLElement | null>(null)
+useFillViewportHeight(listBox, { keepFiltersVisible: true })
 
 // Stažení jde přes axios, aby nesl hlavičku X-Supplier-Id. Holý odkaz ji nepošle
 // a server by u výpisu jiné než výchozí firmy vrátil not_found.
@@ -132,6 +138,20 @@ const statusFilter = ref<string>('')
 const postingFilter = ref<PostingFilter | ''>(route.query.posting_status === 'unposted' ? 'unposted' : '')
 // Řazení podle sloupce — řadí server přes všechny stránky (stránkuje se tam).
 const txSort = useBankTransactionSort(['posted_at', 'amount', 'variable_symbol', 'counterparty', 'invoice', 'status'])
+useBankFilterMemory(() => `${supplierStore.currentSupplierId}:statement:${route.params.id}`, () => ({
+  status: statusFilter.value, posting: postingFilter.value, sort: txSort.selectValue.value,
+}), value => {
+  statusFilter.value = STATUS_OPTIONS.includes(value.status as never) ? value.status! : ''
+  postingFilter.value = route.query.posting_status === 'unposted' ? 'unposted'
+    : value.posting === 'unposted' || value.posting === 'posted' ? value.posting : ''
+  txSort.selectValue.value = typeof value.sort === 'string' ? value.sort : ''
+})
+useScrollLoadMore(loadMoreTarget, () => !loading.value && !loadingMore.value && !refreshing.value && txPage.value < txPages.value, () => load(false))
+function onListScroll(event: Event) {
+  const el = event.currentTarget as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240 && !loading.value && !loadingMore.value && !refreshing.value && txPage.value < txPages.value) void load(false)
+}
+
 // Aktuálně načtené (a serverem filtrované) transakce — název ponechán kvůli šabloně.
 const filteredTransactions = computed<BankTransaction[]>(() => statement.value?.transactions ?? [])
 // Souhrn pro měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza,
@@ -162,13 +182,13 @@ async function load(reset = true) {
 }
 async function loadPage(reset: boolean) {
   const generation = ++loadGeneration
+  const requestedPage = reset ? 1 : txPage.value + 1
   refreshing.value = false
   if (reset) {
     loading.value = true
     txPage.value = 1
   } else {
     loadingMore.value = true
-    txPage.value++
   }
   try {
     const statementId = Number(route.params.id)
@@ -177,7 +197,7 @@ async function loadPage(reset: boolean) {
     const sort = txSort.sort.value
     const [res, suggestionsResult] = await Promise.all([
       bankApi.get(statementId, {
-        page: txPage.value,
+        page: requestedPage,
         status: statusFilter.value ? (statusFilter.value as MatchStatus) : undefined,
         posting_status: postingFilter.value || undefined,
         ...txSort.params.value,
@@ -191,6 +211,7 @@ async function loadPage(reset: boolean) {
       ? res.transactions
       : [...statement.value.transactions, ...res.transactions]
     statement.value = { ...res, transactions }
+    txPage.value = requestedPage
     if (suggestionsResult) {
       const map = new Map(suggestionsResult.suggestions
         .filter(s => s.status === 'pending')
@@ -281,6 +302,9 @@ async function highlightLinkedTx(): Promise<void> {
 }
 
 // Změna filtru stavu spárování → reset na 1. stránku (server-side filtr).
+watch([statusFilter, postingFilter, txSort.sort, () => route.params.id, () => supplierStore.currentSupplierId], () => { loadGeneration++ }, { flush: 'sync' })
+onUnmounted(() => { loadGeneration++ })
+watch(() => supplierStore.currentSupplierId, () => { statement.value = null; void load(true) })
 watch([statusFilter, postingFilter, txSort.sort], () => {
   if (statement.value) load(true)
 })
@@ -501,7 +525,7 @@ const statementActions = computed<ActionItem[]>(() => {
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
-    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
+    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
         <div class="text-lg font-mono font-semibold">
@@ -524,7 +548,7 @@ const statementActions = computed<ActionItem[]>(() => {
       </div>
     </div>
 
-    <div v-else-if="!isVirtual" class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
+    <div v-else-if="!isVirtual" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
         <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
         <div class="text-lg font-mono">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
@@ -603,9 +627,9 @@ const statementActions = computed<ActionItem[]>(() => {
         </div>
       </header>
       <!-- Desktop: tabulka -->
-      <div class="hidden md:block overflow-x-auto">
+      <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
       <table class="w-full text-sm table-sticky-first">
-        <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+        <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
           <tr>
             <SortableTh :label="t('bank.date')" sort-key="posted_at" :sort="txSort.sort.value" @toggle="txSort.toggle" />
             <SortableTh :label="t('bank.amount')" sort-key="amount" :sort="txSort.sort.value" align="right" @toggle="txSort.toggle" />
@@ -613,13 +637,14 @@ const statementActions = computed<ActionItem[]>(() => {
             <SortableTh :label="t('bank.counterparty')" sort-key="counterparty" :sort="txSort.sort.value" @toggle="txSort.toggle" />
             <SortableTh :label="t('bank.invoice')" sort-key="invoice" :sort="txSort.sort.value" @toggle="txSort.toggle" />
             <SortableTh :label="t('invoice.status_label')" sort-key="status" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+            <th v-if="isDoubleEntry" class="px-3 py-2">{{ t('bank.counter_account') }}</th>
             <th class="px-3 py-2 w-32"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
           <BankTransactionRow v-for="tx in filteredTransactions" :key="tx.id"
             layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
-            :fallback-currency="statement.currency" :colspan="7" :actions="bankActions"
+            :fallback-currency="statement.currency" :colspan="isDoubleEntry ? 8 : 7" :show-counter-account="isDoubleEntry" :actions="bankActions"
             @posted="onTxPosted" @changed="load" />
         </tbody>
       </table>
@@ -629,13 +654,13 @@ const statementActions = computed<ActionItem[]>(() => {
       <div class="md:hidden divide-y divide-neutral-100">
         <BankTransactionRow v-for="tx in filteredTransactions" :key="`m-${tx.id}`"
           layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
-          :fallback-currency="statement.currency" :actions="bankActions"
+          :fallback-currency="statement.currency" :show-counter-account="isDoubleEntry" :actions="bankActions"
           @posted="onTxPosted" @changed="load" />
       </div>
 
-      <div v-if="txPage < txPages" class="text-center py-3 border-t border-neutral-200">
+      <div v-if="txPage < txPages" ref="loadMoreTarget" class="text-center border-t border-neutral-200 pointer-fine-hidden">
         <button @click="load(false)" :disabled="loadingMore || refreshing"
-          class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
+          class="cursor-pointer my-3 h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50">
           {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
         </button>
       </div>

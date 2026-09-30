@@ -266,10 +266,10 @@ final class CrmBankUnmatchedNonInvoiceTest extends TestCase
             $sheet = IOFactory::load($path)->getActiveSheet();
             self::assertSame('Bankovní účet', $sheet->getCell('A5')->getValue());
             self::assertSame(self::TEST_ACCOUNT . '/' . self::TEST_BANK_CODE, $sheet->getCell('A6')->getValue());
-            self::assertSame('Příchozí', $sheet->getCell('B6')->getValue());
-            self::assertSame(10000.0, (float) $sheet->getCell('E6')->getValue());
-            self::assertSame(10000.0, (float) $sheet->getCell('E7')->getValue());
-            self::assertNull($sheet->getCell('E8')->getValue());
+            self::assertSame('Datum platby', $sheet->getCell('B5')->getValue());
+            self::assertSame(10000.0, (float) $sheet->getCell('D6')->getValue());
+            self::assertSame(10000.0, (float) $sheet->getCell('D7')->getValue());
+            self::assertNull($sheet->getCell('D8')->getValue());
         } finally {
             @unlink($path);
         }

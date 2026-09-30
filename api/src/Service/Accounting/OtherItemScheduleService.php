@@ -24,6 +24,7 @@ final class OtherItemScheduleService
         if (!isset(self::MONTHS[$frequency])) {
             throw new OtherItemException('invalid_frequency', 'Vyberte měsíční, čtvrtletní nebo roční opakování.');
         }
+        $autoPost = self::autoPost($input['auto_post'] ?? false);
         $endsOn = isset($input['ends_on']) && $input['ends_on'] !== '' ? (string) $input['ends_on'] : null;
         if ($endsOn !== null) self::date($endsOn);
         $pdo = $this->db->pdo();
@@ -35,6 +36,7 @@ final class OtherItemScheduleService
             if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)) {
                 throw new OtherItemException('invalid_status', 'Opakování lze založit jen z aktivního dokladu.', 409);
             }
+            if ($autoPost) self::assertConfirmedSource($item);
             $linked = $pdo->prepare('SELECT 1 FROM other_item_schedule_occurrences WHERE supplier_id = ? AND item_id = ? LIMIT 1');
             $linked->execute([$supplierId, $itemId]);
             if ($linked->fetchColumn()) {
@@ -55,10 +57,10 @@ final class OtherItemScheduleService
                 $template[$field] = $item[$field];
             }
             $stmt = $pdo->prepare('INSERT INTO other_item_schedules
-                (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by)
-                VALUES (?,?,?,?,?,?,?,?)');
+                (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by, auto_post)
+                VALUES (?,?,?,?,?,?,?,?,?)');
             $stmt->execute([$supplierId, $itemId, $frequency, $item['issued_on'], $dueDays, $endsOn,
-                json_encode($template, JSON_THROW_ON_ERROR), $userId]);
+                json_encode($template, JSON_THROW_ON_ERROR), $userId, (int) $autoPost]);
             $id = (int) $pdo->lastInsertId();
             $this->link($supplierId, $id, 0, $itemId);
             if ($ownTx) $pdo->commit();
@@ -72,7 +74,7 @@ final class OtherItemScheduleService
     public function list(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
-            s.ends_on, s.next_index, s.status, s.template_json, s.created_at, oi.status AS source_status
+            s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status
             FROM other_item_schedules s
             JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
             WHERE s.supplier_id = ? ORDER BY s.id DESC');
@@ -83,7 +85,7 @@ final class OtherItemScheduleService
     public function get(int $supplierId, int $id): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
-            s.ends_on, s.next_index, s.status, s.template_json, s.created_at, oi.status AS source_status
+            s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status
             FROM other_item_schedules s
             JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
             WHERE s.supplier_id = ? AND s.id = ?');
@@ -100,7 +102,7 @@ final class OtherItemScheduleService
         return $row;
     }
 
-    public function setStatus(int $supplierId, int $id, string $status): array
+    public function setStatus(int $supplierId, int $id, string $status, ?bool $autoPost = null, bool $allowAutoPost = true): array
     {
         if (!in_array($status, ['active', 'paused'], true)) {
             throw new OtherItemException('invalid_status', 'Neplatný stav rozvrhu.');
@@ -113,8 +115,14 @@ final class OtherItemScheduleService
             $source = $this->items->find($supplierId, $sourceId, true)
                 ?? throw new OtherItemException('not_found', 'Zdrojový doklad nebyl nalezen.', 404);
             if ($status === 'active') self::assertActiveSource($source);
-            $stmt = $pdo->prepare('UPDATE other_item_schedules SET status = ? WHERE supplier_id = ? AND id = ?');
-            $stmt->execute([$status, $supplierId, $id]);
+            if ($autoPost === true) self::assertConfirmedSource($source);
+            $schedule = $this->get($supplierId, $id);
+            if (!$allowAutoPost && ($autoPost === true || $status === 'active' && ($autoPost ?? $schedule['auto_post']))) {
+                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáš oprávnění.', 403);
+            }
+            $stmt = $pdo->prepare('UPDATE other_item_schedules SET status = ?, auto_post = COALESCE(?, auto_post)
+                WHERE supplier_id = ? AND id = ?');
+            $stmt->execute([$status, $autoPost === null ? null : (int) $autoPost, $supplierId, $id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -123,12 +131,13 @@ final class OtherItemScheduleService
         return $this->get($supplierId, $id);
     }
 
-    public function generate(int $supplierId, int $id, string $through, ?int $userId): array
+    public function generate(int $supplierId, int $id, string $through, ?int $userId, bool $allowAutoPost = true): array
     {
         self::date($through);
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
+        else $pdo->exec('SAVEPOINT other_item_schedule_generate');
         try {
             $sourceId = $this->sourceId($supplierId, $id);
             $source = $this->items->find($supplierId, $sourceId, true)
@@ -138,6 +147,9 @@ final class OtherItemScheduleService
             $stmt->execute([$supplierId, $id]);
             $schedule = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($schedule === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
+            if ($schedule['auto_post'] && !$allowAutoPost) {
+                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáš oprávnění.', 403);
+            }
             if ($schedule['status'] !== 'active') {
                 throw new OtherItemException('schedule_paused', 'Pozastavený rozvrh nelze generovat.', 409);
             }
@@ -162,12 +174,30 @@ final class OtherItemScheduleService
             }
             $stmt = $pdo->prepare('UPDATE other_item_schedules SET next_index = ? WHERE supplier_id = ? AND id = ?');
             $stmt->execute([$index, $supplierId, $id]);
+            $posted = [];
+            if ((bool) $schedule['auto_post']) {
+                self::assertConfirmedSource($source);
+                $postingThrough = min($through, (new \DateTimeImmutable('today'))->format('Y-m-d'));
+                $dueItems = $pdo->prepare("SELECT oi.id FROM other_item_schedule_occurrences o
+                    JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
+                    WHERE o.supplier_id = ? AND o.schedule_id = ? AND o.occurrence_index > 0
+                      AND oi.status = 'draft' AND oi.deleted_at IS NULL AND oi.issued_on <= ?
+                      AND COALESCE(oi.accounting_on, oi.issued_on) <= ?
+                    ORDER BY o.occurrence_index FOR UPDATE");
+                $dueItems->execute([$supplierId, $id, $postingThrough, $postingThrough]);
+                foreach ($dueItems->fetchAll(PDO::FETCH_COLUMN) as $itemId) {
+                    $this->service->post($supplierId, (int) $itemId, $userId);
+                    $posted[] = (int) $itemId;
+                }
+            }
             if ($ownTx) $pdo->commit();
+            else $pdo->exec('RELEASE SAVEPOINT other_item_schedule_generate');
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            elseif (!$ownTx && $pdo->inTransaction()) $pdo->exec('ROLLBACK TO SAVEPOINT other_item_schedule_generate');
             throw $e;
         }
-        return ['created_ids' => $created, 'schedule' => $this->get($supplierId, $id)];
+        return ['created_ids' => $created, 'posted_ids' => $posted, 'schedule' => $this->get($supplierId, $id)];
     }
 
     public function installments(int $supplierId, int $itemId): array
@@ -252,6 +282,21 @@ final class OtherItemScheduleService
         }
     }
 
+    private static function assertConfirmedSource(array $source): void
+    {
+        if (!in_array($source['status'], ['confirmed', 'posted'], true)) {
+            throw new OtherItemException('schedule_source_unconfirmed', 'Před automatickým účtováním potvrďte zdrojový doklad.', 409);
+        }
+    }
+
+    private static function autoPost(mixed $value): bool
+    {
+        if (!is_bool($value)) {
+            throw new OtherItemException('invalid_auto_post', 'Volba automatického účtování musí být boolean.');
+        }
+        return $value;
+    }
+
     private static function occurrenceDate(\DateTimeImmutable $anchor, int $months): string
     {
         $first = $anchor->modify('first day of this month')->modify('+' . $months . ' months');
@@ -269,6 +314,7 @@ final class OtherItemScheduleService
 
     private static function decode(array $row): array
     {
+        $row['auto_post'] = (bool) $row['auto_post'];
         if (!in_array($row['source_status'], ['draft', 'confirmed', 'posted'], true)) $row['status'] = 'paused';
         $row['template'] = json_decode($row['template_json'], true, 512, JSON_THROW_ON_ERROR);
         unset($row['template_json'], $row['source_status']);

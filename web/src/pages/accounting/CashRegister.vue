@@ -467,7 +467,7 @@ async function postDraft(d: CashDocument) {
              1100 px široký blok, kterým se na telefonu muselo vodorovně
              rolovat, zatímco všechny ostatní seznamy v aplikaci tam mají karty. -->
         <div class="hidden md:block overflow-x-auto">
-          <table class="w-full text-sm" :class="tbl.densityClass.value">
+          <table v-column-labels="tbl" class="w-full text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="px-3 py-2 w-8"></th>

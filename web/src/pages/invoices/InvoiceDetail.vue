@@ -36,6 +36,7 @@ import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.v
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
+import InvoiceBankMatchModal from '@/components/bank/InvoiceBankMatchModal.vue'
 import { accountingApi } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { useSidePreview } from '@/composables/useSidePreview'
@@ -84,6 +85,18 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
+const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
+const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
+  && auth.canRead('bank') && auth.canWrite('bank.match')
+  && (Number(invoice.value.amount_to_pay) > 0 || (Number(invoice.value.amount_to_pay) < 0
+    && ['invoice', 'credit_note'].includes(invoice.value.invoice_type)
+    && (invoice.value.invoice_type === 'credit_note' || !invoice.value.parent_invoice_id)))
+  && ['issued', 'sent', 'reminded', 'paid'].includes(invoice.value.status)
+  && ['invoice', 'proforma', 'credit_note'].includes(invoice.value.invoice_type))
+function openBankMatch() {
+  if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.varsymbol }
+}
+watch(() => [route.params.id, supplierStore.currentSupplierId], () => { bankMatchTarget.value = null })
 const wrModalOpen = ref(false)
 const loading = ref(true)
 const error = ref('')
@@ -1695,6 +1708,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canCreatePenalty.value && w, disabled: b, loading: busy.value === 'penalty-preview',
       title: t('invoice.penalty.tooltip', { days: daysOverdue.value }) as string, run: openPenaltyModal },
     // ── secondary ──
+    { key: 'bank-match', label: t('bank.invoice_match.action'), icon: 'link', tier: 'secondary', variant: 'success',
+      show: canMatchBankPayment.value, disabled: b, run: openBankMatch },
     { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
       show: isDraft.value && w && !lockedForMe.value, to: `/invoices/${inv.id}/edit` },
     { key: 'send', label: t('invoice.send_to_client'), icon: 'send', tier: 'secondary', variant: 'primary',
@@ -3376,4 +3391,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
     </Teleport>
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
   </div>
+    <Teleport to="body">
+      <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
+        @close="bankMatchTarget = null" @done="load" />
+    </Teleport>
 </template>
