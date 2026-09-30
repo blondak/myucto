@@ -31,6 +31,14 @@ final class UserAdminAction
         'user_suppliers', 'webauthn_ceremonies', 'webauthn_credentials',
     ];
 
+    /**
+     * Auditní stopa smazání nebrání a autora si drží dál: `activity_log.user_id` nemá
+     * cizí klíč (migrace 1945), protože vstupuje do hashe řetězu a nesmí se přepsat.
+     * Výjimka platí jen pro sloupec BEZ cizího klíče — instalace, kde klíč ještě je,
+     * by záznamy vynulovala, a proto u ní smazání blokuje dál.
+     */
+    private const AUDIT_USER_TABLES = ['activity_log'];
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
@@ -395,6 +403,7 @@ final class UserAdminAction
                 AND k.COLUMN_NAME IS NULL"
         );
         foreach ($implicitRelations->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
+            if (in_array($relation['TABLE_NAME'], self::AUDIT_USER_TABLES, true)) continue;
             $table = str_replace('`', '``', (string) $relation['TABLE_NAME']);
             $column = str_replace('`', '``', (string) $relation['COLUMN_NAME']);
             $reference = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `{$column}` = ? LIMIT 1");

@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Auth\DatabaseSecurityClock;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
@@ -279,12 +281,41 @@ final class UserAdminTest extends TestCase
         self::assertSame(409, $certificateBlocked->getStatusCode());
         self::assertSame('user_in_use', $this->json($certificateBlocked)['error']['code']);
 
-        $this->db->pdo()->prepare('DELETE FROM epo_signing_credentials WHERE id = ?')->execute([$this->credentialIds[0]]);
-        $this->db->pdo()->prepare('INSERT INTO activity_log (user_id, action) VALUES (?, ?)')
-            ->execute([$target, '__test_user_delete_audit']);
-        $auditBlocked = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
-        self::assertSame(409, $auditBlocked->getStatusCode());
-        self::assertSame('user_in_use', $this->json($auditBlocked)['error']['code']);
+    }
+
+    public function testAuditTrailDoesNotBlockDeletionAndKeepsItsAuthor(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $target = $this->mkUser('readonly');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$target]);
+
+        $chain = new ActivityLogHashChain($this->db);
+        $logger = new ActivityLogger($this->db, $chain);
+        $pdo->beginTransaction();
+        $logger->log('__test_user_delete_audit', $target);
+        $pdo->commit();
+        $find = $pdo->prepare("SELECT id FROM activity_log WHERE user_id = ? AND action = '__test_user_delete_audit'");
+        $find->execute([$target]);
+        $logId = (int) $find->fetchColumn();
+        self::assertGreaterThan(0, $logId);
+
+        $deleted = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+
+        $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $stmt->execute([$target]);
+        self::assertFalse($stmt->fetchColumn());
+
+        $author = $pdo->prepare('SELECT user_id, hash FROM activity_log WHERE id = ?');
+        $author->execute([$logId]);
+        $row = $author->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($target, (int) $row['user_id'], 'Auditní záznam musí dál nést ID smazaného autora.');
+
+        self::assertNotNull($row['hash']);
+        $broken = array_column($chain->verify($logId)['broken'], 'id');
+        self::assertNotContains($logId, $broken, 'Smazání uživatele nesmí rozbít hash auditního záznamu.');
     }
 
     public function testInactiveUserWithImplicitCardReferenceCannotBeDeleted(): void

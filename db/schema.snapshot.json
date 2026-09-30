@@ -924,7 +924,8 @@
         "1940_deferred_revenue_accrual.sql",
         "1941_imported_paid_invoices_legacy_payment.sql",
         "1942_hosted_mcp_oauth.sql",
-        "1943_unbound_mcp_oauth.sql"
+        "1943_unbound_mcp_oauth.sql",
+        "1945_activity_log_user_without_fk.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -1552,9 +1553,7 @@
                 "idx_al_supplier": "BTREE (supplier_id, created_at)",
                 "idx_al_user": "BTREE (user_id, created_at)"
             },
-            "foreign_keys": {
-                "fk_al_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
-            },
+            "foreign_keys": [],
             "checks": {
                 "payload": "json_valid(`payload`)"
             }
