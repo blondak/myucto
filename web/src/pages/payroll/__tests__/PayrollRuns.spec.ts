@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import type { PayrollRun, PayrollRunReadiness, PayrollRunValidation } from '@/api/payroll'
@@ -126,6 +126,15 @@ function validation(overrides: Partial<PayrollRunValidation> = {}): PayrollRunVa
 }
 
 describe('PayrollRuns', () => {
+  // Výchozí období je minulý měsíc; fixtury počítají se srpnem 2026.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-15T12:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
