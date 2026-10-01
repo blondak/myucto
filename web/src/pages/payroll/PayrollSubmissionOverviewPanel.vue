@@ -873,7 +873,7 @@ onMounted(load)
                       {{ t('payroll.submissions.overview.no_authority_result') }}
                     </span>
                   </td>
-                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.preferred_channel) }}</td>
+                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                       {{ submissionStatusLabel(item.status) }}
@@ -987,7 +987,7 @@ onMounted(load)
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.preferred_channel) }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</dd>
               </div>
             </dl>
             <button

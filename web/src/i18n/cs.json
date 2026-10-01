@@ -6900,6 +6900,8 @@
         "empty": "Za zvolené období nemá firma žádnou otevřenou položku.",
         "unknown": "neznámo",
         "not_applicable": "netýká se",
+        "done_by_delivery_label": "Doručeno",
+        "done_by_delivery_hint": "Splněno doručením do schránky pojišťovny — pojišťovna výsledek zpracování neposílá. Vadu by oznámila samostatnou výzvou.",
         "done_label": "Hotovo",
         "col_agenda": "Agenda a předmět",
         "col_document": "Co se generuje",
@@ -6926,6 +6928,7 @@
           "total": "Celkem",
           "send": "Jde odeslat",
           "generate": "Připravit / jinde v appce",
+          "await": "Odesláno, čeká se",
           "manual": "Jen ručně",
           "done": "Hotovo"
         }

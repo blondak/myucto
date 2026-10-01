@@ -522,6 +522,64 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
+     * Odeslaný přehled VZP: dřív u něj svítila věta „firma nemá nastavenou
+     * odesílací bránu ani datovou schránku", přestože zpráva právě odešla
+     * Mobilním klíčem. Odeslaný řádek čeká na doručení a o kanálu nepoučuje.
+     */
+    public function testDispatchedOverviewWaitsForDeliveryWithoutChannelAdvice(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                latestSubmissionStatus: 'submitted',
+                obligationStatus: 'submitted',
+            )],
+            outboxes: [31 => [
+                'id' => 4,
+                'dispatch_state' => 'sent',
+                'acceptance_state' => 'unknown',
+                'delivered_at' => null,
+                'receipt_document_id' => null,
+            ]],
+        );
+
+        $item = $this->onlyItem($service, 'submission');
+        self::assertSame('await', $item['action']['kind']);
+        self::assertSame('Čeká na doručení', $item['action']['label']);
+        self::assertNull($item['action']['reason']);
+        self::assertSame('datová schránka', $item['channel']['label']);
+        self::assertSame('', $item['channel']['note']);
+        self::assertSame(4, $item['dispatch']['outbox_id']);
+        self::assertSame(31, $item['submission_id']);
+        self::assertFalse($item['fulfilled_by_delivery']);
+        self::assertSame(1, $service->checklist(11, 'production', self::PERIOD)['summary']['await']);
+    }
+
+    /** Doručený přehled se splněnou povinností nese, že ho splnilo doručení. */
+    public function testDeliveredOverviewIsMarkedAsFulfilledByDelivery(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                latestSubmissionStatus: 'submitted',
+                obligationStatus: 'fulfilled',
+            )],
+            outboxes: [31 => [
+                'id' => 4,
+                'dispatch_state' => 'delivered',
+                'acceptance_state' => 'unknown',
+                'delivered_at' => '2026-08-25 10:00:00',
+                'receipt_document_id' => 9,
+            ]],
+        );
+
+        $item = $this->onlyItem($service, 'submission');
+        self::assertTrue($item['done']);
+        self::assertTrue($item['fulfilled_by_delivery']);
+        self::assertTrue($item['dispatch']['has_receipt']);
+    }
+
+    /**
      * @param list<array<string,mixed>> $submissionRows
      * @param list<array<string,mixed>> $deadlineItems
      * @param array{automatic:bool,channel:string,reason:?string} $transport
@@ -532,12 +590,14 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         array $deadlineItems = [],
         array $transport = ['automatic' => false, 'channel' => 'manual_upload', 'reason' => 'isds_transport_unavailable'],
         array $agendaDuties = [],
+        array $outboxes = [],
     ): PayrollMonthlyChecklistService {
         $submissions = $this->createStub(PayrollSubmissionRepository::class);
         $submissions->method('listOverview')->willReturn([
             'items' => $submissionRows,
             'total' => count($submissionRows),
         ]);
+        $submissions->method('dispatchOutboxesBySubmission')->willReturn($outboxes);
 
         $deadlines = $this->createStub(PayrollDeadlineOverviewService::class);
         $deadlines->method('itemsForWindow')->willReturn($deadlineItems);

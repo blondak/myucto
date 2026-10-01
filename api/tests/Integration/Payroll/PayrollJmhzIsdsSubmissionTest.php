@@ -206,6 +206,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             new IsdsTransportAvailabilityResolver(
                 null,
                 new SubmissionCredentialService($credentials, $this->createStub(SecretEncryption::class)),
+                null,
             ),
         ));
 

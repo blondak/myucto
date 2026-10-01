@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Submission\Channel\Isds;
 
+use MyInvoice\Repository\Submission\IsdsMobileCredentialRepository;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
 
@@ -43,21 +44,35 @@ use MyInvoice\Service\Submission\SubmissionCredentialService;
  * docblock té metody), ale je to jediný podklad, který bez síťového volání
  * máme. Firma bez uloženého ID schránky dostane poctivé „ručně", ne slib,
  * který nemáme čím podložit.
+ *
+ * Druhým, silnějším dokladem je osobní profil Mobilního klíče přihlášeného
+ * uživatele ({@see IsdsMobileCredentialRepository}). Kdo si ho uložil, Mobilním
+ * klíčem odesílá — tvrdit mu „nemáte datovou schránku" jen proto, že firma
+ * nemá vyplněné ID schránky, je nepravda, kterou viděla účetní u přehledu VZP
+ * odeslaného právě Mobilním klíčem.
  */
 final readonly class IsdsTransportAvailabilityResolver
 {
     public function __construct(
         private ?IsdsGatewayRegistrationService $gateway,
         private SubmissionCredentialService $credentials,
+        private ?IsdsMobileCredentialRepository $mobileCredentials,
     ) {}
 
-    /** @return array{automatic:bool,channel:string,reason:?string} */
-    public function resolve(int $supplierId, string $environment): array
+    /**
+     * @param ?int $userId přihlášený uživatel; bez něj se osobní profil
+     *                     Mobilního klíče nezohlední
+     * @return array{automatic:bool,channel:string,reason:?string}
+     */
+    public function resolve(int $supplierId, string $environment, ?int $userId = null): array
     {
         if ($this->gateway !== null && $this->gateway->isUsable($environment)) {
             return ['automatic' => true, 'channel' => 'gateway', 'reason' => null];
         }
-        if ($this->credentials->hasDataBox($supplierId, $environment)) {
+        if ($this->credentials->hasDataBox($supplierId, $environment)
+            || ($userId !== null
+                && $this->mobileCredentials?->exists($supplierId, $userId, $environment) === true)
+        ) {
             return ['automatic' => false, 'channel' => 'mobile_key', 'reason' => null];
         }
 

@@ -3006,6 +3006,8 @@ export interface PayrollSubmissionOverviewItem {
   period_end: string
   obligation_kind: string
   preferred_channel: string
+  /** Kanál, kterým poslední podání skutečně odešlo (`isds`), jinak `null`. */
+  dispatch_channel?: string | null
   status: PayrollSubmissionObligationStatus
   row_version: number
   earliest_submission_on: string
@@ -3254,7 +3256,16 @@ export interface PayrollSubmissionQueueDispatchResult {
  * `generate` (není hotová / jde jen o platbu či úkon — odkaz vede tam, kde se
  * to udělá), nebo `manual` (appka to poslat neumí, `reason` říká proč).
  */
-export type PayrollMonthlyChecklistActionKind = 'send' | 'generate' | 'manual'
+export type PayrollMonthlyChecklistActionKind = 'send' | 'generate' | 'manual' | 'await'
+
+/** Odchozí zpráva datové schránky k poslednímu podání řádku. */
+export interface PayrollMonthlyChecklistDispatch {
+  outbox_id: number
+  dispatch_state: string
+  delivered_at: string | null
+  has_receipt: boolean
+  delivery_proof: 'delivered' | 'receipt' | 'accepted' | null
+}
 
 /**
  * Co se má připravit, když je akce „Připravit". Není to odkaz na obrazovku —
@@ -3319,6 +3330,11 @@ export interface PayrollMonthlyChecklistItem {
    * `done` u něj zůstává `false` a akce vede na přípravu nového.
    */
   done: boolean
+  /** Poslední podání povinnosti (jen řádky evidence podání). */
+  submission_id: number | null
+  dispatch: PayrollMonthlyChecklistDispatch | null
+  /** Splněno doručením do schránky úřadu, který výsledek neposílá (PPZ, HOZ). */
+  fulfilled_by_delivery: boolean
   action: PayrollMonthlyChecklistAction
 }
 
@@ -3337,7 +3353,7 @@ export interface PayrollMonthlyChecklistResponse {
   environment: PayrollRegzelEnvironment
   period: string
   window: { from: string; to: string }
-  summary: { total: number; send: number; generate: number; manual: number; done: number }
+  summary: { total: number; send: number; generate: number; manual: number; await: number; done: number }
   items: PayrollMonthlyChecklistItem[]
 }
 

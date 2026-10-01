@@ -114,6 +114,7 @@ final readonly class PayrollMonthlyChecklistService
         int $supplierId,
         string $environment,
         string $period,
+        ?int $userId = null,
     ): array {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException(
@@ -130,7 +131,9 @@ final readonly class PayrollMonthlyChecklistService
         // konkrétním řádku — počítá se tu JEDNOU a dál se předává jako
         // parametr (třída je `readonly`, takže si to nemůže schovat do
         // vlastní mutovatelné vlastnosti).
-        $transport = $this->transportAvailability->resolve($supplierId, $environment);
+        // Uživatel jde dovnitř kvůli osobnímu profilu Mobilního klíče — kdo si
+        // ho uložil, odesílá datovkou, i když firma nemá vyplněné ID schránky.
+        $transport = $this->transportAvailability->resolve($supplierId, $environment, $userId);
 
         // JEDEN dotaz do evidence povinností pro OBA prameny, které z ní
         // žijí: `submissionRows()` z něj vypíše, co existuje, a agendové
@@ -147,13 +150,34 @@ final readonly class PayrollMonthlyChecklistService
             null,
         )['items'];
 
+        // Odchozí zprávy datové schránky k posledním podáním — JEDNÍM dotazem.
+        // Z nich se čte skutečný kanál odeslaného podání a doložené doručení.
+        $outboxes = $this->submissions->dispatchOutboxesBySubmission(
+            $supplierId,
+            $environment,
+            array_values(array_filter(array_map(
+                static fn (array $row): int => (int) ($row['latest_submission']['id'] ?? 0),
+                $registered,
+            ))),
+        );
+
         $items = [
-            ...$this->submissionRows($registered, $transport),
+            ...$this->submissionRows($registered, $transport, $outboxes),
             ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
             ...$this->predecessorJmhzRows($supplierId, $environment, $period),
             ...$this->awaitingRunRows($supplierId, $period),
         ];
+        // Jednotný tvar řádku napříč prameny: podání a odchozí zprávu mají
+        // jen řádky evidence, ostatní nesou prázdné hodnoty.
+        $items = array_map(
+            static fn (array $item): array => $item + [
+                'submission_id' => null,
+                'dispatch' => null,
+                'fulfilled_by_delivery' => false,
+            ],
+            $items,
+        );
         usort(
             $items,
             static fn (array $a, array $b): int
@@ -161,7 +185,7 @@ final readonly class PayrollMonthlyChecklistService
                 <=> [$b['due_on'], $b['source'], $b['agenda_label']],
         );
 
-        $summary = ['total' => count($items), 'send' => 0, 'generate' => 0, 'manual' => 0, 'done' => 0];
+        $summary = ['total' => count($items), 'send' => 0, 'generate' => 0, 'manual' => 0, 'await' => 0, 'done' => 0];
         foreach ($items as $item) {
             if ($item['done'] === true) {
                 ++$summary['done'];
@@ -210,13 +234,24 @@ final readonly class PayrollMonthlyChecklistService
      * dokument. Akce proto vede na PŘÍPRAVU, ne na odeslání; historie
      * zrušeného podání (spisová značka, důvod) zůstává na obrazovce agendy.
      *
+     * ═══════════════════════════════════════════════════════════════════════
+     * ODESLANÉ podání se o kanálu nepoučuje
+     * ═══════════════════════════════════════════════════════════════════════
+     * Když zpráva už odešla, nezáleží na tom, jakou cestu by aplikace nabídla
+     * DNES — dřív tu u přehledu VZP odeslaného Mobilním klíčem svítila věta
+     * „firma nemá datovou schránku". Odeslaný řádek proto ukáže kanál, kterým
+     * zpráva SKUTEČNĚ odešla, a akci `await` (čeká se na doručení nebo na
+     * výsledek), ne návod k odeslání.
+     *
      * @param list<array<string,mixed>> $registered
      * @param array{automatic:bool,channel:string,reason:?string} $transport
+     * @param array<int,array<string,mixed>> $outboxes
      * @return list<array<string,mixed>>
      */
     private function submissionRows(
         array $registered,
         array $transport,
+        array $outboxes = [],
     ): array {
         $rows = [];
         foreach ($registered as $row) {
@@ -234,9 +269,38 @@ final readonly class PayrollMonthlyChecklistService
                 (string) $row['subject_reference'],
                 $transport,
             );
+            $latestId = isset($row['latest_submission']['id'])
+                ? (int) $row['latest_submission']['id']
+                : null;
+            $latestStatus = $row['latest_submission']['status'] ?? null;
+            $outbox = $latestId === null ? null : ($outboxes[$latestId] ?? null);
+            $dispatched = is_string($latestStatus)
+                && in_array($latestStatus, self::DISPATCHED_STATUSES, true);
+            $deliveryProof = PayrollSubmissionDeliveryProof::reason($outbox);
+            if ($dispatched || $done) {
+                $description['channel'] = self::dispatchedChannel(
+                    $outbox,
+                    $description['channel'],
+                );
+            }
+            if ($dispatched && !$done) {
+                $description['action'] = [
+                    'kind' => 'await',
+                    'label' => $outbox !== null && $deliveryProof === null
+                        ? 'Čeká na doručení'
+                        : 'Čeká na výsledek',
+                    'path' => $description['tab_path'],
+                    'reason' => null,
+                ];
+            }
 
             $rows[] = [
                 'key' => 'submission:' . $row['id'],
+                'submission_id' => $latestId,
+                'dispatch' => self::dispatchSummary($outbox),
+                'fulfilled_by_delivery' => $done
+                    && in_array($deliveryProof, ['delivered', 'receipt'], true)
+                    && self::settlementPolicy()->settlesOnDelivery((string) $row['agenda_code']),
                 'source' => 'submission',
                 'agenda_code' => $row['agenda_code'],
                 // Lidský název dodává frontend přes i18n z `agenda_code`
@@ -470,6 +534,57 @@ final readonly class PayrollMonthlyChecklistService
         }
 
         return $rows;
+    }
+
+    /**
+     * Stavy podání, ve kterých zpráva už odešla a čeká se na doručení nebo na
+     * výsledek úřadu.
+     */
+    private const DISPATCHED_STATUSES = ['submitted', 'processing', 'waiting_for_identity'];
+
+    private static function settlementPolicy(): PayrollSubmissionSettlementPolicy
+    {
+        return new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog());
+    }
+
+    /**
+     * Kanál, kterým zpráva SKUTEČNĚ odešla. Odchozí fronta existuje jen
+     * u datové schránky; bez ní zůstává popis agendy, ale bez poznámky
+     * o tom, jak by se odesílalo dnes.
+     *
+     * @param array<string,mixed>|null $outbox
+     * @param array{label:?string,note:string} $fallback
+     * @return array{label:?string,note:string}
+     */
+    private static function dispatchedChannel(?array $outbox, array $fallback): array
+    {
+        if ($outbox !== null) {
+            return ['label' => 'datová schránka', 'note' => ''];
+        }
+
+        return ['label' => $fallback['label'], 'note' => ''];
+    }
+
+    /**
+     * Stav odchozí zprávy datové schránky pro řádek — klient podle něj
+     * nabízí „Načíst doručenky" a ukazuje, kdy zpráva dorazila.
+     *
+     * @param array<string,mixed>|null $outbox
+     * @return array{outbox_id:int,dispatch_state:string,delivered_at:?string,has_receipt:bool,delivery_proof:?string}|null
+     */
+    private static function dispatchSummary(?array $outbox): ?array
+    {
+        if ($outbox === null) {
+            return null;
+        }
+
+        return [
+            'outbox_id' => (int) $outbox['id'],
+            'dispatch_state' => (string) $outbox['dispatch_state'],
+            'delivered_at' => isset($outbox['delivered_at']) ? (string) $outbox['delivered_at'] : null,
+            'has_receipt' => ($outbox['receipt_document_id'] ?? null) !== null,
+            'delivery_proof' => PayrollSubmissionDeliveryProof::reason($outbox),
+        ];
     }
 
     /**

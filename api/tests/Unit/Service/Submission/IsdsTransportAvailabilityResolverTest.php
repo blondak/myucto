@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Submission;
 
+use MyInvoice\Repository\Submission\IsdsMobileCredentialRepository;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
@@ -23,7 +24,7 @@ final class IsdsTransportAvailabilityResolverTest extends TestCase
         $credentials = $this->createStub(SubmissionCredentialService::class);
         $credentials->method('hasDataBox')->willReturn(true);
 
-        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials))
+        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials, null))
             ->resolve(7, 'production');
 
         self::assertTrue($result['automatic']);
@@ -43,7 +44,7 @@ final class IsdsTransportAvailabilityResolverTest extends TestCase
         $credentials = $this->createStub(SubmissionCredentialService::class);
         $credentials->method('hasDataBox')->willReturn(true);
 
-        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials))
+        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials, null))
             ->resolve(7, 'test');
 
         self::assertFalse($result['automatic']);
@@ -58,7 +59,7 @@ final class IsdsTransportAvailabilityResolverTest extends TestCase
         $credentials = $this->createStub(SubmissionCredentialService::class);
         $credentials->method('hasDataBox')->willReturn(false);
 
-        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials))
+        $result = (new IsdsTransportAvailabilityResolver($gateway, $credentials, null))
             ->resolve(7, 'test');
 
         self::assertFalse($result['automatic']);
@@ -72,9 +73,30 @@ final class IsdsTransportAvailabilityResolverTest extends TestCase
         $credentials = $this->createStub(SubmissionCredentialService::class);
         $credentials->method('hasDataBox')->willReturn(true);
 
-        $result = (new IsdsTransportAvailabilityResolver(null, $credentials))
+        $result = (new IsdsTransportAvailabilityResolver(null, $credentials, null))
             ->resolve(7, 'test');
 
         self::assertSame('mobile_key', $result['channel']);
+    }
+
+    /**
+     * Uživatel s uloženým Mobilním klíčem odesílá datovkou, i když firma
+     * nemá vyplněné ID schránky. Dřív mu přehled tvrdil, že datovou schránku
+     * nemá — u zprávy, kterou právě Mobilním klíčem odeslal.
+     */
+    public function testPersonalMobileKeyProfileMakesIsdsSendable(): void
+    {
+        $credentials = $this->createStub(SubmissionCredentialService::class);
+        $credentials->method('hasDataBox')->willReturn(false);
+        $mobile = $this->createStub(IsdsMobileCredentialRepository::class);
+        $mobile->method('exists')->willReturnCallback(
+            static fn (int $supplierId, int $userId, string $environment): bool
+                => $supplierId === 7 && $userId === 3 && $environment === 'production',
+        );
+        $resolver = new IsdsTransportAvailabilityResolver(null, $credentials, $mobile);
+
+        self::assertSame('mobile_key', $resolver->resolve(7, 'production', 3)['channel']);
+        self::assertSame('manual_upload', $resolver->resolve(7, 'production', 4)['channel']);
+        self::assertSame('manual_upload', $resolver->resolve(7, 'production')['channel']);
     }
 }

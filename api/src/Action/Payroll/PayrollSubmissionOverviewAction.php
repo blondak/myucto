@@ -173,6 +173,12 @@ final class PayrollSubmissionOverviewAction
             $item['subject_label'] = $subjects[$index]['subject_label'];
             $item['subject_employee_id'] = $subjects[$index]['subject_employee_id'];
             $item['settlement'] = $this->settlement($item, $outboxes);
+            // Kanál, kterým poslední podání SKUTEČNĚ odešlo. `preferred_channel`
+            // povinnosti je jen plán z doby založení (u PPZ „portál pojišťovny"),
+            // a vedle zprávy odeslané datovkou by tvrdil něco jiného.
+            $item['dispatch_channel'] = isset(
+                $outboxes[(int) ($item['latest_submission']['id'] ?? 0)],
+            ) ? 'isds' : null;
         }
         unset($item);
 

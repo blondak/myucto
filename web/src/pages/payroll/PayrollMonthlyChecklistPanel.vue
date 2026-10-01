@@ -72,7 +72,7 @@ const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubm
 
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
-  total: 0, send: 0, generate: 0, manual: 0, done: 0,
+  total: 0, send: 0, generate: 0, manual: 0, await: 0, done: 0,
 })
 
 function phaseClass(phase: string): string {
@@ -156,12 +156,14 @@ function actionClass(item: PayrollMonthlyChecklistItem): string {
   if (item.action.prepare) return btnFilledSm('primary')
   if (item.action.kind === 'send') return btnFilledSm('primary')
   if (item.action.kind === 'generate') return btnOutlineSm('accent')
+  if (item.action.kind === 'await') return btnOutlineSm('primary')
   return btnOutlineSm('neutral')
 }
 
 function actionIcon(item: PayrollMonthlyChecklistItem): string {
   if (item.action.kind === 'send') return ICONS.send
   if (item.action.kind === 'generate') return ICONS.doc
+  if (item.action.kind === 'await') return ICONS.eye
   return ICONS.x
 }
 
@@ -303,9 +305,9 @@ onMounted(load)
     </div>
 
     <template v-else-if="response">
-      <dl class="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <dl class="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <div
-          v-for="entry in (['total', 'send', 'generate', 'manual', 'done'] as const)"
+          v-for="entry in (['total', 'send', 'generate', 'manual', 'await', 'done'] as const)"
           :key="entry"
           class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
         >
@@ -387,9 +389,18 @@ onMounted(load)
                     <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                       <path :d="ICONS.check" />
                     </svg>
-                    {{ t('payroll.submissions.monthly_checklist.done_label') }}
+                    {{ item.fulfilled_by_delivery
+                      ? t('payroll.submissions.monthly_checklist.done_by_delivery_label')
+                      : t('payroll.submissions.monthly_checklist.done_label') }}
                   </span>
-                  <template v-else>
+                  <p
+                    v-if="item.done && item.fulfilled_by_delivery"
+                    class="mt-1 max-w-xs text-xs text-neutral-500"
+                    data-test="monthly-checklist-done-by-delivery"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.done_by_delivery_hint') }}
+                  </p>
+                  <template v-else-if="!item.done">
                     <button
                       v-if="item.action.prepare"
                       type="button"

@@ -64,6 +64,7 @@ final class PayrollMonthlyChecklistAction
                 $this->currentSupplierId($request),
                 is_string($environment) ? $environment : '',
                 is_string($period) ? $period : '',
+                $this->userId($request),
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(

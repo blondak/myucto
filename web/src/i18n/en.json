@@ -6900,6 +6900,8 @@
         "empty": "No open item for the selected period.",
         "unknown": "unknown",
         "not_applicable": "not applicable",
+        "done_by_delivery_label": "Delivered",
+        "done_by_delivery_hint": "Fulfilled by delivery to the insurer's data box — the insurer does not send a processing result. A defect would come as a separate notice.",
         "done_label": "Done",
         "col_agenda": "Agenda and subject",
         "col_document": "What is generated",
@@ -6926,6 +6928,7 @@
           "total": "Total",
           "send": "Can send",
           "generate": "Prepare / elsewhere in-app",
+          "await": "Sent, waiting",
           "manual": "Manual only",
           "done": "Done"
         }

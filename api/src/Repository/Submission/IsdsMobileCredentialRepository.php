@@ -8,7 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
 /** Šifrovaný osobní profil Mobilního klíče v rozsahu firma + uživatel. */
-final class IsdsMobileCredentialRepository
+class IsdsMobileCredentialRepository
 {
     private const TABLE = 'submission_isds_mobile_credentials';
 
@@ -32,6 +32,21 @@ final class IsdsMobileCredentialRepository
         $statement->execute([$supplierId, $userId, $environment]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? $row : null;
+    }
+
+    /** Má uživatel pro firmu a prostředí uložený profil Mobilního klíče? Bez čtení tajemství. */
+    public function exists(int $supplierId, int $userId, string $environment): bool
+    {
+        if (!$this->isAvailable()) {
+            return false;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND user_id = ? AND environment = ?',
+        );
+        $statement->execute([$supplierId, $userId, $environment]);
+
+        return $statement->fetchColumn() !== false;
     }
 
     public function save(
