@@ -14,7 +14,8 @@
 -- Platí „právě jeden vlastník" — CHECK se proto zahodí a založí znovu se čtyřmi sloupci.
 -- MariaDB neumí ADD CONSTRAINT IF NOT EXISTS u CHECK, odtud DROP + ADD.
 --
--- Idempotentní: ADD COLUMN / INDEX / FOREIGN KEY IF NOT EXISTS, DROP CONSTRAINT IF EXISTS.
+-- Idempotentní: ADD COLUMN / INDEX / FOREIGN KEY IF NOT EXISTS, DROP CONSTRAINT IF EXISTS,
+-- MODIFY ENUM (append-only).
 
 SET NAMES utf8mb4;
 
@@ -61,3 +62,11 @@ ALTER TABLE dimension_defaults
     (client_id IS NOT NULL) + (project_id IS NOT NULL)
       + (product_id IS NOT NULL) + (product_category_id IS NOT NULL) = 1
   );
+
+-- Šablona pravidelné fakturace nese dimenze hlavičky i položek (item_no = pořadí položky
+-- od 1); generátor je zkopíruje na vygenerovanou fakturu. MODIFY ENUM jen přidává hodnotu.
+ALTER TABLE document_dimensions
+  MODIFY COLUMN doc_type ENUM('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL;
+
+ALTER TABLE document_dimension_splits
+  MODIFY COLUMN doc_type ENUM('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL;

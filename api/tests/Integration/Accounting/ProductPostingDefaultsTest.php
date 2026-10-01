@@ -44,6 +44,7 @@ final class ProductPostingDefaultsTest extends TestCase
     private DimensionAssignmentRepository $assignments;
     private InvoiceRepository $invoices;
     private FinalFromProformaCreator $finalCreator;
+    private \Psr\Container\ContainerInterface $container;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -59,6 +60,7 @@ final class ProductPostingDefaultsTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->journal = $container->get(JournalEntryRepository::class);
@@ -240,6 +242,93 @@ final class ProductPostingDefaultsTest extends TestCase
         } catch (PostingException $e) {
             self::assertSame('invalid_item_account', $e->errorCode);
         }
+    }
+
+    public function testHeaderDiscountFollowsDiscountedItemsAccountsAndDimensions(): void
+    {
+        // Sleva z hlavičky (10 %) zlevňuje zboží na účtu produktu i službu na předkontaci —
+        // každý výnos o svůj díl. Dřív šla celá na 602: 604 D 1000 / 602 MD 100.
+        $this->dimensions->setEnabled($this->supplierId, true);
+        $types = $this->dimensions->ensureDefaultTypes($this->supplierId, ['stredisko']);
+        $center = $types['cost_center'];
+        $cProduct = (int) $this->dimensions->createValue($this->supplierId, $center, ['code' => 'C-DISC-P', 'name' => 'Zboží'])['id'];
+        $cService = (int) $this->dimensions->createValue($this->supplierId, $center, ['code' => 'C-DISC-S', 'name' => 'Služby'])['id'];
+        $product = $this->product('DISC-1', '604', null, null);
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'product', $product, [$center => $cProduct]);
+
+        $invoiceId = $this->invoice('FV-DISC', $this->client('Sleva'), [['net' => 1.00]]);
+        $this->db->pdo()->prepare('UPDATE invoices SET discount_percent = 10 WHERE id = ?')->execute([$invoiceId]);
+        $item = fn (float $net, ?int $stock): array => [
+            'description' => 'Položka', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => $net,
+            'vat_rate_id' => $this->vatRateId, 'stock_item_id' => $stock,
+        ];
+        $this->invoices->replaceItems($invoiceId, [$item(1000.00, $product), $item(500.00, null)]);
+        $this->dimensions->saveDocument($this->supplierId, 'invoice', $invoiceId, [], [2 => [$center => $cService]]);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices i JOIN (SELECT invoice_id, SUM(total_without_vat) b, SUM(total_vat) v, SUM(total_with_vat) w
+                                     FROM invoice_items WHERE invoice_id = ? GROUP BY invoice_id) s ON s.invoice_id = i.id
+                SET i.total_without_vat = s.b, i.total_vat = s.v, i.total_with_vat = s.w'
+        )->execute([$invoiceId]);
+        $this->container->get(\MyInvoice\Service\Invoice\InvoiceCalculator::class)->recompute($invoiceId);
+
+        $entryId = $this->postInvoice($invoiceId);
+        $byAccount = $this->byAccount($entryId);
+        self::assertSame(90000, (int) round($byAccount['604']['credit'] * 100), 'Zboží 1000 − sleva 100.');
+        self::assertSame(0, (int) round($byAccount['604']['debit'] * 100), 'Sleva nesmí vyjít jako samostatná noha na MD.');
+        self::assertSame(45000, (int) round($byAccount['602']['credit'] * 100), 'Služba 500 − sleva 50.');
+        self::assertSame(0, (int) round($byAccount['602']['debit'] * 100));
+
+        $dims = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
+        $byLine = [];
+        foreach ($this->journal->linesForEntry($entryId, $this->supplierId) as $line) {
+            $code = $this->accountCode((int) $line['account_id']);
+            if (in_array($code, ['604', '602'], true)) {
+                $byLine[$code][] = ($dims[(int) $line['id']] ?? [])[$center] ?? null;
+            }
+        }
+        self::assertSame(['604' => [$cProduct], '602' => [$cService]], $byLine, 'Slevu nesou dimenze zlevněných položek.');
+    }
+
+    public function testClosingAndOriginUseTheSameItemAccountsAsPosting(): void
+    {
+        // SSOT: uzávěrka (381) i „Podle čeho se účtovalo" berou účet řádku toutéž cestou
+        // jako zaúčtování — jinak by se náklad odložil z jiného účtu, než na kterém leží.
+        $product = $this->product('SSOT-1', '604', '504', null);
+        $purchaseId = $this->purchase('PF-SSOT', $this->client('SSOT'), [
+            ['net' => 300.00, 'stock_item_id' => $product],
+            ['net' => 200.00, 'stock_item_id' => $product, 'expense_kind' => 'service'],
+        ]);
+        $accounts = array_values($this->posting->purchaseItemExpenseAccounts($this->supplierId, $purchaseId));
+        sort($accounts);
+        self::assertSame(['504', '518'], $accounts);
+
+        $invoiceId = $this->invoice('FV-SSOT', $this->client('SSOT2'), [['net' => 100.00, 'stock_item_id' => $product]]);
+        $this->postInvoice($invoiceId);
+        $origin = $this->container->get(\MyInvoice\Service\Accounting\PostingOriginService::class)
+            ->describe($this->supplierId, 'invoice', $invoiceId);
+        self::assertSame('item_account', $origin['origin']);
+        self::assertSame([['account_code' => '604', 'source' => 'product', 'product_id' => $product, 'product_name' => 'Produkt SSOT-1', 'used' => true]],
+            $origin['item_accounts']);
+    }
+
+    public function testFixedAssetPurchaseIgnoresProductExpenseAccount(): void
+    {
+        // Stroj vedený na skladové kartě s výchozím 501: pořízení DHM jde na 042, ne do nákladů.
+        $product = $this->product('DHM-1', null, '501', null);
+        $purchaseId = $this->purchase('PF-DHM', $this->client('Dodavatel stroje'), [['net' => 80000.00, 'stock_item_id' => $product]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET is_fixed_asset = 1 WHERE id = ?')->execute([$purchaseId]);
+
+        $lines = $this->posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId);
+        $codes = array_column($lines, 'account_code');
+        self::assertContains('042', $codes, 'Pořízení majetku jde na 042.');
+        self::assertSame([], array_values(array_filter($codes, static fn (string $c): bool => str_starts_with($c, '501'))),
+            'Výchozí nákladový účet karty se u pořízení majetku nepoužije.');
+
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET is_fixed_asset = 0 WHERE id = ?')->execute([$purchaseId]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET is_fixed_asset = 1 WHERE purchase_invoice_id = ?')->execute([$purchaseId]);
+        $codes = array_column($this->posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId), 'account_code');
+        self::assertSame([], array_values(array_filter($codes, static fn (string $c): bool => str_starts_with($c, '501'))),
+            'Ani položka označená jako majetek nedostane nákladový účet karty.');
     }
 
     // ── dimenze ──────────────────────────────────────────────────────────────

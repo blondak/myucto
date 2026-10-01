@@ -40,6 +40,7 @@ final class DimensionService
         'cash_document' => ['cash_documents', 'cash'],
         'bank_transaction' => [null, 'bank'],
         'journal_template' => ['journal_entry_templates', null],
+        'recurring_template' => ['recurring_invoice_templates', null],
     ];
 
     public function __construct(

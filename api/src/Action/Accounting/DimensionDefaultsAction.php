@@ -171,8 +171,10 @@ final class DimensionDefaultsAction
     {
         return match ($entity) {
             'project' => 'projects',
-            'product' => $level === AccessLevel::WRITE ? 'stock.items.write' : 'stock',
-            'product_category' => $level === AccessLevel::WRITE ? 'eshop.write' : 'eshop',
+            // Zápis = totéž právo, jakým karta a kategorie ukládají účty (StockItemAction /
+            // CategoryAction::requireWrite); routa navíc hlídá stock.items.write / eshop.write.
+            'product' => $level === AccessLevel::WRITE ? 'accounting' : 'stock',
+            'product_category' => $level === AccessLevel::WRITE ? 'accounting' : 'eshop',
             default => 'clients',
         };
     }

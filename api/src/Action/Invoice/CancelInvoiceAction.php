@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\GuardsDocumentLock;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -396,6 +397,10 @@ final class CancelInvoiceAction
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
+            $productAccounts = (new ProductPostingDefaults($this->db))->accountsFor(
+                (int) $invoice['supplier_id'],
+                array_map(static fn (array $it): int => (int) ($it['stock_item_id'] ?? 0), $invoice['items']),
+            );
             foreach ($invoice['items'] as $item) {
                 $code = $item['vat_classification_code']
                     ?? \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode(
@@ -420,8 +425,11 @@ final class CancelInvoiceAction
                     // bez ní by vratka při vystavení dobropisu neuměla napárovat výdej.
                     $item['stock_item_id'] ?? null,
                     $item['warehouse_id'] ?? null,
-                    // Dobropis vrací výnos z TÉHOŽ účtu, na který šla původní položka (F1).
-                    $item['revenue_account_code'] ?? null,
+                    // Dobropis vrací výnos z TÉHOŽ účtu, na který šla původní položka (F1):
+                    // účet z produktu / kategorie se zapíše na položku dobropisu, aby pozdější
+                    // změna karty nepřesměrovala vratku jinam než původní výnos.
+                    ProductPostingDefaults::code($item['revenue_account_code'] ?? null)
+                        ?? ($productAccounts[(int) ($item['stock_item_id'] ?? 0)]['revenue']['code'] ?? null),
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);

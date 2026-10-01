@@ -18,7 +18,7 @@ use PDO;
  */
 final class DimensionAssignmentRepository
 {
-    public const DOC_TYPES = ['purchase_invoice', 'invoice', 'cash_document', 'bank_transaction', 'journal_template'];
+    public const DOC_TYPES = ['purchase_invoice', 'invoice', 'cash_document', 'bank_transaction', 'journal_template', 'recurring_template'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -84,13 +84,15 @@ final class DimensionAssignmentRepository
     }
 
     /**
-     * Zkopíruje dimenze dokladu (hlavička, položky i rozpady) na nový doklad téhož typu —
-     * kopie, dobropis, vyúčtování proformy (F1). Položky se párují podle pořadí, takže
-     * cílový doklad musí mít položky zdroje ve stejném pořadí a na začátku. Cíl, který už
-     * nějaké dimenze má, se nemění.
+     * Zkopíruje dimenze dokladu (hlavička, položky i rozpady) na nový doklad — kopie,
+     * dobropis, vyúčtování proformy, faktura ze šablony pravidelné fakturace (F1). Položky
+     * se párují podle pořadí, takže cílový doklad musí mít položky zdroje ve stejném pořadí
+     * a na začátku. Cíl, který už nějaké dimenze má, se nemění.
      */
-    public function copyDocument(int $supplierId, string $docType, int $fromId, int $toId): void
+    public function copyDocument(int $supplierId, string $docType, int $fromId, int $toId, ?string $toDocType = null): void
     {
+        $fromDocType = $docType;
+        $docType = $toDocType ?? $docType;
         $pdo = $this->db->pdo();
         $exists = $pdo->prepare(
             'SELECT 1 FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?
@@ -104,14 +106,14 @@ final class DimensionAssignmentRepository
         }
         $pdo->prepare(
             'INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
-             SELECT supplier_id, doc_type, ?, item_no, dimension_type_id, dimension_value_id
+             SELECT supplier_id, ?, ?, item_no, dimension_type_id, dimension_value_id
                FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?'
-        )->execute([$toId, $supplierId, $docType, $fromId]);
+        )->execute([$docType, $toId, $supplierId, $fromDocType, $fromId]);
         $pdo->prepare(
             'INSERT INTO document_dimension_splits (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id, share)
-             SELECT supplier_id, doc_type, ?, item_no, dimension_type_id, dimension_value_id, share
+             SELECT supplier_id, ?, ?, item_no, dimension_type_id, dimension_value_id, share
                FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?'
-        )->execute([$toId, $supplierId, $docType, $fromId]);
+        )->execute([$docType, $toId, $supplierId, $fromDocType, $fromId]);
     }
 
     public function deleteDocument(int $supplierId, string $docType, int $docId): void

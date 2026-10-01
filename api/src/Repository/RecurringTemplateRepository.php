@@ -749,7 +749,7 @@ final class RecurringTemplateRepository
         $owner->execute([$templateId]);
         $ownerId = (int) $owner->fetchColumn();
         $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
-            $ownerId, $items, ['price_list_item_id'],
+            $ownerId, $items, ['price_list_item_id', 'stock_item_id', 'warehouse_id'],
         );
         if ($bad !== []) {
             throw new \MyInvoice\Service\Invoice\PriceListResolutionException('invalid_reference', \MyInvoice\Http\TenantReferenceGuard::message($bad));
@@ -782,8 +782,8 @@ final class RecurringTemplateRepository
                  catalog_source_unit_price, catalog_exchange_rate,
                   catalog_exchange_rate_date, description, quantity, duration_minutes, unit,
                  unit_price_without_vat, vat_rate_id, vat_classification_code,
-                 order_index, revenue_account_code' . $ossColumns . ')
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
+                 order_index, revenue_account_code, stock_item_id, warehouse_id' . $ossColumns . ')
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
         );
         foreach (array_values($items) as $i => $item) {
             $params = [
@@ -809,6 +809,10 @@ final class RecurringTemplateRepository
                     : null,
                 (int) ($item['order_index'] ?? $i),
                 $revenueAccounts[$i] ?? null,
+                // Vazba na skladovou kartu: generátor ji přenáší na fakturu (auto-výdejka,
+                // účet a dimenze produktu). Dřív se při uložení šablony ztrácela.
+                !empty($item['stock_item_id']) ? (int) $item['stock_item_id'] : null,
+                !empty($item['stock_item_id']) && !empty($item['warehouse_id']) ? (int) $item['warehouse_id'] : null,
             ];
             if ($supportsOss) {
                 // Pravidlo „co je platný OSS řádek šablony" je sdílené s generátorem
@@ -878,6 +882,11 @@ final class RecurringTemplateRepository
         // ON DELETE CASCADE smaže items.
         // invoices.recurring_template_id má ON DELETE SET NULL → vygenerované faktury zůstanou.
         $this->db->pdo()->prepare('DELETE FROM recurring_invoice_templates WHERE id = ?')
+            ->execute([$id]);
+        // Dimenze šablony (F1) nemají FK na šablonu — polymorfní odkaz, úklid ručně.
+        $this->db->pdo()->prepare("DELETE FROM document_dimensions WHERE doc_type = 'recurring_template' AND doc_id = ?")
+            ->execute([$id]);
+        $this->db->pdo()->prepare("DELETE FROM document_dimension_splits WHERE doc_type = 'recurring_template' AND doc_id = ?")
             ->execute([$id]);
     }
 

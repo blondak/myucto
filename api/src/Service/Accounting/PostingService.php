@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
+use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
@@ -1354,6 +1355,7 @@ final class PostingService
                 $expense,
                 $taxDeductible,
                 (array) ($opts['item_classification_overrides'] ?? []),
+                $isFixedAsset,
             );
 
         // Normálně 5xx/042 MD + 343 MD / 321 D; dobropis obrací obě strany.
@@ -1496,11 +1498,12 @@ final class PostingService
         string $defaultAccount,
         bool $taxDeductible,
         array $itemOverrides = [],
+        bool $isFixedAsset = false,
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
-                    expense_classification_source, total_without_vat, total_vat, stock_item_id
+                    expense_classification_source, total_without_vat, total_vat, stock_item_id, is_fixed_asset
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1510,9 +1513,12 @@ final class PostingService
             return null;
         }
         // Výchozí nákladový účet produktu > kategorie (F1) — až za účtem položky a druhem výdaje.
-        $productAccounts = $this->productDefaults()->accountsFor(
+        // Pořízení dlouhodobého majetku (hlavička nebo položka is_fixed_asset) jde na 042 /
+        // účet majetku: výchozí nákladový účet karty (stroj vedený na skladě s 501) by
+        // investici poslal do nákladů, proto se tam vrstva produktu nepoužije.
+        $productAccounts = $isFixedAsset ? [] : $this->productDefaults()->accountsFor(
             $supplierId,
-            array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $items),
+            array_map(static fn (array $r): int => !empty($r['is_fixed_asset']) ? 0 : (int) ($r['stock_item_id'] ?? 0), $items),
         );
 
         // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
@@ -1646,12 +1652,10 @@ final class PostingService
      * Vrací NULL (tedy dosavadní jedna noha) když doklad nemá položky, žádná položka není
      * navázaná, nebo |Σ vah| ≈ 0 (podíly by dělily nulou).
      *
-     * SLEVOVÉ ŘÁDKY (item_kind='discount') vazbu na kartu nemají a spadnou proto na
-     * $defaultAccount — procentní sleva z hlavičky se generuje per sazba DPH, ne per položka,
-     * takže není ke které kartě ji přiřadit. Nákladová strana je jiná: přijatá faktura nese
-     * slevu jako samostatný řádek u konkrétního zboží a ta se rozpouští do zlevněných
-     * položek ({@see PurchaseDiscountAllocation}). U prodeje majetku se sleva na hlavičce
-     * nepoužívá, cena se zadá rovnou na řádku.
+     * SLEVOVÉ ŘÁDKY (item_kind='discount') se generují z hlavičky po sazbě DPH a kódu
+     * a rozpouštějí se poměrně do zlevněných položek téže sazby ({@see IssuedDiscountAllocation},
+     * zrcadlo {@see PurchaseDiscountAllocation}) — sleva tak snižuje výnos na účtu, kam šlo
+     * zlevněné zboží, ne předkontaci dokladu.
      *
      * @param list<int> $excludeItemIds odpočtové řádky § 37a (viz {@see advanceDeduction})
      * @return array<string,float>|null
@@ -1663,19 +1667,13 @@ final class PostingService
             return null;
         }
 
-        $anyClassified = false;
-        $weights = [];
-        foreach ($items as $row) {
-            if (in_array((int) $row['id'], $excludeItemIds, true)) {
-                continue;
-            }
-            $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null
-                || $row['item_revenue_account'] !== null;
-            $account = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount);
-            $this->itemAccountTrace['invoice|' . $invoiceId][(int) $row['id']] = $account;
-
-            $w = round((float) $row['total_without_vat'] * $rate, 2);
-            $weights[$account] = round(($weights[$account] ?? 0.0) + $w, 2);
+        $items = array_values(array_filter(
+            $items,
+            static fn (array $row): bool => !in_array((int) $row['id'], $excludeItemIds, true),
+        ));
+        [$itemAccounts, $weights, $anyClassified] = $this->issuedItemAccountsAndWeights($supplierId, $items, $rate, $defaultAccount);
+        foreach ($itemAccounts as $itemId => $account) {
+            $this->itemAccountTrace['invoice|' . $invoiceId][$itemId] = $account;
         }
 
         if (!$anyClassified) {
@@ -1691,6 +1689,49 @@ final class PostingService
             return null;
         }
         return $weights;
+    }
+
+    /**
+     * Účet a váha každé položky vydané faktury. Slevový řádek z hlavičky bez vlastního
+     * účtu se rozpustí poměrně do zlevněných položek ({@see IssuedDiscountAllocation}) —
+     * jeho váha jde na jejich účty a do stopy (dimenze) dostane účet té s největším dílem.
+     *
+     * @param list<array<string,mixed>> $items z {@see issuedItemRows()}
+     * @return array{0:array<int,string>, 1:array<string,float>, 2:bool} položka => účet, účet => váha, je něco klasifikované
+     */
+    private function issuedItemAccountsAndWeights(int $supplierId, array $items, float $rate, string $defaultAccount): array
+    {
+        $anyClassified = false;
+        $itemAccounts = [];
+        $itemWeights = [];
+        foreach ($items as $row) {
+            $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null
+                || $row['item_revenue_account'] !== null;
+            $itemAccounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount);
+            $itemWeights[(int) $row['id']] = round((float) $row['total_without_vat'] * $rate, 2);
+        }
+        $discounts = IssuedDiscountAllocation::allocate(array_values(array_filter(
+            $items,
+            static fn (array $row): bool => ($row['item_kind'] ?? 'standard') !== 'discount' || $row['item_revenue_account'] === null,
+        )));
+        $weights = [];
+        foreach ($itemAccounts as $itemId => $account) {
+            $shares = $discounts[$itemId] ?? null;
+            if ($shares === null) {
+                $weights[$account] = round(($weights[$account] ?? 0.0) + $itemWeights[$itemId], 2);
+                continue;
+            }
+            $main = null;
+            foreach ($shares as $targetId => $share) {
+                $target = $itemAccounts[$targetId];
+                $weights[$target] = round(($weights[$target] ?? 0.0) + $itemWeights[$itemId] * $share, 2);
+                if ($main === null || $share > $shares[$main]) {
+                    $main = $targetId;
+                }
+            }
+            $itemAccounts[$itemId] = $itemAccounts[$main];
+        }
+        return [$itemAccounts, $weights, $anyClassified];
     }
 
     /** @param array<string,mixed> $inv */
@@ -1732,7 +1773,8 @@ final class PostingService
     private function issuedItemRows(int $supplierId, int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, small_asset_id, asset_id, total_without_vat, revenue_account_code, stock_item_id
+            'SELECT id, small_asset_id, asset_id, total_without_vat, revenue_account_code, stock_item_id,
+                    item_kind, vat_rate_id, vat_classification_code
                FROM invoice_items
               WHERE invoice_id = ?'
         );
@@ -1785,11 +1827,50 @@ final class PostingService
         }
         $rule = $this->rules->resolve($supplierId, self::issuedHeaderRuleKey($inv));
         $default = (string) ($rule['credit_account_code'] ?? '602');
-        $accounts = [];
-        foreach ($this->issuedItemRows($supplierId, $invoiceId) as $row) {
-            $accounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $default);
+        $rate = $this->fxRate($inv);
+        [$accounts] = $this->issuedItemAccountsAndWeights($supplierId, $this->issuedItemRows($supplierId, $invoiceId), $rate, $default);
+        return ['rate' => $rate, 'accounts' => $accounts];
+    }
+
+    /**
+     * Nákladové účty řádků přijaté faktury tak, jak je zaúčtuje {@see buildFromPurchaseInvoice}
+     * bez ručního přebití účtu: účet položky > druh výdaje (i jistý automatický návrh) >
+     * produkt > kategorie > předkontace, nedaňová analytika, sleva na účtu zlevněné položky.
+     * SSOT pro uzávěrku (časové rozlišení nákladů 381), která musí odložit náklad z téhož
+     * účtu, na který ho faktura zaúčtovala.
+     *
+     * @return array<int,string> id položky => kód účtu
+     */
+    public function purchaseItemExpenseAccounts(int $supplierId, int $purchaseInvoiceId): array
+    {
+        $pi = $this->fetchDocHeader('purchase_invoices', $supplierId, $purchaseInvoiceId);
+        if ($pi === null) {
+            throw new PostingException('entry_not_found', 'Přijatá faktura #' . $purchaseInvoiceId . ' neexistuje.', 404);
         }
-        return ['rate' => $this->fxRate($inv), 'accounts' => $accounts];
+        $isFixedAsset = (bool) ($pi['is_fixed_asset'] ?? false);
+        $taxDeductible = (bool) ($pi['tax_deductible'] ?? true);
+        $rule = $this->rules->resolve($supplierId, $isFixedAsset ? self::DEFAULT_RECEIVED_ASSET_RULE_KEY : self::DEFAULT_RECEIVED_RULE_KEY);
+        $expense = $rule['debit_account_code'] ?? ($isFixedAsset ? '042' : '518');
+        if (!$taxDeductible) {
+            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense);
+        }
+        $key = 'purchase_invoice|' . $purchaseInvoiceId;
+        unset($this->itemAccountTrace[$key]);
+        $this->purchaseExpenseWeights(
+            $supplierId,
+            $purchaseInvoiceId,
+            $this->fxRate($pi),
+            (bool) $pi['reverse_charge'],
+            (string) ($pi['vat_deduction'] ?? 'full'),
+            max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0,
+            $expense,
+            $taxDeductible,
+            [],
+            $isFixedAsset,
+        );
+        $accounts = $this->itemAccountTrace[$key] ?? [];
+        unset($this->itemAccountTrace[$key]);
+        return $accounts;
     }
 
     /**

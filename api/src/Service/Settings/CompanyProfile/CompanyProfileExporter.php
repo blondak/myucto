@@ -226,15 +226,18 @@ final class CompanyProfileExporter
         $stmt = $this->db->pdo()->prepare(
             "SELECT t.code AS type_code, v.code AS value_code,
                     c.ic AS client_ic, c.company_name AS client_name,
-                    p.name AS project_name, p.project_number, pc.ic AS project_client_ic, pc.company_name AS project_client_name
+                    p.name AS project_name, p.project_number, pc.ic AS project_client_ic, pc.company_name AS project_client_name,
+                    si.sku AS product_sku, sc.code AS category_code
                FROM dimension_defaults d
                JOIN dimension_types t ON t.id = d.dimension_type_id
                JOIN dimension_values v ON v.id = d.dimension_value_id
           LEFT JOIN clients c ON c.id = d.client_id AND c.supplier_id = d.supplier_id
           LEFT JOIN projects p ON p.id = d.project_id
           LEFT JOIN clients pc ON pc.id = p.client_id AND pc.supplier_id = d.supplier_id
+          LEFT JOIN stock_items si ON si.id = d.product_id AND si.supplier_id = d.supplier_id
+          LEFT JOIN stock_categories sc ON sc.id = d.product_category_id AND sc.supplier_id = d.supplier_id
               WHERE d.supplier_id = ?
-              ORDER BY d.client_id IS NULL, c.company_name, p.name, t.code"
+              ORDER BY d.client_id IS NULL, c.company_name, p.name, si.sku, sc.code, t.code"
         );
         $stmt->execute([$supplierId]);
         $out = [];
@@ -254,6 +257,21 @@ final class CompanyProfileExporter
                         'number' => $r['project_number'],
                         'client' => self::clientKey($r['project_client_ic'], (string) $r['project_client_name']),
                     ],
+                    'type_code' => (string) $r['type_code'],
+                    'value_code' => (string) $r['value_code'],
+                ];
+            } elseif ($r['product_sku'] !== null) {
+                // Produkt a kategorie (F1) se párují kódem — SKU je ve firmě unikátní.
+                $out[] = [
+                    'entity' => 'product',
+                    'product' => ['sku' => (string) $r['product_sku']],
+                    'type_code' => (string) $r['type_code'],
+                    'value_code' => (string) $r['value_code'],
+                ];
+            } elseif ($r['category_code'] !== null) {
+                $out[] = [
+                    'entity' => 'product_category',
+                    'product_category' => ['code' => (string) $r['category_code']],
                     'type_code' => (string) $r['type_code'],
                     'value_code' => (string) $r['value_code'],
                 ];

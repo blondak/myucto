@@ -23237,6 +23237,7 @@ paths:
           - cash-documents
           - bank-transactions
           - journal-templates
+          - recurring-templates
       - in: path
         name: id
         required: true
@@ -35492,6 +35493,9 @@ components:
               oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
               oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
               oss_supply_type: { type: [string, "null"], enum: [goods, services, null] }
+              stock_item_id: { type: [integer, "null"], description: "Skladová karta položky; generátor ji přenese na fakturu." }
+              warehouse_id: { type: [integer, "null"] }
+              revenue_account_code: { type: [string, "null"], maxLength: 10, description: "Výnosový účet položky (třída 6) přenášený na vygenerovanou fakturu. NULL = produkt > kategorie > předkontace." }
 
     RecurringTemplateInput:
       type: object
@@ -35585,6 +35589,12 @@ components:
                 maxLength: 8
                 description: "Ručně zvolená klasifikace DPH (kód z `/vat-classifications` se `direction` sale/both). Přenese se na každou vygenerovanou fakturu a přebije automatické odvození ze sazby a jednotky. NULL/vynecháno = odvodit. Neznámý kód je chyba validace; u neplátce DPH a u OSS řádku se rozhodnutí zahodí."
               order_index: { type: integer }
+              stock_item_id: { type: [integer, "null"], description: "Skladová karta (musí patřit firmě). Round-trip — uložení položek je DELETE + INSERT." }
+              warehouse_id: { type: [integer, "null"], description: "Sklad výdeje, jen spolu se `stock_item_id`." }
+              revenue_account_code:
+                type: [string, "null"]
+                maxLength: 10
+                description: "Výnosový účet položky (třída 6, aktivní účet rozvrhu firmy), jinak 400. Vygenerovaná faktura ho dostane; účet, který mezitím z rozvrhu zmizel, se při generování vynechá. Dimenze šablony se ukládají přes /api/v1/accounting/dimensions/documents/recurring-templates/{id} a generátor je zkopíruje na fakturu."
               oss_applicable:
                 type: boolean
                 default: false
@@ -35875,9 +35885,9 @@ components:
         posted: { type: boolean }
         origin:
           type: string
-          enum: [preset, expense_rule, rule, detector, learned, matched, schedule, ai, manual, manual_repost, unknown]
+          enum: [preset, expense_rule, item_account, rule, detector, learned, matched, schedule, ai, manual, manual_repost, unknown]
           description: >-
-            Hlavní vrstva. `manual_repost` znamená, že kontaci ručně opravila účetní
+            Hlavní vrstva. `item_account` = účet položky, produktu nebo kategorie přebil předkontaci. `manual_repost` znamená, že kontaci ručně opravila účetní
             a šablona ji už nepopisuje; `manual` = zaúčtováno ručně bez šablony;
             `unknown` = zdroj nelze určit (doklad z doby před evidencí původu).
         manual_repost:
@@ -35888,6 +35898,17 @@ components:
         detector:
           type: [string, "null"]
           description: Klíč vestavěného rozpoznání bankovního pohybu (např. own_transfer)
+        item_accounts:
+          type: array
+          description: Účty, které na doklad určila položka, produkt nebo kategorie produktu (přednost před předkontací)
+          items:
+            type: object
+            properties:
+              account_code: { type: string }
+              source: { type: string, enum: [item, product, product_category] }
+              product_id: { type: [integer, "null"] }
+              product_name: { type: [string, "null"] }
+              used: { type: boolean, description: "Objevil se účet v zápisu?" }
         presets:
           type: array
           description: Předkontace z `posting_rules`, které na doklad podle dnešního nastavení sedí

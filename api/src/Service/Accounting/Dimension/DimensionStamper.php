@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Dimension;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use PDO;
 
 /**
@@ -446,8 +447,11 @@ final class DimensionStamper
         if ($itemTable !== null) {
             // Pořadí položky = pořadí v editoru (order_index), číslováno od 1 — stejně
             // jako ho ukládá DimensionService::saveDocument().
+            $issued = $itemTable === 'invoice_items';
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id, total_without_vat, stock_item_id FROM {$itemTable} WHERE {$itemColumn} = ? ORDER BY order_index, id"
+                'SELECT id, total_without_vat, stock_item_id'
+                . ($issued ? ', item_kind, vat_rate_id, vat_classification_code, revenue_account_code' : '')
+                . " FROM {$itemTable} WHERE {$itemColumn} = ? ORDER BY order_index, id"
             );
             $stmt->execute([$sourceId]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -468,6 +472,9 @@ final class DimensionStamper
                         'account_id' => $itemAccounts[(int) $row['id']] ?? null,
                     ];
                 }
+                if ($issued) {
+                    $items = self::foldIssuedDiscounts($rows, $items);
+                }
             }
         }
         $header = DimensionDefaults::fill(
@@ -475,6 +482,39 @@ final class DimensionStamper
             $defaults->forSource($supplierId, $sourceType, $sourceId),
         );
         return [$header, $items, $splits];
+    }
+
+    /**
+     * Slevový řádek z hlavičky vydané faktury nemá vlastní dimenze — zlevňuje položky své
+     * sazby. Jeho základ se proto přičte (záporně) k zlevněným položkám v poměru, jakým ho
+     * zaúčtování rozpustí do jejich účtů ({@see IssuedDiscountAllocation}), a jako samostatná
+     * položka zmizí. Jinak by nesl dimenze hlavičky se zápornou vahou a výnosový řádek by se
+     * mezi položky s různými dimenzemi nedal rozdělit.
+     *
+     * @param list<array<string,mixed>> $rows řádky invoice_items v pořadí $items
+     * @param list<array{dims:array<int,int>, weight:float, account_id:?int}> $items
+     * @return list<array{dims:array<int,int>, weight:float, account_id:?int}>
+     */
+    public static function foldIssuedDiscounts(array $rows, array $items): array
+    {
+        $index = [];
+        foreach ($rows as $i => $row) {
+            $index[(int) $row['id']] = $i;
+        }
+        $allocation = IssuedDiscountAllocation::allocate(array_values(array_filter(
+            $rows,
+            static fn (array $r): bool => ($r['item_kind'] ?? 'standard') !== 'discount'
+                || trim((string) ($r['revenue_account_code'] ?? '')) === '',
+        )));
+        foreach ($allocation as $discountId => $shares) {
+            $d = $index[$discountId];
+            foreach ($shares as $targetId => $share) {
+                $t = $index[$targetId];
+                $items[$t]['weight'] = round($items[$t]['weight'] + $items[$d]['weight'] * $share, 2);
+            }
+            unset($items[$d]);
+        }
+        return array_values($items);
     }
 
     /** @return array<int,string> */

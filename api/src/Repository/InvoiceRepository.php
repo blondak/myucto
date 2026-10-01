@@ -1773,7 +1773,6 @@ final class InvoiceRepository
                 $language,
                 $supportsOss,
                 count($accrualPeriods) === 1 ? reset($accrualPeriods) : [null, null],
-                count(array_unique(array_map('strval', $revenueAccounts))) === 1 ? reset($revenueAccounts) : null,
             );
         }
     }
@@ -1795,7 +1794,6 @@ final class InvoiceRepository
         string $language,
         bool $supportsOss,
         array $accrualPeriod = [null, null],
-        ?string $revenueAccount = null,
     ): void {
         $label = self::discountLabel($discountPercent, $language);
         $order = $startOrder;
@@ -1825,9 +1823,9 @@ final class InvoiceRepository
                 // Období časového rozlišení: sleva z hlavičky snižuje výnos všech řádků,
                 // takže jejich společné období zdědí; při různých obdobích zůstane bez něj.
                 ...$accrualPeriod,
-                // Výnosový účet (F1): mají-li všechny položky týž účet, sleva ho snižuje;
-                // u různých účtů zůstane bez účtu a jde na předkontaci dokladu.
-                $revenueAccount,
+                // Výnosový účet (F1): sleva vlastní účet nemá, zaúčtování ji rozpustí do účtů
+                // zlevněných položek (IssuedDiscountAllocation).
+                null,
             ];
             if ($supportsOss && isset($g['oss']) && is_array($g['oss'])) {
                 $oss = $g['oss'];

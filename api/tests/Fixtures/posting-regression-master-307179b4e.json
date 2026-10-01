@@ -1,0 +1,216 @@
+{
+    "invoice": [
+        {
+            "account_code": "311",
+            "side": "debit",
+            "amount": 1613.33
+        },
+        {
+            "account_code": "602",
+            "side": "credit",
+            "amount": 1333.33
+        },
+        {
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": 280.0
+        }
+    ],
+    "credit_note": [
+        {
+            "account_code": "311",
+            "side": "credit",
+            "amount": 1210.0
+        },
+        {
+            "account_code": "602",
+            "side": "debit",
+            "amount": 1000.0
+        },
+        {
+            "account_code": "343.200",
+            "side": "debit",
+            "amount": 210.0
+        }
+    ],
+    "foreign_currency": [
+        {
+            "account_code": "311",
+            "side": "debit",
+            "amount": 4729.03,
+            "currency_code": "EUR",
+            "fx_rate": 25.125,
+            "amount_foreign": 188.22
+        },
+        {
+            "account_code": "602",
+            "side": "credit",
+            "amount": 3908.19
+        },
+        {
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": 820.84
+        }
+    ],
+    "header_discount": [
+        {
+            "account_code": "311",
+            "side": "debit",
+            "amount": 1638.99
+        },
+        {
+            "account_code": "602",
+            "side": "credit",
+            "amount": 1354.54
+        },
+        {
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": 284.45
+        }
+    ],
+    "asset_item": [
+        {
+            "account_code": "311",
+            "side": "debit",
+            "amount": 4477.0
+        },
+        {
+            "account_code": "602",
+            "side": "credit",
+            "amount": 700.0
+        },
+        {
+            "account_code": "642",
+            "side": "credit",
+            "amount": 3000.0
+        },
+        {
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": 777.0
+        }
+    ],
+    "proforma_final": [
+        {
+            "account_code": "311",
+            "side": "debit",
+            "amount": 1689.0
+        },
+        {
+            "account_code": "602",
+            "side": "credit",
+            "amount": 1500.0
+        },
+        {
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": 189.0
+        },
+        {
+            "account_code": "324",
+            "side": "debit",
+            "amount": 600.0
+        },
+        {
+            "account_code": "311",
+            "side": "credit",
+            "amount": 600.0
+        }
+    ],
+    "purchase_expense_kind": [
+        {
+            "account_code": "501.900",
+            "side": "debit",
+            "amount": 1000.0
+        },
+        {
+            "account_code": "518",
+            "side": "debit",
+            "amount": 250.0
+        },
+        {
+            "account_code": "343.100",
+            "side": "debit",
+            "amount": 262.5
+        },
+        {
+            "account_code": "321",
+            "side": "credit",
+            "amount": 1512.5
+        }
+    ],
+    "purchase_fixed_asset": [
+        {
+            "account_code": "042",
+            "side": "debit",
+            "amount": 50000.0
+        },
+        {
+            "account_code": "343.100",
+            "side": "debit",
+            "amount": 10500.0
+        },
+        {
+            "account_code": "321",
+            "side": "credit",
+            "amount": 60500.0
+        }
+    ],
+    "purchase_non_deductible": [
+        {
+            "account_code": "518.990",
+            "side": "debit",
+            "amount": 500.0
+        },
+        {
+            "account_code": "343.100",
+            "side": "debit",
+            "amount": 105.0
+        },
+        {
+            "account_code": "321",
+            "side": "credit",
+            "amount": 605.0
+        }
+    ],
+    "dimensions": [
+        {
+            "account": "311",
+            "side": "debit",
+            "amount": "1210.01",
+            "dims": {
+                "projekt": "REGR-P1",
+                "stredisko": "REGR-C1"
+            }
+        },
+        {
+            "account": "602",
+            "side": "credit",
+            "amount": "600.01",
+            "dims": {
+                "projekt": "REGR-P1",
+                "stredisko": "REGR-C1"
+            }
+        },
+        {
+            "account": "602",
+            "side": "credit",
+            "amount": "400.00",
+            "dims": {
+                "projekt": "REGR-P1",
+                "stredisko": "REGR-C2"
+            }
+        },
+        {
+            "account": "343.200",
+            "side": "credit",
+            "amount": "210.00",
+            "dims": {
+                "projekt": "REGR-P1",
+                "stredisko": "REGR-C1"
+            }
+        }
+    ]
+}

@@ -645,7 +645,7 @@ final class CompanyProfileImporter
             return;
         }
         if (!$this->dimensionRepo->enabled($supplierId)) {
-            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů a zakázek se nenahrály.');
+            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů, zakázek a produktů se nenahrály.');
             return;
         }
         $types = [];
@@ -666,11 +666,16 @@ final class CompanyProfileImporter
             $entityId = match ($entity) {
                 'client' => $this->clientId($supplierId, (array) ($d['client'] ?? [])),
                 'project' => $this->projectId($supplierId, (array) ($d['project'] ?? [])),
+                'product' => $this->codeId('SELECT id FROM stock_items WHERE supplier_id = ? AND sku = ?', $supplierId, (string) ($d['product']['sku'] ?? '')),
+                'product_category' => $this->codeId('SELECT id FROM stock_categories WHERE supplier_id = ? AND code = ?', $supplierId, (string) ($d['product_category']['code'] ?? '')),
                 default => null,
             };
-            $who = $entity === 'client'
-                ? 'klient ' . (string) ($d['client']['name'] ?? '?')
-                : 'zakázka ' . (string) ($d['project']['name'] ?? '?');
+            $who = match ($entity) {
+                'client' => 'klient ' . (string) ($d['client']['name'] ?? '?'),
+                'product' => 'produkt ' . (string) ($d['product']['sku'] ?? '?'),
+                'product_category' => 'kategorie ' . (string) ($d['product_category']['code'] ?? '?'),
+                default => 'zakázka ' . (string) ($d['project']['name'] ?? '?'),
+            };
             if ($entityId === null) {
                 $this->warn($section, sprintf('%s ve firmě není, výchozí dimenze %s přeskočena.', ucfirst($who), $typeCode));
                 continue;
@@ -855,6 +860,18 @@ final class CompanyProfileImporter
     }
 
     /** @param array<string,mixed> $project */
+    /** Id záznamu firmy podle unikátního kódu (SKU produktu, kód kategorie), jinak null. */
+    private function codeId(string $sql, int $supplierId, string $code): ?int
+    {
+        if (trim($code) === '') {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, trim($code)]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
     private function projectId(int $supplierId, array $project): ?int
     {
         $clientId = $this->clientId($supplierId, (array) ($project['client'] ?? []));

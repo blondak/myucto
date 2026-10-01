@@ -582,6 +582,15 @@ final class RecurringInvoiceGenerator
                 ] + $ossColumns;
             }
             $this->invoices->replaceItems($newId, $items);
+            // Dimenze šablony (hlavička i položky, F1) — položky faktury leží ve stejném
+            // pořadí jako položky šablony, sleva z hlavičky až za nimi.
+            (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->copyDocument(
+                (int) $template['supplier_id'],
+                'recurring_template',
+                (int) $template['id'],
+                $newId,
+                'invoice',
+            );
 
             $pdo->commit();
             return $newId;

@@ -6,8 +6,6 @@ namespace MyInvoice\Service\Accounting\Closing;
 
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Accounting\Expense\ExpenseKind;
-use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
@@ -143,6 +141,7 @@ final class ClosingService
      */
     private const ESTIMATE_MIN_RECURRING_MONTHS = 3;
     private const ESTIMATE_SAMPLE_SIZE = 3;
+
 
     public function __construct(
         private readonly Connection $db,
@@ -1367,6 +1366,7 @@ final class ClosingService
         $documents = [];
         $byAccount = [];
         $total = 0.0;
+        $accountsByInvoice = [];
         foreach ($this->prepaidExpenseAccrualRows($supplierId, $startsOn, $endsOn) as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
@@ -1400,12 +1400,7 @@ final class ClosingService
                     $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
                 }
             }
-            $account = $this->prepaidExpenseCreditAccount(
-                $supplierId,
-                $row['expense_account_code'] !== null ? (string) $row['expense_account_code'] : null,
-                $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
-                $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null,
-            );
+            $account = $this->prepaidExpenseCreditAccount($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
 
             $total = round($total + $deferred, 2);
             $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $deferred, 2);
@@ -1541,7 +1536,7 @@ final class ClosingService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id AS item_id, pii.purchase_invoice_id, pii.description,
-                    pii.total_without_vat, pii.expense_kind, pii.expense_account_code, pii.stock_item_id,
+                    pii.total_without_vat,
                     pii.accrual_from, pii.accrual_to,
                     pi.vendor_invoice_number, pi.exchange_rate, cur.code AS currency_code
                FROM purchase_invoice_items pii
@@ -1571,7 +1566,7 @@ final class ClosingService
     private function prepaidExpenseReleaseRows(int $supplierId, string $originEndsOn, string $targetEnd): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.total_without_vat, pii.expense_kind, pii.expense_account_code, pii.stock_item_id,
+            'SELECT pii.id AS item_id, pii.total_without_vat,
                     pii.accrual_from, pii.accrual_to, pii.purchase_invoice_id,
                     pi.exchange_rate, cur.code AS currency_code
                FROM purchase_invoice_items pii
@@ -1603,6 +1598,7 @@ final class ClosingService
     {
         $byAccount = [];
         $total = 0.0;
+        $accountsByInvoice = [];
         foreach ($this->prepaidExpenseReleaseRows($supplierId, $originEndsOn, $targetEnd) as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
@@ -1617,12 +1613,7 @@ final class ClosingService
             if ((int) round($release * 100) === 0) {
                 continue;
             }
-            $account = $this->prepaidExpenseCreditAccount(
-                $supplierId,
-                $row['expense_account_code'] !== null ? (string) $row['expense_account_code'] : null,
-                $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
-                $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null,
-            );
+            $account = $this->prepaidExpenseCreditAccount($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
             $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $release, 2);
             $total = round($total + $release, 2);
         }
@@ -1647,30 +1638,22 @@ final class ClosingService
     }
 
     /**
-     * Nákladový účet (5xx) pro odloženou stranu řádku: expense_account_code (adresný účet) přebíjí
-     * odvození z expense_kind (přes posting_rules, tenant si ho může přesměrovat); pak výchozí
-     * nákladový účet produktu > kategorie (stejné pořadí jako PostingService); bez toho všeho
-     * default 518 (dosavadní chování PostingService pro neklasifikovaný náklad).
+     * Nákladový účet (5xx) pro odloženou stranu řádku = účet, na který řádek zaúčtovala
+     * přijatá faktura ({@see PostingService::purchaseItemExpenseAccounts()}, SSOT): účet
+     * položky > druh výdaje včetně jistého automatického návrhu > produkt > kategorie >
+     * předkontace. Jinak by se náklad odložil z jiného účtu, než na kterém leží.
      */
-    private function prepaidExpenseCreditAccount(int $supplierId, ?string $override, ?string $kind, ?int $productId = null): string
+    /** @param array<int,array<int,string>> $accountsByInvoice cache jednoho průchodu (faktura => položka => účet) */
+    private function prepaidExpenseCreditAccount(int $supplierId, int $purchaseInvoiceId, int $itemId, array &$accountsByInvoice): string
     {
-        $override = $override !== null ? trim($override) : '';
-        if ($override !== '') {
-            return $override;
-        }
-        $ek = ExpenseKind::tryFromNullable($kind);
-        if ($ek !== null) {
-            $rule = $this->rules->resolve($supplierId, $ek->ruleKey());
-            return (string) ($rule['debit_account_code'] ?? $ek->fallbackAccount());
-        }
-        if ($productId !== null && $productId > 0) {
-            $product = (new ProductPostingDefaults($this->db))->accountsFor($supplierId, [$productId]);
-            $code = $product[$productId]['expense']['code'] ?? null;
-            if ($code !== null) {
-                return $code;
+        if (!isset($accountsByInvoice[$purchaseInvoiceId])) {
+            try {
+                $accountsByInvoice[$purchaseInvoiceId] = $this->posting->purchaseItemExpenseAccounts($supplierId, $purchaseInvoiceId);
+            } catch (PostingException $e) {
+                throw new ClosingException($e->errorCode, $e->getMessage());
             }
         }
-        return '518';
+        return $accountsByInvoice[$purchaseInvoiceId][$itemId] ?? '518';
     }
 
     // ── časové rozlišení výnosů příštích období — 384 z označených řádků vydaných faktur ──

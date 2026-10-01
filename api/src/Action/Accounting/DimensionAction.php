@@ -53,6 +53,7 @@ final class DimensionAction
         'cash-documents' => 'cash_document',
         'bank-transactions' => 'bank_transaction',
         'journal-templates' => 'journal_template',
+        'recurring-templates' => 'recurring_template',
     ];
 
     public function __construct(

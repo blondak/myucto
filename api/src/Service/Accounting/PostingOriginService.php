@@ -9,6 +9,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
 /**
@@ -30,6 +31,8 @@ use PDO;
  *     {@see PostingService::buildFromInvoice()},
  *   - **přijatá faktura** → druh výdaje na řádcích ({@see ExpenseKind::ruleKey()})
  *     → předkontace, plus nákladové pravidlo, které ten druh vybralo,
+ *   - **účet položky / produktu / kategorie** (F1) → `item_accounts`, přebíjí předkontaci
+ *     u řádků, které ho mají ({@see ProductPostingDefaults}),
  *   - **bankovní pohyb** → pravidlo účtování / vestavěné rozpoznání / naučená
  *     kontace / spárovaná platba (předkontace `payment.*`); zdroj čte
  *     {@see AutomationProvenanceService} z `bank_posting_suggestions`.
@@ -91,6 +94,7 @@ final class PostingOriginService
             'presets'       => [],
             'rules'         => [],
             'detector'      => null,
+            'item_accounts' => [],
         ];
 
         $out = match ($sourceType) {
@@ -135,6 +139,18 @@ final class PostingOriginService
         );
         $out['origin'] = 'preset';
 
+        // Účet položky > produkt > kategorie (F1) má přednost před předkontací — prodej
+        // majetku (641/642) ho přebíjí, takže takové řádky tu nejsou.
+        $items = $this->db->pdo()->prepare(
+            "SELECT revenue_account_code AS own_code, stock_item_id FROM invoice_items
+              WHERE invoice_id = ? AND asset_id IS NULL AND small_asset_id IS NULL AND item_kind <> 'discount'"
+        );
+        $items->execute([$docId]);
+        $out['item_accounts'] = $this->itemAccounts($supplierId, $items->fetchAll(PDO::FETCH_ASSOC), ProductPostingDefaults::KIND_REVENUE, $usedAccounts);
+        if ($out['item_accounts'] !== []) {
+            $out['origin'] = 'item_account';
+        }
+
         return $out;
     }
 
@@ -166,8 +182,20 @@ final class PostingOriginService
             $out['presets'][] = $this->preset($supplierId, (string) $key, $reason, $usedAccounts);
         }
 
+        // Účet položky, jinak (bez druhu výdaje a mimo pořízení majetku) účet produktu
+        // > kategorie — stejné pořadí jako PostingService::purchaseExpenseWeights().
+        $items = $this->db->pdo()->prepare(
+            'SELECT expense_account_code AS own_code,
+                    CASE WHEN expense_kind IS NULL AND is_fixed_asset = 0 AND ? = 0 THEN stock_item_id END AS stock_item_id
+               FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $items->execute([(int) (bool) $row['is_fixed_asset'], $docId]);
+        $out['item_accounts'] = $this->itemAccounts($supplierId, $items->fetchAll(PDO::FETCH_ASSOC), ProductPostingDefaults::KIND_EXPENSE, $usedAccounts);
+
         $prov = $this->purchases->expenseClassificationProvenance($supplierId, $docId);
-        if ($prov['rule_id'] !== null) {
+        if ($prov['rule_id'] === null && $out['item_accounts'] !== []) {
+            $out['origin'] = 'item_account';
+        } elseif ($prov['rule_id'] !== null) {
             $out['rules'][] = [
                 'type'      => 'expense',
                 'id'        => $prov['rule_id'],
@@ -181,6 +209,55 @@ final class PostingOriginService
         }
 
         return $out;
+    }
+
+    /**
+     * Účty, které na dokladu určila položka, produkt nebo kategorie (F1), seskupené
+     * podle účtu a zdroje. Produkt a kategorie se řeší toutéž cestou jako zaúčtování
+     * ({@see ProductPostingDefaults::accountsFor()}).
+     *
+     * @param list<array{own_code:?string, stock_item_id:mixed}> $rows
+     * @param ProductPostingDefaults::KIND_* $kind
+     * @param list<string> $usedAccounts
+     * @return list<array{account_code:string, source:string, product_id:?int, product_name:?string, used:bool}>
+     */
+    private function itemAccounts(int $supplierId, array $rows, string $kind, array $usedAccounts): array
+    {
+        $products = (new ProductPostingDefaults($this->db))->accountsFor(
+            $supplierId,
+            array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $rows),
+        );
+        $names = [];
+        if ($products !== []) {
+            $ids = array_keys($products);
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, name FROM stock_items WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$ids]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $names[(int) $r['id']] = (string) $r['name'];
+            }
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $own = ProductPostingDefaults::code($r['own_code'] ?? null);
+            $productId = (int) ($r['stock_item_id'] ?? 0);
+            $fromProduct = $own === null ? ($products[$productId][$kind] ?? null) : null;
+            if ($own === null && $fromProduct === null) {
+                continue;
+            }
+            $code = $own ?? $fromProduct['code'];
+            $source = $own !== null ? 'item' : $fromProduct['source'];
+            $key = $code . '|' . $source . '|' . ($own === null ? $productId : 0);
+            $out[$key] = [
+                'account_code' => $code,
+                'source' => $source,
+                'product_id' => $own === null ? $productId : null,
+                'product_name' => $own === null ? ($names[$productId] ?? null) : null,
+                'used' => self::accountPresent($code, $usedAccounts),
+            ];
+        }
+        return array_values($out);
     }
 
     /**
