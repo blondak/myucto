@@ -552,6 +552,21 @@ export interface MobileKeyOutboxConfirmBatch {
   state: number
   description: string
   results: MobileKeyBatchItemResult[] | null
+  /**
+   * Relace ponechaná po odeslání k dotažení doručenek (5 minut). `null` =
+   * nic neodešlo nebo relaci ponechat nešlo — doručenky se pak načtou ručně.
+   */
+  receipt_session?: MobileKeyReceiptSession | null
+}
+
+export interface MobileKeyReceiptSession {
+  session_token: string
+  expires_at: string
+}
+
+/** Dotažení doručenek v ponechané relaci; `session_open` = má smysl zkusit znovu. */
+export interface ReceiptSessionResult extends ReceiptBatchResult {
+  session_open: boolean
 }
 
 /**
@@ -942,6 +957,16 @@ export const dataBoxApi = {
     ).then(r => r.data),
 
   /** Dávka v relaci otevřené jménem a heslem; údaje se nikam neukládají. */
+  /**
+   * Doručenky odeslaných zpráv v relaci Mobilního klíče, kterou uživatel
+   * potvrdil při odeslání. Novou relaci nikdy nezakládá; `finish` ji ukončí.
+   */
+  downloadReceiptsInMobileKeySession: (sessionToken: string, environment: string, finish = false) =>
+    api.post<ReceiptSessionResult>('/submissions/outbox/receipts/download/mobile-key/session', {
+      session_token: sessionToken,
+      environment,
+      finish,
+    }).then(r => r.data),
   downloadReceiptsBatchWithPassword: (environment: string, username: string, password: string) =>
     api.post<ReceiptBatchResult>('/submissions/outbox/receipts/download/password', {
       environment,

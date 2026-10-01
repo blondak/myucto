@@ -19,6 +19,10 @@ final class MobileKeyIsdsAuthenticator
     private const CONNECT_TIMEOUT = 10;
     private const TIMEOUT = 30;
     private const USER_AGENT = 'MyUcto-ISDS-MobileKey/1.0';
+    private const SESSION_CONTEXT = 'isds:mobile-key-session:v1';
+    /** Jak dlouho smí klient po odeslání dotahovat doručenky v téže relaci. */
+    public const SESSION_FOLLOW_UP_TTL = 300;
+    private const SESSION_FOLLOW_UP_ATTEMPTS = 12;
 
     /** @param null|callable(string,string,array<string,mixed>):array{status:int,body:string,cookies:array<string,string>} $httpDouble */
     public function __construct(
@@ -224,6 +228,111 @@ final class MobileKeyIsdsAuthenticator
         ];
     }
 
+    /**
+     * Ponechá právě potvrzenou relaci krátce otevřenou, aby si klient mohl
+     * po odeslání v TÉŽE relaci dotáhnout doručenky — bez nového potvrzení
+     * v mobilu. Relace se nikdy nezakládá znovu: kdo token nemá, nebo mu
+     * vypršel, přihlásí se jako obvykle.
+     *
+     * Token drží jen klient, který odeslání potvrdil; v DB je jeho hash a
+     * zašifrovaná session cookie, svázaná s firmou, uživatelem a prostředím.
+     * Po {@see self::SESSION_FOLLOW_UP_TTL} sekundách se tajemství smaže
+     * a ISDS relaci po 30 minutách nečinnosti zneplatní sám.
+     *
+     * @return array{session_token:string,expires_at:string}
+     */
+    public function retainSession(ChannelContext $context, int $userId): array
+    {
+        $this->assertEnvironment($context->environment);
+        if ($context->credentials->authMode !== 'mobile_key' || $context->credentials->sessionCookie === null) {
+            throw new SubmissionChannelException('isds_mobile_session_missing', 'Relace Mobilního klíče není k dispozici.', 409);
+        }
+        $cookie = $this->safeCookie($context->credentials->sessionCookie->reveal());
+        $token = $this->newFlowToken();
+        $this->flows->create(
+            hash('sha256', $token),
+            $context->supplierId,
+            $userId,
+            $context->environment,
+            'mobile_key_session',
+            $this->crypto->encryptFor(
+                json_encode(['session_cookie' => $cookie], JSON_THROW_ON_ERROR),
+                $this->sessionContext($context->supplierId, $userId, $context->environment),
+            ),
+            self::SESSION_FOLLOW_UP_TTL,
+            self::SESSION_FOLLOW_UP_ATTEMPTS,
+        );
+
+        return [
+            'session_token' => $token,
+            'expires_at' => date(DATE_ATOM, time() + self::SESSION_FOLLOW_UP_TTL),
+        ];
+    }
+
+    /**
+     * Otevře ponechanou relaci pro jedno dotažení doručenek. Volající ji pak
+     * buď vrátí ({@see self::releaseSession()}), nebo ukončí
+     * ({@see self::endSession()}).
+     *
+     * @return array{id:int,context:ChannelContext}
+     */
+    public function resumeSession(string $sessionToken, int $supplierId, int $userId, string $environment): array
+    {
+        $this->assertEnvironment($environment);
+        if (preg_match('/^[A-Za-z0-9_-]{43}$/', $sessionToken) !== 1) {
+            throw new SubmissionChannelException('isds_mobile_session_invalid', 'Relace Mobilního klíče není platná.', 409);
+        }
+        $flow = $this->flows->claim(hash('sha256', $sessionToken), $supplierId, $userId, $environment, 'mobile_key_session');
+        if ($flow === null) {
+            throw new SubmissionChannelException(
+                'isds_mobile_session_expired',
+                'Relace Mobilního klíče už skončila. Doručenky načtěte tlačítkem „Načíst doručenky".',
+                409,
+            );
+        }
+        try {
+            $payload = json_decode(
+                $this->crypto->decryptFor(
+                    $flow['payload_ciphertext'],
+                    $this->sessionContext($supplierId, $userId, $environment),
+                ),
+                true,
+                4,
+                JSON_THROW_ON_ERROR,
+            );
+            $cookie = $this->safeCookie(is_array($payload) ? (string) ($payload['session_cookie'] ?? '') : '');
+        } catch (\Throwable) {
+            $this->flows->consume($flow['id']);
+            throw new SubmissionChannelException('isds_mobile_session_invalid', 'Relace Mobilního klíče není platná.', 409);
+        }
+
+        return [
+            'id' => $flow['id'],
+            'context' => new ChannelContext(
+                $supplierId,
+                $environment,
+                new ChannelCredentials(
+                    boxId: '',
+                    authMode: 'mobile_key',
+                    sessionCookie: SensitiveValue::fromProducer(static fn (): string => $cookie),
+                ),
+            ),
+        ];
+    }
+
+    /** Relace zůstane k dalšímu dotažení (do vypršení nebo vyčerpání pokusů). */
+    public function releaseSession(int $id): void
+    {
+        $this->flows->release($id);
+    }
+
+    /** Ukončí ponechanou relaci: smaže tajemství a odhlásí z ISDS. */
+    public function endSession(int $id, ChannelContext $context): void
+    {
+        $this->flows->consume($id);
+        $this->logout($context);
+    }
+
     public function logout(ChannelContext $context): void
     {
         if ($context->credentials->authMode !== 'mobile_key' || $context->credentials->sessionCookie === null) {
@@ -282,6 +391,11 @@ final class MobileKeyIsdsAuthenticator
     private function newFlowToken(): string
     {
         return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    private function sessionContext(int $supplierId, int $userId, string $environment): string
+    {
+        return self::SESSION_CONTEXT . ":supplier:{$supplierId}:user:{$userId}:environment:{$environment}";
     }
 
     private function flowContext(int $supplierId, int $userId, string $environment): string

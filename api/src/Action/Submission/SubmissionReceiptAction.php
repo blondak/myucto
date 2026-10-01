@@ -580,6 +580,67 @@ final class SubmissionReceiptAction
         ]);
     }
 
+    /**
+     * POST /api/submissions/outbox/receipts/download/mobile-key/session —
+     * dotažení doručenek v relaci Mobilního klíče, kterou uživatel potvrdil
+     * při odeslání ({@see SubmissionOutboxAction::mobileKeyConfirmBatch()}).
+     *
+     * Nová relace se tu NIKDY nezakládá: bez platného tokenu se vrátí 409
+     * a klient nabídne ruční „Načíst doručenky". Stahují se jen doručenky
+     * ODESLANÝCH zpráv, schránka doručených zpráv se tu nečte.
+     *
+     * Relace se ukončí (odhlášení z ISDS), jakmile žádná zpráva nečeká na
+     * doručenku, nebo když o to klient požádá (`finish`). Jinak zůstane
+     * k dalšímu pokusu, dokud nevyprší.
+     */
+    public function downloadBatchInMobileKeySession(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        $token = (string) ($body['session_token'] ?? '');
+        $finish = ($body['finish'] ?? false) === true;
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+
+        try {
+            $session = $this->mobileKey->resumeSession($token, $supplierId, $userId, $environment);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        $open = false;
+        try {
+            $result = $this->receipts->downloadManyFromIsds(
+                $supplierId,
+                $environment,
+                $userId,
+                $session['context'],
+                $this->transport,
+            );
+            $open = !$finish && ($result['pending'] > 0 || $result['failed'] > 0);
+        } catch (DocumentException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'receipt_conflict', $e->getMessage(), 409);
+        } finally {
+            if ($open) {
+                $this->mobileKey->releaseSession($session['id']);
+            } else {
+                $this->mobileKey->endSession($session['id'], $session['context']);
+            }
+        }
+
+        return Json::ok($response, $result + ['session_open' => $open]);
+    }
+
     // ───────────────────────── interní ─────────────────────────
 
     /** Společný závěr obou dávkových cest. */

@@ -211,7 +211,7 @@ final readonly class PayrollIsdsSubmissionService
                 'sha256' => $message->attachmentSha256(),
                 'bytes' => strlen($message->attachmentBytes),
             ],
-            'transport' => $this->transportAvailability($supplierId, $environment),
+            'transport' => $this->transportAvailability($supplierId, $environment, $userId),
         ];
     }
 
@@ -227,10 +227,10 @@ final readonly class PayrollIsdsSubmissionService
      *
      * @return array{automatic:bool,channel:string,reason:?string}
      */
-    public function transportAvailability(int $supplierId, string $environment): array
+    public function transportAvailability(int $supplierId, string $environment, ?int $userId = null): array
     {
         return $this->transportAvailability !== null
-            ? $this->transportAvailability->resolve($supplierId, $environment)
+            ? $this->transportAvailability->resolve($supplierId, $environment, $userId)
             : [
                 'automatic' => false,
                 'channel' => 'manual_upload',

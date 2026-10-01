@@ -54,6 +54,52 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         self::assertSame('IPCZ-S-COOKIE=state-cookie-123', $calls[2][2]['cookie'] ?? null);
     }
 
+    /**
+     * Po odeslání zůstane potvrzená relace k dotažení doručenek — svázaná
+     * s firmou, uživatelem a prostředím a bez nového přihlášení. Ukončení
+     * relaci odhlásí z ISDS a token už znovu nepustí.
+     */
+    public function testRetainedSessionCanBeResumedOnlyByItsOwnerAndEnds(): void
+    {
+        $calls = [];
+        $http = static function (string $operation, string $url, array $options) use (&$calls): array {
+            $calls[] = $operation;
+
+            return ['status' => 302, 'body' => '', 'cookies' => []];
+        };
+        $authenticator = new MobileKeyIsdsAuthenticator($this->crypto(), new InMemoryIsdsAuthFlowStore(), $http);
+        $context = new \MyInvoice\Service\Submission\Channel\ChannelContext(
+            7,
+            'test',
+            new ChannelCredentials(
+                boxId: '',
+                authMode: 'mobile_key',
+                sessionCookie: SensitiveValue::fromProducer(static fn (): string => 'session-cookie-123'),
+            ),
+        );
+
+        $retained = $authenticator->retainSession($context, 11);
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9_-]{43}$/', $retained['session_token']);
+
+        try {
+            $authenticator->resumeSession($retained['session_token'], 7, 12, 'test');
+            self::fail('Relaci jiného uživatele nesmí nikdo převzít.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('isds_mobile_session_expired', $e->errorCode);
+        }
+
+        $session = $authenticator->resumeSession($retained['session_token'], 7, 11, 'test');
+        self::assertSame('session-cookie-123', $session['context']->credentials->sessionCookie?->reveal());
+        $authenticator->releaseSession($session['id']);
+
+        $again = $authenticator->resumeSession($retained['session_token'], 7, 11, 'test');
+        $authenticator->endSession($again['id'], $again['context']);
+        self::assertSame(['logout'], $calls, 'Relace se nesmí přihlašovat znovu, jen odhlásit.');
+
+        $this->expectException(SubmissionChannelException::class);
+        $authenticator->resumeSession($retained['session_token'], 7, 11, 'test');
+    }
+
     public function testFlowTokenIsBoundToSupplierAndUser(): void
     {
         $calls = 0;

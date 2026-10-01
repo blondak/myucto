@@ -10,14 +10,22 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
-import { dataBoxApi, type IsdsMobileCredentialProfile, type MobileKeyBatchItemResult } from '@/api/dataBox'
+import {
+  dataBoxApi,
+  type IsdsMobileCredentialProfile,
+  type MobileKeyBatchItemResult,
+  type MobileKeyReceiptSession,
+} from '@/api/dataBox'
 import { btnFilledSm, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{
   outboxIds: number[]
   environment: 'production' | 'test'
 }>()
-const emit = defineEmits<{ sent: [results: MobileKeyBatchItemResult[]] }>()
+const emit = defineEmits<{
+  /** `receiptSession` = relace ponechaná k dotažení doručenek, jinak `null`. */
+  sent: [results: MobileKeyBatchItemResult[], receiptSession: MobileKeyReceiptSession | null]
+}>()
 const { t } = useI18n()
 
 const open = ref(false)
@@ -97,7 +105,7 @@ async function poll() {
     if (result.results) {
       const results = result.results
       close()
-      emit('sent', results)
+      emit('sent', results, result.receipt_session ?? null)
       return
     }
     timer = setTimeout(() => { void poll() }, 2000)

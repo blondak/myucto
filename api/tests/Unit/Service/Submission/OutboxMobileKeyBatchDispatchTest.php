@@ -27,7 +27,12 @@ use Slim\Psr7\Response;
  */
 final class OutboxMobileKeyBatchDispatchTest extends TestCase
 {
-    public function testConfirmedSessionSendsEveryRequestedIdAndThenLogsOut(): void
+    /**
+     * Po úspěšném odeslání relace zůstane krátce otevřená pro dotažení
+     * doručenek ({@see MobileKeyIsdsAuthenticator::retainSession()}) —
+     * účetní tak nemusí podruhé potvrzovat v mobilu.
+     */
+    public function testConfirmedSessionSendsEveryRequestedIdAndKeepsSessionForReceipts(): void
     {
         $sentIds = [];
         $outbox = $this->createStub(SubmissionOutboxService::class);
@@ -62,6 +67,10 @@ final class OutboxMobileKeyBatchDispatchTest extends TestCase
         $authenticator->method('logout')->willReturnCallback(function () use (&$loggedOut): void {
             $loggedOut = true;
         });
+        $authenticator->method('retainSession')->willReturn([
+            'session_token' => 'session-token',
+            'expires_at' => '2026-10-01T12:05:00+02:00',
+        ]);
 
         $response = $this->action($outbox, $authenticator)->mobileKeyConfirmBatch(
             $this->request(['flow_token' => 'flow-abc', 'environment' => 'test', 'outbox_ids' => [11, 12, 13]]),
@@ -70,10 +79,36 @@ final class OutboxMobileKeyBatchDispatchTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame([11, 12, 13], $sentIds);
-        self::assertTrue($loggedOut, 'Relace se musí odhlásit i po úspěšném odeslání.');
+        self::assertFalse($loggedOut, 'Relace zůstává pro dotažení doručenek.');
         $body = json_decode((string) $response->getBody(), true);
         self::assertCount(3, $body['results']);
         self::assertTrue($body['results'][0]['dispatched']);
+        self::assertSame('session-token', $body['receipt_session']['session_token']);
+    }
+
+    /** Když relaci ponechat nejde (nebo nic neodešlo), odhlásí se jako dřív. */
+    public function testSessionIsLoggedOutWhenItCannotBeRetained(): void
+    {
+        $outbox = $this->createStub(SubmissionOutboxService::class);
+        $outbox->method('confirmAndSendBatch')->willReturn([
+            ['id' => 1, 'dispatched' => true, 'row' => ['id' => 1], 'error_code' => null, 'error_message' => null],
+        ]);
+        $loggedOut = false;
+        $authenticator = $this->confirmedFlow();
+        $authenticator->method('retainSession')->willThrowException(new \RuntimeException('store down'));
+        $authenticator->method('logout')->willReturnCallback(function () use (&$loggedOut): void {
+            $loggedOut = true;
+        });
+
+        $response = $this->action($outbox, $authenticator)->mobileKeyConfirmBatch(
+            $this->request(['flow_token' => 'flow-abc', 'environment' => 'test', 'outbox_ids' => [1]]),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertTrue($loggedOut);
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertNull($body['receipt_session']);
     }
 
     public function testOneFailureDoesNotHideTheOtherResults(): void

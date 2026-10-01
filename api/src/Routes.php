@@ -3307,6 +3307,7 @@ final class Routes
         $app->post   ('/api/submissions/outbox/receipts/download/sms/start', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchSmsStart']);
         $app->post   ('/api/submissions/outbox/receipts/download/sms/complete', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchSmsComplete']);
         $app->post   ('/api/submissions/outbox/receipts/download/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchWithMobileKey']);
+        $app->post   ('/api/submissions/outbox/receipts/download/mobile-key/session', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadBatchInMobileKeySession']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'download']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt/download/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'downloadWithMobileKey']);
         // Odesílací brána ISDS (SetConcept): aplikace vloží KONCEPT do perimetru

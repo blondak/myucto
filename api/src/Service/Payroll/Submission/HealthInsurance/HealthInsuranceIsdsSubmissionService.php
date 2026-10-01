@@ -169,7 +169,7 @@ final readonly class HealthInsuranceIsdsSubmissionService
                 'bytes' => (int) $artifact['byte_size'],
                 'format' => $format->value,
             ],
-            'transport' => $this->transportAvailability($supplierId, $environment),
+            'transport' => $this->transportAvailability($supplierId, $environment, $userId),
         ];
     }
 
@@ -251,10 +251,10 @@ final readonly class HealthInsuranceIsdsSubmissionService
      *
      * @return array{automatic:bool,channel:string,reason:?string}
      */
-    private function transportAvailability(int $supplierId, string $environment): array
+    private function transportAvailability(int $supplierId, string $environment, ?int $userId = null): array
     {
         return $this->transportAvailability !== null
-            ? $this->transportAvailability->resolve($supplierId, $environment)
+            ? $this->transportAvailability->resolve($supplierId, $environment, $userId)
             : [
                 'automatic' => false,
                 'channel' => 'manual_upload',

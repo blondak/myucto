@@ -540,10 +540,22 @@ final class SubmissionOutboxAction
             ]);
         }
 
+        $followUp = null;
         try {
             $results = $this->outbox->confirmAndSendBatch($supplierId, $ids, $userId, $context);
+            // Když něco odešlo, zůstane relace krátce otevřená, aby si klient
+            // v ní sám dotáhl doručenky — účetní už nic nepotvrzuje znovu.
+            if ($userId > 0 && in_array(true, array_column($results, 'dispatched'), true)) {
+                try {
+                    $followUp = $this->mobileKey->retainSession($context, $userId);
+                } catch (\Throwable) {
+                    $followUp = null;
+                }
+            }
         } finally {
-            $this->mobileKey->logout($context);
+            if ($followUp === null) {
+                $this->mobileKey->logout($context);
+            }
         }
 
         foreach ($results as $item) {
@@ -556,6 +568,7 @@ final class SubmissionOutboxAction
             'state' => $result['state'],
             'description' => $result['description'],
             'results' => $results,
+            'receipt_session' => $followUp,
         ]);
     }
 
