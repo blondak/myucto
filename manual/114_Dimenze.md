@@ -394,6 +394,50 @@ zaúčtování přenese na řádky zápisu. Storno zápisu přenese stejný rozp
 odečte přesně to, co původní zápis přičetl. Rozpad splní i povinnou dimenzi
 pravidla.
 
+## Účtotvorná dimenze
+
+Dimenze může kromě analytického členění určovat i analytický účet. Firma, která
+vede náklady střediska na vlastních analytikách (518.100 FVE, 518.200 Kancelář),
+tak nemusí volit účet na každém dokladu: stačí vybrat středisko.
+
+Nastavení:
+
+1. V editaci typu zaškrtněte **Účtotvorná dimenze**. Účtotvorná může být jen
+   jedna dimenze firmy (ani firemní typ vedle skupinového). Pole **Účty, na které
+   se mapa uplatní** omezuje výsledkové účty, výchozí je `5, 6`.
+2. V editaci hodnoty vyplňte tabulku **Analytické účty**: syntetika (např. 518)
+   a cílová analytika (518.100), volitelně platnost od–do. Analytiku lze založit
+   přímo z tabulky. Ukládá se společně s hodnotou.
+
+Cílová analytika musí ležet pod zvolenou syntetikou, být aktivní a mít stejnou
+daňovou uznatelnost jako syntetika. Dimenze tak nikdy nepřesune náklad mezi
+daňový a nedaňový. U skupiny firem jsou hodnoty společné, ale mapa platí pro
+firmu, ve které ji nastavíte (každá firma má svůj účtový rozvrh).
+
+Při zaúčtování:
+
+- Řádek na výsledkové syntetice z mapy, jehož hodnota účtotvorné dimenze má
+  mapování, se zaúčtuje na analytiku. Rozhoduje výsledná dimenze řádku, ať ji
+  dal doklad, položka, produkt, zakázka, klient, pravidlo, mzdy nebo ruční zápis.
+- Řádek s rozpadem účtotvorné dimenze (60 % FVE, 40 % Kancelář) se rozdělí na
+  řádky po analytikách, na haléř přesně. Každý díl nese jen svou hodnotu, ostatní
+  dimenze zůstávají.
+- Účet, který zvolil doklad nebo uživatel jako analytiku, se nemění. Mapa
+  přepisuje jen syntetiku. Hodnota bez mapování zůstane na syntetice.
+- Mapa platí podle data účetního případu. Rozvahové účty se nemapují nikdy, DPH
+  ani kontrolní hlášení se nemění.
+- Náhled kontace před zaúčtováním ukáže, kam se syntetika přesune.
+- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik.
+
+Změna dimenze u zaúčtovaného dokladu, která by přesunula řádek na jinou
+analytiku, se do deníku tiše nepromítne: řádek si ponechá dosavadní dimenzi
+a aplikace vyzve k přeúčtování. U dokladu v uzavřeném nebo zamčeném období se
+taková změna odmítne. Úprava dimenze přímo na řádku deníku, která by měnila
+účet, se také odmítne.
+
+Kontrola uzávěrky (i měsíční kontrola) upozorní na výsledkové zápisy, které
+zůstaly na syntetice s mapou, typicky doklad bez střediska.
+
 ## Mzdy
 
 Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení →
