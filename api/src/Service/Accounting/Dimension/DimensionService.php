@@ -157,7 +157,7 @@ final class DimensionService
     {
         $type = $this->requireType($supplierId, $typeId);
         $changes = array_intersect_key($body, array_flip(['name', 'is_active', 'show_on_documents', 'sort_order']));
-        // Účtotvorná dimenze (migrace 1950): nejvýš jeden typ na firmu, maska jen třídy 5 a 6.
+        // Účtotvorná dimenze (migrace 1952): nejvýš jeden typ na firmu, maska jen třídy 5 a 6.
         $changes += (new DimensionAccountMapService($this->db))->typeChanges($supplierId, $type, $body);
         if (array_key_exists('name', $changes)) {
             $changes['name'] = trim((string) $changes['name']);

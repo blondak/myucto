@@ -9,7 +9,7 @@ use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
- * Účtotvorná dimenze (migrace 1950): typ s `drives_accounts` a mapa hodnota dimenze
+ * Účtotvorná dimenze (migrace 1952): typ s `drives_accounts` a mapa hodnota dimenze
  * × syntetika → analytika firmy.
  *
  * Mapa patří firmě i u skupinové hodnoty — účtový rozvrh je per firma. Typ firma vidí

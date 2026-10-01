@@ -8,7 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 
 /**
- * Účtotvorná dimenze: hodnota dimenze určí analytický účet (Firma → Dimenze, migrace 1950).
+ * Účtotvorná dimenze: hodnota dimenze určí analytický účet (Firma → Dimenze, migrace 1952).
  *
  * Řádek zápisu na výsledkovém účtu (maska typu, výchozí `5, 6`), jehož účet je syntetika
  * z mapy a jehož hodnota účtotvorného typu má pro tu syntetiku mapování, jde na cílovou

@@ -243,6 +243,96 @@ final class DimensionOtherDocumentsTest extends TestCase
             'Koncept výskytu převezme změnu dimenzí zdroje.');
     }
 
+    /**
+     * Účtotvorná dimenze (F2) × dimenze karty majetku (F4): odpis karty se střediskem
+     * C1 jde na 551.100, rozpad karty 60/40 rozdělí řádek odpisu na 551.100 / 551.200.
+     */
+    public function testDepreciationOfCardWithDrivingDimensionGoesToAnalytic(): void
+    {
+        $out = $this->runWithDrivingDimension(fn (int $cc): array => [[$cc => $this->value('C1')], null]);
+
+        $depreciation = array_values(array_filter($out['depreciation'], static fn (array $l): bool => str_starts_with($l['account'], '551')));
+        self::assertNotEmpty($depreciation);
+        foreach ($depreciation as $line) {
+            self::assertSame('551.100', $line['account'], 'Odpis karty se střediskem C1 → 551.100.');
+            self::assertSame('REGR-C1', $line['dims']['stredisko'] ?? null);
+        }
+    }
+
+    /** Změna karty: jiná dimenze se přerazítkuje (ruční typy zůstanou), změna střediska chce přeúčtování. */
+    public function testCardChangeWithDrivingDimensionNeedsRepostOnlyForDrivingValue(): void
+    {
+        $this->runWithDrivingDimension(fn (int $cc): array => [[$cc => $this->value('C1')], null]);
+        $supplierId = $this->scenarios->supplierId;
+        $assetId = $this->scenarios->ids['asset'];
+        $cc = $this->types['cost_center'];
+        $project = $this->types['project'];
+
+        $same = $this->dimensions->saveDocument($supplierId, 'asset', $assetId, [$cc => $this->value('C1'), $project => $this->value('P1', 'project')], null);
+        self::assertFalse($same['restamp']['needs_repost'], 'Projekt účet odpisu nemění.');
+        self::assertFalse($same['restamp']['account_change']);
+
+        $moved = $this->dimensions->saveDocument($supplierId, 'asset', $assetId, [$cc => $this->value('C2'), $project => $this->value('P1', 'project')], null);
+        self::assertTrue($moved['restamp']['needs_repost']);
+        self::assertTrue($moved['restamp']['account_change'], 'Středisko C2 by odpis přesunulo z 551.100 na 551.200.');
+        $depreciation = (int) $this->db->pdo()->query(
+            "SELECT id FROM depreciation_entries WHERE asset_id = {$assetId} AND kind = 'accounting' ORDER BY fiscal_year LIMIT 1"
+        )->fetchColumn();
+        foreach ($this->lineIds('depreciation', $depreciation, '551.100') as $lineId) {
+            self::assertSame($this->value('C1'), $this->lineDims($lineId)[$cc] ?? null, 'Řádek 551.100 si ponechá C1.');
+        }
+    }
+
+    public function testDepreciationOfCardWithDrivingSplitIsDividedToAnalytics(): void
+    {
+        $out = $this->runWithDrivingDimension(fn (int $cc): array => [[], [0 => [$cc => [
+            ['value_id' => $this->value('C1'), 'share' => 0.6],
+            ['value_id' => $this->value('C2'), 'share' => 0.4],
+        ]]]]);
+
+        $byAccount = [];
+        foreach ($out['depreciation'] as $line) {
+            if (str_starts_with($line['account'], '551')) {
+                $byAccount[$line['account']] = (int) round((float) $line['amount'] * 100);
+                self::assertSame($line['account'] === '551.100' ? 'REGR-C1' : 'REGR-C2', $line['dims']['stredisko'] ?? null);
+                self::assertArrayNotHasKey('stredisko', $line['splits'], 'Díl odpisu už nenese rozpad střediska.');
+            }
+        }
+        ksort($byAccount);
+        self::assertSame(['551.100', '551.200'], array_keys($byAccount));
+        self::assertEqualsWithDelta(array_sum($byAccount) * 0.6, $byAccount['551.100'], 1);
+    }
+
+    /**
+     * @param callable(int):array{0:array<int,int>,1:?array<int,mixed>} $cardDims hlavička a rozpad karty
+     * @return array<string,mixed>
+     */
+    private function runWithDrivingDimension(callable $cardDims): array
+    {
+        $pdo = $this->db->pdo();
+        return $this->scenarios->run(function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo, $cardDims): void {
+            if ($scenario !== 'asset') {
+                return;
+            }
+            $this->loadTypes();
+            $cc = $this->types['cost_center'];
+            $supplierId = $ctx->supplierId;
+            $this->dimensions->updateType($supplierId, $cc, ['drives_accounts' => true]);
+            $map = $this->container->get(\MyInvoice\Service\Accounting\Dimension\DimensionAccountMapService::class);
+            foreach (['551.100' => 'C1', '551.200' => 'C2'] as $code => $value) {
+                $pdo->prepare(
+                    "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active, tax_deductibility)
+                     SELECT supplier_id, ?, 'Odpisy střediska', account_type, normal_side, 0, id, 1, tax_deductibility
+                       FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '551'
+                     ON DUPLICATE KEY UPDATE is_active = 1"
+                )->execute([$code, $supplierId]);
+                $map->saveForValue($supplierId, $this->value($value), [['synthetic_code' => '551', 'analytic_code' => $code]], null);
+            }
+            [$header, $splits] = $cardDims($cc);
+            $this->dimensions->saveDocument($supplierId, 'asset', $docId, $header, null, false, $splits);
+        });
+    }
+
     /** @return array<string,mixed> */
     private function runWithDimensions(): array
     {

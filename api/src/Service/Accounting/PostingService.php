@@ -249,7 +249,7 @@ final class PostingService
             $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
             $entryDate,
         );
-        // Účtotvorná dimenze (migrace 1950): hodnota dimenze přepíše výsledkovou syntetiku
+        // Účtotvorná dimenze (migrace 1952): hodnota dimenze přepíše výsledkovou syntetiku
         // na analytiku z mapy, rozpad typu rozdělí řádek po analytikách. Až po razítkování
         // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
         // produkt, pravidlo nebo volající (mzdy, ruční zápis). Bez mapy beze změny.
