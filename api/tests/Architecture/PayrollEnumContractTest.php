@@ -73,6 +73,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Ke komu se váže trvalé skrytí mzdového varování po osobách
+        'payroll.ts::PayrollWarningSubjectType'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollWarningSuppressionCatalog::SUBJECT_TYPES',
         // Kam vede proklik z hlášky přípravy registrace (chybějící údaj, upozornění)
         'payroll.ts::PayrollRegistrationProblemTarget'
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements::TARGETS',

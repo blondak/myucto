@@ -29,6 +29,9 @@ final class PayrollWarningSuppressionCatalog
     public const SUBJECT_EMPLOYEE = 'employee';
     public const SUBJECT_EMPLOYMENT = 'employment';
 
+    /** Druhy subjektu skrytí po osobách (párováno s `PayrollWarningSubjectType` na webu). */
+    public const SUBJECT_TYPES = [self::SUBJECT_EMPLOYEE, self::SUBJECT_EMPLOYMENT];
+
     /** @var array<string,'employee'|'employment'> */
     public const HIDEABLE = [
         'tax_declaration_not_signed_summary' => self::SUBJECT_EMPLOYEE,
