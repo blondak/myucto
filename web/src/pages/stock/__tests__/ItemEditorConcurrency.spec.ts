@@ -66,6 +66,10 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: (permission: string) => ['eshop.write', 'stock.items.write'].includes(permission) }),
 }))
 
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }),
+}))
+
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))

@@ -11,6 +11,8 @@ const props = defineProps<{
   ariaLabel?: string
   placeholder?: string
   disabled?: boolean
+  /** Nižší pole (řádek položky dokladu). */
+  compact?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [string] }>()
 const { t } = useI18n()
@@ -23,7 +25,7 @@ const selected = computed(() => options.value.find(account => account.account_co
   <div>
     <input :id="inputId" :value="modelValue || ''" :list="listId" type="text" :disabled="disabled"
       :aria-label="ariaLabel" :placeholder="placeholder || t('accounting.template.account_search')" autocomplete="off"
-      class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono bg-surface"
+      class="w-full px-3 border border-neutral-300 rounded-md font-mono bg-surface" :class="compact ? 'h-8 text-xs' : 'h-10 text-sm'"
       @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)" />
     <datalist :id="listId">
       <option v-for="account in options" :key="account.account_code" :value="account.account_code" :label="account.name">{{ account.account_code }} / {{ account.name }}</option>

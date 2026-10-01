@@ -1,4 +1,19 @@
 {
+  "product_posting": {
+    "tab": "Účtování",
+    "title": "Účtování produktu",
+    "hint": "Výchozí účet a dimenze pro položky dokladů s touto kartou. Položka je přebije, prázdné pole dědí z kategorie, jinak platí předkontace dokladu.",
+    "double_entry_only": "Výchozí účty produktu se používají jen v podvojném účetnictví.",
+    "revenue_account": "Účet výnosů (prodej)",
+    "expense_account": "Účet nákladů (nákup)",
+    "revenue_hint": "Třída 6. Prázdné = podle kategorie, jinak podle předkontace faktury.",
+    "expense_hint": "Třída 5. Platí, když položka přijaté faktury nemá vlastní účet ani druh výdaje.",
+    "inherited": "Prázdné = zdědí {code} z kategorie.",
+    "by_document": "podle dokladu",
+    "category_show": "Účtování produktů kategorie",
+    "category_hide": "Skrýt účtování",
+    "category_hint": "Platí pro produkty, které mají tuto kategorii jako primární a vlastní účet či dimenzi nemají. Dědí se do podkategorií."
+  },
   "accrual_period": {
     "show": "Časové rozlišení",
     "hide": "Skrýt časové rozlišení",
@@ -19466,6 +19481,13 @@
     }
   },
   "invoice": {
+    "item_account": {
+      "show": "Účty položek",
+      "hide": "Skrýt účty položek",
+      "hint": "Výnosový účet jednotlivých položek. Prázdné pole = účet produktu, jeho kategorie, jinak předkontace faktury.",
+      "label": "Výnosový účet",
+      "placeholder": "podle produktu / dokladu"
+    },
     "title": "Vydané faktury",
     "col_order_number": "Objednávka",
     "col_paid_at": "Uhrazeno dne",
@@ -31358,6 +31380,8 @@
       "title": "Výchozí dimenze",
       "hint_client": "Předvyplní se do hlavičky vystavených i přijatých faktur a pokladních dokladů tohoto klienta. Doklad bez dimenze daného typu je dostane při zaúčtování. Výchozí dimenze zakázky mají přednost.",
       "hint_project": "Předvyplní se do hlavičky faktur této zakázky. Doklad bez dimenze daného typu je dostane při zaúčtování. Mají přednost před výchozími dimenzemi klienta.",
+      "hint_product": "Položka dokladu s touto kartou je dostane, pokud je sama nemá. Na výnosech a nákladech mají přednost před hlavičkou dokladu.",
+      "hint_category": "Platí pro produkty této kategorie a podkategorií, které hodnotu typu samy nemají.",
       "save_failed": "Karta je uložená, ale výchozí dimenze se uložit nepodařilo: {message}",
       "autofilled": "Předvyplněno z výchozích dimenzí klienta, zakázky nebo placeného dokladu."
     }

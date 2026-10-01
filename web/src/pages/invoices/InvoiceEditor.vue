@@ -49,6 +49,8 @@ import { cashApi, type CashRegister } from '@/api/cash'
 import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
@@ -478,6 +480,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
     if (si.vat_rate_id != null && vatRates.value.some(v => v.id === si.vat_rate_id)) item.vat_rate_id = si.vat_rate_id
   }
   if (item.warehouse_id == null) item.warehouse_id = defaultWarehouseId.value
+  void prefillFromProduct(item, itemId)
   refreshAvailability()
 }
 
@@ -796,6 +799,47 @@ function hydrateAssetSelections() {
   if (form.value.items.some(it => it.accrual_from || it.accrual_to)) {
     showAccrual.value = true
   }
+  if (form.value.items.some(it => it.revenue_account_code)) {
+    showItemAccounts.value = true
+  }
+}
+
+// ─── ÚČET A DIMENZE POLOŽKY Z PRODUKTU (F1) ─────────────────────────────
+// Volitelný výnosový účet položky je „pokročilá" volba: pole se ukážou až po zapnutí
+// odkazem (nebo samy, když už některá položka účet má). Prázdné pole = účet produktu,
+// jeho kategorie, jinak předkontace dokladu — totéž rozhodne zaúčtování.
+const resultAccounts = useResultAccounts()
+const showItemAccounts = ref(false)
+const itemAccountsAvailable = computed(() => assetSaleAvailable.value && resultAccounts.available.value)
+onMounted(() => { void resultAccounts.load() })
+
+/**
+ * Výběr karty předvyplní prázdný účet a prázdné dimenze položky z produktu (produkt >
+ * kategorie). Volba uživatele se nepřepisuje; selhání dotazu řádek nijak neblokuje.
+ */
+async function prefillFromProduct(item: InvoiceItem, productId: number) {
+  try {
+    const d = await stockApi.getPostingDefaults(productId)
+    if (item.stock_item_id !== productId) return
+    if (!item.revenue_account_code && d.revenue_account_code && itemAccountsAvailable.value) {
+      item.revenue_account_code = d.revenue_account_code
+      showItemAccounts.value = true
+    }
+    if (docDims.enabled.value && docDims.canEdit.value) {
+      const current = docDims.itemDimsOf(item)
+      const next = { ...current }
+      let changed = false
+      for (const [typeId, valueId] of Object.entries(d.dimensions)) {
+        if (!next[Number(typeId)] && valueId) {
+          next[Number(typeId)] = valueId
+          changed = true
+        }
+      }
+      if (changed) docDims.setItemDims(item, next)
+    }
+  } catch {
+    // bez práva na sklad nebo bez nastavení — položka zůstane jak je
+  }
 }
 
 // ─── ČASOVÉ ROZLIŠENÍ VÝNOSU (384) ──────────────────────────────────────
@@ -1057,6 +1101,7 @@ function blankItem(): InvoiceItem {
     warehouse_id: null,
     small_asset_id: null,
     asset_id: null,
+    revenue_account_code: null,
     oss_applicable: false,
     oss_consumer_country: null,
     // Typ sazby se NEpředvyplňuje: do OSS podání jde typ, ne procento, a „základní"
@@ -2266,6 +2311,8 @@ async function submit() {
         asset_id: it.asset_id ?? null,
         accrual_from: it.accrual_from || null,
         accrual_to: it.accrual_to || null,
+        // Výnosový účet položky (F1) — round-trip jako ostatní pole položky.
+        revenue_account_code: (it.revenue_account_code ?? '').trim() || null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         // Prázdný typ sazby se posílá jako null, ne jako „standard" — dosazení základní
@@ -2750,6 +2797,11 @@ async function deleteDraft() {
               :title="t('accrual_period.hint')" data-test="accrual-toggle" @click="showAccrual = !showAccrual">
               {{ showAccrual ? t('accrual_period.hide') : t('accrual_period.show') }}
             </button>
+            <button v-if="itemAccountsAvailable" type="button" class="cursor-pointer text-xs hover:underline whitespace-nowrap mr-1"
+              :class="showItemAccounts ? 'text-danger-600' : 'text-primary-700'"
+              :title="t('invoice.item_account.hint')" data-test="item-accounts-toggle" @click="showItemAccounts = !showItemAccounts">
+              {{ showItemAccounts ? t('invoice.item_account.hide') : t('invoice.item_account.show') }}
+            </button>
             <label v-if="assetSaleAvailable" class="inline-flex items-center gap-1.5 text-sm text-neutral-700 mr-1"
               :title="t('invoice.asset_sale.hint')">
               <input v-model="assetSaleMode" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
@@ -2838,6 +2890,12 @@ async function deleteDraft() {
                 </label>
                 <ItemAccrualFields v-if="showAccrual" :description="item.description"
                   v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
+                <label v-if="showItemAccounts && itemAccountsAvailable && !item.asset_id && !item.small_asset_id"
+                  class="mt-1.5 flex items-start gap-2 text-xs text-neutral-500" data-test="invoice-item-account">
+                  <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
+                  <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.revenueAccounts.value"
+                    class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
+                </label>
                 <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" data-test="stock-row-meta"
                   class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                   <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
@@ -3038,6 +3096,12 @@ async function deleteDraft() {
               </label>
               <ItemAccrualFields v-if="showAccrual" stacked :description="item.description"
                 v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
+              <label v-if="showItemAccounts && itemAccountsAvailable && !item.asset_id && !item.small_asset_id"
+                class="mt-1.5 block text-xs font-medium text-neutral-600">
+                <span class="mb-1 block">{{ t('invoice.item_account.label') }}</span>
+                <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.revenueAccounts.value"
+                  compact :placeholder="t('invoice.item_account.placeholder')" />
+              </label>
               <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                 <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
                 <span v-if="stockRowPriceBadge(item)" :title="t('invoice.stock_pricing.source_hint')"

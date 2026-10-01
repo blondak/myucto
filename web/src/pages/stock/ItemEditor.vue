@@ -52,6 +52,8 @@ import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
 import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
 import ProductVariantInheritance from '@/components/stock/ProductVariantInheritance.vue'
+import ProductPostingDefaults from '@/components/stock/ProductPostingDefaults.vue'
+import { useSupplierStore } from '@/stores/supplier'
 import {
   ALL_CURRENCIES,
   cloneRuleSet,
@@ -68,6 +70,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const pageId = useId()
 const tabList = ref<HTMLElement | null>(null)
 
@@ -77,9 +80,15 @@ const canWriteEshop = computed(() => auth.canWrite('eshop.write'))
 const canSaveEditor = computed(() => auth.canWrite('stock.items.write') && (!isEdit.value || canWriteEshop.value))
 
 // ── Taby ────────────────────────────────────────────────────────────────
-type Tab = 'general' | 'intrastat' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
-const tabs: Tab[] = ['general', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments', 'intrastat']
-const tab = ref<Tab>((tabs as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
+type Tab = 'general' | 'intrastat' | 'accounting' | 'languages' | 'master' | 'relations' | 'categories' | 'parameters' | 'prices' | 'vendors' | 'attachments'
+// Účtování (výchozí účet a dimenze karty) patří k podvojnému účetnictví.
+const accountingTabVisible = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const tabs = computed<Tab[]>(() => [
+  'general', 'languages', 'master', 'relations', 'categories', 'parameters', 'prices', 'vendors', 'attachments', 'intrastat',
+  ...(accountingTabVisible.value ? ['accounting' as const] : []),
+])
+const tab = ref<Tab>((tabs.value as string[]).includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'general')
+const postingDefaults = ref<InstanceType<typeof ProductPostingDefaults> | null>(null)
 watch(tab, (v) => {
   if (route.query.tab !== v) {
     router.replace({ query: { ...route.query, tab: v } })
@@ -99,22 +108,23 @@ function showActiveTab() {
 }
 
 function onTabKey(event: KeyboardEvent, current: Tab) {
-  const index = tabs.indexOf(current)
+  const list = tabs.value
+  const index = list.indexOf(current)
   let next = -1
   if (event.key === 'ArrowRight') {
-    next = (index + 1) % tabs.length
+    next = (index + 1) % list.length
   } else if (event.key === 'ArrowLeft') {
-    next = (index + tabs.length - 1) % tabs.length
+    next = (index + list.length - 1) % list.length
   } else if (event.key === 'Home') {
     next = 0
   } else if (event.key === 'End') {
-    next = tabs.length - 1
+    next = list.length - 1
   }
 
   if (next < 0) return
 
   event.preventDefault()
-  tab.value = tabs[next]!
+  tab.value = tabs.value[next]!
   void nextTick(() => {
     tabList.value?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus()
   })
@@ -969,6 +979,14 @@ async function saveItemExtras(id: number): Promise<boolean> {
       return false
     }
   }
+  if (postingDefaults.value?.dirty) {
+    const message = await postingDefaults.value.save(id)
+    if (message !== null) {
+      error.value = message
+      tab.value = 'accounting'
+      return false
+    }
+  }
   if (priceLevelsDirty.value) {
     const submitted = JSON.stringify(editedPriceLevelRules())
     try {
@@ -1233,7 +1251,8 @@ function markSaved(snapshotValue = snapshot()) {
   savedSnapshot.value = snapshotValue
 }
 const isDirty = computed(() => savedSnapshot.value !== ''
-  && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value || priceLevelsDirty.value))
+  && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value || priceLevelsDirty.value
+    || !!postingDefaults.value?.dirty))
 function confirmDiscard(): boolean {
   return !isDirty.value || window.confirm(t('stock.items.editor_ux.discard_changes'))
 }
@@ -1441,6 +1460,7 @@ function onImgError(e: Event) {
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ tt === 'general' ? t('eshop.item.tab_general')
           : tt === 'intrastat' ? t('stock.items.intrastat.tab')
+          : tt === 'accounting' ? t('product_posting.tab')
           : tt === 'languages' ? t('eshop.item.tab_languages')
           : tt === 'master' ? t('eshop.item.tab_master')
           : tt === 'relations' ? t('eshop.item.tab_relations')
@@ -1697,6 +1717,11 @@ function onImgError(e: Event) {
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- ═══════════ TAB: ÚČTOVÁNÍ ═══════════ -->
+      <div v-if="isEdit && itemId && accountingTabVisible" v-show="tab === 'accounting'" role="tabpanel" :id="`${pageId}-panel-accounting`" :aria-labelledby="`${pageId}-tab-accounting`" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <ProductPostingDefaults ref="postingDefaults" :product-id="itemId" />
       </div>
 
       <!-- ═══════════ TAB: JAZYKY ═══════════ -->

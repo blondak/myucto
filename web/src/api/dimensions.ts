@@ -213,7 +213,7 @@ export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates'
 
 /** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
-export type DimensionDefaultsEntity = 'clients' | 'projects'
+export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories'
 
 export type DimensionPrefillSource = 'project' | 'client' | 'document'
 

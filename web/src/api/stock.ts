@@ -234,6 +234,18 @@ export interface StockItemPackagingUnit {
   in_use?: boolean
 }
 
+/** Účet a dimenze, které položka dokladu dostane z produktu (produkt > kategorie). */
+export interface StockItemPostingDefaults {
+  own_revenue_account_code: string | null
+  own_expense_account_code: string | null
+  revenue_account_code: string | null
+  revenue_account_source: 'product' | 'product_category' | null
+  expense_account_code: string | null
+  expense_account_source: 'product' | 'product_category' | null
+  dimensions: Record<number, number>
+  dimension_sources: Record<number, 'product' | 'product_category'>
+}
+
 export interface StockItemPackaging {
   base_unit: string
   default_sale_unit: string | null
@@ -1093,6 +1105,12 @@ export const stockApi = {
   },
   itemTracking: (id: number) => api.get<StockTrackingOverview>(`/stock/items/${id}/tracking`).then(r => r.data),
   replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
+
+  // ── Výchozí účet a dimenze produktu (Účtování podle dimenzí, F1) ─────────
+  getPostingDefaults: (id: number) =>
+    api.get<StockItemPostingDefaults>(`/stock/items/${id}/posting-defaults`).then(r => r.data),
+  savePostingAccounts: (id: number, payload: { revenue_account_code?: string | null; expense_account_code?: string | null }) =>
+    api.put<{ revenue_account_code: string | null; expense_account_code: string | null }>(`/stock/items/${id}/posting-defaults`, payload).then(r => r.data),
 
   // ── Balení a individuální ceny zákazníků (issue #17) ────────────────────
   getItemPackaging: (id: number) =>

@@ -7,9 +7,10 @@ import { dimensionsApi, compactDimensions, type DimensionDefaultsEntity, type Di
 import { useDimensions } from '@/composables/useDimensions'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import type { PermissionKey } from '@/security/permissions'
 
 /**
- * Výchozí dimenze klienta nebo zakázky (Firma → Dimenze).
+ * Výchozí dimenze klienta, zakázky, produktu nebo kategorie produktů (Firma → Dimenze).
  *
  * `form` = sekce formuláře karty: výběry se ukládají přes `save(id)` až po uložení
  * karty (u nové karty id ještě není). `summary` = jen štítky na detailu, bez úprav.
@@ -30,7 +31,20 @@ const model = ref<DimensionMap>({})
 const saved = ref('{}')
 
 const visible = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
-const canEdit = computed(() => dims.enabled.value && auth.canWrite(props.entity))
+/** Právo k úpravě karty, ke které výchozí dimenze patří (stejné jako úprava karty). */
+const WRITE_PERMISSION: Record<DimensionDefaultsEntity, PermissionKey> = {
+  clients: 'clients',
+  projects: 'projects',
+  'stock/items': 'stock.items.write',
+  'eshop/categories': 'eshop.write',
+}
+const canEdit = computed(() => dims.enabled.value && auth.canWrite(WRITE_PERMISSION[props.entity]))
+const hint = computed(() => ({
+  clients: t('dimensions.defaults.hint_client'),
+  projects: t('dimensions.defaults.hint_project'),
+  'stock/items': t('dimensions.defaults.hint_product'),
+  'eshop/categories': t('dimensions.defaults.hint_category'),
+} as Record<DimensionDefaultsEntity, string>)[props.entity])
 const dirty = computed(() => JSON.stringify(compactDimensions(model.value)) !== saved.value)
 const hasValues = computed(() => Object.keys(compactDimensions(model.value)).length > 0)
 
@@ -72,7 +86,7 @@ defineExpose({ save, dirty })
   <div v-if="visible && mode === 'form'" class="pt-3 border-t border-neutral-100" data-test="entity-dimension-defaults">
     <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.defaults.title') }}</p>
     <DimensionFields v-model="model" :disabled="!canEdit" />
-    <p class="text-xs text-neutral-500 mt-1">{{ entity === 'projects' ? t('dimensions.defaults.hint_project') : t('dimensions.defaults.hint_client') }}</p>
+    <p class="text-xs text-neutral-500 mt-1">{{ hint }}</p>
   </div>
   <div v-else-if="visible && mode === 'summary' && hasValues"
        class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm" data-test="entity-dimension-defaults-summary">

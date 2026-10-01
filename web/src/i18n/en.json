@@ -1,4 +1,19 @@
 {
+  "product_posting": {
+    "tab": "Accounting",
+    "title": "Product accounting",
+    "hint": "Default account and dimensions for document lines with this product. A line can override them, an empty field inherits from the category, otherwise the document posting template applies.",
+    "double_entry_only": "Default product accounts are used in double-entry bookkeeping only.",
+    "revenue_account": "Revenue account (sales)",
+    "expense_account": "Expense account (purchases)",
+    "revenue_hint": "Class 6. Empty = by category, otherwise by the invoice posting template.",
+    "expense_hint": "Class 5. Applies when a purchase invoice line has neither its own account nor an expense kind.",
+    "inherited": "Empty = inherits {code} from the category.",
+    "by_document": "by document",
+    "category_show": "Accounting of category products",
+    "category_hide": "Hide accounting",
+    "category_hint": "Applies to products with this category as primary that have no account or dimension of their own. Inherited by subcategories."
+  },
   "accrual_period": {
     "show": "Accrual period",
     "hide": "Hide accrual period",
@@ -19466,6 +19481,13 @@
     }
   },
   "invoice": {
+    "item_account": {
+      "show": "Line accounts",
+      "hide": "Hide line accounts",
+      "hint": "Revenue account of individual lines. Empty = product account, its category, otherwise the invoice posting template.",
+      "label": "Revenue account",
+      "placeholder": "by product / document"
+    },
     "title": "Issued invoices",
     "col_order_number": "Order no.",
     "col_paid_at": "Paid on",
@@ -31358,6 +31380,8 @@
       "title": "Default dimensions",
       "hint_client": "Prefilled into the header of issued and received invoices and cash documents of this client. A document without a dimension of that type gets it when posted. Project defaults take precedence.",
       "hint_project": "Prefilled into the header of invoices of this project. A document without a dimension of that type gets it when posted. They take precedence over the client defaults.",
+      "hint_product": "A document line with this product gets them unless it has its own. On revenue and expense lines they take precedence over the document header.",
+      "hint_category": "Applies to products of this category and its subcategories that have no value of the type themselves.",
       "save_failed": "The record is saved, but its default dimensions could not be saved: {message}",
       "autofilled": "Prefilled from the default dimensions of the client, project or paid document."
     }

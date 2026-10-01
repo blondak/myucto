@@ -106,6 +106,7 @@
     "portfolio",
     "premier",
     "price_list",
+    "product_posting",
     "profile_signing",
     "project",
     "public_holidays",
@@ -682,8 +683,10 @@
       "stock"
     ],
     "stock-item-new": [
+      "dimensions",
       "eshop",
       "markdown_editor",
+      "product_posting",
       "stock"
     ],
     "stock-item-detail": [
@@ -691,8 +694,10 @@
       "stock"
     ],
     "stock-item-edit": [
+      "dimensions",
       "eshop",
       "markdown_editor",
+      "product_posting",
       "stock"
     ],
     "stock-documents": [
@@ -796,8 +801,10 @@
       "shoptet"
     ],
     "eshop": [
+      "dimensions",
       "eshop",
       "imports",
+      "product_posting",
       "stock"
     ],
     "logbook": [

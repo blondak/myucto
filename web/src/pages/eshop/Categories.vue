@@ -9,6 +9,9 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
+import { useResultAccounts } from '@/composables/useResultAccounts'
 
 // Hierarchicky odsazený název pro výběr nadřazené kategorie (ne interní path).
 function catLabel(c: Category): string {
@@ -25,6 +28,11 @@ const toast = useToast()
 const categories = ref<Category[]>([])
 const loading = ref(false)
 
+// Účtování kategorie (F1): výchozí účet a dimenze produktů, dědí se do podkategorií.
+const resultAccounts = useResultAccounts()
+const postingOpen = ref(false)
+const dimensionDefaults = ref<InstanceType<typeof EntityDimensionDefaults> | null>(null)
+
 async function load() {
   loading.value = true
   try {
@@ -35,7 +43,10 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  void load()
+  void resultAccounts.load()
+})
 
 function mapError(e: any): string {
   const code = e?.response?.data?.error?.code
@@ -76,8 +87,11 @@ function openCreate() {
     name: '',
     display_order: 10,
     export_eshop: true,
-    archived: false
+    archived: false,
+    revenue_account_code: null,
+    expense_account_code: null,
   }
+  postingOpen.value = false
   formActive.value = true
   error.value = ''
   modalOpen.value = true
@@ -91,8 +105,11 @@ function openEdit(cat: Category) {
     name: cat.name,
     display_order: cat.display_order,
     export_eshop: cat.export_eshop,
-    archived: cat.archived
+    archived: cat.archived,
+    revenue_account_code: cat.revenue_account_code ?? null,
+    expense_account_code: cat.expense_account_code ?? null,
   }
+  postingOpen.value = !!(cat.revenue_account_code || cat.expense_account_code)
   formActive.value = !cat.archived
   error.value = ''
   modalOpen.value = true
@@ -106,12 +123,19 @@ async function save() {
   }
   saving.value = true
   form.value.archived = !formActive.value
+  const payload: CategoryPayload = { ...form.value }
+  if (resultAccounts.available.value) {
+    payload.revenue_account_code = String(form.value.revenue_account_code ?? '').trim() || null
+    payload.expense_account_code = String(form.value.expense_account_code ?? '').trim() || null
+  } else {
+    delete payload.revenue_account_code
+    delete payload.expense_account_code
+  }
   try {
-    if (editing.value) {
-      await eshopApi.updateCategory(editing.value.id, form.value)
-    } else {
-      await eshopApi.createCategory(form.value)
-    }
+    const saved = editing.value
+      ? await eshopApi.updateCategory(editing.value.id, payload)
+      : await eshopApi.createCategory(payload)
+    await dimensionDefaults.value?.save(saved.id)
     toast.success(t('common.saved'))
     modalOpen.value = false
     await load()
@@ -284,6 +308,25 @@ async function doMove() {
             <input v-model="formActive" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('eshop.categories.field_active') }}
           </label>
+        </div>
+        <div v-if="resultAccounts.available.value" class="pt-2 border-t border-neutral-100" data-test="category-posting">
+          <button type="button" class="cursor-pointer text-xs text-primary-700 hover:underline" @click="postingOpen = !postingOpen">
+            {{ postingOpen ? t('product_posting.category_hide') : t('product_posting.category_show') }}
+          </button>
+          <div v-show="postingOpen" class="mt-2 space-y-3">
+            <p class="text-xs text-neutral-500">{{ t('product_posting.category_hint') }}</p>
+            <div>
+              <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('product_posting.revenue_account') }}</label>
+              <ChartAccountSelect v-model="form.revenue_account_code" :accounts="resultAccounts.revenueAccounts.value"
+                :placeholder="t('product_posting.by_document')" compact />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('product_posting.expense_account') }}</label>
+              <ChartAccountSelect v-model="form.expense_account_code" :accounts="resultAccounts.expenseAccounts.value"
+                :placeholder="t('product_posting.by_document')" compact />
+            </div>
+            <EntityDimensionDefaults ref="dimensionDefaults" entity="eshop/categories" :entity-id="editing?.id ?? null" />
+          </div>
         </div>
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
         <div class="flex justify-end gap-2 pt-2 border-t border-neutral-100">

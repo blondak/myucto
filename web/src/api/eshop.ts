@@ -203,6 +203,9 @@ export interface Category {
   display_order: number
   export_eshop: boolean
   archived: boolean
+  /** Výchozí účet výnosů / nákladů produktů kategorie (F1); dědí se do podkategorií. */
+  revenue_account_code?: string | null
+  expense_account_code?: string | null
 }
 
 export interface CategoryPayload {
@@ -212,6 +215,8 @@ export interface CategoryPayload {
   display_order: number
   export_eshop: boolean
   archived: boolean
+  revenue_account_code?: string | null
+  expense_account_code?: string | null
 }
 
 export interface CategoryI18nRow {
