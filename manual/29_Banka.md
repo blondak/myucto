@@ -113,6 +113,10 @@ evidovanými, zobrazí se samostatné varování s počty **nalezeno / založeno
 přeskočeno jako duplicita**. U dávkového nahrání se přeskočené pohyby sečtou do
 společného varování. Zkontroluj je, zvlášť pokud nejde o očekávaný překryv výpisů.
 
+Když se po uložení výpisu nepodaří dokončit párování a zaúčtování pohybů, výpis
+i pohyby zůstanou uložené a aplikace zobrazí varování. Postup popisuje
+[§ 29.3.2](#2932-vypis-s-nezpracovanymi-pohyby).
+
 Pokud měsíční GPC obsahuje platby již načtené z API, připojí se k existujícím
 pohybům. Rozdílné bankovní reference se propojí automaticky, pokud kromě účtu,
 měny, data a částky souhlasí protiúčet s variabilním symbolem nebo dostatečně
@@ -218,6 +222,30 @@ párování, rozdělené párování, vytvoření dokladu, přiložení podkladu
 dokladu, ignorování i ruční zaúčtování. Po provedené akci se aktualizuje tentýž
 řádek; není nutné dohledávat původní výpis. Filtry podle našeho účtu, data,
 částky, protistrany, párování a zaúčtování lze kombinovat.
+
+### 29.3.2 Výpis s nezpracovanými pohyby
+
+Načtení výpisu probíhá ve dvou krocích. Nejdřív se uloží výpis a jeho pohyby,
+potom se pohyby zpracují: převezmou párování z e-mailových avíz, spárují se
+na faktury a zaúčtují. Když druhý krok selže (chyba při párování, zaúčtování
+nebo výpadek databáze), pohyby zůstanou v evidenci nezpracované. Platí to pro
+ruční nahrání, stažení z napojené banky, skenování adresáře i PDF výpis
+z e-mailu.
+
+Aplikace na takový výpis upozorní:
+
+- při ručním nahrání varováním, že je výpis uložený, ale párování se
+  nepodařilo dokončit,
+- v seznamu výpisů štítkem **Nezpracováno** u výpisu a souhrnným upozorněním
+  nad seznamem,
+- v detailu výpisu žlutým rámečkem s počtem nezpracovaných pohybů a textem
+  chyby,
+- na nástěnce v **Akcích pro tebe**.
+
+Opakované nahrání stejného souboru pohyby nezpracuje, protože už jsou
+v evidenci. Otevři výpis a použij **Přepárovat výpis** (tlačítko je přímo
+v upozornění i v liště akcí). Po úspěšném přepárování upozornění zmizí. Pokud
+se chyba opakuje, text chyby v upozornění pomůže dohledat příčinu.
 
 ## 29.4 Detail výpisu
 

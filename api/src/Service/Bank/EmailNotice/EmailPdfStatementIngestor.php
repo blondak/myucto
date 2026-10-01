@@ -228,7 +228,9 @@ final class EmailPdfStatementIngestor
                 $accountNumber,
                 (int) ($result['transactions'] ?? 0),
                 (int) ($result['matched'] ?? 0),
-            ),
+            ) . (!empty($result['processing_failed'])
+                ? ' Párování pohybů se nepodařilo dokončit, u výpisu použijte „Přepárovat výpis".'
+                : ''),
             statementId: $statementId > 0 ? $statementId : null,
             matchedBy: isset($parsed['parser']) ? (string) $parsed['parser'] : null,
         );

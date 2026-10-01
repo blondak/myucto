@@ -53,6 +53,10 @@ export interface BankStatement {
   ignored_count?: number
   /** Počet skutečných pohybů bez aktivního účetního zápisu (ignorované položky se nepočítají). */
   unposted_count: number
+  /** Pohyby, které import uložil, ale jejich zpracování (párování, zaúčtování) selhalo. */
+  unprocessed_count?: number
+  /** Výpis má nezpracované pohyby — dokončí je „Znovu spárovat". */
+  processing_failed?: boolean
   imported_at: string
   has_file: boolean
   /** Je k výpisu přiložené PDF (bank_statements.pdf_content)? */
@@ -288,6 +292,8 @@ export interface BankStatementDetail extends BankStatement {
   /** Počet transakcí VÝPISU (ne jen načtené stránky) čekajících na návrh zaúčtování. */
   pending_posting_count: number
   notice_summary: BankStatementNoticeSummary | null
+  /** Text chyby, kterou skončilo zpracování pohybů po importu. */
+  processing_error?: string | null
 }
 
 export interface BankTransactionsParams {
@@ -300,15 +306,18 @@ export interface BankTransactionsParams {
 }
 
 /**
- * Varování z importu výpisu — dnes jen jeden kód: soubor obsahoval pohyby, které
- * se shodují (fingerprint) s už evidovanými, takže se nezaložily. `parsed/inserted/
- * skipped` jsou přesná čísla ze StatementImporter, FE si z nich sám poskládá hlášku
- * (viz `bank.warning.transactions_skipped_as_duplicate` v i18n) — `message` je
- * jen český text pro activity_log, na UI se nepoužívá (chybí EN varianta).
+ * Varování z importu výpisu:
+ * - `transactions_skipped_as_duplicate`: soubor obsahoval pohyby, které se shodují
+ *   (fingerprint) s už evidovanými, takže se nezaložily. `parsed/inserted/skipped`
+ *   jsou přesná čísla ze StatementImporter.
+ * - `processing_failed`: výpis je uložený, ale párování a zaúčtování pohybů selhalo
+ *   (`error` = text chyby). Dokončí ho „Znovu spárovat".
+ * FE si hlášku skládá z i18n — `message` je jen český text pro activity_log.
  */
 export interface ImportWarning {
-  code: 'transactions_skipped_as_duplicate'
+  code: 'transactions_skipped_as_duplicate' | 'processing_failed'
   message?: string
+  error?: string
   parsed?: number
   inserted?: number
   skipped?: number
@@ -351,6 +360,8 @@ export interface ImportResult {
   /** Neprázdné jen když `skipped_duplicates > 0` a výpis NENÍ celý duplicitní —
    *  to je podezřelé (přeskočené pohyby v jinak novém souboru), ne očekávaná duplicita. */
   warnings?: ImportWarning[]
+  /** Pohyby jsou uložené, ale jejich zpracování selhalo (viz `warnings`). */
+  processing_failed?: boolean
 }
 
 /** Kandidát účtu při shodném čísle ve více měnách nebo bankách (#167/#206). */
@@ -380,6 +391,8 @@ export interface BankStatementPage {
   accounts: BankAccountOption[]
   /** Je v cfg.php nastavené adresářové skenování (bank_import.scan_root)? Řídí tlačítko „Skenovat adresář". */
   scan_configured: boolean
+  /** Počet výpisů s nezpracovanými pohyby přes celý scope (bez filtrů a stránkování). */
+  processing_failed_statements?: number
 }
 
 export interface BankListParams {

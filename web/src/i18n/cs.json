@@ -20746,8 +20746,16 @@
     "pdf_attached_to_existing": "Výpis už byl v systému z GPC — PDF se k němu přiložilo.",
     "warning": {
       "transactions_skipped_as_duplicate": "Ve výpisu bylo {parsed} pohybů, založeno {inserted}. {skipped} pohybů se shoduje s už evidovanými (překrývající se výpis) a nebylo založeno — zkontroluj prosím, že jde skutečně o duplicity.",
-      "transactions_skipped_as_duplicate_batch": "Z nahraných výpisů bylo přeskočeno {count} pohybů jako duplicity s už evidovanými — zkontroluj prosím, že jde skutečně o duplicity."
+      "transactions_skipped_as_duplicate_batch": "Z nahraných výpisů bylo přeskočeno {count} pohybů jako duplicity s už evidovanými — zkontroluj prosím, že jde skutečně o duplicity.",
+      "processing_failed": "Výpis je uložený, ale párování a zaúčtování jeho pohybů se nepodařilo dokončit. Otevřete výpis a použijte „Přepárovat výpis“.",
+      "processing_failed_batch": "Výpisy uložené bez dokončeného párování pohybů: {count}. Otevřete je a použijte „Přepárovat výpis“."
     },
+    "processing_failed_badge": "Nezpracováno",
+    "processing_failed_badge_hint": "Nezpracované pohyby: {count}. Párování a zaúčtování po importu se nepodařilo dokončit, otevřete výpis a použijte „Přepárovat výpis“.",
+    "processing_failed_title": "Pohyby výpisu nejsou zpracované",
+    "processing_failed_text": "Výpis je uložený, ale u {count} pohybů se po importu nepodařilo dokončit převzetí z avíz, párování na doklady a zaúčtování. Opakované nahrání souboru je nezpracuje. Použijte „Přepárovat výpis“.",
+    "processing_failed_error": "Chyba: {error}",
+    "processing_failed_summary": "Výpisy s nezpracovanými pohyby: {count}. Jsou označené v seznamu, otevřete je a použijte „Přepárovat výpis“.",
     "choose_account_title": "Vyberte bankovní účet",
     "choose_account_hint": "Soubor „{file}\" odpovídá číslu účtu vedenému ve více měnách nebo bankách. Výpis účet jednoznačně neurčuje — zvolte cílový účet.",
     "choose_account_confirm": "Importovat",
@@ -24598,6 +24606,8 @@
       "bank_sync_title": "Obnov načítání banky: {account}",
       "bank_sync_reconciliation": "Načítání čeká na kontrolu nejednoznačných shod. Otevři účet a načti pohyby.",
       "bank_sync_failed": "Automatické načítání selhalo. Otevři účet a zkontroluj připojení.",
+      "bank_processing_title": "Dokonči párování výpisu: {account}",
+      "bank_processing_failed": "Výpis je uložený, ale párování pohybů se nepodařilo dokončit. Otevři výpis a použij „Přepárovat výpis“.",
       "title": "Akce pro tebe",
       "go_to": "Přejít na detail",
       "dismiss": "Skrýt upozornění",

@@ -20746,8 +20746,16 @@
     "pdf_attached_to_existing": "The statement was already imported from GPC — the PDF was attached to it.",
     "warning": {
       "transactions_skipped_as_duplicate": "The statement had {parsed} transactions, {inserted} were imported. {skipped} matched transactions already on record (overlapping statement) and were not imported — please verify these are genuine duplicates.",
-      "transactions_skipped_as_duplicate_batch": "{count} transactions from the uploaded statements were skipped as duplicates of already recorded ones — please verify these are genuine duplicates."
+      "transactions_skipped_as_duplicate_batch": "{count} transactions from the uploaded statements were skipped as duplicates of already recorded ones — please verify these are genuine duplicates.",
+      "processing_failed": "The statement was saved, but matching and posting of its transactions could not be completed. Open the statement and use “Re-match statement”.",
+      "processing_failed_batch": "Statements saved without completed matching: {count}. Open them and use “Re-match statement”."
     },
+    "processing_failed_badge": "Not processed",
+    "processing_failed_badge_hint": "Unprocessed transactions: {count}. Matching and posting after import could not be completed, open the statement and use “Re-match statement”.",
+    "processing_failed_title": "Statement transactions are not processed",
+    "processing_failed_text": "The statement was saved, but for {count} transactions the takeover from e-mail notices, matching to documents and posting could not be completed after import. Uploading the file again will not process them. Use “Re-match statement”.",
+    "processing_failed_error": "Error: {error}",
+    "processing_failed_summary": "Statements with unprocessed transactions: {count}. They are marked in the list, open them and use “Re-match statement”.",
     "choose_account_title": "Choose bank account",
     "choose_account_hint": "The file “{file}” matches an account number used in multiple currencies or banks. The statement does not identify it unambiguously — choose the target account.",
     "choose_account_confirm": "Import",
@@ -24598,6 +24606,8 @@
       "bank_sync_title": "Restore bank synchronization: {account}",
       "bank_sync_reconciliation": "Synchronization needs a review of ambiguous matches. Open the account and load transactions.",
       "bank_sync_failed": "Automatic synchronization failed. Open the account and check the connection.",
+      "bank_processing_title": "Finish matching the statement: {account}",
+      "bank_processing_failed": "The statement was saved, but matching its transactions could not be completed. Open the statement and use “Re-match statement”.",
       "title": "Action items",
       "go_to": "Go to detail",
       "dismiss": "Dismiss notification",

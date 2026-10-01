@@ -402,6 +402,48 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     expect(m.upload).toHaveBeenNthCalledWith(3, file, 7, [candidate.confirmation_key], undefined)
   })
 
+  it('výpis s nezpracovanými pohyby: štítek u výpisu a souhrnné upozornění nad seznamem', async () => {
+    m.list.mockResolvedValue({ ...emptyPage(), total: 1, processing_failed_statements: 3, items: [{
+      id: 45, source: 'gpc', file_name: 'synthetic-failed.gpc',
+      account_number: '1000000005', bank_code: '0100', currency: 'CZK',
+      statement_date: '2026-09-30', curr_balance: 10, prev_balance: 5,
+      transaction_count: 2, matched_count: 0, unposted_count: 0, has_file: true, has_pdf: false,
+      unprocessed_count: 2, processing_failed: true,
+    }] })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="statements-processing-failed"]').text())
+      .toBe('bank.processing_failed_summary:' + JSON.stringify({ count: 3 }))
+    const badge = wrapper.get('[data-testid="statement-processing-failed-badge"]')
+    expect(badge.text()).toBe('bank.processing_failed_badge')
+    expect(badge.attributes('title')).toBe('bank.processing_failed_badge_hint:' + JSON.stringify({ count: 2 }))
+    wrapper.unmount()
+  })
+
+  it('bez nezpracovaných výpisů se upozornění nevykreslí', async () => {
+    m.list.mockResolvedValue({ ...emptyPage(), processing_failed_statements: 0 })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="statements-processing-failed"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('nahraný výpis s neúspěšným zpracováním pohybů → toast.warning a přesměrování na detail', async () => {
+    m.upload.mockResolvedValue({
+      ...importedResult(),
+      transactions: 2,
+      skipped_duplicates: 0,
+      processing_failed: true,
+      warnings: [{ code: 'processing_failed', error: 'Synthetic failure' }],
+    })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    await selectFiles(wrapper, [gpcFile()])
+    expect(m.toastWarning).toHaveBeenCalledWith('bank.warning.processing_failed')
+    expect(m.push).toHaveBeenCalledWith('/bank/42')
+    wrapper.unmount()
+  })
+
   it('zrušení review neodesílá potvrzení ani další upload', async () => {
     m.upload.mockRejectedValueOnce(reconciliationConflict())
     const wrapper = mount(StatementList, { global: { stubs } })

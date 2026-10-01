@@ -205,6 +205,8 @@ const scanning = ref(false)
 const scanConfigured = ref(false)
 const lastResult = ref<ImportResult | null>(null)
 const error = ref('')
+// Výpisy, jejichž pohyby import uložil, ale nezpracoval — přes celý scope, ne stránku.
+const processingFailedStatements = ref(0)
 
 // #167: výpis u víceměnového účtu se sdíleným číslem účtu — server vrátí 409
 // `ambiguous_account_currency` se seznamem měnových variant; necháme uživatele zvolit
@@ -305,6 +307,7 @@ async function load() {
     years.value = r.years
     accounts.value = r.accounts
     scanConfigured.value = r.scan_configured
+    processingFailedStatements.value = r.processing_failed_statements ?? 0
   } finally { loading.value = false }
 }
 
@@ -571,6 +574,9 @@ async function onFileSelected(e: Event) {
   // zůstat jen v odpovědi API / activity_logu.
   let attachedCount = 0
   let skippedDuplicateCount = 0
+  // Výpis je uložený, ale zpracování pohybů spadlo: uživatel to musí vědět hned,
+  // opakované nahrání téhož souboru už pohyby nezpracuje.
+  let processingFailedCount = 0
   for (const r of results) {
     if (r.duplicate) duplicateCount++
     else {
@@ -579,7 +585,13 @@ async function onFileSelected(e: Event) {
       for (const w of r.warnings ?? []) {
         if (w.code === 'transactions_skipped_as_duplicate') skippedDuplicateCount += w.skipped ?? 0
       }
+      if (r.processing_failed) processingFailedCount++
     }
+  }
+  if (processingFailedCount > 0) {
+    toast.warning(files.length === 1
+      ? t('bank.warning.processing_failed')
+      : t('bank.warning.processing_failed_batch', { count: processingFailedCount }))
   }
 
   const transferred = results.reduce((sum, r) => sum + (r.ignored_transferred ?? 0), 0)
@@ -763,6 +775,12 @@ async function onFileSelected(e: Event) {
       {{ error }}
     </div>
 
+    <div v-if="processingFailedStatements > 0" role="alert" data-testid="statements-processing-failed"
+      class="mb-4 flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 px-4 py-2.5 text-sm text-warning-800">
+      <svg class="w-4 h-4 shrink-0 mt-0.5 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+      <span>{{ t('bank.processing_failed_summary', { count: processingFailedStatements }) }}</span>
+    </div>
+
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <EmptyState v-else-if="!statements.length && filtersActive" boxed variant="filtered"
@@ -811,6 +829,11 @@ async function onFileSelected(e: Event) {
                   {{ t('bank.pdf_source_badge') }}
                 </span>
                 <span v-if="s.statement_number" class="text-neutral-400">#{{ s.statement_number }}</span>
+                <span v-if="s.processing_failed" data-testid="statement-processing-failed-badge"
+                  :title="t('bank.processing_failed_badge_hint', { count: s.unprocessed_count ?? 0 })"
+                  class="text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium whitespace-nowrap">
+                  {{ t('bank.processing_failed_badge') }}
+                </span>
               </span>
             </td>
             <td class="px-3 py-2 text-xs">
@@ -907,6 +930,9 @@ async function onFileSelected(e: Event) {
           </div>
           <div v-if="s.unposted_count > 0" class="mt-1 text-xs text-warning-600 font-medium">
             {{ t('bank.unposted_count', { count: s.unposted_count }) }}
+          </div>
+          <div v-if="s.processing_failed" class="mt-1 text-xs text-warning-600 font-medium">
+            {{ t('bank.processing_failed_badge_hint', { count: s.unprocessed_count ?? 0 }) }}
           </div>
           <div class="flex flex-wrap items-center gap-1.5 mt-2">
             <button v-if="statementHasGpc(s)" type="button" data-testid="statement-gpc"

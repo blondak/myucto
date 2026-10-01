@@ -22,6 +22,7 @@ use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use MyInvoice\Service\Bank\StatementReconciliationConfirmation;
 use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
+use MyInvoice\Service\Bank\StatementProcessingState;
 use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
@@ -846,6 +847,7 @@ final class BankStatementAction
                     " . StatementTransactionScope::countSql('bs.id', 'ibt', "ibt.match_status = 'ignored'") . " AS ignored_count,
                     " . StatementTransactionScope::countSql('bs.id', 'ubt', "ubt.source = 'statement'
                         AND ubt.match_status <> 'ignored' AND NOT " . BankTransactionPostingScope::existsSql($sid, 'ubt.id')) . " AS unposted_count,
+                    " . StatementTransactionScope::countSql('bs.id', 'pbt', StatementProcessingState::failedSql('pbt')) . " AS unprocessed_count,
                     (SELECT CASE
                               WHEN COUNT(DISTINCT COALESCE(NULLIF(cur.bank_code, ''), '?')) = 1
                               THEN MAX(cur.label)
@@ -889,6 +891,8 @@ final class BankStatementAction
             $r['non_invoice_count'] = (int) $r['non_invoice_count'];
             $r['ignored_count'] = (int) $r['ignored_count'];
             $r['unposted_count'] = (int) $r['unposted_count'];
+            $r['unprocessed_count'] = (int) $r['unprocessed_count'];
+            $r['processing_failed'] = $r['unprocessed_count'] > 0;
             $r['prev_balance'] = $r['prev_balance'] === null ? null : (float) $r['prev_balance'];
             $r['curr_balance'] = $r['curr_balance'] === null ? null : (float) $r['curr_balance'];
             $r['has_file'] = (bool) $r['has_file'];
@@ -939,9 +943,20 @@ final class BankStatementAction
             'label'          => $a['label'] !== null ? (string) $a['label'] : null,
         ], $accStmt->fetchAll(\PDO::FETCH_ASSOC));
 
+        // Souhrn přes celý scope bez filtrů: výpis s nezpracovanými pohyby nesmí zmizet
+        // jen proto, že ho skryl zvolený rok nebo stránka.
+        $failedStmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM bank_statements bs
+              WHERE $scopeSql AND " . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . "
+                AND EXISTS (SELECT 1 FROM bank_transactions bt
+                             WHERE " . StatementTransactionScope::sql('bs.id') . ' AND ' . StatementProcessingState::failedSql() . ')'
+        );
+        $failedStmt->execute($scopeParams);
+
         return Json::ok($response, [
             'items' => $rows,
             'total' => $total,
+            'processing_failed_statements' => (int) $failedStmt->fetchColumn(),
             'page' => $page,
             'limit' => $limit,
             'years' => $years,
@@ -1777,6 +1792,8 @@ final class BankStatementAction
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
             $t['posting'] = $postingByTx[$t['id']] ?? null;
+            // Stav zpracování po importu nese výpis (`processing_failed`), ne pohyb.
+            unset($t['processing_pending_at'], $t['processing_error']);
             if ($dimensionsByTx !== null) {
                 $t['dimensions'] = (object) ($dimensionsByTx[$t['id']] ?? []);
             }
@@ -1802,6 +1819,10 @@ final class BankStatementAction
         // Souhrny počítané přes VŠECHNY transakce výpisu (ne jen aktuálně načtenou stránku),
         // ať zůstanou správně i po zapnutí stránkování (dřív FE počítal z plného pole).
         $s['pending_posting_count'] = $this->statementPendingPostingCount($sid, $id);
+        $processing = StatementProcessingState::forStatement($this->db->pdo(), $id);
+        $s['unprocessed_count'] = $processing['unprocessed_count'];
+        $s['processing_failed'] = $processing['unprocessed_count'] > 0;
+        $s['processing_error'] = $processing['processing_error'];
         $s['notice_summary'] = (string) ($s['source'] ?? '') === 'email_notice'
             ? $this->statementNoticeSummary($id)
             : null;
@@ -4332,6 +4353,8 @@ final class BankStatementAction
                 !empty($r['requires_review']),
             );
         }
+        // Zpracování přerušené při importu je tímhle dorovnané.
+        StatementProcessingState::completeStatement($pdo, $statementId);
 
         // Recompute matched_count na výpisu
         $pdo->prepare(

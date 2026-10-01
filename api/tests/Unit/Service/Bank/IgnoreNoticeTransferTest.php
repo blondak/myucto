@@ -40,7 +40,8 @@ final class IgnoreNoticeTransferTest extends TestCase
         $this->pdo->exec('CREATE TABLE bank_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER, source TEXT DEFAULT \'statement\', posted_at TEXT,
             amount REAL, currency TEXT, variable_symbol TEXT, constant_symbol TEXT, specific_symbol TEXT, counterparty_account TEXT,
             counterparty_bank TEXT, counterparty_name TEXT, description TEXT, bank_ref TEXT, match_status TEXT DEFAULT \'unmatched\',
-            matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT, card_last4 TEXT, import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT)');
+            matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT, card_last4 TEXT, import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT,
+            processing_pending_at TEXT, processing_error TEXT)');
         $this->pdo->exec('CREATE TABLE bank_email_processed_messages (bank_transaction_id INTEGER, supplier_id INTEGER)');
         $this->pdo->exec('CREATE TABLE invoice_payments (bank_transaction_id INTEGER)');
         $this->pdo->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER)');

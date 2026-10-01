@@ -25,6 +25,7 @@ import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.v
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
@@ -522,6 +523,23 @@ const statementActions = computed<ActionItem[]>(() => {
       <span v-if="statement.currency" class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 font-medium">{{ statement.currency }}</span>
       <span>· {{ statement.file_name }}</span>
     </p>
+
+    <!-- Import pohyby uložil, ale jejich zpracování (párování, zaúčtování) spadlo.
+         Opakované nahrání souboru je nezpracuje, dokončí je jen přepárování výpisu. -->
+    <div v-if="statement.processing_failed" role="alert" data-testid="statement-processing-failed"
+      class="mt-4 flex flex-wrap items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm">
+      <svg class="w-5 h-5 text-warning-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+      <div class="flex-1 min-w-56">
+        <div class="font-semibold text-warning-800">{{ t('bank.processing_failed_title') }}</div>
+        <p class="text-neutral-700 mt-0.5">{{ t('bank.processing_failed_text', { count: statement.unprocessed_count ?? 0 }) }}</p>
+        <p v-if="statement.processing_error" class="text-xs text-neutral-500 mt-1 break-words">{{ t('bank.processing_failed_error', { error: statement.processing_error }) }}</p>
+      </div>
+      <button v-if="auth.canWrite('bank.match')" type="button" data-testid="statement-processing-rematch"
+        :class="btnFilled('warning')" class="whitespace-nowrap" :disabled="rematching" @click="rematchStatement">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+        {{ rematching ? t('bank.rematch_running') : t('bank.rematch') }}
+      </button>
+    </div>
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->

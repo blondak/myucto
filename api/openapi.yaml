@@ -3167,6 +3167,9 @@ paths:
                   scan_configured:
                     type: boolean
                     description: "Je nakonfigurované hostitelské adresářové skenování (cfg.bank_import.scan_root)? Interní příznak pro UI tlačítko Skenovat adresář."
+                  processing_failed_statements:
+                    type: integer
+                    description: "Počet výpisů firmy s nezpracovanými pohyby (`processing_failed`). Počítá se přes celý scope bez filtrů a stránkování."
 
   /api/v1/bank-statements/{id}:
     parameters:
@@ -5370,6 +5373,10 @@ paths:
         s `paid_at = transaction.posted_at`; transakce s více kandidáty zůstávají
         nepřiřazené pro manuální rozhodnutí. Stavy `auto_exact`, `manual`
         a `ignored` zůstávají nedotčené.
+
+        Je to i jediná cesta, jak dokončit zpracování pohybů výpisu s příznakem
+        `processing_failed` (párování po importu selhalo). Po úspěšném průchodu
+        příznak zmizí; opakované nahrání téhož souboru pohyby znovu nezpracuje.
 
         Pozn.: hromadný **import výpisů z adresáře na serveru** (`scan_root`) je
         hostitelská/cron záležitost a není součástí veřejného API — výpisy se přes
@@ -34145,14 +34152,22 @@ components:
           description: |
             Nespárovaná e-mailová avíza označená za nahrazená tímto výpisem. Týž pohyb
             je pak v evidenci jen jednou — z výpisu; avízo dostane stav `ignored`.
+        processing_failed:
+          type: boolean
+          description: |
+            `true` = výpis i pohyby jsou uložené, ale jejich zpracování (převzetí
+            z e-mailového avíza, párování na doklady, zaúčtování) selhalo. Dokončí ho
+            `POST /bank-statements/{id}/rematch`; opakované nahrání souboru ne.
+            U celého duplicitního souboru se nevrací.
         warnings:
           type: array
-          description: "Např. `transactions_skipped_as_duplicate` při překryvu výpisů."
+          description: "Např. `transactions_skipped_as_duplicate` při překryvu výpisů nebo `processing_failed` při selhání zpracování pohybů."
           items:
             type: object
             properties:
-              code: { type: string }
+              code: { type: string, enum: [transactions_skipped_as_duplicate, processing_failed] }
               message: { type: string }
+              error: { type: string, description: "Jen u `processing_failed`: text chyby, kterou zpracování skončilo." }
               parsed: { type: integer }
               inserted: { type: integer }
               skipped: { type: integer }
@@ -34316,6 +34331,8 @@ components:
         matched_count: { type: integer }
         ignored_count: { type: integer, description: "Počet sekundárních pohybů převzatých autoritativním výpisem a označených jako ignorované." }
         unposted_count: { type: integer, description: "Počet skutečných pohybů bez aktivního účetního zápisu; ignorované položky se nepočítají." }
+        unprocessed_count: { type: integer, description: "Počet pohybů, které import uložil, ale jejich zpracování (párování, zaúčtování) selhalo nebo nedoběhlo." }
+        processing_failed: { type: boolean, description: "True, když má výpis nezpracované pohyby (`unprocessed_count > 0`). Dokončí je POST /bank-statements/{id}/rematch." }
         imported_at: { type: string, format: date-time }
         has_file: { type: boolean, description: "True pokud server má uložený originál výpisu ke stažení přes /bank-statements/{id}/download. U měsíční projekce `bank_api` je false; případný raw obsah zůstává u skrytých původních importů." }
         has_pdf: { type: boolean, description: "True pokud je nahrán doprovodný PDF výpis." }
@@ -34351,6 +34368,7 @@ components:
                   statement_date: { type: [string, "null"], format: date }
                   transaction_count: { type: integer, description: "Počet pohybů, které zdrojový výpis sám vlastní." }
             api_evidence: { type: boolean, description: "True u zdrojového výpisu měsíčního výpisu API. Smazání ho nejdřív odpojí od měsíce a měsíční výpis přepočítá." }
+            processing_error: { type: [string, "null"], description: "Text chyby, kterou skončilo zpracování pohybů po importu. Null bez nezpracovaných pohybů nebo u zpracování, které nedoběhlo bez chyby." }
             file_hash: { type: string, description: "SHA-256 originálního souboru" }
             credit_total: { type: [number, "null"], format: float }
             debit_total: { type: [number, "null"], format: float }

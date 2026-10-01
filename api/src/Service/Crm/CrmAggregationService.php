@@ -1121,9 +1121,12 @@ final class CrmAggregationService
      *   total: int
      * }
      */
-    public function actionItems(int $supplierId, ?int $userId = null, ?\DateTimeImmutable $now = null, bool $canManageBankConnections = false): array
+    public function actionItems(int $supplierId, ?int $userId = null, ?\DateTimeImmutable $now = null, bool $canManageBankConnections = false, bool $canRematchBank = false): array
     {
-        $items = $this->bankSyncActionItems($supplierId, $canManageBankConnections);
+        $items = [
+            ...$this->bankSyncActionItems($supplierId, $canManageBankConnections),
+            ...$this->bankProcessingActionItems($supplierId, $canRematchBank, $now),
+        ];
         $pdo = $this->db->pdo();
         $nowDt = $now ?? new \DateTimeImmutable();
         $today = $nowDt->format('Y-m-d');
@@ -1689,6 +1692,46 @@ final class CrmAggregationService
                 'hint_key' => $row['last_sync_error_code'] === 'statement_reconciliation_required'
                     ? 'crm.action_items.bank_sync_reconciliation' : 'crm.action_items.bank_sync_failed',
                 'link' => '/bank?tab=accounts&currency_id=' . (int) $row['currency_id'],
+                'count' => 1,
+                'dismissible' => false,
+            ];
+        }
+        return $items;
+    }
+
+    /**
+     * Výpisy, jejichž pohyby import uložil, ale nezpracoval (párování, zaúčtování).
+     * Opakované nahrání souboru je nezpracuje, pomůže jen „Znovu spárovat" u výpisu.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function bankProcessingActionItems(int $supplierId, bool $canRematchBank, ?\DateTimeImmutable $now = null): array
+    {
+        if (!$canRematchBank) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bs.id, bs.file_name, bs.statement_date
+               FROM bank_statements bs
+              WHERE ' . \MyInvoice\Repository\BankStatementOwnershipResolver::sql() . '
+                AND ' . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . '
+                AND EXISTS (SELECT 1 FROM bank_transactions bt
+                             WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql('bs.id')
+                . ' AND ' . \MyInvoice\Service\Bank\StatementProcessingState::failedSql('bt', $now) . ')
+           ORDER BY bs.statement_date DESC, bs.id DESC
+              LIMIT 5'
+        );
+        $stmt->execute(\MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId));
+        $items = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $items[] = [
+                'type' => 'bank_statement_processing_' . (int) $row['id'],
+                'severity' => 'high',
+                'title' => trim((string) $row['file_name']) !== '' ? (string) $row['file_name'] : (string) $row['statement_date'],
+                'title_key' => 'crm.action_items.bank_processing_title',
+                'hint' => '',
+                'hint_key' => 'crm.action_items.bank_processing_failed',
+                'link' => '/bank/' . (int) $row['id'],
                 'count' => 1,
                 'dismissible' => false,
             ];

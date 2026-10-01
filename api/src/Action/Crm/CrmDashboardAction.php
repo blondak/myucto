@@ -173,7 +173,8 @@ final class CrmDashboardAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         return Json::ok($response, $this->crm->actionItems($supplierId, $userId, null,
-            RequestAuthorization::allows($request, 'settings.bank_accounts', AccessLevel::WRITE)));
+            RequestAuthorization::allows($request, 'settings.bank_accounts', AccessLevel::WRITE),
+            RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)));
     }
 
     /**

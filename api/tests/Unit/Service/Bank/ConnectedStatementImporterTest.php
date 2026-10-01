@@ -38,7 +38,8 @@ final class ConnectedStatementImporterTest extends TestCase
             id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT,
             variable_symbol TEXT, constant_symbol TEXT, specific_symbol TEXT, counterparty_account TEXT,
             counterparty_bank TEXT, counterparty_name TEXT, card_last4 TEXT, description TEXT, bank_ref TEXT,
-            import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT, match_status TEXT DEFAULT 'unmatched'
+            import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT, match_status TEXT DEFAULT 'unmatched',
+            processing_pending_at TEXT, processing_error TEXT
         )");
         $db = $this->createStub(Connection::class);
         $this->pdo->exec('CREATE TABLE bank_transaction_imports (statement_id INTEGER, bank_transaction_id INTEGER, import_fingerprint TEXT, supplier_id INTEGER, original_statement_id INTEGER, PRIMARY KEY (statement_id, bank_transaction_id))');
@@ -216,15 +217,28 @@ final class ConnectedStatementImporterTest extends TestCase
             self::assertCount(2, $ids);
             throw new \RuntimeException('synthetic matching failure');
         });
-        try {
-            $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
-            self::fail('Matching failure must propagate.');
-        } catch (\RuntimeException $e) {
-            self::assertSame('synthetic matching failure', $e->getMessage());
-        }
+        $failed = $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
+        self::assertTrue($failed['processing_failed'], 'Selhání párování import nezahodí, výpis ho nese dál.');
+        self::assertSame(['processing_failed'], array_column($failed['warnings'], 'code'));
+        self::assertSame(
+            ['synthetic matching failure', 'synthetic matching failure'],
+            $this->pdo->query('SELECT processing_error FROM bank_transactions ORDER BY id')->fetchAll(PDO::FETCH_COLUMN),
+        );
         $result = $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
         self::assertTrue($result['duplicate']);
         self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE processing_error IS NOT NULL')->fetchColumn(), 'Opakované nahrání upozornění neodstraní.');
+    }
+
+    public function testSuccessfulProcessingClearsPendingMark(): void
+    {
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturnCallback(function (array $ids): array {
+            self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE processing_pending_at IS NOT NULL')->fetchColumn());
+            return [];
+        });
+        $result = $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
+        self::assertFalse($result['processing_failed']);
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions WHERE processing_pending_at IS NOT NULL OR processing_error IS NOT NULL')->fetchColumn());
     }
 
     public function testForeignTenantIsRejectedBeforeStorage(): void
@@ -240,12 +254,7 @@ final class ConnectedStatementImporterTest extends TestCase
             self::assertCount(2, $ids);
             throw new \RuntimeException('synthetic matching failure');
         });
-        try {
-            $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
-            self::fail('Matching failure must propagate.');
-        } catch (\RuntimeException $e) {
-            self::assertSame('synthetic matching failure', $e->getMessage());
-        }
+        self::assertTrue($this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10)['processing_failed']);
         $result = $this->importer->importConnected(str_replace('+001310126', '+002310126', $this->gpc()), 'synthetic-2.gpc', null, 1, 10);
         self::assertSame(0, $result['transactions']);
         self::assertSame(2, $result['skipped_duplicates']);

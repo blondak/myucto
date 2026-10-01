@@ -927,7 +927,8 @@
         "1943_unbound_mcp_oauth.sql",
         "1944_other_item_schedule_auto_post.sql",
         "1945_activity_log_user_without_fk.sql",
-        "1946_bank_notice_ignore_transfer.sql"
+        "1946_bank_notice_ignore_transfer.sql",
+        "1947_bank_transaction_processing_state.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2919,6 +2920,8 @@
                 "matched_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "portable_fingerprint": "char(64) NULL DEFAULT NULL",
                 "posted_at": "date NOT NULL",
+                "processing_error": "varchar(500) NULL DEFAULT NULL",
+                "processing_pending_at": "datetime NULL DEFAULT NULL",
                 "source": "enum('statement','email_notice','idoklad') NOT NULL DEFAULT 'statement'",
                 "source_ref": "varchar(190) NULL DEFAULT NULL",
                 "specific_symbol": "varchar(20) NULL DEFAULT NULL",

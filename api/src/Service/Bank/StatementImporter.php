@@ -10,6 +10,7 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use PDO;
+use Psr\Log\LoggerInterface;
 
 /**
  * Persist naparsovaného výpisu do DB (GPC nebo bank-specifický PDF parser — obojí
@@ -31,6 +32,7 @@ final class StatementImporter
         // Mzdové odvody: výpis je zdroj pravdy, takže tady vzniká SKUTEČNÁ úhrada
         // a provizorní signál z avíza se uzavírá. Nullable — instalace bez mezd.
         private readonly ?PayrollPaymentSettlementRecognizer $payrollSettlements = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -177,19 +179,23 @@ final class StatementImporter
             throw $e;
         }
 
-        $pendingIds = [];
-        $state = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
-        foreach ($touched->toProcess() as $txId) {
-            $state->execute([$txId]);
-            $matchStatus = $state->fetchColumn();
-            if ($matchStatus === 'unmatched') {
-                $pendingIds[] = $txId;
-            } else {
-                if ($matchStatus === 'auto_exact') $this->matcher->match($txId);
-                $this->bankPosting?->handleTransaction($txId, $userId);
+        $result['superseded_notices'] = 0;
+        $failure = $this->processSafely($touched->toProcess(), (int) ($result['evidence_statement_id'] ?? $result['statement_id']), function () use ($pdo, $touched, $userId, &$result): void {
+            $pendingIds = [];
+            $state = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
+            foreach ($touched->toProcess() as $txId) {
+                $state->execute([$txId]);
+                $matchStatus = $state->fetchColumn();
+                if ($matchStatus === 'unmatched') {
+                    $pendingIds[] = $txId;
+                } else {
+                    if ($matchStatus === 'auto_exact') $this->matcher->match($txId);
+                    $this->bankPosting?->handleTransaction($txId, $userId);
+                }
             }
-        }
-        $result['superseded_notices'] = $this->processTransactions($pendingIds, $userId)['superseded'];
+            $result['superseded_notices'] = $this->processTransactions($pendingIds, $userId)['superseded'];
+        });
+        $result = $this->withProcessingOutcome($result, $failure);
         $update = $pdo->prepare('UPDATE bank_statements SET matched_count = ? WHERE id = ?');
         foreach (array_unique($affectedStatements) as $statementId) {
             $matched = (int) $pdo->query("SELECT COUNT(*) FROM bank_transactions bt WHERE " . StatementTransactionScope::sql((int) $statementId) . " AND bt.match_status IN ('auto_exact', 'auto_partial', 'manual')")->fetchColumn();
@@ -385,9 +391,11 @@ final class StatementImporter
         $insertTx = $pdo->prepare(
             'INSERT INTO bank_transactions
                  (statement_id, posted_at, amount, currency, variable_symbol, constant_symbol, specific_symbol,
-                  counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, import_fingerprint, portable_fingerprint)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                  counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, import_fingerprint, portable_fingerprint,
+                  processing_pending_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
+        $pendingSince = StatementProcessingState::pendingSince();
         $findDuplicateTx = $pdo->prepare(
             'SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
              WHERE bt.import_fingerprint = ? AND (bs.supplier_id = ? OR (bs.supplier_id IS NULL AND ? IS NULL)) LIMIT 1'
@@ -441,6 +449,7 @@ final class StatementImporter
                     $tx['counterparty_account'], $tx['counterparty_bank'], $tx['counterparty_name'],
                     \MyInvoice\Service\Bank\Card\CardNumberMask::forParsedTransaction($tx),
                     $tx['description'], $tx['bank_ref'], $fingerprint, $portableFingerprint,
+                    $pendingSince,
                 ]);
             } catch (\PDOException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000'
@@ -467,12 +476,16 @@ final class StatementImporter
             }
         }
 
-        $processed = $deferProcessing
-            ? ['matched' => 0, 'superseded' => 0]
-            : $this->processTransactions(array_values(array_filter(
-                $touched->toProcess(),
-                static fn (int $id): bool => !isset($ignoredIds[$id]),
-            )), $userId);
+        $processed = ['matched' => 0, 'superseded' => 0];
+        $failure = null;
+        if (!$deferProcessing) {
+            $failure = $this->processSafely($touched->toProcess(), $statementId, function () use (&$processed, $touched, $ignoredIds, $userId): void {
+                $processed = $this->processTransactions(array_values(array_filter(
+                    $touched->toProcess(),
+                    static fn (int $id): bool => !isset($ignoredIds[$id]),
+                )), $userId);
+            });
+        }
         $matched = $processed['matched'];
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
@@ -506,7 +519,7 @@ final class StatementImporter
             ];
         }
 
-        return [
+        $result = [
             'statement_id'        => $statementId,
             'transactions'        => $inserted,
             'matched'             => $matched,
@@ -517,6 +530,58 @@ final class StatementImporter
             'superseded_notices'  => $processed['superseded'],
             'warnings'            => $warnings,
         ];
+        return $deferProcessing ? $result : $this->withProcessingOutcome($result, $failure);
+    }
+
+    /**
+     * Zpracování založených pohybů po jejich uložení. Selhání import nezahodí: pohyby
+     * v evidenci zůstávají, dostanou chybu ({@see StatementProcessingState}) a výpis
+     * upozorní na „Přepárovat výpis". Opakované nahrání souboru by je už nezpracovalo.
+     *
+     * @param list<int> $transactionIds
+     * @param callable():void $work
+     * @return ?\Throwable Selhání zpracování, nebo null.
+     */
+    private function processSafely(array $transactionIds, int $statementId, callable $work): ?\Throwable
+    {
+        $pdo = $this->db->pdo();
+        try {
+            $work();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            try {
+                StatementProcessingState::fail($pdo, $transactionIds, $e);
+            } catch (\Throwable) {
+                throw $e;
+            }
+            $this->logger?->error('Bank statement processing failed after import', [
+                'statement_id' => $statementId,
+                'transactions' => count($transactionIds),
+                'exception' => $e,
+            ]);
+            return $e;
+        }
+        StatementProcessingState::complete($pdo, $transactionIds);
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private function withProcessingOutcome(array $result, ?\Throwable $failure): array
+    {
+        $result['processing_failed'] = $failure !== null;
+        if ($failure !== null) {
+            $result['warnings'][] = [
+                'code'    => 'processing_failed',
+                'message' => 'Výpis je uložený, ale párování a zaúčtování jeho pohybů se nepodařilo dokončit. Otevřete výpis a použijte „Přepárovat výpis".',
+                'error'   => mb_substr($failure->getMessage(), 0, 500, 'UTF-8'),
+            ];
+        }
+        return $result;
     }
 
     /**
