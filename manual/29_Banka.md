@@ -64,14 +64,19 @@ GPC lze stáhnout. Neúplný GPC nesmaže pohyby, které už byly načtené pře
 PDF příloha úplného podkladu zůstane dostupná u měsíčního výpisu. Další PDF
 původních podkladů najdeš v nabídce akcí jeho detailu.
 
+Oficiální GPC nebo PDF výpis banky můžeš k účtu napojenému přes API nahrát
+i dodatečně. Pohyby, které už přišly z napojení, se znovu nezakládají ani
+nepřepárují; výpis se jen přiloží k měsíčnímu výpisu jako doklad banky. GPC
+s čísly účtů ve vnitřním formátu banky (KB, MONETA) systém převede sám.
+
 V hlavním menu **Peníze → Bankovní účty**, záložka **Bankovní výpisy** →
 tlačítko **Nahrát GPC/ABO nebo PDF**.
 
 ![Upload výpisu](img/11_banka_upload.webp)
 
 > 💡 **PDF výpis místo GPC.** Některé banky GPC/ABO export nenabízejí (Banka
-> CREDITAS), případně ho konkrétní účet nemá zapnutý. Pro **Creditas, ČSOB, KB
-> a Raiffeisenbank**
+> CREDITAS), případně ho konkrétní účet nemá zapnutý. Pro **Creditas, ČSOB, KB,
+> MONETA a Raiffeisenbank**
 > proto stačí nahrát rovnou **PDF výpis** — systém ho deterministicky rozparsuje
 > na transakce (bez AI) a ověří, že součet sedí na počáteční a konečný zůstatek
 > z hlavičky (na haléř přesně). Dál to funguje úplně stejně jako GPC — párování,

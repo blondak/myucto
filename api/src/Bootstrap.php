@@ -1030,7 +1030,10 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\ErsteCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditasStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CsobStatementPdfParser::class),
+                // Novější layout KB před starším: oba nesou patičku Komerční banky.
+                $c->get(\MyInvoice\Service\Bank\Pdf\KbAccountStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbStatementPdfParser::class),
+                $c->get(\MyInvoice\Service\Bank\Pdf\MonetaStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\RaiffeisenbankStatementPdfParser::class),
             ]),
             \MyInvoice\Service\Bank\Connector\FioBankConnector::class => fn (ContainerInterface $c)
