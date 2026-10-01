@@ -426,7 +426,7 @@ final class AnonymizationPolicy
         'payroll_person_tax_credit_claims' => ['evidence_note' => 'text', 'evidence_reference' => 'text'],
         'payroll_person_tax_declarations' => ['evidence_note' => 'text', 'evidence_reference' => 'text'],
         'payroll_person_tax_residences' => ['country_code' => 'keep', 'evidence_note' => 'text', 'evidence_reference' => 'text'],
-        'payroll_posting_allocations' => ['account_code' => 'keep', 'allocation_key' => 'keep', 'cost_center' => 'keep', 'description' => 'text'],
+        'payroll_posting_allocations' => ['account_code' => 'keep', 'allocation_key' => 'keep', 'cost_center' => 'keep', 'description' => 'text', 'dimensions' => 'keep'],
         'payroll_posting_batches' => ['delta_hash' => 'keep', 'target_hash' => 'keep'],
         'payroll_posting_map_proposals' => ['confirmed_json' => 'json', 'proposal_json' => 'json', 'source_reference' => 'text'],
         'payroll_production_qualification_documents' => ['document_sha256' => 'keep', 'evidence_key' => 'keep'],
