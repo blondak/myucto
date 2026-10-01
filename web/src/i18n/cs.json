@@ -7155,7 +7155,20 @@
         },
         "source": {
           "app": "Odesláno aplikací",
+          "databox": "Odesláno datovou schránkou {date}",
           "imported": "Načtený protokol"
+        },
+        "result": {
+          "accepted": "Přijato",
+          "partially_accepted": "Částečně přijato",
+          "rejected": "Odmítnuto",
+          "pending": "Čeká na výsledek"
+        },
+        "history": {
+          "toggle": "Historie období ({count})",
+          "replaced_corrected": "Nahrazeno opravným podáním č. {id}",
+          "replaced_cancelled": "Stornováno podáním č. {id}",
+          "replaced_resubmitted": "Nahrazeno podáním č. {id}"
         },
         "dispatched": {
           "note": "Odesláno datovou schránkou. Dotazovací pokus na VREP tu proto žádný není a o výsledku rozhodne protokol, který ČSSZ doručí do schránky.",
@@ -7173,6 +7186,7 @@
           "failed": "Protokol se nepodařilo načíst.",
           "note": "Tenhle doklad přišel z datové schránky, neodeslala ho aplikace. Datovou větu podání proto nezná — na stav se nelze doptat ani uzavřít transakci, výsledek říká samotný protokol.",
           "period": "Období {month}/{year}",
+          "attached": "Protokol k podání č. {id}",
           "period_unknown": "Období protokol neuvádí",
           "guid": "ID podání (idPodani)",
           "guid_missing": "Protokol ID podání neuvádí",

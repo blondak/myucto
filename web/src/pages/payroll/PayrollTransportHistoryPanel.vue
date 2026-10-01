@@ -429,41 +429,268 @@ watch(selectedCorrectionGuids, () => {
   correctionImpactConfirmed.value = false
 }, { deep: true })
 
+/** Proč podání přestalo být platným stavem období. */
+interface Replacement {
+  by: number
+  reason: 'corrected' | 'cancelled' | 'resubmitted'
+}
+
+type TimelineZone = 'current' | 'history'
+
 type TimelineEntry =
-  | { source: 'app'; key: string; sortKey: string; group: AttemptGroup }
-  | { source: 'imported'; key: string; sortKey: string; protocol: PayrollJmhzImportedProtocol }
+  | { source: 'period'; key: string; periodKey: string; label: string }
+  | { source: 'history-toggle'; key: string; periodKey: string; count: number }
+  | {
+    source: 'app'
+    key: string
+    periodKey: string
+    zone: TimelineZone
+    group: AttemptGroup
+    replacement: Replacement | null
+  }
+  | {
+    source: 'imported'
+    key: string
+    periodKey: string
+    zone: TimelineZone
+    protocol: PayrollJmhzImportedProtocol
+    /** Podání, ke kterému protokol patří; `null` = nespárovaný doklad. */
+    attachedTo: number | null
+  }
+
+const RESULT_STATUSES = ['accepted', 'partially_accepted']
+
+function protocolPeriodKey(protocol: PayrollJmhzImportedProtocol): string {
+  return protocol.period_year && protocol.period_month
+    ? `${protocol.period_year}-${String(protocol.period_month).padStart(2, '0')}`
+    : ''
+}
+
+function groupPeriodKey(group: AttemptGroup): string {
+  return group.periodStart ? group.periodStart.slice(0, 7) : ''
+}
+
+function chainRoot(group: AttemptGroup): number {
+  return group.correctsSubmissionId ?? group.submissionId
+}
 
 /**
- * Jeden chronologický přehled „co jsem podal", ať to odešlo odsud nebo odjinud.
+ * Které podání období už neplatí a čím bylo nahrazené.
  *
- * Řadí se podle OBDOBÍ hlášení, ne podle času založení řádku: uživatel hledá
- * „červenec", ne „to, co jsem načetl naposled". Období, které se nepodařilo
- * zjistit, jde na konec — ne nahoru, kde by vytlačilo to, co je vidět jasně.
+ * Opravné nebo stornovací podání se váže na řádné (`corrects_submission_id`),
+ * takže řetězec drží kořen. Nahrazuje jen podání, které ČSSZ PŘIJALA: odmítnutá
+ * oprava na platnosti původního hlášení nic nemění. Odmítnuté řádné hlášení
+ * nahrazuje pozdější přijaté podání za totéž období (nový GUID, jiný řetězec).
+ */
+function replacementsFor(periodGroups: AttemptGroup[]): Map<number, Replacement> {
+  const result = new Map<number, Replacement>()
+  for (const group of periodGroups) {
+    const later = periodGroups
+      .filter(other => other.submissionId > group.submissionId
+        && RESULT_STATUSES.includes(other.submissionStatus ?? ''))
+      .sort((a, b) => b.submissionId - a.submissionId)
+    const inChain = later.find(other => other.submissionKind !== 'regular'
+      && chainRoot(other) === chainRoot(group))
+    if (inChain) {
+      result.set(group.submissionId, {
+        by: inChain.submissionId,
+        reason: inChain.submissionKind === 'cancellation' ? 'cancelled' : 'corrected',
+      })
+      continue
+    }
+    if (group.submissionStatus === 'rejected' && later.length > 0) {
+      result.set(group.submissionId, { by: later[0]!.submissionId, reason: 'resubmitted' })
+    }
+  }
+  return result
+}
+
+const PROTOCOL_SUBMISSION_STATUS: Record<string, string> = {
+  ProcessedAndComplete: 'accepted',
+  ContainsPassableErrors: 'partially_accepted',
+  PartiallyAccepted: 'partially_accepted',
+  Rejected: 'rejected',
+  NotAccepted: 'rejected',
+}
+
+function sentDates(group: AttemptGroup): string[] {
+  const values = group.attempts.map(attempt => attempt.sent_at)
+  values.push(group.dispatched?.outbox_sent_at ?? null)
+  return values.filter((value): value is string => typeof value === 'string' && value !== '')
+}
+
+/**
+ * K jakému podání načtený protokol patří.
+ *
+ * Protokol nenese číslo našeho podání a `idPodani` je společné celému řetězci
+ * řádného, opravného i stornovacího podání. Páruje se proto postupně podle
+ * spisové značky (CorrelationID), dne podání, výsledku a nakonec podle toho,
+ * že je v období jediné podání. Co nejde určit jednoznačně, zůstane
+ * samostatným dokladem: přiřadit protokol špatnému podání by byla horší lež
+ * než ho ukázat zvlášť.
+ */
+function protocolOwner(
+  protocol: PayrollJmhzImportedProtocol,
+  candidates: AttemptGroup[],
+): number | null {
+  if (candidates.length === 0) return null
+  const reference = protocol.correlation_reference ?? ''
+  if (reference !== '') {
+    const byReference = candidates.filter(group =>
+      group.attempts.some(attempt => attempt.correlation_reference === reference)
+      || group.dispatched?.outbox_correlation_reference === reference)
+    if (byReference.length === 1) return byReference[0]!.submissionId
+  }
+  const submittedDay = (protocol.submitted_at ?? '').slice(0, 10)
+  if (submittedDay !== '') {
+    const byDay = candidates.filter(group =>
+      sentDates(group).some(value => value.slice(0, 10) === submittedDay))
+    if (byDay.length === 1) return byDay[0]!.submissionId
+  }
+  const status = PROTOCOL_SUBMISSION_STATUS[protocol.status_name]
+  if (status) {
+    const byStatus = candidates.filter(group => group.submissionStatus === status)
+    if (byStatus.length === 1) return byStatus[0]!.submissionId
+  }
+  return candidates.length === 1 ? candidates[0]!.submissionId : null
+}
+
+function periodHeading(periodKey: string): string {
+  if (periodKey === '') return t('payroll.submissions.transport.imported.period_unknown')
+  const [year, month] = periodKey.split('-')
+  return t('payroll.submissions.transport.imported.period', {
+    month: Number(month),
+    year: Number(year),
+  })
+}
+
+const historyOpen = ref<Record<string, boolean>>({})
+
+function toggleHistory(periodKey: string) {
+  historyOpen.value = { ...historyOpen.value, [periodKey]: !historyOpen.value[periodKey] }
+}
+
+/** Podání nahrazená opravným nebo stornovacím podáním, klíčovaná číslem. */
+const replacements = computed(() => {
+  const byPeriod = new Map<string, AttemptGroup[]>()
+  for (const group of groups.value) {
+    const key = groupPeriodKey(group)
+    byPeriod.set(key, [...(byPeriod.get(key) ?? []), group])
+  }
+  const all = new Map<number, Replacement>()
+  for (const periodGroups of byPeriod.values()) {
+    for (const [id, replacement] of replacementsFor(periodGroups)) all.set(id, replacement)
+  }
+  return all
+})
+
+/**
+ * Přehled „co jsem podal" seskupený podle OBDOBÍ hlášení, od nejnovějšího.
+ *
+ * Uživatel hledá „srpen", ne „to, co jsem načetl naposled". V rámci období
+ * stojí nahoře platný stav (poslední přijaté podání), pod ním sbalená historie
+ * nahrazených podání. Načtený protokol se připojí ke svému podání; samostatně
+ * stojí jen ten, který spárovat nejde. Období, které se nepodařilo zjistit,
+ * jde na konec.
  */
 const timeline = computed<TimelineEntry[]>(() => {
-  const entries: TimelineEntry[] = groups.value.map(group => ({
-    source: 'app' as const,
-    key: `app-${group.submissionId}`,
-    sortKey: group.periodStart ?? '',
-    group,
-  }))
-  for (const protocol of imported.value) {
-    entries.push({
-      source: 'imported' as const,
-      key: `imported-${protocol.id}`,
-      sortKey: protocol.period_year && protocol.period_month
-        ? `${protocol.period_year}-${String(protocol.period_month).padStart(2, '0')}-01`
-        : '',
-      protocol,
-    })
+  const periods = new Map<string, { groups: AttemptGroup[]; protocols: PayrollJmhzImportedProtocol[] }>()
+  const bucket = (key: string) => {
+    let value = periods.get(key)
+    if (!value) {
+      value = { groups: [], protocols: [] }
+      periods.set(key, value)
+    }
+    return value
   }
-  return entries.sort((a, b) => {
-    if (a.sortKey === b.sortKey) return a.key < b.key ? 1 : -1
-    if (a.sortKey === '') return 1
-    if (b.sortKey === '') return -1
-    return a.sortKey < b.sortKey ? 1 : -1
+  for (const group of groups.value) bucket(groupPeriodKey(group)).groups.push(group)
+  for (const protocol of imported.value) bucket(protocolPeriodKey(protocol)).protocols.push(protocol)
+
+  const keys = [...periods.keys()].sort((a, b) => {
+    if (a === b) return 0
+    if (a === '') return 1
+    if (b === '') return -1
+    return a < b ? 1 : -1
   })
+
+  const entries: TimelineEntry[] = []
+  for (const periodKey of keys) {
+    const period = periods.get(periodKey)!
+    const ordered = [...period.groups].sort((a, b) => b.submissionId - a.submissionId)
+    const attached = new Map<number, PayrollJmhzImportedProtocol[]>()
+    const orphans: PayrollJmhzImportedProtocol[] = []
+    for (const protocol of period.protocols) {
+      const owner = periodKey === '' ? null : protocolOwner(protocol, ordered)
+      if (owner === null) orphans.push(protocol)
+      else attached.set(owner, [...(attached.get(owner) ?? []), protocol])
+    }
+
+    entries.push({ source: 'period', key: `period-${periodKey}`, periodKey, label: periodHeading(periodKey) })
+    const push = (group: AttemptGroup, zone: TimelineZone) => {
+      entries.push({
+        source: 'app',
+        key: `app-${group.submissionId}`,
+        periodKey,
+        zone,
+        group,
+        replacement: replacements.value.get(group.submissionId) ?? null,
+      })
+      for (const protocol of attached.get(group.submissionId) ?? []) {
+        entries.push({
+          source: 'imported',
+          key: `imported-${protocol.id}`,
+          periodKey,
+          zone,
+          protocol,
+          attachedTo: group.submissionId,
+        })
+      }
+    }
+    const current = ordered.filter(group => !replacements.value.has(group.submissionId))
+    const history = ordered.filter(group => replacements.value.has(group.submissionId))
+    for (const group of current) push(group, 'current')
+    for (const protocol of orphans) {
+      entries.push({
+        source: 'imported',
+        key: `imported-${protocol.id}`,
+        periodKey,
+        zone: 'current',
+        protocol,
+        attachedTo: null,
+      })
+    }
+    if (history.length > 0) {
+      const count = history.reduce(
+        (total, group) => total + 1 + (attached.get(group.submissionId)?.length ?? 0),
+        0,
+      )
+      entries.push({ source: 'history-toggle', key: `history-${periodKey}`, periodKey, count })
+      for (const group of history) push(group, 'history')
+    }
+  }
+  return entries
 })
+
+const visibleTimeline = computed(() => timeline.value.filter(entry =>
+  !('zone' in entry) || entry.zone === 'current' || historyOpen.value[entry.periodKey] === true))
+
+/** Výsledek podání čitelný bez rozklikávání: z protokolu, ne z přenosu. */
+function resultKey(group: AttemptGroup): 'accepted' | 'partially_accepted' | 'rejected' | 'pending' {
+  const status = group.submissionStatus ?? ''
+  if (status === 'accepted' || status === 'partially_accepted' || status === 'rejected') return status
+  return 'pending'
+}
+
+const RESULT_TONES: Record<string, string> = {
+  accepted: 'bg-success-100 text-success-700',
+  partially_accepted: 'bg-warning-100 text-warning-800',
+  rejected: 'bg-danger-100 text-danger-700',
+  pending: 'bg-payroll-100 text-payroll-800',
+}
+
+function replacementLabel(replacement: Replacement): string {
+  return t(`payroll.submissions.transport.history.replaced_${replacement.reason}`, { id: replacement.by })
+}
 
 function importedPeriodLabel(protocol: PayrollJmhzImportedProtocol): string {
   if (!protocol.period_year || !protocol.period_month) {
@@ -566,13 +793,38 @@ function reverifyMessage(result: PayrollJmhzProtocolReverification): string {
  * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
  */
 function canCancel(group: AttemptGroup): boolean {
+  const target = actionTargetGroup(group)
   return canWrite.value
-    && group.submissionKind === 'regular'
-    && ['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
+    // Nahrazené (opravené nebo stornované) podání už není platný stav období.
+    && !replacements.value.has(group.submissionId)
+    && target !== null
+    && RESULT_STATUSES.includes(group.submissionStatus ?? '')
+    && RESULT_STATUSES.includes(target.submissionStatus ?? '')
     // Odeslání dokládá buď pokus VREP, nebo odchozí zpráva datové schránky.
     // Hlášení poslané datovkou žádný pokus nemá a stornovat ho jde stejně.
-    && (group.attempts.some(attempt => attempt.sent_at !== null)
-      || group.dispatched !== null)
+    && (target.attempts.some(attempt => attempt.sent_at !== null)
+      || target.dispatched !== null)
+}
+
+/**
+ * Oprava i storno se na serveru vážou vždy na ŘÁDNÉ podání (kořen řetězce).
+ * Platný stav období ale ukazuje karta posledního přijatého opravného podání,
+ * takže akce nabízí ona a míří na své řádné podání.
+ */
+function actionTargetGroup(group: AttemptGroup): AttemptGroup | null {
+  if (group.submissionKind === 'regular') return group
+  if (group.submissionKind !== 'correction' || group.correctsSubmissionId === null) return null
+  const root = groups.value.find(candidate => candidate.submissionId === group.correctsSubmissionId)
+  return root && root.submissionKind === 'regular' ? root : null
+}
+
+function actionTarget(group: AttemptGroup): number {
+  return actionTargetGroup(group)?.submissionId ?? group.submissionId
+}
+
+/** Formulář opravy a storna patří pod platnou kartu, ne pod nahrazenou v historii. */
+function canCorrectFormHost(entry: { replacement: Replacement | null }): boolean {
+  return entry.replacement === null
 }
 
 /**
@@ -589,10 +841,13 @@ function canCancel(group: AttemptGroup): boolean {
  * protokolu, takže je to silnější podmínka než uzavřený pokus.
  */
 function canCorrect(group: AttemptGroup): boolean {
+  const target = actionTargetGroup(group)
   if (
     !canWrite.value
-    || group.submissionKind !== 'regular'
-    || !['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
+    || replacements.value.has(group.submissionId)
+    || target === null
+    || !RESULT_STATUSES.includes(group.submissionStatus ?? '')
+    || !RESULT_STATUSES.includes(target.submissionStatus ?? '')
   ) {
     return false
   }
@@ -1662,11 +1917,35 @@ onMounted(loadVariableSymbols)
       </div>
 
       <template v-else>
-        <template v-for="entry in timeline" :key="entry.key">
+        <template v-for="entry in visibleTimeline" :key="entry.key">
+        <h3
+          v-if="entry.source === 'period'"
+          class="pt-2 text-sm font-semibold uppercase tracking-wide text-neutral-500"
+          :data-test="`transport-period-${entry.periodKey}`"
+        >
+          {{ entry.label }}
+        </h3>
+
+        <button
+          v-else-if="entry.source === 'history-toggle'"
+          type="button"
+          :class="btnOutlineSm('neutral')"
+          :aria-expanded="historyOpen[entry.periodKey] === true"
+          :data-test="`transport-history-toggle-${entry.periodKey}`"
+          @click="toggleHistory(entry.periodKey)"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.chevron" />
+          </svg>
+          {{ t('payroll.submissions.transport.history.toggle', { count: entry.count }) }}
+        </button>
+
         <section
-          v-if="entry.source === 'app'"
+          v-else-if="entry.source === 'app'"
           :data-test="`transport-group-${entry.group.submissionId}`"
-          class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+          :data-zone="entry.zone"
+          class="rounded-xl border bg-surface shadow-sm"
+          :class="entry.zone === 'history' ? 'border-neutral-200 opacity-80' : 'border-neutral-200'"
         >
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
             <div>
@@ -1677,27 +1956,57 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.group.submission', {
                   id: entry.group.submissionId,
                 }) }}
+                <template v-if="entry.group.submissionKind && te(`payroll.submissions.transport.ready.kind.${entry.group.submissionKind}`)">
+                  · {{ t(`payroll.submissions.transport.ready.kind.${entry.group.submissionKind}`) }}
+                </template>
               </p>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
               <span
+                class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                :class="RESULT_TONES[resultKey(entry.group)]"
+                :data-test="`transport-result-${entry.group.submissionId}`"
+              >
+                {{ t(`payroll.submissions.transport.result.${resultKey(entry.group)}`) }}
+              </span>
+              <span
+                v-if="entry.replacement"
+                class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700"
+                :data-test="`transport-replaced-${entry.group.submissionId}`"
+              >
+                {{ replacementLabel(entry.replacement) }}
+              </span>
+              <span
+                v-if="entry.group.dispatched && entry.group.attempts.length === 0"
                 class="rounded-full bg-payroll-100 px-2.5 py-1 text-xs font-medium text-payroll-800"
                 :data-test="`transport-source-app-${entry.group.submissionId}`"
               >
-                {{ t('payroll.submissions.transport.source.app') }}
-              </span>
-              <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
-                {{ t('payroll.submissions.transport.group.attempts', {
-                  total: entry.group.attempts.length,
+                {{ t('payroll.submissions.transport.source.databox', {
+                  date: entry.group.dispatched.outbox_sent_at
+                    ? formatDate(entry.group.dispatched.outbox_sent_at)
+                    : '—',
                 }) }}
               </span>
+              <template v-else>
+                <span
+                  class="rounded-full bg-payroll-100 px-2.5 py-1 text-xs font-medium text-payroll-800"
+                  :data-test="`transport-source-app-${entry.group.submissionId}`"
+                >
+                  {{ t('payroll.submissions.transport.source.app') }}
+                </span>
+                <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
+                  {{ t('payroll.submissions.transport.group.attempts', {
+                    total: entry.group.attempts.length,
+                  }) }}
+                </span>
+              </template>
               <button
-                v-if="canCorrect(entry.group) && correctingId !== entry.group.submissionId"
+                v-if="canCorrect(entry.group) && correctingId !== actionTarget(entry.group)"
                 type="button"
-                :data-test="`transport-correct-${entry.group.submissionId}`"
+                :data-test="`transport-correct-${actionTarget(entry.group)}`"
                 :class="btnOutlineSm('warning')"
                 :disabled="busy"
-                @click="askToCorrect(entry.group.submissionId)"
+                @click="askToCorrect(actionTarget(entry.group))"
               >
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path :d="ICONS.edit" />
@@ -1705,12 +2014,12 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.correction.action') }}
               </button>
               <button
-                v-if="canCancel(entry.group) && cancellingId !== entry.group.submissionId"
+                v-if="canCancel(entry.group) && cancellingId !== actionTarget(entry.group)"
                 type="button"
-                :data-test="`transport-cancel-${entry.group.submissionId}`"
+                :data-test="`transport-cancel-${actionTarget(entry.group)}`"
                 :class="btnOutlineSm('danger')"
                 :disabled="busy"
-                @click="askToCancel(entry.group.submissionId)"
+                @click="askToCancel(actionTarget(entry.group))"
               >
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path :d="ICONS.x" />
@@ -1721,8 +2030,8 @@ onMounted(loadVariableSymbols)
           </div>
 
           <div
-            v-if="correctingId === entry.group.submissionId"
-            :data-test="`transport-correct-form-${entry.group.submissionId}`"
+            v-if="correctingId === actionTarget(entry.group) && canCorrectFormHost(entry)"
+            :data-test="`transport-correct-form-${actionTarget(entry.group)}`"
             class="border-b border-warning-500/30 bg-warning-50 p-4 sm:p-6"
           >
             <p class="text-sm font-semibold text-warning-800">
@@ -1737,7 +2046,7 @@ onMounted(loadVariableSymbols)
               {{ t('payroll.submissions.transport.correction.deadline_hint') }}
             </p>
             <div
-              v-if="correctionPreparationLoadingId === entry.group.submissionId"
+              v-if="correctionPreparationLoadingId === actionTarget(entry.group)"
               data-test="transport-correct-preparation-loading"
               class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
               role="status"
@@ -1773,7 +2082,7 @@ onMounted(loadVariableSymbols)
                 :class="btnOutline('warning')"
                 :disabled="busy || correctionPreparationId === null"
                 data-test="transport-correct-load"
-                @click="loadContentCorrectionCandidates(entry.group.submissionId)"
+                @click="loadContentCorrectionCandidates(actionTarget(entry.group))"
               >
                 {{ t('payroll.submissions.transport.correction.load') }}
               </button>
@@ -1788,7 +2097,7 @@ onMounted(loadVariableSymbols)
               }) }}
             </p>
             <div
-              v-if="correctionLoadingId === entry.group.submissionId"
+              v-if="correctionLoadingId === actionTarget(entry.group)"
               data-test="transport-correct-loading"
               class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
               role="status"
@@ -1926,19 +2235,19 @@ onMounted(loadVariableSymbols)
             <div class="mt-4 flex flex-wrap gap-2 border-t border-warning-500/30 pt-4">
               <button
                 type="button"
-                :data-test="`transport-correct-submit-${entry.group.submissionId}`"
+                :data-test="`transport-correct-submit-${actionTarget(entry.group)}`"
                 :class="btnFilled('warning')"
                 :disabled="busy
                   || correctionPreparationId === null
                   || selectedCorrectionGuids.length === 0
                   || !correctionImpactConfirmed"
-                @click="confirmCorrection(entry.group.submissionId)"
+                @click="confirmCorrection(actionTarget(entry.group))"
               >
                 {{ t('payroll.submissions.transport.correction.confirm') }}
               </button>
               <button
                 type="button"
-                :data-test="`transport-correct-abort-${entry.group.submissionId}`"
+                :data-test="`transport-correct-abort-${actionTarget(entry.group)}`"
                 :class="btnOutline('neutral')"
                 :disabled="busy"
                 @click="closeCorrection"
@@ -1951,8 +2260,8 @@ onMounted(loadVariableSymbols)
           <!-- Storno ruší u ČSSZ všechna hlášení za období a je nevratné,
                takže se nespouští jedním kliknutím. -->
           <div
-            v-if="cancellingId === entry.group.submissionId"
-            :data-test="`transport-cancel-confirm-${entry.group.submissionId}`"
+            v-if="cancellingId === actionTarget(entry.group) && canCorrectFormHost(entry)"
+            :data-test="`transport-cancel-confirm-${actionTarget(entry.group)}`"
             class="border-b border-danger-500/30 bg-danger-50 p-4 sm:p-6"
             role="alert"
           >
@@ -1969,8 +2278,8 @@ onMounted(loadVariableSymbols)
                   name="jmhz-cancel-mode"
                   value="whole"
                   :checked="cancelMode === 'whole'"
-                  :data-test="`transport-cancel-mode-whole-${entry.group.submissionId}`"
-                  @change="chooseCancelMode(entry.group.submissionId, 'whole')"
+                  :data-test="`transport-cancel-mode-whole-${actionTarget(entry.group)}`"
+                  @change="chooseCancelMode(actionTarget(entry.group), 'whole')"
                 >
                 {{ t('payroll.jmhz_gate.cancel_components.mode_whole') }}
               </label>
@@ -1980,8 +2289,8 @@ onMounted(loadVariableSymbols)
                   name="jmhz-cancel-mode"
                   value="components"
                   :checked="cancelMode === 'components'"
-                  :data-test="`transport-cancel-mode-components-${entry.group.submissionId}`"
-                  @change="chooseCancelMode(entry.group.submissionId, 'components')"
+                  :data-test="`transport-cancel-mode-components-${actionTarget(entry.group)}`"
+                  @change="chooseCancelMode(actionTarget(entry.group), 'components')"
                 >
                 {{ t('payroll.jmhz_gate.cancel_components.mode_components') }}
               </label>
@@ -1989,7 +2298,7 @@ onMounted(loadVariableSymbols)
             <p v-if="cancelMode === 'whole'" class="mt-1 text-sm text-danger-700">
               {{ t('payroll.submissions.transport.storno.confirm_text') }}
             </p>
-            <div v-else class="mt-2" :data-test="`transport-cancel-components-${entry.group.submissionId}`">
+            <div v-else class="mt-2" :data-test="`transport-cancel-components-${actionTarget(entry.group)}`">
               <p class="text-sm text-danger-700">{{ t('payroll.jmhz_gate.cancel_components.description') }}</p>
               <p v-if="cancelComponentsLoading" class="mt-2 text-sm text-neutral-600" role="status">
                 {{ t('common.loading') }}
@@ -2027,7 +2336,7 @@ onMounted(loadVariableSymbols)
                 <input
                   v-model="cancelComponentsConfirmed"
                   type="checkbox"
-                  :data-test="`transport-cancel-components-impact-${entry.group.submissionId}`"
+                  :data-test="`transport-cancel-components-impact-${actionTarget(entry.group)}`"
                   class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-danger-700 focus:ring-danger-500"
                 >
                 <span class="text-sm text-neutral-800">{{ t('payroll.jmhz_gate.cancel_components.impact') }}</span>
@@ -2043,20 +2352,20 @@ onMounted(loadVariableSymbols)
               <button
                 v-if="cancelMode === 'whole'"
                 type="button"
-                :data-test="`transport-cancel-submit-${entry.group.submissionId}`"
+                :data-test="`transport-cancel-submit-${actionTarget(entry.group)}`"
                 :class="btnFilled('danger')"
                 :disabled="busy"
-                @click="confirmCancel(entry.group.submissionId)"
+                @click="confirmCancel(actionTarget(entry.group))"
               >
                 {{ t('payroll.submissions.transport.storno.confirm') }}
               </button>
               <button
                 v-else
                 type="button"
-                :data-test="`transport-cancel-components-submit-${entry.group.submissionId}`"
+                :data-test="`transport-cancel-components-submit-${actionTarget(entry.group)}`"
                 :class="btnFilled('danger')"
                 :disabled="busy || selectedCancelGuids.length === 0 || !cancelComponentsConfirmed"
-                @click="confirmCancelComponents(entry.group.submissionId)"
+                @click="confirmCancelComponents(actionTarget(entry.group))"
               >
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path :d="ICONS.x" />
@@ -2065,7 +2374,7 @@ onMounted(loadVariableSymbols)
               </button>
               <button
                 type="button"
-                :data-test="`transport-cancel-abort-${entry.group.submissionId}`"
+                :data-test="`transport-cancel-abort-${actionTarget(entry.group)}`"
                 :class="btnOutline('neutral')"
                 :disabled="busy"
                 @click="cancellingId = null"
@@ -2516,14 +2825,22 @@ onMounted(loadVariableSymbols)
         </section>
 
         <section
-          v-else
+          v-else-if="entry.source === 'imported'"
           :data-test="`transport-imported-${entry.protocol.id}`"
+          :data-zone="entry.zone"
+          :data-attached-to="entry.attachedTo ?? undefined"
           class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+          :class="[
+            entry.attachedTo !== null ? 'ml-4 sm:ml-8' : '',
+            entry.zone === 'history' ? 'opacity-80' : '',
+          ]"
         >
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
             <div>
               <h3 class="text-base font-semibold text-neutral-900">
-                {{ importedPeriodLabel(entry.protocol) }}
+                {{ entry.attachedTo !== null
+                  ? t('payroll.submissions.transport.imported.attached', { id: entry.attachedTo })
+                  : importedPeriodLabel(entry.protocol) }}
               </h3>
               <p class="mt-1 text-xs text-neutral-500">
                 {{ t(`payroll.submissions.transport.imported.kind.${entry.protocol.protocol_kind}`) }}

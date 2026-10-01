@@ -1002,6 +1002,146 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-close-11"]').exists()).toBe(false)
   })
 
+  /*
+   * Produkce: za 8/2026 stála nahoře stará chyba (protokol k řádnému podání)
+   * a až pod ní přijaté opravné podání. Řádné podání č. 1 navíc dál nabízelo
+   * opravu i storno, přestože ho už nahradilo opravné č. 3.
+   */
+  describe('seskupení podle období', () => {
+    function periodScenario() {
+      m.jmhzTransportHistory.mockResolvedValue({
+        environment: 'production',
+        attempts: [],
+        dispatched_submissions: [
+          dispatched({
+            submission_id: 4,
+            submission_status: 'accepted',
+            period_start: '2026-09-01',
+            period_end: '2026-09-30',
+            outbox_id: 14,
+            outbox_sent_at: '2026-10-08 09:00:00',
+            outbox_correlation_reference: 'JMHZ25-SYNT-4',
+          }),
+          dispatched({
+            submission_id: 3,
+            submission_kind: 'correction',
+            submission_status: 'accepted',
+            corrects_submission_id: 1,
+            period_start: '2026-08-01',
+            period_end: '2026-08-31',
+            outbox_id: 13,
+            outbox_sent_at: '2026-09-20 10:00:00',
+            outbox_correlation_reference: 'JMHZ25-SYNT-3',
+          }),
+          dispatched({
+            submission_id: 1,
+            submission_status: 'partially_accepted',
+            period_start: '2026-08-01',
+            period_end: '2026-08-31',
+            outbox_id: 11,
+            outbox_sent_at: '2026-09-08 09:00:00',
+            outbox_correlation_reference: 'JMHZ25-SYNT-1',
+          }),
+        ],
+      })
+      m.jmhzImportedProtocols.mockResolvedValue({
+        environment: 'production',
+        protocols: [protocol({
+          id: 21,
+          period_month: 8,
+          period_year: 2026,
+          correlation_reference: null,
+          status_code: 3,
+          status_name: 'PartiallyAccepted',
+          error_count: 1,
+          submitted_at: '2026-09-08T09:00:00+02:00',
+        })],
+      })
+    }
+
+    function order(wrapper: ReturnType<typeof mount>): string[] {
+      return wrapper.findAll('[data-test^="transport-period-"], [data-test^="transport-group-"],'
+        + ' [data-test^="transport-history-toggle-"], [data-test^="transport-imported-2"]')
+        .map(node => node.attributes('data-test') ?? '')
+        .filter(value => /^transport-(period|group|history-toggle|imported)-[\d-]+$/.test(value))
+    }
+
+    it('nahoře platný stav období, nahrazené podání a jeho protokol sbalené v historii', async () => {
+      periodScenario()
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      expect(order(wrapper)).toEqual([
+        'transport-period-2026-09',
+        'transport-group-4',
+        'transport-period-2026-08',
+        'transport-group-3',
+        'transport-history-toggle-2026-08',
+      ])
+      expect(wrapper.get('[data-test="transport-history-toggle-2026-08"]').text())
+        .toContain('payroll.submissions.transport.history.toggle 2')
+      expect(wrapper.get('[data-test="transport-result-3"]').text())
+        .toContain('payroll.submissions.transport.result.accepted')
+      expect(wrapper.get('[data-test="transport-result-3"]').classes().join(' ')).toContain('success')
+      expect(wrapper.get('[data-test="transport-source-app-3"]').text())
+        .toContain('payroll.submissions.transport.source.databox')
+      expect(wrapper.get('[data-test="transport-group-3"]').text()).not.toContain('group.attempts')
+
+      await wrapper.get('[data-test="transport-history-toggle-2026-08"]').trigger('click')
+
+      expect(order(wrapper)).toEqual([
+        'transport-period-2026-09',
+        'transport-group-4',
+        'transport-period-2026-08',
+        'transport-group-3',
+        'transport-history-toggle-2026-08',
+        'transport-group-1',
+        'transport-imported-21',
+      ])
+      expect(wrapper.get('[data-test="transport-replaced-1"]').text())
+        .toContain('payroll.submissions.transport.history.replaced_corrected 3')
+      expect(wrapper.get('[data-test="transport-result-1"]').text())
+        .toContain('payroll.submissions.transport.result.partially_accepted')
+      expect(wrapper.get('[data-test="transport-imported-21"]').attributes('data-attached-to')).toBe('1')
+    })
+
+    it('opravu a storno nabídne jen u platného podání období, ne u nahrazeného', async () => {
+      periodScenario()
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+      await wrapper.get('[data-test="transport-history-toggle-2026-08"]').trigger('click')
+
+      const replaced = wrapper.get('[data-test="transport-group-1"]')
+      expect(replaced.find('[data-test^="transport-correct-"]').exists()).toBe(false)
+      expect(replaced.find('[data-test^="transport-cancel-"]').exists()).toBe(false)
+      // Platná karta opravného podání míří s opravou na své řádné podání.
+      const current = wrapper.get('[data-test="transport-group-3"]')
+      expect(current.find('[data-test="transport-correct-1"]').exists()).toBe(true)
+      expect(current.find('[data-test="transport-cancel-1"]').exists()).toBe(true)
+    })
+
+    it('protokol, který nejde jednoznačně spárovat, zůstane samostatně', async () => {
+      periodScenario()
+      m.jmhzImportedProtocols.mockResolvedValue({
+        environment: 'production',
+        protocols: [protocol({
+          id: 22,
+          period_month: 8,
+          period_year: 2026,
+          correlation_reference: null,
+          status_name: 'Processing',
+          submitted_at: null,
+        })],
+      })
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      const card = wrapper.get('[data-test="transport-imported-22"]')
+      expect(card.attributes('data-attached-to')).toBeUndefined()
+      expect(card.attributes('data-zone')).toBe('current')
+    })
+  })
+
   it('řadí naše pokusy a načtené protokoly v jednom pořadí podle období', async () => {
     m.jmhzImportedProtocols.mockResolvedValue({
       environment: 'production',

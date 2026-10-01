@@ -7155,7 +7155,20 @@
         },
         "source": {
           "app": "Sent by this app",
+          "databox": "Sent via data box {date}",
           "imported": "Imported protocol"
+        },
+        "result": {
+          "accepted": "Accepted",
+          "partially_accepted": "Partially accepted",
+          "rejected": "Rejected",
+          "pending": "Awaiting result"
+        },
+        "history": {
+          "toggle": "Period history ({count})",
+          "replaced_corrected": "Replaced by corrective submission no. {id}",
+          "replaced_cancelled": "Cancelled by submission no. {id}",
+          "replaced_resubmitted": "Replaced by submission no. {id}"
         },
         "dispatched": {
           "note": "Sent through the data box. There is no VREP polling attempt here, so the outcome comes from the protocol ČSSZ delivers to the box.",
@@ -7173,6 +7186,7 @@
           "failed": "The protocol could not be imported.",
           "note": "This document arrived through the data box; the app did not send it. It therefore holds no submission payload — the status cannot be polled and no transaction can be closed. The protocol itself is the result.",
           "period": "Period {month}/{year}",
+          "attached": "Protocol for submission no. {id}",
           "period_unknown": "The protocol states no period",
           "guid": "Submission ID (idPodani)",
           "guid_missing": "The protocol states no submission ID",
