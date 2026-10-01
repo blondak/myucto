@@ -6933,6 +6933,7 @@
       "details_eldp": "Pension record sheets and manual completion",
       "details_jmhz": "Details: previews, legal facts, submissions by the previous program and history",
       "tabs_more": "More",
+      "tabs_extraordinary": "Extraordinary submissions",
       "tabs": {
         "monthly": "Month",
         "queue": "To send",
@@ -6944,7 +6945,7 @@
         "eldp": "Pension record sheet",
         "health": "Health insurers",
         "health_notifications": "HI — notifications",
-        "statutory": "Extraordinary submissions",
+        "statutory": "Obligations overview",
         "other": "Other",
         "inbox": "Inbox",
         "certificate": "Certificate",

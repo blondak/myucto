@@ -366,19 +366,31 @@ onMounted(load)
 onMounted(loadInboxBadge)
 
 /*
- * Tři hlavní záložky pokryjí měsíční práci: Měsíc (co podat a odeslat),
- * Odesláno (stav odeslání) a Mimořádná podání (nemocenské a další zákonné
- * povinnosti mimo měsíční cyklus). Ostatní obrazovky jsou pod „Další" —
- * dál mají vlastní adresu, takže staré odkazy fungují.
+ * Viditelné záložky jsou rutina každého měsíce: Měsíc, JMHZ, Zdravotní
+ * pojišťovny, K odeslání a Odesláno. Schovat je pod „Další" znamenalo, že
+ * měsíční hlášení nikdo nenašel. Podání mimo měsíční cyklus jsou pohromadě
+ * pod „Mimořádná podání", „Další" drží jen správu (Inbox, Certifikát).
+ * Každá záložka má dál vlastní adresu, takže staré odkazy fungují. Na úzkém
+ * displeji se záložky zalamují, nic se automaticky nepřesouvá.
  */
-const primaryTabs: SubmissionTab[] = ['monthly', 'transport', 'statutory']
-const moreTabs = computed(() => tabs.filter(tab => !primaryTabs.includes(tab)))
-const moreActive = computed(() => !primaryTabs.includes(activeTab.value))
-const moreOpen = ref(false)
+const primaryTabs: SubmissionTab[] = ['monthly', 'jmhz', 'health', 'queue', 'transport']
+const tabGroups: { key: 'extraordinary' | 'more'; labelKey: string; tabs: SubmissionTab[] }[] = [
+  {
+    key: 'extraordinary',
+    labelKey: 'payroll.submissions.tabs_extraordinary',
+    tabs: ['statutory', 'regzel', 'registration_completion', 'discount_intents', 'sickness', 'eldp', 'other'],
+  },
+  { key: 'more', labelKey: 'payroll.submissions.tabs_more', tabs: ['inbox', 'certificate'] },
+]
+const openGroup = ref<'extraordinary' | 'more' | null>(null)
+
+function toggleGroup(key: 'extraordinary' | 'more') {
+  openGroup.value = openGroup.value === key ? null : key
+}
 
 function selectTab(tab: SubmissionTab) {
   activeTab.value = tab
-  moreOpen.value = false
+  openGroup.value = null
 }
 
 /*
@@ -474,21 +486,28 @@ function rememberDetails(tab: string, event: Event) {
       >
         {{ t(`payroll.submissions.tabs.${tab}`) }}
       </button>
-      <div class="relative" @keydown.escape="moreOpen = false">
+      <div
+        v-for="group in tabGroups"
+        :key="group.key"
+        class="relative"
+        @keydown.escape="openGroup = null"
+      >
         <button
           type="button"
           class="-mb-px inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
-          :class="moreActive
+          :class="group.tabs.includes(activeTab)
             ? 'border-payroll-600 text-payroll-600'
             : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
-          :aria-expanded="moreOpen"
+          :aria-expanded="openGroup === group.key"
           aria-haspopup="true"
-          data-test="submissions-more-tabs"
-          @click="moreOpen = !moreOpen"
+          :data-test="`submissions-${group.key}-tabs`"
+          @click="toggleGroup(group.key)"
         >
-          {{ moreActive ? t(`payroll.submissions.tabs.${activeTab}`) : t('payroll.submissions.tabs_more') }}
+          {{ group.tabs.includes(activeTab) && group.key === 'more'
+            ? t(`payroll.submissions.tabs.${activeTab}`)
+            : t(group.labelKey) }}
           <span
-            v-if="inboxOpenCount !== null && inboxOpenCount > 0"
+            v-if="group.key === 'more' && inboxOpenCount !== null && inboxOpenCount > 0"
             class="ml-0.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
           >
             {{ inboxOpenCount }}
@@ -498,12 +517,12 @@ function rememberDetails(tab: string, event: Event) {
           </svg>
         </button>
         <div
-          v-show="moreOpen"
+          v-show="openGroup === group.key"
           class="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-neutral-200 bg-surface py-1 shadow-lg"
-          data-test="submissions-more-menu"
+          :data-test="`submissions-${group.key}-menu`"
         >
           <button
-            v-for="tab in moreTabs"
+            v-for="tab in group.tabs"
             :key="tab"
             type="button"
             role="tab"

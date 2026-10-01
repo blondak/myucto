@@ -538,18 +538,45 @@ describe('PayrollSubmissions', () => {
     wrapper.unmount()
   })
 
-  it('má tři hlavní záložky a ostatní pod „Další"', async () => {
+  /*
+   * Měsíční rutina (JMHZ, pojišťovny, K odeslání) byla schovaná pod „Další"
+   * a účetní ji nenašla. Viditelné jsou záložky každého měsíce, mimořádná
+   * podání mají vlastní nabídku a „Další" drží jen správu.
+   */
+  it('ukáže měsíční rutinu jako hlavní záložky, mimořádná podání a správu v nabídkách', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
     const nav = wrapper.get('nav[role="tablist"]')
+    expect(nav.classes()).toContain('flex-wrap')
     const primary = nav.findAll(':scope > [role="tab"]').map(tab => tab.text())
     expect(primary).toEqual([
       'payroll.submissions.tabs.monthly',
+      'payroll.submissions.tabs.jmhz',
+      'payroll.submissions.tabs.health',
+      'payroll.submissions.tabs.queue',
       'payroll.submissions.tabs.transport',
-      'payroll.submissions.tabs.statutory',
     ])
-    expect(wrapper.get('[data-test="submissions-more-menu"]').text()).toContain('payroll.submissions.tabs.jmhz')
+    const groups = nav.findAll(':scope > div > button[aria-haspopup]').map(button => button.text())
+    expect(groups[0]).toContain('payroll.submissions.tabs_extraordinary')
+    expect(groups[1]).toContain('payroll.submissions.tabs_more')
+    const extraordinary = wrapper.get('[data-test="submissions-extraordinary-menu"]')
+      .findAll('[role="tab"]').map(tab => tab.text())
+    expect(extraordinary).toEqual([
+      'payroll.submissions.tabs.statutory',
+      'payroll.submissions.tabs.regzel',
+      'payroll.submissions.tabs.registration_completion',
+      'payroll.submissions.tabs.discount_intents',
+      'payroll.submissions.tabs.sickness',
+      'payroll.submissions.tabs.eldp',
+      'payroll.submissions.tabs.other',
+    ])
+    const more = wrapper.get('[data-test="submissions-more-menu"]')
+      .findAll('[role="tab"]').map(tab => tab.text())
+    expect(more).toEqual([
+      'payroll.submissions.tabs.inbox',
+      'payroll.submissions.tabs.certificate',
+    ])
   })
 
   /* Jedno období pro celou stránku: návrh serveru, v adrese, sdílené záložkami. */

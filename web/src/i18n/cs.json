@@ -6933,6 +6933,7 @@
       "details_eldp": "Evidenční listy a ruční dokončení",
       "details_jmhz": "Podrobnosti: náhledy, právní skutečnosti, podání předchozím programem a historie",
       "tabs_more": "Další",
+      "tabs_extraordinary": "Mimořádná podání",
       "tabs": {
         "monthly": "Měsíc",
         "queue": "K odeslání",
@@ -6944,7 +6945,7 @@
         "eldp": "Evidenční list DP",
         "health": "Zdravotní pojišťovny",
         "health_notifications": "ZP — oznámení",
-        "statutory": "Mimořádná podání",
+        "statutory": "Přehled povinností",
         "other": "Ostatní",
         "inbox": "Inbox",
         "certificate": "Certifikát",

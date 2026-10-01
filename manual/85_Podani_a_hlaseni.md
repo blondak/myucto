@@ -28,13 +28,16 @@ Podání přes datovou schránku registraci certifikátu nevyžaduje, zmocnění
 
 ## 85.3 Měsíc — co podat a odeslat
 
-Stránka **Mzdy → Podání a hlášení** má tři hlavní záložky: **Měsíc** (co za
-měsíc podat a odeslat), **Odesláno** (stav odeslaných podání) a **Mimořádná
-podání** (nemocenské a další povinnosti mimo měsíční cyklus). Ostatní obrazovky
-(JMHZ, Zdravotní pojišťovny, K odeslání, ELDP, Inbox, Certifikát a další) jsou
-v nabídce **Další ▾**; odkazy na ně platí beze změny.
+Stránka **Mzdy → Podání a hlášení** ukazuje jako hlavní záložky to, co se
+dělá každý měsíc: **Měsíc** (co za měsíc podat a odeslat), **JMHZ**,
+**Zdravotní pojišťovny**, **K odeslání** a **Odesláno** (stav odeslaných
+podání). Podání mimo měsíční cyklus jsou v nabídce **Mimořádná podání ▾**:
+přehled povinností, registrace zaměstnavatele, dohlášení údajů (A3), záměr
+slevy, dávky nemocenského, evidenční list DP a ostatní. V nabídce **Další ▾**
+je jen správa: Inbox a Certifikát. Na úzkém displeji se záložky zalamují do
+dalšího řádku. Každá záložka má vlastní adresu, odkazy na ni platí beze změny.
 
-Celá stránka má **jedno období** (a jedno prostředí) nad záložkami; platí pro
+Celá stránka má **jedno období** nad záložkami; platí pro
 všechny záložky a je vidět i v adrese stránky. Bez období v adrese se otevře
 nejstarší měsíc s nesplněným měsíčním hlášením, jinak předchozí měsíc.
 Oznámení zdravotní pojišťovně (HOZ) z jiného měsíce, které má ještě otevřenou
@@ -1346,7 +1349,7 @@ se nevykazuje jako odeslané.
 
 ## 85.14 Podání zdravotním pojišťovnám
 
-Záložka **Zdravotní pojišťovny** (v nabídce **Další ▾**) začíná kartami
+Záložka **Zdravotní pojišťovny** začíná kartami
 pojišťoven za období: co se podává, kolik a jak je na tom úhrada. Karta už
 podané pojišťovny nenabízí **Podat datovkou** znovu (druhé podání by
 u pojišťovny založilo duplicitu), ukáže **Podáno** s datem a nechá jen
@@ -1452,7 +1455,7 @@ a následně ověřte doručenku i věcnou odpověď pojišťovny.
 
 ## 85.15 Nemocenské a další zákonné povinnosti
 
-Záložka **Mimořádná podání** ukazuje pro vybraný měsíc přesnou matici toho,
+Záložka **Mimořádná podání ▾ → Přehled povinností** ukazuje pro vybraný měsíc přesnou matici toho,
 co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
 jen částečně a HZUPN zůstává samostatným hlášením.
 
