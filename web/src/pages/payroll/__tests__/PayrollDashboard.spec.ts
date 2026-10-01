@@ -66,6 +66,10 @@ function mountDashboard() {
           props: ['initialYear'],
           template: '<div data-test="annual-report-panel-stub" :data-year="initialYear" />',
         },
+        PayrollDimensionCostReportPanel: {
+          props: ['initialYear'],
+          template: '<div data-test="dimension-cost-report-panel-stub" />',
+        },
         PayrollOperationalHealthPanel: {
           template: '<div data-test="operational-health-panel-stub" />',
         },

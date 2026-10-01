@@ -229,6 +229,41 @@ zaúčtování přenese na řádky zápisu. Storno zápisu přenese stejný rozp
 odečte přesně to, co původní zápis přičetl. Rozpad splní i povinnou dimenzi
 pravidla.
 
+## Mzdy
+
+Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení →
+Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže jedno
+středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy nebo
+její skupiny firem.
+
+Při zaúčtování schváleného mzdového běhu:
+
+- Náklady pracovního vztahu (hrubá mzda, pojistné zaměstnavatele na 524,
+  příspěvek na spoření u rizikové práce) nesou firemní dimenzi navázané mzdové
+  dimenze. Řádky se seskupí podle účtu, strany a dimenzí, takže v deníku je
+  například jeden řádek 521 za každé středisko.
+- Vztah rozdělený podílem (např. 70 / 30) rozdělí každý svůj náklad podle podílů.
+  Haléř, který po dělení zbude, dostane podíl s největším zbytkem, součet tedy
+  vždy sedí na haléř.
+- Závazky (331, 336, 342 a další) se na střediska nedělí. Dluží se jako celek.
+- Do deníku se neúčtuje po zaměstnancích. Mzdový předpis zůstává jeden za firmu.
+- Textový kód střediska se na řádky zapisuje dál, sestavy po středisku proto
+  fungují i bez vazby.
+
+Opravná revize, která změní jen středisko nebo podíly, odúčtuje původní části
+a zaúčtuje nové, celkový náklad se nemění. Bez vazby a bez rozpadu se mzdy
+účtují přesně jako dřív.
+
+### Náklady na zaměstnance po dimenzi
+
+Na přehledu mezd je sestava **Náklady na zaměstnance po dimenzi**. Za zvolený
+rok ukáže mzdové náklady každého zaměstnance rozdělené po střediscích nebo
+firemních dimenzích (mzdy, pojistné zaměstnavatele, ostatní) a souhrn po
+hodnotách. Sestava čte účetní můstek mezd, ne deník, a započítává jen zaúčtované
+běhy (u opravených běhů poslední zaúčtovanou revizi). Součet sedí na nákladové
+řádky mzdového předpisu v deníku. Pojistné revize, kterou nešlo rozdělit na
+pracovní vztahy, se ukáže v řádku **Nerozděleno na zaměstnance**.
+
 ## Sestavy
 
 ### Filtr na dimenzi ve výkazech

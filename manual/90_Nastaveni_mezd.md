@@ -222,6 +222,19 @@ smazat běžně. Konkrétní přiřazení střediska, zakázky nebo činnosti pr
 vztahu se vede přímo na kartě daného vztahu v seznamu zaměstnanců, opět
 s vlastním obdobím účinnosti a bez souběhu dvou dimenzí stejného typu.
 
+Mzdovou dimenzi lze v poli **Firemní dimenze** navázat na hodnotu z Firma →
+Dimenze. Mzdy se pak účtují na stejné středisko jako faktury a řádky mzdového
+předpisu v deníku nesou firemní dimenzi. U nové mzdové dimenze výběr firemní
+hodnoty předvyplní typ, název a kód. Bez vazby se mzdy účtují jako dosud, jen
+s textovým kódem střediska.
+
+Pracovní vztah, který pracuje pro víc středisek, se na kartě vztahu rozdělí
+tlačítkem **Rozdělit podílem**: vybere se typ, hodnoty a jejich procenta
+(například 70 % a 30 %), součet musí dát přesně 100 %. Rozpad platí od zvoleného
+dne a dosavadní přiřazení téhož typu se den předtím ukončí. Podrobnosti
+o rozdělení nákladů v deníku popisuje kapitola [Dimenze](114_Dimenze.md), část
+Mzdy.
+
 Výchozí účet dimenze mění pouze nákladovou stranu hrubé mzdy. Použije se jen
 tehdy, když mzdová složka nemá vlastní výslovnou předkontaci; konkrétní účet
 složky má vždy přednost. Pokud má vztah účet na více dimenzích, rozhoduje v

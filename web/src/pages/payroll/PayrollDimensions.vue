@@ -4,6 +4,7 @@ import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollCompanyDimensionValue,
   type PayrollDimension,
   type PayrollDimensionPayload,
   type PayrollDimensionType,
@@ -36,6 +37,7 @@ const historyLocked = ref(false)
 const showValidation = ref(false)
 const typeFilter = ref<PayrollDimensionType | ''>('')
 const form = ref<PayrollDimensionPayload>(newDimension())
+const companyValues = ref<PayrollCompanyDimensionValue[]>([])
 
 const TYPES: PayrollDimensionType[] = ['cost_center', 'project', 'activity']
 
@@ -44,6 +46,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'code', labelKey: 'payroll.employer.dimensions.code', required: true },
   { key: 'name', labelKey: 'payroll.employer.dimensions.name' },
   { key: 'validity', labelKey: 'payroll.employer.dimensions.validity' },
+  { key: 'company', labelKey: 'payroll.employer.dimensions.company_value' },
   { key: 'account', labelKey: 'payroll.employer.dimensions.account', defaultHidden: true },
   { key: 'status', labelKey: 'payroll.employer.dimensions.status' },
   { key: 'actions', labelKey: 'common.actions', required: true },
@@ -67,7 +70,54 @@ function newDimension(): PayrollDimensionPayload {
     valid_to: null,
     is_active: true,
     default_account_code: null,
+    dimension_value_id: null,
     row_version: 0,
+  }
+}
+
+const companyValueOptions = computed(() => companyValues.value.map(value => ({
+  value: value.id,
+  label: `${value.code} — ${value.name}`,
+  secondary: value.type_name,
+  keywords: `${value.type_name} ${value.code} ${value.name}`,
+})))
+
+function companyValueLabel(valueId: number | null): string {
+  if (valueId === null) return '—'
+  const value = companyValues.value.find(item => item.id === valueId)
+  return value ? `${value.type_name}: ${value.code}` : `#${valueId}`
+}
+
+/**
+ * Výběr firemní hodnoty u nové dimenze předvyplní typ, název a kód — mzdová
+ * dimenze se tak dá „založit z firemní" jedním výběrem. U existující dimenze
+ * se jen mění vazba, údaje dimenze zůstávají.
+ */
+function selectCompanyValue(valueId: number | null) {
+  form.value.dimension_value_id = valueId
+  if (valueId === null || editingId.value !== null) return
+  const value = companyValues.value.find(item => item.id === valueId)
+  if (!value) return
+  if (value.type_kind === 'cost_center' || value.type_kind === 'project') {
+    form.value.dimension_type = value.type_kind
+  }
+  if (form.value.name.trim() === '') {
+    form.value.name = value.name.slice(0, 190)
+    codeSlug.fromName(form.value.name)
+  }
+  const code = value.code.trim().toUpperCase()
+  if (/^[A-Z0-9][A-Z0-9._-]{0,49}$/.test(code) && !takenCodes.value.includes(code)) {
+    form.value.code = code
+    codeSlug.markManual(code)
+  }
+}
+
+async function loadCompanyValues() {
+  try {
+    companyValues.value = await payrollApi.payrollCompanyDimensionValues()
+  } catch {
+    // Firemní dimenze jsou volitelné — bez nich editor funguje jako dřív.
+    companyValues.value = []
   }
 }
 
@@ -152,6 +202,7 @@ function edit(dimension: PayrollDimension) {
     valid_to: dimension.valid_to,
     is_active: dimension.is_active,
     default_account_code: dimension.default_account_code,
+    dimension_value_id: dimension.dimension_value_id ?? null,
     row_version: dimension.row_version,
   }
   saveError.value = ''
@@ -262,6 +313,7 @@ async function restore(dimension: PayrollDimension) {
       valid_to: dimension.valid_to,
       is_active: dimension.is_active,
       default_account_code: dimension.default_account_code,
+      dimension_value_id: dimension.dimension_value_id ?? null,
       row_version: 0,
     })
     dimensions.value = [...dimensions.value, restored]
@@ -281,7 +333,10 @@ function apiCode(error: unknown): string {
   return error.response?.data?.error?.code ?? ''
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadCompanyValues()
+})
 </script>
 
 <template>
@@ -349,6 +404,7 @@ onMounted(load)
                 <th v-if="tbl.isVisible('code')" class="px-3 py-2">{{ t('payroll.employer.dimensions.code') }}</th>
                 <th v-if="tbl.isVisible('name')" class="px-3 py-2">{{ t('payroll.employer.dimensions.name') }}</th>
                 <th v-if="tbl.isVisible('validity')" class="px-3 py-2">{{ t('payroll.employer.dimensions.validity') }}</th>
+                <th v-if="tbl.isVisible('company')" class="px-3 py-2">{{ t('payroll.employer.dimensions.company_value') }}</th>
                 <th v-if="tbl.isVisible('account')" class="px-3 py-2">{{ t('payroll.employer.dimensions.account') }}</th>
                 <th v-if="tbl.isVisible('status')" class="px-3 py-2">{{ t('payroll.employer.dimensions.status') }}</th>
                 <th v-if="tbl.isVisible('actions')" class="px-3 py-2 text-right">{{ t('common.actions') }}</th>
@@ -360,6 +416,7 @@ onMounted(load)
                 <td v-if="tbl.isVisible('code')" class="px-3 py-3 font-mono">{{ dimension.code }}</td>
                 <td v-if="tbl.isVisible('name')" class="px-3 py-3">{{ dimension.name }}</td>
                 <td v-if="tbl.isVisible('validity')" class="px-3 py-3">{{ dimension.valid_from }} – {{ dimension.valid_to ?? '∞' }}</td>
+                <td v-if="tbl.isVisible('company')" class="px-3 py-3 text-neutral-600">{{ companyValueLabel(dimension.dimension_value_id ?? null) }}</td>
                 <td v-if="tbl.isVisible('account')" class="px-3 py-3 font-mono text-neutral-600">{{ dimension.default_account_code ?? '—' }}</td>
                 <td v-if="tbl.isVisible('status')" class="px-3 py-3">
                   <span
@@ -495,6 +552,25 @@ onMounted(load)
       </div>
 
       <div class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div class="md:col-span-2 xl:col-span-3">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">
+            {{ t('payroll.employer.dimensions.company_value') }}
+          </span>
+          <SearchableSelect
+            :model-value="form.dimension_value_id"
+            :options="companyValueOptions"
+            :disabled="!canWrite"
+            :placeholder="t('payroll.employer.dimensions.company_value_none')"
+            accent="payroll"
+            data-test="dimension-company-value"
+            @update:model-value="selectCompanyValue($event as number | null)"
+          />
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ companyValues.length === 0
+              ? t('payroll.employer.dimensions.company_value_empty')
+              : t('payroll.employer.dimensions.company_value_hint') }}
+          </span>
+        </div>
         <div>
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.dimensions.type') }}

@@ -1975,6 +1975,21 @@
       "privacy_hint": "Přehled neobsahuje jména, osobní identifikátory ani detail jednotlivých zaměstnanců.",
       "load_failed": "Roční přehled mezd se nepodařilo načíst."
     },
+    "dimension_cost_report": {
+      "title": "Náklady na zaměstnance po dimenzi",
+      "description": "Mzdové náklady (hrubé mzdy, pojistné zaměstnavatele a ostatní) zaúčtovaných mzdových běhů rozdělené po zaměstnancích a střediscích nebo firemních dimenzích.",
+      "employee": "Zaměstnanec",
+      "dimension": "Středisko / dimenze",
+      "wages": "Mzdy",
+      "insurance": "Pojistné",
+      "other": "Ostatní",
+      "total": "Celkem",
+      "unassigned": "Nerozděleno na zaměstnance",
+      "no_dimension": "Bez dimenze",
+      "empty": "Za vybraný rok zatím nejsou zaúčtované mzdové běhy.",
+      "source_hint": "Report čte účetní můstek mezd, ne deník — v deníku je mzdový předpis za firmu. Součet sedí na nákladové řádky mzdového předpisu.",
+      "load_failed": "Náklady na zaměstnance po dimenzi se nepodařilo načíst."
+    },
     "posting_map": {
       "title": "Kontace mezd z původního programu",
       "intro": "Z převzatého zaúčtování se odvodí, který účet stál u kterého mzdového plnění, a nabídne se to jako návrh nastavení kontací. Uloží se jen to, co potvrdíte.",
@@ -6668,7 +6683,17 @@
         "valid_from_required": "Vyplňte datum, od kterého přiřazení platí.",
         "valid_to_invalid": "Konec platnosti nesmí předcházet jejímu začátku.",
         "none_available": "Firma zatím nemá žádnou účinnou mzdovou dimenzi.",
-        "open_settings": "Založit dimenze v nastavení mezd"
+        "open_settings": "Založit dimenze v nastavení mezd",
+        "split": "Rozdělit podílem",
+        "split_title": "Procentní rozpad vztahu",
+        "split_hint": "Náklady vztahu se rozdělí mezi zvolené dimenze jednoho typu podle podílů, součet musí být 100 %. Dosavadní přiřazení téhož typu se ukončí den před začátkem rozpadu.",
+        "split_add_row": "Přidat dimenzi",
+        "split_remove": "Odebrat",
+        "split_total": "Součet: {total} %",
+        "split_invalid": "Vyberte různé dimenze, vyplňte kladné podíly a zkontrolujte, že dávají dohromady přesně 100 %.",
+        "split_saved": "Rozpad vztahu byl uložen.",
+        "share_percent": "Podíl %",
+        "share_badge": "{share} %"
       },
       "surcharge_policy": {
         "title": "Zásady zákonných příplatků (§ 114–118)",
@@ -8485,6 +8510,10 @@
         "is_active": "Aktivní",
         "default_account_code": "Výchozí analytický účet",
         "default_account_hint": "Analytika k účtům mzdového automatického můstku (MZ-03). Nepovinné.",
+        "company_value": "Firemní dimenze",
+        "company_value_none": "Bez vazby na firemní dimenzi",
+        "company_value_hint": "Mzdy dimenze se zaúčtují na zvolenou hodnotu z Firma → Dimenze, stejně jako faktury. U nové dimenze výběr předvyplní typ, název a kód.",
+        "company_value_empty": "Firma zatím nemá žádné hodnoty v Firma → Dimenze. Bez vazby se mzdy účtují jen s textovým střediskem.",
         "validation": {
           "title": "Zkontrolujte prosím zvýrazněná pole.",
           "code": "Kód musí mít 1–50 znaků: velká písmena, číslice, tečku, podtržítko nebo pomlčku.",

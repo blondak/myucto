@@ -4971,11 +4971,23 @@ export interface PayrollDimension {
   valid_to: string | null
   is_active: boolean
   default_account_code: string | null
+  /** Hodnota firemní dimenze (Firma → Dimenze), na kterou se mzdy účtují. */
+  dimension_value_id: number | null
   created_by: number | null
   updated_by: number | null
   row_version: number
   created_at: string
   updated_at: string
+}
+
+/** Hodnota firemní dimenze, na kterou lze mzdovou dimenzi navázat. */
+export interface PayrollCompanyDimensionValue {
+  id: number
+  type_id: number
+  type_name: string
+  type_kind: string
+  code: string
+  name: string
 }
 
 export type PayrollDimensionPayload = Omit<
@@ -4991,6 +5003,8 @@ export interface PayrollEmploymentDimension {
   dimension_type: PayrollDimensionType
   dimension_code: string
   dimension_name: string
+  /** Podíl vztahu na hodnotě v procentech; bez rozpadu 100. */
+  share_percent: number
   valid_from: string
   valid_to: string | null
   created_by: number | null
@@ -5005,6 +5019,49 @@ export interface PayrollEmploymentDimensionPayload {
   valid_from: string
   valid_to: string | null
   row_version?: number
+}
+
+/** Procentní rozpad vztahu mezi víc hodnot jednoho typu (součet 100 %). */
+export interface PayrollEmploymentDimensionSplitPayload {
+  dimension_type: PayrollDimensionType
+  valid_from: string
+  valid_to: string | null
+  shares: { dimension_id: number; share_percent: number }[]
+}
+
+export interface PayrollDimensionCostReportDimension {
+  type_id: number
+  type_name: string
+  value_id: number
+  code: string
+  name: string
+}
+
+export interface PayrollDimensionCostReportRow {
+  employment_id: number | null
+  employee_id: number | null
+  employee_name: string | null
+  employment_code: string | null
+  cost_center: string | null
+  dimensions: PayrollDimensionCostReportDimension[]
+  wages_minor: number
+  insurance_minor: number
+  other_minor: number
+  total_minor: number
+}
+
+export interface PayrollDimensionCostReport {
+  year: number
+  rows: PayrollDimensionCostReportRow[]
+  by_dimension: {
+    type_id: number | null
+    type_name: string | null
+    value_id: number | null
+    code: string
+    name: string
+    total_minor: number
+  }[]
+  totals: { wages_minor: number; insurance_minor: number; other_minor: number; total_minor: number }
 }
 
 /**
@@ -8649,6 +8706,12 @@ export const payrollApi = {
   deletePayrollDimension: (id: number) =>
     api.delete<{ deleted: boolean }>(`/payroll/settings/dimensions/${id}`)
       .then(response => response.data.deleted),
+  payrollCompanyDimensionValues: () =>
+    api.get<{ values: PayrollCompanyDimensionValue[] }>('/payroll/settings/dimensions/company-values')
+      .then(response => response.data.values),
+  dimensionCostReport: (year: number) =>
+    api.get<{ report: PayrollDimensionCostReport }>(`/payroll/reports/dimension-costs/${year}`)
+      .then(response => response.data.report),
   /**
    * Souhrn navazujících agend jednoho vztahu (rozcestník na kartě zaměstnance).
    *
@@ -8706,6 +8769,11 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/dimensions/${assignmentId}`,
       payload,
     ).then(response => response.data.dimension),
+  splitEmploymentDimension: (employmentId: number, payload: PayrollEmploymentDimensionSplitPayload) =>
+    api.post<{ dimensions: PayrollEmploymentDimension[] }>(
+      `/payroll/employments/${employmentId}/dimension-splits`,
+      payload,
+    ).then(response => response.data.dimensions),
   /**
    * `employeeId` zúží seznam na jednu osobu už na serveru. Zužovat načtenou
    * stránku v prohlížeči nešlo: dokument z jiné strany se tiše neprojevil.

@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   payrollDimensions: vi.fn(),
   createEmploymentDimension: vi.fn(),
   updateEmploymentDimension: vi.fn(),
+  splitEmploymentDimension: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('@/api/payroll', () => ({
     payrollDimensions: m.payrollDimensions,
     createEmploymentDimension: m.createEmploymentDimension,
     updateEmploymentDimension: m.updateEmploymentDimension,
+    splitEmploymentDimension: m.splitEmploymentDimension,
   },
 }))
 
@@ -62,7 +64,7 @@ function assignment(
   } as PayrollEmploymentDimension
 }
 
-function mountPanel() {
+function mountPanel(selectable = false) {
   return mount(EmploymentDimensionsPanel, {
     props: { employmentId: 12, canWrite: true },
     global: {
@@ -71,10 +73,16 @@ function mountPanel() {
           props: ['to'],
           template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
         },
-        SearchableSelect: {
-          props: ['modelValue'],
-          template: '<span />',
-        },
+        SearchableSelect: selectable
+          ? {
+              props: ['modelValue'],
+              emits: ['update:modelValue'],
+              template: '<input @input="$emit(\'update:modelValue\', Number($event.target.value))" />',
+            }
+          : {
+              props: ['modelValue'],
+              template: '<span />',
+            },
       },
     },
   })
@@ -92,7 +100,7 @@ describe('EmploymentDimensionsPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-test="dimensions-add"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
@@ -107,7 +115,7 @@ describe('EmploymentDimensionsPanel', () => {
 
     // Přes „upravit" u existujícího přiřazení — dimenze je tím vybraná
     // a zbývá jediná vada: obrácený interval.
-    await wrapper.findAll('button')[1].trigger('click')
+    await wrapper.get('[data-test="dimensions-edit"]').trigger('click')
     const dates = wrapper.findAll('input[type="date"]')
     await dates[0].setValue('2026-05-01')
     await dates[1].setValue('2026-04-01')
@@ -134,5 +142,45 @@ describe('EmploymentDimensionsPanel', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="dimensions-none-available"]').exists()).toBe(false)
+  })
+
+  it('rozpad, který nedává 100 %, neodešle', async () => {
+    m.payrollDimensions.mockResolvedValue([dimension(), dimension({ id: 8, code: 'S02' })])
+    const wrapper = mountPanel(true)
+    await flushPromises()
+
+    await wrapper.get('[data-test="dimensions-split-open"]').trigger('click')
+    await wrapper.get('[data-test="dimensions-split-dimension-0"]').setValue('7')
+    await wrapper.get('[data-test="dimensions-split-dimension-1"]').setValue('8')
+    await wrapper.get('[data-test="dimensions-split-share-0"]').setValue('70')
+    await wrapper.get('[data-test="dimensions-split-share-1"]').setValue('20')
+    await wrapper.get('[data-test="dimensions-split-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.splitEmploymentDimension).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="dimensions-split-total"]').classes()).toContain('text-warning-700')
+  })
+
+  it('rozpad 70 / 30 uloží najednou jedním požadavkem', async () => {
+    m.payrollDimensions.mockResolvedValue([dimension(), dimension({ id: 8, code: 'S02' })])
+    m.splitEmploymentDimension.mockResolvedValue([])
+    const wrapper = mountPanel(true)
+    await flushPromises()
+
+    await wrapper.get('[data-test="dimensions-split-open"]').trigger('click')
+    await wrapper.get('[data-test="dimensions-split-dimension-0"]').setValue('7')
+    await wrapper.get('[data-test="dimensions-split-dimension-1"]').setValue('8')
+    await wrapper.get('[data-test="dimensions-split-share-0"]').setValue('70')
+    await wrapper.get('[data-test="dimensions-split-share-1"]').setValue('30')
+    await wrapper.get('[data-test="dimensions-split-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.splitEmploymentDimension).toHaveBeenCalledWith(12, expect.objectContaining({
+      dimension_type: 'cost_center',
+      shares: [
+        { dimension_id: 7, share_percent: 70 },
+        { dimension_id: 8, share_percent: 30 },
+      ],
+    }))
   })
 })

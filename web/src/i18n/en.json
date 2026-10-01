@@ -1975,6 +1975,21 @@
       "privacy_hint": "This overview contains no names, personal identifiers, or individual employee detail.",
       "load_failed": "The annual payroll overview could not be loaded."
     },
+    "dimension_cost_report": {
+      "title": "Employee costs by dimension",
+      "description": "Payroll costs (gross wages, employer insurance and other) of posted payroll runs broken down by employee and cost centre or company dimension.",
+      "employee": "Employee",
+      "dimension": "Cost centre / dimension",
+      "wages": "Wages",
+      "insurance": "Insurance",
+      "other": "Other",
+      "total": "Total",
+      "unassigned": "Not assigned to an employee",
+      "no_dimension": "No dimension",
+      "empty": "There are no posted payroll runs for the selected year yet.",
+      "source_hint": "The report reads the payroll posting bridge, not the journal — the journal holds one payroll entry per company. The total matches the cost lines of that entry.",
+      "load_failed": "Employee costs by dimension could not be loaded."
+    },
     "posting_map": {
       "title": "Payroll postings from the previous program",
       "intro": "The taken-over postings are used to derive which account sat behind which payroll item, and the result is offered as a proposal for the posting settings. Only what you confirm is saved.",
@@ -6668,7 +6683,17 @@
         "valid_from_required": "Fill in the date the assignment starts on.",
         "valid_to_invalid": "The end of validity cannot precede its start.",
         "none_available": "This company has no effective payroll dimension yet.",
-        "open_settings": "Create dimensions in payroll settings"
+        "open_settings": "Create dimensions in payroll settings",
+        "split": "Split by share",
+        "split_title": "Percentage split of the employment",
+        "split_hint": "The employment's costs are split between the selected dimensions of one type by share; the shares must add up to 100 %. Existing assignments of the same type end the day before the split starts.",
+        "split_add_row": "Add dimension",
+        "split_remove": "Remove",
+        "split_total": "Total: {total} %",
+        "split_invalid": "Select different dimensions, fill in positive shares and make sure they add up to exactly 100 %.",
+        "split_saved": "The employment split was saved.",
+        "share_percent": "Share %",
+        "share_badge": "{share} %"
       },
       "surcharge_policy": {
         "title": "Statutory surcharge policy (Sections 114–118)",
@@ -8485,6 +8510,10 @@
         "is_active": "Active",
         "default_account_code": "Default analytic account",
         "default_account_hint": "Analytic sub-account for the payroll automatic posting bridge accounts (MZ-03). Optional.",
+        "company_value": "Company dimension",
+        "company_value_none": "Not linked to a company dimension",
+        "company_value_hint": "Payroll for this dimension is posted to the selected value from Company → Dimensions, just like invoices. For a new dimension the choice pre-fills type, name and code.",
+        "company_value_empty": "The company has no values in Company → Dimensions yet. Without a link, payroll is posted with the text cost centre only.",
         "validation": {
           "title": "Please check the highlighted fields.",
           "code": "Code must be 1–50 characters: uppercase letters, digits, dot, underscore or hyphen.",
