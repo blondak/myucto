@@ -933,7 +933,8 @@
         "1949_product_posting_defaults.sql",
         "1950_purchase_submission_dimensions.sql",
         "1951_dimensions_other_items_assets.sql",
-        "1952_dimension_account_map.sql"
+        "1952_dimension_account_map.sql",
+        "1953_payroll_external_jmhz_manual_attestation.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10796,12 +10797,13 @@
                 "form_count": "int(10) unsigned NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "imported_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "note": "varchar(500) NULL DEFAULT NULL",
                 "payload_ciphertext": "longtext NOT NULL",
                 "payload_hash": "binary(32) NOT NULL",
                 "payload_sha256": "char(64) NOT NULL COLLATE ascii_bin",
                 "period": "char(7) NULL DEFAULT NULL COLLATE ascii_bin",
                 "program": "varchar(100) NULL DEFAULT NULL",
-                "source": "enum('pamica','jmhz_xml') NOT NULL",
+                "source": "enum('pamica','jmhz_xml','manual_attestation') NOT NULL",
                 "source_key": "varchar(191) NOT NULL COLLATE ascii_bin",
                 "status": "enum('sent','not_sent') NOT NULL",
                 "submission_guid": "char(36) NULL DEFAULT NULL COLLATE ascii_bin",
