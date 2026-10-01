@@ -245,6 +245,7 @@ final class GlobalSeedTables
         'bank_posting_rules', 'bank_rule_templates',
         'statement_account_overrides', 'statement_function_map',
         'cost_centers', 'dimension_types', 'dimension_values', 'dimension_account_rules',
+        'dimension_account_map',
         // Per-supplier číselníky.
         'expense_categories', 'revenue_categories', 'trip_categories',
         // Předvolby AI (ztlumené zdroje návrhů), ne návrhy samotné.

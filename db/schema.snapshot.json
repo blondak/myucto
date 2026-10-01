@@ -932,7 +932,8 @@
         "1948_payroll_dimensions_company_link_and_split.sql",
         "1949_product_posting_defaults.sql",
         "1950_purchase_submission_dimensions.sql",
-        "1951_dimensions_other_items_assets.sql"
+        "1951_dimensions_other_items_assets.sql",
+        "1952_dimension_account_map.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3997,6 +3998,43 @@
                 "detail": "json_valid(`detail`)"
             }
         },
+        "dimension_account_map": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "analytic_account_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "synthetic_account_id": "bigint(20) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_from": "date NULL DEFAULT NULL",
+                "valid_to": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_dam_synthetic": "BTREE (synthetic_account_id)",
+                "fk_dam_user": "BTREE (created_by)",
+                "idx_dam_analytic": "BTREE (analytic_account_id)",
+                "idx_dam_supplier_synthetic": "BTREE (supplier_id, synthetic_account_id)",
+                "idx_dam_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "idx_dam_value": "BTREE (supplier_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_dam_analytic": "(analytic_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dam_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dam_synthetic": "(synthetic_account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dam_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_dam_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_dam_validity": "`valid_from` is null or `valid_to` is null or `valid_to` >= `valid_from`"
+            }
+        },
         "dimension_account_rules": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -4077,6 +4115,9 @@
             "columns": {
                 "code": "varchar(30) NOT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "drives_accounts": "tinyint(1) NOT NULL DEFAULT 0",
+                "drives_accounts_mask": "varchar(190) NOT NULL DEFAULT '5, 6'",
+                "drives_accounts_owner": "varchar(40) NULL DEFAULT NULL STORED GENERATED AS (if(`drives_accounts` = 1,concat(ifnull(`supplier_id`,''),':',ifnull(`supplier_group_id`,'')),NULL))",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "kind": "enum('cost_center','project','vehicle','location','deal','custom') NOT NULL DEFAULT 'custom'",
@@ -4089,6 +4130,7 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_dimension_type_drives_accounts": "UNIQUE BTREE (drives_accounts_owner)",
                 "uq_dimension_type_group_code": "UNIQUE BTREE (supplier_group_id, code)",
                 "uq_dimension_type_supplier_code": "UNIQUE BTREE (supplier_id, code)"
             },
