@@ -281,6 +281,55 @@ final class PayrollPaymentApiTest extends TestCase
         );
     }
 
+    public function testBatchCreationRejectsMalformedPaymentDateOption(): void
+    {
+        $response = $this->action->createBatch(
+            $this->request('session', 'POST')->withParsedBody([
+                'export_format' => 'abo',
+                'payer_reference' => 'currency:1',
+                'items' => [['liability_id' => 1, 'amount_minor' => 100]],
+                'payment_date' => '2026-10-01',
+                'accept_late_payment' => 'yes',
+            ]),
+            new Response(),
+            [],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->json($response)['error']['code'] ?? null);
+    }
+
+    public function testRescheduleRequiresPaymentDate(): void
+    {
+        $response = $this->action->rescheduleBatch(
+            $this->request('session', 'POST')->withParsedBody([
+                'accept_late_payment' => false,
+            ]),
+            new Response(),
+            ['batchId' => '1'],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->json($response)['error']['code'] ?? null);
+    }
+
+    public function testDiscardOfUnknownBatchIsConflictNotServerError(): void
+    {
+        $response = $this->action->discardBatch(
+            $this->request('session', 'POST')->withParsedBody([
+                'confirm_bank_cancellation' => true,
+            ]),
+            new Response(),
+            ['batchId' => '999999999'],
+        );
+
+        self::assertContains($response->getStatusCode(), [409, 422]);
+        self::assertContains(
+            $this->json($response)['error']['code'] ?? null,
+            ['payment_batch_blocked', 'validation_failed'],
+        );
+    }
+
     public function testExportRejectsFormatThatIsNotText(): void
     {
         $response = $this->action->generateExport(
@@ -589,6 +638,9 @@ final class PayrollPaymentApiTest extends TestCase
             ),
             $this->container->get(
                 \MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class,
+            ),
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardService::class,
             ),
         );
 

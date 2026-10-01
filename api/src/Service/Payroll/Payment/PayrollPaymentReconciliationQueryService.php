@@ -409,7 +409,8 @@ final class PayrollPaymentReconciliationQueryService
                 AND payment_match.allocation_id = allocation.id
               WHERE allocation.supplier_id = ?
                 AND run.period_start >= ?
-                AND run.period_start < ?'
+                AND run.period_start < ?
+                AND ' . PayrollPaymentBatchDiscardScope::activeBatch('payment_batch') . "\n"
             . $searchClause
             . ' GROUP BY allocation.id, allocation.item_id,
                        payment_item.item_reference, payment_batch.id,

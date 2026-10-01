@@ -97,7 +97,7 @@ final class PayrollPaymentSettlementRecognizer
                     'transaction' => $transaction,
                     'distance' => abs(
                         $this->dayNumber($transaction['posted_at'])
-                        - $this->dayNumber($liability['due_on']),
+                        - $this->dayNumber($this->expectedPaymentDate($liability)),
                     ),
                 ];
             }
@@ -202,10 +202,32 @@ final class PayrollPaymentSettlementRecognizer
     /** @param array<string,mixed> $liability */
     private function payableFrom(array $liability): string
     {
-        return (new \DateTimeImmutable((string) $liability['period_start']))
+        $from = (new \DateTimeImmutable((string) $liability['period_start']))
             ->modify('+1 month')
             ->modify('-' . self::PAYABLE_FROM_TOLERANCE_DAYS . ' days')
             ->format('Y-m-d');
+        // Příkaz zadaný na dřívější den (účetní platí hned po uzávěrce) se
+        // musí najít i tehdy, když odešel před obvyklým začátkem okna.
+        $planned = $liability['planned_payment_date'] ?? null;
+
+        return is_string($planned) && $planned < $from ? $planned : $from;
+    }
+
+    /**
+     * Den, kdy má platba odejít: datum příkazu v živé dávce, jinak splatnost.
+     *
+     * Vzdálenost od něj rozhoduje mezi dvěma stejnými odvody po sobě jdoucích
+     * měsíců. Kdyby se měřila jen ke splatnosti, platba zadaná dřív (třeba
+     * 1. 10. místo 19. 10.) by byla blíž splatnosti PŘEDCHOZÍHO měsíce (20. 9.)
+     * než té své a spárovala by se k jinému měsíci.
+     *
+     * @param array<string,mixed> $liability
+     */
+    private function expectedPaymentDate(array $liability): string
+    {
+        $planned = $liability['planned_payment_date'] ?? null;
+
+        return is_string($planned) ? $planned : (string) $liability['due_on'];
     }
 
     /** @param array<string,mixed> $liability */
@@ -325,12 +347,28 @@ final class PayrollPaymentSettlementRecognizer
                         AND allocation.liability_id = liability.id
                         AND batch.channel = "bank"
                         AND allocation.amount_minor = liability.amount_minor
+                        AND ' . PayrollPaymentBatchDiscardScope::activeBatch('batch') . '
                       ORDER BY allocation.id ASC
                       LIMIT 1) AS allocation_id,
+                    (SELECT batch.planned_payment_date
+                       FROM payroll_payment_allocations allocation
+                       JOIN payroll_payment_items item
+                         ON item.supplier_id = allocation.supplier_id
+                        AND item.id = allocation.item_id
+                       JOIN payroll_payment_batches batch
+                         ON batch.supplier_id = item.supplier_id
+                        AND batch.id = item.batch_id
+                      WHERE allocation.supplier_id = liability.supplier_id
+                        AND allocation.liability_id = liability.id
+                        AND batch.channel = "bank"
+                        AND ' . PayrollPaymentBatchDiscardScope::activeBatch('batch') . '
+                      ORDER BY allocation.id ASC
+                      LIMIT 1) AS planned_payment_date,
                     (SELECT COUNT(*)
                        FROM payroll_payment_allocations allocation
                       WHERE allocation.supplier_id = liability.supplier_id
-                        AND allocation.liability_id = liability.id) AS allocation_count,
+                        AND allocation.liability_id = liability.id
+                        AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . ') AS allocation_count,
                     EXISTS (
                       SELECT 1
                         FROM payroll_payment_settlement_signals settlement_signal
@@ -379,6 +417,9 @@ final class PayrollPaymentSettlementRecognizer
             $result[] = [
                 'id' => (int) $row['id'],
                 'due_on' => (string) $row['due_on'],
+                'planned_payment_date' => $row['planned_payment_date'] === null
+                    ? null
+                    : (string) $row['planned_payment_date'],
                 'period_start' => (string) $row['period_start'],
                 'currency_code' => (string) $row['currency_code'],
                 'liability_kind' => (string) $row['liability_kind'],

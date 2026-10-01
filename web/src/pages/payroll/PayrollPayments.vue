@@ -10,6 +10,8 @@ import {
   type PayrollPayerOption,
   type PayrollPaymentAllocation,
   type PayrollPaymentBatch,
+  type PayrollPaymentBatchDiscardResult,
+  type PayrollPaymentBatchRescheduleResult,
   type PayrollPaymentEvidence,
   type PayrollPaymentExport,
   type PayrollPaymentExportFormat,
@@ -39,6 +41,16 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 // data od zbytku aplikace, viz komentář u `formatMoneyMinor`.
 import { formatDate, formatDateTime, formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import PayrollPaymentDateChoice from '@/components/payroll/PayrollPaymentDateChoice.vue'
+import PayrollPaymentBatchChangeDialog from '@/components/payroll/PayrollPaymentBatchChangeDialog.vue'
+import {
+  effectivePaymentDate,
+  isLatePaymentDate,
+  requestedPaymentDate,
+  selectionDefaultPaymentDate,
+  todayIso,
+  type PaymentDateChoice,
+} from '@/components/payroll/payrollPaymentDate'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -296,11 +308,39 @@ const formatSelectOptions = computed(() => {
   }
   return []
 })
+/*
+ * Datum úhrady nové dávky. Výchozí „podle splatnosti" se serveru neposílá,
+ * takže dávka vznikne přesně jako dřív. Zvolený režim (např. „Dnes") zůstává
+ * i pro další dávku - účetní, která platí vše hned, ho nastaví jednou pro
+ * mzdy i pro všechny skupiny odvodů. Potvrzení pozdní platby se ale u každé
+ * dávky zadává znovu.
+ */
+const today = todayIso()
+const paymentDateChoice = ref<PaymentDateChoice>({ mode: 'statutory', customDate: '' })
+const latePaymentConfirmed = ref(false)
+const selectionDefaultDate = computed(() => selectionDefaultPaymentDate(selectedItems.value))
+const selectionPaymentDate = computed(() => effectivePaymentDate(
+  paymentDateChoice.value,
+  selectionDefaultDate.value,
+  today,
+))
+const selectionPaymentLate = computed(() => isLatePaymentDate(
+  selectionPaymentDate.value,
+  selectionDefaultDate.value,
+))
+const paymentDateReady = computed(() => {
+  const requested = requestedPaymentDate(paymentDateChoice.value, today)
+  if (paymentDateChoice.value.mode === 'custom' && requested === null) return false
+  if (requested !== null && requested < today) return false
+  return !selectionPaymentLate.value || latePaymentConfirmed.value
+})
+watch(selectionDefaultDate, () => { latePaymentConfirmed.value = false })
 const canCreateBatch = computed(() =>
   auth.canWrite('payroll.payments')
   && selectedItems.value.length > 0
   && exportFormat.value !== null
-  && payerReference.value !== null,
+  && payerReference.value !== null
+  && paymentDateReady.value,
 )
 const allocationPool = computed(() => {
   const pool = new Map<number, PayrollPaymentAllocation>()
@@ -1057,6 +1097,7 @@ async function recognizeSettlements(): Promise<void> {
 async function createBatch(): Promise<void> {
   if (!canCreateBatch.value || creatingBatch.value) return
   creatingBatch.value = true
+  const paymentDate = requestedPaymentDate(paymentDateChoice.value, today)
   try {
     const result = await payrollPaymentsApi.createBatch({
       export_format: exportFormat.value!,
@@ -1065,7 +1106,14 @@ async function createBatch(): Promise<void> {
         liability_id: item.id,
         amount_minor: remainingMinor(item),
       })),
+      ...(paymentDate === null
+        ? {}
+        : {
+            payment_date: paymentDate,
+            accept_late_payment: selectionPaymentLate.value && latePaymentConfirmed.value,
+          }),
     })
+    latePaymentConfirmed.value = false
     toast.success(t(
       result.replayed
         ? 'payroll.payments.batch.replayed'
@@ -1096,6 +1144,45 @@ async function createBatch(): Promise<void> {
     ))
   } finally {
     creatingBatch.value = false
+  }
+}
+
+/*
+ * Zahození dávky a změna data úhrady. Obojí běží přes dialog, který u stažené
+ * nebo bance předané dávky chce potvrzení zrušení v bankovnictví. Dávku
+ * s doloženou úhradou měnit nejde - tlačítka se u ní vůbec neukážou.
+ */
+const batchChange = ref<{ batch: PayrollPaymentBatch; mode: 'discard' | 'reschedule' } | null>(null)
+
+function canChangeBatch(batch: PayrollPaymentBatch): boolean {
+  return auth.canWrite('payroll.payments')
+    && !batch.discarded
+    && batch.settled_minor === 0
+}
+
+function openBatchChange(batch: PayrollPaymentBatch, mode: 'discard' | 'reschedule'): void {
+  if (!canChangeBatch(batch)) return
+  batchChange.value = { batch, mode }
+}
+
+async function onBatchDiscarded(result: PayrollPaymentBatchDiscardResult): Promise<void> {
+  batchChange.value = null
+  if (result.discarded || result.replayed) {
+    toast.success(t('payroll.payments.batch.discarded'))
+  }
+  await load()
+}
+
+async function onBatchRescheduled(result: PayrollPaymentBatchRescheduleResult): Promise<void> {
+  batchChange.value = null
+  toast.success(t('payroll.payments.batch.rescheduled', {
+    date: formatDate(result.batch.planned_payment_date),
+  }))
+  await load()
+  // Stejně jako u nové dávky: soubor pro banku se rovnou vyrobí k novému datu.
+  const created = batches.value.find(batch => batch.id === result.batch.batch_id)
+  if (created !== undefined && created.export_format !== 'manual') {
+    await generateExport(created)
   }
 }
 
@@ -1190,6 +1277,7 @@ async function generateExport(
   if (
     !auth.canWrite('payroll.payments')
     || batch.export_format === 'manual'
+    || batch.discarded
     || generatingBatchId.value !== null
   ) return
   generatingBatchId.value = batch.id
@@ -1825,6 +1913,15 @@ onMounted(load)
               : t('payroll.payments.batch.create') }}
           </button>
         </div>
+        <PayrollPaymentDateChoice
+          v-model="paymentDateChoice"
+          v-model:late-confirmed="latePaymentConfirmed"
+          class="mt-4"
+          :default-date="selectionDefaultDate"
+          :today="today"
+          :disabled="creatingBatch"
+          test-id="batch-payment-date"
+        />
         <p
           v-if="payerSelectOptions.length === 0"
           class="mt-3 text-sm text-warning-700"
@@ -2121,16 +2218,44 @@ onMounted(load)
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="batch in batches" :key="batch.id" class="align-top">
+                <tr
+                  v-for="batch in batches"
+                  :key="batch.id"
+                  class="align-top"
+                  :class="batch.discarded ? 'bg-neutral-50 text-neutral-500' : ''"
+                  :data-test="batch.discarded ? 'batch-discarded' : 'batch-live'"
+                >
                   <td class="px-4 py-3 text-neutral-700">
-                    <span class="whitespace-nowrap">{{ formatDate(batch.planned_payment_date) }}</span>
+                    <span class="whitespace-nowrap" :class="batch.discarded ? 'line-through' : ''">{{ formatDate(batch.planned_payment_date) }}</span>
+                    <span
+                      v-if="batch.discarded"
+                      class="mt-1 block w-fit rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700"
+                      :title="t('payroll.payments.batch.discarded_hint')"
+                      data-test="batch-discarded-badge"
+                    >
+                      {{ t('payroll.payments.batch.discarded_badge', { date: formatDate(batch.discarded_at) }) }}
+                    </span>
+                    <span
+                      v-else-if="batch.payment_date_mode === 'earlier' && batch.default_payment_date"
+                      class="mt-0.5 block text-xs text-neutral-500"
+                      data-test="batch-date-earlier"
+                    >
+                      {{ t('payroll.payments.batch.mode_earlier', { date: formatDate(batch.default_payment_date) }) }}
+                    </span>
+                    <span
+                      v-else-if="batch.payment_date_mode === 'later' && batch.default_payment_date"
+                      class="mt-0.5 block text-xs font-medium text-danger-700"
+                      data-test="batch-date-later"
+                    >
+                      {{ t('payroll.payments.batch.mode_later', { date: formatDate(batch.default_payment_date) }) }}
+                    </span>
                     <!--
                       Datum příkazu není zákonný termín: u odvodů se posílá dřív,
                       aby částka stihla být PŘIPSÁNA. Bez téhle věty vypadá dřívější
                       datum jako chyba a účetní ho „opraví" na zákonný termín.
                     -->
                     <span
-                      v-if="batch.is_shifted && batch.statutory_due_on"
+                      v-else-if="batch.is_shifted && batch.statutory_due_on"
                       class="mt-0.5 block text-xs text-neutral-500"
                       data-test="batch-statutory-due"
                     >
@@ -2167,7 +2292,7 @@ onMounted(load)
                           {{ formatFileSize(file.size_bytes) }} · {{ formatDateTime(file.created_at) }}
                         </span>
                         <button
-                          v-if="auth.canWrite('payroll.payments')"
+                          v-if="auth.canWrite('payroll.payments') && !batch.discarded"
                           type="button"
                           :class="btnOutlineSm('neutral')"
                           :disabled="downloadingExportId !== null"
@@ -2182,7 +2307,7 @@ onMounted(load)
                         </button>
                         <!-- Nahrazenou revizi jde odklidit ze seznamu; platná zůstává vždy. -->
                         <button
-                          v-if="auth.canWrite('payroll.payments') && isOutdatedExport(batch, file)"
+                          v-if="auth.canWrite('payroll.payments') && !batch.discarded && isOutdatedExport(batch, file)"
                           type="button"
                           class="cursor-pointer rounded-md border border-danger-200 px-1.5 py-1 text-danger-600 hover:bg-danger-50 disabled:cursor-default disabled:opacity-50"
                           :disabled="hidingExportId !== null"
@@ -2205,10 +2330,11 @@ onMounted(load)
                   </td>
                   <td class="px-4 py-3 text-right">
                     <div
-                      v-if="batch.export_format !== 'manual' && auth.canWrite('payroll.payments')"
+                      v-if="auth.canWrite('payroll.payments') && !batch.discarded"
                       class="flex flex-wrap justify-end gap-2"
                     >
                       <button
+                        v-if="batch.export_format !== 'manual'"
                         type="button"
                         :class="btnFilledSm('primary')"
                         :disabled="generatingBatchId !== null"
@@ -2228,6 +2354,7 @@ onMounted(load)
                         jeho náhrada: vzniká z týchž zmrazených instrukcí dávky.
                       -->
                       <button
+                        v-if="batch.export_format !== 'manual'"
                         type="button"
                         data-test="batch-generate-pdf"
                         :class="btnOutlineSm('neutral')"
@@ -2241,6 +2368,37 @@ onMounted(load)
                           ? t('payroll.payments.batch.generating')
                           : t('payroll.payments.batch.generate_pdf') }}
                       </button>
+                      <template v-if="canChangeBatch(batch)">
+                        <button
+                          type="button"
+                          class="whitespace-nowrap"
+                          :class="btnOutlineSm('neutral')"
+                          data-test="batch-change-date"
+                          @click="openBatchChange(batch, 'reschedule')"
+                        >
+                          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path :d="ICONS.calendar" />
+                          </svg>
+                          {{ t('payroll.payments.batch.change_date') }}
+                        </button>
+                        <button
+                          type="button"
+                          class="whitespace-nowrap"
+                          :class="btnOutlineSm('danger')"
+                          data-test="batch-discard"
+                          @click="openBatchChange(batch, 'discard')"
+                        >
+                          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path :d="ICONS.trash" />
+                          </svg>
+                          {{ t('payroll.payments.batch.discard') }}
+                        </button>
+                      </template>
+                      <span
+                        v-else-if="batch.settled_minor > 0"
+                        class="text-xs text-neutral-500"
+                        data-test="batch-settled-locked"
+                      >{{ t('payroll.payments.batch.settled_locked') }}</span>
                     </div>
                   </td>
                 </tr>
@@ -2250,7 +2408,12 @@ onMounted(load)
         </section>
 
         <section data-layout="batch-mobile" class="grid grid-cols-1 gap-3 md:hidden">
-          <article v-for="batch in batches" :key="batch.id" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
+          <article
+            v-for="batch in batches"
+            :key="batch.id"
+            class="rounded-xl border border-neutral-200 p-4 shadow-sm"
+            :class="batch.discarded ? 'bg-neutral-50 text-neutral-500' : 'bg-surface'"
+          >
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 class="font-semibold text-neutral-900">
@@ -2261,7 +2424,25 @@ onMounted(load)
                   {{ t('payroll.payments.batch.item_count', { count: batch.declared_item_count }) }}
                 </p>
                 <p
-                  v-if="batch.is_shifted && batch.statutory_due_on"
+                  v-if="batch.discarded"
+                  class="mt-1 w-fit rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700"
+                >
+                  {{ t('payroll.payments.batch.discarded_badge', { date: formatDate(batch.discarded_at) }) }}
+                </p>
+                <p
+                  v-else-if="batch.payment_date_mode === 'earlier' && batch.default_payment_date"
+                  class="mt-0.5 text-xs text-neutral-500"
+                >
+                  {{ t('payroll.payments.batch.mode_earlier', { date: formatDate(batch.default_payment_date) }) }}
+                </p>
+                <p
+                  v-else-if="batch.payment_date_mode === 'later' && batch.default_payment_date"
+                  class="mt-0.5 text-xs font-medium text-danger-700"
+                >
+                  {{ t('payroll.payments.batch.mode_later', { date: formatDate(batch.default_payment_date) }) }}
+                </p>
+                <p
+                  v-else-if="batch.is_shifted && batch.statutory_due_on"
                   class="mt-0.5 text-xs text-neutral-500"
                 >
                   {{ t('payroll.payments.batch.shifted_from_statutory', {
@@ -2292,7 +2473,7 @@ onMounted(load)
                     </p>
                   </div>
                   <button
-                    v-if="auth.canWrite('payroll.payments')"
+                    v-if="auth.canWrite('payroll.payments') && !batch.discarded"
                     type="button"
                     :class="btnOutlineSm('neutral')"
                     :disabled="downloadingExportId !== null"
@@ -2304,7 +2485,7 @@ onMounted(load)
                     {{ t('payroll.payments.batch.download') }}
                   </button>
                   <button
-                    v-if="auth.canWrite('payroll.payments') && isOutdatedExport(batch, file)"
+                    v-if="auth.canWrite('payroll.payments') && !batch.discarded && isOutdatedExport(batch, file)"
                     type="button"
                     class="cursor-pointer rounded-md border border-danger-200 px-1.5 py-1 text-danger-600 hover:bg-danger-50 disabled:cursor-default disabled:opacity-50"
                     :disabled="hidingExportId !== null"
@@ -2325,10 +2506,11 @@ onMounted(load)
                 : t('payroll.payments.batch.no_export') }}
             </p>
             <div
-              v-if="batch.export_format !== 'manual' && auth.canWrite('payroll.payments')"
+              v-if="auth.canWrite('payroll.payments') && !batch.discarded"
               class="mt-4 flex flex-col gap-2"
             >
               <button
+                v-if="batch.export_format !== 'manual'"
                 type="button"
                 class="cursor-pointer"
                 :class="btnFilled('primary')"
@@ -2345,6 +2527,7 @@ onMounted(load)
                   }) }}
               </button>
               <button
+                v-if="batch.export_format !== 'manual'"
                 type="button"
                 class="cursor-pointer"
                 :class="btnOutline('neutral')"
@@ -2358,9 +2541,43 @@ onMounted(load)
                   ? t('payroll.payments.batch.generating')
                   : t('payroll.payments.batch.generate_pdf') }}
               </button>
+              <template v-if="canChangeBatch(batch)">
+                <button
+                  type="button"
+                  :class="btnOutline('neutral')"
+                  @click="openBatchChange(batch, 'reschedule')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.calendar" />
+                  </svg>
+                  {{ t('payroll.payments.batch.change_date') }}
+                </button>
+                <button
+                  type="button"
+                  :class="btnOutline('danger')"
+                  @click="openBatchChange(batch, 'discard')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.trash" />
+                  </svg>
+                  {{ t('payroll.payments.batch.discard') }}
+                </button>
+              </template>
+              <p
+                v-else-if="batch.settled_minor > 0"
+                class="text-xs text-neutral-500"
+              >{{ t('payroll.payments.batch.settled_locked') }}</p>
             </div>
           </article>
         </section>
+        <PayrollPaymentBatchChangeDialog
+          v-if="batchChange"
+          :batch="batchChange.batch"
+          :mode="batchChange.mode"
+          @close="batchChange = null"
+          @discarded="onBatchDiscarded"
+          @rescheduled="onBatchRescheduled"
+        />
       </template>
     </template>
 

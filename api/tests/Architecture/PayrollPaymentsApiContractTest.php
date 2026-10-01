@@ -22,6 +22,8 @@ final class PayrollPaymentsApiContractTest extends TestCase
             "\$g->get('/payments/payer-options', [PayrollPaymentAction::class, 'listPayerOptions']);",
             "\$g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);",
             "\$g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);",
+            "\$g->post('/payments/batches/{batchId:[0-9]+}/discard', [PayrollPaymentAction::class, 'discardBatch']);",
+            "\$g->post('/payments/batches/{batchId:[0-9]+}/reschedule', [PayrollPaymentAction::class, 'rescheduleBatch']);",
             "\$g->get('/payments/reconciliation', [PayrollPaymentAction::class, 'listReconciliation']);",
             "\$g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);",
             "\$g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);",
@@ -70,6 +72,8 @@ final class PayrollPaymentsApiContractTest extends TestCase
             ['POST', '/api/payroll/payments/reconciliation/matches', AccessLevel::WRITE],
             ['POST', '/api/payroll/payments/reconciliation/reversals', AccessLevel::WRITE],
             ['POST', '/api/payroll/payments/batches/7/exports', AccessLevel::WRITE],
+            ['POST', '/api/payroll/payments/batches/7/discard', AccessLevel::WRITE],
+            ['POST', '/api/payroll/payments/batches/7/reschedule', AccessLevel::WRITE],
             ['POST', '/api/payroll/payments/exports/8/download-grants', AccessLevel::WRITE],
             ['POST', '/api/payroll/payments/exports/download', AccessLevel::WRITE],
         ] as [$method, $path, $access]) {

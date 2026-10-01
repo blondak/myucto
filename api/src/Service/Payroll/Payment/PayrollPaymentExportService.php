@@ -215,6 +215,11 @@ final class PayrollPaymentExportService
                         'Platební dávka nebyla nalezena.',
                     );
                 }
+                if ($this->exports->isBatchDiscarded($supplierId, $batchId)) {
+                    throw new \DomainException(
+                        'Dávka byla zahozena, nový soubor k ní nevznikne.',
+                    );
+                }
                 $format = $this->resolveFormat($batch, $exportFormat);
                 $latest = $this->exports->lockLatestRevision(
                     $supplierId,

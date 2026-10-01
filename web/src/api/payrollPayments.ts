@@ -30,6 +30,11 @@ export interface PayrollPaymentLiability {
     | null
   revision_kind: 'regular' | 'correction'
   due_on: string
+  /**
+   * Datum příkazu „podle splatnosti": u odvodů o rezervu na převod dřív než
+   * `due_on`, jinak rovno `due_on`. Výchozí datum úhrady nové dávky.
+   */
+  payment_on?: string
   currency_code: string
   amount_minor: number
   allocated_minor: number
@@ -118,9 +123,36 @@ export interface PayrollPaymentBatch {
   currency_code: string
   declared_total_minor: number
   declared_item_count: number
+  /** Datum příkazu „podle splatnosti" (poslední včasné). */
+  default_payment_date?: string | null
+  /** Jak se zvolené datum liší od „podle splatnosti". */
+  payment_date_mode?: 'statutory' | 'earlier' | 'later'
+  /** Mzdová období závazků v dávce (RRRR-MM). */
+  period_from?: string | null
+  period_to?: string | null
   settled_minor: number
   created_at: string
+  /** Zahozená dávka zůstává jen jako auditní stopa, nic se z ní nevyrábí. */
+  discarded?: boolean
+  discarded_at?: string | null
+  /** Opustila dávka aplikaci? Podle toho se před zahozením žádá potvrzení. */
+  handover_state?: PayrollPaymentBatchHandoverState
   exports: PayrollPaymentExport[]
+}
+
+export type PayrollPaymentBatchHandoverState = 'none' | 'downloaded' | 'submitted'
+
+export interface PayrollPaymentBatchDiscardResult {
+  batch_id: number
+  handover_state: PayrollPaymentBatchHandoverState
+  discarded: boolean
+  replayed: boolean
+}
+
+export interface PayrollPaymentBatchRescheduleResult {
+  discarded_batch_id: number
+  handover_state: PayrollPaymentBatchHandoverState
+  batch: PayrollPaymentBatchResult
 }
 
 export interface PayrollPaymentBatchList {
@@ -329,9 +361,32 @@ export const payrollPaymentsApi = {
     export_format: 'abo' | 'sepa' | 'manual'
     payer_reference: string
     items: Array<{ liability_id: number; amount_minor: number }>
+    /** Bez data platí „podle splatnosti" (dosavadní chování). */
+    payment_date?: string
+    /** Datum po splatnosti projde jen s výslovným potvrzením. */
+    accept_late_payment?: boolean
   }) =>
     api.post<PayrollPaymentBatchResult>(
       '/payroll/payments/batches',
+      payload,
+    ).then(response => response.data),
+  /**
+   * Zahodí dávku. Staženou nebo bance předanou jen s potvrzením, že ji
+   * uživatel v bankovnictví zrušil; dávku s doloženou úhradou nikdy.
+   */
+  discardBatch: (batchId: number, payload: { confirm_bank_cancellation: boolean }) =>
+    api.post<PayrollPaymentBatchDiscardResult>(
+      `/payroll/payments/batches/${batchId}/discard`,
+      payload,
+    ).then(response => response.data),
+  /** Nové datum úhrady = zahodit dávku a sestavit ze stejných závazků novou. */
+  rescheduleBatch: (batchId: number, payload: {
+    payment_date: string
+    accept_late_payment: boolean
+    confirm_bank_cancellation: boolean
+  }) =>
+    api.post<PayrollPaymentBatchRescheduleResult>(
+      `/payroll/payments/batches/${batchId}/reschedule`,
       payload,
     ).then(response => response.data),
   declareSettlement: (liabilityId: number, payload: { paid_on?: string; note?: string }) =>

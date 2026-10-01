@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardScope;
 use PDO;
 
 /**
@@ -96,6 +97,7 @@ final class PayrollRunPaymentSettlementService
                         FROM payroll_payment_allocations allocation
                        WHERE allocation.supplier_id = liability.supplier_id
                          AND allocation.liability_id = liability.id
+                         AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . '
                     ) AS allocated_minor,
                     (
                       SELECT COALESCE(SUM(payment_match.amount_minor), 0)
@@ -111,6 +113,7 @@ final class PayrollRunPaymentSettlementService
                          AND payment_item.id = allocation.item_id
                        WHERE allocation.supplier_id = liability.supplier_id
                          AND allocation.liability_id = liability.id
+                         AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . '
                     ) AS batch_count
                FROM payroll_payment_liabilities liability
                JOIN payroll_run_revisions liability_revision

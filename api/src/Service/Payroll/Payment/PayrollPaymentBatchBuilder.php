@@ -61,7 +61,12 @@ final class PayrollPaymentBatchBuilder
         string $payerReference,
         array $requests,
         ?int $actorUserId = null,
+        ?string $paymentDate = null,
+        bool $acceptLatePayment = false,
     ): array {
+        if ($paymentDate !== null) {
+            PayrollPaymentDatePolicy::assertDate($paymentDate);
+        }
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException(
                 'Firma platební dávky musí být kladné číslo.',
@@ -86,34 +91,60 @@ final class PayrollPaymentBatchBuilder
             );
         }
         $normalizedRequests = $this->normalizeRequests($requests);
-        $idempotencyMaterial = CanonicalJson::encode([
-            'schema_reference' => 'payroll-payment-batch-idempotency.v1',
-            'supplier_id' => $supplierId,
-            'export_format' => $exportFormat,
-            'payer_reference' => $payerReference,
-            'requests' => $normalizedRequests,
-        ]);
-        $idempotencyHash = hash(
-            'sha256',
-            $idempotencyMaterial,
-            true,
-        );
-        $idempotencyHex = bin2hex($idempotencyHash);
 
         return $this->batches->transaction(function () use (
             $supplierId,
             $exportFormat,
             $payerReference,
             $normalizedRequests,
-            $idempotencyHash,
-            $idempotencyHex,
             $actorUserId,
+            $paymentDate,
+            $acceptLatePayment,
         ): array {
             if (!$this->batches->lockSupplier($supplierId)) {
                 throw new \DomainException(
                     'Firma platební dávky nebyla nalezena.',
                 );
             }
+            $idempotencyMaterial = [
+                'schema_reference' => 'payroll-payment-batch-idempotency.v1',
+                'supplier_id' => $supplierId,
+                'export_format' => $exportFormat,
+                'payer_reference' => $payerReference,
+                'requests' => $normalizedRequests,
+            ];
+            /*
+             * Zvolené datum úhrady je součást požadavku: týž výběr k jinému
+             * datu je jiná dávka. Bez volby („podle splatnosti") klíč zůstává
+             * bajtově stejný jako dřív, takže se starší dávky dál přehrají.
+             */
+            if ($paymentDate !== null) {
+                $idempotencyMaterial['payment_date'] = $paymentDate;
+            }
+            /*
+             * Po zahození dávky se týž výběr musí dát sestavit znovu. Bez
+             * otisku zahozených dávek by se požadavek „přehrál" na tu
+             * zahozenou (unikátní klíč idempotence je na dávce napevno).
+             */
+            $discardedBatchIds = $this->batches
+                ->discardedBatchIdsForLiabilities(
+                    $supplierId,
+                    array_map(
+                        static fn (array $request): int =>
+                            $request['liability_id'],
+                        $normalizedRequests,
+                    ),
+                );
+            if ($discardedBatchIds !== []) {
+                $idempotencyMaterial['discarded_batch_ids'] =
+                    $discardedBatchIds;
+            }
+            $idempotencyHash = hash(
+                'sha256',
+                CanonicalJson::encode($idempotencyMaterial),
+                true,
+            );
+            $idempotencyHex = bin2hex($idempotencyHash);
             $existing = $this->batches->findByIdempotencyForUpdate(
                 $supplierId,
                 $idempotencyHash,
@@ -257,9 +288,15 @@ final class PayrollPaymentBatchBuilder
              * jen tehdy, když se datum splatnosti obou druhů shoduje).
              */
             $statutoryDueOn = $plannedDate;
-            if ($onlyLevies) {
-                $plannedDate = PayrollLevyPaymentDate::forDueOn($plannedDate);
-            }
+            $plannedDate = PayrollPaymentDatePolicy::resolve(
+                $paymentDate,
+                PayrollPaymentDatePolicy::defaultPlannedDate(
+                    $statutoryDueOn,
+                    $onlyLevies,
+                ),
+                PayrollPaymentDatePolicy::today($this->clock->now()),
+                $acceptLatePayment,
+            );
 
             $payerInstruction = $this->payerInstruction(
                 $supplierId,

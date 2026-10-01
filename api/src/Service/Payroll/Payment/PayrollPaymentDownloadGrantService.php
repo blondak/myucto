@@ -64,9 +64,18 @@ final class PayrollPaymentDownloadGrantService
             $ttlSeconds,
             $beforeCommit,
         ): array {
-            if ($this->exports->lockById($supplierId, $exportId) === null) {
+            $export = $this->exports->lockById($supplierId, $exportId);
+            if ($export === null) {
                 throw new \DomainException(
                     'Platební export pro download grant nebyl nalezen.',
+                );
+            }
+            // Soubor zahozené dávky už ven nesmí: nahraný do banky by znamenal
+            // druhou platbu vedle náhradní dávky. Řádek exportu zůstává jako
+            // auditní stopa, jen se nestahuje.
+            if ($this->exports->isBatchDiscarded($supplierId, (int) $export['batch_id'])) {
+                throw new \DomainException(
+                    'Dávka byla zahozena, její soubor už stáhnout nejde.',
                 );
             }
             $now = $this->grants->currentUtcDateTime();

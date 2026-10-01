@@ -21,6 +21,10 @@ use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationResult;
 use MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchHandoverException;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchSettledException;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentLateDateException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportService;
@@ -85,6 +89,8 @@ final class PayrollPaymentAction
         // obojí jen kolem platební knihy, nikdy místo ní.
         private readonly PayrollPaymentSettlementDeclarationService $settlementDeclarations,
         private readonly PayrollPaymentSettlementRecognizer $settlementRecognizer,
+        // Zahození dávky a náhradní dávka s jiným datem úhrady.
+        private readonly PayrollPaymentBatchDiscardService $batchDiscards,
     ) {}
 
     /** @param array<string,string> $args */
@@ -1005,10 +1011,16 @@ final class PayrollPaymentAction
         $format = $body['export_format'] ?? null;
         $payerReference = $body['payer_reference'] ?? null;
         $rawItems = $body['items'] ?? null;
+        // Volitelné datum úhrady. Bez něj (null) platí dosavadní „podle
+        // splatnosti"; pozdější datum než splatnost projde jen s potvrzením.
+        $paymentDate = $body['payment_date'] ?? null;
+        $acceptLatePayment = $body['accept_late_payment'] ?? false;
         if (!is_string($format)
             || !is_string($payerReference)
             || !is_array($rawItems)
             || !array_is_list($rawItems)
+            || ($paymentDate !== null && !is_string($paymentDate))
+            || !is_bool($acceptLatePayment)
         ) {
             return Json::error(
                 $response,
@@ -1055,6 +1067,8 @@ final class PayrollPaymentAction
                 $items,
                 $userId,
                 $request,
+                $paymentDate,
+                $acceptLatePayment,
             ): array {
                 $result = $this->batchBuilder->build(
                     $supplierId,
@@ -1062,7 +1076,18 @@ final class PayrollPaymentAction
                     trim($payerReference),
                     $items,
                     $userId,
+                    $paymentDate === null ? null : trim($paymentDate),
+                    $acceptLatePayment,
                 );
+                $payload = [
+                    'export_format' => $result['export_format'],
+                    'item_count' => $result['declared_item_count'],
+                    'total_minor' => $result['declared_total_minor'],
+                ];
+                if ($paymentDate !== null) {
+                    $payload['payment_date'] = $result['planned_payment_date'];
+                    $payload['late_payment_confirmed'] = $acceptLatePayment;
+                }
                 $this->logPaymentActivity(
                     $request,
                     $result['created']
@@ -1070,17 +1095,15 @@ final class PayrollPaymentAction
                         : 'payroll.payment_batch_replayed',
                     'payroll_payment_batch',
                     $result['batch_id'],
-                    [
-                        'export_format' => $result['export_format'],
-                        'item_count' => $result['declared_item_count'],
-                        'total_minor' => $result['declared_total_minor'],
-                    ],
+                    $payload,
                     $supplierId,
                     $userId,
                 );
 
                 return $result;
             });
+        } catch (PayrollPaymentLateDateException $exception) {
+            return $this->lateDateError($response, $exception);
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
@@ -1098,6 +1121,228 @@ final class PayrollPaymentAction
         }
 
         return Json::ok($response, $result, 201);
+    }
+
+    /**
+     * Zahození dávky. Stažená nebo bance předaná dávka vyžaduje potvrzení,
+     * že ji uživatel v bankovnictví zrušil (`confirm_bank_cancellation`).
+     *
+     * @param array{batchId:string} $args
+     */
+    public function discardBatch(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $body = $request->getParsedBody();
+        $confirm = is_array($body) && !array_is_list($body)
+            ? ($body['confirm_bank_cancellation'] ?? false)
+            : false;
+        $batchId = (int) $args['batchId'];
+        $userId = $this->userId($request);
+        if (!is_bool($confirm) || $batchId <= 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Zahození vyžaduje dávku a případné potvrzení zrušení v bance.',
+                422,
+            );
+        }
+        if ($userId === null) {
+            return Json::sessionRequired($response, 'Chybí přihlášený uživatel.');
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->transaction(function () use (
+                $supplierId,
+                $batchId,
+                $confirm,
+                $userId,
+                $request,
+            ): array {
+                $result = $this->batchDiscards->discard(
+                    $supplierId,
+                    $batchId,
+                    $confirm,
+                    $userId,
+                );
+                if ($result['discarded']) {
+                    $this->logPaymentActivity(
+                        $request,
+                        'payroll.payment_batch_discarded',
+                        'payroll_payment_batch',
+                        $batchId,
+                        [
+                            'handover_state' => $result['handover_state'],
+                            'bank_cancellation_confirmed_by_user' =>
+                                $result['handover_state'] !== 'none',
+                        ],
+                        $supplierId,
+                        $userId,
+                    );
+                }
+
+                return $result;
+            });
+        } catch (\Throwable $exception) {
+            return $this->batchChangeError($response, $exception);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Nové datum úhrady dávky = zahodit ji a sestavit ze stejných závazků
+     * náhradní dávku. Stažená nebo předaná dávka vyžaduje stejné potvrzení
+     * jako zahození.
+     *
+     * @param array{batchId:string} $args
+     */
+    public function rescheduleBatch(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $body = $request->getParsedBody();
+        $body = is_array($body) && !array_is_list($body) ? $body : [];
+        $paymentDate = $body['payment_date'] ?? null;
+        $acceptLate = $body['accept_late_payment'] ?? false;
+        $confirm = $body['confirm_bank_cancellation'] ?? false;
+        $batchId = (int) $args['batchId'];
+        $userId = $this->userId($request);
+        if (!is_string($paymentDate)
+            || !is_bool($acceptLate)
+            || !is_bool($confirm)
+            || $batchId <= 0
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Změna data vyžaduje dávku a nové datum úhrady.',
+                422,
+            );
+        }
+        if ($userId === null) {
+            return Json::sessionRequired($response, 'Chybí přihlášený uživatel.');
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->transaction(function () use (
+                $supplierId,
+                $batchId,
+                $paymentDate,
+                $acceptLate,
+                $confirm,
+                $userId,
+                $request,
+            ): array {
+                $result = $this->batchDiscards->reschedule(
+                    $supplierId,
+                    $batchId,
+                    trim($paymentDate),
+                    $acceptLate,
+                    $confirm,
+                    $userId,
+                );
+                $this->logPaymentActivity(
+                    $request,
+                    'payroll.payment_batch_rescheduled',
+                    'payroll_payment_batch',
+                    $batchId,
+                    [
+                        'handover_state' => $result['handover_state'],
+                        'bank_cancellation_confirmed_by_user' =>
+                            $result['handover_state'] !== 'none',
+                        'replacement_batch_id' => $result['batch']['batch_id'],
+                        'payment_date' =>
+                            $result['batch']['planned_payment_date'],
+                        'late_payment_confirmed' => $acceptLate,
+                    ],
+                    $supplierId,
+                    $userId,
+                );
+
+                return $result;
+            });
+        } catch (\Throwable $exception) {
+            return $this->batchChangeError($response, $exception);
+        }
+
+        return Json::ok($response, $result, 201);
+    }
+
+    private function batchChangeError(
+        Response $response,
+        \Throwable $exception,
+    ): Response {
+        return match (true) {
+            $exception instanceof PayrollPaymentLateDateException =>
+                $this->lateDateError($response, $exception),
+            $exception instanceof PayrollPaymentBatchHandoverException =>
+                Json::error(
+                    $response,
+                    'payment_batch_handover_unconfirmed',
+                    $exception->getMessage(),
+                    409,
+                    ['handover_state' => $exception->handoverState],
+                ),
+            $exception instanceof PayrollPaymentBatchSettledException =>
+                Json::error(
+                    $response,
+                    'payment_batch_settled',
+                    $exception->getMessage(),
+                    409,
+                ),
+            $exception instanceof \InvalidArgumentException =>
+                Json::error(
+                    $response,
+                    'validation_failed',
+                    $exception->getMessage(),
+                    422,
+                ),
+            $exception instanceof \DomainException =>
+                Json::error(
+                    $response,
+                    'payment_batch_blocked',
+                    $exception->getMessage(),
+                    409,
+                ),
+            default => throw $exception,
+        };
+    }
+
+    private function lateDateError(
+        Response $response,
+        PayrollPaymentLateDateException $exception,
+    ): Response {
+        return Json::error(
+            $response,
+            'payment_date_late_unconfirmed',
+            $exception->getMessage(),
+            409,
+            [
+                'requested_date' => $exception->requestedDate,
+                'latest_on_time_date' => $exception->latestOnTimeDate,
+            ],
+        );
     }
 
     /** @param array{batchId:string} $args */

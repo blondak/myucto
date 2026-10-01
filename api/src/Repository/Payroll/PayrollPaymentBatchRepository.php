@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardScope;
 use PDO;
 
 final class PayrollPaymentBatchRepository
@@ -154,6 +155,7 @@ final class PayrollPaymentBatchRepository
                         FROM payroll_payment_allocations allocation
                        WHERE allocation.supplier_id = liability.supplier_id
                          AND allocation.liability_id = liability.id
+                         AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . '
                     ) AS allocated_minor
                FROM payroll_payment_liabilities liability
               WHERE liability.supplier_id = ?
@@ -576,6 +578,44 @@ final class PayrollPaymentBatchRepository
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * Zahozené dávky, které kdy alokovaly některý z vybraných závazků.
+     *
+     * Vstupuje do idempotentního klíče nové dávky: po zahození se týž výběr
+     * musí dát sestavit znovu, a ne se „přehrát" na zahozenou dávku.
+     *
+     * @param non-empty-list<int> $liabilityIds
+     * @return list<int>
+     */
+    public function discardedBatchIdsForLiabilities(
+        int $supplierId,
+        array $liabilityIds,
+    ): array {
+        $placeholders = implode(
+            ',',
+            array_fill(0, count($liabilityIds), '?'),
+        );
+        $statement = $this->db->pdo()->prepare(
+            'SELECT DISTINCT discard.batch_id
+               FROM payroll_payment_allocations allocation
+               JOIN payroll_payment_items item
+                 ON item.supplier_id = allocation.supplier_id
+                AND item.id = allocation.item_id
+               JOIN payroll_payment_batch_discards discard
+                 ON discard.supplier_id = item.supplier_id
+                AND discard.batch_id = item.batch_id
+              WHERE allocation.supplier_id = ?
+                AND allocation.liability_id IN (' . $placeholders . ')
+              ORDER BY discard.batch_id',
+        );
+        $statement->execute([$supplierId, ...$liabilityIds]);
+
+        return array_map(
+            static fn (mixed $id): int => (int) $id,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
     }
 
     public function insertAllocation(

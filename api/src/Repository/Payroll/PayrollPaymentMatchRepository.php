@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardScope;
 use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use PDO;
 
@@ -86,6 +87,9 @@ final class PayrollPaymentMatchRepository
                  ON liability.supplier_id = allocation.supplier_id
                 AND liability.id = allocation.liability_id
               WHERE allocation.supplier_id = ? AND allocation.id = ?
+                -- Alokace zahozené dávky už nic nedokládá: úhrada patří
+                -- náhradní dávce, ne té zahozené.
+                AND ' . PayrollPaymentBatchDiscardScope::activeBatch('batch') . '
               FOR UPDATE',
         );
         $statement->execute([$supplierId, $allocationId]);

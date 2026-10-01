@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyPaymentDate;
 use PDO;
 
 final class PayrollPaymentBatchQueryService
@@ -108,8 +109,15 @@ final class PayrollPaymentBatchQueryService
      *   currency_code:string,
      *   declared_total_minor:int,
      *   declared_item_count:int,
+     *   default_payment_date:?string,
+     *   payment_date_mode:string,
+     *   period_from:?string,
+     *   period_to:?string,
      *   settled_minor:int,
      *   created_at:string,
+     *   discarded:bool,
+     *   discarded_at:?string,
+     *   handover_state:string,
      *   exports:list<array{
      *     id:int,
      *     export_format:string,
@@ -163,8 +171,65 @@ final class PayrollPaymentBatchQueryService
                          AND liability.id = allocation.liability_id
                        WHERE payment_item.supplier_id = batch.supplier_id
                          AND payment_item.batch_id = batch.id
-                    ) AS statutory_due_on
+                    ) AS statutory_due_on,
+                    (
+                      SELECT GROUP_CONCAT(DISTINCT liability.liability_kind)
+                        FROM payroll_payment_items payment_item
+                        JOIN payroll_payment_allocations allocation
+                          ON allocation.supplier_id =
+                             payment_item.supplier_id
+                         AND allocation.item_id = payment_item.id
+                        JOIN payroll_payment_liabilities liability
+                          ON liability.supplier_id = allocation.supplier_id
+                         AND liability.id = allocation.liability_id
+                       WHERE payment_item.supplier_id = batch.supplier_id
+                         AND payment_item.batch_id = batch.id
+                    ) AS liability_kinds,
+                    (
+                      SELECT CONCAT(
+                               DATE_FORMAT(MIN(run.period_start), "%Y-%m"),
+                               "|",
+                               DATE_FORMAT(MAX(run.period_start), "%Y-%m")
+                             )
+                        FROM payroll_payment_items payment_item
+                        JOIN payroll_payment_allocations allocation
+                          ON allocation.supplier_id =
+                             payment_item.supplier_id
+                         AND allocation.item_id = payment_item.id
+                        JOIN payroll_payment_liabilities liability
+                          ON liability.supplier_id = allocation.supplier_id
+                         AND liability.id = allocation.liability_id
+                        JOIN payroll_run_revisions revision
+                          ON revision.supplier_id = liability.supplier_id
+                         AND revision.id = liability.revision_id
+                        JOIN payroll_runs run
+                          ON run.supplier_id = revision.supplier_id
+                         AND run.id = revision.run_id
+                       WHERE payment_item.supplier_id = batch.supplier_id
+                         AND payment_item.batch_id = batch.id
+                    ) AS period_range,
+                    discard.handover_state AS discard_handover_state,
+                    discard.discarded_at,
+                    EXISTS (
+                      SELECT 1 FROM bank_payment_order_submissions submission
+                       WHERE submission.supplier_id = batch.supplier_id
+                         AND submission.payroll_batch_id = batch.id
+                    ) AS is_submitted,
+                    EXISTS (
+                      SELECT 1
+                        FROM payroll_payment_exports downloaded_export
+                        JOIN payroll_payment_export_download_grants grant_row
+                          ON grant_row.supplier_id =
+                             downloaded_export.supplier_id
+                         AND grant_row.export_id = downloaded_export.id
+                       WHERE downloaded_export.supplier_id = batch.supplier_id
+                         AND downloaded_export.batch_id = batch.id
+                         AND grant_row.used_at IS NOT NULL
+                    ) AS is_downloaded
               FROM payroll_payment_batches batch
+              LEFT JOIN payroll_payment_batch_discards discard
+                ON discard.supplier_id = batch.supplier_id
+               AND discard.batch_id = batch.id
               WHERE batch.supplier_id = ?
                 AND EXISTS (
                   SELECT 1
@@ -188,7 +253,8 @@ final class PayrollPaymentBatchQueryService
                      AND run.period_start >= ?
                      AND run.period_start < ?
                 )
-              ORDER BY batch.planned_payment_date DESC, batch.id DESC',
+              ORDER BY discard.batch_id IS NOT NULL,
+                       batch.planned_payment_date DESC, batch.id DESC',
         );
         $statement->execute([$supplierId, $from, $to]);
         $batches = [];
@@ -205,6 +271,18 @@ final class PayrollPaymentBatchQueryService
             }
             $batchIds[] = $id;
             $statutoryDueOn = self::nullableText($row, 'statutory_due_on');
+            $plannedPaymentDate = self::text($row, 'planned_payment_date');
+            $defaultPaymentDate = $this->defaultPaymentDate(
+                $statutoryDueOn,
+                self::nullableText($row, 'liability_kinds'),
+            );
+            $discardHandover = self::nullableText(
+                $row,
+                'discard_handover_state',
+            );
+            [$periodFrom, $periodTo] = self::periodBounds(
+                self::nullableText($row, 'period_range'),
+            );
             $batches[$id] = [
                 'id' => $id,
                 'batch_reference' => self::text(
@@ -237,8 +315,35 @@ final class PayrollPaymentBatchQueryService
                     $row,
                     'declared_item_count',
                 ),
+                /*
+                 * Datum „podle splatnosti" a jak se od něj zvolené datum liší.
+                 * `earlier` = účetní platí dřív (smí vždy), `later` = vědomě
+                 * po splatnosti. UI podle toho vysvětluje datum příkazu.
+                 */
+                'default_payment_date' => $defaultPaymentDate,
+                'payment_date_mode' => match (true) {
+                    $defaultPaymentDate === null,
+                    $plannedPaymentDate === $defaultPaymentDate => 'statutory',
+                    $plannedPaymentDate < $defaultPaymentDate => 'earlier',
+                    default => 'later',
+                },
+                'period_from' => $periodFrom,
+                'period_to' => $periodTo,
                 'settled_minor' => $settled,
                 'created_at' => self::text($row, 'created_at'),
+                /*
+                 * Zahozená dávka zůstává v seznamu jako auditní stopa, ale už
+                 * nedrží závazky a nic se z ní nevyrábí. `handover_state` říká,
+                 * jestli dávka opustila aplikaci - podle toho UI před zahozením
+                 * nebo změnou data žádá potvrzení zrušení v bankovnictví.
+                 */
+                'discarded' => $discardHandover !== null,
+                'discarded_at' => self::nullableText($row, 'discarded_at'),
+                'handover_state' => $discardHandover ?? match (true) {
+                    (bool) ($row['is_submitted'] ?? false) => 'submitted',
+                    (bool) ($row['is_downloaded'] ?? false) => 'downloaded',
+                    default => 'none',
+                },
                 'exports' => [],
             ];
         }
@@ -294,6 +399,44 @@ final class PayrollPaymentBatchQueryService
         }
 
         return array_values($batches);
+    }
+
+    /**
+     * Datum „podle splatnosti" - totéž pravidlo, podle kterého ho počítá
+     * builder ({@see PayrollPaymentDatePolicy::defaultPlannedDate()}).
+     */
+    private function defaultPaymentDate(
+        ?string $statutoryDueOn,
+        ?string $liabilityKinds,
+    ): ?string {
+        if ($statutoryDueOn === null || $liabilityKinds === null) {
+            return null;
+        }
+        $onlyLevies = true;
+        foreach (explode(',', $liabilityKinds) as $kind) {
+            $onlyLevies = $onlyLevies
+                && PayrollLevyPaymentDate::isLevyLiabilityKind($kind);
+        }
+        try {
+            return PayrollPaymentDatePolicy::defaultPlannedDate(
+                $statutoryDueOn,
+                $onlyLevies,
+            );
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /** @return array{?string,?string} */
+    private static function periodBounds(?string $range): array
+    {
+        if ($range === null
+            || preg_match('/^(\d{4}-\d{2})\|(\d{4}-\d{2})$/D', $range, $match) !== 1
+        ) {
+            return [null, null];
+        }
+
+        return [$match[1], $match[2]];
     }
 
     /** @return array{string,string} */

@@ -12,7 +12,7 @@ Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, te
 
 1. U zaúčtovaného běhu zvolte **Připravit platby**. Aplikace otevře **Mzdy → Mzdové příkazy a úhrady** ve správném období a nabídne závazky daného běhu.
 2. Zkontrolujte příjemce, účet, částku, splatnost a platební symboly každého závazku.
-3. Na kartě **Co zaplatit** vyberte kompatibilní závazky a vytvořte mzdový příkaz ABO pro CZK, SEPA pro EUR, nebo evidenci hotovostní výplaty.
+3. Na kartě **Co zaplatit** vyberte kompatibilní závazky, zvolte **Datum úhrady** (podle splatnosti, dnes, nebo vlastní datum) a vytvořte mzdový příkaz ABO pro CZK, SEPA pro EUR, nebo evidenci hotovostní výplaty.
 4. Platby autorizujte v bance podle interních pravidel firmy.
 5. Po provedení spárujte úhrady a vyřešte rozdíly nebo vratky.
 
@@ -181,3 +181,42 @@ plánovaného data výplaty mzdového běhu ani ze samotné existence exportníh
 souboru. Dokud nejsou všechny požadované částky průkazně spárovány a případné
 vratky vyřešeny, aplikace závazek ani daňové potvrzení neoznačí za skutečně
 uhrazené.
+
+## 82.10 Datum úhrady, změna data a zahození příkazu
+
+Při vytváření mzdového příkazu zvolíte **Datum úhrady**:
+
+- **Podle splatnosti** je výchozí volba. Čistá mzda jde k datu výplaty, dávka
+  složená jen z odvodů o jeden pracovní den dřív než zákonný termín (viz 82.9).
+- **Dnes** pošle příkaz s dnešním datem. Hodí se, když chcete zaplatit hned
+  po uzávěrce, ne až ke splatnosti.
+- **Vlastní datum** dovolí jakýkoli den od dneška. Minulé datum aplikace
+  nepřijme, banka by příkaz se zpětným datem odmítla.
+
+Zaplatit dřív můžete vždy. Datum **po splatnosti** aplikace zvýrazní a příkaz
+vytvoří jen po zaškrtnutí potvrzení, protože u pojistného hrozí penále a u daně
+a mzdy úrok z prodlení. Zvolená volba platí pro jeden vytvářený příkaz a zůstane
+nastavená i pro další; když tedy zvolíte **Dnes**, vytvoříte postupně příkaz na
+mzdy i příkazy na jednotlivé odvody se stejným datem. Potvrzení pozdní platby
+se zadává u každého příkazu znovu.
+
+Zvolené datum se uloží do příkazu a použije se v souboru pro banku (KPC, SEPA)
+i v dokladu PDF. Zákonný termín zůstává uložený u závazků, takže seznam příkazů
+ukazuje, zda je příkaz dřív než splatnost, nebo po ní. Rozpoznání úhrad
+z výpisu hledá platbu k datu příkazu, takže dřívější platba se přiřadí ke svému
+měsíci, ne k předchozímu se stejnou částkou.
+
+**Změnit datum** u existujícího příkazu na kartě **Mzdové příkazy** příkaz
+zahodí a ze stejných závazků vytvoří nový s novým datem, včetně nového souboru
+pro banku. **Zahodit** vrátí závazky do karty **Co zaplatit**, kde z nich
+vytvoříte nový příkaz.
+
+Pokud jste soubor příkazu už stáhli nebo ho aplikace předala bance, chce
+zahození i změna data potvrzení, že příkaz v bankovnictví není autorizovaný,
+nebo jste ho tam zrušili (například u CREDITAS v nabídce Transakce, Zadané,
+Hromadné). Bez zrušení v bance hrozí dvojí platba. Příkaz, ke kterému je
+doložená úhrada (spárovaná platba z výpisu), zahodit ani přeplánovat nejde.
+
+Zahozený příkaz zůstává v seznamu jako záznam s označením **Zahozeno** a datem.
+Jeho soubory zůstávají v evidenci, ale už je nejde stáhnout, předat bance ani
+k němu spárovat úhradu. Zahození i změna data se zapisují do auditní stopy.

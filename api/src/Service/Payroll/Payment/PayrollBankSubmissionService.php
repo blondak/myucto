@@ -97,7 +97,8 @@ final class PayrollBankSubmissionService
             || $date < new \DateTimeImmutable('today', new \DateTimeZone('Europe/Prague'))) {
             throw new BankConnectorOperationException('payment_order_date_in_past');
         }
-        if ($this->sources->hasSettlement($supplierId, (int) $batch['id'])) {
+        if (!empty($batch['discarded'])
+            || $this->sources->hasSettlement($supplierId, (int) $batch['id'])) {
             throw new BankConnectorOperationException('payment_order_no_longer_payable');
         }
     }

@@ -6,17 +6,27 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
+use MyInvoice\Repository\Payroll\PayrollPaymentBatchDiscardRepository;
+use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentDownloadGrantRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentExportRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\AboPaymentOrderWriter;
+use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payment\SepaPaymentOrderWriter;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchHandoverException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentExportStorage;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Pdf\PaymentOrderPdfRenderer;
+use Symfony\Component\Clock\MockClock;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -124,6 +134,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
             'payroll_payment_export_idempotency_keys',
             'payroll_payment_exports',
             'payroll_payment_items',
+            'payroll_payment_batch_discards',
             'payroll_payment_batches',
             'payroll_payment_liabilities',
         ];
@@ -154,7 +165,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
             $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
         }
 
-        foreach (['activity_log', 'api_request_log'] as $table) {
+        foreach (['activity_log', 'api_request_log', 'payroll_module_state'] as $table) {
             $statement = $pdo->prepare(
                 "DELETE FROM {$table}"
                 . " WHERE supplier_id IN ({$placeholders})",
@@ -710,6 +721,76 @@ final class PayrollPaymentExportServiceTest extends TestCase
         } finally {
             $pdo->rollBack();
         }
+    }
+
+    /**
+     * Stažená dávka jde zahodit jen s potvrzením, že ji uživatel v bance
+     * zrušil. Po zahození už z ní nevznikne další soubor ani stažení - řádky
+     * exportu ale zůstávají jako auditní stopa.
+     */
+    public function testDownloadedBatchDiscardNeedsBankCancellationAndStopsFiles(): void
+    {
+        $batchId = $this->insertBatch('abo');
+        $export = $this->service->export(
+            $this->supplierId,
+            $batchId,
+            'discard-source',
+            $this->userId,
+        );
+        $grants = new PayrollPaymentDownloadGrantService(
+            new PayrollPaymentDownloadGrantRepository($this->db),
+            $this->exports,
+            $this->storage,
+        );
+        $grant = $grants->issue($this->supplierId, $export['export_id'], $this->userId, 60);
+        $grants->consume($this->supplierId, $this->userId, $grant['token']);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", NULL, NOW())',
+        )->execute([$this->supplierId]);
+        $gate = new PayrollProductionGate(new PayrollModuleStateRepository($this->db));
+        $discards = new PayrollPaymentBatchDiscardService(
+            new PayrollPaymentBatchRepository($this->db),
+            new PayrollPaymentBatchDiscardRepository($this->db),
+            new PayrollPaymentBatchBuilder(
+                new PayrollPaymentBatchRepository($this->db),
+                Bootstrap::buildContainer()->get(PayrollSensitiveData::class),
+                $this->encryption,
+                new IbanValidator(),
+                new CzechBankAccountValidator(),
+                new MockClock('2026-08-04 10:00:00 Europe/Prague'),
+                $gate,
+            ),
+            $gate,
+        );
+
+        try {
+            $discards->discard($this->supplierId, $batchId, false, $this->userId);
+            self::fail('Staženou dávku nesmí jít zahodit bez potvrzení.');
+        } catch (PayrollPaymentBatchHandoverException $exception) {
+            self::assertSame('downloaded', $exception->handoverState);
+        }
+        $result = $discards->discard($this->supplierId, $batchId, true, $this->userId);
+        self::assertTrue($result['discarded']);
+        self::assertSame('downloaded', $result['handover_state']);
+
+        try {
+            $grants->issue($this->supplierId, $export['export_id'], $this->userId, 60);
+            self::fail('Soubor zahozené dávky se nesmí znovu stáhnout.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('zahozena', $exception->getMessage());
+        }
+        try {
+            $this->service->export($this->supplierId, $batchId, 'after-discard', $this->userId, null, 'pdf');
+            self::fail('Ze zahozené dávky nesmí vzniknout nový soubor.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('zahozena', $exception->getMessage());
+        }
+        self::assertSame(
+            1,
+            $this->countRows('payroll_payment_exports', 'supplier_id = ?', [$this->supplierId]),
+        );
     }
 
     public function testStorageRejectsSupplierDirectoryEscapeWhenSupported(): void

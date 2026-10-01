@@ -472,6 +472,20 @@ final class PayrollPaymentExportRepository
             );
     }
 
+    /** Je dávka zahozená (migrace 1952)? Zahozená se už neexportuje ani nestahuje. */
+    public function isBatchDiscarded(int $supplierId, int $batchId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT EXISTS (
+               SELECT 1 FROM payroll_payment_batch_discards
+                WHERE supplier_id = ? AND batch_id = ?
+             )',
+        );
+        $statement->execute([$supplierId, $batchId]);
+
+        return (bool) $statement->fetchColumn();
+    }
+
     public function countStorageReferences(
         int $supplierId,
         string $storageKey,

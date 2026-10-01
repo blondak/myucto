@@ -7,8 +7,9 @@ import type { PayrollPaymentBatch } from '@/api/payrollPayments'
 import { payrollBankSubmissionsApi, type PayrollBankSubmissionState } from '@/api/payrollBankSubmissions'
 import { bankConnectionErrorMessage } from '@/utils/bankConnectionError'
 import { apiErrorCode } from '@/api/errors'
-import { formatDate, formatDateTime, formatMoneyMinor } from '@/composables/useFormat'
+import { formatDateTime, formatMoneyMinor } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { batchDescription } from '@/components/payroll/payrollPaymentDate'
 
 const props = defineProps<{ batches: PayrollPaymentBatch[]; canWrite: boolean }>()
 const { t } = useI18n()
@@ -16,7 +17,8 @@ const auth = useAuthStore()
 const { blockDemoMutation } = useDemoMode()
 const canRead = computed(() => auth.canRead('payroll.payments') && auth.canRead('settings.bank_accounts'))
 const maySubmit = computed(() => props.canWrite && auth.canWrite('payroll.payments') && auth.canWrite('settings.bank_accounts'))
-const eligible = computed(() => props.batches.filter(batch => batch.channel === 'bank' && batch.currency_code === 'CZK' && batch.export_format === 'abo'))
+// Zahozená dávka už do banky nesmí: vedle náhradní dávky by znamenala druhou platbu.
+const eligible = computed(() => props.batches.filter(batch => batch.channel === 'bank' && batch.currency_code === 'CZK' && batch.export_format === 'abo' && !batch.discarded))
 const selectedId = ref<number | null>(null)
 const selectedConnectionId = ref<number | null>(null)
 const batch = computed(() => eligible.value.find(item => item.id === selectedId.value))
@@ -66,7 +68,7 @@ async function submit() {
   if (blocked.value || loading.value || submitting.value || blockDemoMutation()) return
   const current = batch.value
   const target = connection.value
-  if (!current || !target || !window.confirm(t('payroll_bank.confirm', { reference: current.batch_reference, amount: formatMoneyMinor(current.declared_total_minor, current.currency_code), count: current.declared_item_count, provider: target.label }))) return
+  if (!current || !target || !window.confirm(t('payroll_bank.confirm', { reference: batchDescription(current, t), amount: formatMoneyMinor(current.declared_total_minor, current.currency_code), count: current.declared_item_count, provider: target.label }))) return
   submitting.value = true
   error.value = ''
   uncertain.value.add(current.id)
@@ -90,7 +92,7 @@ async function submit() {
     <label class="block text-sm">{{ t('payroll_bank.batch') }}
       <select v-model="selectedId" :disabled="submitting" class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3" data-test="batch">
         <option :value="null">{{ t('payroll_bank.choose') }}</option>
-        <option v-for="item in eligible" :key="item.id" :value="item.id">{{ item.batch_reference }} · {{ formatDate(item.planned_payment_date) }} · {{ formatMoneyMinor(item.declared_total_minor, item.currency_code) }}</option>
+        <option v-for="item in eligible" :key="item.id" :value="item.id">{{ batchDescription(item, t) }}</option>
       </select>
     </label>
     <label v-if="state && state.connections.length" class="block text-sm">{{ t('bank_connection.payment_connection') }}

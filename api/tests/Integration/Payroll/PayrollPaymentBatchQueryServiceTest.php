@@ -142,6 +142,12 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         self::assertSame($batchId, $batches[0]['id']);
         self::assertSame(123_456, $batches[0]['declared_total_minor']);
         self::assertSame(0, $batches[0]['settled_minor']);
+        self::assertSame('2026-08', $batches[0]['period_from']);
+        self::assertSame('2026-08', $batches[0]['period_to']);
+        self::assertSame('2026-09-15', $batches[0]['default_payment_date']);
+        self::assertSame('statutory', $batches[0]['payment_date_mode']);
+        self::assertFalse($batches[0]['discarded']);
+        self::assertSame('none', $batches[0]['handover_state']);
         self::assertCount(1, $batches[0]['exports']);
         self::assertSame(
             'mzdy-platby-2026-09-15.kpc',
@@ -151,6 +157,24 @@ final class PayrollPaymentBatchQueryServiceTest extends TestCase
         self::assertStringNotContainsString('snapshot_ciphertext', $encoded);
         self::assertStringNotContainsString('instruction_ciphertext', $encoded);
         self::assertStringNotContainsString('payer_reference', $encoded);
+    }
+
+    /** Zahozená dávka zůstává v seznamu jako auditní stopa i se stavem předání. */
+    public function testDiscardedBatchStaysListedWithHandoverState(): void
+    {
+        $discarded = $this->insertBatch($this->supplierId, '2026-08-01', '2026-09-20');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_batch_discards
+                (supplier_id, batch_id, handover_state, bank_cancellation_confirmed)
+             VALUES (?, ?, "submitted", 1)',
+        )->execute([$this->supplierId, $discarded]);
+
+        $batches = $this->queries->batchesForPeriod($this->supplierId, '2026-08');
+
+        self::assertSame([$discarded], array_column($batches, 'id'));
+        self::assertTrue($batches[0]['discarded']);
+        self::assertSame('submitted', $batches[0]['handover_state']);
+        self::assertNotNull($batches[0]['discarded_at']);
     }
 
     private function insertCurrency(

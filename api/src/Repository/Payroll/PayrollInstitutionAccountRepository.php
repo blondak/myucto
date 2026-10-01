@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardScope;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -648,7 +649,8 @@ final class PayrollInstitutionAccountRepository
                     SELECT 1
                       FROM payroll_payment_allocations allocation
                      WHERE allocation.supplier_id = liability.supplier_id
-                       AND allocation.liability_id = liability.id)'
+                       AND allocation.liability_id = liability.id
+                       AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . ')'
         );
         $statement->execute([$supplierId, '%:account:' . $id]);
         $pending = (int) $statement->fetchColumn();

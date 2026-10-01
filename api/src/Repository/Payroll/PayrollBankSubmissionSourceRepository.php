@@ -15,7 +15,11 @@ final class PayrollBankSubmissionSourceRepository
     {
         $query = $this->db->pdo()->prepare('SELECT id, batch_reference, channel, direction, export_format,
             planned_payment_date, currency_code, declared_total_minor, declared_item_count,
-            snapshot_ciphertext, snapshot_hash FROM payroll_payment_batches WHERE supplier_id = ? AND id = ?');
+            snapshot_ciphertext, snapshot_hash,
+            EXISTS (SELECT 1 FROM payroll_payment_batch_discards d
+                     WHERE d.supplier_id = payroll_payment_batches.supplier_id
+                       AND d.batch_id = payroll_payment_batches.id) AS discarded
+            FROM payroll_payment_batches WHERE supplier_id = ? AND id = ?');
         $query->execute([$supplierId, $batchId]);
         $row = $query->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $row;

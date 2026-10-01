@@ -342,6 +342,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/payments/liabilities/[0-9]+/settlement-signal$#', 'payroll.payments', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/payments/liabilities/[0-9]+/settlement-signal$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/payments/batches/[0-9]+/(discard|reschedule)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/[0-9]+/download-grants$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/download$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/revisions/[0-9]+/payments/(?:liabilities|net-wage-liabilities)$#', 'payroll.payments', AccessLevel::WRITE],

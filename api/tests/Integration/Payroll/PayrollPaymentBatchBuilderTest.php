@@ -6,11 +6,15 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
+use MyInvoice\Repository\Payroll\PayrollPaymentBatchDiscardRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentLateDateException;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -592,6 +596,192 @@ final class PayrollPaymentBatchBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Zaplatit dřív smí účetní vždy. Zvolené datum se propíše do snapshotu
+     * i do každé instrukce (z nich vzniká ABO/SEPA/PDF), zákonný termín
+     * zůstává pro kontrolu prodlení a datum je součást idempotence.
+     */
+    public function testEarlierPaymentDateIsFrozenIntoSnapshotAndInstructions(): void
+    {
+        $builder = $this->builderAt('2099-01-06 08:00:00 Europe/Prague');
+        $liabilityId = $this->insertBankLiability(100_000);
+        $request = [['liability_id' => $liabilityId, 'amount_minor' => 30_000]];
+        $payer = "currency:{$this->payerCurrencyId}";
+
+        $early = $builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId, '2099-01-06');
+        $replay = $builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId, '2099-01-06');
+        $statutory = $builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId);
+
+        self::assertSame('2099-01-06', $early['planned_payment_date']);
+        self::assertTrue($replay['replayed']);
+        self::assertSame($early['batch_id'], $replay['batch_id']);
+        self::assertTrue($statutory['created'], 'Jiné datum úhrady je jiná dávka.');
+        self::assertSame('2099-01-10', $statutory['planned_payment_date']);
+
+        $stored = $this->batch($early['batch_id']);
+        self::assertSame('2099-01-06', $this->stringValue($stored, 'planned_payment_date'));
+        $snapshot = json_decode($this->encryption->decryptFor(
+            $this->stringValue($stored, 'snapshot_ciphertext'),
+            "payroll-payment-batch:{$this->supplierId}:"
+                . $this->stringValue($stored, 'batch_reference'),
+        ), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($snapshot);
+        self::assertSame('2099-01-06', $snapshot['planned_payment_date'] ?? null);
+        self::assertSame('2099-01-10', $snapshot['statutory_due_on'] ?? null);
+        self::assertTrue($snapshot['is_shifted'] ?? null);
+        $item = $this->items($early['batch_id'])[0];
+        $instruction = json_decode($this->encryption->decryptFor(
+            $this->stringValue($item, 'instruction_ciphertext'),
+            "payroll-payment-item:{$this->supplierId}:"
+                . $this->stringValue($item, 'item_reference'),
+        ), true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($instruction);
+        self::assertSame('2099-01-06', $instruction['planned_payment_date'] ?? null);
+    }
+
+    public function testRejectsPaymentDateInThePast(): void
+    {
+        $builder = $this->builderAt('2099-01-06 08:00:00 Europe/Prague');
+        $liabilityId = $this->insertBankLiability(10_000);
+
+        try {
+            $builder->build(
+                $this->supplierId,
+                'abo',
+                "currency:{$this->payerCurrencyId}",
+                [['liability_id' => $liabilityId, 'amount_minor' => 10_000]],
+                $this->actorId,
+                '2099-01-05',
+            );
+            self::fail('Minulé datum úhrady musí být odmítnuto.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('minulosti', $exception->getMessage());
+        }
+        self::assertSame(0, $this->allocatedMinor($liabilityId));
+    }
+
+    public function testLatePaymentDateRequiresExplicitConfirmation(): void
+    {
+        $builder = $this->builderAt('2099-01-06 08:00:00 Europe/Prague');
+        $liabilityId = $this->insertBankLiability(10_000);
+        $request = [['liability_id' => $liabilityId, 'amount_minor' => 10_000]];
+        $payer = "currency:{$this->payerCurrencyId}";
+
+        try {
+            $builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId, '2099-01-12');
+            self::fail('Datum po splatnosti musí vyžadovat potvrzení.');
+        } catch (PayrollPaymentLateDateException $exception) {
+            self::assertSame('2099-01-10', $exception->latestOnTimeDate);
+        }
+        self::assertSame(0, $this->allocatedMinor($liabilityId));
+
+        $late = $builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId, '2099-01-12', true);
+        self::assertSame('2099-01-12', $late['planned_payment_date']);
+    }
+
+    /**
+     * Zahozená dávka vrátí závazky do „Co zaplatit" a týž výběr jde sestavit
+     * znovu - ne „přehrát" na zahozenou dávku.
+     */
+    public function testDiscardReleasesLiabilitiesForANewBatch(): void
+    {
+        $liabilityId = $this->insertBankLiability(50_000);
+        $request = [['liability_id' => $liabilityId, 'amount_minor' => 50_000]];
+        $payer = "currency:{$this->payerCurrencyId}";
+        $first = $this->builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId);
+
+        $discard = $this->discardService($this->builder)->discard(
+            $this->supplierId,
+            $first['batch_id'],
+            false,
+            $this->actorId,
+        );
+        $again = $this->discardService($this->builder)->discard(
+            $this->supplierId,
+            $first['batch_id'],
+            false,
+            $this->actorId,
+        );
+        $second = $this->builder->build($this->supplierId, 'abo', $payer, $request, $this->actorId);
+
+        self::assertTrue($discard['discarded']);
+        self::assertSame('none', $discard['handover_state']);
+        self::assertTrue($again['replayed']);
+        self::assertTrue($second['created']);
+        self::assertNotSame($first['batch_id'], $second['batch_id']);
+        self::assertSame(1, $this->countRows(
+            'payroll_payment_batch_discards',
+            'supplier_id = ? AND batch_id = ?',
+            [$this->supplierId, $first['batch_id']],
+        ));
+        // Původní dávka i její alokace zůstávají jako auditní stopa.
+        self::assertSame(2, $this->countRows(
+            'payroll_payment_batches',
+            'supplier_id = ?',
+            [$this->supplierId],
+        ));
+    }
+
+    /**
+     * Nové datum = zahodit a sestavit znovu, atomicky. Když nová dávka
+     * neprojde (minulé datum), stará zůstane živá.
+     */
+    public function testRescheduleReplacesBatchAtomically(): void
+    {
+        $builder = $this->builderAt('2099-01-06 08:00:00 Europe/Prague');
+        $liabilityId = $this->insertBankLiability(40_000);
+        $first = $builder->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [['liability_id' => $liabilityId, 'amount_minor' => 40_000]],
+            $this->actorId,
+        );
+        $service = $this->discardService($builder);
+
+        try {
+            $service->reschedule($this->supplierId, $first['batch_id'], '2099-01-01', false, false, $this->actorId);
+            self::fail('Minulé datum musí přeplánování odmítnout.');
+        } catch (\DomainException) {
+        }
+        self::assertSame(0, $this->countRows(
+            'payroll_payment_batch_discards',
+            'supplier_id = ?',
+            [$this->supplierId],
+        ));
+
+        $result = $service->reschedule($this->supplierId, $first['batch_id'], '2099-01-06', false, false, $this->actorId);
+
+        self::assertSame($first['batch_id'], $result['discarded_batch_id']);
+        self::assertSame('2099-01-06', $result['batch']['planned_payment_date']);
+        self::assertSame(40_000, $result['batch']['declared_total_minor']);
+        self::assertNotSame($first['batch_id'], $result['batch']['batch_id']);
+    }
+
+    private function builderAt(string $now): PayrollPaymentBatchBuilder
+    {
+        return new PayrollPaymentBatchBuilder(
+            new PayrollPaymentBatchRepository($this->db),
+            $this->sensitiveData,
+            $this->encryption,
+            new IbanValidator(),
+            new CzechBankAccountValidator(),
+            new MockClock($now),
+            new PayrollProductionGate(new PayrollModuleStateRepository($this->db)),
+        );
+    }
+
+    private function discardService(
+        PayrollPaymentBatchBuilder $builder,
+    ): PayrollPaymentBatchDiscardService {
+        return new PayrollPaymentBatchDiscardService(
+            new PayrollPaymentBatchRepository($this->db),
+            new PayrollPaymentBatchDiscardRepository($this->db),
+            $builder,
+            new PayrollProductionGate(new PayrollModuleStateRepository($this->db)),
+        );
+    }
+
     private function insertBankLiability(
         int $amountMinor,
         string $currencyCode = 'CZK',
@@ -985,7 +1175,7 @@ final class PayrollPaymentBatchBuilderTest extends TestCase
      */
     private function countRows(string $table, string $where, array $params): int
     {
-        if ($table !== 'payroll_payment_batches') {
+        if (!in_array($table, ['payroll_payment_batches', 'payroll_payment_batch_discards'], true)) {
             throw new \InvalidArgumentException('Nepovolená testovací tabulka.');
         }
         $statement = $this->db->pdo()->prepare(

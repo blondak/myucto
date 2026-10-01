@@ -145,6 +145,7 @@ final class PayrollPaymentQueryService
                         FROM payroll_payment_allocations allocation
                        WHERE allocation.supplier_id = liability.supplier_id
                          AND allocation.liability_id = liability.id
+                         AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . '
                     ) AS allocated_minor,
                     (
                       SELECT COALESCE(SUM(payment_match.amount_minor), 0)
@@ -233,7 +234,8 @@ final class PayrollPaymentQueryService
         $allocated = '(SELECT COALESCE(SUM(allocation.amount_minor), 0)
                          FROM payroll_payment_allocations allocation
                         WHERE allocation.supplier_id = liability.supplier_id
-                          AND allocation.liability_id = liability.id)';
+                          AND allocation.liability_id = liability.id
+                          AND ' . PayrollPaymentBatchDiscardScope::activeAllocation('allocation') . ')';
         $settled = '(SELECT COALESCE(SUM(payment_match.amount_minor), 0)
                        FROM payroll_payment_allocations allocation
                        JOIN payroll_payment_matches payment_match

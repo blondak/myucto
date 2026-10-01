@@ -1045,6 +1045,10 @@ final class Routes
             $g->get('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'get']);
             $g->post('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'post']);
             $g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);
+            // Zahození dávky (i stažené / předané bance, po potvrzení zrušení
+            // v bankovnictví) a náhradní dávka s jiným datem úhrady.
+            $g->post('/payments/batches/{batchId:[0-9]+}/discard', [PayrollPaymentAction::class, 'discardBatch']);
+            $g->post('/payments/batches/{batchId:[0-9]+}/reschedule', [PayrollPaymentAction::class, 'rescheduleBatch']);
             // Legislativní rulesety — globální číselník (default v kódu + DB override),
             // konkrétnější cesty musí být před `/rulesets/{rulesetId}`.
             $g->get('/rulesets', [PayrollRulesetAction::class, 'list']);

@@ -9,6 +9,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentSettlementSignalRepository;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchDiscardService;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchSettledException;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
@@ -18,6 +20,7 @@ use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 
 /**
  * Rozpoznání zaplaceného odvodu v bankovních pohybech (migrace 1750).
@@ -37,6 +40,7 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
     private const AMOUNT_MINOR = 302_400;
     private const VARIABLE_SYMBOL = '9900112233';
 
+    private ContainerInterface $container;
     private Connection $connection;
     private PDO $pdo;
     private PayrollPaymentSettlementRecognizer $recognizer;
@@ -63,6 +67,7 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
         $deadlines = $container->get(PayrollDeadlineOverviewRepository::class);
         self::assertInstanceOf(PayrollDeadlineOverviewRepository::class, $deadlines);
 
+        $this->container = $container;
         $this->connection = $connection;
         $this->pdo = $connection->pdo();
         $this->recognizer = $recognizer;
@@ -260,6 +265,217 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
         );
     }
 
+    /**
+     * Platba zadaná DŘÍV než ke splatnosti se musí doložit ke svému měsíci.
+     *
+     * Účetní zaplatí lednový odvod hned po uzávěrce (26. 1.), ne až 21. 2.
+     * Vedle visí ještě nezaplacený prosincový odvod se stejnou částkou i VS.
+     * Kdyby se vzdálenost měřila ke splatnosti a okno začínalo až měsíc po
+     * období, platba by spadla k prosinci. Datum příkazu v živé dávce ji
+     * přiřadí správně - a zahozená dávka (s původním datem) se nepočítá.
+     */
+    public function testEarlyPaymentIsSettledAgainstItsOwnMonth(): void
+    {
+        $this->activatePayroll();
+        $discard = $this->discardService()->discard(
+            $this->supplierId,
+            $this->batchIdForAllocation($this->allocationId),
+            false,
+            $this->actorId,
+        );
+        self::assertTrue($discard['discarded']);
+        $earlyAllocationId = $this->insertAllocation(
+            $this->liabilityId,
+            '2026-01-26',
+            'early',
+        );
+        $decemberRevisionId = $this->insertRevision('2025-12-01', 'december');
+        $this->insertLevyLiabilityFor(
+            $decemberRevisionId,
+            $this->institutionAccountId(),
+            '2026-01-20',
+            'december',
+        );
+        $this->insertBankTransaction('2026-01-26', '-3024.00', 'early', 'statement');
+
+        $result = $this->recognizer->recognizeForSupplier($this->supplierId);
+
+        self::assertSame(1, $result['matched']);
+        self::assertSame(0, $result['signalled'], 'Platba nesmí spadnout k prosinci.');
+        $statement = $this->pdo->prepare(
+            'SELECT allocation_id, liability_id FROM payroll_payment_matches
+              WHERE supplier_id = ?',
+        );
+        $statement->execute([$this->supplierId]);
+        $match = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($match);
+        self::assertSame($earlyAllocationId, (int) $match['allocation_id']);
+        self::assertSame($this->liabilityId, (int) $match['liability_id']);
+    }
+
+    /** Dávku s doloženou úhradou zahodit nejde - ani službou, ani přímo v DB. */
+    public function testSettledBatchCannotBeDiscarded(): void
+    {
+        $this->activatePayroll();
+        $this->insertBankTransaction('2026-02-20', '-3024.00', 'settled', 'statement');
+        self::assertSame(1, $this->recognizer->recognizeForSupplier($this->supplierId)['matched']);
+        $batchId = $this->batchIdForAllocation($this->allocationId);
+
+        try {
+            $this->discardService()->discard($this->supplierId, $batchId, true, $this->actorId);
+            self::fail('Zaplacenou dávku nesmí jít zahodit.');
+        } catch (PayrollPaymentBatchSettledException) {
+        }
+
+        $this->pdo->exec('SAVEPOINT direct_discard');
+        try {
+            $this->pdo->prepare(
+                'INSERT INTO payroll_payment_batch_discards
+                    (supplier_id, batch_id, handover_state, bank_cancellation_confirmed)
+                 VALUES (?, ?, "none", 0)',
+            )->execute([$this->supplierId, $batchId]);
+            self::fail('Trigger musí zahození zaplacené dávky odmítnout.');
+        } catch (\PDOException $exception) {
+            self::assertStringContainsString('recorded settlement', $exception->getMessage());
+        } finally {
+            $this->pdo->exec('ROLLBACK TO SAVEPOINT direct_discard');
+        }
+    }
+
+    /** K alokaci zahozené dávky už úhradu spárovat nejde. */
+    public function testDiscardedBatchAllocationCannotBeMatched(): void
+    {
+        $this->activatePayroll();
+        $this->discardService()->discard(
+            $this->supplierId,
+            $this->batchIdForAllocation($this->allocationId),
+            false,
+            $this->actorId,
+        );
+        $transactionId = $this->insertBankTransaction('2026-02-20', '-3024.00', 'late', 'statement');
+
+        self::assertSame(
+            0,
+            $this->recognizer->recognizeForSupplier($this->supplierId)['matched'],
+        );
+        $this->expectException(DomainException::class);
+        $this->reconciliation->match(
+            new PayrollPaymentReconciliationCommand(
+                $this->supplierId,
+                $this->allocationId,
+                self::AMOUNT_MINOR,
+                PayrollPaymentEvidenceReference::bank($this->statementId, $transactionId),
+                'test-discarded-allocation',
+                null,
+            ),
+        );
+    }
+
+    private function discardService(): PayrollPaymentBatchDiscardService
+    {
+        $service = $this->container->get(PayrollPaymentBatchDiscardService::class);
+        self::assertInstanceOf(PayrollPaymentBatchDiscardService::class, $service);
+
+        return $service;
+    }
+
+    private function activatePayroll(): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2025-01-01", NULL, NOW())',
+        )->execute([$this->supplierId]);
+    }
+
+    private function batchIdForAllocation(int $allocationId): int
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT item.batch_id
+               FROM payroll_payment_allocations allocation
+               JOIN payroll_payment_items item
+                 ON item.supplier_id = allocation.supplier_id
+                AND item.id = allocation.item_id
+              WHERE allocation.supplier_id = ? AND allocation.id = ?',
+        );
+        $statement->execute([$this->supplierId, $allocationId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function institutionAccountId(): int
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT id FROM payroll_institution_accounts WHERE supplier_id = ?',
+        );
+        $statement->execute([$this->supplierId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function insertRevision(string $periodStart, string $key): int
+    {
+        $this->pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status,
+                 current_revision_no)
+             VALUES (?, ?, ?, "approved", 1)',
+        )->execute([$this->supplierId, $periodStart, $periodStart]);
+        $runId = (int) $this->pdo->lastInsertId();
+        $snapshot = '{"schema":"synthetic-payroll-result.v1"}';
+        $snapshotHash = hash('sha256', $snapshot);
+        $this->pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 1, "approved", "synthetic-settlement.v1",
+                     ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            str_repeat('b', 64),
+            $snapshot,
+            $snapshotHash,
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', "synthetic-settlement-revision-{$this->supplierId}-{$key}", true),
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function insertLevyLiabilityFor(
+        int $revisionId,
+        int $accountId,
+        string $dueOn,
+        string $key,
+    ): int {
+        $snapshot = '{"schema":"synthetic-liability.v1"}';
+        $this->pdo->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, source_snapshot_json,
+                 source_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, ?, "health_insurance",
+                     "outgoing", ?, ?, "CZK", ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            "health-insurance.synthetic-{$key}",
+            'institution:health_insurer:111:account:' . $accountId,
+            $dueOn,
+            self::AMOUNT_MINOR,
+            $snapshot,
+            hash('sha256', $snapshot),
+            hash('sha256', "settlement-liability-{$this->supplierId}-{$key}", true),
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
     /** @return list<array<string,mixed>> */
     private function openLevyDeadlines(): array
     {
@@ -383,9 +599,12 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
         return (int) $this->pdo->lastInsertId();
     }
 
-    private function insertAllocation(int $liabilityId): int
-    {
-        $reference = "settlement-{$liabilityId}";
+    private function insertAllocation(
+        int $liabilityId,
+        string $plannedPaymentDate = self::DUE_ON,
+        string $key = '',
+    ): int {
+        $reference = "settlement-{$liabilityId}{$key}";
         $this->pdo->prepare(
             'INSERT INTO payroll_payment_batches
                 (supplier_id, batch_reference, channel, export_format,
@@ -397,7 +616,7 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
         )->execute([
             $this->supplierId,
             "batch-{$reference}",
-            self::DUE_ON,
+            $plannedPaymentDate,
             self::AMOUNT_MINOR,
             'enc:v2:synthetic-batch',
             hash('sha256', "batch-{$reference}"),

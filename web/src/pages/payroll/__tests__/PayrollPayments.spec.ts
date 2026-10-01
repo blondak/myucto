@@ -7,6 +7,8 @@ const m = vi.hoisted(() => ({
   payerOptions: vi.fn(),
   batches: vi.fn(),
   createBatch: vi.fn(),
+  discardBatch: vi.fn(),
+  rescheduleBatch: vi.fn(),
   generateExport: vi.fn(),
   createDownloadGrant: vi.fn(),
   downloadExport: vi.fn(),
@@ -41,6 +43,8 @@ vi.mock('@/api/payrollPayments', () => ({
     payerOptions: m.payerOptions,
     batches: m.batches,
     createBatch: m.createBatch,
+    discardBatch: m.discardBatch,
+    rescheduleBatch: m.rescheduleBatch,
     generateExport: m.generateExport,
     createDownloadGrant: m.createDownloadGrant,
     downloadExport: m.downloadExport,
@@ -1562,5 +1566,217 @@ describe('PayrollPayments', () => {
     expect(m.generateExport).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
+  })
+
+  async function selectFirstLiability(wrapper: ReturnType<typeof mount>): Promise<void> {
+    await wrapper.get('[data-layout="desktop"]').findAll('input[type="checkbox"]')[1].setValue(true)
+    await flushPromises()
+  }
+
+  function createButtonOf(wrapper: ReturnType<typeof mount>) {
+    return wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.payments.batch.create'))!
+  }
+
+  /*
+   * Uživatel 1. 10.: „hromadná platba šla do splatnosti 19. 10. a neovlivním to."
+   * Dřívější datum se smí vždy a pošle se serveru; výchozí volba nic neposílá.
+   */
+  it('pošle dřívější datum úhrady jen tehdy, když ho účetní zvolí', async () => {
+    m.liabilities.mockResolvedValue(liabilityList([{
+      ...(await m.liabilities()).items[0],
+      due_on: '2026-10-20',
+      payment_on: '2026-10-19',
+    }]))
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await selectFirstLiability(wrapper)
+
+    expect(wrapper.get('[data-test="payment-date-mode-statutory"]').text())
+      .toContain('payroll.payments.payment_date.statutory_with_date')
+    await wrapper.get('[data-test="payment-date-mode-today"] input').setValue(true)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payment-date-earlier"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="payment-date-late"]').exists()).toBe(false)
+    await createButtonOf(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(m.createBatch).toHaveBeenCalledWith(expect.objectContaining({
+      payment_date: '2026-09-15',
+      accept_late_payment: false,
+    }))
+  })
+
+  it('datum po splatnosti pustí jen s výslovným potvrzením', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await selectFirstLiability(wrapper)
+
+    // Závazek splatný 15. 8., dnes je 15. 9.: „Dnes" je po splatnosti.
+    await wrapper.get('[data-test="payment-date-mode-today"] input').setValue(true)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payment-date-late"]').exists()).toBe(true)
+    expect(createButtonOf(wrapper).attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="payment-date-late-confirm"]').setValue(true)
+    await flushPromises()
+    expect(createButtonOf(wrapper).attributes('disabled')).toBeUndefined()
+    await createButtonOf(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(m.createBatch).toHaveBeenCalledWith(expect.objectContaining({
+      payment_date: '2026-09-15',
+      accept_late_payment: true,
+    }))
+  })
+
+  /*
+   * Staženou nebo bance předanou dávku jde zahodit, ale jen s potvrzením, že ji
+   * účetní v bankovnictví zrušila - jinak hrozí dvojí platba.
+   */
+  it('zahodí staženou dávku až po potvrzení zrušení v bance', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [{
+        id: 51,
+        batch_reference: 'payroll-batch:synthetic',
+        channel: 'bank',
+        export_format: 'abo',
+        planned_payment_date: '2026-10-19',
+        default_payment_date: '2026-10-19',
+        payment_date_mode: 'statutory',
+        period_from: '2026-09',
+        period_to: '2026-09',
+        currency_code: 'CZK',
+        declared_total_minor: 513_500,
+        declared_item_count: 3,
+        settled_minor: 0,
+        created_at: '2026-10-01 08:00:00',
+        discarded: false,
+        discarded_at: null,
+        handover_state: 'submitted',
+        exports: [],
+      }],
+    })
+    m.discardBatch.mockResolvedValue({
+      batch_id: 51,
+      handover_state: 'submitted',
+      discarded: true,
+      replayed: false,
+    })
+    const wrapper = mount(PayrollPayments, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+    await wrapper.get('[data-test="batch-discard"]').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.get('[data-test="batch-change-dialog"]')
+    expect(dialog.text()).toContain('payroll.payments.batch_change.handover_submitted')
+    // Popis dávky je lidský, ne interní reference.
+    expect(wrapper.get('[data-test="batch-change-subject"]').text()).toContain('9/2026')
+    expect(wrapper.get('[data-test="batch-change-subject"]').text()).not.toContain('payroll-batch:')
+    expect(wrapper.get('[data-test="batch-change-submit"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="batch-change-bank-confirm"]').setValue(true)
+    await wrapper.get('[data-test="batch-change-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(m.discardBatch).toHaveBeenCalledWith(51, { confirm_bank_cancellation: true })
+    expect(m.success).toHaveBeenCalledWith('payroll.payments.batch.discarded')
+  })
+
+  it('zahozenou dávku ukáže jako stopu bez akcí a dávku s úhradou nedá změnit', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [
+        {
+          id: 51,
+          batch_reference: 'payroll-batch:discarded',
+          channel: 'bank',
+          export_format: 'abo',
+          planned_payment_date: '2026-10-19',
+          currency_code: 'CZK',
+          declared_total_minor: 513_500,
+          declared_item_count: 3,
+          settled_minor: 0,
+          created_at: '2026-10-01 08:00:00',
+          discarded: true,
+          discarded_at: '2026-10-01 09:00:00',
+          handover_state: 'downloaded',
+          exports: [],
+        },
+        {
+          id: 52,
+          batch_reference: 'payroll-batch:settled',
+          channel: 'bank',
+          export_format: 'abo',
+          planned_payment_date: '2026-10-01',
+          currency_code: 'CZK',
+          declared_total_minor: 513_500,
+          declared_item_count: 3,
+          settled_minor: 513_500,
+          created_at: '2026-10-01 09:00:00',
+          discarded: false,
+          handover_state: 'downloaded',
+          exports: [],
+        },
+      ],
+    })
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const desktop = wrapper.get('[data-layout="batch-desktop"]')
+    expect(desktop.find('[data-test="batch-discarded-badge"]').exists()).toBe(true)
+    expect(desktop.find('[data-test="batch-change-date"]').exists()).toBe(false)
+    expect(desktop.find('[data-test="batch-discard"]').exists()).toBe(false)
+    expect(desktop.find('[data-test="batch-settled-locked"]').exists()).toBe(true)
+  })
+
+  it('změní datum dávky a rovnou vyrobí nový soubor pro banku', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [{
+        id: 51,
+        batch_reference: 'payroll-batch:synthetic',
+        channel: 'bank',
+        export_format: 'abo',
+        planned_payment_date: '2026-10-19',
+        default_payment_date: '2026-10-19',
+        payment_date_mode: 'statutory',
+        currency_code: 'CZK',
+        declared_total_minor: 513_500,
+        declared_item_count: 3,
+        settled_minor: 0,
+        created_at: '2026-09-15 08:00:00',
+        discarded: false,
+        handover_state: 'none',
+        exports: [],
+      }],
+    })
+    m.rescheduleBatch.mockResolvedValue({
+      discarded_batch_id: 51,
+      handover_state: 'none',
+      batch: { batch_id: 51, planned_payment_date: '2026-09-15', declared_item_count: 3 },
+    })
+    const wrapper = mount(PayrollPayments, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+    await wrapper.get('[data-test="batch-change-date"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="batch-change-handover"]').exists()).toBe(false)
+    m.generateExport.mockClear()
+    await wrapper.get('[data-test="batch-change-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(m.rescheduleBatch).toHaveBeenCalledWith(51, {
+      payment_date: '2026-09-15',
+      accept_late_payment: false,
+      confirm_bank_cancellation: false,
+    })
+    expect(m.generateExport).toHaveBeenCalledTimes(1)
   })
 })

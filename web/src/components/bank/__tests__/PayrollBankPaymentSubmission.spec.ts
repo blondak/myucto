@@ -43,11 +43,22 @@ describe('PayrollBankPaymentSubmission', () => {
     const wrapper = mount(PayrollBankPaymentSubmission, { props: { ...props, batches: [batch, { ...batch, id: 8, currency_code: 'EUR' }, { ...batch, id: 9, channel: 'cash' }, { ...batch, id: 10, export_format: 'sepa' }] } })
     expect(wrapper.findAll('[data-test="batch"] option')).toHaveLength(2)
   })
+  it('labels batches by period, date, amount and count and skips discarded ones', () => {
+    const wrapper = mount(PayrollBankPaymentSubmission, { props: { ...props, batches: [{ ...batch, period_from: '2026-09', period_to: '2026-09' }, { ...batch, id: 11, discarded: true }] } })
+    const options = wrapper.findAll('[data-test="batch"] option')
+    expect(options).toHaveLength(2)
+    expect(options[1].text()).toContain('9/2026')
+    expect(options[1].text()).toContain('2026-09-30')
+    expect(options[1].text()).toContain('123.45')
+    expect(options[1].text()).not.toContain('TEST-7')
+  })
   it('confirms the saved batch amount count and bank and sends identifiers only', async () => {
     const wrapper = await selected()
     await wrapper.get('[data-test="submit"]').trigger('click')
     await flushPromises()
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('TEST-7'))
+    // Potvrzení popisuje dávku lidsky (datum, částka, počet), ne interní referencí.
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('2026-09-30'))
+    expect(window.confirm).not.toHaveBeenCalledWith(expect.stringContaining('TEST-7'))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Test bank'))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('"count":2'))
     expect(m.submit).toHaveBeenCalledExactlyOnceWith(7, 3)
