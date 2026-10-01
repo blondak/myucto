@@ -26,18 +26,58 @@ Nastavení v MyÚčtu:
 
 Podání přes datovou schránku registraci certifikátu nevyžaduje, zmocnění ano. Datovou schránku zmocněnce je vhodné uvést na Oznámení o zmocnění, jinak ČSSZ podání dohledává ručně a odpověď přijde se zpožděním.
 
-## 85.3 Měsíční přehled — co následuje
+## 85.3 Měsíc — co podat a odeslat
 
-Záložka **Měsíční přehled** (a tentýž panel pod uzavřeným mzdovým během) skládá
+Stránka **Mzdy → Podání a hlášení** má tři hlavní záložky: **Měsíc** (co za
+měsíc podat a odeslat), **Odesláno** (stav odeslaných podání) a **Mimořádná
+podání** (nemocenské a další povinnosti mimo měsíční cyklus). Ostatní obrazovky
+(JMHZ, Zdravotní pojišťovny, K odeslání, ELDP, Inbox, Certifikát a další) jsou
+v nabídce **Další ▾**; odkazy na ně platí beze změny.
+
+Záložka **Měsíc** (a tentýž panel pod uzavřeným mzdovým během) skládá
 za zvolené období jeden seznam: co se generuje a odesílá, komu, jakou cestou a
-do kdy, a u toho, co MyÚčto neodesílá samo, také proč.
+do kdy, a u toho, co MyÚčto neodesílá samo, také proč. Bez zvoleného měsíce se
+otevře nejstarší měsíc s nesplněným měsíčním hlášením (JMHZ, přehled o platbě,
+hromadné oznámení) za poslední rok, jinak předchozí měsíc — mzdy se podávají
+zpětně.
+
+### 85.3.1 Připravit a odeslat
+
+U povinnosti bez podání je tlačítko **Připravit a odeslat** a vedle něj
+**Jen připravit**. Příprava zmrazí podání ze schválené revize mzdového běhu
+a přehled zůstane na místě; připravený řádek pak nabídne **Odeslat**.
+
+Tlačítko **Připravit a odeslat vše** nad seznamem pokryje všechny řádky měsíce,
+které jde připravit nebo odeslat. Nepřipravené se nejdřív připraví, pak se
+v ostrém prostředí ukáže jedno potvrzení se seznamem *co → komu → jakou cestou*.
+Po potvrzení:
+
+- **JMHZ** odejde přes VREP ČSSZ (podepsané certifikátem) hned.
+- **Přehledy o platbě** všem pojišťovnám a **hromadná oznámení** se zařadí do
+  odchozí fronty datové schránky. S Mobilním klíčem je odešle **jedno potvrzení
+  v mobilu** — každá zpráva jde do schránky své pojišťovny. Když jedna zpráva
+  selže, ostatní odejdou a chyba se ukáže u jejího řádku.
+- U **odesílací brány** se každý koncept schvaluje v datové schránce zvlášť
+  (tlačítko **Schválit koncept v datovce 1/3**); jednou autorizací pro všechny
+  zprávy odesílá jen Mobilní klíč.
+- Bez brány i Mobilního klíče zůstanou zprávy ve frontě datové schránky
+  k ručnímu odeslání.
+
+Kontrola slevy po lhůtě (kontrola 290) se při přípravě ptá u konkrétního řádku
+a čeká na vědomé potvrzení. Druhé řádné JMHZ za týž měsíc aplikace nepřipraví.
+
+Po odeslání Mobilním klíčem zůstane potvrzená relace pět minut otevřená
+a aplikace v ní sama dotáhne doručenky odeslaných zpráv — bez dalšího
+potvrzení v mobilu a bez čtení schránky doručených zpráv. U odeslaného řádku
+bez doručenky je tlačítko **Načíst doručenky** (v otevřené relaci načte hned,
+jinak vede do Datové schránky).
 
 Přehled nese **povinnost, ne dokument**. Měsíční hlášení zaměstnavatele (JMHZ) a
 přehled o platbě pojistného za každou zdravotní pojišťovnu, u které je v období
 pojištěný aspoň jeden zaměstnanec, se v něm objeví hned po schválení mzdové
 revize — tedy dřív, než k nim vůbec existuje podání. U každé takové položky je
-zákonná lhůta konkrétním datem, stav **nepřipraveno** a tlačítko **Připravit**,
-které podání za tu agendu, to období a tu pojišťovnu založí a rovnou otevře.
+zákonná lhůta konkrétním datem, stav **nepřipraveno** a tlačítka **Připravit
+a odeslat** a **Jen připravit** pro tu agendu, to období a tu pojišťovnu.
 Uzávěrka sama žádná podání nezakládá: koncept, který se musí rušit při každé
 opravě běhu, by práci spíš přidal.
 
@@ -46,8 +86,12 @@ i testovacím režimu. Přepínač prostředí rozhoduje jen o tom, kde se hled�
 založené podání — zkušební podání v testu proto ostrou povinnost neodškrtne.
 
 Za splněnou se položka považuje teprve tehdy, když je podání **odeslané a
-přijaté**. Zrušené podání povinnost nesplnilo: zůstává v seznamu jako
-nesplněné, s poznámkou, že se má připravit nové.
+přijaté**. Přehled o platbě pojistného a hromadné oznámení zdravotní
+pojišťovně jsou splněné **doručením do schránky pojišťovny** (viz 85.7.1);
+řádek pak ukáže **Doručeno**. Odeslaný řádek, u kterého se čeká, nese stav
+**Čeká na doručení** nebo **Čeká na výsledek** a kanál, kterým zpráva skutečně
+odešla. Zrušené podání povinnost nesplnilo: zůstává v seznamu jako nesplněné,
+s poznámkou, že se má připravit nové.
 
 ## 85.4 Zákonné termíny na přehledu mezd
 
@@ -274,14 +318,21 @@ Návrh čeká na doplnění, připravené podání prošlo lokální kontrolou, 
 
 ### 85.7.1 Když úřad výsledek neposílá
 
-U některých agend žádná strojově čitelná odpověď nedorazí — typicky u přehledu
-o platbě pojistného zdravotní pojišťovně. Pojišťovna zprávu převezme a tím to
-končí. Řádek by proto zůstal navždy ve stavu **Čeká na výsledek podání**
-a lhůta by se neuzavřela.
+U přehledu o platbě pojistného a hromadného oznámení zdravotní pojišťovně
+žádná strojově čitelná odpověď nedorazí. Podání je učiněné **dodáním do datové
+schránky pojišťovny**; vadu pojišťovna oznámí samostatnou výzvou, kterou
+evidujete jako výzvu k podání.
 
-V přehledu podání je u takového řádku pod štítkem termínu věta *„Úřad výsledek
-zpracování neposílá, potvrďte vyřízení sami"* a tlačítko **Označit za
-vyřízené**. Vyžádá si poznámku, čím je vyřízení doložené (číslo zprávy, datum
+Jakmile je dodání doložené (datová schránka potvrdí doručení nebo je
+k podání připojená doručenka), aplikace povinnost **uzavře sama**: termín se
+překlopí na **Splněno** a Měsíc ukáže **Doručeno**. Stav podání zůstane
+„odesláno" a odchozí zpráva si nese jen doručení — výrok o přijetí obsahu
+aplikace nevymýšlí. U měsíčního hlášení ČSSZ to neplatí, tam měsíc uzavírá
+protokol ČSSZ.
+
+Když doručení doložené není (zpráva odešla mimo aplikaci a doručenka chybí),
+je v přehledu podání u řádku věta *„Úřad výsledek zpracování neposílá,
+potvrďte vyřízení sami"* a tlačítko **Označit za vyřízené**. Vyžádá si poznámku, čím je vyřízení doložené (číslo zprávy, datum
 doručenky); ta zůstane v historii, aby bylo poznat, že měsíc uzavřel člověk
 a o co se opřel.
 
@@ -789,7 +840,7 @@ Hlášení, které se podává **po splatnosti pojistného** a uplatňuje **slev
 pojistném zaměstnavatele**, dostane varování kontroly 290. ČSSZ slevu porovná
 se slevou v posledním hlášení s akceptovanou pojistnou částí a vyšší slevu po
 lhůtě neuzná. Varování zmrazení nezakazuje, ale vyžaduje výslovné potvrzení:
-panel **Zmrazení a odeslání JMHZ** i **Měsíční přehled** ukážou větu
+panel **Zmrazení a odeslání JMHZ** i záložka **Měsíc** ukážou větu
 s datem splatnosti a výší slevy, odkaz na protokoly ve **Stavu odeslání** (kde
 najdete poslední akceptovanou slevu) a na **Mzdové běhy** (kde se sleva
 opravuje). Tlačítkem **Sleva nepřevyšuje poslední akceptovanou, zmrazit**
@@ -814,12 +865,12 @@ prostředí lze použít k bezpečnému testu celého toku.
   eGovernmentu. Není-li brána aktivní, připravená zpráva zůstane v odchozí
   frontě pro ruční odeslání a doplnění ID zprávy a doručenky.
 - **Odeslat přes VREP** předá stejné zmrazené podání bráně ČSSZ. Výsledek,
-  protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
+  protokol a případné chyby se sledují na záložce **Odesláno**. Převzetí
   transportem ještě není přijetí podání.
 
 Stav podání převezme aplikace jen z protokolu, jehož podpis ČSSZ ověřila.
 Protokol, který ověřením neprošel, zůstane u podání uložený jako neověřený
-a podání se nepohne. U takového pokusu ukáže **Stav odeslání** tlačítko
+a podání se nepohne. U takového pokusu ukáže **Odesláno** tlačítko
 **Znovu ověřit protokol**. Aplikace uložený protokol ověří úplně stejně jako
 čerstvě dotažený (podpis, certifikát ČSSZ, druh podání i CorrelationID) a teprve
 když projde, převezme z něj stav podání. Když neprojde, nezmění nic a ukáže
@@ -847,8 +898,10 @@ Podaří-li se odeslání, ale nepovede se zapsat jeho evidence, aplikace to
 k druhému podání; místo toho vznikne provozní nález, který je vidět
 v provozním přehledu mezd.
 
-Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
-Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
+Odpovědi z datové schránky se nikdy nestahují automaticky. Jedinou výjimkou
+jsou doručenky právě odeslaných zpráv v relaci Mobilního klíče, kterou uživatel
+při odeslání potvrdil (viz 85.3.1); novou relaci aplikace nikdy sama
+nezakládá. Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
 **Firma → Datová schránka** a před síťovým voláním potvrdí upozornění, že
 vyzvednutí může založit doručení a spustit zákonné lhůty. Pro toto jediné
 načtení si zvolí firemní certifikát, jednorázové jméno a heslo, SMS, nebo
@@ -1043,7 +1096,7 @@ Jsou na to dvě cesty a liší se tím, co po nich zůstane:
 |---|---|---|
 | **Zahodit** (Fronta „K odeslání") | u podání | Pokus dostane konečný stav a přestane blokovat další odeslání. V historii zůstane i s tím, co úřad odpověděl. |
 | **Smazat pokus** | u pokusu v historii | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
-| **Potvrdit opakování** | u pokusu „Možná doručeno" (fronta i Stav odeslání) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
+| **Potvrdit opakování** | u pokusu „Možná doručeno" (fronta i Odesláno) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
 Zahození je běžná cesta — historie pokusů je záměrně úplná, aby šlo dohledat,
 co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá** a jen
@@ -1278,6 +1331,30 @@ se nevykazuje jako odeslané.
 
 ## 85.14 Podání zdravotním pojišťovnám
 
+Záložka **Zdravotní pojišťovny** (v nabídce **Další ▾**) začíná kartami
+pojišťoven za období: co se podává, kolik a jak je na tom úhrada. Karta už
+podané pojišťovny nenabízí **Podat datovkou** znovu (druhé podání by
+u pojišťovny založilo duplicitu), ukáže **Podáno** s datem a nechá jen
+stažení. Stav úhrady pojistného rozlišuje:
+
+- **Čeká na úhradu … do …** — pojistné ještě není zaplacené a splatnost
+  neuplynula; nic nesouhlasí, jen se čeká na platbu,
+- **Po splatnosti** — nezaplaceno po splatnosti,
+- **Nesouhlasí: doloženo X z Y** — zaplaceno jen zčásti, nebo závazek
+  v platbách mezd nesouhlasí s přehledem; nesouhlas závazku brání uzávěrce
+  plateb mezd, dokud se nesrovná,
+- **Úhrada doložena**.
+
+Když závazek k úhradě ještě nevznikl, stav se neukazuje. Pod kartami jsou
+oznámení HOZ za období; možnosti elektronického podání a ruční sestavení HOZ
+i PPZ jsou sbalené pod **Podrobnosti a ruční sestavení** (revize je předvybraná
+nejnovější schválená).
+
+Soubor podání se jmenuje stejně v příloze datové zprávy i při stažení:
+`{AGENDA}_{RRRR-MM}_{příjemce}_{IČO}`, u opravného podání s `_opravne`, např.
+`PPPZ_2026-09_VZP-111_12345678.pdf` nebo `JMHZ_2026-09_CSSZ_12345678.xml`.
+Název je bez diakritiky a mezer.
+
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:
 
 - **HOZ** je hromadné oznámení zaměstnavatele. Aplikace povinnosti odvodí,
@@ -1360,7 +1437,7 @@ a následně ověřte doručenku i věcnou odpověď pojišťovny.
 
 ## 85.15 Nemocenské a další zákonné povinnosti
 
-Záložka **Další povinnosti** ukazuje pro vybraný měsíc přesnou matici toho,
+Záložka **Mimořádná podání** ukazuje pro vybraný měsíc přesnou matici toho,
 co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
 jen částečně a HZUPN zůstává samostatným hlášením.
 
@@ -1387,7 +1464,7 @@ Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
 zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
 HZUPN** ji zmrazit; MyÚčto ji ověří proti připnutému XSD. Odesílá se rovnou
 odsud tlačítkem **Odeslat NEMPRI/HZUPN datovou schránkou** — kanál VREP/APEP
-pro tyhle dvě agendy otevřený není, takže na záložce **Stav odeslání**, která
+pro tyhle dvě agendy otevřený není, takže na záložce **Odesláno**, která
 patří jemu, tahle podání nenajdete. U připraveného podání je vždy napsané, co
 se s ním stane: buď ho MyÚčto vloží do datové schránky jako koncept a odeslání
 schválíte v ISDS, nebo ho odešle po potvrzení Mobilním klíčem, nebo si přílohu
