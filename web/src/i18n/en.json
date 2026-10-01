@@ -21180,6 +21180,7 @@
       "proforma": "Proforma invoice — confirm manually"
     },
     "match_failed": "Match failed",
+    "advance_final_force_confirm": "Is this really a top-up payment of this invoice, not the advance payment? Confirming matches the payment with the invoice.",
     "statement_title": "Statement {number} — {date}",
     "email_notice_badge": "Notices",
     "email_notice_hint": "Monthly summary of payments from bank e-mail notices (not an uploaded statement).",

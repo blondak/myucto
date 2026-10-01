@@ -517,15 +517,17 @@ export const bankApi = {
     api.get<{ items: BankPaymentCandidate[]; total: number; page: number; pages: number; limit: number }>('/bank-transactions/payment-candidates', {
       params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page },
     }).then(r => r.data),
-  matchDocument: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number }) =>
+  matchDocument: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; forceAdvanceFinal?: boolean }) =>
     api.post<{
       matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null
       partial_payment?: boolean; remaining?: number; currency?: string
     }>(`/bank-transactions/${txId}/match-document`, {
       ...(ref.invoiceId ? { invoice_id: ref.invoiceId } : {}),
       ...(ref.purchaseInvoiceId ? { purchase_invoice_id: ref.purchaseInvoiceId } : {}),
+      ...(ref.forceAdvanceFinal ? { force_advance_final: true } : {}),
     }).then(r => r.data),
-  matchManual: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; varsymbol?: string }) =>
+  /** `forceAdvanceFinal` = vědomé párování platby neuhrazené zálohy s konečnou fakturou (po potvrzení). */
+  matchManual: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; varsymbol?: string; forceAdvanceFinal?: boolean }) =>
     api.post<{
       matched: true; paid_at?: string; purchase_invoice_id?: number; posting?: MatchPostingResult | null
       /** Přijatá faktura: platba nepokryla zbytek, doklad zůstal částečně uhrazený. */
@@ -534,6 +536,7 @@ export const bankApi = {
       ...(ref.invoiceId ? { invoice_id: ref.invoiceId } : {}),
       ...(ref.purchaseInvoiceId ? { purchase_invoice_id: ref.purchaseInvoiceId } : {}),
       ...(ref.varsymbol ? { varsymbol: ref.varsymbol } : {}),
+      ...(ref.forceAdvanceFinal ? { force_advance_final: true } : {}),
     }).then(r => r.data),
   /** Sloučená úhrada: jedna příchozí platba → více vystavených faktur (téhož klienta). */
   matchMultiple: (txId: number, invoiceIds: number[]) =>

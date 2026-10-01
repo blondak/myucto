@@ -3098,6 +3098,16 @@ final class BankStatementAction
         $statementId = (int) ($txRow['statement_id'] ?? 0);
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
+        // Zrcadlo přijaté strany: platba proformy patří na proformu, ne na vyúčtovací fakturu
+        // ({@see \MyInvoice\Service\Bank\AdvanceFinalMatchGuard}); obejití po potvrzení v UI.
+        if (empty($body['force_advance_final']) && (float) ($txRow['amount'] ?? 0) > 0
+            && ($violation = (new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db))
+                ->issuedViolation($supplierId, $invoiceId, (float) $txRow['amount'])) !== null) {
+            return Json::error($response, \MyInvoice\Service\Bank\AdvanceFinalMatchGuard::CODE, $violation['message'], 409, [
+                'advance_id' => $violation['advance_id'], 'advance_type' => $violation['advance_type'],
+            ]);
+        }
+
         // Guard: transakce už založila platbu na JINÉ faktuře — tiché přepárování by
         // nechalo platbu (a paid stav) na původní faktuře a novou by jen flagnulo.
         // Uživatel musí nejdřív zrušit stávající spárování (smaže i platbu).
@@ -3936,6 +3946,7 @@ final class BankStatementAction
                     'manual',
                     null,
                     $userId ?: null,
+                    new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db),
                 );
                 $pdo->prepare(
                     "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?) WHERE id = ? AND supplier_id = ?"
@@ -3956,6 +3967,11 @@ final class BankStatementAction
                 )->execute([$statementId, $statementId]);
             }
             self::commitAtomic($pdo, $own, $savepoint);
+        } catch (\MyInvoice\Service\Bank\AdvanceFinalMatchException $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, \MyInvoice\Service\Bank\AdvanceFinalMatchGuard::CODE, $e->getMessage(), 409, [
+                'advance_id' => $e->advanceId, 'advance_type' => $e->advanceType,
+            ]);
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint);
             return Json::error($response, 'match_failed', 'Sloučené párování přijatých faktur selhalo: ' . $e->getMessage(), 500);
@@ -4006,12 +4022,6 @@ final class BankStatementAction
             return Json::error($response, 'invalid_status',
                 "Přijatou fakturu ve stavu '{$pi['status']}' nelze spárovat.", 409);
         }
-        if ($advance = $this->unpaidAdvanceOfFinal($supplierId, $purchaseInvoiceId, $txId)) {
-            return Json::error($response, 'advance_payment_belongs_to_advance', $advance['message'], 409, [
-                'advance_id' => $advance['id'],
-            ]);
-        }
-
         // Load transaction for amount + posted_at
         $tx = $pdo->prepare(
             'SELECT bt.posted_at, bt.amount, bt.statement_id,
@@ -4026,6 +4036,16 @@ final class BankStatementAction
         $statementId = (int) ($txRow['statement_id'] ?? 0);
         $absAmount = abs((float) ($txRow['amount'] ?? 0));
         $txCurrency = isset($txRow['currency']) && $txRow['currency'] !== null ? strtoupper((string) $txRow['currency']) : null;
+
+        // Platba zálohy patří na zálohu, ne na konečnou fakturu. Vědomé obejití
+        // (`force_advance_final`) jde jen po potvrzení v UI.
+        $force = !empty(((array) ($request->getParsedBody() ?? []))['force_advance_final']);
+        $advanceGuard = $force ? null : new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db);
+        if ($advanceGuard !== null && ($violation = $advanceGuard->purchaseViolation($supplierId, $purchaseInvoiceId, $absAmount)) !== null) {
+            return Json::error($response, \MyInvoice\Service\Bank\AdvanceFinalMatchGuard::CODE, $violation['message'], 409, [
+                'advance_id' => $violation['advance_id'], 'advance_type' => $violation['advance_type'],
+            ]);
+        }
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
 
@@ -4076,7 +4096,7 @@ final class BankStatementAction
 
             // Pohyb z auto_partial už auto řádek pro tuto dvojici má — ruční párování ho převezme.
             \MyInvoice\Service\Bank\PurchasePaymentMatchWriter::record(
-                $pdo, $supplierId, $txId, $purchaseInvoiceId, $absAmount, 'manual', null, $userId ?: null,
+                $pdo, $supplierId, $txId, $purchaseInvoiceId, $absAmount, 'manual', null, $userId ?: null, $advanceGuard,
             );
 
             // Mark transakci jako manual (matched_invoice_id zůstane NULL — to je pro vystavené)
@@ -4126,51 +4146,6 @@ final class BankStatementAction
             $result['currency'] = $partial['currency'];
         }
         return Json::ok($response, $result);
-    }
-
-    /**
-     * Konečná faktura navázaná na zálohovou fakturu, která zatím nemá úhradu: platbu,
-     * která odpovídá záloze (nebo na faktuře už nic nezbývá k úhradě), patří spárovat
-     * se ZÁLOHOU. Spárovaná s fakturou by se zaúčtovala 321/221, záloha by zůstala
-     * neuhrazená a její zúčtování 321/314 by se nikdy nezapsalo.
-     *
-     * @return array{id:int, message:string}|null
-     */
-    private function unpaidAdvanceOfFinal(int $supplierId, int $purchaseInvoiceId, int $txId): ?array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT a.id, COALESCE(NULLIF(a.vendor_invoice_number, ''), a.varsymbol) AS label,
-                    a.total_with_vat, f.amount_to_pay,
-                    (SELECT ABS(bt.amount) FROM bank_transactions bt WHERE bt.id = ?) AS tx_amount
-               FROM purchase_invoices f
-               JOIN purchase_invoices a
-                 ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
-                AND a.document_kind = 'advance' AND a.status <> 'cancelled'
-              WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
-                AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = a.id)
-                AND NOT EXISTS (SELECT 1 FROM cash_documents cd
-                                 WHERE cd.supplier_id = a.supplier_id AND cd.purchase_invoice_id = a.id
-                                   AND cd.status = 'posted')
-                AND NOT EXISTS (SELECT 1 FROM invoice_settlements s
-                                 WHERE s.supplier_id = a.supplier_id AND s.doc_type = 'purchase_invoice'
-                                   AND s.doc_id = a.id AND s.status = 'confirmed')"
-        );
-        $stmt->execute([$txId, $purchaseInvoiceId, $supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return null;
-        }
-        $nothingLeft = (float) $row['amount_to_pay'] <= 0.005;
-        $matchesAdvance = abs((float) $row['tx_amount'] - (float) $row['total_with_vat']) <= 1.0;
-        if (!$nothingLeft && !$matchesAdvance) {
-            return null; // doplatek konečné faktury nad zálohu se na fakturu párovat smí
-        }
-        $label = (string) ($row['label'] ?? ('#' . $row['id']));
-        return [
-            'id'      => (int) $row['id'],
-            'message' => 'Faktura vyúčtovává zálohu ' . $label . ', která zatím nemá úhradu. Spárujte platbu se '
-                . 'zálohou ' . $label . ' — zaúčtuje se na 314 a tato faktura zálohu zúčtuje (321/314).',
-        ];
     }
 
     private function recordManualMatchV2(int $transactionId, int $supplierId, int $userId): void

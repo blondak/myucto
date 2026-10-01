@@ -87,6 +87,9 @@ final class BankPaymentCandidatesAction
                 throw new \DomainException('Bankovní pohyb již není volnou úhradou tohoto dokladu.', 409);
             }
             $input = [$type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id' => (int) $document['id']];
+            if (!empty($body['force_advance_final'])) {
+                $input['force_advance_final'] = true;
+            }
             $result = $this->bank->manualMatch($request->withParsedBody($input), $response, $args);
             if ($result->getStatusCode() >= 400) {
                 if ($own) $pdo->rollBack();

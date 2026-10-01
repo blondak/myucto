@@ -998,6 +998,9 @@ final class StatementMatcher
         if ($pi === null) {
             return ['status' => 'unmatched', 'reason' => 'no_purchase_with_vs', 'tx_currency' => $txCurrency];
         }
+        if ($this->isAdvancePaymentForFinal($supplierId, (int) $pi['id'], $absAmount)) {
+            return ['status' => 'unmatched', 'reason' => 'advance_payment_for_final', 'purchase_invoice_id' => (int) $pi['id']];
+        }
 
         $alreadyPaid = ($pi['status'] === 'paid');
         // Vlastní alokace pohybu (z dřívějšího auto_partial) není cizí úhrada — jinak by
@@ -1212,6 +1215,18 @@ final class StatementMatcher
         return $this->cardCandidatesInstance ??= new \MyInvoice\Service\Bank\Card\CardPaymentCandidates($this->db);
     }
 
+    private ?AdvanceFinalMatchGuard $advanceGuardInstance = null;
+
+    /**
+     * Automat nesmí platbu neuhrazené zálohy navrhnout ani spárovat s konečnou fakturou,
+     * která zálohu vyúčtovává. Kandidát se vyřadí stejným pravidlem jako ruční párování.
+     */
+    private function isAdvancePaymentForFinal(int $supplierId, int $purchaseInvoiceId, float $absAmount): bool
+    {
+        $this->advanceGuardInstance ??= new AdvanceFinalMatchGuard($this->db);
+        return $this->advanceGuardInstance->purchaseViolation($supplierId, $purchaseInvoiceId, $absAmount) !== null;
+    }
+
     /**
      * Pohyb kartou → přijatý doklad (účtenka, faktura) téže karty.
      *
@@ -1232,6 +1247,9 @@ final class StatementMatcher
             }
             $m = $this->expectedMatch($remaining, (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
             if ($m === null || abs($absAmount - $m['expected']) > $m['exact']) {
+                continue;
+            }
+            if ($this->isAdvancePaymentForFinal($supplierId, (int) $r['id'], $absAmount)) {
                 continue;
             }
             if (($r['card_last4'] ?? null) === $last4) {
@@ -1469,6 +1487,9 @@ final class StatementMatcher
                 }
                 $expected = round((float) $candidate['amount_to_pay'], 2);
                 if (abs($absAmount - $expected) >= 0.005) {
+                    continue;
+                }
+                if ($this->isAdvancePaymentForFinal($supplierId, (int) $candidate['id'], $absAmount)) {
                     continue;
                 }
                 $matches[] = $candidate;

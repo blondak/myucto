@@ -21180,6 +21180,7 @@
       "proforma": "Zálohová faktura — potvrďte ručně"
     },
     "match_failed": "Párování selhalo",
+    "advance_final_force_confirm": "Jde opravdu o doplatek této faktury, ne o platbu zálohy? Potvrzením platbu spárujete s fakturou.",
     "statement_title": "Výpis {number} — {date}",
     "email_notice_badge": "Avíza",
     "email_notice_hint": "Měsíční souhrn plateb z e-mailových bankovních avíz (ne nahraný výpis).",

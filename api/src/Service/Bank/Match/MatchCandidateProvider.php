@@ -55,6 +55,12 @@ final class MatchCandidateProvider
             if (!$incoming && \MyInvoice\Service\Bank\Card\CardPaymentCandidates::isOtherCard($txCard, $row['card_last4'] ?? null)) {
                 continue;
             }
+            // Platba neuhrazené zálohy se nenavrhuje na konečnou fakturu, která ji vyúčtovává.
+            if (!$incoming && !empty($row['advance_purchase_invoice_id'])
+                && (new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db))
+                    ->purchaseViolation($supplierId, (int) $row['id'], $amount) !== null) {
+                continue;
+            }
             $candidate = $this->singleCandidate($tx, $row, $amount, $currency, $posted, $accountMap, $incoming);
             if ($candidate !== null) $base[] = $candidate;
         }
@@ -108,7 +114,8 @@ final class MatchCandidateProvider
                     p.amount_to_pay,
                     (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
-                    p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4
+                    p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4,
+                    p.advance_purchase_invoice_id
                FROM purchase_invoices p
                JOIN currencies cur ON cur.id = p.currency_id
                JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id

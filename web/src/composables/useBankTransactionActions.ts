@@ -455,8 +455,21 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     const supplierId = matchSupplier.currentSupplierId
     matchError.value = ''
     try {
-      const reference = c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id }
-      const r = await (fromDocument ? bankApi.matchDocument(txId, reference) : bankApi.matchManual(txId, reference))
+      const reference: { invoiceId?: number; purchaseInvoiceId?: number; forceAdvanceFinal?: boolean } =
+        c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id }
+      const send = () => (fromDocument ? bankApi.matchDocument(txId, reference) : bankApi.matchManual(txId, reference))
+      let r: Awaited<ReturnType<typeof send>>
+      try {
+        r = await send()
+      } catch (e: any) {
+        // Platba neuhrazené zálohy na konečnou fakturu: server ji odmítne a radí zálohu.
+        // Jen vědomé potvrzení (opravdu doplatek faktury) párování provede.
+        const err = e?.response?.data?.error
+        if (err?.code !== 'advance_payment_belongs_to_advance'
+          || !confirm(`${err.message}\n\n${t('bank.advance_final_force_confirm')}`)) throw e
+        reference.forceAdvanceFinal = true
+        r = await send()
+      }
       if (supplierId !== matchSupplier.currentSupplierId) return true
       if (matchingTx.value === txId) { detailReturnTarget.value = null; dismissMatch() }
       toastPosting(r.posting)

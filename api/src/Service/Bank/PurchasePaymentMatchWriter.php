@@ -32,7 +32,13 @@ final class PurchasePaymentMatchWriter
         string $matchType,
         ?int $confidence = null,
         ?int $userId = null,
+        ?AdvanceFinalMatchGuard $advanceGuard = null,
     ): void {
+        // Platba zálohy nepatří na konečnou fakturu ({@see AdvanceFinalMatchGuard}). Volající
+        // bez strážce je vědomé obejití (force) nebo oprava dat, která párování přesouvá
+        // NA zálohu.
+        $advanceGuard?->assertPurchaseAllowed($supplierId, $purchaseInvoiceId, $amount);
+
         $existing = $pdo->prepare(
             'SELECT id, match_type FROM payment_matches
               WHERE supplier_id = ? AND bank_transaction_id = ? AND purchase_invoice_id = ?

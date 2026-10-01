@@ -280,16 +280,25 @@ final class MatchSuggestionService
             $dup = $this->db->pdo()->prepare('SELECT id FROM payment_matches WHERE bank_transaction_id = ? AND purchase_invoice_id = ?');
             $dup->execute([(int) $tx['id'], $id]);
             if ($dup->fetchColumn() === false) {
+                try {
+                    \MyInvoice\Service\Bank\PurchasePaymentMatchWriter::record(
+                        $this->db->pdo(),
+                        $supplierId,
+                        (int) $tx['id'],
+                        $id,
+                        abs((float) $tx['amount']),
+                        $manual ? 'manual' : 'auto',
+                        $manual ? null : (int) round((float) $candidate['score'] * 100),
+                        $userId ?: null,
+                        new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db),
+                    );
+                } catch (\MyInvoice\Service\Bank\AdvanceFinalMatchException $e) {
+                    throw new MatchSuggestionException(\MyInvoice\Service\Bank\AdvanceFinalMatchGuard::CODE, $e->getMessage(), 409);
+                }
                 if ((string) $purchase['status'] !== 'paid') {
                     $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
                         ->execute([$postedAt, $id, $supplierId]);
                 }
-                $this->db->pdo()->prepare(
-                    'INSERT INTO payment_matches
-                        (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence, matched_by_user_id)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)'
-                )->execute([$supplierId, $tx['id'], $id, abs((float) $tx['amount']), $manual ? 'manual' : 'auto',
-                    $manual ? null : (int) round((float) $candidate['score'] * 100), $userId ?: null]);
             }
             $this->markTransaction((int) $tx['id'], null, $manual ? 'manual' : 'auto_exact', $userId);
             $this->recountStatement((int) $tx['statement_id']);
