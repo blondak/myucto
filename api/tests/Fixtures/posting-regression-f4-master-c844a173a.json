@@ -1,0 +1,151 @@
+{
+    "other_receivable": [
+        {
+            "account": "315",
+            "side": "debit",
+            "amount": "1000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "602",
+            "side": "credit",
+            "amount": "600.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "648",
+            "side": "credit",
+            "amount": "400.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "other_payable": [
+        {
+            "account": "325",
+            "side": "credit",
+            "amount": "1200.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "518",
+            "side": "debit",
+            "amount": "1200.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "offset": [
+        {
+            "account": "321",
+            "side": "debit",
+            "amount": "6000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "311",
+            "side": "credit",
+            "amount": "6000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "settlement": [
+        {
+            "account": "355",
+            "side": "debit",
+            "amount": "2420.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "311",
+            "side": "credit",
+            "amount": "2420.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "asset_in_use": [
+        {
+            "account": "022",
+            "side": "debit",
+            "amount": "120000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "042",
+            "side": "credit",
+            "amount": "120000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "depreciation": [
+        {
+            "account": "551",
+            "side": "debit",
+            "amount": "22000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "credit",
+            "amount": "22000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "depreciation_disposal_year": [
+        {
+            "account": "551",
+            "side": "debit",
+            "amount": "6000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "credit",
+            "amount": "6000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "asset_disposal": [
+        {
+            "account": "551",
+            "side": "debit",
+            "amount": "92000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "credit",
+            "amount": "92000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "debit",
+            "amount": "120000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "022",
+            "side": "credit",
+            "amount": "120000.00",
+            "dims": [],
+            "splits": []
+        }
+    ]
+}
