@@ -929,7 +929,8 @@
         "1945_activity_log_user_without_fk.sql",
         "1946_bank_notice_ignore_transfer.sql",
         "1947_bank_transaction_processing_state.sql",
-        "1948_payroll_dimensions_company_link_and_split.sql"
+        "1948_payroll_dimensions_company_link_and_split.sql",
+        "1949_product_posting_defaults.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4041,6 +4042,8 @@
                 "dimension_type_id": "bigint(20) unsigned NOT NULL",
                 "dimension_value_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "product_category_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "product_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
@@ -4048,17 +4051,21 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_dimdef_supplier": "BTREE (supplier_id)",
                 "idx_dimdef_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "uq_dimdef_category_type": "UNIQUE BTREE (product_category_id, dimension_type_id)",
                 "uq_dimdef_client_type": "UNIQUE BTREE (client_id, dimension_type_id)",
+                "uq_dimdef_product_type": "UNIQUE BTREE (product_id, dimension_type_id)",
                 "uq_dimdef_project_type": "UNIQUE BTREE (project_id, dimension_type_id)"
             },
             "foreign_keys": {
+                "fk_dimdef_category": "(product_category_id) -> stock_categories (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_client": "(client_id) -> clients (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_dimdef_product": "(product_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_dimdef_owner": "`client_id` is null <> (`project_id` is null)"
+                "chk_dimdef_owner": "(`client_id` is not null) + (`project_id` is not null) + (`product_id` is not null) + (`product_category_id` is not null) = 1"
             }
         },
         "dimension_types": {
@@ -4149,7 +4156,7 @@
                 "dimension_type_id": "bigint(20) unsigned NOT NULL",
                 "dimension_value_id": "bigint(20) unsigned NOT NULL",
                 "doc_id": "bigint(20) unsigned NOT NULL",
-                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template') NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL",
                 "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "share": "decimal(12,10) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -4175,7 +4182,7 @@
                 "dimension_type_id": "bigint(20) unsigned NOT NULL",
                 "dimension_value_id": "bigint(20) unsigned NOT NULL",
                 "doc_id": "bigint(20) unsigned NOT NULL",
-                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template') NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL",
                 "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
@@ -5811,6 +5818,7 @@
                 "oss_taxable_amount_return": "decimal(14,2) NULL DEFAULT NULL",
                 "oss_vat_amount_return": "decimal(14,2) NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
+                "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "small_asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "total_vat": "decimal(12,2) NOT NULL",
@@ -18024,6 +18032,7 @@
                 "oss_supply_type": "enum('goods','services') NULL DEFAULT NULL",
                 "price_list_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
+                "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "template_id": "bigint(20) unsigned NOT NULL",
                 "unit": "varchar(20) NOT NULL DEFAULT 'ks'",
@@ -19260,11 +19269,13 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "depth": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "display_order": "int(11) NOT NULL DEFAULT 0",
+                "expense_account_code": "varchar(10) NULL DEFAULT NULL",
                 "export_eshop": "tinyint(1) NOT NULL DEFAULT 1",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "name": "varchar(150) NOT NULL",
                 "parent_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "path": "varchar(255) NOT NULL DEFAULT '/'",
+                "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
@@ -19912,6 +19923,7 @@
                 "default_sale_unit": "varchar(20) NULL DEFAULT NULL",
                 "delivery_days": "smallint(5) unsigned NULL DEFAULT NULL",
                 "ean": "varchar(20) NULL DEFAULT NULL",
+                "expense_account_code": "varchar(10) NULL DEFAULT NULL",
                 "export_eshop": "tinyint(1) NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "intrastat_cn8_code": "char(8) NULL DEFAULT NULL",
@@ -19929,6 +19941,7 @@
                 "note": "text NULL DEFAULT NULL",
                 "pricing_base": "enum('weighted_avg','last_purchase','manual') NOT NULL DEFAULT 'weighted_avg'",
                 "retired_at": "timestamp NULL DEFAULT NULL",
+                "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "sale_price_without_vat": "decimal(12,2) NULL DEFAULT NULL",
                 "sku": "varchar(50) NOT NULL",

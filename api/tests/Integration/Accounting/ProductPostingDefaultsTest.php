@@ -21,7 +21,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Produkt a kategorie jako zdroj účtu a dimenzí (Účtování podle dimenzí, F1, migrace 1948).
+ * Produkt a kategorie jako zdroj účtu a dimenzí (Účtování podle dimenzí, F1, migrace 1949).
  *
  *   • bez nastavení se účtuje bajtově stejně jako dřív (regrese),
  *   • účet: majetek > účet položky > produkt > kategorie > předkontace dokladu,
