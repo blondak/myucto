@@ -1,5 +1,5 @@
 import { api } from './client'
-import { appendStepUpProof } from './epoSubmissions'
+import { appendStepUpProof, stepUpProofBody } from './epoSubmissions'
 import type { EpoSigningCredential, EpoStepUpProof } from './epoSubmissions'
 
 /** Typy zpráv pro kopii dodavateli — zrcadlí RecipientResolver::TYPE_*. */
@@ -833,6 +833,26 @@ export interface CertificateVaultUploadPayload {
   /** Heslo k PFX/P12, ne heslo do aplikace. */
   password: string
   proof: EpoStepUpProof
+  /** Povolit certifikát i v dalších firmách; cílové firmy určuje server. */
+  shareWithOtherSuppliers?: boolean
+  /** Jen do firem, kde uživatel ještě nemá platný certifikát. */
+  shareOnlyWithoutValid?: boolean
+}
+
+export type CertificateVaultSharingStatus =
+  | 'enabled'
+  | 'already_enabled'
+  | 'skipped_has_valid'
+  | 'skipped_no_permission'
+
+export interface CertificateVaultSharingResult {
+  supplier_id: number
+  name: string
+  status: CertificateVaultSharingStatus
+}
+
+export type CertificateVaultUploadResult = CertificateVaultItem & {
+  supplier_sharing?: CertificateVaultSharingResult[]
 }
 
 export type SigningCredentialPassphrasePolicy = 'encrypted_store' | 'passphrase_file' | 'prompt_on_use'
@@ -1126,10 +1146,19 @@ export const settingsApi = {
     data.append('label', payload.label)
     data.append('password', payload.password)
     appendStepUpProof(data, payload.proof)
-    return api.post<CertificateVaultItem>('/settings/certificates', data, {
+    if (payload.shareWithOtherSuppliers) {
+      data.append('share_with_other_suppliers', '1')
+      data.append('share_only_without_valid', payload.shareOnlyWithoutValid ? '1' : '0')
+    }
+    return api.post<CertificateVaultUploadResult>('/settings/certificates', data, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
+  shareCertificateWithOtherSuppliers: (id: number, onlyWithoutValid: boolean, proof: EpoStepUpProof) =>
+    api.post<{ supplier_sharing: CertificateVaultSharingResult[] }>(`/settings/certificates/${id}/share`, {
+      share_only_without_valid: onlyWithoutValid,
+      ...stepUpProofBody(proof),
+    }).then(r => r.data.supplier_sharing),
   getSigningSettings: () =>
     api.get<SigningSettings>('/settings/signing').then(r => r.data),
   updateSigningSettings: (payload: Pick<SigningSettings, 'accountant_profiles_enabled'>) =>

@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import {
   settingsApi,
   type CertificateVaultItem,
+  type CertificateVaultSharingResult,
+  type CertificateVaultSharingStatus,
   type PdfSignatureOutputSetting,
   type PdfSignatureTestResult,
   type PdfSignatureUserDefault,
@@ -126,6 +128,39 @@ const certificateStepTotp = ref('')
 const certificateStepPasskeyToken = ref('')
 const certificatePasskeyBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
+/**
+ * Certifikát se neukládá do každé firmy zvlášť: trezor je osobní a firma
+ * dostává jen povolení. „Uložit i do dalších firem" ho proto povolí ve všech
+ * firmách, kde má uživatel stejné oprávnění; výběr firem dělá server.
+ */
+const certificateShareWithOthers = ref(false)
+const certificateShareOnlyWithoutValid = ref(false)
+const certificateSharingResults = ref<CertificateVaultSharingResult[] | null>(null)
+const certificateSharingId = ref<number | null>(null)
+
+const sharingStatusOrder: CertificateVaultSharingStatus[] = [
+  'enabled',
+  'already_enabled',
+  'skipped_has_valid',
+  'skipped_no_permission',
+]
+
+const certificateSharingSummary = computed(() =>
+  sharingStatusOrder
+    .map(status => ({
+      status,
+      count: (certificateSharingResults.value ?? []).filter(row => row.status === status).length,
+    }))
+    .filter(item => item.count > 0),
+)
+
+function sharingStatusClass(status: CertificateVaultSharingStatus): string {
+  switch (status) {
+    case 'enabled': return 'border-success-500/30 bg-success-50 text-success-700'
+    case 'skipped_no_permission': return 'border-warning-500/30 bg-warning-50 text-warning-800'
+    default: return 'border-neutral-200 bg-neutral-100 text-neutral-600'
+  }
+}
 
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true
@@ -444,28 +479,59 @@ async function uploadCertificate() {
     return
   }
   certificateBusy.value = true
+  certificateSharingResults.value = null
   try {
-    await settingsApi.uploadCertificate({
+    const result = await settingsApi.uploadCertificate({
       file: certificateFile.value,
       label: certificateLabel.value.trim(),
       password: certificatePassword.value,
-      proof: {
-        password: certificateStepPassword.value || undefined,
-        totp_code: certificateStepTotp.value.trim() || undefined,
-        step_up_token: certificateStepPasskeyToken.value || undefined,
-      },
+      proof: certificateStepUpProof(),
+      shareWithOtherSuppliers: certificateShareWithOthers.value,
+      shareOnlyWithoutValid: certificateShareWithOthers.value && certificateShareOnlyWithoutValid.value,
     })
     certificateFile.value = null
     certificateLabel.value = ''
     certificatePassword.value = ''
     if (certificateFileInput.value) certificateFileInput.value.value = ''
     resetCertificateStepUp()
+    if (result.supplier_sharing) certificateSharingResults.value = result.supplier_sharing
     await Promise.all([loadCertificates(), loadPersonalCertificates()])
     toast.success(t('settings.certificate_vault_uploaded'))
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('common.error')))
   } finally {
     certificateBusy.value = false
+  }
+}
+
+function certificateStepUpProof() {
+  return {
+    password: certificateStepPassword.value || undefined,
+    totp_code: certificateStepTotp.value.trim() || undefined,
+    step_up_token: certificateStepPasskeyToken.value || undefined,
+  }
+}
+
+async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultItem) {
+  if (certificateSharingId.value !== null || certificateBusy.value) return
+  if (certificateStepUpMissing.value !== '') {
+    toast.error(certificateStepUpMissing.value)
+    return
+  }
+  certificateSharingId.value = certificate.id
+  certificateSharingResults.value = null
+  try {
+    certificateSharingResults.value = await settingsApi.shareCertificateWithOtherSuppliers(
+      certificate.id,
+      certificateShareOnlyWithoutValid.value,
+      certificateStepUpProof(),
+    )
+    resetCertificateStepUp()
+    toast.success(t('settings.certificate_vault_share_done'))
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('common.error')))
+  } finally {
+    certificateSharingId.value = null
   }
 }
 
@@ -1005,6 +1071,13 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 <span v-if="certificate.linked_profiles_count > 0" class="rounded-full border border-primary-500/30 bg-primary-50 px-2 py-0.5 text-[11px] text-primary-700">
                   {{ t('settings.certificate_vault_linked_profiles', { count: certificate.linked_profiles_count }) }}
                 </span>
+                <button v-if="certificate.valid_now" type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']"
+                  :data-testid="`certificate-share-${certificate.id}`"
+                  :disabled="certificateSharingId !== null || certificateBusy"
+                  @click="shareCertificateWithOtherSuppliers(certificate)">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
+                  {{ certificateSharingId === certificate.id ? t('common.saving') : t('settings.certificate_vault_share_existing') }}
+                </button>
               </div>
             </div>
           </div>
@@ -1043,14 +1116,58 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
           </div>
+          <div class="mt-3 space-y-2">
+            <label class="flex items-start gap-2 text-sm">
+              <input v-model="certificateShareWithOthers" type="checkbox" data-testid="certificate-share-others"
+                class="mt-0.5 h-4 w-4 accent-primary-600" />
+              <span>
+                <span class="block text-neutral-700">{{ t('settings.certificate_vault_share_others') }}</span>
+                <span class="block text-xs text-neutral-500">{{ t('settings.certificate_vault_share_others_hint') }}</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 text-sm pl-6">
+              <input v-model="certificateShareOnlyWithoutValid" type="checkbox" data-testid="certificate-share-only-without-valid"
+                class="mt-0.5 h-4 w-4 accent-primary-600" />
+              <span>
+                <span class="block text-neutral-700">{{ t('settings.certificate_vault_share_only_without_valid') }}</span>
+                <span class="block text-xs text-neutral-500">{{ t('settings.certificate_vault_share_only_without_valid_hint') }}</span>
+              </span>
+            </label>
+          </div>
           <p v-if="certificateStepUpMissing" class="mt-2 text-xs text-warning-700">{{ certificateStepUpMissing }}</p>
         </div>
 
         <div class="mt-4 flex flex-wrap justify-end">
-          <button type="button" :class="btnFilled('primary')" :disabled="!canUploadCertificate" @click="uploadCertificate">
+          <button type="button" :class="[btnFilled('primary'), 'whitespace-nowrap']" :disabled="!canUploadCertificate"
+            data-testid="certificate-upload" @click="uploadCertificate">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ certificateBusy ? t('common.saving') : t('settings.certificate_vault_store') }}
           </button>
+        </div>
+
+        <div v-if="certificateSharingResults !== null" class="mt-4 rounded-lg border border-neutral-200 p-4"
+          data-testid="certificate-sharing-results">
+          <h4 class="text-xs font-medium uppercase tracking-wide text-neutral-500">{{ t('settings.certificate_vault_share_result_title') }}</h4>
+          <p v-if="certificateSharingResults.length === 0" class="mt-2 text-xs text-neutral-500">
+            {{ t('settings.certificate_vault_share_result_none') }}
+          </p>
+          <template v-else>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span v-for="item in certificateSharingSummary" :key="item.status"
+                class="rounded-full border px-2 py-0.5 text-[11px]" :class="sharingStatusClass(item.status)">
+                {{ t(`settings.certificate_vault_share_status_${item.status}`) }}: {{ item.count }}
+              </span>
+            </div>
+            <ul class="mt-3 divide-y divide-neutral-100 text-sm">
+              <li v-for="row in certificateSharingResults" :key="row.supplier_id"
+                class="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <span class="min-w-0 break-words text-neutral-700">{{ row.name }}</span>
+                <span class="rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap" :class="sharingStatusClass(row.status)">
+                  {{ t(`settings.certificate_vault_share_status_${row.status}`) }}
+                </span>
+              </li>
+            </ul>
+          </template>
         </div>
       </section>
 

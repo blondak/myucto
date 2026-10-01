@@ -73,6 +73,19 @@ final class CertificateVaultActionTest extends TestCase
         );
     }
 
+    /** Povolení certifikátu v dalších firmách má stejnou bránu jako jeho nahrání. */
+    public function testSharingWithOtherCompaniesRefusesTokenAuthentication(): void
+    {
+        $response = $this->action->shareWithOtherSuppliers(
+            $this->request('admin', 'bearer'),
+            new Response(),
+            ['credentialId' => '1'],
+        );
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('session_required', (string) $response->getBody());
+    }
+
     public function testUnauthenticatedRequestIsRefused(): void
     {
         $request = (new ServerRequestFactory())

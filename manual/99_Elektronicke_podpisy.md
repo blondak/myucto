@@ -147,6 +147,34 @@ adresu používanou jako odesílatel nebo aby ho příjemcův klient uměl při�
 odesílateli. Aplikace podpis vytvoří, ale důvěryhodnost a shoda identity se
 vyhodnocuje až v e-mailovém klientovi příjemce.
 
+### 99.4.3 Trezor certifikátů a další firmy
+
+Sekce **Trezor certifikátů** na stránce **Systém -> Elektronické podpisy** je
+jediné místo, kam se osobní certifikát P12/PFX nahrává. Certifikát patří
+uživateli, ne firmě: v trezoru je uložený jednou a šifrovaně, firma k němu
+dostává jen povolení. Odtud si ho berou podpisové profily, podání EPO i mzdová
+podání.
+
+Při nahrání lze zaškrtnout dvě volby:
+
+| Volba | Co udělá |
+|---|---|
+| **Uložit i do dalších firem** | Certifikát se povolí i ve všech dalších firmách, kde jsi členem a smíš spravovat elektronické podpisy. Výchozí stav je vypnuto. |
+| **Jen do firem bez platného certifikátu** | Přeskočí firmy, kde už máš povolený jiný platný certifikát. |
+
+U každého platného certifikátu v trezoru je navíc tlačítko **Povolit v dalších
+firmách**, které udělá totéž pro certifikát nahraný dříve. Obě akce vyžadují
+stejné ověření jako nahrání certifikátu.
+
+Po dokončení se zobrazí přehled po firmách: **Povoleno**, **Už bylo povoleno**,
+**Přeskočeno, má platný certifikát** a **Přeskočeno, chybí oprávnění**. Firmy,
+kde nejsi členem, se akce nedotkne. Každé povolení se zapíše do auditního logu
+dotčené firmy jako `certificate_vault_supplier_enabled`.
+
+Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané firmě
+skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí
+v příslušném nastavení té firmy.
+
 ## 99.5 Politika hesla k certifikátu
 
 | Politika | Kdy použít | Chování |

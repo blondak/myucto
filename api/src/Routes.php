@@ -3251,6 +3251,7 @@ final class Routes
         // i mzdová podání. EPO endpointy zůstávají a míří do téhož trezoru.
         $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
         $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
+        $app->post   ('/api/settings/certificates/{credentialId:[0-9]+}/share', [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'shareWithOtherSuppliers']);
         // Datová schránka jako průřezový kanál podání (DPH, KH, SH, DPPO,
         // přehledy ZP…). Systémový certifikát je vždy nastavení aktuální firmy.
         $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);

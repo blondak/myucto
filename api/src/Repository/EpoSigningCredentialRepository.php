@@ -204,6 +204,33 @@ final class EpoSigningCredentialRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Má vlastník pro firmu povolený JINÝ certifikát, který právě platí?
+     *
+     * Certifikáty jsou osobní (`owner_user_id`), takže „firma už má platný
+     * certifikát" se tu ptá na trezor téhož uživatele: cizí certifikát mu
+     * podpis stejně neodemkne ({@see findUsable()}).
+     */
+    public function hasOtherValidEnabledForSupplier(
+        int $ownerUserId,
+        int $supplierId,
+        int $exceptCredentialId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM epo_signing_credentials c
+               JOIN epo_signing_credential_suppliers cs
+                 ON cs.credential_id = c.id AND cs.supplier_id = ?
+              WHERE c.owner_user_id = ? AND c.id <> ? AND c.deleted_at IS NULL
+                AND c.valid_from <= ? AND c.valid_to >= ?
+              LIMIT 1'
+        );
+        // Čas z PHP, ne NOW(): platnost se ukládá i vyhodnocuje (valid_now) v časové zóně PHP.
+        $now = date('Y-m-d H:i:s');
+        $stmt->execute([$supplierId, $ownerUserId, $exceptCredentialId, $now, $now]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return array<string,mixed>|null */
     public function findUsable(int $credentialId, int $ownerUserId, int $supplierId): ?array
     {

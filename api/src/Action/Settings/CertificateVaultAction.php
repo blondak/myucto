@@ -13,6 +13,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Epo\EpoSigningCredentialService;
 use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Signing\CertificateVaultSupplierSharing;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -41,6 +43,8 @@ final class CertificateVaultAction
         private readonly EpoSigningCredentialService $credentials,
         private readonly EpoStepUpService $stepUp,
         private readonly ActivityLogger $logger,
+        private readonly CertificateVaultSupplierSharing $sharing,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -103,7 +107,68 @@ final class CertificateVaultAction
             $supplierId,
         );
 
+        if ($this->flag($body, 'share_with_other_suppliers')) {
+            $result['supplier_sharing'] = $this->sharing->shareWithOtherSuppliers(
+                $request,
+                (int) ($result['id'] ?? 0),
+                $userId,
+                $supplierId,
+                $this->flag($body, 'share_only_without_valid'),
+                $this->clientIp($request),
+            ) ?? [];
+        }
+
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Povolí už uložený certifikát i v dalších firmách uživatele, typicky
+     * certifikát nahraný dřív jen v jedné firmě. Cílové firmy určuje server
+     * ({@see CertificateVaultSupplierSharing}); klient posílá jen volbu
+     * „jen do firem bez platného certifikátu".
+     */
+    public function shareWithOtherSuppliers(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $userId = $this->userId($request);
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $this->stepUp->verify($request, $userId, $body, 'credential_supplier_access');
+        } catch (EpoSubmissionException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                $exception->httpStatus,
+            );
+        }
+        $results = $this->sharing->shareWithOtherSuppliers(
+            $request,
+            (int) ($args['credentialId'] ?? 0),
+            $userId,
+            $supplierId,
+            $this->flag($body, 'share_only_without_valid'),
+            $this->clientIp($request),
+        );
+        if ($results === null) {
+            return Json::error($response, 'credential_not_found', 'Certifikát nebyl nalezen.', 404);
+        }
+
+        return Json::ok($response, ['supplier_sharing' => $results]);
+    }
+
+    /** @param array<string,mixed> $body */
+    private function flag(array $body, string $key): bool
+    {
+        return filter_var($body[$key] ?? false, FILTER_VALIDATE_BOOL);
+    }
+
+    private function clientIp(Request $request): ?string
+    {
+        return $this->ipMatcher->clientIpFromRequest($request->getServerParams());
     }
 
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
