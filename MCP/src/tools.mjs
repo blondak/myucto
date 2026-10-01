@@ -30,6 +30,9 @@
 
 import { DIMENSION_TOOLS, DIMENSION_FILTER, dimensionQuery } from './dimension-tools.mjs';
 import { AUDIT_TOOLS } from './audit-tools.mjs';
+import {
+  INVOICE_TOOLS, PAYMENT_SCHEDULE_INPUT, withPaymentSchedule, checkCreatedSchedule,
+} from './invoice-tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -79,7 +82,7 @@ const CONFIRM = bool(
  * @param {string} action co by se stalo, např. „Smazat se má kategorie"
  * @param {string} label  konkrétní záznam, ať uživatel nevidí jen číslo
  */
-function requireConfirm(a, action, label) {
+export function requireConfirm(a, action, label) {
   if (a.confirm === true) return;
   throw new Error(
     `NEPROVEDENO — chybí potvrzení. ${action}: ${label}.\n`
@@ -97,7 +100,7 @@ function requireConfirm(a, action, label) {
  *
  * @param {(row: any) => string} label krátký popis záznamu do hlášky
  */
-async function confirmed(c, a, tool, { path, action, label }) {
+export async function confirmed(c, a, tool, { path, action, label }) {
   const current = await c.get(path, null, tool);
   requireConfirm(a, action, label(current));
   return current;
@@ -118,12 +121,12 @@ const nameOf = (row, fallbackId) => {
  * takže posílat `undefined` klíče by znamenalo rozdíl mezi „neměň" a „vynuluj"
  * setřít — a model, který chce upravit jen název, by tiše smazal EAN.
  */
-const changed = (a, keys) => Object.fromEntries(
+export const changed = (a, keys) => Object.fromEntries(
   keys.filter((k) => a[k] !== undefined).map((k) => [k, a[k]]),
 );
 
 /** Složí úplný PUT payload: zadané hodnoty mají přednost, ostatní se převezmou. */
-const merged = (current, a, keys) => Object.fromEntries(
+export const merged = (current, a, keys) => Object.fromEntries(
   keys
     .filter((k) => a[k] !== undefined || current?.[k] !== undefined)
     .map((k) => [k, a[k] !== undefined ? a[k] : current[k]]),
@@ -402,10 +405,10 @@ const INVOICE_ITEM_FIELDS = [
 const isDiscountRow = (item) => (item?.item_kind ?? 'standard') === 'discount';
 
 /** Položky dokladu bez systémových slevových řádků, v pořadí jako na dokladu. */
-const invoiceLines = (invoice) => (invoice?.items ?? []).filter((item) => !isDiscountRow(item));
+export const invoiceLines = (invoice) => (invoice?.items ?? []).filter((item) => !isDiscountRow(item));
 
 /** Načte doklad a ověří, že je to koncept; vystavený se opravuje jinak. */
-async function loadDraftInvoice(c, invoiceId, tool) {
+export async function loadDraftInvoice(c, invoiceId, tool) {
   const invoice = await c.get(`/invoices/${invoiceId}`, null, tool);
   if (invoice?.status !== 'draft') {
     throw new Error(
@@ -424,7 +427,7 @@ async function loadDraftInvoice(c, invoiceId, tool) {
  * OSS, pořadí). `rederive` je zahodí jen tam, kde by po změně sazby nebo daňového
  * kontextu hlavičky lhala; server je pak dopočítá stejně jako u nové položky.
  */
-function lineForPut(item, { rederive = false } = {}) {
+export function lineForPut(item, { rederive = false } = {}) {
   const out = {};
   for (const key of INVOICE_ITEM_FIELDS) {
     if (item[key] !== undefined) out[key] = item[key];
@@ -461,7 +464,7 @@ function pickInvoiceLine(lines, a) {
  * a celý seznam položek. Měna se dá změnit kódem; `currency_id` se pak nepošle
  * a server ho dohledá sám.
  */
-function draftPayload(invoice, changes, lines) {
+export function draftPayload(invoice, changes, lines) {
   const header = merged(invoice, changes, INVOICE_HEADER_FIELDS);
   if (changes.currency !== undefined) {
     delete header.currency_id;
@@ -472,7 +475,7 @@ function draftPayload(invoice, changes, lines) {
 }
 
 /** Výsledek úpravy: co se změnilo a doklad tak, jak ho po uložení vrátil server. */
-const draftResult = (invoiceId, summary, saved) => ({ invoice_id: invoiceId, ...summary, invoice: saved });
+export const draftResult = (invoiceId, summary, saved) => ({ invoice_id: invoiceId, ...summary, invoice: saved });
 
 /** Název výkazu podle období dokladu — stejný tvar, jaký nabízí aplikace. */
 function defaultReportTitle(invoice) {
@@ -652,6 +655,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
 export const TOOLS = [
   ...DIMENSION_TOOLS,
   ...AUDIT_TOOLS,
+  ...INVOICE_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────
@@ -1405,7 +1409,10 @@ export const TOOLS = [
       + '(`issue_invoice`), takže je pořád možné koncept zkontrolovat nebo smazat.\n\n'
       + 'Před voláním si zjisti `client_id` (`search_clients`) a `vat_rate_id` '
       + '(`list_vat_rates`). Ceny položek se zadávají BEZ DPH, pokud nenastavíš '
-      + '`prices_include_vat`.',
+      + '`prices_include_vat`.\n\n'
+      + 'Splátkový nebo platební kalendář (§ 31 a § 31a ZDPH) je `invoice_type: "payment_calendar"` '
+      + 's rozpisem plateb v `payment_schedule`; součet rozpisu musí sedět na celkovou částku '
+      + 'dokladu, jinak ho nepůjde vystavit. Rozpis jde doplnit i později přes `set_invoice_payment_schedule`.',
     inputSchema: schema({
       client_id: int('ID odběratele.'),
       items: {
@@ -1423,8 +1430,9 @@ export const TOOLS = [
         }, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
       },
       invoice_type: str('Typ dokladu, výchozí "invoice".', {
-        enum: ['invoice', 'proforma', 'credit_note', 'cancellation'],
+        enum: ['invoice', 'proforma', 'credit_note', 'cancellation', 'payment_calendar'],
       }),
+      payment_schedule: PAYMENT_SCHEDULE_INPUT,
       project_id: int('Zakázka; musí patřit odběrateli.'),
       issue_date: date('Datum vystavení (výchozí dnes).'),
       due_date: date('Datum splatnosti (výchozí podle nastavení odběratele).'),
@@ -1439,7 +1447,10 @@ export const TOOLS = [
       varsymbol: str('Ruční variabilní symbol; jinak se přidělí automaticky při vystavení.'),
     }, ['client_id', 'items']),
     write: true,
-    run: (c, a, tool) => c.post('/invoices', a, tool),
+    run: async (c, a, tool) => {
+      const body = withPaymentSchedule(a);
+      return checkCreatedSchedule(body, await c.post('/invoices', body, tool));
+    },
   },
   {
     name: 'issue_invoice',
@@ -1487,7 +1498,9 @@ export const TOOLS = [
       varsymbol: str('Ruční variabilní symbol; prázdný text = přidělí se při vystavení.'),
       payment_variable_symbol: str('Variabilní symbol pro platbu, liší-li se od čísla dokladu.'),
       supplier_order_number: str('Číslo objednávky odběratele.'),
-      invoice_type: str('Typ konceptu.', { enum: ['invoice', 'proforma', 'credit_note'] }),
+      invoice_type: str('Typ konceptu. Rozpis plateb kalendáře nastaví `set_invoice_payment_schedule`.', {
+        enum: ['invoice', 'proforma', 'credit_note', 'payment_calendar'],
+      }),
     }),
     write: true,
     run: async (c, a, tool) => {

@@ -32,7 +32,8 @@ Podstatné vlastnosti:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), vystavování, odesílání, evidence úhrad, upomínky |
+| Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky), vystavování, odesílání a příjemci, storno a dobropis, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, ISDOC, upomínky jednotlivě i hromadně |
+| Pravidelná fakturace | čtení šablon a vygenerovaných faktur, založení, úprava, smazání, pozastavení, obnovení, přeplánování a ruční vygenerování faktury |
 | Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** — založení, úprava, archivace, rozpočty a ziskovost |
@@ -341,6 +342,28 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 
 Podrobnosti v [§ 106.7.4](#10674-uprava-konceptu-faktury).
 
+**Další práce s vydanými fakturami** *(token čtení a zápis)*
+
+- „Fakturu 2026042 jsme vystavili omylem, stornuj ji.“
+- „K faktuře 2026042 připrav dobropis, zákazník vrátil zboží.“
+- „Udělej kopii zářijové faktury pro ACME s datem 1. října.“
+- „Záloha pro ACME je zaplacená, připrav finální fakturu.“
+- „Kolik by byl úrok z prodlení u faktury 2026031? Pokud víc než 100 Kč, připrav penalizační fakturu.“
+- „Zaeviduj k faktuře 2026042 hotovostní platbu 5 000 Kč z dnešního dne.“
+- „Z přiložené smlouvy udělej splátkový kalendář na nájem a nastav rozpis plateb.“
+- „Pošli upomínky ke všem fakturám, které jsou víc než 30 dní po splatnosti.“
+
+Podrobnosti v [§ 106.7.5](#10675-dalsi-prace-s-vydanymi-fakturami).
+
+**Pravidelná fakturace** *(token čtení a zápis)*
+
+- „Založ pro ACME měsíční paušál 5 000 Kč za správu serveru, vždy k 1. dni v měsíci.“
+- „Zvyš paušál pro ACME od příští faktury na 5 500 Kč.“
+- „Pozastav pravidelnou fakturaci pro ACME, dokud se nedohodneme.“
+- „Vygeneruj fakturu z paušálu pro ACME hned, jen jako koncept.“
+
+Podrobnosti v [§ 106.7.6](#10676-pravidelna-fakturace).
+
 **Odběratelé**
 
 - „Založ klienta podle IČO 45274649.“
@@ -511,6 +534,69 @@ Platí přitom:
 V režimu jen pro čtení se tyto nástroje nenabízejí; vyžadují token
 s oprávněním čtení a zápis.
 
+### 106.7.5 Další práce s vydanými fakturami
+
+Kromě konceptu umí asistent s vydanými doklady totéž, co detail faktury v aplikaci:
+
+| Nástroj | Co dělá |
+|---|---|
+| `delete_invoice_draft` | smaže koncept; vystavený doklad odmítne |
+| `cancel_invoice` | interní storno, nebo koncept dobropisu se zápornými položkami |
+| `uncancel_invoice` | zruší interní storno omylem stornované faktury nebo zálohy |
+| `clone_invoice` | založí koncept jako kopii dokladu |
+| `create_final_invoice_from_proforma` | ze zaplacené zálohy založí koncept finální faktury s odečtenou zálohou |
+| `list_invoice_advance_candidates`, `list_proforma_final_candidates`, `link_invoice_advance`, `unlink_invoice_advance` | ruční propojení faktury se zálohou a jeho zrušení |
+| `preview_invoice_penalty`, `create_invoice_penalty` | výpočet úroku z prodlení a koncept penalizační faktury |
+| `add_invoice_payment`, `delete_invoice_payment`, `unmark_invoice_paid` | evidence částečné i celé úhrady, smazání úhrady, vrácení stavu zaplaceno |
+| `create_payment_tax_document` | koncept daňového dokladu k přijaté platbě zálohy |
+| `set_invoice_payment_schedule` | rozpis plateb platebního nebo splátkového kalendáře |
+| `get_invoice_isdoc` | ISDOC XML vystaveného dokladu jako text |
+| `get_invoice_recipients` | komu by se doklad nebo upomínka poslaly |
+| `send_invoice_reminders_bulk` | upomínky k více fakturám naráz, nejvýš 50 |
+
+Platí přitom:
+
+- **Storno a dobropis jsou daňové kroky.** Asistent je udělá jen na tvůj výslovný
+  pokyn a vždy až po potvrzení ([§ 106.9.4](#10694-potvrzovani-nevratnych-kroku)).
+  Interní storno je pro doklad, který odběratel nepřevzal: faktura dostane stav
+  stornovaná a vypadne z evidence DPH. Pokud doklad odběratel už má, patří k němu
+  dobropis. Ten vznikne jako koncept, zkontroluješ ho a vystavíš stejně jako fakturu.
+- Storno, zrušení storna ani nové doklady s datem v uzavřeném nebo uzamčeném období
+  (po podání přiznání k DPH) aplikace nepovolí.
+- Finální faktura ze zálohy, dobropis, kopie, penalizační faktura i daňový doklad
+  k platbě vznikají jako **koncepty**. Daňový dopad mají až po vystavení.
+- **Platební kalendář** je jeden daňový doklad s rozpisem plateb (§ 31 a § 31a ZDPH).
+  Rozpis může asistent sestavit z podkladu, který mu dáš (smlouva, tabulka splátek),
+  a před uložením ti ho ukáže. Součet splátek musí přesně sedět na celkovou částku
+  dokladu; když nesedí, asistent nic neuloží a řekne rozdíl.
+- Platby z bankovního výpisu se párují v bance. Ručně se evidují hotovost,
+  zápočet nebo platba, kterou banka nespárovala.
+- Upomínka i poděkování za platbu jsou e-maily odběrateli, posílají se jen na tvůj pokyn.
+- Zaúčtování dokladu asistent neumí, to zůstává v aplikaci.
+
+### 106.7.6 Pravidelná fakturace
+
+Šablony pravidelné fakturace asistent čte (`list_recurring_invoices`,
+`get_recurring_invoice`, `recurring_invoice_history`) a umí je i spravovat:
+
+| Nástroj | Co dělá |
+|---|---|
+| `create_recurring_invoice` | založí šablonu: odběratel, periodicita, den v měsíci, položky |
+| `update_recurring_invoice` | změní zadaná pole; ostatní i položky zůstanou, pokud položky nezadáš celé znovu |
+| `pause_recurring_invoice`, `resume_recurring_invoice` | pozastaví a obnoví generování |
+| `reschedule_recurring_invoice` | posune datum příští faktury |
+| `run_recurring_invoice_now` | vygeneruje fakturu hned, mimo rozvrh |
+| `delete_recurring_invoice` | smaže šablonu; už vygenerované faktury zůstanou |
+
+Platí přitom:
+
+- Bez automatického vystavení vznikají z šablony **koncepty** ke kontrole.
+  Automatické vystavení a odeslání e-mailem asistent zapne jen na výslovný pokyn.
+- Ruční vygenerování faktury vyžaduje potvrzení. U šablony s automatickým
+  vystavením se faktura rovnou vystaví (a případně odešle), proto asistent předem
+  řekne, co se stane. Na požádání vytvoří jen koncept.
+- Úprava šablony se týká až faktur, které z ní teprve vzniknou.
+
 ## 106.8 Zakázky, dokumenty a kniha jízd
 
 ### 106.8.1 Zakázky
@@ -632,7 +718,10 @@ jen čte.
 ### 106.9.4 Potvrzování nevratných kroků
 
 Mazání, storno dokladu, uzavření inventury a odebrání položky z konceptu
-faktury vyžadují **výslovné potvrzení**.
+faktury vyžadují **výslovné potvrzení**. U vydaných faktur a pravidelné fakturace
+jde o smazání konceptu, storno a dobropis, zrušení storna, smazání úhrady, vrácení
+stavu zaplaceno, hromadné upomínky, smazání šablony pravidelné fakturace
+a ruční vygenerování faktury ze šablony.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
 změna týkala:
 
