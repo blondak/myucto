@@ -77,14 +77,39 @@ Při zapnutých dimenzích mají výběr dimenzí:
 - přijaté a vydané faktury, v hlavičce i u každé položky,
 - pokladní doklady,
 - bankovní pohyby (v detailu výpisu i v seznamu všech pohybů, viz níže),
-- ruční zápisy, u každého řádku,
-- šablony ručních zápisů (dimenze se předvyplní do zápisu).
+- ruční zápisy (interní doklady), u každého řádku,
+- šablony ručních zápisů (dimenze se předvyplní do zápisu),
+- ostatní pohledávky a závazky, v editoru i na detailu,
+- karty dlouhodobého majetku, v editoru i na detailu (viz
+  [Majetek](#majetek)).
 
 Výběr hledá v kódu, názvu i v nadřízených hodnotách: hledání „Morava" najde
 i hodnotu Brno, která pod Moravou leží.
 
-Na detailu faktury a pokladního dokladu lze dimenze změnit i u zaúčtovaného
-dokladu.
+Na detailu faktury, pokladního dokladu, ostatní pohledávky nebo závazku a karty
+majetku lze dimenze změnit i u zaúčtovaného dokladu.
+
+### Ostatní pohledávky a závazky
+
+Dimenze hlavičky ostatní pohledávky nebo závazku se při zaúčtování zapíšou na
+všechny řádky zápisu, tedy na saldokontní účet i na protiúčty. Typ, který doklad
+nemá, doplní výchozí dimenze protistrany z adresáře. Na detailu dokladu lze
+v panelu **Dimenze** zadat i rozpad mezi více hodnot. Rozvrh opakování přenese
+dimenze zdrojového dokladu na každý vygenerovaný výskyt. Bankovní pohyb nebo
+pokladní doklad, který položku hradí, dostane její dimenze ve chvíli spárování
+úhrady; odpojení úhrady je zase odebere.
+
+### Zápočty
+
+- **Vzájemný zápočet** vlastní dimenze nemá. Řádek pohledávky dostane dimenze
+  započtených vydaných faktur, řádek závazku dimenze započtených přijatých faktur.
+  Liší-li se faktury jedné strany v hodnotě typu, nese řádek rozpad v poměru
+  započtených částek. Typ, který některé faktuře chybí, doplní výchozí dimenze
+  partnera zápočtu.
+- **Zápočet proti účtu** (úhrada faktury zápočtem proti zvolenému účtu) přebírá
+  dimenze vyrovnávané faktury, stejně jako její bankovní úhrada.
+
+Změna dimenzí faktury se promítne i do zápisů jejích zápočtů.
 
 ### Bankovní pohyby
 
@@ -146,6 +171,9 @@ Kde se použijí:
 - **Bankovní pohyb**: u spárovaného pohybu nabídne panel dimenzí hodnoty
   spárované faktury (její dimenze, případně výchozí dimenze její zakázky
   a klienta). Uloží se tlačítkem **Uložit dimenze**.
+- **Ostatní pohledávka a závazek**: po výběru protistrany z adresáře se
+  předvyplní prázdné dimenze hlavičky.
+- **Karta majetku**: předvyplní se dimenze přijaté faktury, ze které karta vznikla.
 
 Pravidla přednosti:
 
@@ -199,6 +227,28 @@ kterou už faktura má, nepřepíše.
 a to z aktivních hodnot firmy, které se ukazují na dokladech. Ostatní typy
 a interní údaje číselníku (odpovědná osoba, poznámky, vazby) portál nevidí.
 Náhrada originálu převezme středisko nahrazovaného podání.
+
+## Majetek
+
+Karta dlouhodobého majetku (hmotného i nehmotného) nese vlastní dimenze. Zadávají
+se v editoru karty v sekci **Dimenze** a na detailu karty v panelu **Dimenze**,
+kde lze nastavit i rozpad mezi více hodnot (například stroj sdílený dvěma
+středisky v poměru 60/40).
+
+Dimenze karty dostanou všechny zápisy majetku:
+
+- zařazení do užívání,
+- účetní odpisy, včetně odpisu roku vyřazení,
+- vyřazení (doodepsání zůstatkové ceny a vyřazení z evidence).
+
+Technické zhodnocení se do zápisů promítá přes odpisy a vyřazení, takže nese
+dimenze karty také. Karta bez vlastních dimenzí přebírá dimenze přijaté faktury,
+ze které vznikla.
+
+Změna dimenzí karty se promítne do všech už zaúčtovaných zápisů majetku, i v
+uzavřeném období, protože mění jen analytické členění. Drobný majetek dimenze
+nese z přijaté faktury nákupu; časové rozlišení drobného majetku v uzávěrce je
+souhrnný zápis za období a dimenze nemá.
 
 ## Produkt a kategorie
 
@@ -316,7 +366,8 @@ z jiného systému.
 Náklad, který patří víc střediskům nebo projektům, se dá rozdělit tlačítkem
 **Rozpad**:
 
-- na detailu dokladu v panelu Dimenze (rozpad celého dokladu),
+- na detailu dokladu v panelu Dimenze (rozpad celého dokladu, také u ostatní
+  pohledávky nebo závazku a u karty majetku),
 - v účetním deníku v úpravě dimenzí řádků (rozpad jednoho řádku).
 
 V rozpadu se vybere typ dimenze a hodnoty s procentem, u řádku deníku také
