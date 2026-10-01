@@ -386,4 +386,81 @@ final class GpcParserTest extends TestCase
         self::assertSame('ACME s.r.o.', $t['counterparty_name']);
         self::assertStringContainsString('Poznamka k platbe', (string) $t['description']);
     }
+
+    private static function header074(string $account, string $prevCents, string $currCents, string $debitCents, string $creditCents, string $number, string $date): string
+    {
+        return '074' . str_pad($account, 16, '0', STR_PAD_LEFT) . str_pad('TEST UCET', 20) . '      '
+            . str_pad($prevCents, 14, '0', STR_PAD_LEFT) . '+'
+            . str_pad($currCents, 14, '0', STR_PAD_LEFT) . '+'
+            . str_pad($debitCents, 14, '0', STR_PAD_LEFT) . '+'
+            . str_pad($creditCents, 14, '0', STR_PAD_LEFT) . '+'
+            . $number . $date;
+    }
+
+    private static function tx075(string $account, string $amountCents, string $code, string $date): string
+    {
+        return '075' . str_pad($account, 16, '0', STR_PAD_LEFT) . str_pad('', 16, '0')
+            . str_pad('1', 13, '0', STR_PAD_LEFT) . str_pad($amountCents, 12, '0', STR_PAD_LEFT) . $code
+            . str_pad('', 10, '0') . '00' . '0000' . '0000' . str_pad('', 10, '0') . '000000'
+            . str_pad('TEST', 20) . '00203' . $date;
+    }
+
+    /**
+     * Soubor za období složený z denních bloků (074 + pohyby dne, KB „účetní data").
+     * Hlavička musí popsat celé období, dřív vyhrála poslední, takže počáteční
+     * zůstatek a obraty patřily jen poslednímu dni a výpis nesouhlasil s pohyby.
+     */
+    public function testMultipleStatementBlocksDescribeWholePeriod(): void
+    {
+        $content = self::header074('1000000005', '0', '500000', '0', '500000', '001', '100949') . "\r\n"
+            . self::tx075('1000000005', '500000', '2', '100949') . "\r\n"
+            . self::header074('1000000005', '500000', '498667', '1333', '0', '002', '150949') . "\r\n"
+            . self::tx075('1000000005', '1333', '1', '150949') . "\r\n";
+
+        $parsed = (new GpcParser())->parse($content);
+
+        self::assertSame(0.0, $parsed['header']['prev_balance']);
+        self::assertSame(4986.67, $parsed['header']['curr_balance']);
+        self::assertSame(5000.0, $parsed['header']['credit_total']);
+        self::assertSame(13.33, $parsed['header']['debit_total']);
+        self::assertSame('2049-09-15', $parsed['header']['statement_date']);
+        self::assertNull($parsed['header']['statement_number'], 'Období z více denních výpisů nemá jedno číslo výpisu.');
+        self::assertCount(2, $parsed['transactions']);
+    }
+
+    public function testSingleStatementBlockKeepsItsHeader(): void
+    {
+        $content = self::header074('1000000005', '100', '200', '0', '100', '007', '310349') . "\r\n"
+            . self::tx075('1000000005', '100', '2', '310349') . "\r\n";
+
+        $header = (new GpcParser())->parse($content)['header'];
+
+        self::assertSame('007', $header['statement_number']);
+        self::assertSame(1.0, $header['prev_balance']);
+        self::assertSame(1.0, $header['credit_total']);
+    }
+
+    /**
+     * Vnitřní formát čísla účtu (KB, MONETA): tytéž číslice v jiném pořadí.
+     * 000000-0123456789 se v něm píše jako 9785012346000000.
+     */
+    public function testInternalAccountFormatConvertsToEditionForm(): void
+    {
+        self::assertSame('0000000123456789', GpcParser::internalToEdition('9785012346000000'));
+        self::assertNull(GpcParser::internalToEdition('123456789'));
+
+        $parsed = GpcParser::withEditionAccounts([
+            'header' => ['account_number' => '9785012346000000'],
+            'transactions' => [
+                ['counterparty_account' => '9785012346000000'],
+                ['counterparty_account' => null],
+                ['counterparty_account' => 'CZ0001000000001000000005'],
+            ],
+        ]);
+
+        self::assertSame('0000000123456789', $parsed['header']['account_number']);
+        self::assertSame('0000000123456789', $parsed['transactions'][0]['counterparty_account']);
+        self::assertNull($parsed['transactions'][1]['counterparty_account']);
+        self::assertSame('CZ0001000000001000000005', $parsed['transactions'][2]['counterparty_account']);
+    }
 }

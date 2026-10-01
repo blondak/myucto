@@ -50,13 +50,34 @@ final class StatementImporter
     {
         // Volající, který výpis už rozparsoval kvůli hlavičce, ho předá - soubor se
         // nečte podruhé.
-        $parsed ??= $this->parser->parse($content);
+        $parsed = $this->withRegisteredAccountFormat($parsed ?? $this->parser->parse($content));
         $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
         $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
         if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
             return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false, $reconciliationConfirmations, $ignoreDecision);
         }
         return $this->persist($parsed, $content, $fileName, $userId, $currencyId, 'gpc');
+    }
+
+    /**
+     * GPC z banky, která čísla účtů píše ve „vnitřním formátu" (KB, MONETA: tytéž
+     * číslice v jiném pořadí), převede na ediční tvar. Rozhoduje registr vlastních
+     * účtů: převádí se jen tehdy, když číslo účtu z hlavičky v něm není a jeho ediční
+     * podoba ano. Bez převodu by výpis nešel přiřadit účtu firmy a protiúčty by
+     * nesouhlasily s pohyby z jiných zdrojů, takže by se tytéž platby založily znovu.
+     *
+     * @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed
+     * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
+     */
+    public function withRegisteredAccountFormat(array $parsed): array
+    {
+        $raw = trim((string) ($parsed['header']['account_number'] ?? ''));
+        $edition = GpcParser::internalToEdition($raw);
+        if ($edition === null || $edition === $raw
+            || $this->registeredAccounts($raw) !== [] || $this->registeredAccounts($edition) === []) {
+            return $parsed;
+        }
+        return GpcParser::withEditionAccounts($parsed);
     }
 
     public function importConnected(string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, array $reconciliationConfirmations = []): array
@@ -854,24 +875,7 @@ final class StatementImporter
         if ($accountNumber === '') {
             return null;
         }
-        $stmt = $this->db->pdo()->query(
-            'SELECT supplier_id, account_number, iban, bank_code
-               FROM currencies
-              WHERE account_number IS NOT NULL OR iban IS NOT NULL
-              UNION ALL
-             SELECT supplier_id, account_number, iban, bank_code
-               FROM supplier_bank_accounts
-              WHERE is_active = 1'
-        );
-        if ($stmt === false) {
-            return null;
-        }
-        $matches = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (AccountNumberNormalizer::matchesAny($accountNumber, $row['account_number'] ?? null, $row['iban'] ?? null)) {
-                $matches[] = $row;
-            }
-        }
+        $matches = $this->registeredAccounts($accountNumber);
         $supplierIds = array_values(array_unique(array_filter(
             array_map(static fn (array $row): int => (int) $row['supplier_id'], $matches),
             static fn (int $supplierId): bool => $supplierId > 0,
@@ -884,5 +888,37 @@ final class StatementImporter
             'supplier_id' => count($supplierIds) === 1 ? $supplierIds[0] : null,
             'bank_code' => count($bankCodes) === 1 ? $bankCodes[0] : null,
         ];
+    }
+
+    /**
+     * Záznamy obou registrů vlastních účtů (currencies + supplier_bank_accounts),
+     * kterým číslo účtu odpovídá.
+     *
+     * @return list<array{supplier_id:mixed,account_number:mixed,iban:mixed,bank_code:mixed}>
+     */
+    private function registeredAccounts(string $accountNumber): array
+    {
+        if ($accountNumber === '') {
+            return [];
+        }
+        $stmt = $this->db->pdo()->query(
+            'SELECT supplier_id, account_number, iban, bank_code
+               FROM currencies
+              WHERE account_number IS NOT NULL OR iban IS NOT NULL
+              UNION ALL
+             SELECT supplier_id, account_number, iban, bank_code
+               FROM supplier_bank_accounts
+              WHERE is_active = 1'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        $matches = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (AccountNumberNormalizer::matchesAny($accountNumber, $row['account_number'] ?? null, $row['iban'] ?? null)) {
+                $matches[] = $row;
+            }
+        }
+        return $matches;
     }
 }

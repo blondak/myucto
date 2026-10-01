@@ -34,7 +34,7 @@ final class GpcParser
         }
 
         $lines = preg_split('/\r\n|\n|\r/', $content);
-        $header = null;
+        $headers = [];
         $reconstructed = false;
         $transactions = [];
         $lastTxIndex = -1; // index poslední 075 transakce (pro navázání 078 avíza)
@@ -43,8 +43,8 @@ final class GpcParser
             if ($line === '' || strlen($line) < 3) continue;
             $type = substr($line, 0, 3);
             if ($type === '074') {
-                $header = $this->parseHeader($line);
-                $reconstructed = $reconstructed || $header['reconstructed'];
+                $headers[] = $this->parseHeader($line);
+                $reconstructed = $reconstructed || $headers[array_key_last($headers)]['reconstructed'];
             } elseif ($type === '075') {
                 $transactions[] = $this->parseTransaction($line);
                 $lastTxIndex = count($transactions) - 1;
@@ -59,12 +59,86 @@ final class GpcParser
             }
         }
 
-        if ($header === null) {
+        if ($headers === []) {
             throw new \RuntimeException('GPC: chybí header (074 řádek).');
         }
 
+        $header = $this->periodHeader($headers);
         $header['reconstructed'] = $reconstructed;
         return ['header' => $header, 'transactions' => $transactions];
+    }
+
+    /**
+     * Soubor za období může obsahovat víc výpisů za sebou (KB „účetní data" za několik
+     * dní = jeden blok 074 + pohyby na každý den). Hlavička souboru pak musí popisovat
+     * CELÉ období: počáteční zůstatek prvního bloku, konečný posledního a obraty všech.
+     * Dřív vyhrála poslední hlavička, takže počáteční zůstatek i obraty patřily jen
+     * poslednímu dni a nesouhlasily s pohyby souboru.
+     *
+     * @param non-empty-list<array<string,mixed>> $headers
+     * @return array<string,mixed>
+     */
+    private function periodHeader(array $headers): array
+    {
+        $last = $headers[array_key_last($headers)];
+        if (count($headers) === 1) {
+            return $last;
+        }
+        $numbers = array_values(array_unique(array_filter(
+            array_map(static fn (array $h): string => ltrim((string) $h['statement_number'], '0'), $headers),
+            static fn (string $n): bool => $n !== '',
+        )));
+        return [
+            'prev_balance'     => $headers[0]['prev_balance'],
+            'debit_total'      => round(array_sum(array_column($headers, 'debit_total')), 2),
+            'credit_total'     => round(array_sum(array_column($headers, 'credit_total')), 2),
+            // Bloky nesou každý své číslo (denní výpisy), období jako celek žádné nemá.
+            'statement_number' => count($numbers) === 1 ? $last['statement_number'] : null,
+        ] + $last;
+    }
+
+    /**
+     * Pořadí číslic „vnitřního formátu" čísla účtu, jak ho v GPC píšou některé banky
+     * (KB, MONETA): pozice číslic N1…N16 edičního tvaru (předčíslí 6 + číslo 10) ve
+     * vnitřním tvaru. Ediční tvar 000000-0123456789 je ve vnitřním 9785012346000000.
+     */
+    private const INTERNAL_TO_EDITION = [10, 11, 12, 13, 14, 15, 4, 5, 6, 7, 8, 3, 9, 1, 2, 0];
+
+    /** Ediční tvar (16 číslic) čísla účtu zapsaného ve vnitřním formátu; NULL = nejde o 16 číslic. */
+    public static function internalToEdition(string $internal): ?string
+    {
+        $internal = trim($internal);
+        if (preg_match('/^\d{16}$/D', $internal) !== 1) {
+            return null;
+        }
+        $edition = '';
+        foreach (self::INTERNAL_TO_EDITION as $position) {
+            $edition .= $internal[$position];
+        }
+        return $edition;
+    }
+
+    /**
+     * Výpis ve vnitřním formátu převedený na ediční tvar: vlastní účet v hlavičce
+     * i protiúčty pohybů (banka píše ve vnitřním formátu oboje).
+     *
+     * @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed
+     * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
+     */
+    public static function withEditionAccounts(array $parsed): array
+    {
+        $account = self::internalToEdition((string) ($parsed['header']['account_number'] ?? ''));
+        if ($account !== null) {
+            $parsed['header']['account_number'] = $account;
+        }
+        foreach ($parsed['transactions'] as &$tx) {
+            $counterparty = self::internalToEdition((string) ($tx['counterparty_account'] ?? ''));
+            if ($counterparty !== null) {
+                $tx['counterparty_account'] = $counterparty;
+            }
+        }
+        unset($tx);
+        return $parsed;
     }
 
     /**

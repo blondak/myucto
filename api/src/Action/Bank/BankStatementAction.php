@@ -261,7 +261,7 @@ final class BankStatementAction
 
         // MS-P2-1: parse hlavičku, ověř že account_number patří currencies aktuálního supplieru
         try {
-            $parsed = $this->parser->parse($content);
+            $parsed = $this->importer->withRegisteredAccountFormat($this->parser->parse($content));
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
@@ -453,7 +453,8 @@ final class BankStatementAction
      *   - vlastnictví (SEC-01), zdroj gpc/pdf (virtuální avízo-výpisy PDF nemají),
      *   - dosud bez přiloženého PDF (existující nikdy nepřepisujeme),
      *   - shoda čísla účtu a měny,
-     *   - datum výpisu v okně ±10 dní (GPC i PDF datují koncem období, ne na den),
+     *   - datum výpisu v okně ±10 dní (GPC i PDF datují koncem období), dolní mez
+     *     nejvýš první pohyb PDF (měsíční výpis z feedu datuje posledním pohybem),
      *   - shoda čísla výpisu, pokud ho nesou obě strany (GPC „007" × PDF „7"),
      *   - a hlavně POKRYTÍ POHYBŮ: ≥ 80 % transakcí z PDF musí mít v kandidátovi
      *     protějšek na datum + částku. To je vlastní důkaz, že jde o tentýž výpis;
@@ -476,16 +477,27 @@ final class BankStatementAction
             $currencyCode = ($cur->fetchColumn() ?: null);
         }
 
+        // Okno se počítá od začátku období PDF, ne jen kolem jeho data: měsíční výpis
+        // složený z bankovního feedu nese datum POSLEDNÍHO pohybu, takže u účtu, kde
+        // se v druhé půlce měsíce nic nehnulo, leží o víc než deset dní před koncem
+        // období PDF, a PDF by se místo přiložení naimportovalo jako druhý výpis.
+        $periodStart = $statementDate;
+        foreach ($parsed['transactions'] as $tx) {
+            $posted = (string) ($tx['posted_at'] ?? '');
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $posted) === 1 && $posted < $periodStart) {
+                $periodStart = $posted;
+            }
+        }
         $candidates = $this->db->pdo()->prepare(
             "SELECT id, account_number, currency, statement_number, source
                FROM bank_statements bs
               WHERE source IN " . \MyInvoice\Service\Bank\BankStatementSource::sqlList() . "
                 AND " . \MyInvoice\Service\Bank\BankApiMonthlyStatements::visibleSql() . "
                 AND (pdf_content IS NULL OR OCTET_LENGTH(pdf_content) = 0)
-                AND statement_date BETWEEN DATE_SUB(?, INTERVAL 10 DAY) AND DATE_ADD(?, INTERVAL 10 DAY)
+                AND statement_date BETWEEN LEAST(?, DATE_SUB(?, INTERVAL 10 DAY)) AND DATE_ADD(?, INTERVAL 10 DAY)
               ORDER BY id"
         );
-        $candidates->execute([$statementDate, $statementDate]);
+        $candidates->execute([$periodStart, $statementDate, $statementDate]);
 
         $pdfNumber = ltrim(trim((string) ($parsed['header']['statement_number'] ?? '')), '0');
         $matches = [];

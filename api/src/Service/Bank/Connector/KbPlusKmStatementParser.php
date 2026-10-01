@@ -15,8 +15,6 @@ use MyInvoice\Service\Bank\GpcParser;
 final class KbPlusKmStatementParser
 {
     private const MAX_FILE_BYTES = 10 * 1024 * 1024;
-    /** Pozice číslic N1…N16 edičního formátu ve vnitřním formátu (popis formátu KM, odd. 1.4). */
-    private const INTERNAL_TO_EDITION = [10, 11, 12, 13, 14, 15, 4, 5, 6, 7, 8, 3, 9, 1, 2, 0];
 
     public function __construct(private readonly GpcParser $gpc = new GpcParser()) {}
 
@@ -160,13 +158,10 @@ final class KbPlusKmStatementParser
         return $match[1];
     }
 
+    /** Vnitřní formát čísla účtu (popis formátu KM, odd. 1.4) → ediční tvar. */
     private function toEdition(string $internal): string
     {
-        $edition = '';
-        foreach (self::INTERNAL_TO_EDITION as $position) {
-            $edition .= $internal[$position];
-        }
-        return $edition;
+        return GpcParser::internalToEdition($internal) ?? $internal;
     }
 
     private function date(string $value, string $format): \DateTimeImmutable
