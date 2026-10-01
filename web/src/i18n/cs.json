@@ -6867,6 +6867,8 @@
       "title": "Mzdová podání",
       "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
       "tabs_label": "Druhy mzdových podání",
+      "details_health": "Podrobnosti: oznámení HOZ, ruční sestavení a historie",
+      "details_jmhz": "Podrobnosti: náhledy, právní skutečnosti, podání předchozím programem a historie",
       "tabs_more": "Další",
       "tabs": {
         "monthly": "Měsíc",
@@ -6945,6 +6947,12 @@
           "open_databox": "Otevřít datovou schránku",
           "databox_sent": "Odesláno do datových schránek: {sent}. Nepovedlo se: {failed}.",
           "receipts_following": "Doručenky se v téže relaci Mobilního klíče dotahují samy (několik minut). Přehled pojišťovně je podaný doručením do její schránky.",
+          "load_receipts_count": "Načíst doručenky ({count})",
+          "receipts_intro": "Jedno přihlášení Mobilním klíčem stáhne doručenky všech odeslaných zpráv, které je ještě nemají. Schránka doručených zpráv se nečte.",
+          "receipts_pending": "Čeká na doručenku — doručenku má {delivered} z {total} odeslaných zpráv.",
+          "receipts_pending_hint": "Přehled pojišťovně je podaný doručením do její schránky; dokud doručenka není načtená, měsíc se neukáže jako splněný.",
+          "receipts_loaded": "Doručenky připojené: {attached}. Ještě nedoručené: {pending}.",
+          "awaiting_receipt": "Čeká na doručenku",
           "load_receipts": "Načíst doručenky"
         },
         "summary": {
@@ -8757,6 +8765,7 @@
         },
         "annual_settlement_undecided": "{count} lidí s příjmem za rok {year} ještě nemá rozhodnuto, zda o zúčtování žádají"
       },
+      "awaiting_receipts": {"title": "Čeká na doručenku: {count} odeslaných zpráv", "done_title": "Doručenky načtené", "hint": "Zprávy do datových schránek odešly před víc než hodinou, ale doručenka ještě není načtená. Přehled pojišťovně je podaný doručením — po načtení doručenky se měsíc sám přepne na Doručeno / splněno."},
       "operational_health": {
         "title": "Provozní přehled mezd",
         "description": "Souhrn stavů, které vyžadují pozornost. Neobsahuje osobní ani detailní údaje.",

@@ -1,6 +1,8 @@
 # 97. Datová schránka
 
-Nastavení datové schránky je vždy svázané s právě vybranou firmou. Otevřete je přes **Firma → Datová schránka**. Produkční a testovací prostředí mají oddělené přístupy, uložené údaje i historii.
+Nastavení datové schránky je vždy svázané s právě vybranou firmou. Otevřete je přes **Mzdy → Datová schránka** (v nabídce hned za Podáními a hlášeními). Produkční a testovací prostředí mají oddělené přístupy, uložené údaje i historii.
+
+Když v odchozích podáních něco čeká na odeslání nebo na doručenku, stránka se otevře rovnou na záložce **Odchozí podání**.
 
 Na stránce najdete pět záložek:
 

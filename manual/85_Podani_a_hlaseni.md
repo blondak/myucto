@@ -69,8 +69,16 @@ a čeká na vědomé potvrzení. Druhé řádné JMHZ za týž měsíc aplikace 
 Po odeslání Mobilním klíčem zůstane potvrzená relace pět minut otevřená
 a aplikace v ní sama dotáhne doručenky odeslaných zpráv — bez dalšího
 potvrzení v mobilu a bez čtení schránky doručených zpráv. U odeslaného řádku
-bez doručenky je tlačítko **Načíst doručenky** (v otevřené relaci načte hned,
-jinak vede do Datové schránky).
+bez doručenky je stav **Čeká na doručenku**; nad seznamem je vidět, kolik
+odeslaných zpráv z kolika má doručenku, a tlačítko **Načíst doručenky**, které
+je stáhne pro všechny zprávy jedním přihlášením Mobilním klíčem. Po načtení se
+řádek sám přepne na **Doručeno**. Dokud nějaká ostrá zpráva odeslaná před víc
+než hodinou doručenku nemá, ukazuje totéž upozornění i přehled mezd.
+
+Záložky **JMHZ** a **Zdravotní pojišťovny** začínají stejnou akční kartou za
+své agendy (co, komu, stav, lhůta, jedno tlačítko). Ostatní — podání
+předchozím programem, náhledy, právní skutečnosti, oznámení HOZ a ruční
+sestavení — je pod **Podrobnosti**; prohlížeč si pamatuje, co máte rozbalené.
 
 Přehled nese **povinnost, ne dokument**. Měsíční hlášení zaměstnavatele (JMHZ) a
 přehled o platbě pojistného za každou zdravotní pojišťovnu, u které je v období

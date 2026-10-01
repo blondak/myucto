@@ -513,6 +513,33 @@ describe('PayrollSubmissions', () => {
     setup()
   })
 
+  it('má tři hlavní záložky a ostatní pod „Další"', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    const nav = wrapper.get('nav[role="tablist"]')
+    const primary = nav.findAll(':scope > [role="tab"]').map(tab => tab.text())
+    expect(primary).toEqual([
+      'payroll.submissions.tabs.monthly',
+      'payroll.submissions.tabs.transport',
+      'payroll.submissions.tabs.statutory',
+    ])
+    expect(wrapper.get('[data-test="submissions-more-menu"]').text()).toContain('payroll.submissions.tabs.jmhz')
+  })
+
+  /* „Co odesílám, mám vidět hned": akční karta je na záložce agendy první. */
+  it('na záložce JMHZ je akční karta první a zbytek je pod Podrobnostmi', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await clickTab(wrapper, 'jmhz')
+
+    const card = wrapper.get('[data-test="submissions-action-card"]')
+    const details = wrapper.get('[data-test="submissions-details-jmhz"]')
+    expect(card.element.compareDocumentPosition(details.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(details.find('[data-test="monthly-checklist-panel"]').exists()).toBe(false)
+    expect(card.find('[data-test="monthly-checklist-panel"]').exists()).toBe(true)
+  })
+
   it('oddělí test a produkci, používá standardní záložky a SearchableSelect', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()

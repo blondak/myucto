@@ -196,14 +196,25 @@ final class PayrollOperationalHealthService
         ];
     }
 
-    /** @return array{failed:int,send_uncertain:int,rejected:int} */
+    /**
+     * `awaiting_receipt` = ostré zprávy odeslané před víc než hodinou, ke kterým
+     * ještě není doložené doručení. Bez doručenky přehled pojišťovně nedoběhne
+     * do „splněno" — přehled mezd na to proto upozorní jako na úkol.
+     *
+     * @return array{failed:int,send_uncertain:int,rejected:int,awaiting_receipt:int}
+     */
     private function isdsOutbox(int $supplierId): array
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT
                 SUM(dispatch_state = "failed") AS failed,
                 SUM(dispatch_state = "send_uncertain") AS send_uncertain,
-                SUM(acceptance_state = "rejected") AS rejected
+                SUM(acceptance_state = "rejected") AS rejected,
+                SUM(environment = "production"
+                    AND dispatch_state = "sent"
+                    AND receipt_document_id IS NULL
+                    AND acceptance_state = "unknown"
+                    AND sent_at < UTC_TIMESTAMP() - INTERVAL 1 HOUR) AS awaiting_receipt
                FROM submission_outbox
               WHERE supplier_id = ?
                 AND channel = "isds"
@@ -215,6 +226,7 @@ final class PayrollOperationalHealthService
             'failed' => (int) ($row['failed'] ?? 0),
             'send_uncertain' => (int) ($row['send_uncertain'] ?? 0),
             'rejected' => (int) ($row['rejected'] ?? 0),
+            'awaiting_receipt' => (int) ($row['awaiting_receipt'] ?? 0),
         ];
     }
 

@@ -6867,6 +6867,8 @@
       "title": "Payroll submissions",
       "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
       "tabs_label": "Payroll submission types",
+      "details_health": "Details: HOZ notifications, manual preparation and history",
+      "details_jmhz": "Details: previews, legal facts, submissions by the previous program and history",
       "tabs_more": "More",
       "tabs": {
         "monthly": "Month",
@@ -6945,6 +6947,12 @@
           "open_databox": "Open data box",
           "databox_sent": "Sent to data boxes: {sent}. Failed: {failed}.",
           "receipts_following": "Delivery receipts are being fetched in the same Mobile Key session (a few minutes). An insurer overview is filed by delivery to the insurer's data box.",
+          "load_receipts_count": "Load delivery receipts ({count})",
+          "receipts_intro": "One Mobile Key login downloads delivery receipts for all sent messages that do not have one yet. The incoming message box is not read.",
+          "receipts_pending": "Waiting for delivery receipts — {delivered} of {total} sent messages have one.",
+          "receipts_pending_hint": "An insurer overview is filed by delivery to the insurer's data box; until the receipt is loaded, the month does not show as fulfilled.",
+          "receipts_loaded": "Receipts attached: {attached}. Not delivered yet: {pending}.",
+          "awaiting_receipt": "Waiting for receipt",
           "load_receipts": "Load delivery receipts"
         },
         "summary": {
@@ -8757,6 +8765,7 @@
         },
         "annual_settlement_undecided": "{count} people with income for {year} have not yet decided whether they request the settlement"
       },
+      "awaiting_receipts": {"title": "Waiting for delivery receipts: {count} sent messages", "done_title": "Delivery receipts loaded", "hint": "Data box messages were sent more than an hour ago but the delivery receipt has not been loaded yet. An insurer overview is filed by delivery — once the receipt is loaded, the month switches to Delivered / fulfilled on its own."},
       "operational_health": {
         "title": "Payroll operational overview",
         "description": "A summary of states that need attention. It contains no personal or detailed data.",

@@ -19,7 +19,18 @@ describe('navigace datové schránky', () => {
   it('nabízí schránku v jedné položce pod Mzdami, s právem na zápis', () => {
     expect(appLayout.match(/to: '\/admin\/databox'/g)).toHaveLength(1)
     expect(appLayout).toContain("label: t('nav.databox')")
-    expect(appLayout).toContain("permission: 'settings.signing' as PermissionKey, dividerBefore: true")
+    expect(appLayout).toContain("{ to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey }")
+  })
+
+  // Schránka je pokračování podání (odeslané zprávy, doručenky), ne nastavení —
+  // stojí hned za „Podání a hlášení".
+  it('stojí hned za Podáními a hlášeními', () => {
+    const submissions = appLayout.indexOf("{ to: '/payroll/submissions'")
+    const databox = appLayout.indexOf("{ to: '/admin/databox'")
+    expect(submissions).toBeGreaterThan(-1)
+    expect(databox).toBeGreaterThan(submissions)
+    const between = appLayout.slice(submissions, databox)
+    expect(between.match(/\{ to: '/g)).toHaveLength(1)
   })
 
   // Brána stojí vedle schránky pod Mzdami: přes ISDS chodí prakticky jen mzdová
@@ -28,6 +39,7 @@ describe('navigace datové schránky', () => {
     expect(appLayout).toContain("to: '/admin/isds-gateway'")
     expect(appLayout).toContain("label: t('nav.isds_gateway')")
     expect(appLayout).toContain("...(isAdmin ? [{ to: '/admin/isds-gateway'")
+    expect(appLayout.indexOf("to: '/admin/isds-gateway'")).toBeGreaterThan(appLayout.indexOf("to: '/admin/databox'"))
   })
 
   it('skrývá položku bez práva k zápisu stejně jako samotná routa', () => {

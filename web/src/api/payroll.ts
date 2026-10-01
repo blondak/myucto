@@ -3571,6 +3571,8 @@ export interface PayrollOperationalHealth {
     failed: number
     send_uncertain: number
     rejected: number
+    /** Ostré zprávy odeslané před víc než hodinou bez doložené doručenky. */
+    awaiting_receipt?: number
   }
   archive_capacity: {
     measured: boolean

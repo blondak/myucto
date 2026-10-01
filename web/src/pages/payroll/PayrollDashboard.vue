@@ -22,6 +22,7 @@ import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.v
 import PayrollDimensionCostReportPanel from '@/pages/payroll/PayrollDimensionCostReportPanel.vue'
 import PayrollTaxStatementPanel from '@/pages/payroll/PayrollTaxStatementPanel.vue'
 import PayrollDeadlinesPanel from '@/pages/payroll/PayrollDeadlinesPanel.vue'
+import PayrollAwaitingReceiptsCallout from '@/pages/payroll/PayrollAwaitingReceiptsCallout.vue'
 import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
 
@@ -446,6 +447,7 @@ onMounted(load)
           zmeškaná lhůta je jediná věc na téhle stránce, která se s odstupem
           času už nedá napravit.
         -->
+        <PayrollAwaitingReceiptsCallout />
         <PayrollDeadlinesPanel />
 
         <PayrollOperationalHealthPanel />

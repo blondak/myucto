@@ -10,9 +10,15 @@ import {
   type PayrollMonthlyChecklistResponse,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
-import { dataBoxApi, type MobileKeyBatchItemResult, type MobileKeyReceiptSession } from '@/api/dataBox'
+import {
+  dataBoxApi,
+  type MobileKeyBatchItemResult,
+  type MobileKeyReceiptSession,
+  type ReceiptBatchResult,
+} from '@/api/dataBox'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
+import MobileKeyReceiptsButton from '@/components/submission/MobileKeyReceiptsButton.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -49,6 +55,13 @@ const props = defineProps<{
   period?: string
   /** Výchozí měsíc samostatného panelu (z adresy stránky podání). */
   initialPeriod?: string
+  /**
+   * Jen tyto agendy (kód nebo jeho začátek, např. `JMHZ`, `PPZ_2026`) —
+   * akční karta nahoře záložky agendy. Bez filtru celý měsíc.
+   */
+  agendas?: string[]
+  /** Akční karta: bez souhrnných dlaždic. */
+  compact?: boolean
 }>()
 const emit = defineEmits<{
   'update:environment': [value: PayrollRegzelEnvironment]
@@ -113,7 +126,27 @@ const receiptFollowUp = useReceiptFollowUp(
 )
 const followUpActive = receiptFollowUp.active
 
-const items = computed(() => response.value?.items ?? [])
+function matchesAgenda(code: string | null): boolean {
+  if (!props.agendas || props.agendas.length === 0) return true
+  if (code === null) return false
+  return props.agendas.some(agenda => code === agenda || code.startsWith(agenda))
+}
+
+const items = computed(() => (response.value?.items ?? []).filter(item => matchesAgenda(item.agenda_code)))
+
+/**
+ * Odeslané zprávy datové schránky a kolik z nich má doložené doručení.
+ * Bez doručenky přehled pojišťovně nedoběhne do „splněno" — účetní to musí
+ * vidět u měsíce, ne až v Datové schránce.
+ */
+const receiptStats = computed(() => {
+  const sent = items.value.filter(item =>
+    item.dispatch !== null && item.dispatch !== undefined
+    && ['sent', 'delivered'].includes(item.dispatch.dispatch_state),
+  )
+  const delivered = sent.filter(item => item.dispatch?.delivery_proof !== null).length
+  return { total: sent.length, delivered, pending: sent.length - delivered }
+})
 const summary = computed(() => response.value?.summary ?? {
   total: 0, send: 0, generate: 0, manual: 0, await: 0, done: 0,
 })
@@ -450,6 +483,15 @@ async function approveGatewayConcept() {
   }
 }
 
+/** Doručenky stažené jedním přihlášením Mobilním klíčem (bez otevřené relace). */
+async function onReceiptsLoaded(result: ReceiptBatchResult) {
+  sendSummary.value = t('payroll.submissions.monthly_checklist.send.receipts_loaded', {
+    attached: result.attached,
+    pending: result.pending,
+  })
+  await load(true)
+}
+
 /**
  * „Načíst doručenky" u odeslaného řádku: v otevřené relaci Mobilního klíče
  * hned, jinak na obrazovku datové schránky (nové přihlášení se tu nespouští).
@@ -568,7 +610,7 @@ onMounted(() => { void load() })
 
     <template v-else-if="response">
       <div
-        v-if="bulkItems.length || mobileKeyOutboxIds.length || gatewayOutboxIds.length || manualOutboxCount || sendSummary || followUpActive"
+        v-if="bulkItems.length || mobileKeyOutboxIds.length || gatewayOutboxIds.length || manualOutboxCount || sendSummary || followUpActive || receiptStats.pending"
         class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm shadow-sm"
         data-test="monthly-checklist-send-bar"
       >
@@ -629,9 +671,30 @@ onMounted(() => { void load() })
         <p v-if="followUpActive" class="mt-3 text-neutral-600" data-test="monthly-checklist-receipts-following">
           {{ t('payroll.submissions.monthly_checklist.send.receipts_following') }}
         </p>
+        <div
+          v-else-if="receiptStats.pending"
+          class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3"
+          data-test="monthly-checklist-receipts-pending"
+        >
+          <p class="font-medium text-warning-800">
+            {{ t('payroll.submissions.monthly_checklist.send.receipts_pending', {
+              delivered: receiptStats.delivered,
+              total: receiptStats.total,
+            }) }}
+          </p>
+          <p class="mt-1 text-neutral-700">
+            {{ t('payroll.submissions.monthly_checklist.send.receipts_pending_hint') }}
+          </p>
+          <MobileKeyReceiptsButton
+            class="mt-2"
+            :environment="environment"
+            :pending="receiptStats.pending"
+            @done="onReceiptsLoaded"
+          />
+        </div>
       </div>
 
-      <dl class="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <dl v-if="!compact" class="grid grid-cols-2 gap-3 lg:grid-cols-6" data-test="monthly-checklist-summary">
         <div
           v-for="entry in (['total', 'send', 'generate', 'manual', 'await', 'done'] as const)"
           :key="entry"
@@ -796,17 +859,13 @@ onMounted(() => { void load() })
                         </svg>
                         {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
                       </button>
-                      <RouterLink
+                      <span
                         v-else-if="awaitsReceipt(item)"
-                        :to="{ name: 'admin-databox' }"
-                        :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                        class="inline-flex items-center gap-1 rounded-full bg-warning-50 px-2.5 py-1 text-xs font-medium text-warning-800"
                         data-test="monthly-checklist-receipts"
                       >
-                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                          <path :d="ICONS.download" />
-                        </svg>
-                        {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
-                      </RouterLink>
+                        {{ t('payroll.submissions.monthly_checklist.send.awaiting_receipt') }}
+                      </span>
                     </div>
                     <p
                       v-if="item.action.reason"
@@ -940,13 +999,12 @@ onMounted(() => { void load() })
                   >
                     {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
                   </button>
-                  <RouterLink
+                  <span
                     v-else-if="awaitsReceipt(item)"
-                    :to="{ name: 'admin-databox' }"
-                    :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                    class="inline-flex items-center rounded-full bg-warning-50 px-2.5 py-1 text-xs font-medium text-warning-800"
                   >
-                    {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
-                  </RouterLink>
+                    {{ t('payroll.submissions.monthly_checklist.send.awaiting_receipt') }}
+                  </span>
                 </div>
                 <p v-if="item.action.reason" class="mt-1 text-xs text-neutral-500">{{ item.action.reason }}</p>
                 <p v-if="sendError[item.key]" class="mt-1 text-xs text-danger-600" role="alert">{{ sendError[item.key] }}</p>

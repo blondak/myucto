@@ -1657,7 +1657,15 @@ onMounted(async () => {
   // Při odchodu na schvalovací obrazovku se stránka stejně opouští — načítat
   // zbytek by bylo zbytečné volání navíc.
   if (!returning || gatewayNotice.value?.state !== 'awaiting_approval') await loadAll()
+  // Bez výslovné záložky v adrese se otevřou Odchozí podání, když v nich něco
+  // čeká na odeslání nebo na doručenku — to je důvod, proč sem účetní jde.
+  if (!requestedTab && !returning && outboxNeedsAttention.value) tab.value = 'outbox'
 })
+
+const outboxNeedsAttention = computed(() => outbox.value.some(row =>
+  ['ready', 'sending', 'send_uncertain'].includes(String(row.dispatch_state))
+  || (String(row.dispatch_state) === 'sent' && row.receipt_document_id === null),
+))
 
 onUnmounted(clearMobileStatusTimer)
 onUnmounted(clearReceiptsTimer)

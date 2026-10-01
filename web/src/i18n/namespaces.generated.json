@@ -487,6 +487,7 @@
       "document_requests"
     ],
     "payroll-dashboard": [
+      "databox",
       "payroll",
       "payroll_absence"
     ],

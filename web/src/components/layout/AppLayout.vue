@@ -677,6 +677,9 @@ const navSections = computed<NavSection[]>(() => {
         // protějšek — nepatří do měsíčního sledu, běží jen v lednu až březnu.
         { to: '/payroll/annual-settlement', label: t('nav.payroll_annual_settlement'), icon: ICONS.accounting, permission: 'payroll.documents' as PermissionKey },
         { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
+        // Datová schránka hned za podáními: odeslané zprávy, doručenky a koncepty
+        // jsou pokračování téhož kroku, ne nastavení. Adresa i právo zůstávají.
+        { to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey },
         // 2) Kmenová evidence zaměstnance — nemá měsíční takt, udržuje se průběžně.
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
         { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
@@ -706,14 +709,11 @@ const navSections = computed<NavSection[]>(() => {
         // Výmaz stojí hned za lhůtami — bez nich nedává smysl —, ale má vlastní
         // právo: číst lhůty smí i ten, kdo nesmí odklepnout nevratné smazání.
         { to: '/payroll/erasure', label: t('nav.payroll_erasure'), icon: ICONS.erasure, permission: 'payroll.erasure' as PermissionKey },
-        // 4) Odesílací cesty. Obě obrazovky byly dřív jinde — datová schránka
-        // ve Firmě, odesílací brána v Systému — a uživatel z toho nepoznal, že
-        // spolu souvisí. Přes ISDS chodí prakticky jen mzdová podání (přehledy
-        // a hlášení zdravotním pojišťovnám, JMHZ jako alternativa k VREP,
-        // součinnost exekutorům), takže patří sem, vedle sebe a v tomhle pořadí:
-        // nejdřív schránka firmy, pak brána, přes kterou zprávy fyzicky odchází.
-        { to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey, dividerBefore: true },
-        ...(isAdmin ? [{ to: '/admin/isds-gateway', label: t('nav.isds_gateway'), icon: ICONS.documents }] : []),
+        // 4) Odesílací brána (jen superadmin). Datová schránka firmy stojí
+        // hned za Podáními a hlášeními; přes ISDS chodí prakticky jen mzdová
+        // podání (přehledy a hlášení pojišťovnám, JMHZ jako alternativa k VREP,
+        // součinnost exekutorům).
+        ...(isAdmin ? [{ to: '/admin/isds-gateway', label: t('nav.isds_gateway'), icon: ICONS.documents, dividerBefore: true }] : []),
       ],
     } as NavSection)
   }

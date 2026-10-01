@@ -144,6 +144,8 @@ final class PayrollOperationalHealthActionTest extends TestCase
         $this->outbox($this->supplierId, 'failed', 'unknown', 'failed');
         $this->outbox($this->supplierId, 'send_uncertain', 'unknown', 'uncertain');
         $this->outbox($this->supplierId, 'sent', 'rejected', 'rejected');
+        // Odesláno před víc než hodinou a bez doručenky: úkol na přehledu mezd.
+        $this->outbox($this->supplierId, 'sent', 'unknown', 'awaiting-receipt');
         $this->outbox($this->otherSupplierId, 'failed', 'unknown', 'other');
 
         $this->liability($this->supplierId, 'overdue');
@@ -195,6 +197,7 @@ final class PayrollOperationalHealthActionTest extends TestCase
                 'failed' => 1,
                 'send_uncertain' => 1,
                 'rejected' => 1,
+                'awaiting_receipt' => 1,
             ],
             'archive_capacity' => [
                 'measured' => true,

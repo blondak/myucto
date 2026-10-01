@@ -673,9 +673,30 @@ describe('PayrollMonthlyChecklistPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    const receipts = wrapper.get('tbody [data-test="monthly-checklist-receipts"]')
-    expect(receipts.text()).toContain('load_receipts')
+    expect(wrapper.get('tbody [data-test="monthly-checklist-receipts"]').text()).toContain('awaiting_receipt')
     expect(wrapper.find('tbody [data-test="monthly-checklist-send"]').exists()).toBe(false)
+    // Nahoře jasný další krok: kolik z kolika má doručenku a jedno tlačítko.
+    const pending = wrapper.get('[data-test="monthly-checklist-receipts-pending"]')
+    expect(pending.text()).toContain('receipts_pending 0 1')
+    expect(pending.find('[data-test="mobile-key-receipts-action"]').text()).toContain('load_receipts_count 1')
+  })
+
+  it('akční karta agendy ukáže jen své agendy a bez souhrnných dlaždic', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [
+      agendaDutyItem(),
+      { ...agendaDutyItem(), key: 'agenda_duty:JMHZ25:5', agenda_code: 'JMHZ25', subject: 'účtárna' },
+    ] }))
+
+    const wrapper = mount(PayrollMonthlyChecklistPanel, {
+      props: { environment: 'production', period: '2026-08', agendas: ['JMHZ'], compact: true },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody [data-test="monthly-checklist-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.text()).toContain('účtárna')
+    expect(wrapper.find('[data-test="monthly-checklist-summary"]').exists()).toBe(false)
   })
 
   it('bez zvoleného měsíce otevře měsíc navržený serverem', async () => {

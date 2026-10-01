@@ -363,6 +363,36 @@ function selectTab(tab: SubmissionTab) {
   activeTab.value = tab
   moreOpen.value = false
 }
+
+/*
+ * „Co odesílám, mám vidět hned": záložky agend začínají akční kartou za
+ * období (co, komu, stav, lhůta, jedno tlačítko) a zbytek — podání
+ * předchozím programem, náhledy, ruční sestavení, výpisy — je pod
+ * „Podrobnosti". Sbalení si pamatuje prohlížeč uživatele.
+ */
+const DETAILS_STORAGE_KEY = 'myucto.payroll.submissions.details.v1'
+
+function readDetailsState(): Record<string, boolean> {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(DETAILS_STORAGE_KEY) ?? '{}')
+    return parsed !== null && typeof parsed === 'object' ? parsed as Record<string, boolean> : {}
+  } catch {
+    return {}
+  }
+}
+
+const detailsOpen = ref<Record<string, boolean>>(readDetailsState())
+
+function rememberDetails(tab: string, event: Event) {
+  const open = (event.target as HTMLDetailsElement).open
+  if (detailsOpen.value[tab] === open) return
+  detailsOpen.value = { ...detailsOpen.value, [tab]: open }
+  try {
+    window.localStorage.setItem(DETAILS_STORAGE_KEY, JSON.stringify(detailsOpen.value))
+  } catch {
+    // Bez úložiště (soukromé okno) se sbalení jen nezapamatuje.
+  }
+}
 </script>
 
 <template>
@@ -520,15 +550,44 @@ function selectTab(tab: SubmissionTab) {
       nezávisí, proto stojí mimo společný skeleton.
     -->
     <template v-else-if="activeTab === 'health'">
+      <section class="space-y-3" data-test="submissions-action-card">
+        <label class="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-700">
+          {{ t('payroll.submissions.overview.period') }}
+          <input
+            v-model="healthPeriod"
+            type="month"
+            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            data-test="submissions-action-card-period"
+          >
+        </label>
+        <PayrollMonthlyChecklistPanel
+          v-model:environment="environment"
+          :period="healthPeriod"
+          :agendas="['PPZ_2026', 'HOZ_2026']"
+          compact
+        />
+      </section>
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
         v-model:period="healthPeriod"
         mode="health"
       />
-      <PayrollHealthNotificationPanel
-        v-model:period="healthPeriod"
-        v-model:environment="environment"
-      />
+      <details
+        class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        :open="detailsOpen.health === true"
+        data-test="submissions-details-health"
+        @toggle="rememberDetails('health', $event)"
+      >
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-neutral-800 sm:px-6">
+          {{ t('payroll.submissions.details_health') }}
+        </summary>
+        <div class="border-t border-neutral-200 p-4 sm:p-6">
+          <PayrollHealthNotificationPanel
+            v-model:period="healthPeriod"
+            v-model:environment="environment"
+          />
+        </div>
+      </details>
     </template>
 
     <div v-else-if="loading" class="space-y-4">
@@ -794,16 +853,50 @@ function selectTab(tab: SubmissionTab) {
       v-model:environment="environment"
     />
 
+    <template v-else-if="activeTab === 'jmhz'">
+      <section class="space-y-3" data-test="submissions-action-card">
+        <label class="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-700">
+          {{ t('payroll.submissions.overview.period') }}
+          <input
+            v-model="overviewPeriod"
+            type="month"
+            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            data-test="submissions-action-card-period"
+          >
+        </label>
+        <PayrollMonthlyChecklistPanel
+          v-model:environment="environment"
+          :period="overviewPeriod"
+          :agendas="['JMHZ']"
+          compact
+        />
+      </section>
+      <details
+        class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        :open="detailsOpen.jmhz === true"
+        data-test="submissions-details-jmhz"
+        @toggle="rememberDetails('jmhz', $event)"
+      >
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-neutral-800 sm:px-6">
+          {{ t('payroll.submissions.details_jmhz') }}
+        </summary>
+        <div class="space-y-4 border-t border-neutral-200 p-4 sm:p-6">
+          <!--
+            Podání předchozím programem: měsíc, za který řádné hlášení podal
+            předchozí program, se tu vysvětluje a opravuje. Firma bez převodu
+            z jiného programu panel neuvidí.
+          -->
+          <PayrollExternalJmhzSubmissionsPanel :environment="environment" />
+          <PayrollSubmissionOverviewPanel
+            v-model:environment="environment"
+            v-model:period="overviewPeriod"
+            mode="jmhz"
+          />
+        </div>
+      </details>
+    </template>
+
     <template v-else>
-      <!--
-        Podání předchozím programem stojí nad přehledem JMHZ: měsíc, za který
-        řádné hlášení podal předchozí program, se tu vysvětluje a opravuje.
-        Firma bez převodu z jiného programu panel neuvidí.
-      -->
-      <PayrollExternalJmhzSubmissionsPanel
-        v-if="activeTab === 'jmhz'"
-        :environment="environment"
-      />
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
         v-model:period="overviewPeriod"
