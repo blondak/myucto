@@ -456,8 +456,8 @@ final class StatementMatcher
             }
             return $result;
         }
-        if ($this->hasOtherItemAllocation($pdo, $transactionId)) {
-            return ['status' => 'unmatched', 'reason' => 'other_item_allocated'];
+        if (($taken = $this->takenElsewhereReason($pdo, $transactionId)) !== null) {
+            return ['status' => 'unmatched', 'reason' => $taken];
         }
         // Pohyb, který už spotřebovala mzdová platba, není volný — druhé
         // přiřazení k faktuře by tutéž korunu použilo dvakrát. Důvod
@@ -1167,14 +1167,34 @@ final class StatementMatcher
         $stmt->execute([$transactionId]);
         $status = $stmt->fetchColumn();
         return $status !== false && in_array((string) $status, $free, true)
-            && !$this->hasOtherItemAllocation($pdo, $transactionId);
+            && $this->takenElsewhereReason($pdo, $transactionId) === null;
     }
 
-    private function hasOtherItemAllocation(PDO $pdo, int $transactionId): bool
+    /**
+     * Pohyb, který už spotřebovala jiná evidence: úhrada ostatní pohledávky či závazku,
+     * nebo převod mezi vlastními účty. Na doklad se párovat nesmí, jinak by tatáž
+     * koruna zaplatila dvě věci; převod mezi vlastními účty se shodným VS by se navíc
+     * tvářil jako úhrada faktury. Podmínka nad aliasem `bt`, sdílená všemi dotazy
+     * matcheru na volné pohyby.
+     */
+    private const TAKEN_ELSEWHERE_SQL =
+        '(EXISTS (SELECT 1 FROM other_item_allocations oia WHERE oia.bank_transaction_id = bt.id)'
+        . ' OR EXISTS (SELECT 1 FROM bank_transfer_matches btm'
+        . ' WHERE btm.out_transaction_id = bt.id OR btm.in_transaction_id = bt.id))';
+
+    /** Důvod, proč pohyb nejde párovat na doklad (viz TAKEN_ELSEWHERE_SQL), nebo null. */
+    private function takenElsewhereReason(PDO $pdo, int $transactionId): ?string
     {
         $stmt = $pdo->prepare('SELECT 1 FROM other_item_allocations WHERE bank_transaction_id = ? LIMIT 1');
         $stmt->execute([$transactionId]);
-        return $stmt->fetchColumn() !== false;
+        if ($stmt->fetchColumn() !== false) {
+            return 'other_item_allocated';
+        }
+        $stmt = $pdo->prepare(
+            'SELECT 1 FROM bank_transfer_matches WHERE out_transaction_id = ? OR in_transaction_id = ? LIMIT 1'
+        );
+        $stmt->execute([$transactionId, $transactionId]);
+        return $stmt->fetchColumn() !== false ? 'own_transfer_matched' : null;
     }
 
     private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;
@@ -1310,7 +1330,7 @@ final class StatementMatcher
                 AND bt.amount < 0
                 AND DATEDIFF(bt.posted_at, ?) BETWEEN ? AND ?
                 AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)
-                AND NOT EXISTS (SELECT 1 FROM other_item_allocations oia WHERE oia.bank_transaction_id = bt.id)
+                AND NOT " . self::TAKEN_ELSEWHERE_SQL . "
                 AND " . \MyInvoice\Repository\BankStatementOwnershipResolver::sql('bs') . '
               ORDER BY bt.posted_at, bt.id'
         );
@@ -1386,9 +1406,9 @@ final class StatementMatcher
                 $this->rollBack($pdo);
                 return ['status' => 'unmatched', 'reason' => 'amount_date_transaction_not_free'];
             }
-            if ($this->hasOtherItemAllocation($pdo, $transactionId)) {
+            if (($taken = $this->takenElsewhereReason($pdo, $transactionId)) !== null) {
                 $pdo->rollBack();
-                return ['status' => 'unmatched', 'reason' => 'other_item_allocated'];
+                return ['status' => 'unmatched', 'reason' => $taken];
             }
 
             $sameAmount = $pdo->prepare(
@@ -1397,7 +1417,7 @@ final class StatementMatcher
                   WHERE bt.statement_id = ?
                     AND bt.match_status = 'unmatched'
                     AND bt.amount < 0
-                    AND NOT EXISTS (SELECT 1 FROM other_item_allocations oia WHERE oia.bank_transaction_id = bt.id)
+                    AND NOT " . self::TAKEN_ELSEWHERE_SQL . "
                     AND ABS(ABS(bt.amount) - ?) < 0.005
                     AND UPPER(COALESCE(NULLIF(bt.currency, ''), ?)) = ?"
             );

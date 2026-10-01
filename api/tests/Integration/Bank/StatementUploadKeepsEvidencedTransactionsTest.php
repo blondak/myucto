@@ -105,6 +105,29 @@ final class StatementUploadKeepsEvidencedTransactionsTest extends TestCase
         self::assertSame(2, (int) $linked->fetchColumn(), 'Výpis se k evidovaným pohybům jen propojí.');
     }
 
+    /**
+     * „Znovu spárovat“ volá matcher přímo, mimo import. Převod mezi vlastními účty je
+     * obsazený stejně jako úhrada ostatní položky a fakturu se shodným VS zaplatit nesmí.
+     */
+    public function testMatcherDoesNotPayInvoiceWithOwnTransfer(): void
+    {
+        $this->apiImport('rematch', [
+            $this->tx('SYNTH-RM-IN', 1000.00, self::VS_TRANSFER, 'Prevod z vlastniho uctu'),
+            $this->tx('SYNTH-RM-OUT', -1000.00, self::VS_TRANSFER, 'Prevod na vlastni ucet'),
+        ]);
+        [$in, $out] = $this->transactionIds;
+        $this->db->pdo()->prepare('INSERT INTO bank_transfer_matches (supplier_id, out_transaction_id, in_transaction_id, amount, currency) VALUES (?, ?, ?, 1000.00, "CZK")')
+            ->execute([$this->supplierId, $out, $in]);
+        $invoiceId = $this->insertInvoice(self::VS_TRANSFER, 1000.00);
+
+        $matcher = Bootstrap::buildContainer()->get(\MyInvoice\Service\Bank\StatementMatcher::class);
+        $result = $matcher->match($in);
+
+        self::assertSame(0, $this->paymentCount($invoiceId), 'Převod mezi vlastními účty nesmí uhradit fakturu se shodným VS.');
+        self::assertSame('unmatched', $result['status']);
+        self::assertSame('own_transfer_matched', $result['reason'] ?? null);
+    }
+
     public function testUploadDoesNotMatchEvidencedUnmatchedMovementAgain(): void
     {
         $api = $this->apiImport('payment', [

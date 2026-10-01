@@ -41,6 +41,7 @@ final class StatementMatcherPurchasePaymentTest extends TestCase
             CREATE TABLE cash_documents (id INTEGER PRIMARY KEY, supplier_id INTEGER, purchase_invoice_id INTEGER,
                 doc_type TEXT, status TEXT, total_amount REAL, currency_code TEXT DEFAULT 'CZK', amount_foreign REAL);
             CREATE TABLE other_item_allocations (bank_transaction_id INTEGER);
+            CREATE TABLE bank_transfer_matches (out_transaction_id INTEGER, in_transaction_id INTEGER);
             CREATE TABLE payment_matches (id INTEGER PRIMARY KEY, invoice_id INTEGER, supplier_id INTEGER, bank_transaction_id INTEGER,
                 purchase_invoice_id INTEGER, amount REAL, match_type TEXT, match_confidence INTEGER, matched_by_user_id INTEGER);
             CREATE TABLE offset_agreement_items (supplier_id INTEGER, agreement_id INTEGER, doc_type TEXT, doc_id INTEGER, amount REAL);
