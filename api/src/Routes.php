@@ -2438,6 +2438,9 @@ final class Routes
             $g->post  ('/dimensions/types/{id:[0-9]+}/values',           [\MyInvoice\Action\Accounting\DimensionAction::class, 'createValue']);
             $g->patch ('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateValue']);
             $g->delete('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteValue']);
+            $g->get   ('/dimensions/account-map',                        [\MyInvoice\Action\Accounting\DimensionAction::class, 'accountMap']);
+            $g->get   ('/dimensions/types/{id:[0-9]+}/account-candidates', [\MyInvoice\Action\Accounting\DimensionAction::class, 'accountCandidates']);
+            $g->put   ('/dimensions/values/{id:[0-9]+}/account-map',     [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveAccountMap']);
             $g->get   ('/dimensions/responsible-candidates',             [\MyInvoice\Action\Accounting\DimensionAction::class, 'responsibleCandidates']);
             $g->get   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates|recurring-templates|other-items|assets}/{id:[0-9]+}',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'getDocument']);

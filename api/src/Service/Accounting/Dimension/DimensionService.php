@@ -155,8 +155,10 @@ final class DimensionService
     /** @param array<string,mixed> $body */
     public function updateType(int $supplierId, int $typeId, array $body): array
     {
-        $this->requireType($supplierId, $typeId);
+        $type = $this->requireType($supplierId, $typeId);
         $changes = array_intersect_key($body, array_flip(['name', 'is_active', 'show_on_documents', 'sort_order']));
+        // Účtotvorná dimenze (migrace 1950): nejvýš jeden typ na firmu, maska jen třídy 5 a 6.
+        $changes += (new DimensionAccountMapService($this->db))->typeChanges($supplierId, $type, $body);
         if (array_key_exists('name', $changes)) {
             $changes['name'] = trim((string) $changes['name']);
             if ($changes['name'] === '' || mb_strlen($changes['name']) > 100) {
@@ -408,7 +410,7 @@ final class DimensionService
      * @param array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items pořadí položky => mapa typ => hodnota; null = ponechat
      * @param array<int|string,mixed>|null $splits
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}}
      */
     public function saveDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, bool $forRepost = false, ?array $splits = null): array
     {
@@ -417,7 +419,9 @@ final class DimensionService
         return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $forRepost, $splits): array {
             $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits);
             if (!$forRepost && $result['restamp']['needs_repost'] && $result['restamp']['locked']) {
-                throw new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
+                throw !empty($result['restamp']['account_change'])
+                    ? new DimensionException('account_change_in_locked_period', self::ACCOUNT_CHANGE_LOCKED_MESSAGE, 409)
+                    : new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
             }
             return $result;
         });
@@ -428,6 +432,13 @@ final class DimensionService
         . 'přeúčtováním. Dejte položkám stejnou dimenzi (nebo ji zadejte jen v hlavičce dokladu), případně upravte '
         . 'dimenze přímo na řádcích zápisu v účetním deníku.';
 
+    public const ACCOUNT_CHANGE_LOCKED_MESSAGE = 'Změna dimenze by přesunula zaúčtovaný řádek na jiný analytický účet '
+        . '(účtotvorná dimenze), ale zápis leží v uzavřeném nebo zamčeném období — změnit účet jde jen přeúčtováním. '
+        . 'Ponechte dosavadní hodnotu účtotvorné dimenze, nebo doklad stornujte a zaúčtujte znovu.';
+
+    public const ACCOUNT_CHANGE_MESSAGE = 'Změna dimenze by přesunula řádek na jiný analytický účet (účtotvorná dimenze) — '
+        . 'účet zaúčtovaného řádku se mění jen přeúčtováním. Přeúčtujte doklad, nebo ponechte dosavadní hodnotu.';
+
     /**
      * Náhled uložení dimenzí dokladu: co by po uložení neslo každý řádek jeho živých
      * zápisů. Počítá se TOUTÉŽ cestou jako {@see saveDocument()} (zápis + rollback),
@@ -437,7 +448,7 @@ final class DimensionService
      * @param array<int|string,mixed>|null $items
      * @param array<int|string,mixed>|null $splits
      * @return array{header:array<int,int>, items:array<int,array<int,int>>,
-     *               restamp:array{lines:int,needs_repost:bool,locked:bool}, refused:bool,
+     *               restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}, refused:bool,
      *               lines:list<array{id:int, entry_id:int, account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, dimensions:array<int,int>}>}
      */
     public function previewDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
@@ -464,7 +475,7 @@ final class DimensionService
      * @param array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items
      * @param array<int|string,mixed>|null $splits
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,locked:bool}}
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}}
      */
     private function applyDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
     {
@@ -528,15 +539,24 @@ final class DimensionService
         foreach ($currentSplits[0] ?? [] as $typeId => $_) {
             $released[$typeId] = null;
         }
-        $restamp = ['lines' => 0, 'needs_repost' => false, 'locked' => false];
+        $restamp = ['lines' => 0, 'needs_repost' => false, 'account_change' => false, 'locked' => false];
         foreach ($this->postingSources($supplierId, $docType, $docId) as [$source, $sourceId]) {
             $one = $this->posting->restampDimensions($supplierId, $source, $sourceId, false, $released);
             $restamp['lines'] += $one['lines'];
             $restamp['needs_repost'] = $restamp['needs_repost'] || $one['needs_repost'];
+            $restamp['account_change'] = $restamp['account_change'] || !empty($one['account_change']);
             $restamp['locked'] = $restamp['locked'] || $this->postedOutsideOpenPeriod($supplierId, $source, $sourceId);
         }
         foreach ($this->cascadeSources($supplierId, $docType, $docId) as [$source, $sourceId, $keep]) {
-            $restamp['lines'] += $this->posting->restampDimensions($supplierId, $source, $sourceId, $keep, $keep ? $released : [])['lines'];
+            $one = $this->posting->restampDimensions($supplierId, $source, $sourceId, $keep, $keep ? $released : []);
+            $restamp['lines'] += $one['lines'];
+            // Účtotvorná dimenze i v kaskádě: zápis úhrady / zápočtu, jehož řádek by změnil
+            // analytiku, se nepřerazítkoval — doklad (a jeho úhrada) potřebuje přeúčtovat.
+            if (!empty($one['account_change'])) {
+                $restamp['needs_repost'] = true;
+                $restamp['account_change'] = true;
+                $restamp['locked'] = $restamp['locked'] || $this->postedOutsideOpenPeriod($supplierId, $source, $sourceId);
+            }
         }
         if ($docType === 'other_item') {
             $this->syncScheduleDrafts($supplierId, $docId);
@@ -870,6 +890,26 @@ final class DimensionService
             ], array_values($touched)),
             (string) $first['entry_date'],
         );
+
+        // Účtotvorná dimenze: nová hodnota nesmí tiše přesunout řádek na jinou analytiku.
+        if ($touched !== []) {
+            $projected = (new DimensionAccountRouter($this->db))->projectForEntry(
+                $supplierId,
+                (string) $first['entry_date'],
+                array_map(static fn (array $r): array => [
+                    'id' => (int) $r['id'],
+                    'account_id' => (int) $r['account_id'],
+                    'side' => (string) $r['side'],
+                    'amount' => (float) $r['amount'],
+                    'dimensions' => $newDims[(int) $r['id']] ?? [],
+                    'dimension_splits' => $newSplits[(int) $r['id']] ?? [],
+                ], array_values($rows)),
+                $this->posting->singleAnalyticRedirects($supplierId),
+            );
+            if (array_intersect($projected['conflicts'], array_map('intval', array_keys($touched))) !== []) {
+                throw new DimensionException('account_change_needs_repost', self::ACCOUNT_CHANGE_MESSAGE, 409);
+            }
+        }
 
         $changed = 0;
         foreach (array_keys($rows) as $lineId) {

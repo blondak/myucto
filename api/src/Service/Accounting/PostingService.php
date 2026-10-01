@@ -11,6 +11,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
+use MyInvoice\Service\Accounting\Dimension\DimensionAccountRouter;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
@@ -247,6 +248,15 @@ final class PostingService
             $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
             $entryDate,
         );
+        // Účtotvorná dimenze (migrace 1950): hodnota dimenze přepíše výsledkovou syntetiku
+        // na analytiku z mapy, rozpad typu rozdělí řádek po analytikách. Až po razítkování
+        // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
+        // produkt, pravidlo nebo volající (mzdy, ruční zápis). Bez mapy beze změny.
+        $routed = (new DimensionAccountRouter($this->db))
+            ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId));
+        if ($routed !== $resolved) {
+            $resolved = $this->dimensionStamper()->linkColumns($supplierId, $routed);
+        }
         // Pravidla dimenzí podle účtu (Firma → Dimenze → Pravidla): povinná dimenze
         // s vynucením `error` zápis odmítne, `warning` se vrátí přes dimensionWarnings().
         $this->dimensionWarnings = [];
@@ -2593,6 +2603,17 @@ final class PostingService
     }
 
     /**
+     * Celá mapa přesměru (syntetika => jediná analytika) — pro účtotvornou dimenzi,
+     * která musí poznat řádek, jejž přesměr poslal ze syntetiky na analytiku.
+     *
+     * @return array<string,string>
+     */
+    public function singleAnalyticRedirects(int $supplierId): array
+    {
+        return $this->singleAnalyticMap($supplierId);
+    }
+
+    /**
      * Mapa „trojmístná syntetika → její JEDINÁ aktivní daňová analytika" pro firmu.
      *
      * PROČ. Jakmile syntetika dostane potomka, nesmí se na ni dál účtovat — součet
@@ -2800,12 +2821,101 @@ final class PostingService
      *
      * `$keepLineTypes` a `$released` viz {@see DimensionStamper::restamp()}.
      *
+     * Výjimka nekryje účtotvornou dimenzi: změna, která by přesunula řádek na jinou
+     * analytiku, se nepřerazítkuje a vrátí `needs_repost` + `account_change`.
+     *
      * @param array<int,?int> $released
-     * @return array{lines:int, needs_repost:bool}
+     * @return array{lines:int, needs_repost:bool, account_change:bool}
      */
     public function restampDimensions(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = []): array
     {
-        return $this->dimensionStamper()->restamp($supplierId, $sourceType, $sourceId, $keepLineTypes, $released);
+        return $this->dimensionStamper()->restamp(
+            $supplierId,
+            $sourceType,
+            $sourceId,
+            $keepLineTypes,
+            $released,
+            $this->singleAnalyticMap($supplierId),
+        );
+    }
+
+    /**
+     * Účty položek dokladu po účtotvorné dimenzi: kód účtu položky (z builderu, např.
+     * {@see purchaseItemExpenseAccounts()}) => kódy, na které ho zaúčtování rozeslalo,
+     * s podíly. Bez účtotvorné dimenze (nebo bez zápisu dokladu) vrací účet beze změny.
+     *
+     * Volá ho časové rozlišení (381/384): náklad či výnos se musí odložit a rozpustit na
+     * téže analytice, na které leží — jinak by syntetika šla do minusu a analytika
+     * zůstala neodložená. Dimenze položky dává {@see DimensionStamper::itemDimensions()}
+     * a pravidla dimenzí, tedy totéž co zaúčtování; datum platnosti mapy = datum zápisu.
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param array<int,string> $itemCodes id položky => kód účtu
+     * @return array<int,array<string,float>> id položky => kód => podíl (součet 1)
+     */
+    public function itemAccountsByDimension(int $supplierId, string $sourceType, int $sourceId, array $itemCodes): array
+    {
+        $identity = array_map(static fn (string $code): array => [$code => 1.0], $itemCodes);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT entry_date FROM journal_entries
+              WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL AND posted_at IS NOT NULL
+              ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        $entryDate = $stmt->fetchColumn();
+        if ($entryDate === false) {
+            return $identity;
+        }
+        $router = new DimensionAccountRouter($this->db);
+        $context = $router->context($supplierId, (string) $entryDate);
+        if ($context === null) {
+            return $identity;
+        }
+        $itemDims = $this->dimensionStamper()->itemDimensions($supplierId, $sourceType, $sourceId);
+        $codeMap = $this->accounts->codeToIdMap($supplierId);
+        $single = $this->singleAnalyticMap($supplierId);
+        $lines = [];
+        foreach ($itemCodes as $itemId => $code) {
+            $resolvedCode = $single[$code] ?? $code;
+            $lines[$itemId] = ['account_id' => (int) ($codeMap[$resolvedCode]['id'] ?? 0), 'side' => 'debit', 'amount' => 1.0]
+                + ($itemDims[$itemId] ?? []);
+        }
+        $keys = array_keys($lines);
+        $lines = array_combine($keys, $this->dimensionStamper()->rules()->applyDefaults(
+            $supplierId,
+            $sourceType,
+            $sourceId,
+            array_values($lines),
+            (string) $entryDate,
+        ));
+        $origins = [];
+        foreach ($single as $synthetic => $analytic) {
+            if (isset($codeMap[$synthetic], $codeMap[$analytic])) {
+                $origins[(int) $codeMap[$analytic]['id']] = (int) $codeMap[$synthetic]['id'];
+            }
+        }
+        $out = $identity;
+        foreach ($lines as $itemId => $line) {
+            if ($line['account_id'] <= 0) {
+                continue;
+            }
+            $targets = DimensionAccountRouter::targets(
+                $line,
+                $context['type_id'],
+                $context['mask'],
+                $context['accounts'],
+                $context['map'],
+                $origins,
+            );
+            if (array_keys($targets) === [$line['account_id']]) {
+                continue;
+            }
+            $out[$itemId] = [];
+            foreach ($targets as $accountId => $share) {
+                $out[$itemId][(string) $context['accounts'][$accountId]['code']] = $share;
+            }
+        }
+        return $out;
     }
 
     // ── interní ───────────────────────────────────────────────────────────────

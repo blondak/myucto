@@ -136,6 +136,43 @@ final class DimensionStamper
     }
 
     /**
+     * Dimenze, které zaúčtování dá výsledkovému řádku každé položky dokladu: položka >
+     * produkt > hlavička > zakázka > klient (rozpad jako `dimension_splits`). Výchozí
+     * hodnoty pravidel se tu neuplatní — závisí na účtu, doplní je volající přes
+     * {@see DimensionRuleService::applyDefaults()}.
+     *
+     * Potřebuje ji časové rozlišení (381/384): odkládá náklad položky a musí ho vzít
+     * z téže analytiky, na kterou ho zaúčtovala účtotvorná dimenze.
+     *
+     * @return array<int,array{dimensions?:array<int,int>, dimension_splits?:array<int,array<int,float>>}> id položky => dimenze
+     */
+    public function itemDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    {
+        if (!isset(self::SOURCES[$sourceType]) || self::SOURCES[$sourceType][1] === null || !$this->enabled($supplierId)) {
+            return [];
+        }
+        [$header, , $splits, $byItem] = $this->documentContext($supplierId, $sourceType, $sourceId, null);
+        $out = [];
+        foreach ($byItem as $itemId => $dims) {
+            $line = self::expandSplits([['dimensions' => self::merge($header, $dims)]], $splits)[0];
+            $out[$itemId] = array_intersect_key($line, ['dimensions' => 1, 'dimension_splits' => 1]);
+        }
+        return $out;
+    }
+
+    /**
+     * Doplní textové středisko a zakázku z dimenzí řádků (viz stamp()) — pro řádky,
+     * které po razítkování ještě změnily dimenze (dělení účtotvornou dimenzí).
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    public function linkColumns(int $supplierId, array $lines): array
+    {
+        return $this->syncLinkedColumns($supplierId, $lines);
+    }
+
+    /**
      * Rozpad dokladu (hlavička nebo položka) jede jádrem {@see assign()} jako zástupná
      * záporná „hodnota" (-1 = první rozpad dokladu): položky se stejným rozpadem se tak
      * seskupí stejně jako položky se stejnou hodnotou. Tady se zástupná hodnota nahradí
@@ -181,14 +218,20 @@ final class DimensionStamper
      * Typ z `$released` (typ => hodnota, null = rozpad), který doklad určoval dřív a teď
      * už ne, se z řádku odebere, jen když tam pořád je tatáž hodnota (resp. rozpad).
      *
+     * `account_change` = dimenze by změnila analytický účet (účtotvorná dimenze) —
+     * dotčené řádky se nepřerazítkovaly a doklad potřebuje přeúčtovat. Posuzují se
+     * výsledné dimenze řádku (po zachování ručních typů), takže ruční středisko
+     * řádku, které doklad neurčuje, konflikt nevyvolá.
+     *
      * @param array<int,?int> $released
-     * @return array{lines:int, needs_repost:bool}
+     * @param array<string,string> $singleAnalytics syntetika => jediná analytika (přesměr PostingService)
+     * @return array{lines:int, needs_repost:bool, account_change:bool}
      */
-    public function restamp(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = []): array
+    public function restamp(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = [], array $singleAnalytics = []): array
     {
         $keepLineTypes = $keepLineTypes || in_array($sourceType, self::KEEP_LINE_TYPES, true);
         if (!isset(self::SOURCES[$sourceType]) || !$this->enabled($supplierId)) {
-            return ['lines' => 0, 'needs_repost' => false];
+            return ['lines' => 0, 'needs_repost' => false, 'account_change' => false];
         }
         $pdo = $this->db->pdo();
         $entries = $pdo->prepare(
@@ -201,13 +244,15 @@ final class DimensionStamper
             $entryDates[(int) $e['id']] = (string) $e['entry_date'];
         }
         if ($entryDates === []) {
-            return ['lines' => 0, 'needs_repost' => false];
+            return ['lines' => 0, 'needs_repost' => false, 'account_change' => false];
         }
         [$header, $items, $splits] = $this->documentContext($supplierId, $sourceType, $sourceId, null);
         $types = $this->accountTypes($supplierId);
         $assignments = new DimensionAssignmentRepository($this->db);
+        $router = new DimensionAccountRouter($this->db);
         $changed = 0;
         $needsRepost = false;
+        $accountChange = false;
         foreach ($entryDates as $entryId => $entryDate) {
             $stmt = $pdo->prepare(
                 'SELECT id, account_id, side, amount, currency_code FROM journal_entry_lines
@@ -230,14 +275,19 @@ final class DimensionStamper
                 }
             }
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            // Řádek rozdělený při zaúčtování mohla účtotvorná dimenze rozeslat na různé
+            // analytiky téže syntetiky — sourozence proto počítá syntetika, ne analytika.
+            $siblingAccount = $router->siblingAccounts($supplierId, $entryDate, $singleAnalytics);
+            $siblingKey = static fn (array $l): string
+                => ($siblingAccount[(int) $l['account_id']] ?? (int) $l['account_id']) . '|' . $l['side'];
             $siblings = [];
             foreach ($rows as $l) {
-                $key = $l['account_id'] . '|' . $l['side'];
+                $key = $siblingKey($l);
                 $siblings[$key] = ($siblings[$key] ?? 0) + 1;
             }
-            $lines = array_map(static function (array $l) use ($current, $siblings): array {
+            $lines = array_map(static function (array $l) use ($current, $siblings, $siblingKey): array {
                 $l['current_dimensions'] = $current[(int) $l['id']] ?? [];
-                $l['split_siblings'] = $siblings[$l['account_id'] . '|' . $l['side']];
+                $l['split_siblings'] = $siblings[$siblingKey($l)];
                 return $l;
             }, $rows);
             if ($sourceType === 'bank') {
@@ -258,17 +308,51 @@ final class DimensionStamper
                 self::expandSplits($result['lines'], $splits),
                 $entryDate,
             );
+            // Výsledné dimenze řádku (u zachovaných ručních typů po sloučení s řádkem).
+            foreach ($restamped as $i => $line) {
+                if (!$keepLineTypes) {
+                    continue;
+                }
+                $lineId = (int) $line['id'];
+                [$dims, $lineSplits] = self::keepLineTypes(
+                    $originalDims[$lineId] ?? [],
+                    $originalSplits[$lineId] ?? [],
+                    array_map('intval', (array) ($line['dimensions'] ?? [])),
+                    (array) ($line['dimension_splits'] ?? []),
+                    $released,
+                );
+                unset($restamped[$i]['dimensions'], $restamped[$i]['dimension_splits']);
+                if ($dims !== []) {
+                    $restamped[$i]['dimensions'] = $dims;
+                }
+                if ($lineSplits !== []) {
+                    $restamped[$i]['dimension_splits'] = $lineSplits;
+                }
+            }
+            // Účtotvorná dimenze: nová hodnota, která by změnila analytický účet nebo
+            // rozdělení řádků mezi analytiky, se tiše nepřerazítkuje — řádek si ponechá
+            // dosavadní dimenze a doklad potřebuje přeúčtovat (needs_repost).
+            $old = array_fill_keys(array_map(static fn (array $r): int => (int) $r['id'], $rows), []);
+            foreach ($originalDims as $lineId => $dims) {
+                $old[$lineId]['dimensions'] = $dims;
+            }
+            foreach ($originalSplits as $lineId => $byType) {
+                $old[$lineId]['dimension_splits'] = $byType;
+            }
+            $projected = $router->projectForEntry($supplierId, $entryDate, array_values($restamped), $singleAnalytics, $old);
+            $restamped = $projected['lines'];
+            if ($projected['conflicts'] !== []) {
+                $needsRepost = true;
+                $accountChange = true;
+                $restamped = array_values(array_filter(
+                    $restamped,
+                    static fn (array $l): bool => !in_array((int) $l['id'], $projected['conflicts'], true),
+                ));
+            }
             foreach ($restamped as $line) {
                 $lineId = (int) $line['id'];
-                [$dims, $lineSplits] = $keepLineTypes
-                    ? self::keepLineTypes(
-                        $originalDims[$lineId] ?? [],
-                        $originalSplits[$lineId] ?? [],
-                        array_map('intval', (array) ($line['dimensions'] ?? [])),
-                        (array) ($line['dimension_splits'] ?? []),
-                        $released,
-                    )
-                    : [$line['dimensions'] ?? [], $line['dimension_splits'] ?? []];
+                $dims = $line['dimensions'] ?? [];
+                $lineSplits = $line['dimension_splits'] ?? [];
                 $dimsChanged = $assignments->replaceLineDimensions($supplierId, $lineId, $dims);
                 $splitsChanged = $assignments->replaceLineSplits($supplierId, $lineId, $lineSplits);
                 if ($dimsChanged || $splitsChanged) {
@@ -276,7 +360,7 @@ final class DimensionStamper
                 }
             }
         }
-        return ['lines' => $changed, 'needs_repost' => $needsRepost];
+        return ['lines' => $changed, 'needs_repost' => $needsRepost, 'account_change' => $accountChange];
     }
 
     /**
@@ -629,7 +713,9 @@ final class DimensionStamper
      * zástupná záporná hodnota, kterou po rozdělení řádků nahradí {@see expandSplits()}.
      *
      * @param array<int,int>|null $itemAccounts
-     * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>, 2:list<array<int,float>>}
+     * Čtvrtý prvek = id položky => její vlastní dimenze (položka > produkt), bez hlavičky.
+     *
+     * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>, 2:list<array<int,float>>, 3:array<int,array<int,int>>}
      */
     private function documentContext(int $supplierId, string $sourceType, int $sourceId, ?array $itemAccounts): array
     {
@@ -654,6 +740,7 @@ final class DimensionStamper
         }
         ksort($dims['header']);
         $items = [];
+        $byItem = [];
         if ($itemTable !== null) {
             // Pořadí položky = pořadí v editoru (order_index), číslováno od 1 — stejně
             // jako ho ukládá DimensionService::saveDocument().
@@ -671,6 +758,12 @@ final class DimensionStamper
                 $supplierId,
                 array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $rows),
             );
+            foreach ($rows as $i => $row) {
+                $byItem[(int) $row['id']] = DimensionDefaults::fill(
+                    $dims['items'][$i + 1] ?? [],
+                    $productDims[(int) ($row['stock_item_id'] ?? 0)]['header'] ?? [],
+                );
+            }
             if ($dims['items'] !== [] || $productDims !== []) {
                 foreach ($rows as $i => $row) {
                     $items[] = [
@@ -697,7 +790,7 @@ final class DimensionStamper
             }
         }
         $header = DimensionDefaults::fill($dims['header'], $inherited['header']);
-        return [$header, $items, $splits];
+        return [$header, $items, $splits, $byItem];
     }
 
     /**

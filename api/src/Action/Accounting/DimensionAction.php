@@ -9,6 +9,7 @@ use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionAccountMapService;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionRuleAudit;
 use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
@@ -38,6 +39,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET|POST /api/accounting/dimensions/rules, PUT|DELETE …/rules/{id} — pravidla dimenzí podle účtu
  *   GET    /api/accounting/dimensions/rules/audit              — zaúčtované řádky bez povinné dimenze
  *   GET    /api/accounting/dimensions/rules/coverage           — pokrytí účtů dimenzemi (návrh pravidel)
+ *   GET    /api/accounting/dimensions/account-map              — účtotvorná dimenze: mapa hodnota × syntetika → analytika
+ *   GET    /api/accounting/dimensions/types/{id}/account-candidates — syntetiky v masce typu a jejich analytiky
+ *   PUT    /api/accounting/dimensions/values/{id}/account-map  — nahradit mapu hodnoty (firma)
  *
  * Čtení = `accounting` READ, zápisy = `accounting` WRITE (RoutePermissionMap i tady),
  * zapnutí sekce a skupina firem = správa firmy.
@@ -66,7 +70,45 @@ final class DimensionAction
         private readonly IpMatcher $ipMatcher,
         private readonly DimensionRuleService $rules,
         private readonly DimensionRuleAudit $ruleAudit,
+        private readonly DimensionAccountMapService $accountMap,
     ) {}
+
+    // ── účtotvorná dimenze ──────────────────────────────────────────────────
+
+    /** GET …/account-map?value_id= — mapa firmy (volitelně jedné hodnoty). */
+    public function accountMap(Request $request, Response $response): Response
+    {
+        $valueId = (int) ($request->getQueryParams()['value_id'] ?? 0);
+        return Json::ok($response, $this->accountMap->list($this->currentSupplierId($request), $valueId > 0 ? $valueId : null));
+    }
+
+    public function accountCandidates(Request $request, Response $response, array $args): Response
+    {
+        try {
+            return Json::ok($response, $this->accountMap->candidates($this->currentSupplierId($request), (int) ($args['id'] ?? 0)));
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+    }
+
+    /** PUT …/values/{id}/account-map — `{rows: [{synthetic_account_id, analytic_account_id, valid_from, valid_to}]}`. */
+    public function saveAccountMap(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $valueId = (int) ($args['id'] ?? 0);
+            $body = (array) ($request->getParsedBody() ?? []);
+            $rows = $this->accountMap->saveForValue($supplierId, $valueId, array_values((array) ($body['rows'] ?? [])), $this->userId($request));
+            $this->log($request, 'dimension.account_map_updated', $valueId, [
+                'rows' => array_map(static fn (array $r): array => [
+                    'synthetic' => $r['synthetic_code'],
+                    'analytic' => $r['analytic_code'],
+                    'valid_from' => $r['valid_from'],
+                    'valid_to' => $r['valid_to'],
+                ], $rows),
+            ]);
+            return $rows;
+        });
+    }
 
     // ── pravidla dimenzí podle účtu ─────────────────────────────────────────
 
