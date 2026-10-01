@@ -82,6 +82,21 @@ final class PurchaseAdvanceCoveredStatusTest extends BankPostingTestCase
         self::assertSame(['paid', self::YEAR . '-06-24'], $this->state($advance));
     }
 
+    /** Běžná ručně uhrazená faktura: spárování ani odpárování nemění stav ani ruční datum. */
+    public function testRegularManuallyPaidInvoiceKeepsManualDateThroughMatchAndUnmatch(): void
+    {
+        $vendor  = $this->client('Dodavatel běžná faktura');
+        $invoice = $this->purchaseInvoice('PF-STAV-7', $vendor, 1210.00);
+        $this->markPaid($invoice, self::YEAR . '-06-23');
+        $tx = $this->transaction($this->statement(), -1210.00, ['posted_at' => self::YEAR . '-06-24']);
+
+        $this->match($tx, $invoice);
+        self::assertSame(['paid', self::YEAR . '-06-23'], $this->state($invoice), 'Ruční datum úhrady zůstává.');
+
+        $this->unmatch($tx);
+        self::assertSame(['paid', self::YEAR . '-06-23'], $this->state($invoice), 'Odpárování ruční úhradu nevrací.');
+    }
+
     /** Pokladní úhrada zálohy a její storno (zrcadlo bankovní větve). */
     public function testCashPaymentOfAdvanceAndReversalDriveFinalStatus(): void
     {

@@ -4081,8 +4081,9 @@ final class BankStatementAction
             // (manualMatchPurchaseSplit) nesoulad odmítá celou, proto ji to netýká.
             $settlesFully = FxPaymentSettlement::settlesRemaining($absAmount, $remaining, $docCurrency, $docRate, $txCurrency);
 
-            // Mark purchase paid — jen pokud ještě není. Ručně zaplacené se status nemění;
-            // datum úhrady srovná AdvanceCoveredPaidStatus níž, až platby kryjí doklad celý.
+            // Mark purchase paid — jen pokud ještě není (ručně zaplacenou jen navážeme,
+            // status/paid_at nepřepisujeme — respektujeme stav nastavený uživatelem).
+            // Výjimkou je záloha: AdvanceCoveredPaidStatus níž jí srovná datum podle plateb.
             if (!$alreadyPaid && $settlesFully) {
                 $pdo->prepare(
                     "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"

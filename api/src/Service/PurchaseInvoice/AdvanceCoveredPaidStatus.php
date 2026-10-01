@@ -7,19 +7,22 @@ namespace MyInvoice\Service\PurchaseInvoice;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
-use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
  * Stav „uhrazeno" přijatých dokladů, který plyne z evidovaných úhrad a ze zálohy.
  *
+ * Týká se JEN záloh (`document_kind = 'advance'`) a jejich konečných faktur navázaných
+ * přes `advance_purchase_invoice_id`. Běžná faktura se nemění: ruční „uhrazeno" i ruční
+ * datum úhrady zůstávají a zrušení párování je nevrací.
+ *
  * Dvě pravidla, obě odvozená od téže evidence úhrad ({@see PurchaseSettledExpr}):
  *
- *   1. Doklad ve stavu `paid`, který evidované úhrady (banka, pokladna, zápočty) kryjí
- *      celý, má `paid_at` = datum POSLEDNÍ z nich. Ruční „Označit jako uhrazené" s jiným
- *      datem se spárováním platby přepíše skutečností; zrušení párování pak doklad podle
- *      data úhrady pozná a vrátí ho mezi otevřené (BankTransactionReleaseService).
+ *   1. Záloha ve stavu `paid`, kterou evidované úhrady (banka, pokladna, zápočty) kryjí
+ *      celou, má `paid_at` = datum POSLEDNÍ z nich. Ruční „Označit jako uhrazené" s jiným
+ *      datem se spárováním platby přepíše skutečností; zrušení párování pak zálohu podle
+ *      data úhrady pozná a vrátí ji mezi otevřené (BankTransactionReleaseService).
  *   2. Konečná faktura, kterou záloha kryje CELOU (`amount_to_pay` = 0 po odečtení zálohy)
  *      a která nemá vlastní úhradu, je uhrazená právě tehdy, když je uhrazená její záloha,
  *      a to k datu úhrady zálohy. Přestane-li být záloha uhrazená (zrušené párování,
@@ -30,8 +33,11 @@ use PDO;
  * ({@see \MyInvoice\Service\Accounting\AdvanceSettlementSync}): bankovní párování a jeho
  * zrušení, pokladní úhrada, její storno a smazání. Běží v transakci volajícího.
  *
- * Vydaná strana to nepotřebuje: vyúčtovací faktura krytá proformou je `paid` od vystavení
- * a přepočet z plateb ji záměrně nerevertuje (InvoicePaymentService::recomputeLocked).
+ * TODO: zápočty zálohy (OffsetService, InvoiceSettlementService) stav konečné faktury
+ * zatím nespouštějí.
+ * TODO: vydaná strana — vyúčtovací faktura krytá proformou je `paid` od vystavení
+ * a přepočet z plateb ji záměrně nerevertuje (InvoicePaymentService::recomputeLocked),
+ * takže po zrušení platby proformy zůstane uhrazená.
  */
 final class AdvanceCoveredPaidStatus
 {
@@ -79,7 +85,7 @@ final class AdvanceCoveredPaidStatus
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false
             || (string) $row['status'] !== 'paid'
-            || (string) $row['document_kind'] === PayablePredicate::NON_PAYABLE_DOCUMENT_KIND
+            || (string) $row['document_kind'] !== 'advance'
             || (float) $row['amount_to_pay'] <= 0.005
             || (float) $row['amount_to_pay'] - (float) $row['settled'] > FxPaymentSettlement::AMOUNT_TOLERANCE) {
             return null;
