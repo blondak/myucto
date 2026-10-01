@@ -222,6 +222,44 @@ final class DimensionExtractionReviewTest extends TestCase
         self::assertSame([], $this->container->get(PurchaseInvoiceReviewNeeds::class)->forInvoice($this->supplierId, $this->row($cancelled))['reasons']);
     }
 
+    public function testAdvanceAndTaxDocumentAreNotFlagged(): void
+    {
+        $vendor = $this->client('REQ-KIND');
+        (new DimensionRuleService($this->db))->create($this->supplierId, [
+            'dimension_type_id' => $this->centerType, 'account_mask' => '5', 'enforcement' => 'error',
+        ]);
+        $needs = $this->container->get(PurchaseInvoiceReviewNeeds::class);
+        foreach (['advance', 'tax_document'] as $kind) {
+            $doc = $this->purchase('KIND-' . $kind, $vendor, self::YEAR . '-06-15', 'draft', $kind);
+            self::assertSame([], $needs->forInvoice($this->supplierId, $this->row($doc))['reasons'], "{$kind} nemá nákladový řádek.");
+        }
+        $invoice = $this->purchase('KIND-invoice', $vendor, self::YEAR . '-06-15', 'draft');
+        self::assertSame([RequiredDimensionReviewCheck::REASON], $needs->forInvoice($this->supplierId, $this->row($invoice))['reasons']);
+    }
+
+    public function testListRowsAreEvaluatedInOneBatch(): void
+    {
+        $vendor = $this->client('REQ-LIST');
+        (new DimensionRuleService($this->db))->create($this->supplierId, [
+            'dimension_type_id' => $this->centerType, 'account_mask' => '5', 'enforcement' => 'error',
+        ]);
+        $center = $this->value($this->centerType, 'RC-LIST');
+        $missing = $this->purchase('LIST-1', $vendor, self::YEAR . '-06-15', 'draft');
+        $filled = $this->purchase('LIST-2', $vendor, self::YEAR . '-06-15', 'draft');
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $filled, [$this->centerType => $center], []);
+        $received = $this->purchase('LIST-3', $vendor, self::YEAR . '-06-15');
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET extraction_warning = ? WHERE id = ?')->execute(['Rozdíl součtů', $received]);
+
+        $result = $this->container->get(PurchaseInvoiceReviewNeeds::class)
+            ->forListRows($this->supplierId, [$this->row($missing), $this->row($filled), $this->row($received)]);
+        self::assertSame([RequiredDimensionReviewCheck::REASON], $result[$missing]['reasons']);
+        self::assertSame([], $result[$filled]['reasons']);
+        self::assertSame(['extraction_warning'], $result[$received]['reasons'], 'Přijatý doklad v seznamu jen podle hlášení.');
+
+        $api = json_encode(PurchaseInvoiceReviewNeeds::toApi($result[$filled]), JSON_THROW_ON_ERROR);
+        self::assertSame('{"reasons":[],"details":{}}', $api, 'Prázdné details je v JSON objekt.');
+    }
+
     // ── dimenze z podání → hlavička faktury ──────────────────────────────────
 
     public function testSubmissionDimensionsArePropagatedToCreatedInvoiceHeader(): void
@@ -333,7 +371,7 @@ final class DimensionExtractionReviewTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function purchase(string $number, int $vendorId, string $issue, string $status = 'received'): int
+    private function purchase(string $number, int $vendorId, string $issue, string $status = 'received', string $kind = 'invoice'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -341,8 +379,8 @@ final class DimensionExtractionReviewTest extends TestCase
                 (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
                  received_at, currency_id, reverse_charge, vendor_snapshot, total_without_vat, total_vat,
                  total_with_vat, status, vat_classification_code, vat_deduction, created_by)
-             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", 1000, 210, 1210, ?, "40", "full", ?)'
-        )->execute([$this->supplierId, $vendorId, $number, $issue, $issue, $issue, $issue, $this->currencyId, $status, $this->userId]);
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, "{}", 1000, 210, 1210, ?, "40", "full", ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $kind, $issue, $issue, $issue, $issue, $this->currencyId, $status, $this->userId]);
         $id = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO purchase_invoice_items

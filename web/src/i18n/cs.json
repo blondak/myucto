@@ -17780,6 +17780,7 @@
         "items_hint": "Jinou dimenzi položky nastavíte štítkem u řádku.",
         "required": "Povinné podle pravidel dimenzí: {type} (účet {accounts}). Bez ní doklad nepůjde zaúčtovat.",
         "suggestion": "Návrh",
+        "split_in_detail": "Rozpad upravíte v detailu dokladu",
         "detail_notice": "Dokladu chybí povinná dimenze: {types}.",
         "source": {
           "client": "výchozí dodavatele",

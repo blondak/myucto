@@ -35995,9 +35995,11 @@ components:
       properties:
         reasons:
           type: array
-          items: { type: string, enum: [extraction_warning, missing_required_dimension] }
+          items: { type: string }
+          description: "Známé hodnoty: extraction_warning, missing_required_dimension. Klient má neznámý důvod brát jako „potřebuje kontrolu“."
         details:
           type: object
+          description: Podrobnosti podle důvodu; bez podrobností prázdný objekt.
           properties:
             missing_required_dimension:
               type: object

@@ -25,7 +25,9 @@ import {
   dimensionsApi,
   type DimensionMap,
   type DimensionPrefillSource,
+  type DimensionSplits,
 } from '@/api/dimensions'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
 
 /**
  * Kontrola AI vytěžených přijatých faktur po importu — faktura po faktuře.
@@ -135,6 +137,9 @@ const dimLoadedItems = ref<Record<number, Record<number, number>>>({})
 const openItemDims = reactive(new Set<number>())
 /** Typ → hodnota a zdroj, které doplnilo předvyplnění (návrh, dokud ho uživatel nezmění). */
 const suggestions = ref<Record<number, { value: number; source: DimensionPrefillSource }>>({})
+/** Rozpad hlavičky (0) a položek (pořadí od 1) mezi víc hodnot typu. V okně jen ke čtení:
+ * typ s rozpadem se nepředvyplňuje ani nenabízí, takže ho uložení ponechá beze změny. */
+const dimSplits = ref<Record<number, DimensionSplits>>({})
 let dimSeq = 0
 
 /** Položky v pořadí, v jakém je backend čísluje (order_index, od 1). */
@@ -152,6 +157,7 @@ async function loadDimensions(inv: PurchaseInvoice): Promise<void> {
   dimLoadedHeader.value = {}
   dimLoadedItems.value = {}
   suggestions.value = {}
+  dimSplits.value = {}
   openItemDims.clear()
   for (const k of Object.keys(dimItems)) delete dimItems[Number(k)]
   if (!dims.enabled.value) return
@@ -170,6 +176,8 @@ async function loadDimensions(inv: PurchaseInvoice): Promise<void> {
     ])
     if (seq !== dimSeq) return
     const header: DimensionMap = { ...doc.header }
+    dimSplits.value = doc.splits ?? {}
+    const headerSplit = dimSplits.value[0] ?? {}
     dimLoadedHeader.value = compactDimensions(doc.header)
     const loadedItems: Record<number, Record<number, number>> = {}
     orderedItems.value.forEach((it, i) => {
@@ -183,7 +191,7 @@ async function loadDimensions(inv: PurchaseInvoice): Promise<void> {
     const next: Record<number, { value: number; source: DimensionPrefillSource }> = {}
     for (const [typeId, valueId] of Object.entries(prefill?.header ?? {})) {
       const key = Number(typeId)
-      if (!header[key] && valueId) {
+      if (!header[key] && valueId && !headerSplit[key]?.length) {
         header[key] = valueId
         next[key] = { value: valueId, source: prefill?.sources[key] ?? 'client' }
       }
@@ -201,7 +209,20 @@ const activeSuggestions = computed(() => Object.entries(suggestions.value)
   .map(([typeId, s]) => ({ typeId: Number(typeId), ...s })))
 
 const missingRequired = computed(() => missingDimensions(invoice.value)
-  .filter(m => !dimHeader.value[m.type_id]))
+  .filter(m => !dimHeader.value[m.type_id] && !dimSplits.value[0]?.[m.type_id]?.length))
+
+/** Rozpad hlavičky (typ → podíly), zobrazený jen ke čtení. */
+const headerSplits = computed<DimensionSplits>(() => dimSplits.value[0] ?? {})
+const hasHeaderSplits = computed(() => Object.values(headerSplits.value).some(s => (s?.length ?? 0) > 0))
+
+/** Typy bez rozpadu v dané části dokladu (0 = hlavička, jinak pořadí položky od 1). */
+function editableTypes(itemNo: number) {
+  const split = dimSplits.value[itemNo] ?? {}
+  return dims.documentTypes.value.filter(ty => !(split[ty.id]?.length))
+}
+function itemNoOf(id: number | undefined): number {
+  return orderedItems.value.findIndex(it => it.id === id) + 1
+}
 
 function typeName(typeId: number): string {
   return dims.typeById.value.get(typeId)?.name ?? `#${typeId}`
@@ -227,8 +248,8 @@ const itemDimsChanged = computed(() => orderedItems.value.some(it => it.id !== u
   && !sameMap(compactDimensions(dimItems[it.id]), dimLoadedItems.value[it.id] ?? {})))
 const dimsChanged = computed(() => !sameMap(compactDimensions(dimHeader.value), dimLoadedHeader.value) || itemDimsChanged.value)
 
-async function saveDimensions(inv: PurchaseInvoice): Promise<void> {
-  if (!dimsEditable.value || !dimsChanged.value) return
+async function saveDimensions(inv: PurchaseInvoice): Promise<boolean> {
+  if (!dimsEditable.value || !dimsChanged.value) return false
   const items: Record<number, DimensionMap> = {}
   orderedItems.value.forEach((it, i) => {
     const map = compactDimensions(itemDims(it.id))
@@ -239,6 +260,7 @@ async function saveDimensions(inv: PurchaseInvoice): Promise<void> {
     ...(itemDimsChanged.value ? { items } : {}),
   })
   if (result.restamp.needs_repost) toast.warning(t('dimensions.needs_repost'))
+  return true
 }
 
 async function save(): Promise<void> {
@@ -257,7 +279,9 @@ async function save(): Promise<void> {
       if (res._repost) toast.info(t('purchase_invoice.extraction_review.reposted'))
       updated = res
     }
-    await saveDimensions(inv)
+    const dimsSaved = await saveDimensions(inv)
+    // Doklad i s přepočteným `review` — rodič (seznam, detail) nesmí ukazovat zastaralé upozornění.
+    if (changed.length || dimsSaved) updated = await purchaseInvoicesApi.get(inv.id).catch(() => updated)
     queue.value[index.value] = updated
     emit('updated', updated)
     next()
@@ -368,7 +392,13 @@ onMounted(async () => {
           <h3 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.extraction_review.dimensions.title') }}</h3>
           <span class="text-xs text-neutral-500">{{ t('purchase_invoice.extraction_review.dimensions.items_hint') }}</span>
         </div>
-        <DimensionFields v-model="dimHeader" compact :disabled="!dimsEditable" />
+        <DimensionFields v-model="dimHeader" compact :types="editableTypes(0)" :disabled="!dimsEditable" />
+        <p v-if="hasHeaderSplits" class="text-xs text-neutral-600 flex flex-wrap items-center gap-1.5" data-test="review-dimension-splits">
+          <DimensionChips :dimensions="{}" :splits="headerSplits" />
+          <RouterLink :to="`/purchase-invoices/${invoice.id}`" class="text-primary-600 hover:underline" @click="emit('close', true)">
+            {{ t('purchase_invoice.extraction_review.dimensions.split_in_detail') }}
+          </RouterLink>
+        </p>
         <p v-for="m in missingRequired" :key="`missing-${m.type_id}`" class="text-xs text-danger-600" data-test="review-dimension-missing">
           {{ t('purchase_invoice.extraction_review.dimensions.required', { type: m.type_name, accounts: m.account_codes.join(', ') }) }}
         </p>
@@ -427,7 +457,7 @@ onMounted(async () => {
               :open="openItemDims.has(it.id as number)" :filled="Object.values(itemDims(it.id)).some(v => !!v)"
               :disabled="!dimsEditable" @toggle="toggleItemDims(it.id)" />
             <div v-if="dimsShown && openItemDims.has(it.id as number)" class="w-full sm:basis-full" data-test="review-item-dimensions">
-              <DimensionFields compact :model-value="itemDims(it.id)" :disabled="!dimsEditable"
+              <DimensionFields compact :model-value="itemDims(it.id)" :types="editableTypes(itemNoOf(it.id))" :disabled="!dimsEditable"
                 @update:model-value="setItemDims(it.id, $event)" />
             </div>
           </li>

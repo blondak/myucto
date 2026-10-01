@@ -43,9 +43,10 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
 }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/components/purchase/ExtractionWarningText.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/dimensions/DimensionChips.vue', () => ({ default: { props: ['dimensions', 'splits'], template: '<span class="split-chips" />' } }))
 vi.mock('@/components/dimensions/ItemDimensionsToggle.vue', () => ({ default: { template: '<button class="item-toggle" />' } }))
 vi.mock('@/components/dimensions/DimensionFields.vue', () => ({
-  default: { name: 'DimensionFields', props: ['modelValue', 'disabled', 'compact'], emits: ['update:modelValue'], template: '<div class="fields" />' },
+  default: { name: 'DimensionFields', props: ['modelValue', 'disabled', 'compact', 'types'], emits: ['update:modelValue'], template: '<div class="fields" />' },
 }))
 
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
@@ -138,6 +139,35 @@ describe('ExtractionReviewModal — dimenze', () => {
     expect(m.saveDocument).toHaveBeenCalledWith('purchase-invoices', 2, { header: { 1: 7 } })
     expect(m.setExpenseKinds).not.toHaveBeenCalled()
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('typ s rozpadem v hlavičce nepředvyplní, nenabídne a uložení rozpad nepošle k přepsání', async () => {
+    m.getDocument.mockResolvedValue({ header: {}, items: {}, splits: { 0: { 1: [{ value_id: 3, share: 0.5 }, { value_id: 4, share: 0.5 }] } } })
+    m.invoices = { 2: invoice(2, { review: missingCenter }) }
+    const wrapper = await mountModal([2])
+
+    const fields = wrapper.findComponent({ name: 'DimensionFields' })
+    expect(fields.props('modelValue')).toEqual({})
+    expect(fields.props('types')).toEqual([])
+    expect(wrapper.find('[data-test="review-dimension-suggestion"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="review-dimension-missing"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="review-dimension-splits"]').exists()).toBe(true)
+
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(m.saveDocument).not.toHaveBeenCalled()
+  })
+
+  it('po uložení předá rodiči doklad s přepočteným review', async () => {
+    m.invoices = { 2: invoice(2, { review: missingCenter }) }
+    const wrapper = await mountModal([2])
+    m.invoices[2] = invoice(2, { review: { reasons: [], details: {} } })
+
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+
+    const updated = wrapper.emitted('updated')?.[0]?.[0] as { review: { reasons: string[] } }
+    expect(updated.review.reasons).toEqual([])
   })
 
   it('výchozí hodnota z dokladu se nepřepíše a beze změny se nic neukládá', async () => {

@@ -66,6 +66,7 @@ import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import { useDimensions } from '@/composables/useDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 
@@ -238,6 +239,7 @@ const savedReceivedAtSource = ref<'manual' | 'import' | null>(null)
 
 // Firma → Dimenze — hlavička a položky; ukládají se až po uložení dokladu.
 const docDims = useDocumentDimensions('purchase-invoices')
+const dimensionCatalog = useDimensions()
 
 const today = appIsoDate()
 
@@ -610,8 +612,12 @@ async function loadSubmissionOrigin(): Promise<void> {
       form.value.document_kind = item.document_kind_hint
     }
     // Středisko zvolené při nahrání je ruční volba — výchozí dimenze dodavatele ho nepřebijí.
-    if (item.dimensions && Object.keys(item.dimensions).length) {
-      docDims.header.value = { ...docDims.header.value, ...item.dimensions }
+    // Hodnotu mezitím uzavřenou vynecháme (jako backend), uložení by ji odmítlo.
+    if (item.dimensions && Object.keys(item.dimensions).length && dimensionCatalog.enabled.value) {
+      await dimensionCatalog.load().catch(() => undefined)
+      const active = Object.fromEntries(Object.entries(item.dimensions)
+        .filter(([, valueId]) => dimensionCatalog.valueById.value.get(valueId)?.is_active === true))
+      docDims.header.value = { ...docDims.header.value, ...active }
     }
   } catch (e) {
     if (submissionId.value === requestedId) error.value = apiErrorMessage(e)

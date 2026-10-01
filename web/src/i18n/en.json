@@ -17780,6 +17780,7 @@
         "items_hint": "Set a different dimension for a line with the tag button next to it.",
         "required": "Required by the dimension rules: {type} (account {accounts}). The document cannot be posted without it.",
         "suggestion": "Suggestion",
+        "split_in_detail": "Edit the split on the document detail",
         "detail_notice": "The document is missing a required dimension: {types}.",
         "source": {
           "client": "vendor default",

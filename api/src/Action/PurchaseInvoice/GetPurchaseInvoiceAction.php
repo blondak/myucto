@@ -58,7 +58,9 @@ final class GetPurchaseInvoiceAction
         );
         // Proč doklad potřebuje okno Kontrola vytěžených dokladů (hlášení vytěžení,
         // chybějící povinná dimenze…) — okno i seznam rozhodují podle tohohle.
-        $invoice['review'] = $this->reviewNeeds->forInvoice(SupplierGuard::currentId($request), $invoice);
+        $invoice['review'] = PurchaseInvoiceReviewNeeds::toApi(
+            $this->reviewNeeds->forInvoice(SupplierGuard::currentId($request), $invoice),
+        );
 
         return Json::ok($response, $invoice);
     }

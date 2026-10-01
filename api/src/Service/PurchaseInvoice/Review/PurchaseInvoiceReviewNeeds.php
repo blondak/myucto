@@ -33,24 +33,14 @@ final class PurchaseInvoiceReviewNeeds
      */
     public function forInvoice(int $supplierId, array $invoice): array
     {
-        $reasons = [];
-        $details = [];
-        if (trim((string) ($invoice['extraction_warning'] ?? '')) !== '') {
-            $reasons[] = self::EXTRACTION_WARNING;
-        }
-        foreach ($this->checks as $check) {
-            $detail = $check->evaluate($supplierId, $invoice);
-            if ($detail !== null) {
-                $reasons[] = $check->reason();
-                $details[$check->reason()] = $detail;
-            }
-        }
-        return ['reasons' => $reasons, 'details' => $details];
+        $id = (int) ($invoice['id'] ?? 0);
+        return $this->forRows($supplierId, [$invoice])[$id]
+            ?? ['reasons' => [], 'details' => []];
     }
 
     /**
-     * Pro řádky seznamu. Kontrolují se jen koncepty — seznam má až stovky řádků a
-     * u přijatého dokladu se chybějící dimenze ozve nejpozději při zaúčtování; detail
+     * Pro řádky seznamu. Chybějící povinná dimenze se počítá jen u konceptů — seznam má
+     * až stovky řádků a u přijatého dokladu se ozve nejpozději při zaúčtování; detail
      * dokladu ({@see forInvoice()}) kontroluje každý nezaúčtovaný doklad.
      *
      * @param list<array<string,mixed>> $rows
@@ -58,20 +48,46 @@ final class PurchaseInvoiceReviewNeeds
      */
     public function forListRows(int $supplierId, array $rows): array
     {
+        $drafts = array_values(array_filter($rows, static fn (array $r): bool => (string) ($r['status'] ?? '') === 'draft'));
+        return $this->forRows($supplierId, $rows, $drafts);
+    }
+
+    /**
+     * Tvar pro JSON: `details` je vždy objekt, i když je prázdný.
+     *
+     * @param array{reasons:list<string>, details:array<string,array<string,mixed>>} $review
+     * @return array{reasons:list<string>, details:object}
+     */
+    public static function toApi(array $review): array
+    {
+        return ['reasons' => $review['reasons'], 'details' => (object) $review['details']];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param list<array<string,mixed>>|null $checked řádky, na které se pustí kontroly (null = všechny)
+     * @return array<int,array{reasons:list<string>, details:array<string,array<string,mixed>>}>
+     */
+    private function forRows(int $supplierId, array $rows, ?array $checked = null): array
+    {
         $out = [];
         foreach ($rows as $row) {
             $id = (int) ($row['id'] ?? 0);
             if ($id <= 0) {
                 continue;
             }
-            if ((string) ($row['status'] ?? '') !== 'draft') {
-                $out[$id] = [
-                    'reasons' => trim((string) ($row['extraction_warning'] ?? '')) !== '' ? [self::EXTRACTION_WARNING] : [],
-                    'details' => [],
-                ];
-                continue;
+            $out[$id] = [
+                'reasons' => trim((string) ($row['extraction_warning'] ?? '')) !== '' ? [self::EXTRACTION_WARNING] : [],
+                'details' => [],
+            ];
+        }
+        foreach ($this->checks as $check) {
+            foreach ($check->evaluateMany($supplierId, $checked ?? $rows) as $id => $detail) {
+                if (isset($out[$id])) {
+                    $out[$id]['reasons'][] = $check->reason();
+                    $out[$id]['details'][$check->reason()] = $detail;
+                }
             }
-            $out[$id] = $this->forInvoice($supplierId, $row);
         }
         return $out;
     }

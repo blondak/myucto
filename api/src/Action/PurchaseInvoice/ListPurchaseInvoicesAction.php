@@ -154,7 +154,7 @@ final class ListPurchaseInvoicesAction
                         $row['dimension_labels'] = $dimensionLabels[(int) $row['id']] ?? [];
                     }
                     if (isset($review[(int) $row['id']])) {
-                        $row['review'] = $review[(int) $row['id']];
+                        $row['review'] = PurchaseInvoiceReviewNeeds::toApi($review[(int) $row['id']]);
                     }
                 }
             }
