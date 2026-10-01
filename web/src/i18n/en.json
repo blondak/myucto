@@ -22734,9 +22734,6 @@
       "title": "Run payroll",
       "label": "Run payroll",
       "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default.",
-      "beta_warning": "The payroll module has been through extensive testing. Even so, please keep a close eye on the pay, contribution and filing figures for social security, health insurers and the tax office and check them.",
-      "beta_report": "Please report any problems at",
-      "beta_report_thanks": "Thank you for them, we fix every report right away.",
       "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again.",
       "buy": "Activate payroll add-on"
     },

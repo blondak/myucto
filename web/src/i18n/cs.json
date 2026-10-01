@@ -22734,9 +22734,6 @@
       "title": "Vést mzdy",
       "label": "Vést mzdy",
       "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Ve výchozím stavu je vypnutý.",
-      "beta_warning": "Mzdový modul prošel rozsáhlým testováním. Prosím přesto pečlivě sledujte a kontrolujte výpočty mezd, odvodů a podání pro ČSSZ, zdravotní pojišťovny a finanční úřad.",
-      "beta_report": "Případné problémy nahlaste na",
-      "beta_report_thanks": "Děkujeme za ně, jakékoliv případné hlášení ihned opravíme.",
       "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná.",
       "buy": "Aktivovat mzdový doplněk"
     },
