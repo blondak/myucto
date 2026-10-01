@@ -32,7 +32,7 @@ Podstatné vlastnosti:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
+| Fakturace | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), vystavování, odesílání, evidence úhrad, upomínky |
 | Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** — založení, úprava, archivace, rozpočty a ziskovost |
@@ -332,6 +332,15 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Najdi fakturu pro ACME z června a ukaž, jestli je zaplacená.“
 - „Vystav fakturu firmě ACME na 10 hodin konzultací po 1 500 Kč.“ *(token čtení a zápis)*
 
+**Úprava konceptu faktury** *(token čtení a zápis)*
+
+- „Na konceptu pro ACME změň cenu druhé položky na 1 800 Kč.“
+- „Přidej na koncept položku Doprava, 1 ks, 350 Kč.“
+- „Odeber poslední položku, je tam omylem.“
+- „Posuň splatnost konceptu o 14 dní a doplň poznámku.“
+
+Podrobnosti v [§ 106.7.4](#10674-uprava-konceptu-faktury).
+
 **Odběratelé**
 
 - „Založ klienta podle IČO 45274649.“
@@ -346,7 +355,7 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 - „Přidej do výkazu 5 metrů kabeláže po 120 Kč.“
 - „Smaž poslední řádek z výkazu, zadal jsem ho omylem.“
 
-Podrobnosti v [§ 106.7](#1067-vykazy-prace-a-materialu).
+Podrobnosti v [§ 106.7](#1067-koncept-faktury-vykazy-prace-a-materialu).
 
 **Zakázky, dokumenty a kniha jízd**
 
@@ -432,7 +441,7 @@ Když je ARES nedostupný, u úpravy se **nic nemění** (raději nic než půlk
 starých a půlka nových údajů). U zakládání se použijí údaje ze zadání, pokud
 stačí — asistent do odpovědi napíše, odkud data vzal.
 
-## 106.7 Výkazy práce a materiálu
+## 106.7 Koncept faktury, výkazy práce a materiálu
 
 Výkaz je navázaný na **koncept faktury** — přesně jako v aplikaci. Stačí tedy říct:
 
@@ -468,6 +477,39 @@ lze samozřejmě určit („…3 hodiny po 1 800 Kč“).
 rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
 existujícího výkazu, jinak si o ni řekne — špatná sazba by se propsala do
 přiznání k DPH.
+
+### 106.7.4 Úprava konceptu faktury
+
+Koncept, který asistent připravil, nemusíš opravovat ručně v editoru. Stačí mu
+říct, co změnit, a koncept upraví:
+
+| Nástroj | Co dělá |
+|---|---|
+| `update_invoice` | změní hlavičku: data, splatnost, měnu, jazyk, způsob úhrady, poznámky, zakázku, slevu, variabilní symbol |
+| `add_invoice_item` | přidá položku na konec nebo na zvolené místo |
+| `update_invoice_item` | změní jednu položku (text, množství, jednotku, cenu, sazbu DPH, časové rozlišení) |
+| `remove_invoice_item` | odebere jednu položku, jen s potvrzením ([§ 106.9.4](#10694-potvrzovani-nevratnych-kroku)) |
+
+Platí přitom:
+
+- **Mění se jen to, co řekneš.** Ostatní pole hlavičky i ostatní položky zůstanou,
+  včetně údajů, které v rozhovoru nevidíš: časové rozlišení, vazba na sklad
+  a majetek, nastavení OSS a pořadí položek.
+- Položku určíš pořadím, jak ji vidíš na dokladu („druhá položka“), nebo jejím
+  ID. Řádek se slevou z celé faktury se nepočítá, ten dopočítává aplikace sama.
+- **Sazbu DPH si asistent nevymýšlí.** U nové položky se na ni zeptá, u upravované
+  ji nechá, dokud ji výslovně nezměníš. Po změně sazby, data zdanitelného plnění
+  nebo přenesené daňové povinnosti si aplikace zařazení položek pro přiznání
+  k DPH a OSS odvodí znovu.
+- Doklad se dohledá stejně jako u výkazu práce ([§ 106.7.2](#10672-ktery-doklad-se-pouzije)):
+  má-li odběratel víc konceptů, asistent je vypíše a nechá tě vybrat.
+- Součty a DPH spočítá aplikace; asistent vrátí upravený doklad.
+- **Upravit jde jen koncept.** Vystavenou fakturu asistent odmítne změnit,
+  ta se opravuje dobropisem nebo stornem v aplikaci.
+- Jedinou položku dokladu odebrat nejde, doklad musí nějakou mít.
+
+V režimu jen pro čtení se tyto nástroje nenabízejí; vyžadují token
+s oprávněním čtení a zápis.
 
 ## 106.8 Zakázky, dokumenty a kniha jízd
 
@@ -589,7 +631,8 @@ jen čte.
 
 ### 106.9.4 Potvrzování nevratných kroků
 
-Mazání, storno dokladu a uzavření inventury vyžadují **výslovné potvrzení**.
+Mazání, storno dokladu, uzavření inventury a odebrání položky z konceptu
+faktury vyžadují **výslovné potvrzení**.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
 změna týkala:
 

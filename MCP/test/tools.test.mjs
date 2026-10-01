@@ -466,3 +466,251 @@ test('skladové čtecí nástroje posílají správné cesty a filtry', async ()
   assert.equal(client.calls[6].query.currency, 'EUR');
   assert.equal(client.calls[6].query.prices_include_vat, 0);
 });
+
+// ── Úprava konceptu faktury (#112) ─────────────────────────────────────────
+
+const draftInvoice = (overrides = {}) => ({
+  id: 42,
+  status: 'draft',
+  invoice_type: 'invoice',
+  client_id: 8,
+  project_id: 3,
+  issue_date: '2026-09-30',
+  tax_date: '2026-09-30',
+  due_date: '2026-10-14',
+  currency_id: 1,
+  currency: 'CZK',
+  reverse_charge: false,
+  prices_include_vat: false,
+  language: 'cs',
+  note_above_items: null,
+  note_below_items: 'Děkujeme',
+  discount_percent: 10,
+  payment_method: 'bank_transfer',
+  rounding_mode: 'none',
+  varsymbol: null,
+  vat_classification_code: '1',
+  items: [
+    {
+      id: 101, description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks',
+      unit_price_without_vat: 12000, vat_rate_id: 1, order_index: 0, item_kind: 'standard',
+      vat_classification_code: '1', stock_item_id: null, warehouse_id: null,
+      small_asset_id: null, asset_id: null, accrual_from: '2026-10-01', accrual_to: '2027-09-30',
+      oss_applicable: false, oss_consumer_country: null, total_with_vat: 14520,
+    },
+    {
+      id: 102, description: 'Konzultace', quantity: 2, duration_minutes: 120, unit: 'h',
+      unit_price_without_vat: 1500, vat_rate_id: 1, order_index: 1, item_kind: 'standard',
+      vat_classification_code: '1', stock_item_id: null, warehouse_id: null,
+      small_asset_id: null, asset_id: null, accrual_from: null, accrual_to: null,
+      oss_applicable: false, oss_consumer_country: null,
+    },
+    {
+      id: 103, description: 'E-kniha', quantity: 1, duration_minutes: null, unit: 'ks',
+      unit_price_without_vat: 300, vat_rate_id: 5, order_index: 2, item_kind: 'standard',
+      vat_classification_code: null, stock_item_id: 9, warehouse_id: 2,
+      small_asset_id: null, asset_id: null, accrual_from: null, accrual_to: null,
+      oss_applicable: true, oss_consumer_country: 'DE', oss_rate_type: 'reduced',
+      oss_supply_type: 'services', oss_needs_manual_review: false,
+    },
+    { id: 104, description: 'Sleva 10 %', quantity: 1, unit: 'ks', unit_price_without_vat: -1230,
+      vat_rate_id: 1, order_index: 3, item_kind: 'discount' },
+  ],
+  ...overrides,
+});
+
+const draftClient = (invoice = draftInvoice()) => new FakeClient({
+  'GET /invoices/42': invoice,
+  'PUT /invoices/42': { id: 42, status: 'draft', total_with_vat: 9999 },
+});
+
+const putOf = (client) => {
+  const puts = client.calls.filter((call) => call.method === 'PUT');
+  assert.equal(puts.length, 1, 'Má proběhnout právě jeden PUT.');
+  assert.equal(puts[0].path, '/invoices/42');
+  return puts[0].body;
+};
+
+test('úpravy konceptu jsou zápisové a odebrání položky vyžaduje potvrzení', () => {
+  for (const name of ['update_invoice', 'add_invoice_item', 'update_invoice_item', 'remove_invoice_item']) {
+    assert.equal(tool(name).write, true, name);
+  }
+  assert.equal(tool('remove_invoice_item').destructive, true);
+  assert.equal(tool('update_invoice_item').destructive, undefined);
+  assert.deepEqual(tool('add_invoice_item').inputSchema.required,
+    ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']);
+  assert.ok(tool('remove_invoice_item').inputSchema.properties.confirm);
+});
+
+test('změna ceny jedné položky zachová ostatní řádky i jejich skrytá pole', async () => {
+  const client = draftClient();
+  const result = await tool('update_invoice_item').run(client, {
+    invoice_id: 42, row: 1, unit_price_without_vat: 1800,
+  }, 'update_invoice_item');
+
+  const body = putOf(client);
+  // Hlavička jde celá, jinak by ji PUT přepsal výchozími hodnotami.
+  assert.equal(body.client_id, 8);
+  assert.equal(body.project_id, 3);
+  assert.equal(body.currency_id, 1);
+  assert.equal(body.note_below_items, 'Děkujeme');
+  assert.equal(body.discount_percent, 10);
+  assert.equal(body.exchange_rate, undefined, 'Kurz se bez pokynu neposílá, jinak by se zamkl.');
+  // Slevový řádek generuje server, zpět se neposílá.
+  assert.equal(body.items.length, 3);
+  assert.deepEqual(body.items[0], {
+    description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks',
+    unit_price_without_vat: 1800, vat_rate_id: 1, order_index: 0, vat_classification_code: '1',
+    stock_item_id: null, warehouse_id: null, small_asset_id: null, asset_id: null,
+    accrual_from: '2026-10-01', accrual_to: '2027-09-30',
+    oss_applicable: false, oss_consumer_country: null,
+  });
+  assert.equal(body.items[1].duration_minutes, 120);
+  assert.equal(body.items[2].oss_consumer_country, 'DE');
+  assert.equal(body.items[2].oss_rate_type, 'reduced');
+  assert.equal(body.items[2].stock_item_id, 9);
+  assert.equal(body.items[2].warehouse_id, 2);
+  assert.equal(body.items[2].order_index, 2);
+  assert.equal(result.row, 1);
+  assert.equal(result.before.unit_price_without_vat, 12000);
+  assert.deepEqual(result.invoice, { id: 42, status: 'draft', total_with_vat: 9999 });
+});
+
+test('změna sazby nechá server odvodit zařazení jen u upravené položky', async () => {
+  const client = draftClient();
+  await tool('update_invoice_item').run(client, { invoice_id: 42, item_id: 103, vat_rate_id: 1 }, 'update_invoice_item');
+
+  const body = putOf(client);
+  assert.equal(body.items[2].vat_rate_id, 1);
+  assert.equal('vat_classification_code' in body.items[2], false);
+  assert.equal('oss_applicable' in body.items[2], false);
+  assert.equal('oss_consumer_country' in body.items[2], false);
+  assert.equal(body.items[2].stock_item_id, 9);
+  assert.equal(body.items[0].vat_classification_code, '1');
+  assert.equal(body.items[0].oss_applicable, false);
+});
+
+test('změna množství časové položky přepočítá délku v minutách', async () => {
+  const client = draftClient();
+  await tool('update_invoice_item').run(client, { invoice_id: 42, row: 2, quantity: 3.5 }, 'update_invoice_item');
+  const body = putOf(client);
+  assert.equal(body.items[1].quantity, 3.5);
+  assert.equal(body.items[1].duration_minutes, 210);
+});
+
+test('prázdný text zruší časové rozlišení položky', async () => {
+  const client = draftClient();
+  await tool('update_invoice_item').run(client, { invoice_id: 42, row: 1, accrual_from: '', accrual_to: '' }, 'update_invoice_item');
+  const body = putOf(client);
+  assert.equal(body.items[0].accrual_from, null);
+  assert.equal(body.items[0].accrual_to, null);
+});
+
+test('přidání položky ji vloží na zadané místo a přečísluje pořadí', async () => {
+  const client = draftClient();
+  const result = await tool('add_invoice_item').run(client, {
+    invoice_id: 42, description: 'Doprava', quantity: 1, unit_price_without_vat: 350, vat_rate_id: 1, position: 2,
+  }, 'add_invoice_item');
+
+  const body = putOf(client);
+  assert.deepEqual(body.items.map((item) => [item.description, item.order_index]), [
+    ['Licence', 0], ['Doprava', 1], ['Konzultace', 2], ['E-kniha', 3],
+  ]);
+  // Nová položka nemá OSS ani klasifikaci, ty odvodí server.
+  assert.deepEqual(body.items[1], {
+    description: 'Doprava', quantity: 1, unit: 'ks', unit_price_without_vat: 350, vat_rate_id: 1, order_index: 1,
+  });
+  assert.equal(body.items[0].accrual_to, '2027-09-30');
+  assert.equal(result.added.row, 2);
+});
+
+test('odebrání položky bez potvrzení nic nezmění', async () => {
+  const client = draftClient();
+  await assert.rejects(
+    tool('remove_invoice_item').run(client, { invoice_id: 42, row: 3 }, 'remove_invoice_item'),
+    /NEPROVEDENO.*E-kniha/s,
+  );
+  assert.equal(client.calls.some((call) => call.method === 'PUT'), false);
+});
+
+test('odebrání položky s potvrzením pošle zbylé řádky beze změny', async () => {
+  const client = draftClient();
+  const result = await tool('remove_invoice_item').run(client, { invoice_id: 42, row: 3, confirm: true }, 'remove_invoice_item');
+  const body = putOf(client);
+  assert.deepEqual(body.items.map((item) => item.description), ['Licence', 'Konzultace']);
+  assert.equal(body.items[0].accrual_from, '2026-10-01');
+  assert.equal(result.removed.description, 'E-kniha');
+});
+
+test('jedinou položku odebrat nejde', async () => {
+  const single = draftInvoice();
+  single.items = [single.items[0]];
+  const client = draftClient(single);
+  await assert.rejects(
+    tool('remove_invoice_item').run(client, { invoice_id: 42, row: 1, confirm: true }, 'remove_invoice_item'),
+    /jen tuto položku/,
+  );
+  assert.equal(client.calls.some((call) => call.method === 'PUT'), false);
+});
+
+test('úprava hlavičky změní jen zadaná pole a zachová položky', async () => {
+  const client = draftClient();
+  const result = await tool('update_invoice').run(client, {
+    invoice_id: 42, due_date: '2026-10-28', note: 'Splatnost prodloužena',
+  }, 'update_invoice');
+
+  const body = putOf(client);
+  assert.equal(body.due_date, '2026-10-28');
+  assert.equal(body.note_below_items, 'Splatnost prodloužena');
+  assert.equal(body.issue_date, '2026-09-30');
+  assert.equal(body.currency_id, 1);
+  assert.equal(body.items.length, 3);
+  assert.equal(body.items[0].vat_classification_code, '1');
+  assert.equal(body.items[2].oss_consumer_country, 'DE');
+  assert.deepEqual(result.changed, { due_date: '2026-10-28', note_below_items: 'Splatnost prodloužena' });
+});
+
+test('změna DUZP nechá server znovu odvodit zařazení všech položek', async () => {
+  const client = draftClient();
+  await tool('update_invoice').run(client, { invoice_id: 42, tax_date: '2027-01-05' }, 'update_invoice');
+  const body = putOf(client);
+  for (const item of body.items) {
+    assert.equal('vat_classification_code' in item, false);
+    assert.equal('oss_applicable' in item, false);
+  }
+  assert.equal(body.items[0].accrual_from, '2026-10-01');
+});
+
+test('změna měny se posílá kódem a zakázku jde odebrat nulou', async () => {
+  const client = draftClient();
+  await tool('update_invoice').run(client, { invoice_id: 42, currency: 'eur', project_id: 0 }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal(body.currency, 'EUR');
+  assert.equal('currency_id' in body, false);
+  assert.equal(body.project_id, null);
+});
+
+test('vystavenou fakturu úpravy odmítnou ještě před zápisem', async () => {
+  for (const [name, args] of [
+    ['update_invoice', { invoice_id: 42, due_date: '2026-11-01' }],
+    ['add_invoice_item', { invoice_id: 42, description: 'X', quantity: 1, unit_price_without_vat: 1, vat_rate_id: 1 }],
+    ['update_invoice_item', { invoice_id: 42, row: 1, quantity: 2 }],
+    ['remove_invoice_item', { invoice_id: 42, row: 1, confirm: true }],
+  ]) {
+    const client = draftClient(draftInvoice({ status: 'issued', varsymbol: '20260042' }));
+    await assert.rejects(tool(name).run(client, args, name), /není koncept.*dobropis/s, name);
+    assert.equal(client.calls.some((call) => call.method === 'PUT'), false, name);
+  }
+});
+
+test('koncept podle odběratele: při více konceptech se nehádá', async () => {
+  const client = new FakeClient({
+    'GET /clients': { data: [{ id: 8, company_name: 'ACME s.r.o.' }] },
+    'GET /invoices': { data: [{ id: 42 }, { id: 43 }] },
+  });
+  await assert.rejects(
+    tool('update_invoice').run(client, { client: 'ACME', due_date: '2026-11-01' }, 'update_invoice'),
+    /Konceptů je víc: #42, #43/,
+  );
+  assert.equal(client.calls.some((call) => call.method === 'PUT'), false);
+});

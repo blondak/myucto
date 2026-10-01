@@ -335,7 +335,7 @@ async function resolveDraftInvoice(client, args, tool) {
     clientId = found[0].id;
   }
 
-  // Výkaz jde uložit jen do konceptu — vystavený doklad je uzamčený.
+  // Výkaz i položky jde měnit jen u konceptu — vystavený doklad je uzamčený.
   const grouped = await client.get('/invoices', {
     per_page: 200,
     filter: { status: 'draft', client_id: clientId, project_id: projectId },
@@ -344,7 +344,7 @@ async function resolveDraftInvoice(client, args, tool) {
   const drafts = rows(grouped).flatMap((g) => g.invoices ?? [g]);
   if (drafts.length === 0) {
     throw new Error(
-      `Pro „${needle}" není žádný koncept faktury, do kterého by šlo výkaz zapsat. `
+      `Pro „${needle}" není žádný koncept faktury, který by šlo upravit. `
       + 'Založte koncept v aplikaci, nebo použijte `create_invoice`.',
     );
   }
@@ -358,6 +358,121 @@ async function resolveDraftInvoice(client, args, tool) {
 
   return { invoiceId: Number(drafts[0].id), projectId, clientId };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Úprava konceptu faktury
+//
+// PUT /invoices/{id} přepisuje sloupce hlavičky tím, co přijde (chybějící pole
+// by vynuloval nebo nahradil výchozí hodnotou odběratele), a položky nahrazuje
+// celé (DELETE + INSERT). Nástroje proto vždy posílají kompletní hlavičku
+// a všechny položky sloučené ze současného stavu, stejně jako editor v aplikaci.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Pole hlavičky, která editor posílá zpět; bez nich by je PUT přepsal. */
+const INVOICE_HEADER_FIELDS = [
+  'invoice_type', 'client_id', 'project_id', 'issue_date', 'tax_date', 'due_date',
+  'currency_id', 'reverse_charge', 'is_simplified', 'price_level_id', 'prices_include_vat',
+  'income_tax_exempt', 'income_tax_exempt_reason', 'language', 'supplier_order_number',
+  'payment_variable_symbol', 'note_above_items', 'note_below_items', 'advance_paid_amount',
+  'discount_percent', 'payment_method', 'rounding_mode', 'auto_send_reminders', 'varsymbol',
+  'vat_classification_code', 'revenue_category', 'revenue_category_id',
+];
+
+/**
+ * Změna některého z těchto polí mění daňové zařazení řádků (tuzemsko / EU / OSS,
+ * přenesená povinnost, rok sazby). Klasifikaci a OSS sloupce položek pak musí
+ * server odvodit znovu, jinak by na dokladu zůstaly kódy pro starý stav.
+ */
+const INVOICE_TAX_CONTEXT = ['invoice_type', 'client_id', 'issue_date', 'tax_date', 'reverse_charge'];
+
+const INVOICE_ITEM_OSS_FIELDS = [
+  'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
+  'oss_exchange_rate', 'oss_exchange_rate_date', 'oss_taxable_amount_return',
+  'oss_vat_amount_return', 'oss_original_period', 'oss_needs_manual_review',
+];
+
+/** Všechna pole řádku, která server při náhradě položek přijímá. */
+const INVOICE_ITEM_FIELDS = [
+  'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
+  'vat_rate_id', 'order_index', 'vat_classification_code', 'stock_item_id', 'warehouse_id',
+  'small_asset_id', 'asset_id', 'accrual_from', 'accrual_to', ...INVOICE_ITEM_OSS_FIELDS,
+];
+
+/** Slevové řádky generuje server z `discount_percent`; zpět se neposílají. */
+const isDiscountRow = (item) => (item?.item_kind ?? 'standard') === 'discount';
+
+/** Položky dokladu bez systémových slevových řádků, v pořadí jako na dokladu. */
+const invoiceLines = (invoice) => (invoice?.items ?? []).filter((item) => !isDiscountRow(item));
+
+/** Načte doklad a ověří, že je to koncept; vystavený se opravuje jinak. */
+async function loadDraftInvoice(c, invoiceId, tool) {
+  const invoice = await c.get(`/invoices/${invoiceId}`, null, tool);
+  if (invoice?.status !== 'draft') {
+    throw new Error(
+      `Faktura #${invoiceId}${invoice?.varsymbol ? ` (${invoice.varsymbol})` : ''} není koncept `
+      + `(stav „${invoice?.status ?? '?'}"), proto ji nelze upravit. Vystavený doklad se opravuje `
+      + 'opravným daňovým dokladem (dobropisem), nebo se stornuje; obojí v aplikaci.',
+    );
+  }
+  return invoice;
+}
+
+/**
+ * Řádek tak, jak ho vrátil server, připravený k odeslání zpět.
+ *
+ * Nezměněné řádky si nesou všechna skrytá pole (časové rozlišení, sklad, majetek,
+ * OSS, pořadí). `rederive` je zahodí jen tam, kde by po změně sazby nebo daňového
+ * kontextu hlavičky lhala; server je pak dopočítá stejně jako u nové položky.
+ */
+function lineForPut(item, { rederive = false } = {}) {
+  const out = {};
+  for (const key of INVOICE_ITEM_FIELDS) {
+    if (item[key] !== undefined) out[key] = item[key];
+  }
+  if (rederive) {
+    delete out.vat_classification_code;
+    for (const key of INVOICE_ITEM_OSS_FIELDS) delete out[key];
+  }
+  return out;
+}
+
+/**
+ * Najde řádek podle `item_id`, nebo podle pořadí (1 = první položka, slevové
+ * řádky se nepočítají). Pořadí odpovídá tomu, jak položky vidí uživatel.
+ */
+function pickInvoiceLine(lines, a) {
+  if (a.item_id !== undefined) {
+    const index = lines.findIndex((item) => Number(item.id) === Number(a.item_id));
+    if (index < 0) throw new Error(`Položka #${a.item_id} na dokladu není.`);
+    return index;
+  }
+  if (a.row !== undefined) {
+    const row = Number(a.row);
+    if (!(row >= 1 && row <= lines.length)) {
+      throw new Error(`Doklad má ${lines.length} položek, položka ${a.row} neexistuje.`);
+    }
+    return row - 1;
+  }
+  throw new Error('Zadejte `item_id`, nebo pořadí položky `row` (od 1). Obojí vrátí `get_invoice`.');
+}
+
+/**
+ * Kompletní PUT payload konceptu: hlavička ze současného stavu přebitá změnami
+ * a celý seznam položek. Měna se dá změnit kódem; `currency_id` se pak nepošle
+ * a server ho dohledá sám.
+ */
+function draftPayload(invoice, changes, lines) {
+  const header = merged(invoice, changes, INVOICE_HEADER_FIELDS);
+  if (changes.currency !== undefined) {
+    delete header.currency_id;
+    header.currency = String(changes.currency).toUpperCase();
+  }
+  if (changes.exchange_rate !== undefined) header.exchange_rate = changes.exchange_rate;
+  return { ...header, items: lines };
+}
+
+/** Výsledek úpravy: co se změnilo a doklad tak, jak ho po uložení vrátil server. */
+const draftResult = (invoiceId, summary, saved) => ({ invoice_id: invoiceId, ...summary, invoice: saved });
 
 /** Název výkazu podle období dokladu — stejný tvar, jaký nabízí aplikace. */
 function defaultReportTitle(invoice) {
@@ -1336,6 +1451,217 @@ export const TOOLS = [
     inputSchema: schema({ id: int('ID konceptu faktury.') }, ['id']),
     write: true,
     run: (c, a, tool) => c.post(`/invoices/${a.id}/issue`, {}, tool),
+  },
+  {
+    name: 'update_invoice',
+    title: 'Upravit hlavičku konceptu faktury',
+    description:
+      'Změní hlavičku KONCEPTU faktury (data, splatnost, měnu, jazyk, způsob úhrady, '
+      + 'poznámky, zakázku, slevu…). Zadaná pole se změní, ostatní zůstanou, položky '
+      + 'beze změny. Na položky jsou `add_invoice_item`, `update_invoice_item` '
+      + 'a `remove_invoice_item`.\n\n'
+      + 'Doklad určíš `invoice_id`, nebo názvem odběratele (`client`) či zakázky (`project`). '
+      + 'Když má odběratel víc konceptů, nástroj nehádá a vypíše je.\n\n'
+      + 'Součty a DPH přepočítá server; vrátí upravený doklad. Vystavenou fakturu '
+      + 'nástroj odmítne: ta se opravuje dobropisem nebo stornem.',
+    inputSchema: schema({
+      invoice_id: int('ID konceptu faktury. Když chybí, dohledá se podle `client` / `project`.'),
+      client: str('Název odběratele, alternativa k `invoice_id`.'),
+      project: str('Název zakázky, alternativa k `invoice_id`.'),
+      issue_date: date('Datum vystavení.'),
+      due_date: date('Datum splatnosti. „Posuň o 14 dní" si spočítej z `get_invoice`.'),
+      tax_date: date('Datum zdanitelného plnění (DUZP).'),
+      currency: str('Kód měny, např. EUR. Kurz se po změně měny nebo data načte znovu z ČNB.'),
+      exchange_rate: num('Ruční kurz místo kurzu ČNB. Zadávej jen na výslovný pokyn.', { exclusiveMinimum: 0 }),
+      language: str('Jazyk dokladu.', { enum: ['cs', 'en'] }),
+      payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
+      note: str('Poznámka pod položkami. Prázdný text poznámku smaže.'),
+      note_above_items: str('Poznámka nad položkami. Prázdný text poznámku smaže.'),
+      project_id: int('Zakázka; musí patřit odběrateli. 0 zakázku z dokladu odebere.', { minimum: 0 }),
+      discount_percent: num('Sleva z celé faktury v procentech (0–100); slevový řádek dopočítá server.', { minimum: 0, maximum: 100 }),
+      prices_include_vat: bool(
+        'Ceny položek jsou včetně DPH. POZOR: čísla na položkách zůstanou stejná, změní se '
+        + 'jen jejich význam, takže se změní celková částka. Ověř si to s uživatelem.',
+      ),
+      reverse_charge: bool('Přenesená daňová povinnost.'),
+      varsymbol: str('Ruční variabilní symbol; prázdný text = přidělí se při vystavení.'),
+      payment_variable_symbol: str('Variabilní symbol pro platbu, liší-li se od čísla dokladu.'),
+      supplier_order_number: str('Číslo objednávky odběratele.'),
+      invoice_type: str('Typ konceptu.', { enum: ['invoice', 'proforma', 'credit_note'] }),
+    }),
+    write: true,
+    run: async (c, a, tool) => {
+      const { invoiceId } = await resolveDraftInvoice(c, a, tool);
+      const invoice = await loadDraftInvoice(c, invoiceId, tool);
+
+      const changes = changed(a, [
+        'issue_date', 'due_date', 'tax_date', 'currency', 'exchange_rate', 'language',
+        'payment_method', 'note_above_items', 'project_id', 'discount_percent',
+        'prices_include_vat', 'reverse_charge', 'varsymbol', 'payment_variable_symbol',
+        'supplier_order_number', 'invoice_type',
+      ]);
+      if (a.note !== undefined) changes.note_below_items = a.note;
+      if (changes.project_id === 0) changes.project_id = null;
+      if (Object.keys(changes).length === 0) {
+        throw new Error('Není co měnit. Zadejte aspoň jedno pole hlavičky.');
+      }
+
+      // Položky se posílají vždy: server z nich přegeneruje slevový řádek a po změně
+      // dat, typu nebo přenesené povinnosti i daňové zařazení řádků.
+      const rederive = INVOICE_TAX_CONTEXT.some(
+        (key) => changes[key] !== undefined && changes[key] !== invoice[key],
+      );
+      const lines = invoiceLines(invoice).map((item) => lineForPut(item, { rederive }));
+
+      const saved = await c.put(`/invoices/${invoiceId}`, draftPayload(invoice, changes, lines), tool);
+      return draftResult(invoiceId, { changed: changes }, saved);
+    },
+  },
+  {
+    name: 'add_invoice_item',
+    title: 'Přidat položku na koncept faktury',
+    description:
+      'Přidá položku na KONCEPT faktury, např. „přidej na koncept pro ACME dopravu, 1 ks, 350 Kč". '
+      + 'Existující položky zůstanou beze změny, včetně skrytých údajů (časové rozlišení, '
+      + 'sklad, OSS, pořadí).\n\n'
+      + 'Doklad určíš `invoice_id`, nebo názvem odběratele (`client`) či zakázky (`project`); '
+      + 'při víc konceptech nástroj nehádá a vypíše je.\n\n'
+      + 'Sazbu DPH NEHÁDEJ: `vat_rate_id` je povinné (seznam vrátí `list_vat_rates`). '
+      + 'Cena je bez DPH, pokud doklad nemá `prices_include_vat`; pak je s DPH.',
+    inputSchema: schema({
+      invoice_id: int('ID konceptu faktury. Když chybí, dohledá se podle `client` / `project`.'),
+      client: str('Název odběratele, alternativa k `invoice_id`.'),
+      project: str('Název zakázky, alternativa k `invoice_id`.'),
+      description: str('Text položky.'),
+      quantity: num('Množství. Nesmí být nula.'),
+      unit: str('Měrná jednotka, výchozí „ks".'),
+      unit_price_without_vat: num('Jednotková cena (bez DPH, u dokladu s `prices_include_vat` s DPH).'),
+      vat_rate_id: int('ID sazby DPH, viz `list_vat_rates`.'),
+      position: int('Pořadí, na které se položka vloží (1 = první). Výchozí je na konec.', { minimum: 1 }),
+      accrual_from: date('Časové rozlišení od (RRRR-MM-DD).'),
+      accrual_to: date('Časové rozlišení do (RRRR-MM-DD).'),
+      stock_item_id: int('Volitelná vazba na skladovou kartu.'),
+      warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
+    }, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const quantity = Number(a.quantity);
+      if (!Number.isFinite(quantity) || quantity === 0) throw new Error('Množství nesmí být nula.');
+      if (String(a.description ?? '').trim() === '') throw new Error('Zadejte text položky.');
+
+      const { invoiceId } = await resolveDraftInvoice(c, a, tool);
+      const invoice = await loadDraftInvoice(c, invoiceId, tool);
+      const lines = invoiceLines(invoice).map((item) => lineForPut(item));
+
+      const added = {
+        description: String(a.description).trim(),
+        quantity,
+        unit: String(a.unit ?? 'ks').trim() || 'ks',
+        unit_price_without_vat: Number(a.unit_price_without_vat),
+        vat_rate_id: a.vat_rate_id,
+        ...changed(a, ['accrual_from', 'accrual_to', 'stock_item_id', 'warehouse_id']),
+      };
+      const at = a.position !== undefined ? Math.min(Number(a.position), lines.length + 1) - 1 : lines.length;
+      lines.splice(at, 0, added);
+      // Pořadí se počítá znovu, ať nová položka nesdílí `order_index` s tou, za kterou se vložila.
+      lines.forEach((line, index) => { line.order_index = index; });
+
+      const saved = await c.put(`/invoices/${invoiceId}`, draftPayload(invoice, {}, lines), tool);
+      return draftResult(invoiceId, { added: { ...added, row: at + 1 } }, saved);
+    },
+  },
+  {
+    name: 'update_invoice_item',
+    title: 'Upravit položku konceptu faktury',
+    description:
+      'Změní jednu položku KONCEPTU faktury, např. „změň cenu druhé položky na 1 800 Kč". '
+      + 'Položku určíš `item_id`, nebo pořadím `row` (1 = první, jak je vidí uživatel; '
+      + 'slevový řádek se nepočítá). Oboje vrátí `get_invoice`.\n\n'
+      + 'Změní se jen zadaná pole. Ostatní pole položky (časové rozlišení, sklad, OSS) '
+      + 'i ostatní položky zůstanou. Sazbu DPH měň jen na výslovný pokyn; daňové '
+      + 'zařazení řádku pak server odvodí znovu.',
+    inputSchema: schema({
+      invoice_id: int('ID konceptu faktury.'),
+      item_id: int('ID položky.'),
+      row: int('Pořadí položky, od 1. Alternativa k `item_id`.', { minimum: 1 }),
+      description: str('Nový text položky.'),
+      quantity: num('Nové množství. Nesmí být nula.'),
+      unit: str('Nová měrná jednotka.'),
+      unit_price_without_vat: num('Nová jednotková cena (bez DPH, u dokladu s `prices_include_vat` s DPH).'),
+      vat_rate_id: int('Nová sazba DPH, viz `list_vat_rates`. Jen na výslovný pokyn.'),
+      accrual_from: str('Časové rozlišení od (RRRR-MM-DD); prázdný text ho zruší.'),
+      accrual_to: str('Časové rozlišení do (RRRR-MM-DD); prázdný text ho zruší.'),
+    }, ['invoice_id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const changes = changed(a, [
+        'description', 'quantity', 'unit', 'unit_price_without_vat', 'vat_rate_id',
+        'accrual_from', 'accrual_to',
+      ]);
+      if (Object.keys(changes).length === 0) throw new Error('Není co měnit. Zadejte aspoň jedno pole položky.');
+      if (changes.quantity !== undefined && !(Number(changes.quantity) !== 0)) {
+        throw new Error('Množství nesmí být nula.');
+      }
+
+      const invoice = await loadDraftInvoice(c, a.invoice_id, tool);
+      const items = invoiceLines(invoice);
+      const index = pickInvoiceLine(items, a);
+      const before = items[index];
+
+      const rateChanged = changes.vat_rate_id !== undefined && Number(changes.vat_rate_id) !== Number(before.vat_rate_id);
+      const lines = items.map((item, i) => lineForPut(item, { rederive: i === index && rateChanged }));
+      const line = lines[index];
+      for (const key of ['accrual_from', 'accrual_to']) {
+        if (changes[key] === '') changes[key] = null;
+      }
+      Object.assign(line, changes);
+      if (changes.unit !== undefined && changes.unit !== before.unit) {
+        line.duration_minutes = null;
+      } else if (changes.quantity !== undefined && line.duration_minutes != null) {
+        // U časové položky platí délka v minutách a množství z ní server dopočítá.
+        line.duration_minutes = Math.round(Number(changes.quantity) * 60);
+      }
+
+      const saved = await c.put(`/invoices/${a.invoice_id}`, draftPayload(invoice, {}, lines), tool);
+      return draftResult(Number(a.invoice_id), {
+        row: index + 1,
+        before: { description: before.description, quantity: before.quantity, unit: before.unit,
+          unit_price_without_vat: before.unit_price_without_vat, vat_rate_id: before.vat_rate_id },
+        changed: changes,
+      }, saved);
+    },
+  },
+  {
+    name: 'remove_invoice_item',
+    title: 'Odebrat položku z konceptu faktury',
+    description:
+      'Odebere jednu položku KONCEPTU faktury, určenou `item_id` nebo pořadím `row` '
+      + '(1 = první, slevový řádek se nepočítá). Ostatní položky zůstanou beze změny. '
+      + 'Jedinou položku odebrat nejde, doklad musí nějakou mít.\n\n'
+      + 'Bez `confirm: true` nic neodebere a jen vrátí, která položka by zmizela.',
+    inputSchema: schema({
+      invoice_id: int('ID konceptu faktury.'),
+      item_id: int('ID položky.'),
+      row: int('Pořadí položky, od 1. Alternativa k `item_id`.', { minimum: 1 }),
+      confirm: CONFIRM,
+    }, ['invoice_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await loadDraftInvoice(c, a.invoice_id, tool);
+      const items = invoiceLines(invoice);
+      const index = pickInvoiceLine(items, a);
+      const target = items[index];
+      if (items.length === 1) {
+        throw new Error('Doklad má jen tuto položku a bez položek ho uložit nejde. Upravte ji, nebo koncept smažte v aplikaci.');
+      }
+      requireConfirm(a, 'Z konceptu se má odebrat položka',
+        `${index + 1}. ${target.description} (${target.quantity} ${target.unit ?? ''} × ${target.unit_price_without_vat})`);
+
+      const lines = items.filter((_, i) => i !== index).map((item) => lineForPut(item));
+      const saved = await c.put(`/invoices/${a.invoice_id}`, draftPayload(invoice, {}, lines), tool);
+      return draftResult(Number(a.invoice_id), { removed: { row: index + 1, ...lineForPut(target) } }, saved);
+    },
   },
   {
     name: 'send_invoice',
