@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountRouter;
@@ -2897,13 +2898,23 @@ final class PostingService
 
     /**
      * Účty položek dokladu po účtotvorné dimenzi: kód účtu položky (z builderu, např.
-     * {@see purchaseItemExpenseAccounts()}) => kódy, na které ho zaúčtování rozeslalo,
+     * {@see purchaseItemExpenseAccounts()}) => kódy, na kterých položka v deníku leží,
      * s podíly. Bez účtotvorné dimenze (nebo bez zápisu dokladu) vrací účet beze změny.
      *
      * Volá ho časové rozlišení (381/384): náklad či výnos se musí odložit a rozpustit na
-     * téže analytice, na které leží — jinak by syntetika šla do minusu a analytika
-     * zůstala neodložená. Dimenze položky dává {@see DimensionStamper::itemDimensions()}
-     * a pravidla dimenzí, tedy totéž co zaúčtování; datum platnosti mapy = datum zápisu.
+     * téže analytice, na které leží — jinak by analytika šla do minusu a jiná zůstala
+     * neodložená. Rozhoduje proto SKUTEČNÝ živý zápis dokladu, ne aktuální mapa:
+     *
+     *  - Syntetika položky bez řádků mapy, nebo pod kterou zápis nenese žádnou analytiku
+     *    téhož druhu a uznatelnosti, zůstává beze změny (běžný doklad, nedaňová
+     *    analytika z builderu apod.).
+     *  - Jinak se spočítá rozdělení položky podle jejích dimenzí a mapy platné k datu
+     *    zápisu ({@see DimensionStamper::itemDimensions()} + pravidla, totéž co zaúčtování).
+     *    Leží-li všechny cílové analytiky opravdu v zápisu, platí toto rozdělení (položky
+     *    s různým střediskem se tak odkládají každá ze své analytiky).
+     *  - Když ne (mapa nebo dimenze se po zaúčtování změnily, doklad se nepřeúčtoval),
+     *    použije se poměr, v jakém zápis syntetiku položky a její analytiky z mapy
+     *    skutečně nese.
      *
      * @param 'invoice'|'purchase_invoice' $sourceType
      * @param array<int,string> $itemCodes id položky => kód účtu
@@ -2912,50 +2923,82 @@ final class PostingService
     public function itemAccountsByDimension(int $supplierId, string $sourceType, int $sourceId, array $itemCodes): array
     {
         $identity = array_map(static fn (string $code): array => [$code => 1.0], $itemCodes);
+        $mapRepo = new DimensionAccountMapRepository($this->db);
+        $mapTargets = $mapRepo->allTargets($supplierId);
+        if ($mapTargets === []) {
+            return $identity;
+        }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT entry_date FROM journal_entries
-              WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL AND posted_at IS NOT NULL
-              ORDER BY id DESC LIMIT 1'
+            'SELECT MAX(e.entry_date) AS entry_date FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ? AND e.reversed_by IS NULL AND e.posted_at IS NOT NULL'
         );
         $stmt->execute([$supplierId, $sourceType, $sourceId]);
         $entryDate = $stmt->fetchColumn();
-        if ($entryDate === false) {
+        if ($entryDate === false || $entryDate === null) {
             return $identity;
         }
-        $router = new DimensionAccountRouter($this->db);
-        $context = $router->context($supplierId, (string) $entryDate);
-        if ($context === null) {
-            return $identity;
-        }
-        $itemDims = $this->dimensionStamper()->itemDimensions($supplierId, $sourceType, $sourceId);
+        $posted = $this->postedAccountAmounts($supplierId, $sourceType, $sourceId);
+        $accounts = $mapRepo->accounts($supplierId);
         $codeMap = $this->accounts->codeToIdMap($supplierId);
         $single = $this->singleAnalyticMap($supplierId);
-        $lines = [];
-        foreach ($itemCodes as $itemId => $code) {
-            $resolvedCode = $single[$code] ?? $code;
-            $lines[$itemId] = ['account_id' => (int) ($codeMap[$resolvedCode]['id'] ?? 0), 'side' => 'debit', 'amount' => 1.0]
-                + ($itemDims[$itemId] ?? []);
-        }
-        $keys = array_keys($lines);
-        $lines = array_combine($keys, $this->dimensionStamper()->rules()->applyDefaults(
-            $supplierId,
-            $sourceType,
-            $sourceId,
-            array_values($lines),
-            (string) $entryDate,
-        ));
         $origins = [];
         foreach ($single as $synthetic => $analytic) {
             if (isset($codeMap[$synthetic], $codeMap[$analytic])) {
                 $origins[(int) $codeMap[$analytic]['id']] = (int) $codeMap[$synthetic]['id'];
             }
         }
-        $out = $identity;
-        foreach ($lines as $itemId => $line) {
-            if ($line['account_id'] <= 0) {
+
+        // Položky, jejichž syntetika má v zápisu analytiku z mapy.
+        $lines = [];
+        $families = [];
+        foreach ($itemCodes as $itemId => $code) {
+            $accountId = (int) ($codeMap[$single[$code] ?? $code]['id'] ?? 0);
+            $synthetic = $origins[$accountId] ?? $accountId;
+            if (!isset($mapTargets[$synthetic], $accounts[$synthetic])) {
                 continue;
             }
-            $targets = DimensionAccountRouter::targets(
+            // Syntetika a její analytiky téhož druhu a uznatelnosti, které zápis nese —
+            // i analytika z dřívější podoby mapy (nedaňovou analytiku z builderu ne).
+            $family = [];
+            foreach ($posted as $member => $amount) {
+                $account = $accounts[$member] ?? null;
+                $inFamily = $member === $synthetic || ($account !== null && $account['parent_id'] === $synthetic
+                    && $account['tax_deductibility'] === $accounts[$synthetic]['tax_deductibility']
+                    && $account['account_type'] === $accounts[$synthetic]['account_type']);
+                if ($inFamily && $amount > 0.0) {
+                    $family[$member] = $amount;
+                }
+            }
+            if ($accountId <= 0 || array_diff_key($family, [$synthetic => 1, $accountId => 1]) === []) {
+                continue;
+            }
+            $families[$itemId] = $family;
+            $lines[$itemId] = ['account_id' => $accountId, 'side' => 'debit', 'amount' => 1.0];
+        }
+        if ($lines === []) {
+            return $identity;
+        }
+
+        $context = (new DimensionAccountRouter($this->db))->context($supplierId, (string) $entryDate);
+        if ($context !== null) {
+            $itemDims = $this->dimensionStamper()->itemDimensions($supplierId, $sourceType, $sourceId);
+            foreach ($lines as $itemId => $line) {
+                $lines[$itemId] = $line + ($itemDims[$itemId] ?? []);
+            }
+            $keys = array_keys($lines);
+            $lines = array_combine($keys, $this->dimensionStamper()->rules()->applyDefaults(
+                $supplierId,
+                $sourceType,
+                $sourceId,
+                array_values($lines),
+                (string) $entryDate,
+            ));
+        }
+
+        $out = $identity;
+        foreach ($lines as $itemId => $line) {
+            $family = $families[$itemId];
+            $targets = $context === null ? [] : DimensionAccountRouter::targets(
                 $line,
                 $context['type_id'],
                 $context['mask'],
@@ -2963,13 +3006,39 @@ final class PostingService
                 $context['map'],
                 $origins,
             );
-            if (array_keys($targets) === [$line['account_id']]) {
-                continue;
+            if ($targets === [] || array_diff_key($targets, $family) !== []) {
+                // Rozdělení podle dnešní mapy v zápisu není — platí poměr zápisu.
+                $total = array_sum($family);
+                $targets = array_map(static fn (float $amount): float => $amount / $total, $family);
             }
             $out[$itemId] = [];
             foreach ($targets as $accountId => $share) {
-                $out[$itemId][(string) $context['accounts'][$accountId]['code']] = $share;
+                $out[$itemId][(string) $accounts[$accountId]['code']] = $share;
             }
+        }
+        return $out;
+    }
+
+    /**
+     * Obrat živých zápisů dokladu po účtech (absolutní hodnota) — podklad pro časové
+     * rozlišení účtotvorné dimenze.
+     *
+     * @return array<int,float> id účtu => částka
+     */
+    private function postedAccountAmounts(int $supplierId, string $sourceType, int $sourceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.account_id, ABS(SUM(l.signed_amount)) AS amount
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ?
+                AND e.reversed_by IS NULL AND e.posted_at IS NOT NULL
+              GROUP BY l.account_id'
+        );
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['account_id']] = round((float) $r['amount'], 2);
         }
         return $out;
     }

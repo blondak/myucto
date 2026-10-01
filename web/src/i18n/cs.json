@@ -16950,6 +16950,7 @@
         "realized_fx_unbooked": "Realizovaný kurzový rozdíl nezaúčtovaný na 563/663 (zaplacený cizoměnový doklad)",
         "small_asset_cards_incomplete": "Evidence karet drobného majetku nesedí na obrat 501.200 (chybí karty)",
         "dimension_account_unmapped": "Výsledkové zápisy na syntetice s účtotvornou dimenzí bez analytiky (chybí hodnota dimenze nebo mapování)",
+        "dimension_account_map_invalid": "Mapa účtotvorné dimenze míří na analytiku, která už neodpovídá syntetice (rodič, druh nebo daňová uznatelnost)",
         "cnb_rate_deviation": "Kurz na dokladu se odchyluje od denního kurzu ČNB",
         "payment_match_audit": "Spárované platby, které nesedí (měna, částka, kurzový rozdíl, protistrana)",
         "clearing_accounts_open": "Zúčtovací (průběžné) účty s otevřeným zůstatkem k rozvahovému dni",

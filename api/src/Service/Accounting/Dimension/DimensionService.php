@@ -905,6 +905,10 @@ final class DimensionService
                     'dimension_splits' => $newSplits[(int) $r['id']] ?? [],
                 ], array_values($rows)),
                 $this->posting->singleAnalyticRedirects($supplierId),
+                array_map(static fn (array $r): array => [
+                    'dimensions' => $current[(int) $r['id']] ?? [],
+                    'dimension_splits' => $currentSplits[(int) $r['id']] ?? [],
+                ], $rows),
             );
             if (array_intersect($projected['conflicts'], array_map('intval', array_keys($touched))) !== []) {
                 throw new DimensionException('account_change_needs_repost', self::ACCOUNT_CHANGE_MESSAGE, 409);

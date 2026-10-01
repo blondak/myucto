@@ -4716,6 +4716,9 @@ final class ClosingService
         if ($wants('dimension_account_unmapped')) {
             $checks[] = $this->checkDimensionAccountUnmapped($supplierId, $rangeFrom, $rangeTo);
         }
+        if ($wants('dimension_account_map_invalid')) {
+            $checks[] = $this->checkDimensionAccountMapInvalid($supplierId);
+        }
 
         if ($wants('small_asset_cards_incomplete')) {
             $checks[] = $this->checkSmallAssetCards($supplierId, $rangeFrom, $rangeTo);
@@ -5219,6 +5222,27 @@ final class ClosingService
         $accounts = $type === null ? [] : $repo->unmappedSyntheticLines($supplierId, $type['id'], $from, $to);
         return [
             'key' => 'dimension_account_unmapped',
+            'severity' => 'warning',
+            'ok' => $accounts === [],
+            'value' => ['count' => count($accounts), 'accounts' => $accounts],
+        ];
+    }
+
+    /**
+     * Účtotvorná dimenze: řádek mapy, jehož analytika už neodpovídá syntetice (jiný
+     * rodič, druh nebo daňová uznatelnost — typicky po importu účtového rozvrhu, který
+     * uznatelnost přepíše). Zaúčtování takový řádek přeskakuje, náklad zůstane na
+     * syntetice; mapu je potřeba opravit.
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}
+     */
+    private function checkDimensionAccountMapInvalid(int $supplierId): array
+    {
+        $repo = new DimensionAccountMapRepository($this->db);
+        $type = $repo->drivingType($supplierId);
+        $accounts = $type === null ? [] : $repo->invalidRows($supplierId, $type['id']);
+        return [
+            'key' => 'dimension_account_map_invalid',
             'severity' => 'warning',
             'ok' => $accounts === [],
             'value' => ['count' => count($accounts), 'accounts' => $accounts],

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -16,6 +17,9 @@ use PDO;
  */
 final class DimensionAccountMapRepository
 {
+    /** Analytika (alias `a`) leží přímo pod syntetikou (`s`) a má stejný druh i daňovou uznatelnost. */
+    private const VALID_PAIR_SQL = '(a.parent_id = s.id AND a.tax_deductibility = s.tax_deductibility AND a.account_type = s.account_type)';
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -62,14 +66,17 @@ final class DimensionAccountMapRepository
 
     /**
      * Platná mapa k datu: syntetika => hodnota => analytika. Neaktivní analytika
-     * ani syntetika se neuplatní — zápis by na ni stejně neprošel.
+     * ani syntetika se neuplatní — zápis by na ni stejně neprošel. Řádek, jehož
+     * analytika mezitím přestala odpovídat (jiný rodič, jiná daňová uznatelnost nebo
+     * druh — např. po importu účtového rozvrhu), se neuplatní taky; ukáže ho kontrola
+     * uzávěrky ({@see invalidRows()}).
      *
      * @return array<int,array<int,int>>
      */
     public function activeMap(int $supplierId, int $typeId, string $date): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT m.synthetic_account_id, m.dimension_value_id, m.analytic_account_id
+            "SELECT m.synthetic_account_id, m.dimension_value_id, m.analytic_account_id
                FROM dimension_account_map m
                JOIN chart_of_accounts s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
                JOIN chart_of_accounts a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
@@ -77,7 +84,8 @@ final class DimensionAccountMapRepository
                 AND (m.valid_from IS NULL OR m.valid_from <= ?)
                 AND (m.valid_to IS NULL OR m.valid_to >= ?)
                 AND s.is_active = 1 AND a.is_active = 1
-              ORDER BY m.valid_from IS NULL, m.valid_from DESC, m.id'
+                AND " . self::VALID_PAIR_SQL . "
+              ORDER BY m.valid_from IS NULL, m.valid_from DESC, m.id"
         );
         $stmt->execute([$supplierId, $typeId, $date, $date]);
         $out = [];
@@ -85,6 +93,52 @@ final class DimensionAccountMapRepository
             $out[(int) $r['synthetic_account_id']][(int) $r['dimension_value_id']] ??= (int) $r['analytic_account_id'];
         }
         return $out;
+    }
+
+    /**
+     * Všechny cílové analytiky mapy firmy bez ohledu na typ a platnost:
+     * syntetika => seznam analytik. Podle nich časové rozlišení pozná, že zápis
+     * dokladu nese analytiku z mapy.
+     *
+     * @return array<int,list<int>>
+     */
+    public function allTargets(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT synthetic_account_id, analytic_account_id FROM dimension_account_map WHERE supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['synthetic_account_id']][] = (int) $r['analytic_account_id'];
+        }
+        return $out;
+    }
+
+    /**
+     * Řádky mapy, jejichž analytika už neodpovídá syntetice (rodič, druh, daňová
+     * uznatelnost) — zaúčtování je přeskakuje, kontrola uzávěrky je hlásí.
+     *
+     * @return list<array{account_id:int, account_code:string, name:string}>
+     */
+    public function invalidRows(int $supplierId, int $typeId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT a.id AS account_id, a.account_code, s.account_code AS synthetic_code, v.code AS value_code
+               FROM dimension_account_map m
+               JOIN chart_of_accounts s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
+               JOIN chart_of_accounts a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
+               JOIN dimension_values v ON v.id = m.dimension_value_id
+              WHERE m.supplier_id = ? AND m.dimension_type_id = ?
+                AND NOT " . self::VALID_PAIR_SQL . "
+              ORDER BY a.account_code"
+        );
+        $stmt->execute([$supplierId, $typeId]);
+        return array_map(static fn (array $r): array => [
+            'account_id' => (int) $r['account_id'],
+            'account_code' => (string) $r['account_code'],
+            'name' => $r['value_code'] . ': ' . $r['synthetic_code'] . ' → ' . $r['account_code'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /** Má firma pro typ vůbec nějaký řádek mapy (bez ohledu na platnost)? */
@@ -170,8 +224,13 @@ final class DimensionAccountMapRepository
 
     /**
      * Zaúčtované výsledkové řádky, které zůstaly na syntetice s mapou účtotvorné dimenze
-     * (řádku chyběla hodnota typu, nebo hodnota bez mapování). Uzávěrkové a otevírací
-     * zápisy se nepočítají — uzavírají zůstatek syntetiky jako celek.
+     * (řádku chyběla hodnota typu, nebo hodnota bez mapování). Nepočítají se:
+     *  - uzávěrkové a otevírací zápisy (uzavírají zůstatek syntetiky jako celek),
+     *  - stornované zápisy a storna (source_id NULL) — pár se vyruší,
+     *  - zápisy bez zdrojového dokladu a převzaté z jiného programu (mapu obcházejí
+     *    záměrně, {@see \MyInvoice\Service\Accounting\TakenOverRecord}),
+     *  - cizoměnové řádky (mapa je nedělí a nechává na syntetice),
+     *  - řádky mimo platnost mapy k datu účetního případu.
      *
      * @return list<array{account_id:int, account_code:string, name:string, line_count:int, amount:float}>
      */
@@ -186,12 +245,19 @@ final class DimensionAccountMapRepository
                 AND e.entry_date BETWEEN ? AND ?
                 AND e.posted_at IS NOT NULL
                 AND e.source_type NOT IN ('closing', 'opening')
-                AND l.account_id IN (SELECT m.synthetic_account_id FROM dimension_account_map m
-                                      WHERE m.supplier_id = ? AND m.dimension_type_id = ?)
+                AND e.reversed_by IS NULL
+                AND e.source_id IS NOT NULL
+                AND NOT " . TakenOverRecord::journalEntrySql('e') . "
+                AND l.currency_code IS NULL
+                AND EXISTS (SELECT 1 FROM dimension_account_map m
+                             WHERE m.supplier_id = l.supplier_id AND m.dimension_type_id = ?
+                               AND m.synthetic_account_id = l.account_id
+                               AND (m.valid_from IS NULL OR m.valid_from <= e.entry_date)
+                               AND (m.valid_to IS NULL OR m.valid_to >= e.entry_date))
               GROUP BY a.id, a.account_code, a.name
               ORDER BY a.account_code"
         );
-        $stmt->execute([$supplierId, $from, $to, $supplierId, $typeId]);
+        $stmt->execute([$supplierId, $from, $to, $typeId]);
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['account_id'],
             'account_code' => (string) $r['account_code'],

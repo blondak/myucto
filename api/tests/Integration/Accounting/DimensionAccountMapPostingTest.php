@@ -281,6 +281,65 @@ final class DimensionAccountMapPostingTest extends TestCase
         self::assertSame(['518' => 10_000], $this->expenseCents($this->postPurchase($purchase)), 'Mapa platná od července červnový doklad nemění.');
     }
 
+    /**
+     * Zápis z doby před mapou (518 + FVE), mapa FVE → 518.100 až potom: změna JINÉ
+     * dimenze (zakázka) nemění hodnotu účtotvorného typu, takže se přerazítkuje bez
+     * výzvy k přeúčtování — v otevřeném i zamčeném období a na řádku deníku.
+     */
+    public function testMapCreatedAfterPostingAcceptsOtherDimensionInOpenPeriod(): void
+    {
+        [$purchase, $entryId, $line518] = $this->postedBeforeMap();
+        $project = $this->value($this->projectType, 'F2-LATE-P');
+        $open = $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->fve, $this->projectType => $project], []);
+        self::assertFalse($open['restamp']['needs_repost'], 'Zakázka účet nemění.');
+        self::assertSame($project, $this->assignments->entryLineDimensions($this->supplierId, $entryId)[$line518][$this->projectType] ?? null);
+    }
+
+    public function testMapCreatedAfterPostingAcceptsOtherDimensionInLockedPeriod(): void
+    {
+        [$purchase] = $this->postedBeforeMap();
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        )->execute([$this->supplierId, self::YEAR . '-06-30']);
+        $project = $this->value($this->projectType, 'F2-LATE-P2');
+        $locked = $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->fve, $this->projectType => $project], []);
+        self::assertTrue($locked['restamp']['locked']);
+        self::assertFalse($locked['restamp']['needs_repost']);
+    }
+
+    public function testMapCreatedAfterPostingAcceptsOtherDimensionOnJournalLine(): void
+    {
+        [, $entryId, $line518] = $this->postedBeforeMap();
+        $project = $this->value($this->projectType, 'F2-LATE-P3');
+        self::assertSame(1, $this->dimensions->saveEntryLines($this->supplierId, $entryId, [
+            $line518 => [$this->centerType => $this->fve, $this->projectType => $project],
+        ]));
+    }
+
+    /**
+     * Zápis z doby před mapou (518 + FVE), mapa FVE → 518.100 až potom. Změna JINÉ
+     * dimenze nemění hodnotu účtotvorného typu a nesmí vyžadovat přeúčtování.
+     *
+     * @return array{0:int,1:int,2:int} doklad, zápis, řádek 518
+     */
+    private function postedBeforeMap(): array
+    {
+        $this->dimensions->updateType($this->supplierId, $this->centerType, ['drives_accounts' => true]);
+        $purchase = $this->purchase('F2-LATE-MAP', [[500.00, 105.00]]);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->fve], []);
+        $entryId = $this->postPurchase($purchase);
+        self::assertSame(['518' => 50_000], $this->expenseCents($entryId));
+        $this->map->saveForValue($this->supplierId, $this->fve, [['synthetic_code' => '518', 'analytic_code' => '518.100']], $this->userId);
+        $line518 = 0;
+        foreach ($this->journal->linesForEntry($entryId, $this->supplierId) as $line) {
+            if ($this->code((int) $line['account_id']) === '518') {
+                $line518 = (int) $line['id'];
+            }
+        }
+        return [$purchase, $entryId, $line518];
+    }
+
     /** Náhled kontace ukáže, kam zaúčtování syntetiku přesune — touž cestou jako zápis. */
     public function testPostingPreviewShowsDimensionRouting(): void
     {
@@ -347,7 +406,65 @@ final class DimensionAccountMapPostingTest extends TestCase
         self::assertEqualsWithDelta($deferred * 0.6, $byAccount['518.100'], 1);
     }
 
+    /** Mapa změněná po zaúčtování: odklad jde z analytiky, na které náklad v deníku leží. */
+    public function testDeferralFollowsPostedAnalyticAfterMapChange(): void
+    {
+        $this->enableDriving();
+        $purchase = $this->purchase('F2-381-MAP', [[1_000.00, 210.00]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET accrual_from = ?, accrual_to = ? WHERE purchase_invoice_id = ?')
+            ->execute([self::YEAR . '-07-01', (self::YEAR + 1) . '-06-30', $purchase]);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->fve], []);
+        self::assertSame(['518.100' => 100_000], $this->expenseCents($this->postPurchase($purchase)));
+        $this->map->saveForValue($this->supplierId, $this->fve, [['synthetic_code' => '518', 'analytic_code' => '518.200']], $this->userId);
+
+        $preview = $this->closing()->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId());
+        self::assertSame(['518.100'], array_keys($preview['by_account']), 'Ne z 518.200, kde náklad neleží.');
+    }
+
+    /** Import rozvrhu změnil uznatelnost analytiky: mapa se neuplatní a kontrola ji ukáže. */
+    public function testMapRowWithChangedDeductibilityIsSkippedAndReported(): void
+    {
+        $this->enableDriving();
+        // Třetí daňová analytika, ať 518 nemá jedinou daňovou analytiku (přesměr mimo F2).
+        $this->analytic('518.300', '518');
+        $this->db->pdo()->prepare("UPDATE chart_of_accounts SET tax_deductibility = 'non_deductible' WHERE supplier_id = ? AND account_code = '518.100'")
+            ->execute([$this->supplierId]);
+        $purchase = $this->purchase('F2-DEDUCT', [[100.00, 21.00]]);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->fve], []);
+
+        self::assertSame(['518' => 10_000], $this->expenseCents($this->postPurchase($purchase)), 'Nedaňová analytika nesmí převzít daňový náklad.');
+        $check = $this->checkOf('dimension_account_map_invalid');
+        self::assertFalse($check['ok']);
+        self::assertSame(['518.100'], array_column($check['value']['findings'], 'account_code'));
+    }
+
+    /** Storno pár a zápis před platností mapy kontrolu nespouští. */
+    public function testClosingCheckIgnoresReversedEntriesAndEntriesBeforeMapValidity(): void
+    {
+        $this->enableDriving();
+        $reversed = $this->postPurchase($this->purchase('F2-CHK-REV', [[100.00, 21.00]]));
+        $this->posting->reverse($this->supplierId, $reversed, ['entry_date' => self::YEAR . '-06-20']);
+        $this->map->saveForValue($this->supplierId, $this->office, [
+            ['synthetic_code' => '518', 'analytic_code' => '518.200', 'valid_from' => self::YEAR . '-07-01'],
+        ], $this->userId);
+        $this->db->pdo()->prepare('DELETE FROM dimension_account_map WHERE supplier_id = ? AND dimension_value_id = ?')
+            ->execute([$this->supplierId, $this->fve]);
+        $this->postPurchase($this->purchase('F2-CHK-EARLY', [[100.00, 21.00]]));
+
+        self::assertTrue($this->checkOf('dimension_account_unmapped')['ok']);
+    }
+
     // ── pomocné ──────────────────────────────────────────────────────────────
+
+    /** @return array<string,mixed> */
+    private function checkOf(string $key): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM accounting_periods WHERE id = ?');
+        $stmt->execute([$this->periodId()]);
+        $checks = $this->closing()->buildChecks($this->supplierId, (array) $stmt->fetch(\PDO::FETCH_ASSOC), null, null, 50, [$key]);
+        self::assertCount(1, $checks);
+        return $checks[0];
+    }
 
     private function closing(): \MyInvoice\Service\Accounting\Closing\ClosingService
     {

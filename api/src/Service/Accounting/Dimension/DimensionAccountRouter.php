@@ -29,6 +29,11 @@ use MyInvoice\Repository\DimensionAccountMapRepository;
  *
  * Bez účtotvorného typu nebo bez platných řádků mapy se nic nemění (žádný dotaz navíc
  * kromě zjištění typu).
+ *
+ * Importy převzatých dat (převod z Money S3, POHODY, PREMIERu, Stereo NX) mapu ZÁMĚRNĚ
+ * obcházejí: zapisují deník tak, jak ho zaúčtoval zdrojový program, a postDocument
+ * nevolají — převzatý zápis se nesmí rozejít se zdrojem. Kontrola uzávěrky je proto
+ * nehlásí ({@see \MyInvoice\Repository\DimensionAccountMapRepository::unmappedSyntheticLines()}).
  */
 final class DimensionAccountRouter
 {
@@ -165,15 +170,23 @@ final class DimensionAccountRouter
      * svého dílu (u řádku rozděleného mapou jen svou hodnotu typu). Neshoda → `conflict`
      * (dimenze by změnila účet nebo částky, to smí jen přeúčtování).
      *
+     * Neshoda je konflikt jen tehdy, když se mění hodnoty účtotvorného typu (stará vs.
+     * nová hodnota nebo rozpad řádku). Zápis z doby před mapou (518 se střediskem FVE,
+     * mapa FVE → 518.100 vznikla až potom) se změnou jiné dimenze (zakázka) nedostane
+     * do konfliktu: účet by se nezměnil, protože hodnota typu je pořád stejná a zápis
+     * se nepřeúčtovává — nové dimenze se přijmou tak, jak jsou.
+     *
      * Analytika, která je cílem mapy, se bere jako výsledek mapy, i když ji builder zvolil
      * výslovně — změna hodnoty typu pak raději vyžádá přeúčtování, než aby tiše nechala
      * řádek na analytice cizí hodnoty.
      *
      * @param list<array<string,mixed>> $lines zaúčtované řádky (`id`, `account_id`, `side`, `amount`)
      *                                        s NOVÝMI `dimensions` / `dimension_splits`
+     * @param array<int,array{dimensions?:array<int,int>, dimension_splits?:array<int,array<int,float>>}> $old
+     *        id řádku => DOSAVADNÍ dimenze a rozpady (řádek bez záznamu se bere jako změněný)
      * @return array{lines:list<array<string,mixed>>, conflicts:list<int>} řádky s promítnutými dimenzemi, id řádků v konfliktu
      */
-    public static function project(array $lines, int $typeId, DimensionAccountMask $mask, array $accounts, array $map, array $origins = []): array
+    public static function project(array $lines, int $typeId, DimensionAccountMask $mask, array $accounts, array $map, array $origins = [], array $old = []): array
     {
         $redirectOf = array_flip($origins);
         $groups = [];
@@ -222,6 +235,17 @@ final class DimensionAccountRouter
             ksort($actual);
             ksort($expected);
             if ($actual !== $expected) {
+                $drivingChanged = false;
+                foreach ($idx as $i) {
+                    $id = (int) ($lines[$i]['id'] ?? 0);
+                    if (!isset($old[$id]) || self::drivingKey($old[$id], $typeId) !== self::drivingKey($lines[$i], $typeId)) {
+                        $drivingChanged = true;
+                        break;
+                    }
+                }
+                if (!$drivingChanged) {
+                    continue;
+                }
                 foreach ($idx as $i) {
                     $conflicts[] = (int) ($lines[$i]['id'] ?? 0);
                 }
@@ -242,19 +266,40 @@ final class DimensionAccountRouter
     }
 
     /**
+     * Hodnota účtotvorného typu na řádku jako porovnatelný klíč (hodnota, nebo rozpad).
+     *
+     * @param array<string,mixed> $line
+     */
+    private static function drivingKey(array $line, int $typeId): string
+    {
+        $splits = $line['dimension_splits'][$typeId] ?? null;
+        if (is_array($splits) && $splits !== []) {
+            $row = [];
+            foreach ($splits as $v => $share) {
+                $row[(int) $v] = round((float) $share, 6);
+            }
+            ksort($row);
+            return 's' . json_encode($row, JSON_THROW_ON_ERROR);
+        }
+        $value = (int) ($line['dimensions'][$typeId] ?? 0);
+        return $value > 0 ? 'v' . $value : '';
+    }
+
+    /**
      * Přerazítkování podle aktuální mapy firmy: viz {@see project()}. Bez mapy beze změny.
      *
      * @param list<array<string,mixed>> $lines
      * @param array<string,string> $singleAnalytics
+     * @param array<int,array<string,mixed>> $old id řádku => dosavadní dimenze a rozpady
      * @return array{lines:list<array<string,mixed>>, conflicts:list<int>}
      */
-    public function projectForEntry(int $supplierId, string $entryDate, array $lines, array $singleAnalytics = []): array
+    public function projectForEntry(int $supplierId, string $entryDate, array $lines, array $singleAnalytics = [], array $old = []): array
     {
         $context = $this->context($supplierId, $entryDate);
         if ($context === null) {
             return ['lines' => $lines, 'conflicts' => []];
         }
-        return self::project($lines, $context['type_id'], $context['mask'], $context['accounts'], $context['map'], self::origins($context['accounts'], $singleAnalytics));
+        return self::project($lines, $context['type_id'], $context['mask'], $context['accounts'], $context['map'], self::origins($context['accounts'], $singleAnalytics), $old);
     }
 
     /**
