@@ -391,6 +391,56 @@ final class PayrollTravelApiTest extends TestCase
         self::assertSame('trip_state_conflict', $this->errorCode($response));
     }
 
+    /** Vyúčtování do měsíce s uzavřenou mzdou by vytvořilo vstupy, které se nevyplatí. */
+    public function testMaterializationIntoClosedPayrollMonthIsRefused(): void
+    {
+        $trip = $this->createTrip($this->tripPayload(mealRateBand1: '200'));
+        $tripId = PayrollTimeValue::int($trip['id'] ?? null, 'trip_id');
+        $approved = $this->approveTrip($tripId, PayrollTimeValue::int(
+            $trip['row_version'] ?? null,
+            'row_version',
+        ));
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                 (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, "closed", 1, 1)'
+        )->execute([
+            $this->supplierId,
+            $approved['settlement_period_start'],
+            $approved['settlement_period_start'],
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                  idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)"
+        )->execute([$this->supplierId, $runId, str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
+        $pdo->prepare(
+            "INSERT INTO payroll_run_employments
+                 (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, '{}', ?)"
+        )->execute([
+            $this->supplierId,
+            (int) $pdo->lastInsertId(),
+            $this->employeeId,
+            $this->employmentId,
+            str_repeat('c', 64),
+        ]);
+
+        $response = $this->travel->materialize(
+            $this->approverRequest('POST', "/api/payroll/travel/trips/{$tripId}/materialize"),
+            new Response(),
+            ['id' => (string) $tripId],
+        );
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('payroll_run_closed', $this->errorCode($response));
+        self::assertSame([], $this->travelInputs());
+    }
+
     public function testTenantIsolationHidesForeignTripsFromListAndDetail(): void
     {
         $trip = $this->createTrip($this->tripPayload());

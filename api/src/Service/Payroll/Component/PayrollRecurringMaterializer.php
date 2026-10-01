@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRecurringComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
+use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
+use MyInvoice\Service\Payroll\PayrollRunClosedException;
 
 /**
  * ── Krácení základní mzdy za nepřítomnost ────────────────────────────────────
@@ -40,6 +42,7 @@ final class PayrollRecurringMaterializer
         private readonly PayrollRecurringComponentRepository $recurring,
         private readonly PayrollRecurringAmountCalculator $calculator,
         private readonly PayrollWageProrationService $wageProration,
+        private readonly PayrollClosedRunGuard $closedRuns,
     ) {
     }
 
@@ -56,7 +59,21 @@ final class PayrollRecurringMaterializer
             $created = [];
             $replayed = [];
             $manualReview = [];
+            // Vztah s uzavřenou mzdou za měsíc nový koncept nedostane: do
+            // výplaty by se nedostal a běh za další měsíc by ho nevzal.
+            $closedRuns = $this->closedRuns->closingRuns($supplierId, $periodStart);
             foreach ($this->recurring->effectiveForPeriod($supplierId, $periodStart) as $row) {
+                $closedRun = $closedRuns[PayrollTimeValue::int(
+                    $row['employment_id'] ?? null,
+                    'employment_id',
+                )] ?? null;
+                if ($closedRun !== null) {
+                    $manualReview[] = $this->blocked(
+                        $row,
+                        (new PayrollRunClosedException($closedRun))->getMessage(),
+                    );
+                    continue;
+                }
                 if (!PayrollTimeValue::bool(
                     $row['component_is_active'] ?? null,
                     'component_is_active',

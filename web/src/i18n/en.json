@@ -3504,6 +3504,14 @@
       "load_failed_hint": "Payroll inputs for this period did not load. Do not re-enter them — try loading again first, so you do not create duplicates.",
       "save_blocked_loading": "Wait for the inputs for the selected period to load.",
       "save_blocked_empty": "There is nothing to save for this period — no relation here has a payroll input.",
+      "closed_run": {
+        "title_all": "Payroll for {period} is closed.",
+        "title_some": "Payroll for {period} is closed for {count} relations.",
+        "hint": "Inputs no longer change and closed rows are not saved. Request a correction on the payroll run.",
+        "open_runs": "Open payroll runs",
+        "badge": "Payroll closed",
+        "save_blocked": "Payroll for this month is closed, there is nothing to save. Request a correction on the payroll run."
+      },
       "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
       "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again.",
       "save_partial_invalid": "Only rows without errors are saved — {count} row stays unsaved until you fix it. | Only rows without errors are saved — {count} rows stay unsaved until you fix them.",

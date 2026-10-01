@@ -245,6 +245,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::COMPONENT_CELL_SOURCES',
         'payroll.ts::PayrollQuickComponentMode'
             => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::COMPONENT_CELL_MODES',
+        // Stav běhu, ve kterém je mzda vztahu za měsíc uzavřená.
+        'payroll.ts::PayrollQuickClosedRunStatus'
+            => 'const:MyInvoice\Service\Payroll\PayrollClosedRunGuard::FINISHED_STATUSES',
         // Proč rozklad pojistného není k dispozici. Každý důvod má na obrazovce
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>

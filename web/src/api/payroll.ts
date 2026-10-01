@@ -2363,6 +2363,14 @@ export interface PayrollQuickInputProration {
   amount_minor: number
 }
 
+export type PayrollQuickClosedRunStatus = 'approved' | 'posted' | 'payment_ready' | 'paid' | 'closed'
+
+export interface PayrollQuickClosedRun {
+  run_id: number
+  status: PayrollQuickClosedRunStatus
+  period: string
+}
+
 export interface PayrollQuickInputRow {
   employee_id: number
   employment_id: number
@@ -2375,6 +2383,11 @@ export interface PayrollQuickInputRow {
   suspended_in_month: boolean
   /** Lehký příznak pro přehled; úplné absence se vracejí jen kartám stránky. */
   away_in_month?: boolean
+  /**
+   * Běh, ve kterém je mzda vztahu za měsíc uzavřená (schválený a dál).
+   * Řádek je pak jen ke čtení; karty přehledu klíč neposílají.
+   */
+  closed_run?: PayrollQuickClosedRun | null
   base_amount_minor: number
   base_managed_elsewhere: boolean
   /** Pravidelné složky vztahu, ze kterých za měsíc ještě nevznikl vstup. */

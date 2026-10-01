@@ -1511,4 +1511,65 @@ describe('PayrollQuickInputs', () => {
       expect(digits('[data-testid="quick-total-gross"]')).toBe('12690000')
     })
   })
+
+  describe('uzavřená mzda za měsíc', () => {
+    const closedRun = { run_id: 77, status: 'closed' as const, period: '2026-09' }
+
+    it('zamkne uzavřený řádek, ukáže upozornění a neposílá ho k uložení', async () => {
+      m.load.mockImplementation(async period => ({
+        period,
+        items: [
+          fixture({ employment_id: 12, closed_run: closedRun }),
+          fixture({ employment_id: 13, employee_id: 9, full_name: 'Syntetická osoba 2', closed_run: null }),
+        ],
+        total: 2,
+      }))
+
+      const wrapper = mountPage()
+      await flushPromises()
+
+      const notice = wrapper.get('[data-testid="quick-closed-run-notice"]')
+      expect(notice.text()).toContain('payroll.quick_inputs.closed_run.title_some')
+      expect(wrapper.get('[data-testid="quick-closed-run-open"]').attributes('data-to'))
+        .toContain('"name":"payroll-runs"')
+      expect(wrapper.find('[data-testid="quick-closed-12"]').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="quick-closed-13"]').exists()).toBe(false)
+
+      const [closedRow, openRow] = wrapper.get('[data-layout="desktop"]').findAll('tbody tr')
+      const closedInputs = closedRow.findAll('input')
+      expect(closedInputs.length).toBeGreaterThan(0)
+      expect(closedInputs.every(input => input.attributes('disabled') !== undefined)).toBe(true)
+      expect(openRow.get('[data-testid="quick-base-13"]').attributes('disabled')).toBeUndefined()
+
+      await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+      await flushPromises()
+      expect(m.save).toHaveBeenCalledTimes(1)
+      expect(m.save.mock.calls[0][0].rows.map((row: { employment_id: number }) => row.employment_id))
+        .toEqual([13])
+    })
+
+    it('u celého uzavřeného měsíce zablokuje uložení a řekne proč', async () => {
+      m.load.mockImplementation(async period => ({
+        period,
+        items: [fixture({ closed_run: closedRun })],
+        total: 1,
+      }))
+
+      const wrapper = mountPage()
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="quick-closed-run-notice"]').text())
+        .toContain('payroll.quick_inputs.closed_run.title_all')
+      expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-testid="quick-payroll-save-blocked"]').text())
+        .toBe('payroll.quick_inputs.closed_run.save_blocked')
+    })
+
+    it('bez uzavřeného běhu upozornění neukazuje', async () => {
+      const wrapper = mountPage()
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="quick-closed-run-notice"]').exists()).toBe(false)
+    })
+  })
 })

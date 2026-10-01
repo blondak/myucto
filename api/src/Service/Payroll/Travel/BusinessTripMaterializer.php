@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollBusinessTripRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDOException;
 
@@ -46,6 +47,7 @@ final class BusinessTripMaterializer
         private readonly PayrollBusinessTripRepository $trips,
         private readonly PayrollComponentRepository $components,
         private readonly BusinessTripCashPosting $cashPosting,
+        private readonly PayrollClosedRunGuard $closedRuns,
     ) {}
 
     /** @return array<string,mixed> */
@@ -79,6 +81,16 @@ final class BusinessTripMaterializer
                 $trip['settlement_period_start'] ?? null,
                 'settlement_period_start',
             );
+            if ($firstSettlement) {
+                // První promítnutí do měsíce s uzavřenou mzdou by vytvořilo
+                // vstupy, které se do výplaty nedostanou. Vyúčtování jde přesunout
+                // do otevřeného měsíce, nebo běh otevřít k opravě.
+                $this->closedRuns->assertOpen(
+                    $supplierId,
+                    $periodStart,
+                    PayrollTimeValue::int($trip['employment_id'] ?? null, 'employment_id'),
+                );
+            }
             $settlement = BusinessTripSettlement::fromTrip($trip);
 
             $created = [];

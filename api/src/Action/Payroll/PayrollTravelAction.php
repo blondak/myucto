@@ -15,6 +15,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Travel\BusinessTripCalculation;
 use MyInvoice\Service\Payroll\Travel\BusinessTripCalculator;
@@ -269,6 +270,8 @@ final class PayrollTravelAction
                 (int) ($args['id'] ?? 0),
                 $this->userId($request),
             );
+        } catch (PayrollRunClosedException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (\DomainException $e) {
             return Json::error($response, 'trip_state_conflict', $e->getMessage(), 409);
         }

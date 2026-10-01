@@ -9,6 +9,8 @@ use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
+use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
@@ -157,6 +159,7 @@ final class PayrollQuickInputRepository
         private readonly PayrollQuickSurchargeCalculator $quickSurcharges,
         private readonly PayrollSurchargeClaimRepository $surchargeClaims,
         private readonly PayrollWageProrationService $wageProration,
+        private readonly PayrollClosedRunGuard $closedRuns,
     ) {}
 
     /**
@@ -244,8 +247,24 @@ final class PayrollQuickInputRepository
             $cursor += count($batch['items']);
         } while ($cursor < $total && $batch['items'] !== []);
 
-        $recurringPending = array_values(array_filter(
+        // Uzavřená mzda se hlásí u řádku, aby ho formulář zamkl dřív, než do
+        // něj někdo napíše; ukládání ho odmítne tak jako tak. Jeden dotaz za
+        // celý měsíc, ne po řádcích. Neuložené návrhy ani nevytvořené vstupy
+        // z pravidelných složek se u takového řádku nehlásí — nic z nich už
+        // udělat nejde.
+        $closedRuns = $this->closedRuns->closingRuns($supplierId, $period);
+        $all = array_map(
+            static fn (array $item): array => $item + [
+                'closed_run' => $closedRuns[(int) $item['employment_id']] ?? null,
+            ],
             $all,
+        );
+        $open = array_values(array_filter(
+            $all,
+            static fn (array $item): bool => $item['closed_run'] === null,
+        ));
+        $recurringPending = array_values(array_filter(
+            $open,
             static fn (array $item): bool => (int) ($item['recurring_pending_count'] ?? 0) > 0,
         ));
 
@@ -255,7 +274,7 @@ final class PayrollQuickInputRepository
             'total' => $total,
             'columns' => $this->componentColumns($supplierId, $period . '-01', $all),
             'totals' => self::periodTotals($all),
-            'unsaved_suggestions' => self::unsavedSuggestions($all),
+            'unsaved_suggestions' => self::unsavedSuggestions($open),
             // Za celý zúžený měsíc, ne za stránku: akce „vytvořit vstupy
             // z pravidelných složek" jde přes celý měsíc najednou.
             'recurring_pending' => [
@@ -1239,6 +1258,7 @@ final class PayrollQuickInputRepository
             foreach ($current['items'] as $item) {
                 $items[(int) $item['employment_id']] = $item;
             }
+            $closedRuns = $this->closedRuns->closingRuns($supplierId, $period, array_keys($items));
             $componentIds = $this->componentIds($supplierId, $period . '-01');
             /** @var array<string,array<string,mixed>>|null $dynamicDefinitions načte se až u první buňky složky */
             $dynamicDefinitions = null;
@@ -1254,6 +1274,16 @@ final class PayrollQuickInputRepository
                         new \InvalidArgumentException(
                             'Pracovní vztah nepatří této firmě nebo není v daném měsíci účinný.'
                         ),
+                    );
+                    continue;
+                }
+                if (isset($closedRuns[$employmentId])) {
+                    // Mzda za měsíc je u vztahu uzavřená. Nový podklad by se do
+                    // výplaty nedostal a v přehledu by vypadal, že dostal.
+                    $collected[] = self::failure(
+                        $employmentId,
+                        'row',
+                        new PayrollRunClosedException($closedRuns[$employmentId]),
                     );
                     continue;
                 }
@@ -3259,7 +3289,8 @@ final class PayrollQuickInputRepository
                 => 'employment_row_version_conflict',
             $e instanceof PayrollInputConflictException => 'row_version_conflict',
             $e instanceof PayrollInputApprovalException,
-            $e instanceof PayrollInputCancellationException => $e->errorCode,
+            $e instanceof PayrollInputCancellationException,
+            $e instanceof PayrollRunClosedException => $e->errorCode,
             $e instanceof \InvalidArgumentException => 'validation_failed',
             default => 'input_state_conflict',
         };

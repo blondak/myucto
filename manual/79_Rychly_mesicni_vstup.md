@@ -21,6 +21,15 @@ Musí být vybraný správný měsíc, existovat aktivní vztahy a nastavené mz
 Uložený vstup čeká na zpracování během; podle oprávnění uživatele vznikne rovnou
 jako schválený, nebo jako koncept ke schválení. V otevřeném běhu se projeví po výpočtu. Po uzavření nelze změnou vstupu přepsat archivovaný výsledek; je nutný podporovaný opravný postup.
 
+Je-li vztah v mzdovém běhu za měsíc, který je schválený, zaúčtovaný, připravený
+k úhradě, vyplacený nebo uzavřený, je jeho řádek **jen ke čtení** a u jména nese
+štítek **Mzda uzavřena**. Nad tabulkou se zobrazí upozornění s odkazem na mzdové
+běhy; takový řádek se neukládá a server by ho stejně odmítl. Jsou-li uzavřené
+všechny řádky, tlačítko **Uložit měsíční podklady** je neaktivní. Změnu zadáte
+až po **Vyžádat opravu** u mzdového běhu: běh čekající na opravu podklady
+přijímá. Totéž platí pro ruční zadání v **Mzdových vstupech**, vytvoření vstupů
+z pravidelných složek a první promítnutí vyúčtování pracovní cesty.
+
 ## 79.5 Kontroly a bezpečnost
 
 Kontrolujte období, souběžný vztah, znaménko, jednotku a duplicity. Hromadné zadání zvyšuje riziko záměny osoby; před uložením používejte kontrolní součet. Zdrojovou přílohu nesdílejte mimo oprávněný okruh.

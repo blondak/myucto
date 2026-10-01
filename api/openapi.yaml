@@ -22270,7 +22270,10 @@ paths:
         Vytvoří vstup ve stavu `draft`. Neschvaluje ho ani nespouští výpočet mzdy.
         Složky `NAHRADA_MZDY_DPN` a `NAHRADA_MZDY_DOVOLENA` tudy zadat nelze —
         vznikají výhradně ze schválené absence, protože jejich částka je vázaná
-        na zákonný nárok a na zmrazený průměrný výdělek.
+        na zákonný nárok a na zmrazený průměrný výdělek. Do měsíce, za který je
+        mzda vztahu uzavřená (vztah je v aktuální revizi běhu ve stavu
+        `approved`, `posted`, `payment_ready`, `paid` nebo `closed`), vstup
+        zadat nelze — odpověď 409 s kódem `payroll_run_closed`.
       requestBody:
         required: true
         content:
@@ -22287,6 +22290,7 @@ paths:
                 properties:
                   input: { $ref: '#/components/schemas/PayrollInput' }
         '403': { $ref: '#/components/responses/InsufficientScope' }
+        '409': { description: 'Mzda za měsíc je u vztahu uzavřená (`payroll_run_closed`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/inputs/{id}:
@@ -22325,7 +22329,7 @@ paths:
                   input: { $ref: '#/components/schemas/PayrollInput' }
         '403': { $ref: '#/components/responses/InsufficientScope' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Konflikt verze nebo stavu, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'Konflikt verze nebo stavu; `payroll_run_closed`, je-li mzda za původní nebo nový měsíc vstupu u vztahu uzavřená', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/runs:

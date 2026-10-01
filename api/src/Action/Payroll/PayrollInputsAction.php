@@ -18,7 +18,9 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollInputPreviewService;
 use MyInvoice\Service\Payroll\Component\PayrollInputValidator;
+use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -35,6 +37,7 @@ final class PayrollInputsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
+        private readonly PayrollClosedRunGuard $closedRuns,
     ) {}
 
     /**
@@ -156,11 +159,15 @@ final class PayrollInputsAction
         // schvaluje rovnou a umí i opravu, a na všechno ostatní je
         // {@see approveBatch()}.
         try {
+            $data = $this->validator->validate($this->input($request));
+            $this->assertMonthOpen($this->currentSupplierId($request), $data);
             $input = $this->inputs->create(
                 $this->currentSupplierId($request),
-                $this->validator->validate($this->input($request)),
+                $data,
                 $this->userId($request),
             );
+        } catch (PayrollRunClosedException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -391,12 +398,18 @@ final class PayrollInputsAction
             return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
         }
         try {
+            $data = $this->validator->validate([...self::storedInputBody($current), ...$body]);
+            // Uzavřený nesmí být ani měsíc, odkud vstup odchází, ani ten, kam jde.
+            $this->assertMonthOpen($supplierId, $current);
+            $this->assertMonthOpen($supplierId, $data);
             $input = $this->inputs->update(
                 $supplierId,
                 $id,
-                $this->validator->validate([...self::storedInputBody($current), ...$body]),
+                $data,
                 $version,
             );
+        } catch (PayrollRunClosedException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollInputConflictException $e) {
@@ -504,12 +517,18 @@ final class PayrollInputsAction
             );
         }
         try {
+            $current = $this->inputs->find($this->currentSupplierId($request), (int) ($args['id'] ?? 0));
+            if ($current !== null) {
+                $this->assertMonthOpen($this->currentSupplierId($request), $current);
+            }
             $input = $this->inputs->approve(
                 $this->currentSupplierId($request),
                 (int) ($args['id'] ?? 0),
                 $version,
                 $this->userId($request),
             );
+        } catch (PayrollRunClosedException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (PayrollInputApprovalException $e) {
             return Json::error(
                 $response,
@@ -588,6 +607,23 @@ final class PayrollInputsAction
         }
         $this->audit($request, 'payroll.input.benefit_reversed', $input);
         return Json::ok($response, ['input' => $input]);
+    }
+
+    /**
+     * Ruční vstup do měsíce, za který je mzda vztahu uzavřená, se odmítá.
+     * Automatické cesty (materializace absencí, ukončení vztahu, převzetí)
+     * jdou přímo přes repozitář a mají vlastní pravidla.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function assertMonthOpen(int $supplierId, array $input): void
+    {
+        $period = $input['period_start'] ?? null;
+        $employmentId = $input['employment_id'] ?? null;
+        if (!is_string($period) || $period === '' || !is_numeric($employmentId)) {
+            return;
+        }
+        $this->closedRuns->assertOpen($supplierId, $period, (int) $employmentId);
     }
 
     private function authorize(

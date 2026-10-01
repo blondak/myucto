@@ -410,7 +410,13 @@ function surchargeState(row: UiRow, kind: PayrollQuickSurchargeKind): PayrollQui
 }
 
 /** Editovatelné je pole jen tehdy, když to dovolí SERVER. Neodvozujeme to tu. */
+/** Mzda vztahu za měsíc je uzavřená: řádek je jen ke čtení a neposílá se. */
+function rowClosed(row: PayrollQuickInputRow): boolean {
+  return row.closed_run != null
+}
+
 function surchargeEditable(row: UiRow, kind: PayrollQuickSurchargeKind): boolean {
+  if (rowClosed(row)) return false
   const state = surchargeState(row, kind)
   if (state === null || !state.entry_available) return false
   return state.status === null || state.status === 'draft'
@@ -492,7 +498,7 @@ function componentCell(row: UiRow, code: string): PayrollQuickComponentCell | nu
 }
 
 function componentEditable(row: UiRow, column: PayrollQuickComponentColumn): boolean {
-  if (!canWrite.value) return false
+  if (!canWrite.value || rowClosed(row)) return false
   const cell = componentCell(row, column.code)
   if (cell === null) return column.editable_in_quick
   if (!cell.entry_available) return false
@@ -1097,7 +1103,10 @@ const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
  * ostatní se uloží.
  */
 const savableRows = computed(() => [...rows.value, ...pendingElsewhere.value]
-  .filter(row => !rowInvalid(row)))
+  .filter(row => !rowInvalid(row) && !rowClosed(row)))
+
+/** Řádky stránky s uzavřenou mzdou za měsíc. */
+const closedRows = computed(() => rows.value.filter(rowClosed))
 
 /*
  * Proč nejde „Uložit vše". Blokací je několik a liší se tím, co má uživatel
@@ -1112,6 +1121,9 @@ const saveBlockedReason = computed<string | null>(() => {
     return t('payroll.quick_inputs.save_blocked_loading')
   }
   if (rows.value.length === 0) return t('payroll.quick_inputs.save_blocked_empty')
+  if (closedRows.value.length === rows.value.length && pendingElsewhere.value.length === 0) {
+    return t('payroll.quick_inputs.closed_run.save_blocked')
+  }
   if (savableRows.value.length === 0) return t('payroll.quick_inputs.save_blocked_invalid')
   return null
 })
@@ -1438,7 +1450,7 @@ async function save(): Promise<void> {
     batch = [
       ...savableRows.value,
       ...others.filter(row => !onPage.has(row.employment_id) && !pendingIds.has(row.employment_id)
-        && !rowInvalid(row)),
+        && !rowInvalid(row) && !rowClosed(row)),
     ]
   } catch (error) {
     saving.value = false
@@ -1624,6 +1636,34 @@ onMounted(() => {
       <p class="mt-1">
         {{ t('payroll.historical.quick_inputs', { period: formatPeriod(payrollStartPeriod ?? '') }) }}
       </p>
+    </div>
+
+    <!--
+      Mzda za měsíc je u některých vztahů uzavřená. Jejich řádky jsou jen ke
+      čtení a neposílají se; změna jde jen opravou mzdového běhu.
+    -->
+    <div
+      v-if="!historyMode && closedRows.length > 0"
+      data-testid="quick-closed-run-notice"
+      class="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-neutral-700"
+      role="status"
+    >
+      <p class="font-medium text-warning-900">
+        {{ closedRows.length === rows.length
+          ? t('payroll.quick_inputs.closed_run.title_all', { period: formatPeriod(period) })
+          : t('payroll.quick_inputs.closed_run.title_some', { period: formatPeriod(period), count: closedRows.length }) }}
+      </p>
+      <p class="mt-1">{{ t('payroll.quick_inputs.closed_run.hint') }}</p>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <RouterLink
+          :to="{ name: 'payroll-runs', query: { period } }"
+          :class="[btnOutline('warning'), 'whitespace-nowrap']"
+          data-testid="quick-closed-run-open"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>
+          {{ t('payroll.quick_inputs.closed_run.open_runs') }}
+        </RouterLink>
+      </div>
     </div>
 
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
@@ -2071,6 +2111,14 @@ onMounted(() => {
                     >
                       {{ employmentStatusLabel(row) }}
                     </span>
+                    <span
+                      v-if="rowClosed(row)"
+                      :data-testid="`quick-closed-${row.employment_id}`"
+                      class="inline-flex items-center gap-0.5 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-700"
+                    >
+                      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.lock" /></svg>
+                      {{ t('payroll.quick_inputs.closed_run.badge') }}
+                    </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
@@ -2107,7 +2155,7 @@ onMounted(() => {
                       :aria-invalid="baseError(row) !== null"
                       :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
                       :class="[fieldClass(baseError(row), true, true), 'w-32', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                      :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
+                      :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
                       @input="markDirty(row)"
                     >
                     <PayrollQuickFieldState
@@ -2197,7 +2245,7 @@ onMounted(() => {
                           :aria-pressed="row.overtime_mode === 'amount'"
                           :aria-label="t('payroll.quick_inputs.total_amount')"
                           :title="t('payroll.quick_inputs.total_amount')"
-                          :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                          :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)"
                           @click="setOvertimeMode(row, 'amount')"
                         >{{ t('payroll.quick_inputs.mode_amount_short') }}</button>
                       </div>
@@ -2211,7 +2259,7 @@ onMounted(() => {
                         :aria-invalid="overtimeError(row) !== null"
                         :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
                         :class="[fieldClass(overtimeError(row), true, true), 'w-24']"
-                        :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                        :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)"
                         @input="markDirty(row)"
                       >
                       <input
@@ -2224,7 +2272,7 @@ onMounted(() => {
                         :aria-invalid="overtimeError(row) !== null"
                         :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
                         :class="[fieldClass(overtimeError(row), true, true), row.overtime_hours_relation_supported ? 'w-24' : 'w-32']"
-                        :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                        :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)"
                         @input="markDirty(row)"
                       >
                     </template>
@@ -2284,7 +2332,7 @@ onMounted(() => {
                       :aria-invalid="bonusError(row) !== null"
                       :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
                       :class="[fieldClass(bonusError(row), true, true), 'w-32']"
-                      :disabled="loading || saving || !canWrite || !editable(row.inputs.bonus)"
+                      :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.bonus)"
                       @input="markDirty(row)"
                     >
                     <PayrollQuickFieldState
@@ -2610,7 +2658,7 @@ onMounted(() => {
                   :aria-labelledby="`quick-income-label-mobile-${row.employment_id}`"
                   :aria-invalid="baseError(row) !== null"
                   :class="[fieldClass(baseError(row)), 'w-full', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                  :disabled="loading || saving || !canWrite || !editable(row.inputs.base)"
+                  :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
                   @input="markDirty(row)"
                 >
                 <span v-if="baseSuggested(row)" class="mt-1 block text-xs text-warning-700">
@@ -2655,7 +2703,7 @@ onMounted(() => {
                   :aria-labelledby="`quick-bonus-label-mobile-${row.employment_id}`"
                   :aria-invalid="bonusError(row) !== null"
                   :class="[fieldClass(bonusError(row)), 'w-full']"
-                  :disabled="loading || saving || !canWrite || !editable(row.inputs.bonus)"
+                  :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.bonus)"
                   @input="markDirty(row)"
                 >
                 <span v-if="bonusError(row)" class="mt-1 block text-xs text-danger-700">
@@ -2686,7 +2734,7 @@ onMounted(() => {
                     <button type="button" class="cursor-pointer"
   :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
                     <button type="button" class="cursor-pointer"
-  :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
+  :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
                   </template>
                   <input
                     v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours'"
@@ -2697,7 +2745,7 @@ onMounted(() => {
                     :aria-label="t('payroll.quick_inputs.overtime_hours')"
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
-                    :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                    :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
                   <input
@@ -2709,7 +2757,7 @@ onMounted(() => {
                     :aria-label="additionalIncomeLabel(row)"
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
-                    :disabled="loading || saving || !canWrite || !editable(row.inputs.overtime)"
+                    :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
                 </div>
@@ -2919,7 +2967,7 @@ onMounted(() => {
       <p v-else-if="canWrite && savePartialNote" :class="[BTN_DISABLED_NOTE, 'order-first basis-full sm:text-right']" data-testid="quick-payroll-save-partial">
         {{ savePartialNote }}
       </p>
-      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || savableRows.length === 0" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
+      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || savableRows.length === 0 || saveBlockedReason !== null" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.quick_inputs.save_all') }}
       </button>

@@ -3504,6 +3504,14 @@
       "load_failed_hint": "Mzdové vstupy za toto období se nenačetly. Nezadávejte je znovu — nejdřív zkuste načtení zopakovat, ať nevzniknou duplicity.",
       "save_blocked_loading": "Počkejte, než se vstupy za zvolené období načtou.",
       "save_blocked_empty": "Za toto období není co uložit — nejsou tu žádné vztahy se mzdovým vstupem.",
+      "closed_run": {
+        "title_all": "Mzdy za {period} jsou uzavřené.",
+        "title_some": "Mzdy za {period} jsou u {count} vztahů uzavřené.",
+        "hint": "Podklady se už nemění a uzavřené řádky se neukládají. Opravu vyžádejte u mzdového běhu.",
+        "open_runs": "Otevřít mzdové běhy",
+        "badge": "Mzda uzavřena",
+        "save_blocked": "Mzdy za tento měsíc jsou uzavřené, není co uložit. Opravu vyžádejte u mzdového běhu."
+      },
       "save_blocked_invalid": "Opravte červeně označená pole. Dokud v tabulce zůstane neplatná hodnota, uložit nejde.",
       "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu.",
       "save_partial_invalid": "Uloží se jen řádky bez chyby — {count} řádek zůstane neuložený, dokud ho neopravíte. | Uloží se jen řádky bez chyby — {count} řádky zůstanou neuložené, dokud je neopravíte. | Uloží se jen řádky bez chyby — {count} řádků zůstane neuložených, dokud je neopravíte.",
