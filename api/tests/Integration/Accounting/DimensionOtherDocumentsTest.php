@@ -6,9 +6,11 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\OtherItemScheduleService;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Tests\Support\OtherDocumentsPostingScenarios;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -16,9 +18,7 @@ use Psr\Container\ContainerInterface;
 
 /**
  * Dimenze ostatních dokladů a karty majetku se promítnou do řádků deníku
- * (Účtování podle dimenzí, F4): ostatní pohledávka a závazek (hlavička i rozpad),
- * vzájemný zápočet po stranách, zápočet proti účtu z faktury, karta majetku do
- * zařazení, odpisů a vyřazení. Scénáře sdílí s regresním testem
+ * (Účtování podle dimenzí, F4). Scénáře sdílí s regresním testem
  * {@see OtherDocumentsPostingRegressionTest}.
  */
 #[Group('integration')]
@@ -26,6 +26,10 @@ final class DimensionOtherDocumentsTest extends TestCase
 {
     private ContainerInterface $container;
     private Connection $db;
+    private DimensionService $dimensions;
+    private OtherDocumentsPostingScenarios $scenarios;
+    /** @var array<string,int> */
+    private array $types = [];
 
     protected function setUp(): void
     {
@@ -35,6 +39,8 @@ final class DimensionOtherDocumentsTest extends TestCase
         $this->container = Bootstrap::buildContainer();
         $this->db = $this->container->get(Connection::class);
         $this->db->pdo()->beginTransaction();
+        $this->dimensions = $this->container->get(DimensionService::class);
+        $this->scenarios = new OtherDocumentsPostingScenarios($this->container);
     }
 
     protected function tearDown(): void
@@ -49,28 +55,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testDocumentAndCardDimensionsReachJournalLines(): void
     {
-        $dimensions = $this->container->get(DimensionService::class);
-        $pdo = $this->db->pdo();
-        $out = (new OtherDocumentsPostingScenarios($this->container))->run(
-            function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($dimensions, $pdo): void {
-                $types = $ctx->types();
-                $cc = $types['cost_center'];
-                $c1 = $ctx->value($cc, 'REGR-C1');
-                $c2 = $ctx->value($cc, 'REGR-C2');
-                $p1 = $ctx->value($types['project'], 'REGR-P1');
-                match ($scenario) {
-                    'other_receivable' => $dimensions->saveDocument($ctx->supplierId, 'other_item', $docId, [$cc => $c1], null),
-                    'other_payable' => $dimensions->saveDocument($ctx->supplierId, 'other_item', $docId, [$types['project'] => $p1], null, false,
-                        [0 => [$cc => [['value_id' => $c1, 'share' => 0.6], ['value_id' => $c2, 'share' => 0.4]]]]),
-                    'offset' => $dimensions->saveDocument($ctx->supplierId, 'invoice', (int) $pdo->query(
-                        "SELECT doc_id FROM offset_agreement_items WHERE agreement_id = {$docId} AND doc_type = 'invoice'"
-                    )->fetchColumn(), [$types['project'] => $p1], null),
-                    'settlement' => $dimensions->saveDocument($ctx->supplierId, 'invoice', $docId, [$cc => $c2], null),
-                    'asset' => $dimensions->saveDocument($ctx->supplierId, 'asset', $docId, [$cc => $c1, $types['project'] => $p1], null),
-                    default => null,
-                };
-            },
-        );
+        $out = $this->runWithDimensions();
 
         foreach ($out['other_receivable'] as $line) {
             self::assertSame(['stredisko' => 'REGR-C1'], $line['dims'], 'Ostatní pohledávka: hlavička na všech řádcích (' . $line['account'] . ').');
@@ -85,7 +70,7 @@ final class DimensionOtherDocumentsTest extends TestCase
         self::assertSame([], $offset['321']['dims'], 'Zápočet: závazek nese dimenze přijaté faktury (žádné).');
 
         foreach ($out['settlement'] as $line) {
-            self::assertSame(['stredisko' => 'REGR-C2'], $line['dims'], 'Zápočet proti účtu přebírá dimenze faktury (' . $line['account'] . ').');
+            self::assertSame(['stredisko' => ['REGR-C1' => 0.6, 'REGR-C2' => 0.4]], $line['splits'], 'Zápočet proti účtu přebírá i rozpad faktury (' . $line['account'] . ').');
         }
 
         foreach (['asset_in_use', 'depreciation', 'depreciation_disposal_year', 'asset_disposal'] as $scenario) {
@@ -94,109 +79,237 @@ final class DimensionOtherDocumentsTest extends TestCase
                 self::assertSame(['projekt' => 'REGR-P1', 'stredisko' => 'REGR-C1'], $line['dims'], $scenario . ': dimenze karty na ' . $line['account'] . '.');
             }
         }
-        self::assertSame('551', $out['depreciation'][0]['account']);
+
+        foreach ($out['other_payable_bank'] as $line) {
+            self::assertSame(['projekt' => 'REGR-P1'], $line['dims'], 'Bankovní úhrada přebírá hlavičku závazku (' . $line['account'] . ').');
+        }
+        foreach ($out['other_receivable_cash'] as $line) {
+            self::assertSame(['stredisko' => 'REGR-C1'], $line['dims'], 'Pokladní úhrada přebírá hlavičku pohledávky.');
+        }
+        foreach ($out['other_schedule'] as $line) {
+            self::assertSame(['stredisko' => 'REGR-C1'], $line['dims'], 'Výskyt rozvrhu nese dimenze zdroje.');
+        }
+        foreach ($out['asset_from_purchase'] as $line) {
+            self::assertSame(['projekt' => 'REGR-P1', 'stredisko' => 'REGR-C2'], $line['dims'], 'Karta z položky: položka > hlavička faktury.');
+        }
+        foreach ([...$out['asset_sale_depreciation'], ...$out['asset_sale_disposal']] as $line) {
+            self::assertSame(['stredisko' => 'REGR-C2'], $line['dims'], 'Prodej majetku fakturou: dimenze karty (' . $line['account'] . ').');
+        }
     }
 
     public function testCardDimensionChangeRestampsPostedAssetEntries(): void
     {
-        $scenarios = new OtherDocumentsPostingScenarios($this->container);
-        $assetId = 0;
-        $scenarios->run(function (string $scenario, int $docId) use (&$assetId): void {
-            if ($scenario === 'asset') {
-                $assetId = $docId;
-            }
-        });
-        $dimensions = $this->container->get(DimensionService::class);
-        $types = $scenarios->types();
-        $c1 = $scenarios->value($types['cost_center'], 'REGR-C1');
-        $c2 = $scenarios->value($types['cost_center'], 'REGR-C2');
-        $result = $dimensions->saveDocument($scenarios->supplierId, 'asset', $assetId, [], null, false,
-            [0 => [$types['cost_center'] => [['value_id' => $c1, 'share' => 0.6], ['value_id' => $c2, 'share' => 0.4]]]]);
+        $this->scenarios->run();
+        $this->loadTypes();
+        $assetId = $this->scenarios->ids['asset'];
+        $result = $this->dimensions->saveDocument($this->scenarios->supplierId, 'asset', $assetId, [], null, false,
+            [0 => [$this->types['cost_center'] => [['value_id' => $this->value('C1'), 'share' => 0.6], ['value_id' => $this->value('C2'), 'share' => 0.4]]]]);
         // zařazení 2 + odpis 2 + odpis roku vyřazení 2 + vyřazení 4 řádky
         self::assertSame(10, $result['restamp']['lines']);
         self::assertFalse($result['restamp']['needs_repost']);
-
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT je.id FROM journal_entries je
-               JOIN depreciation_entries de ON de.id = je.source_id AND je.source_type = 'depreciation'
-              WHERE de.asset_id = ? AND je.reversed_by IS NULL ORDER BY je.id LIMIT 1"
-        );
-        $stmt->execute([$assetId]);
-        foreach ($scenarios->entryLines((int) $stmt->fetchColumn()) as $line) {
-            self::assertSame(['stredisko' => ['REGR-C1' => 0.6, 'REGR-C2' => 0.4]], $line['splits'], 'Odpis po změně karty: rozpad 60/40.');
+        foreach ($this->scenarios->sourceLines('asset_disposal', $assetId) as $line) {
+            self::assertSame(['stredisko' => ['REGR-C1' => 0.6, 'REGR-C2' => 0.4]], $line['splits'], 'Vyřazení po změně karty: rozpad 60/40.');
         }
     }
 
-    public function testScheduleOccurrenceCopiesSourceDimensions(): void
+    public function testRestampKeepsManualLineDimensionsOfOtherTypes(): void
     {
-        $scenarios = new OtherDocumentsPostingScenarios($this->container);
-        $receivable = 0;
-        $scenarios->run(function (string $scenario, int $docId) use (&$receivable): void {
-            if ($scenario === 'other_receivable') {
-                $receivable = $docId;
-            }
-        });
-        $types = $scenarios->types();
-        $c2 = $scenarios->value($types['cost_center'], 'REGR-C2');
-        $dimensions = $this->container->get(DimensionService::class);
-        $dimensions->saveDocument($scenarios->supplierId, 'other_item', $receivable, [$types['cost_center'] => $c2], null);
+        $this->scenarios->run();
+        $this->loadTypes();
+        $supplierId = $this->scenarios->supplierId;
+        $assetId = $this->scenarios->ids['asset'];
+        $project = $this->types['project'];
+        $cc = $this->types['cost_center'];
 
+        // Ruční projekt na řádku odpisu 551 a na řádku zápočtu proti účtu (např. z doby před F4).
+        $manual = $this->lineIds('depreciation', (int) $this->db->pdo()->query(
+            "SELECT id FROM depreciation_entries WHERE asset_id = {$assetId} AND kind = 'accounting' ORDER BY fiscal_year LIMIT 1"
+        )->fetchColumn(), '551');
+        $settlementId = (int) $this->db->pdo()->query(
+            'SELECT id FROM invoice_settlements WHERE doc_id = ' . $this->scenarios->ids['settled']
+        )->fetchColumn();
+        $manual = [...$manual, ...$this->lineIds('settlement', $settlementId, '355')];
+        $assignments = $this->container->get(DimensionAssignmentRepository::class);
+        foreach ($manual as $lineId) {
+            $assignments->replaceLineDimensions($supplierId, $lineId, [$project => $this->value('P1', 'project')]);
+        }
+
+        // Uložení beze změny i se změnou jiného typu ruční projekt nesmaže.
+        $this->dimensions->saveDocument($supplierId, 'asset', $assetId, [], null);
+        $this->dimensions->saveDocument($supplierId, 'invoice', $this->scenarios->ids['settled'], [], null);
+        foreach ($manual as $lineId) {
+            self::assertSame([$project => $this->value('P1', 'project')], $this->lineDims($lineId), 'Ruční projekt zůstal (uložení bez dimenzí).');
+        }
+        $this->dimensions->saveDocument($supplierId, 'asset', $assetId, [$cc => $this->value('C2')], null);
+        self::assertSame(self::sorted([$project => $this->value('P1', 'project'), $cc => $this->value('C2')]), $this->lineDims($manual[0]));
+
+        // Typ, který karta přestane určovat, zmizí jen tam, kde je pořád hodnota karty.
+        $this->dimensions->saveDocument($supplierId, 'asset', $assetId, [], null);
+        self::assertSame([$project => $this->value('P1', 'project')], $this->lineDims($manual[0]));
+    }
+
+    public function testPurchaseInvoiceChangeRestampsCardsWithoutOwnDimensions(): void
+    {
+        $this->scenarios->run();
+        $this->loadTypes();
+        $supplierId = $this->scenarios->supplierId;
+        $cc = $this->types['cost_center'];
+        $purchase = $this->scenarios->ids['purchase'];
+
+        $this->dimensions->saveDocument($supplierId, 'purchase_invoice', $purchase, [], [2 => [$cc => $this->value('C1')]]);
+        foreach ($this->scenarios->sourceLines('asset', $this->scenarios->ids['asset_from_purchase']) as $line) {
+            self::assertSame(['stredisko' => 'REGR-C1'], $line['dims'], 'Karta bez vlastních dimenzí se přerazítkuje z položky faktury.');
+        }
+
+        $this->dimensions->saveDocument($supplierId, 'asset', $this->scenarios->ids['asset_from_purchase'], [$cc => $this->value('C2')], null);
+        $this->dimensions->saveDocument($supplierId, 'purchase_invoice', $purchase, [], null, false,
+            [2 => [$cc => [['value_id' => $this->value('C1'), 'share' => 0.5], ['value_id' => $this->value('C3'), 'share' => 0.5]]]]);
+        foreach ($this->scenarios->sourceLines('asset', $this->scenarios->ids['asset_from_purchase']) as $line) {
+            self::assertSame(['stredisko' => 'REGR-C2'], $line['dims'], 'Karta s vlastními dimenzemi se fakturou nemění.');
+        }
+    }
+
+    public function testCashPayingSeveralOtherItemsSplitsByAllocation(): void
+    {
+        $this->scenarios->run();
+        $this->loadTypes();
+        $supplierId = $this->scenarios->supplierId;
+        $cc = $this->types['cost_center'];
+        $other = $this->container->get(OtherItemService::class);
+        $items = [];
+        foreach ([[600.00, 'C1'], [400.00, 'C2']] as [$amount, $code]) {
+            $item = $other->create($supplierId, [
+                'side' => 'receivable', 'kind' => 'claim', 'title' => 'Syntetická pohledávka ' . $code,
+                'partner_id' => $this->scenarios->ids['client'], 'issued_on' => OtherDocumentsPostingScenarios::YEAR . '-04-01',
+                'due_on' => OtherDocumentsPostingScenarios::YEAR . '-04-30', 'currency' => 'CZK', 'amount' => $amount,
+                'counter_account_code' => '602',
+            ], null);
+            $this->dimensions->saveDocument($supplierId, 'other_item', (int) $item['id'], [$cc => $this->value($code)], null);
+            $other->post($supplierId, (int) $item['id'], null);
+            $items[] = [(int) $item['id'], $amount];
+        }
+        $date = OtherDocumentsPostingScenarios::YEAR . '-04-15';
+        $cashId = $this->scenarios->cashDocument(1000.00, $date);
+        $this->container->get(PostingService::class)->postDocument($supplierId, 'cash', $cashId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 1000.00],
+            ['account_code' => '315', 'side' => 'credit', 'amount' => 600.00],
+            ['account_code' => '315', 'side' => 'credit', 'amount' => 400.00],
+        ], ['entry_date' => $date, 'posted' => true]);
+        foreach ($items as [$itemId, $amount]) {
+            $other->allocate($supplierId, $itemId, ['cash_document_id' => $cashId, 'amount' => $amount], null);
+        }
+
+        $lines = $this->scenarios->sourceLines('cash', $cashId);
+        self::assertSame(['stredisko' => ['REGR-C1' => 0.6, 'REGR-C2' => 0.4]], $lines[0]['splits'], 'Pokladna 211: rozpad podle alokací.');
+        self::assertSame(['stredisko' => 'REGR-C1'], $lines[1]['dims'], 'Řádek 315 alokace první položky.');
+        self::assertSame(['stredisko' => 'REGR-C2'], $lines[2]['dims'], 'Řádek 315 alokace druhé položky.');
+    }
+
+    public function testBankUnallocationReleasesOnlyItemDimensions(): void
+    {
+        $out = $this->runWithDimensions();
+        self::assertNotEmpty($out['other_payable_bank']);
+        $supplierId = $this->scenarios->supplierId;
+        $txId = $this->scenarios->ids['bank'];
+        $lineIds = $this->lineIds('bank', $txId, '221');
+        $assignments = $this->container->get(DimensionAssignmentRepository::class);
+        $assignments->replaceLineDimensions($supplierId, $lineIds[0],
+            [$this->types['project'] => $this->value('P1', 'project'), $this->types['cost_center'] => $this->value('C3')]);
+
+        $other = $this->container->get(OtherItemService::class);
+        $payable = $this->scenarios->ids['other_payable'];
+        $other->unallocate($supplierId, $payable, (int) $other->allocations($supplierId, $payable)[0]['id']);
+        self::assertSame([$this->types['cost_center'] => $this->value('C3')], $this->lineDims($lineIds[0]), 'Ruční středisko zůstává, převzatý projekt odejde.');
+        foreach ($this->scenarios->sourceLines('bank', $txId) as $line) {
+            if ($line['account'] === '325') {
+                self::assertSame([], $line['dims'], 'Po odpojení úhrady dimenze položky z pohybu zmizí.');
+            }
+        }
+    }
+
+    public function testScheduleDraftsFollowSourceDimensions(): void
+    {
+        $this->scenarios->run();
+        $this->loadTypes();
+        $supplierId = $this->scenarios->supplierId;
+        $cc = $this->types['cost_center'];
+        $source = $this->scenarios->ids['other_payable'];
         $schedules = $this->container->get(OtherItemScheduleService::class);
-        $schedule = $schedules->create($scenarios->supplierId, $receivable, ['frequency' => 'monthly'], null);
-        $generated = $schedules->generate($scenarios->supplierId, (int) $schedule['id'], OtherDocumentsPostingScenarios::YEAR . '-03-15', null);
-        self::assertCount(1, $generated['created_ids']);
-        $next = $generated['created_ids'][0];
-        self::assertSame([$types['cost_center'] => $c2], $dimensions->documentDimensions($scenarios->supplierId, 'other_item', $next)['header']);
+        $schedule = $schedules->create($supplierId, $source, ['frequency' => 'monthly'], null);
+        $draft = $schedules->generate($supplierId, (int) $schedule['id'], OtherDocumentsPostingScenarios::YEAR . '-03-15', null)['created_ids'][0];
 
-        $posted = $this->container->get(OtherItemService::class)->post($scenarios->supplierId, $next, null);
-        foreach ($scenarios->entryLines((int) $posted['journal_entry_id']) as $line) {
-            self::assertSame(['stredisko' => 'REGR-C2'], $line['dims']);
-        }
+        $this->dimensions->saveDocument($supplierId, 'other_item', $source, [$cc => $this->value('C3')], null);
+        self::assertSame([$cc => $this->value('C3')], $this->dimensions->documentDimensions($supplierId, 'other_item', $draft)['header'],
+            'Koncept výskytu převezme změnu dimenzí zdroje.');
     }
 
-    public function testBankPaymentTakesOtherItemDimensionsOnAllocation(): void
+    /** @return array<string,mixed> */
+    private function runWithDimensions(): array
     {
-        $scenarios = new OtherDocumentsPostingScenarios($this->container);
-        $payable = 0;
-        $scenarios->run(function (string $scenario, int $docId) use (&$payable): void {
-            if ($scenario === 'other_payable') {
-                $payable = $docId;
-            }
-        });
-        $types = $scenarios->types();
-        $c1 = $scenarios->value($types['cost_center'], 'REGR-C1');
-        $this->container->get(DimensionService::class)
-            ->saveDocument($scenarios->supplierId, 'other_item', $payable, [$types['cost_center'] => $c1], null);
-
         $pdo = $this->db->pdo();
-        $pdo->prepare(
-            'INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date, currency)
-             VALUES (?, "synteticky-vypis-f4", ?, "1000000005/0100", ?, "CZK")'
-        )->execute([$scenarios->supplierId, hash('sha256', uniqid('', true)), OtherDocumentsPostingScenarios::YEAR . '-02-20']);
-        $pdo->prepare(
-            'INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, match_status, counterparty_name, description)
-             VALUES (?, ?, -1200, "CZK", "unmatched", "Syntetický pronajímatel", "Nájem")'
-        )->execute([(int) $pdo->lastInsertId(), OtherDocumentsPostingScenarios::YEAR . '-02-20']);
-        $txId = (int) $pdo->lastInsertId();
-        $entryId = $this->container->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($scenarios->supplierId, 'bank', $txId, [
-            ['account_code' => '325', 'side' => 'debit', 'amount' => 1200],
-            ['account_code' => '221', 'side' => 'credit', 'amount' => 1200],
-        ], ['entry_date' => OtherDocumentsPostingScenarios::YEAR . '-02-20', 'posted' => true]);
-        foreach ($scenarios->entryLines($entryId) as $line) {
-            self::assertSame([], $line['dims'], 'Před spárováním pohyb dimenze nemá.');
-        }
+        return $this->scenarios->run(function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo): void {
+            $this->loadTypes();
+            $cc = $this->types['cost_center'];
+            $project = $this->types['project'];
+            $supplierId = $ctx->supplierId;
+            $split = [0 => [$cc => [['value_id' => $this->value('C1'), 'share' => 0.6], ['value_id' => $this->value('C2'), 'share' => 0.4]]]];
+            match ($scenario) {
+                'other_receivable' => $this->dimensions->saveDocument($supplierId, 'other_item', $docId, [$cc => $this->value('C1')], null),
+                'other_payable' => $this->dimensions->saveDocument($supplierId, 'other_item', $docId, [$project => $this->value('P1', 'project')], null, false, $split),
+                'offset' => $this->dimensions->saveDocument($supplierId, 'invoice', (int) $pdo->query(
+                    "SELECT doc_id FROM offset_agreement_items WHERE agreement_id = {$docId} AND doc_type = 'invoice'"
+                )->fetchColumn(), [$project => $this->value('P1', 'project')], null),
+                'settlement' => $this->dimensions->saveDocument($supplierId, 'invoice', $docId, [], null, false, $split),
+                'asset' => $this->dimensions->saveDocument($supplierId, 'asset', $docId, [$cc => $this->value('C1'), $project => $this->value('P1', 'project')], null),
+                'asset_from_purchase' => $this->dimensions->saveDocument($supplierId, 'purchase_invoice', $docId,
+                    [$project => $this->value('P1', 'project'), $cc => $this->value('C1')], [2 => [$cc => $this->value('C2')]]),
+                'asset_sale' => $this->dimensions->saveDocument($supplierId, 'asset', $docId, [$cc => $this->value('C2')], null),
+                default => null,
+            };
+        });
+    }
 
-        $service = $this->container->get(OtherItemService::class);
-        $service->allocate($scenarios->supplierId, $payable, ['bank_transaction_id' => $txId, 'amount' => 1200], null);
-        foreach ($scenarios->entryLines($entryId) as $line) {
-            self::assertSame(['stredisko' => 'REGR-C1'], $line['dims'], 'Spárovaná úhrada přebírá dimenze položky (' . $line['account'] . ').');
-        }
+    private function loadTypes(): void
+    {
+        $this->types = $this->scenarios->types();
+    }
 
-        $allocationId = (int) $service->allocations($scenarios->supplierId, $payable)[0]['id'];
-        $service->unallocate($scenarios->supplierId, $payable, $allocationId);
-        foreach ($scenarios->entryLines($entryId) as $line) {
-            self::assertSame([], $line['dims'], 'Po odpojení úhrady dimenze z pohybu zmizí.');
-        }
+    private function value(string $code, string $kind = 'cost_center'): int
+    {
+        return $this->scenarios->value($this->types[$kind], 'REGR-' . $code);
+    }
+
+    /** @return list<int> */
+    private function lineIds(string $sourceType, int $sourceId, string $account): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.id FROM journal_entries je
+               JOIN journal_entry_lines l ON l.entry_id = je.id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.reversed_by IS NULL AND a.account_code = ?
+              ORDER BY l.id'
+        );
+        $stmt->execute([$this->scenarios->supplierId, $sourceType, $sourceId, $account]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /** @return array<int,int> */
+    private function lineDims(int $lineId): array
+    {
+        $dims = $this->container->get(DimensionAssignmentRepository::class)->lineDimensions($this->scenarios->supplierId, [$lineId]);
+        $out = $dims[$lineId] ?? [];
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * @param array<int,int> $dims
+     * @return array<int,int>
+     */
+    private static function sorted(array $dims): array
+    {
+        ksort($dims);
+        return $dims;
     }
 
     /**

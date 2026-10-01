@@ -447,8 +447,13 @@ final class DimensionService
         return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $splits): array {
             $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits);
             $result['refused'] = $result['restamp']['needs_repost'] && $result['restamp']['locked'];
+            // Náhled ukáže i zápisy, které dimenze dokladu přebírají (úhrady, zápočty, karty).
             $result['lines'] = [];
-            foreach ($this->postingSources($supplierId, $docType, $docId) as [$sourceType, $sourceId]) {
+            $sources = $this->postingSources($supplierId, $docType, $docId);
+            foreach ($this->cascadeSources($supplierId, $docType, $docId) as [$sourceType, $sourceId]) {
+                $sources[] = [$sourceType, $sourceId];
+            }
+            foreach ($sources as [$sourceType, $sourceId]) {
                 array_push($result['lines'], ...$this->postedLines($supplierId, $sourceType, $sourceId));
             }
             return $result;
@@ -517,16 +522,24 @@ final class DimensionService
         if ($normSplits !== [] || $currentSplits !== []) {
             $this->assignments->replaceDocumentSplits($supplierId, $docType, $docId, $normSplits);
         }
-        $sourceType = self::DOCUMENTS[$docType][1];
+        // Co doklad určoval před uložením: typ, který teď neurčuje, se z řádků zápisů
+        // odebere jen tam, kde je pořád tato hodnota (ruční dimenze řádku zůstane).
+        $released = $current['header'];
+        foreach ($currentSplits[0] ?? [] as $typeId => $_) {
+            $released[$typeId] = null;
+        }
         $restamp = ['lines' => 0, 'needs_repost' => false, 'locked' => false];
         foreach ($this->postingSources($supplierId, $docType, $docId) as [$source, $sourceId]) {
-            $one = $this->posting->restampDimensions($supplierId, $source, $sourceId);
+            $one = $this->posting->restampDimensions($supplierId, $source, $sourceId, false, $released);
             $restamp['lines'] += $one['lines'];
             $restamp['needs_repost'] = $restamp['needs_repost'] || $one['needs_repost'];
             $restamp['locked'] = $restamp['locked'] || $this->postedOutsideOpenPeriod($supplierId, $source, $sourceId);
         }
-        if ($sourceType === 'invoice' || $sourceType === 'purchase_invoice' || $sourceType === 'other_item') {
-            $restamp['lines'] += $this->restampPayments($supplierId, $sourceType, $docId);
+        foreach ($this->cascadeSources($supplierId, $docType, $docId) as [$source, $sourceId, $keep]) {
+            $restamp['lines'] += $this->posting->restampDimensions($supplierId, $source, $sourceId, $keep, $keep ? $released : [])['lines'];
+        }
+        if ($docType === 'other_item') {
+            $this->syncScheduleDrafts($supplierId, $docId);
         }
         return [
             'header' => $normHeader,
@@ -537,39 +550,46 @@ final class DimensionService
     }
 
     /**
-     * Úhrady (bankovní pohyby, pokladní doklady) přebírají dimenze placené faktury
-     * při zaúčtování. Změna dimenzí faktury se proto promítne i do jejich zápisů,
-     * jinak by saldo po dimenzi zůstalo rozjeté. Totéž platí pro zápočty faktury
-     * (vzájemný i proti účtu) a pro úhrady ostatní pohledávky nebo závazku.
+     * Zápisy jiných dokladů, které dimenze dokladu přebírají, a proto se s jeho změnou
+     * přerazítkují:
+     *   • faktura: bankovní a pokladní úhrady (dosavadní chování, přepíšou celou sadu),
+     *     zápočty proti účtu a vzájemné zápočty (ruční typy řádků zůstanou),
+     *   • přijatá faktura navíc karty majetku, které z ní vznikly a vlastní dimenze nemají,
+     *   • ostatní pohledávka / závazek: jejich bankovní a pokladní úhrady.
+     *
+     * @return list<array{0:string, 1:int, 2:bool}> zdroj, id, zachovat ruční typy řádků
      */
-    private function restampPayments(int $supplierId, string $sourceType, int $docId): int
+    private function cascadeSources(int $supplierId, string $docType, int $docId): array
     {
         $pdo = $this->db->pdo();
-        $lines = 0;
-        if ($sourceType === 'other_item') {
+        $out = [];
+        if ($docType === 'other_item') {
             $stmt = $pdo->prepare(
                 'SELECT DISTINCT bank_transaction_id, cash_document_id FROM other_item_allocations
                   WHERE supplier_id = ? AND other_item_id = ?'
             );
             $stmt->execute([$supplierId, $docId]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $lines += $r['bank_transaction_id'] !== null
-                    ? $this->posting->restampDimensions($supplierId, 'bank', (int) $r['bank_transaction_id'])['lines']
-                    : $this->posting->restampDimensions($supplierId, 'cash', (int) $r['cash_document_id'])['lines'];
+                $out[] = $r['bank_transaction_id'] !== null
+                    ? ['bank', (int) $r['bank_transaction_id'], true]
+                    : ['cash', (int) $r['cash_document_id'], true];
             }
-            return $lines;
+            return $out;
+        }
+        if ($docType !== 'invoice' && $docType !== 'purchase_invoice') {
+            return [];
         }
         $settlements = $pdo->prepare('SELECT id FROM invoice_settlements WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?');
-        $settlements->execute([$supplierId, $sourceType, $docId]);
+        $settlements->execute([$supplierId, $docType, $docId]);
         foreach ($settlements->fetchAll(PDO::FETCH_COLUMN) as $settlementId) {
-            $lines += $this->posting->restampDimensions($supplierId, 'settlement', (int) $settlementId)['lines'];
+            $out[] = ['settlement', (int) $settlementId, true];
         }
         $offsets = $pdo->prepare('SELECT DISTINCT agreement_id FROM offset_agreement_items WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?');
-        $offsets->execute([$supplierId, $sourceType, $docId]);
+        $offsets->execute([$supplierId, $docType, $docId]);
         foreach ($offsets->fetchAll(PDO::FETCH_COLUMN) as $agreementId) {
-            $lines += $this->posting->restampDimensions($supplierId, 'offset', (int) $agreementId)['lines'];
+            $out[] = ['offset', (int) $agreementId, true];
         }
-        if ($sourceType === 'invoice') {
+        if ($docType === 'invoice') {
             $bank = $pdo->prepare(
                 'SELECT ip.bank_transaction_id FROM invoice_payments ip
                    JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = ?
@@ -591,12 +611,49 @@ final class DimensionService
         $cash = $pdo->prepare("SELECT id FROM cash_documents WHERE supplier_id = ? AND {$cashColumn} = ?");
         $cash->execute([$supplierId, $docId]);
         foreach ($bank->fetchAll(PDO::FETCH_COLUMN) as $txId) {
-            $lines += $this->posting->restampDimensions($supplierId, 'bank', (int) $txId)['lines'];
+            $out[] = ['bank', (int) $txId, false];
         }
         foreach ($cash->fetchAll(PDO::FETCH_COLUMN) as $cashId) {
-            $lines += $this->posting->restampDimensions($supplierId, 'cash', (int) $cashId)['lines'];
+            $out[] = ['cash', (int) $cashId, false];
         }
-        return $lines;
+        if ($docType === 'purchase_invoice') {
+            $assets = $pdo->prepare(
+                "SELECT a.id FROM assets a
+                  WHERE a.supplier_id = ? AND a.purchase_invoice_id = ?
+                    AND NOT EXISTS (SELECT 1 FROM document_dimensions d
+                                     WHERE d.supplier_id = a.supplier_id AND d.doc_type = 'asset' AND d.doc_id = a.id)
+                    AND NOT EXISTS (SELECT 1 FROM document_dimension_splits d
+                                     WHERE d.supplier_id = a.supplier_id AND d.doc_type = 'asset' AND d.doc_id = a.id)
+                  ORDER BY a.id"
+            );
+            $assets->execute([$supplierId, $docId]);
+            foreach ($assets->fetchAll(PDO::FETCH_COLUMN) as $assetId) {
+                foreach ($this->postingSources($supplierId, 'asset', (int) $assetId) as [$source, $sourceId]) {
+                    $out[] = [$source, $sourceId, true];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Rozvrh opakování: nezaúčtované koncepty výskytů dostanou dimenze zdrojového
+     * dokladu znovu (jsou to jeho kopie, generátor je kopíroval při vzniku).
+     */
+    private function syncScheduleDrafts(int $supplierId, int $sourceItemId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT o.item_id FROM other_item_schedules s
+               JOIN other_item_schedule_occurrences o ON o.schedule_id = s.id AND o.supplier_id = s.supplier_id
+               JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
+              WHERE s.supplier_id = ? AND s.source_item_id = ? AND o.item_id <> s.source_item_id
+                AND oi.status = 'draft' AND oi.deleted_at IS NULL"
+        );
+        $stmt->execute([$supplierId, $sourceItemId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $itemId) {
+            $this->assignments->deleteDocument($supplierId, 'other_item', (int) $itemId);
+            $this->assignments->copyDocument($supplierId, 'other_item', $sourceItemId, (int) $itemId);
+        }
     }
 
     /**

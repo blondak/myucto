@@ -96,25 +96,40 @@ final class DimensionDefaults
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
      *   • zápočet proti účtu: dimenze vyrovnávané faktury včetně jejích výchozích
-     *   • majetek (zařazení, odpis, vyřazení): dimenze přijaté faktury, ze které
-     *     karta vznikla
+     *   • majetek (zařazení, odpis, vyřazení): položka přijaté faktury, ze které
+     *     karta vznikla (položka > produkt > kategorie > hlavička faktury)
      *
      * @return array<int,int> typ => hodnota
      */
     public function forSource(int $supplierId, string $sourceType, int $sourceId): array
     {
+        return $this->sourceDimensions($supplierId, $sourceType, $sourceId)['header'];
+    }
+
+    /**
+     * {@see forSource()} i s rozpadem: zápočty a karta majetku přebírají z faktury
+     * i její rozpad (typ => hodnota => podíl). Typ nese buď hodnotu, nebo rozpad.
+     *
+     * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
+     */
+    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    {
+        $header = static fn (array $h): array => ['header' => $h, 'splits' => []];
         return match ($sourceType) {
-            'invoice' => $this->forDocument($supplierId, 'invoice', $sourceId),
-            'purchase_invoice' => $this->forDocument($supplierId, 'purchase_invoice', $sourceId),
-            'cash' => $this->forCash($supplierId, $sourceId),
-            'bank' => $this->forBank($supplierId, $sourceId),
-            'other_item' => $this->forDocument($supplierId, 'other_item', $sourceId),
-            'offset' => $this->forOffset($supplierId, $sourceId),
+            'invoice' => $header($this->forDocument($supplierId, 'invoice', $sourceId)),
+            'purchase_invoice' => $header($this->forDocument($supplierId, 'purchase_invoice', $sourceId)),
+            'cash' => $header($this->forCash($supplierId, $sourceId)),
+            'bank' => $header($this->forBank($supplierId, $sourceId)),
+            'other_item' => $header($this->forDocument($supplierId, 'other_item', $sourceId)),
+            'offset' => $header($this->forOffset($supplierId, $sourceId)),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
-            default => [],
+            default => $header([]),
         };
     }
+
+    /** @var array<string,?int> zápis odpisu => karta (vazba se nemění, platí po celý běh) */
+    private array $assetIds = [];
 
     /**
      * Karta majetku zápisu: zařazení a vyřazení mají za zdroj kartu, účetní odpis
@@ -128,24 +143,58 @@ final class DimensionDefaults
         if ($sourceType !== 'depreciation') {
             return null;
         }
-        $stmt = $this->db->pdo()->prepare('SELECT asset_id FROM depreciation_entries WHERE id = ? AND supplier_id = ?');
-        $stmt->execute([$sourceId, $supplierId]);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        $key = $supplierId . ':' . $sourceId;
+        if (!array_key_exists($key, $this->assetIds)) {
+            $stmt = $this->db->pdo()->prepare('SELECT asset_id FROM depreciation_entries WHERE id = ? AND supplier_id = ?');
+            $stmt->execute([$sourceId, $supplierId]);
+            $id = $stmt->fetchColumn();
+            $this->assetIds[$key] = $id === false ? null : (int) $id;
+        }
+        return $this->assetIds[$key];
     }
 
-    /** @return array<int,int> */
+    /**
+     * Dimenze karty majetku zděděné z přijaté faktury pořízení: vlastní dimenze
+     * a rozpad položky > produkt položky (> kategorie) > hlavička faktury s rozpadem
+     * a výchozími hodnotami, typ po typu. Karta bez vazby na fakturu nic nedědí.
+     *
+     * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
+     */
     private function forAsset(int $supplierId, ?int $assetId): array
     {
         if ($assetId === null) {
-            return [];
+            return ['header' => [], 'splits' => []];
         }
-        $stmt = $this->db->pdo()->prepare('SELECT purchase_invoice_id FROM assets WHERE id = ? AND supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.purchase_invoice_id, i.stock_item_id,
+                    (SELECT COUNT(*) FROM purchase_invoice_items x
+                      WHERE x.purchase_invoice_id = i.purchase_invoice_id
+                        AND (x.order_index < i.order_index OR (x.order_index = i.order_index AND x.id <= i.id))) AS item_no
+               FROM assets a
+          LEFT JOIN purchase_invoice_items i ON i.id = a.purchase_invoice_item_id AND i.purchase_invoice_id = a.purchase_invoice_id
+              WHERE a.id = ? AND a.supplier_id = ?'
+        );
         $stmt->execute([$assetId, $supplierId]);
-        $purchaseId = $stmt->fetchColumn();
-        return $purchaseId === false || $purchaseId === null
-            ? []
-            : $this->effectiveHeader($supplierId, 'purchase_invoice', (int) $purchaseId);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['purchase_invoice_id'] === null) {
+            return ['header' => [], 'splits' => []];
+        }
+        $purchaseId = (int) $row['purchase_invoice_id'];
+        $layers = [];
+        if ((int) ($row['item_no'] ?? 0) > 0) {
+            $itemNo = (int) $row['item_no'];
+            $assignments = new DimensionAssignmentRepository($this->db);
+            $layers[] = [
+                'header' => $assignments->documentDimensions($supplierId, 'purchase_invoice', $purchaseId)['items'][$itemNo] ?? [],
+                'splits' => $assignments->documentSplits($supplierId, 'purchase_invoice', $purchaseId)[$itemNo] ?? [],
+            ];
+            if ($row['stock_item_id'] !== null) {
+                $productId = (int) $row['stock_item_id'];
+                $layers[] = ['header' => $this->forProducts($supplierId, [$productId])[$productId]['header'] ?? [], 'splits' => []];
+            }
+        }
+        $layers[] = $this->effectiveDimensions($supplierId, 'purchase_invoice', $purchaseId);
+        return self::layer($layers);
     }
 
     /** @return array<int,int> */
@@ -157,20 +206,68 @@ final class DimensionDefaults
         return $partner === false ? [] : $this->resolve($supplierId, (int) $partner, null)['header'];
     }
 
-    /** @return array<int,int> */
+    /** @return array{header:array<int,int>, splits:array<int,array<int,float>>} */
     private function forSettlement(int $supplierId, int $settlementId): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT doc_type, doc_id FROM invoice_settlements WHERE id = ? AND supplier_id = ?');
         $stmt->execute([$settlementId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row === false ? [] : $this->effectiveHeader($supplierId, (string) $row['doc_type'], (int) $row['doc_id']);
+        return $row === false
+            ? ['header' => [], 'splits' => []]
+            : $this->effectiveDimensions($supplierId, (string) $row['doc_type'], (int) $row['doc_id']);
     }
 
     /**
-     * Doklady vzájemného zápočtu s částkou a efektivní hlavičkou. Vydané faktury snižují
-     * pohledávku (strana Dal), přijaté závazek (strana Má dáti).
+     * Hlavička dokladu i s rozpadem, jak ji vidí účtování: vlastní hodnoty a rozpad
+     * hlavičky + výchozí hodnoty pro typy, které doklad nemá ani jako rozpad.
      *
-     * @return list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>
+     * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
+     */
+    public function effectiveDimensions(int $supplierId, string $docType, int $docId): array
+    {
+        $assignments = new DimensionAssignmentRepository($this->db);
+        return self::layer([
+            [
+                'header' => $assignments->documentDimensions($supplierId, $docType, $docId)['header'],
+                'splits' => $assignments->documentSplits($supplierId, $docType, $docId)[0] ?? [],
+            ],
+            ['header' => $this->forDocument($supplierId, $docType, $docId), 'splits' => []],
+        ]);
+    }
+
+    /**
+     * Vrstvy dimenzí v pořadí přednosti: typ bere první vrstva, která ho má jako
+     * hodnotu nebo jako rozpad.
+     *
+     * @param list<array{header:array<int,int>, splits:array<int,array<int,float>>}> $layers
+     * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
+     */
+    public static function layer(array $layers): array
+    {
+        $header = [];
+        $splits = [];
+        foreach ($layers as $layer) {
+            foreach ($layer['splits'] as $typeId => $shares) {
+                if (!isset($header[$typeId]) && !isset($splits[$typeId]) && $shares !== []) {
+                    $splits[(int) $typeId] = $shares;
+                }
+            }
+            foreach ($layer['header'] as $typeId => $valueId) {
+                if (!isset($header[$typeId]) && !isset($splits[$typeId])) {
+                    $header[(int) $typeId] = (int) $valueId;
+                }
+            }
+        }
+        ksort($header);
+        ksort($splits);
+        return ['header' => $header, 'splits' => $splits];
+    }
+
+    /**
+     * Doklady vzájemného zápočtu s částkou a efektivní hlavičkou včetně rozpadu.
+     * Vydané faktury snižují pohledávku (strana Dal), přijaté závazek (strana Má dáti).
+     *
+     * @return list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>, splits:array<int,array<int,float>>}>
      */
     public function offsetDocuments(int $supplierId, int $agreementId): array
     {
@@ -187,8 +284,7 @@ final class DimensionDefaults
                 'doc_type' => (string) $r['doc_type'],
                 'doc_id' => (int) $r['doc_id'],
                 'amount' => round(abs((float) $r['amount']), 2),
-                'header' => $this->effectiveHeader($supplierId, (string) $r['doc_type'], (int) $r['doc_id']),
-            ];
+            ] + $this->effectiveDimensions($supplierId, (string) $r['doc_type'], (int) $r['doc_id']);
         }
         return $out;
     }
@@ -236,10 +332,56 @@ final class DimensionDefaults
         $linked = match (true) {
             $row['invoice_id'] !== null => $this->effectiveHeader($supplierId, 'invoice', (int) $row['invoice_id']),
             $row['purchase_invoice_id'] !== null => $this->effectiveHeader($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id']),
-            count($others) === 1 => $this->effectiveHeader($supplierId, 'other_item', $others[0]),
+            // Víc ostatních položek: společné hodnoty, rozdílné typy rozdělí DimensionStamper (jako u banky).
+            $others !== [] => self::commonHeader(array_column($this->cashDocuments($supplierId, $cashId)['documents'], 'header')),
             default => [],
         };
         return self::fill($own, $linked);
+    }
+
+    /**
+     * Ostatní pohledávky a závazky hrazené pokladním dokladem (jen doklad bez vazby
+     * na fakturu), ve tvaru {@see bankDocuments()}.
+     *
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     */
+    public function cashDocuments(int $supplierId, int $cashId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT doc_type FROM cash_documents
+              WHERE id = ? AND supplier_id = ? AND invoice_id IS NULL AND purchase_invoice_id IS NULL'
+        );
+        $stmt->execute([$cashId, $supplierId]);
+        $docType = $stmt->fetchColumn();
+        if ($docType === false) {
+            return ['incoming' => false, 'documents' => []];
+        }
+        $documents = [];
+        foreach ($this->otherItemAllocations($supplierId, 'cash_document_id', $cashId) as $itemId => $amount) {
+            $documents[] = [
+                'doc_type' => 'other_item',
+                'doc_id' => $itemId,
+                'amount' => round(abs($amount), 2),
+                'header' => $this->effectiveHeader($supplierId, 'other_item', $itemId),
+            ];
+        }
+        return ['incoming' => $docType === 'in', 'documents' => $documents];
+    }
+
+    /**
+     * @param list<array<int,int>> $headers
+     * @return array<int,int>
+     */
+    private static function commonHeader(array $headers): array
+    {
+        if ($headers === []) {
+            return [];
+        }
+        $common = array_shift($headers);
+        foreach ($headers as $header) {
+            $common = array_intersect_assoc($common, $header);
+        }
+        return $common;
     }
 
     /**
@@ -250,15 +392,7 @@ final class DimensionDefaults
      */
     private function forBank(int $supplierId, int $transactionId): array
     {
-        $documents = $this->bankDocuments($supplierId, $transactionId)['documents'];
-        if ($documents === []) {
-            return [];
-        }
-        $common = array_shift($documents)['header'];
-        foreach ($documents as $doc) {
-            $common = array_intersect_assoc($common, $doc['header']);
-        }
-        return $common;
+        return self::commonHeader(array_column($this->bankDocuments($supplierId, $transactionId)['documents'], 'header'));
     }
 
     /**

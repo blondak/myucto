@@ -194,6 +194,33 @@ final class DimensionStamperTest extends TestCase
         self::assertSame([[], []], DimensionStamper::commonDocumentDimensions([]));
     }
 
+    public function testCommonDocumentDimensionsCarriesDocumentSplit(): void
+    {
+        [$dims, $splits] = DimensionStamper::commonDocumentDimensions([
+            ['amount' => 1000.00, 'header' => [], 'splits' => [self::CENTER => [200 => 0.6, 201 => 0.4]]],
+        ]);
+        self::assertSame([], $dims);
+        self::assertSame([self::CENTER => [200 => 0.6, 201 => 0.4]], $splits, 'Rozpad jediné faktury přejde na řádek.');
+    }
+
+    public function testKeepLineTypesOverridesOnlyDocumentTypesAndReleasesStaleValue(): void
+    {
+        [$dims, $splits] = DimensionStamper::keepLineTypes(
+            [self::PROJECT => 100, self::CENTER => 200, 30 => 300],
+            [],
+            [self::PROJECT => 101],
+            [],
+            [self::CENTER => 200, 30 => 999],
+        );
+        self::assertSame([self::PROJECT => 101, 30 => 300], $dims, 'Typ dokladu přepíše, uvolněná hodnota zmizí, cizí ruční hodnota zůstane.');
+        self::assertSame([], $splits);
+        self::assertSame(
+            [[self::PROJECT => 100], []],
+            DimensionStamper::keepLineTypes([self::PROJECT => 100], [], [], [], []),
+            'Doklad nic neurčuje: řádek beze změny.',
+        );
+    }
+
     private function purchaseLines(float $base): array
     {
         return [

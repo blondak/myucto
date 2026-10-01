@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
+use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use PDO;
 
 final class OtherItemService
@@ -501,7 +502,7 @@ final class OtherItemService
                       WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
                 );
                 $reactivate->execute([(int) $prior['id'], $supplierId]);
-                $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId);
+                $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
@@ -512,7 +513,7 @@ final class OtherItemService
             );
             $stmt->execute([$supplierId, $id, $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
             // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
-            $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId);
+            $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -533,13 +534,16 @@ final class OtherItemService
                 WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $payment->execute([$allocationId, $supplierId, $id]);
             $paymentRow = $payment->fetch(PDO::FETCH_ASSOC);
+            // Dimenze, které úhrada od položky převzala; po odpojení se z jejích řádků odeberou.
+            $itemDims = (new DimensionDefaults($this->db))->effectiveDimensions($supplierId, 'other_item', $id);
+            $released = $itemDims['header'] + array_fill_keys(array_keys($itemDims['splits']), null);
             $stmt = $pdo->prepare('DELETE FROM other_item_allocations WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $stmt->execute([$allocationId, $supplierId, $id]);
             if ($stmt->rowCount() === 0) throw new OtherItemException('payment_not_found', 'Úhrada nebyla nalezena.', 404);
             if ($paymentRow !== false) {
                 $this->posting->restampDimensions($supplierId,
                     $paymentRow['bank_transaction_id'] !== null ? 'bank' : 'cash',
-                    (int) ($paymentRow['bank_transaction_id'] ?? $paymentRow['cash_document_id']));
+                    (int) ($paymentRow['bank_transaction_id'] ?? $paymentRow['cash_document_id']), true, $released);
             }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {

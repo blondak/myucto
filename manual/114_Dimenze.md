@@ -97,7 +97,10 @@ nemá, doplní výchozí dimenze protistrany z adresáře. Na detailu dokladu lz
 v panelu **Dimenze** zadat i rozpad mezi více hodnot. Rozvrh opakování přenese
 dimenze zdrojového dokladu na každý vygenerovaný výskyt. Bankovní pohyb nebo
 pokladní doklad, který položku hradí, dostane její dimenze ve chvíli spárování
-úhrady; odpojení úhrady je zase odebere.
+úhrady; odpojení úhrady je zase odebere. Hradí-li pohyb nebo pokladní doklad víc
+položek s různými hodnotami, rozdělí se jejich dimenze po řádcích stejně jako
+u úhrady více faktur. Změna dimenzí zdrojového dokladu rozvrhu se promítne i do
+výskytů, které jsou zatím koncepty.
 
 ### Zápočty
 
@@ -109,7 +112,11 @@ pokladní doklad, který položku hradí, dostane její dimenze ve chvíli spár
 - **Zápočet proti účtu** (úhrada faktury zápočtem proti zvolenému účtu) přebírá
   dimenze vyrovnávané faktury, stejně jako její bankovní úhrada.
 
-Změna dimenzí faktury se promítne i do zápisů jejích zápočtů.
+Zápočty přebírají z faktury i rozpad hlavičky (například 60/40 mezi dvě
+střediska), takže saldo pohledávek a závazků po dimenzi sedí.
+
+Změna dimenzí faktury se promítne i do zápisů jejích zápočtů. Náhled uložení
+dimenzí na detailu faktury ukáže i dotčené řádky úhrad a zápočtů.
 
 ### Bankovní pohyby
 
@@ -243,10 +250,14 @@ Dimenze karty dostanou všechny zápisy majetku:
 
 Technické zhodnocení se do zápisů promítá přes odpisy a vyřazení, takže nese
 dimenze karty také. Karta bez vlastních dimenzí přebírá dimenze přijaté faktury,
-ze které vznikla.
+ze které vznikla: dimenze nebo rozpad její položky, jinak výchozí dimenze produktu
+položky, jinak hlavičku faktury. Změna dimenzí faktury se pak promítne i do zápisů
+takové karty. Karta s vlastními dimenzemi se fakturou nemění.
 
 Změna dimenzí karty se promítne do všech už zaúčtovaných zápisů majetku, i v
-uzavřeném období, protože mění jen analytické členění. Drobný majetek dimenze
+uzavřeném období, protože mění jen analytické členění. Přepíší se jen typy, které
+karta určuje: dimenze jiného typu zadaná ručně na řádku zápisu (například projekt
+u odpisu) zůstane. Totéž platí pro ostatní pohledávky a závazky a pro zápočty. Drobný majetek dimenze
 nese z přijaté faktury nákupu; časové rozlišení drobného majetku v uzávěrce je
 souhrnný zápis za období a dimenze nemá.
 

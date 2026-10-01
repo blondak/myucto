@@ -162,7 +162,7 @@ pokud existují — tabulku **technických zhodnocení** s celkovým součtem.
 Při zapnutých dimenzích má detail panel **Dimenze** karty (v editoru karty sekce
 **Dimenze**). Středisko, projekt nebo jiná dimenze karty, případně jejich rozpad,
 se zapíše na zařazení, účetní odpisy i vyřazení. Karta bez vlastních dimenzí
-přebírá dimenze přijaté faktury, ze které vznikla. Podrobnosti v kapitole
+přebírá dimenze přijaté faktury (její položky), ze které vznikla. Podrobnosti v kapitole
 [Dimenze](114_Dimenze.md#majetek).
 
 Klíčová část detailu je **Plán odpisů** se záložkami **Daňové** / **Účetní**

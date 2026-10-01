@@ -49,6 +49,7 @@ final class OtherDocumentsPostingScenarios
     private int $userId = 0;
     private int $czId = 0;
     private int $vatRateId = 0;
+    private int $cashRegister = 0;
 
     public function __construct(private readonly ContainerInterface $container)
     {
@@ -67,6 +68,7 @@ final class OtherDocumentsPostingScenarios
         $out = [];
 
         $client = $this->client('Regresní partner');
+        $this->ids['client'] = $client;
         $other = $this->container->get(OtherItemService::class);
         $receivable = $other->create($this->supplierId, [
             'side' => 'receivable', 'kind' => 'claim', 'title' => 'Regresní pohledávka', 'partner_id' => $client,
@@ -99,6 +101,7 @@ final class OtherDocumentsPostingScenarios
         $out['offset'] = $this->sourceLines('offset', $agreementId);
 
         $settled = $this->invoice($client, 2420.00);
+        $this->ids['settled'] = $settled;
         $prepare('settlement', $settled, $this);
         $settlement = $this->container->get(InvoiceSettlementService::class)->create($this->supplierId, 'invoice', $settled, [
             'settled_on' => self::YEAR . '-05-31', 'amount' => 2420.00, 'account_id' => $this->accountId('355'),
@@ -133,6 +136,7 @@ final class OtherDocumentsPostingScenarios
             ['account_code' => '325', 'side' => 'debit', 'amount' => 1200.00],
             ['account_code' => '221', 'side' => 'credit', 'amount' => 1200.00],
         ], ['entry_date' => self::YEAR . '-02-20', 'posted' => true]);
+        $this->ids['bank'] = $txId;
         $prepare('other_payable_bank', $txId, $this);
         $other->allocate($this->supplierId, (int) $payable['id'], ['bank_transaction_id' => $txId, 'amount' => 1200.00], $this->userId);
         $out['other_payable_bank'] = $this->sourceLines('bank', $txId);
@@ -142,6 +146,7 @@ final class OtherDocumentsPostingScenarios
             ['account_code' => '211', 'side' => 'debit', 'amount' => 1000.00],
             ['account_code' => '315', 'side' => 'credit', 'amount' => 1000.00],
         ], ['entry_date' => self::YEAR . '-02-25', 'posted' => true]);
+        $this->ids['cash'] = $cashId;
         $prepare('other_receivable_cash', $cashId, $this);
         $other->allocate($this->supplierId, (int) $receivable['id'], ['cash_document_id' => $cashId, 'amount' => 1000.00], $this->userId);
         $out['other_receivable_cash'] = $this->sourceLines('cash', $cashId);
@@ -158,6 +163,7 @@ final class OtherDocumentsPostingScenarios
         $item = (int) $this->db->pdo()->query(
             "SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = {$purchase} ORDER BY order_index, id LIMIT 1 OFFSET 1"
         )->fetchColumn();
+        $this->ids['purchase'] = $purchase;
         $prepare('asset_from_purchase', $purchase, $this);
         $fromPurchase = (int) $assets->create($this->supplierId, [
             'inventory_number' => 'REGR-M2', 'name' => 'Regresní stroj z faktury', 'input_price' => 60000.00,
@@ -174,6 +180,7 @@ final class OtherDocumentsPostingScenarios
             'acquisition_date' => self::YEAR . '-01-20', 'tax_method' => 'straight', 'tax_group' => 2,
             'acc_useful_life_months' => 60,
         ], ['user_id' => $this->userId])['asset']['id'];
+        $this->ids['sold'] = $sold;
         $prepare('asset_sale', $sold, $this);
         $assets->putIntoUse($this->supplierId, $sold, self::YEAR . '-01-20', true, $meta);
         $saleInvoice = $this->invoice($client, 50000.00, $sold);
@@ -188,7 +195,7 @@ final class OtherDocumentsPostingScenarios
     /** @var array<string,int> id dokladů scénářů pro testy */
     public array $ids = [];
 
-    private function bankTransaction(float $amount, string $date): int
+    public function bankTransaction(float $amount, string $date): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -202,12 +209,15 @@ final class OtherDocumentsPostingScenarios
         return (int) $pdo->lastInsertId();
     }
 
-    private function cashDocument(float $amount, string $date): int
+    public function cashDocument(float $amount, string $date): int
     {
         $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO cash_registers (supplier_id, name, account_code, is_default) VALUES (?, "Regresní pokladna", "211", 0)')
-            ->execute([$this->supplierId]);
-        $register = (int) $pdo->lastInsertId();
+        if ($this->cashRegister === 0) {
+            $pdo->prepare('INSERT INTO cash_registers (supplier_id, name, account_code, is_default) VALUES (?, "Regresní pokladna", "211", 0)')
+                ->execute([$this->supplierId]);
+            $this->cashRegister = (int) $pdo->lastInsertId();
+        }
+        $register = $this->cashRegister;
         $pdo->prepare(
             'INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
                                          description, vat_mode, total_amount, status, created_by)
@@ -331,7 +341,7 @@ final class OtherDocumentsPostingScenarios
     }
 
     /** @return list<array{account:string, side:string, amount:string, dims:array<string,string>, splits:array<string,array<string,float>>}> */
-    private function sourceLines(string $sourceType, int $sourceId): array
+    public function sourceLines(string $sourceType, int $sourceId): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL ORDER BY id'

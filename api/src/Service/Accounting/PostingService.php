@@ -2798,11 +2798,14 @@ final class PostingService
      * Stejná výjimka z §35 jako {@see restampProjectDimension()}: mění jen analytické
      * členění, ne účet, stranu, částku ani období.
      *
+     * `$keepLineTypes` a `$released` viz {@see DimensionStamper::restamp()}.
+     *
+     * @param array<int,?int> $released
      * @return array{lines:int, needs_repost:bool}
      */
-    public function restampDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    public function restampDimensions(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = []): array
     {
-        return $this->dimensionStamper()->restamp($supplierId, $sourceType, $sourceId);
+        return $this->dimensionStamper()->restamp($supplierId, $sourceType, $sourceId, $keepLineTypes, $released);
     }
 
     // ── interní ───────────────────────────────────────────────────────────────
