@@ -1,4 +1,4 @@
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
@@ -31,6 +31,8 @@ const POSTING_REASON_KEYS: Record<string, string> = {
   ambiguous_supplier: 'bank.posting.reason_ambiguous_supplier',
 }
 
+export type BankDetailAction = 'match' | 'create' | 'request' | 'ignore' | 'unmatch'
+
 type AnchorOption = { value: number; label: string; secondary?: string }
 
 /**
@@ -47,6 +49,42 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const toast = useToast()
   const router = useRouter()
   const matchSupplier = useSupplierStore()
+  const detailReturnTarget = ref<BankTransaction | null>(null)
+  let disposed = false
+
+  function canRunDetailAction(tx: BankTransaction, action: BankDetailAction): boolean {
+    if (tx.posting?.payroll_matched) return false
+    const auth = useAuthStore()
+    const status = tx.match_status
+    if (action === 'create') return auth.canWrite('purchase_invoices.create') && tx.amount < 0 && status === 'unmatched'
+    if (action === 'request') return auth.canWrite('documents.requests') && ['unmatched', 'auto_partial'].includes(status)
+    if (!auth.canWrite('bank.match')) return false
+    if (action === 'match') return ['unmatched', 'auto_partial'].includes(status)
+    if (action === 'ignore') return status === 'unmatched'
+    return ['auto_exact', 'auto_partial', 'manual', 'ignored'].includes(status)
+  }
+
+  async function runDetailAction(action: BankDetailAction) {
+    const tx = textDetail.value
+    if (!tx || !canRunDetailAction(tx, action)) return
+    const supplierId = matchSupplier.currentSupplierId
+    detailReturnTarget.value = tx
+    textDetail.value = null
+    // Odmontovat detail před otevřením dalšího dialogu (scroll lock a Escape).
+    await nextTick()
+    if (disposed || supplierId !== matchSupplier.currentSupplierId) return
+    const open = { match: startMatch, create: openCreate, request: openRequestDoc, ignore: ignoreTx, unmatch: unmatchTx }
+    open[action](tx)
+  }
+
+  async function restoreDetail() {
+    const tx = detailReturnTarget.value
+    const supplierId = matchSupplier.currentSupplierId
+    detailReturnTarget.value = null
+    if (!tx) return
+    await nextTick()
+    if (!disposed && supplierId === matchSupplier.currentSupplierId) textDetail.value = tx
+  }
 
   function toastPosting(posting?: MatchPostingResult | { action: string; reason?: string } | null) {
     if (!posting) return
@@ -88,11 +126,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const matchError = ref('')
 
   async function acceptSuggestion(suggestion: MatchSuggestion, candidate: number) {
-    if (reviewingSuggestion.value !== null) return
+    if (matchBusy.value) return
     reviewingSuggestion.value = suggestion.id
     matchError.value = ''
     try {
       const result = await bankApi.acceptMatchSuggestion(suggestion.id, candidate)
+      detailReturnTarget.value = null
       matchingTx.value = null
       toast.success(t('bank.match_v2.accepted'))
       toastPosting(result.posting)
@@ -107,11 +146,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   async function rejectSuggestion(suggestion: MatchSuggestion) {
-    if (reviewingSuggestion.value !== null) return
+    if (matchBusy.value) return
     reviewingSuggestion.value = suggestion.id
     matchError.value = ''
     try {
       await bankApi.rejectMatchSuggestion(suggestion.id)
+      detailReturnTarget.value = null
       matchingTx.value = null
       toast.success(t('bank.match_v2.rejected'))
       await opts.reload()
@@ -192,8 +232,15 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       if (matchingTx.value) void loadMatchCandidates(matchingTx.value)
     }, 300)
   }, { flush: 'sync' })
-  watch(() => matchSupplier.currentSupplierId, () => { closeMatch(); purchaseShortfall.value = null })
+  watch(() => matchSupplier.currentSupplierId, () => {
+    detailReturnTarget.value = null
+    textDetail.value = null
+    dismissMatch()
+    purchaseShortfall.value = null
+  })
   onBeforeUnmount(() => {
+    disposed = true
+    detailReturnTarget.value = null
     candidateLoadVersion++
     if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
   })
@@ -310,7 +357,16 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     loadSplitSuggestions(matchCtx.value, splitWindow.value, id)
   }
 
+  const matchingManual = ref(false)
+  const matchBusy = computed(() => matchingManual.value || matchingCandidate.value || matchingGoPay.value || reviewingSuggestion.value !== null)
+
   function closeMatch() {
+    if (matchBusy.value || matchingTx.value === null) return
+    dismissMatch()
+    void restoreDetail()
+  }
+
+  function dismissMatch() {
     matchingTx.value = null
     candidateLoadVersion++
     if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
@@ -319,11 +375,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   async function confirmGoPayCandidate() {
-    if (!matchingTx.value || !gopayCandidate.value || matchingGoPay.value) return
+    if (!matchingTx.value || !gopayCandidate.value || matchBusy.value) return
     matchingGoPay.value = true
     matchError.value = ''
     try {
       const result = await gopayApi.associatePayout(gopayCandidate.value.id, matchingTx.value)
+      detailReturnTarget.value = null
       matchingTx.value = null
       toast.success(result.payout_issue_code === 'email_notice_provisional'
         ? t('bank.gopay_match.notice_matched')
@@ -337,18 +394,22 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   async function confirmSuggestion(s: SplitSuggestion) {
-    if (!matchingTx.value) return
+    if (!matchingTx.value || matchBusy.value) return
+    matchingManual.value = true
     matchError.value = ''
     try {
       const ids = s.invoices.map(i => i.id)
       const r = await (matchCtx.value && matchCtx.value.amount < 0
         ? bankApi.matchMultiplePurchases(matchingTx.value, ids)
         : bankApi.matchMultiple(matchingTx.value, ids))
+      detailReturnTarget.value = null
       matchingTx.value = null
       toastPosting(r.posting)
       await opts.reload()
     } catch (e: any) {
       matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+    } finally {
+      matchingManual.value = false
     }
   }
 
@@ -389,7 +450,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   async function matchCandidate(txId: number, c: Pick<MatchCandidate, 'id' | 'type' | 'ref'>, fromDocument = false): Promise<boolean> {
-    if (matchingCandidate.value || !useAuthStore().canWrite('bank.match')) return false
+    if (matchBusy.value || !useAuthStore().canWrite('bank.match')) return false
     matchingCandidate.value = true
     const supplierId = matchSupplier.currentSupplierId
     matchError.value = ''
@@ -397,7 +458,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       const reference = c.type === 'invoice' ? { invoiceId: c.id } : { purchaseInvoiceId: c.id }
       const r = await (fromDocument ? bankApi.matchDocument(txId, reference) : bankApi.matchManual(txId, reference))
       if (supplierId !== matchSupplier.currentSupplierId) return true
-      if (matchingTx.value === txId) closeMatch()
+      if (matchingTx.value === txId) { detailReturnTarget.value = null; dismissMatch() }
       toastPosting(r.posting)
       notePurchaseShortfall(r, c.ref || `#${c.id}`)
       await opts.reload()
@@ -419,17 +480,21 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   async function confirmMatch() {
-    if (!matchingTx.value || !matchVarsymbol.value.trim()) return
+    if (!matchingTx.value || !matchVarsymbol.value.trim() || matchBusy.value) return
+    matchingManual.value = true
     matchError.value = ''
     try {
       const vs = matchVarsymbol.value.trim()
       const r = await bankApi.matchManual(matchingTx.value, { varsymbol: vs })
+      detailReturnTarget.value = null
       matchingTx.value = null
       toastPosting(r.posting)
       notePurchaseShortfall(r, vs)
       await opts.reload()
     } catch (e: any) {
       matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+    } finally {
+      matchingManual.value = false
     }
   }
 
@@ -443,7 +508,11 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     createTx.value = tx
     createVendorId.value = null
   }
-  function closeCreate() { createTx.value = null }
+  function closeCreate() {
+    if (creatingPi.value || vendorModalOpen.value || !createTx.value) return
+    createTx.value = null
+    void restoreDetail()
+  }
   /** Template ref na VendorPicker (reload po vytvoření vendora) zůstává lokální
    *  BankCreatePurchaseModal.vue — sem patří jen business logika. */
   function onVendorCreated(client: Client) {
@@ -455,6 +524,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     creatingPi.value = true
     try {
       const r = await bankApi.createPurchaseInvoice(createTx.value.id, createVendorId.value)
+      detailReturnTarget.value = null
       createTx.value = null
       router.push(`/purchase-invoices/${r.purchase_invoice_id}`)
     } catch (e) {
@@ -472,7 +542,11 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     requestDocTx.value = tx
     requestDocDeadline.value = ''
   }
-  function closeRequestDoc() { requestDocTx.value = null }
+  function closeRequestDoc() {
+    if (requestingDoc.value || !requestDocTx.value) return
+    requestDocTx.value = null
+    void restoreDetail()
+  }
   async function submitRequestDoc() {
     if (!requestDocTx.value || requestingDoc.value) return
     requestingDoc.value = true
@@ -481,6 +555,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         deadline: requestDocDeadline.value || undefined,
       })
       toast.success(t('bank.document_request.created'))
+      detailReturnTarget.value = null
       requestDocTx.value = null
       await opts.reload()
     } catch (e) {
@@ -512,7 +587,9 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   function closeIgnore() {
-    if (!ignoring.value) ignoreTarget.value = null
+    if (ignoring.value || !ignoreTarget.value) return
+    ignoreTarget.value = null
+    void restoreDetail()
   }
 
   async function confirmIgnore() {
@@ -524,6 +601,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       const result = await bankApi.ignore(tx.id, ignoreNote.value.trim() || null)
       tx.match_status = 'ignored'
       tx.ignore_note = result.ignore_note
+      detailReturnTarget.value = null
       ignoreTarget.value = null
       await refreshAfterMutation()
     } catch (e) {
@@ -543,7 +621,9 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   function closeUnmatch() {
-    if (!unmatching.value) unmatchTarget.value = null
+    if (unmatching.value || !unmatchTarget.value) return
+    unmatchTarget.value = null
+    void restoreDetail()
   }
 
   async function confirmUnmatch() {
@@ -558,6 +638,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         matched_varsymbol: null, matched_invoice_amount: null, matched_client_name: null,
         matched_purchase_ref: null, matched_vendor_name: null, matched_invoices: [], matched_at: null,
       })
+      detailReturnTarget.value = null
       unmatchTarget.value = null
       await refreshAfterMutation()
     } catch (e) {
@@ -568,12 +649,12 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   useHotkey('escape', () => {
-    if (matchingTx.value !== null) matchingTx.value = null
-    if (createTx.value !== null && !vendorModalOpen.value) createTx.value = null
+    if (matchingTx.value !== null) closeMatch()
+    if (createTx.value !== null && !vendorModalOpen.value) closeCreate()
   })
 
   return {
-    toastPosting,
+    toastPosting, canRunDetailAction, runDetailAction, matchBusy,
     // match v2
     matchSuggestions, expandedSuggestions, setSuggestions, suggestionFor, toggleSuggestion,
     reviewingSuggestion, matchError, acceptTxSuggestion, rejectTxSuggestion,
