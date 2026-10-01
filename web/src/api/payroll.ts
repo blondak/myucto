@@ -6460,6 +6460,32 @@ export interface PayrollRunValidation {
   overridden_by: number | null
   overridden_by_name: string | null
   overridden_at: string | null
+  /** Jde varování trvale skrýt (katalog na serveru; blokující chyby nikdy). */
+  hideable?: boolean
+  /** Ke komu se skrytí po osobách váže: osoba, nebo pracovní vztah. */
+  subject_type?: PayrollWarningSubjectType | null
+  /** Dosud neskryté osoby (vztahy), kterých se varování týká. */
+  subject_ids?: number[]
+}
+
+export type PayrollWarningSubjectType = 'employee' | 'employment'
+
+/** Trvalé skrytí varování: celý typ ve firmě (`supplier`), nebo jedna osoba / vztah. */
+export interface PayrollWarningSuppression {
+  id: number
+  code: string
+  subject_type: 'supplier' | PayrollWarningSubjectType
+  subject_id: number | null
+  subject_label: string | null
+  reason: string | null
+  created_by: number | null
+  created_by_name: string | null
+  created_at: string
+}
+
+export interface PayrollWarningSuppressionList {
+  items: PayrollWarningSuppression[]
+  hideable_codes: string[]
 }
 
 export interface PayrollRunValidationOverrideResponse {
@@ -6641,6 +6667,8 @@ export interface PayrollRun {
   result_snapshot: PayrollRunResultSnapshot | null
   available_commands: PayrollRunCommand[]
   validations: PayrollRunValidation[]
+  /** Kolik kontrol běhu je trvale skrytých — do `validations` se nedostanou. */
+  hidden_validation_count?: number
   payment_coverage?: PayrollRunPaymentCoverage | null
   /**
    * Co se od zmrazení snímku otevřené revize změnilo v podkladech. `null`
@@ -6747,6 +6775,10 @@ export interface PayrollRunReadinessFinding {
   entity_total?: number
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null }[]
+  /** Jde nález trvale skrýt; `subject_ids` jsou VŠECHNY dotčené osoby (vztahy). */
+  hideable?: boolean
+  subject_type?: PayrollWarningSubjectType | null
+  subject_ids?: number[]
 }
 
 /**
@@ -9237,6 +9269,20 @@ export const payrollApi = {
       payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  /** Trvale skrytá varování firmy a kódy, které skrýt jde. */
+  listWarningSuppressions: () =>
+    api.get<PayrollWarningSuppressionList>('/payroll/warning-suppressions')
+      .then(response => response.data),
+  /**
+   * Trvalé skrytí varování. Bez `subject_ids` se skryje celý typ ve firmě,
+   * jinak jen u vyjmenovaných osob (pracovních vztahů).
+   */
+  hideWarning: (payload: { code: string, subject_ids?: number[], reason?: string | null }) =>
+    api.post<{ created: number, skipped: number }>('/payroll/warning-suppressions', payload)
+      .then(response => response.data),
+  restoreWarnings: (ids: number[]) =>
+    api.post<{ restored: number }>('/payroll/warning-suppressions/restore', { ids })
+      .then(response => response.data),
   /**
    * Stažení dokumentu, o kterém známe jen `id` a název souboru.
    *

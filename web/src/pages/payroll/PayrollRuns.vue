@@ -37,6 +37,7 @@ import PayrollTakeoverRunsPanel from '@/pages/payroll/PayrollTakeoverRunsPanel.v
 import type { PayrollRegzelEnvironment, PayrollStatutoryBulkResult } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import PayrollHideWarningDialog from '@/components/payroll/PayrollHideWarningDialog.vue'
 import {
   evidenceRefreshCommand,
   firstStatutoryReviewId,
@@ -203,7 +204,11 @@ type DisplayValidation = PayrollRunValidation & {
    * po staru.
    */
   override_items: OverrideItem[]
+  /** Osoby (vztahy), u kterých jde varování skupiny trvale skrýt. */
+  hide_subjects: HideSubject[]
 }
+
+type HideSubject = { id: number, label: string }
 
 type OverrideItem = {
   validation: PayrollRunValidation
@@ -350,6 +355,7 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
         entity_labels: [],
         remediation_links: [],
         override_items: overrideItems(items, runPeriod),
+        hide_subjects: [],
       }
     }
     const warningGroup = !GROUPED_VALIDATION_CODES.has(primary.code) && primary.severity !== 'blocker'
@@ -388,6 +394,7 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
       entity_labels: entityLabels,
       remediation_links: Array.from(links, ([path, labels]) => ({ path, label: labels.join(', ') })),
       override_items: [],
+      hide_subjects: primary.hideable ? hideSubjects(items) : [],
     }
   })
 
@@ -401,6 +408,86 @@ function validationGroups(validations: PayrollRunValidation[], runPeriod: string
 
 function warningGroupKey(validation: PayrollRunValidation): string {
   return `warning-${validation.code}`
+}
+
+/*
+ * Trvalé skrytí varování (po osobě nebo celý typ ve firmě). Server posílá
+ * u skrytelných kontrol `subject_ids` — osoby souhrnu „N osob…", nebo
+ * pracovní vztah samostatného varování. Jméno vztahu nese začátek zprávy.
+ */
+function subjectLabel(type: PayrollRunValidation['subject_type'], id: number, message?: string): string {
+  if (type === 'employee' && personNames.value[id]) return personNames.value[id]!
+  if (type === 'employment' && message) {
+    const label = splitPersonPrefix(message)?.label
+    if (label) return label
+  }
+  return t('payroll.warning_suppressions.subject_unknown', { id })
+}
+
+function hideSubjects(items: PayrollRunValidation[]): HideSubject[] {
+  const subjects = new Map<number, HideSubject>()
+  for (const item of items) {
+    if (!item.hideable) continue
+    for (const id of item.subject_ids ?? []) {
+      if (!subjects.has(id)) subjects.set(id, { id, label: subjectLabel(item.subject_type ?? null, id, item.message) })
+    }
+  }
+  return Array.from(subjects.values())
+}
+
+function readinessHideSubjects(finding: PayrollRunReadinessFinding): HideSubject[] {
+  const labels = new Map<number, string>()
+  for (const entity of finding.entities) {
+    if (entity.entity_id !== null && entity.label) labels.set(entity.entity_id, entity.label)
+  }
+  return (finding.subject_ids ?? []).map(id => ({
+    id,
+    label: labels.get(id) ?? subjectLabel(finding.subject_type ?? null, id),
+  }))
+}
+
+const canHideWarnings = computed(() => auth.canWrite('payroll.approve'))
+const pendingHide = ref<{ code: string, message: string, scope: 'people' | 'type', subjects: HideSubject[] } | null>(null)
+
+function askHide(code: string, message: string, scope: 'people' | 'type', subjects: HideSubject[]): void {
+  pendingHide.value = { code, message, scope, subjects }
+}
+
+async function onWarningHidden(): Promise<void> {
+  pendingHide.value = null
+  toast.success(t('payroll.runs.hide_warning_done'))
+  await load()
+}
+
+/*
+ * Po schválení jsou varování odsouhlasená: účetní je viděla při výpočtu a
+ * běh schválila. V dalších krocích (zaúčtování, platby, uzavření) se proto
+ * neukazují, jen nenápadný odkaz je rozbalí. Blokující chyby zůstávají.
+ */
+const WARNINGS_ACCEPTED_STATUSES = new Set(['approved', 'posted', 'payment_ready', 'paid', 'closed', 'cancelled'])
+const calculationWarningsOpen = ref<Record<number, boolean>>({})
+
+function isBlockingValidation(validation: PayrollRunValidation): boolean {
+  return validation.severity === 'blocker'
+    || (validation.requires_override && !validation.overridden_at)
+}
+
+function warningsAccepted(run: PayrollRun): boolean {
+  return WARNINGS_ACCEPTED_STATUSES.has(run.status)
+}
+
+function calculationWarningCount(run: PayrollRun): number {
+  return warningsAccepted(run) ? run.validations.filter(validation => !isBlockingValidation(validation)).length : 0
+}
+
+function sectionValidations(run: PayrollRun): PayrollRunValidation[] {
+  return warningsAccepted(run) && !calculationWarningsOpen.value[run.id]
+    ? run.validations.filter(isBlockingValidation)
+    : run.validations
+}
+
+function toggleCalculationWarnings(run: PayrollRun): void {
+  calculationWarningsOpen.value = { ...calculationWarningsOpen.value, [run.id]: !calculationWarningsOpen.value[run.id] }
 }
 
 /** Blokátor, nebo varování, které ještě čeká na výjimku. */
@@ -742,7 +829,7 @@ function commandDisabled(run: PayrollRun, command: PayrollRunCommand): boolean {
 const validationScope = ref<Record<number, 'blocking' | 'all'>>({})
 
 function blockingGroupCount(run: PayrollRun): number {
-  return validationGroups(run.validations, run.period_start).filter(blocksApproval).length
+  return validationGroups(sectionValidations(run), run.period_start).filter(blocksApproval).length
 }
 
 function currentValidationScope(run: PayrollRun): 'blocking' | 'all' {
@@ -751,7 +838,7 @@ function currentValidationScope(run: PayrollRun): 'blocking' | 'all' {
 }
 
 function visibleValidationGroups(run: PayrollRun): DisplayValidation[] {
-  const groups = validationGroups(run.validations, run.period_start)
+  const groups = validationGroups(sectionValidations(run), run.period_start)
   return currentValidationScope(run) === 'blocking' ? groups.filter(blocksApproval) : groups
 }
 
@@ -1651,6 +1738,31 @@ onMounted(load)
                   </svg>
                   {{ t('payroll.runs.validation.open_remediation') }}
                 </a>
+                <div
+                  v-if="finding.hideable && canHideWarnings"
+                  class="mt-2 flex flex-wrap gap-2"
+                  :data-test="`run-readiness-hide-${finding.code}`"
+                >
+                  <button
+                    v-if="finding.subject_ids?.length"
+                    type="button"
+                    :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                    :data-test="`run-readiness-hide-people-${finding.code}`"
+                    @click="askHide(finding.code, finding.message, 'people', readinessHideSubjects(finding))"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
+                    {{ t('payroll.runs.hide_warning_people', { count: finding.subject_ids.length }, finding.subject_ids.length) }}
+                  </button>
+                  <button
+                    type="button"
+                    :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                    :data-test="`run-readiness-hide-type-${finding.code}`"
+                    @click="askHide(finding.code, finding.message, 'type', [])"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
+                    {{ t('payroll.runs.hide_warning_type') }}
+                  </button>
+                </div>
               </li>
             </ul>
           </div>
@@ -2186,11 +2298,51 @@ onMounted(load)
           :person-names="personNames"
         />
 
+        <!--
+          Po schválení jsou varování odsouhlasená — zůstává jen nenápadný
+          odkaz, který je rozbalí. Skrytá varování mají odkaz do nastavení.
+        -->
         <div
-          v-if="run.validations.length"
+          v-if="calculationWarningCount(run) || run.hidden_validation_count"
+          class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+          :data-testid="`payroll-run-${run.id}-warning-links`"
+        >
+          <button
+            v-if="calculationWarningCount(run)"
+            type="button"
+            class="inline-flex items-center gap-1 whitespace-nowrap text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-700"
+            :aria-expanded="!!calculationWarningsOpen[run.id]"
+            :data-testid="`payroll-run-${run.id}-calculation-warnings`"
+            @click="toggleCalculationWarnings(run)"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="calculationWarningsOpen[run.id] ? ICONS.eyeOff : ICONS.eye" /></svg>
+            {{ calculationWarningsOpen[run.id]
+              ? t('payroll.runs.calculation_warnings_hide')
+              : t('payroll.runs.calculation_warnings_link', { count: calculationWarningCount(run) }) }}
+          </button>
+          <RouterLink
+            v-if="run.hidden_validation_count"
+            :to="{ name: 'payroll-settings', query: { tab: 'warnings' } }"
+            class="inline-flex items-center gap-1 whitespace-nowrap text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-700"
+            :data-testid="`payroll-run-${run.id}-hidden-warnings`"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
+            {{ t('payroll.runs.hidden_warnings_link', { count: run.hidden_validation_count }) }}
+          </RouterLink>
+        </div>
+
+        <div
+          v-if="sectionValidations(run).length"
           class="mt-4 scroll-mt-24 space-y-2"
           :data-testid="`payroll-run-${run.id}-validations-section`"
         >
+          <p
+            v-if="calculationWarningsOpen[run.id] && calculationWarningCount(run)"
+            class="text-xs text-neutral-500"
+            :data-testid="`payroll-run-${run.id}-calculation-warnings-hint`"
+          >
+            {{ t('payroll.runs.calculation_warnings_hint') }}
+          </p>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
             <div
@@ -2221,16 +2373,16 @@ onMounted(load)
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path :d="ICONS.table" />
                 </svg>
-                {{ t('payroll.runs.validation_scope.all', { count: run.validations.length }) }}
+                {{ t('payroll.runs.validation_scope.all', { count: sectionValidations(run).length }) }}
               </button>
             </div>
           </div>
           <p
-            v-if="currentValidationScope(run) === 'blocking' && run.validations.length > approveBlockerCount(run)"
+            v-if="currentValidationScope(run) === 'blocking' && sectionValidations(run).length > approveBlockerCount(run)"
             class="text-xs text-neutral-500"
             :data-testid="`payroll-run-${run.id}-validation-scope-hint`"
           >
-            {{ t('payroll.runs.validation_scope.hint', { count: run.validations.length - approveBlockerCount(run) }) }}
+            {{ t('payroll.runs.validation_scope.hint', { count: sectionValidations(run).length - approveBlockerCount(run) }) }}
           </p>
           <!--
             Nesloučené validace chodí po osobách; u 226 lidí by jich tu viselo
@@ -2287,6 +2439,35 @@ onMounted(load)
                 </a>
               </template>
             </ExpandableList>
+            <!--
+              Trvalé skrytí varování: u osob skupiny jedním klikem, nebo celý
+              typ ve firmě. Blokující chyby a výjimky sem nikdy nepatří.
+            -->
+            <div
+              v-if="validation.hideable && canHideWarnings && !blocksApproval(validation)"
+              class="mt-2 flex flex-wrap gap-2"
+              :data-testid="`payroll-validation-${validation.id}-hide`"
+            >
+              <button
+                v-if="validation.hide_subjects.length"
+                type="button"
+                :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                :data-testid="`payroll-validation-${validation.id}-hide-people`"
+                @click="askHide(validation.code, validation.display_message, 'people', validation.hide_subjects)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
+                {{ t('payroll.runs.hide_warning_people', { count: validation.hide_subjects.length }, validation.hide_subjects.length) }}
+              </button>
+              <button
+                type="button"
+                :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                :data-testid="`payroll-validation-${validation.id}-hide-type`"
+                @click="askHide(validation.code, validation.display_message, 'type', [])"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
+                {{ t('payroll.runs.hide_warning_type') }}
+              </button>
+            </div>
             <!--
               Zkratka přímo z běhu: odkaz výš vede tam, kde se koncepty
               schvalují po jednom, a to je u větší firmy stovky kliknutí.
@@ -2753,6 +2934,16 @@ onMounted(load)
         </div>
       </form>
     </Modal>
+
+    <PayrollHideWarningDialog
+      v-if="pendingHide"
+      :code="pendingHide.code"
+      :message="pendingHide.message"
+      :scope="pendingHide.scope"
+      :subjects="pendingHide.subjects"
+      @close="pendingHide = null"
+      @hidden="onWarningHidden"
+    />
 
     <PayrollStatutoryBulkDefaultsDialog
       v-if="bulkDefaultsRun"

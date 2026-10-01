@@ -26,6 +26,7 @@ import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
 import JmhzEmployerAnnualEvidenceSettings from './JmhzEmployerAnnualEvidenceSettings.vue'
+import PayrollHiddenWarningsPanel from './PayrollHiddenWarningsPanel.vue'
 import { codeFromName, OFFICE_CODE_MAX_LENGTH } from '@/utils/slugifyCode'
 import {
   NULLABLE_PAYROLL_ACCOUNT_KEYS,
@@ -48,8 +49,10 @@ const loadFailed = ref(false)
 const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
-type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'dimensions' | 'submissions'
-const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions']
+type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'dimensions' | 'submissions' | 'warnings'
+const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions', 'warnings']
+/* Skrývat a obnovovat varování smí ten, kdo schvaluje běhy — stejně jako server. */
+const canManageWarnings = computed(() => auth.canWrite('payroll.approve'))
 // `?tab=` musí platit pro KAŽDOU záložku, ne jen pro `submissions`. Dokud se
 // ostatní hodnoty tiše zahazovaly, průvodce prvním nastavením posílal kroky
 // „Platební účty institucí", „Předkontace mezd" i „Mzdová politika" na jednu a
@@ -1020,6 +1023,8 @@ onMounted(async () => {
         <RegzelProfileSettings :can-write="canWriteSubmissions" />
         <JmhzEmployerAnnualEvidenceSettings :can-write="canWriteSubmissions" />
       </div>
+
+      <PayrollHiddenWarningsPanel v-if="activeTab === 'warnings'" :can-write="canManageWarnings" />
 
       <div
         v-if="!canWrite && (activeTab === 'employer' || activeTab === 'accounting')"

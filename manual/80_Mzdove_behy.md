@@ -280,6 +280,42 @@ nebo firma vedoucí daňovou evidenci), stránka označí jako nezaúčtovaný �
 nejde o rozdíl. Stránka je čistě informační a nic nezapisuje ani do deníku,
 ani do mzdové revize.
 
+### 80.8.4 Varování běhu a jejich trvalé skrytí
+
+Kontroly běhu se dělí na **blokující chyby** (zastaví výpočet nebo schválení),
+**varování s výjimkou** (schválení čeká, dokud k nim neschválíte výjimku) a
+**varování** (informace, schválení nezastaví). Varování vidíte v kontrole před
+zahájením běhu a na kartě běhu až do jeho schválení. Schválením je
+odsouhlasíte, takže u schváleného, zaúčtovaného, placeného i uzavřeného běhu
+karta ukazuje jen blokující chyby a nenápadný odkaz **Varování při výpočtu
+(N)**, který je na požádání rozbalí.
+
+Některá varování popisují stav, který je ve firmě v pořádku a opakoval by se
+každý měsíc: osoby bez podepsaného prohlášení poplatníka, pracovní vztah bez
+založené pracovní doby nebo bez mzdových vstupů. Taková varování můžete
+trvale skrýt přímo z karty běhu nebo z kontroly před zahájením:
+
+- **Skrýt pro všech N osob** (u jedné osoby **Skrýt u této osoby**) otevře
+  dialog se seznamem dotčených osob. Výchozí jsou vybrané všechny, takže
+  stačí potvrdit; jednotlivé osoby můžete z výběru odškrtnout.
+- **Skrýt tento typ ve firmě** skryje varování u všech osob, i u nových.
+
+Důvod skrytí je nepovinný. Skrytí platí pro všechny další běhy i pro běhy,
+které už existují, dokud ho neobnovíte. Skrytá varování se nepočítají do
+počtů kontrol; u běhu se místo nich ukáže odkaz **Skrytá varování (N)**.
+Souhrnné varování „Počet osob s nepodepsaným prohlášením…" se po skrytí části
+osob ukáže se sníženým počtem; zmizí, až jsou skryté všechny dotčené osoby.
+
+Přehled všech skrytí je v **Mzdy → Nastavení zaměstnavatele → Skrytá
+varování**, seskupený podle typu, s tím, kdo a kdy varování skryl a proč.
+Odtud ho obnovíte jednotlivě nebo celou skupinu najednou. Skrytí i obnovení
+se zapisují do auditního logu. Skrývat a obnovovat smí uživatel s právem
+schvalovat mzdové běhy.
+
+Blokující chyby, varování s výjimkou a překročení zákonných limitů (dohoda
+o provedení práce nad 300 hodin, průměr dohody o pracovní činnosti, přesčasy,
+exekuce, sleva na pojistném) skrýt nejde.
+
 ## 80.9 Převzaté měsíce roku přechodu
 
 Firma, která přešla z jiného mzdového programu uprostřed roku, má v roce

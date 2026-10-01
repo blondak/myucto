@@ -67,6 +67,8 @@ final class PayrollRunsAction
         // Nabídka posunout začátek vedení mezd za měsíce zpracované předchozím
         // programem, když seznam běhů hlásí díru před zvoleným obdobím.
         private readonly \MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup $migrationSetup,
+        // Trvale skrytá varování se do kontrol běhu ani do jejich počtů nepočítají.
+        private readonly \MyInvoice\Service\Payroll\Run\PayrollWarningSuppressionService $warningSuppressions,
     ) {}
 
     /**
@@ -414,6 +416,7 @@ final class PayrollRunsAction
             $offset,
         );
         $items = $page['items'];
+        $suppressions = $this->warningSuppressions->activeSet($this->currentSupplierId($request));
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -444,12 +447,14 @@ final class PayrollRunsAction
                 $this->currentSupplierId($request),
                 $revisionId,
             );
-            $item['validations'] = $revisionId === null
+            $filtered = $suppressions->filterRows($revisionId === null
                 ? []
                 : $this->runs->validations(
                     $this->currentSupplierId($request),
                     $revisionId,
-                );
+                ));
+            $item['validations'] = $filtered['visible'];
+            $item['hidden_validation_count'] = $filtered['hidden_count'];
             $item['source_drift'] = $this->sourceDriftFor(
                 $this->currentSupplierId($request),
                 PayrollRunStatus::from($status),

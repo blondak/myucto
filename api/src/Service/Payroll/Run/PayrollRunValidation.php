@@ -6,6 +6,10 @@ namespace MyInvoice\Service\Payroll\Run;
 
 final readonly class PayrollRunValidation
 {
+    /**
+     * @param list<int> $subjectIds osoby souhrnného varování („N osob…"), jinak prázdné;
+     *     podle nich jde souhrn skrýt po osobách ({@see PayrollWarningSuppressionCatalog})
+     */
     public function __construct(
         public string $severity,
         public string $code,
@@ -14,6 +18,7 @@ final readonly class PayrollRunValidation
         public string $message,
         public ?string $remediationPath = null,
         public bool $requiresOverride = false,
+        public array $subjectIds = [],
     ) {
         if (!in_array($severity, ['blocker', 'warning', 'info'], true)) {
             throw new \InvalidArgumentException('Neplatná závažnost validace běhu.');

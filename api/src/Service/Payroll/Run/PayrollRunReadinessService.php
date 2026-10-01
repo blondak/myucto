@@ -59,6 +59,8 @@ final class PayrollRunReadinessService
         // První mzdové období firmy. Starší měsíc se nekontroluje, jen odmítne —
         // viz `moduleStartFinding()`.
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
+        // Trvale skrytá varování se do předběžné kontroly nepočítají.
+        private readonly PayrollWarningSuppressionService $warningSuppressions,
     ) {}
 
     /**
@@ -151,14 +153,17 @@ final class PayrollRunReadinessService
         if ($snapshot !== null) {
             // Jméno u každého záznamu: 25× „Otevřít místo k opravě" bez jména
             // neříkalo, koho proklik otevře.
+            $validations = $this->warningSuppressions
+                ->activeSet($supplierId)
+                ->filterValidations($snapshot->validations);
             $employmentIds = [];
-            foreach ($snapshot->validations as $validation) {
+            foreach ($validations as $validation) {
                 if ($validation->entityType === 'employment' && $validation->entityId !== null) {
                     $employmentIds[$validation->entityId] = $validation->entityId;
                 }
             }
             foreach ($this->groupValidations(
-                $snapshot->validations,
+                $validations,
                 $this->jmhzProbe->employmentLabels($supplierId, array_values($employmentIds)),
             ) as $finding) {
                 $findings[] = $finding;
@@ -190,6 +195,15 @@ final class PayrollRunReadinessService
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
         }
+        // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
+        $findings = array_map(
+            static fn (array $finding): array => $finding + [
+                'hideable' => false,
+                'subject_type' => null,
+                'subject_ids' => [],
+            ],
+            $findings,
+        );
 
         return [
             'period_start' => $periodStart,
@@ -245,6 +259,10 @@ final class PayrollRunReadinessService
             // MAX_ENTITIES, takže jeho délka o počtu nic neříká.
             'entity_total' => $count,
             'entities' => $entities,
+            // Nálezy mimo kontroly snímku trvale skrýt nejde.
+            'hideable' => false,
+            'subject_type' => null,
+            'subject_ids' => [],
         ];
     }
 
@@ -427,7 +445,26 @@ final class PayrollRunReadinessService
                     'count' => 0,
                     'entity_total' => 0,
                     'entities' => [],
+                    // Trvalé skrytí: kód z katalogu a VŠECHNY dotčené subjekty
+                    // (`entities` je oříznutý, „skrýt pro všech N" potřebuje celek).
+                    'hideable' => PayrollWarningSuppressionCatalog::isHideable(
+                        $code,
+                        $validation->severity,
+                        $validation->requiresOverride,
+                    ),
+                    'subject_type' => PayrollWarningSuppressionCatalog::subjectType($code),
+                    'subject_ids' => [],
                 ];
+            }
+            if ($groups[$code]['hideable']) {
+                foreach (PayrollWarningSuppressionCatalog::subjects(
+                    $code,
+                    $validation->entityType,
+                    $validation->entityId,
+                    $validation->subjectIds,
+                ) as $subjectId) {
+                    $groups[$code]['subject_ids'][] = $subjectId;
+                }
             }
             ++$groups[$code]['entity_total'];
             if ($groups[$code]['remediation_path'] !== $validation->remediationPath) {

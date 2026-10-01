@@ -2690,6 +2690,36 @@
       "failed_title": "Nepovedlo se doplnit ({count})",
       "recalculate_notice": "Mzdový běh, u kterého jste pracoviště doplnili, je nutné znovu přepočítat a schválit novou revizi, aby se nová hodnota promítla do hlášení."
     },
+    "warning_suppressions": {
+      "title": "Skrytá varování",
+      "intro": "Varování, která jste u mzdového běhu trvale skryli. Do kontrol běhu ani do jejich počtů se nepočítají, dokud je neobnovíte. Blokující chyby skrýt nejde.",
+      "empty": "Žádné varování není skryté.",
+      "load_failed": "Skrytá varování se nepodařilo načíst.",
+      "restore": "Obnovit",
+      "restore_all": "Obnovit vše ({count})",
+      "restored": "Obnoveno varování: {count}.",
+      "restore_failed": "Varování se nepodařilo obnovit.",
+      "no_permission": "Skrývat a obnovovat varování smí jen uživatel s právem schvalovat mzdové běhy.",
+      "scope_company": "Celý typ ve firmě",
+      "subject_unknown": "Osoba č. {id}",
+      "hidden_by": "Skryl(a) {name}, {date}",
+      "hide_type": "Skrýt tento typ ve firmě",
+      "hide_people": "Skrýt pro všech {count} osob | Skrýt u této osoby | Skrýt pro všech {count} osob",
+      "hide_selected": "Skrýt u vybraných ({count})",
+      "hide_failed": "Varování se nepodařilo skrýt.",
+      "type_scope_hint": "Varování tohoto typu se přestane ukazovat u všech osob ve firmě, i u nových, a to ve všech dalších mzdových bězích.",
+      "people_scope_hint": "Varování se přestane ukazovat jen u vybraných osob, a to ve všech dalších mzdových bězích. U ostatních osob zůstane.",
+      "filter_people": "Hledat osobu",
+      "select_all": "Vybrat vše",
+      "select_none": "Zrušit výběr",
+      "selected": "Vybráno {count} z {total}",
+      "reason_prompt": "Důvod (nepovinný)",
+      "codes": {
+        "tax_declaration_not_signed_summary": "Nepodepsané prohlášení poplatníka k dani",
+        "time_month_missing": "Chybí schválená pracovní doba",
+        "employment_without_inputs": "Pracovní vztah bez mzdových vstupů"
+      }
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Vyhledat zaměstnance",
@@ -2775,6 +2805,13 @@
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
       "validations": "Kontroly běhu",
+      "hidden_warnings_link": "Skrytá varování ({count})",
+      "calculation_warnings_link": "Varování při výpočtu ({count})",
+      "calculation_warnings_hide": "Skrýt varování při výpočtu",
+      "calculation_warnings_hint": "Varování jste odsouhlasili schválením běhu. Blokující chyby se ukazují dál.",
+      "hide_warning_people": "Skrýt pro všech {count} osob | Skrýt u této osoby | Skrýt pro všech {count} osob",
+      "hide_warning_type": "Skrýt tento typ ve firmě",
+      "hide_warning_done": "Varování je skryté. Obnovit ho můžete v Nastavení zaměstnavatele → Skrytá varování.",
       "validation_scope": {
         "blocking": "Blokují schválení ({count})",
         "all": "Všechny kontroly ({count})",
@@ -8246,7 +8283,8 @@
         "accounting": "Automatické účtování",
         "policies": "Politiky a připravenost",
         "submissions": "Podání",
-        "dimensions": "Dimenze"
+        "dimensions": "Dimenze",
+        "warnings": "Skrytá varování"
       },
       "jmhz_annual": {
         "title": "Roční údaje zaměstnavatele pro JMHZ",

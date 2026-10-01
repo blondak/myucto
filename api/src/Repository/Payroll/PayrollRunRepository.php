@@ -1441,6 +1441,13 @@ final class PayrollRunRepository
                 : (int) $row[$field];
         }
         $row['requires_override'] = (bool) $row['requires_override'];
+        $subjects = isset($row['subject_ids_json']) && is_string($row['subject_ids_json'])
+            ? json_decode($row['subject_ids_json'], true)
+            : null;
+        $row['subject_ids'] = is_array($subjects)
+            ? array_values(array_map('intval', $subjects))
+            : [];
+        unset($row['subject_ids_json']);
         return $row;
     }
 
@@ -1803,8 +1810,9 @@ final class PayrollRunRepository
         $validationInsert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,
-                 entity_id, message, remediation_path, requires_override)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 entity_id, message, remediation_path, requires_override,
+                 subject_ids_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($snapshot->validations as $validation) {
             $validationInsert->execute([
@@ -1817,6 +1825,9 @@ final class PayrollRunRepository
                 $validation->message,
                 $validation->remediationPath,
                 $validation->requiresOverride ? 1 : 0,
+                $validation->subjectIds === []
+                    ? null
+                    : json_encode(array_values($validation->subjectIds), JSON_THROW_ON_ERROR),
             ]);
         }
     }

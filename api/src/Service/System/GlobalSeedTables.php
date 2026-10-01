@@ -263,6 +263,9 @@ final class GlobalSeedTables
         'payroll_component_definitions', 'payroll_component_jmhz_mappings',
         'payroll_posting_map_proposals', 'payroll_dimensions', 'payroll_agenda_matrix',
         'payroll_retention_policies', 'payroll_import_profiles', 'payroll_submission_signing_profiles',
+        // Trvale skrytá varování mzdových běhů — rozhodnutí účetní o tom, co je
+        // ve firmě v pořádku, ne výsledek výpočtu.
+        'payroll_warning_suppressions',
         // Globální legislativa mezd a JMHZ (bez supplier_id): pravidla a číselníky
         // specifikace MPSV nejsou data firmy a jejich znovunačtení je drahé.
         'payroll_rulesets', 'payroll_ruleset_audit',

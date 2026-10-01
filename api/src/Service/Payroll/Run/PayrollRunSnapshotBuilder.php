@@ -667,31 +667,26 @@ final class PayrollRunSnapshotBuilder
         // přehlédnutí. Daňový dopad je stejný jako u kohokoliv jiného (včetně
         // srážky pod rozhodnou částkou), mění se jen to, co běh hlásí.
         // Osoba, která má vedle funkce i jiný vztah, se počítá dál.
-        $unsignedDeclarations = 0;
+        // Id osob nese souhrn kvůli trvalému skrytí po osobách.
+        $unsignedDeclarations = [];
         foreach ($people as $personId => $person) {
             if (self::onlyCompanyBodyRelations($person['employments'])) {
                 continue;
             }
             $declaration = $statutoryEvidence[$personId]['income_tax']['declaration'] ?? null;
             if (is_array($declaration) && ($declaration['status'] ?? null) === 'not-signed') {
-                $unsignedDeclarations++;
+                $unsignedDeclarations[] = (int) $personId;
             }
         }
-        if ($unsignedDeclarations > 0) {
+        if ($unsignedDeclarations !== []) {
             $validations[] = new PayrollRunValidation(
                 'warning',
                 'tax_declaration_not_signed_summary',
                 'run',
                 null,
-                sprintf(
-                    'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
-                    . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
-                    . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
-                    . ' pod rozhodnou částkou se daň sráží zvláštní sazbou (§ 6 odst. 4 ZDP).'
-                    . ' Ověřte, že to odpovídá skutečnosti.',
-                    $unsignedDeclarations,
-                ),
+                self::unsignedDeclarationsMessage(count($unsignedDeclarations)),
                 '/payroll/people',
+                subjectIds: $unsignedDeclarations,
             );
         }
 
@@ -717,6 +712,23 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $json),
             hash('sha256', $manifestJson),
             $validations,
+        );
+    }
+
+    /**
+     * Věta souhrnného varování o nepodepsaných prohlášeních. Veřejná, protože
+     * po skrytí části osob ji se sníženým počtem skládá i
+     * {@see PayrollWarningSuppressionSet}.
+     */
+    public static function unsignedDeclarationsMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
+            . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
+            . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
+            . ' pod rozhodnou částkou se daň sráží zvláštní sazbou (§ 6 odst. 4 ZDP).'
+            . ' Ověřte, že to odpovídá skutečnosti.',
+            $count,
         );
     }
 

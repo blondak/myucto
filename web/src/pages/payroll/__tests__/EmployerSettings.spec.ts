@@ -660,8 +660,9 @@ describe('EmployerSettings — účtová osnova', () => {
     const wrapper = await mountPage()
     const tabs = wrapper.findAll('[role="tab"]')
 
-    // Šestá záložka je Dimenze (MZ-03-W05, střediska/zakázky/činnosti).
-    expect(tabs).toHaveLength(6)
+    // Šestá záložka je Dimenze (MZ-03-W05, střediska/zakázky/činnosti),
+    // sedmá Skrytá varování mzdových běhů.
+    expect(tabs).toHaveLength(7)
     expect(tabs[0].attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).toContain('payroll.employer.registration_title')
     expect(wrapper.text()).not.toContain('payroll.employer.health_accounts.title')

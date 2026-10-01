@@ -24,6 +24,7 @@ const m = vi.hoisted(() => ({
   advanceTo: vi.fn(),
   advanceStart: vi.fn(),
   monthlyChecklist: vi.fn(),
+  hideWarning: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -66,6 +67,7 @@ vi.mock('@/api/payroll', () => ({
     // Rozcestník „Co následuje“ v kartě zaúčtovaného běhu je TÝŽ panel
     // jako v Podáních; scénáře, které ho neřeší, dostanou prázdný přehled.
     monthlyChecklist: m.monthlyChecklist,
+    hideWarning: m.hideWarning,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -1272,6 +1274,10 @@ describe('PayrollRuns', () => {
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
+    // Po schválení je vyřešené varování jen za odkazem „Varování při výpočtu".
+    expect(wrapper.find('[data-testid="payroll-validation-71-locked"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="payroll-run-15-calculation-warnings"]').trigger('click')
+
     expect(wrapper.find('[data-testid="payroll-validation-71-revoke"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="payroll-validation-71-locked"]').text())
       .toContain('payroll.runs.override.locked_after_approval')
@@ -1727,5 +1733,193 @@ describe('PayrollRuns', () => {
     expect(wrapper.find('[data-test="run-create-blocked"]').exists()).toBe(false)
 
     wrapper.unmount()
+  })
+
+  describe('trvale skrytá varování', () => {
+    const summary = () => validation({
+      id: 501,
+      code: 'tax_declaration_not_signed_summary',
+      entity_type: 'run',
+      entity_id: null,
+      message: 'Počet osob s nepodepsaným prohlášením poplatníka k dani: 2.',
+      remediation_path: '/payroll/people',
+      requires_override: false,
+      hideable: true,
+      subject_type: 'employee',
+      subject_ids: [7, 8],
+    })
+    const blocker = () => validation({
+      id: 900,
+      severity: 'blocker',
+      code: 'enforcement_not_deducting',
+      message: 'Syntetický Dlužník: exekuční případ je doručený, ale ještě se nesráží.',
+      remediation_path: '/payroll/enforcement?case=5',
+      requires_override: false,
+    })
+
+    /*
+     * Po schválení jsou varování odsouhlasená; karta nechá jen odkaz.
+     * Blokující chyby se ukazují dál.
+     */
+    it('po schválení varování schová za odkaz a blokující chybu nechá', async () => {
+      m.runs.mockResolvedValue([run({ status: 'approved', can_delete: false, validations: [summary(), blocker()] })])
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      const groups = () => wrapper.findAll('[data-test^="payroll-validation-group-"]')
+      expect(groups()).toHaveLength(1)
+      expect(groups()[0].text()).toContain('Syntetický Dlužník')
+      expect(wrapper.find('[data-testid="payroll-validation-501-hide"]').exists()).toBe(false)
+
+      await wrapper.get('[data-testid="payroll-run-15-calculation-warnings"]').trigger('click')
+      await wrapper.get('[data-testid="payroll-run-15-validation-scope-all"]').trigger('click')
+      expect(groups()).toHaveLength(2)
+      expect(wrapper.find('[data-testid="payroll-run-15-calculation-warnings-hint"]').exists()).toBe(true)
+
+      wrapper.unmount()
+    })
+
+    it('před schválením ukáže varování beze změny a bez odkazu', async () => {
+      m.runs.mockResolvedValue([run({ status: 'calculated', can_delete: false, validations: [summary()] })])
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="payroll-run-15-calculation-warnings"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="payroll-run-15-hidden-warnings"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="payroll-validation-group-warning-tax_declaration_not_signed_summary"]').text())
+        .toContain('nepodepsaným prohlášením')
+
+      wrapper.unmount()
+    })
+
+    it('skryje souhrnné varování pro všechny dotčené osoby jedním dialogem', async () => {
+      m.runs.mockResolvedValue([run({ status: 'calculated', can_delete: false, validations: [summary()] })])
+      m.hideWarning.mockResolvedValue({ created: 2, skipped: 0 })
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      await wrapper.get('[data-testid="payroll-validation-501-hide-people"]').trigger('click')
+      const reason = document.body.querySelector<HTMLTextAreaElement>('[data-test="hide-warning-reason"]')!
+      reason.value = 'Studenti, prohlášení podepsali jinde'
+      reason.dispatchEvent(new Event('input'))
+      await flushPromises()
+      document.body.querySelector<HTMLButtonElement>('[data-test="confirm-hide-warning"]')!.click()
+      await flushPromises()
+
+      expect(m.hideWarning).toHaveBeenCalledWith({
+        code: 'tax_declaration_not_signed_summary',
+        subject_ids: [7, 8],
+        reason: 'Studenti, prohlášení podepsali jinde',
+      })
+      expect(m.success).toHaveBeenCalledWith('payroll.runs.hide_warning_done')
+      expect(m.runs).toHaveBeenCalledTimes(2)
+
+      wrapper.unmount()
+    })
+
+    it('typ varování skryje pro celou firmu bez seznamu osob', async () => {
+      m.runs.mockResolvedValue([run({ status: 'calculated', can_delete: false, validations: [summary()] })])
+      m.hideWarning.mockResolvedValue({ created: 1, skipped: 0 })
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      await wrapper.get('[data-testid="payroll-validation-501-hide-type"]').trigger('click')
+      document.body.querySelector<HTMLButtonElement>('[data-test="confirm-hide-warning"]')!.click()
+      await flushPromises()
+
+      expect(m.hideWarning).toHaveBeenCalledWith({ code: 'tax_declaration_not_signed_summary', reason: null })
+
+      wrapper.unmount()
+    })
+
+    it('blokující chybu ani bez práva schvalovat skrýt nenabídne', async () => {
+      m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.approve')
+      m.runs.mockResolvedValue([run({ status: 'calculated', can_delete: false, validations: [summary(), blocker()] })])
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+      await wrapper.get('[data-testid="payroll-run-15-validation-scope-all"]').trigger('click')
+
+      expect(wrapper.find('[data-testid="payroll-validation-501-hide"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="payroll-validation-900-hide"]').exists()).toBe(false)
+
+      wrapper.unmount()
+    })
+
+    it('počet skrytých varování vede do nastavení', async () => {
+      m.runs.mockResolvedValue([run({ status: 'calculated', can_delete: false, validations: [], hidden_validation_count: 3 })])
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="payroll-run-15-hidden-warnings"]').text())
+        .toContain('payroll.runs.hidden_warnings_link')
+      expect(wrapper.find('[data-testid="payroll-run-15-validations-section"]').exists()).toBe(false)
+
+      wrapper.unmount()
+    })
+
+    it('předběžná kontrola nabídne skrytí jen u skrytelného nálezu', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-08-01',
+        payment_date: '2026-09-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [
+          {
+            code: 'time_month_missing',
+            severity: 'warning',
+            impact: 'anytime',
+            scope: 'monthly',
+            message: 'Pracovní vztah nemá schválenou pracovní dobu.',
+            remediation_path: null,
+            count: 2,
+            entity_total: 2,
+            entities: [
+              { entity_type: 'employment', entity_id: 41, label: 'Syntetická Osoba (P1)' },
+              { entity_type: 'employment', entity_id: 42, label: 'Syntetický Člověk (P2)' },
+            ],
+            hideable: true,
+            subject_type: 'employment',
+            subject_ids: [41, 42],
+          },
+          {
+            code: 'person_data_gap',
+            severity: 'warning',
+            impact: 'blocking',
+            scope: 'setup',
+            message: 'Chybí zákonné údaje.',
+            remediation_path: null,
+            count: 1,
+            entities: [],
+            hideable: false,
+            subject_type: null,
+            subject_ids: [],
+          },
+        ],
+      } satisfies PayrollRunReadiness)
+      m.hideWarning.mockResolvedValue({ created: 1, skipped: 0 })
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="run-readiness-hide-person_data_gap"]').exists()).toBe(false)
+      await wrapper.get('[data-test="run-readiness-hide-people-time_month_missing"]').trigger('click')
+      expect(document.body.querySelector('[data-test="hide-warning-people"]')?.textContent).toContain('Syntetický Člověk (P2)')
+      document.body.querySelector<HTMLInputElement>('[data-test="hide-warning-person-41"]')!.click()
+      await flushPromises()
+      document.body.querySelector<HTMLButtonElement>('[data-test="confirm-hide-warning"]')!.click()
+      await flushPromises()
+
+      expect(m.hideWarning).toHaveBeenCalledWith({ code: 'time_month_missing', subject_ids: [42], reason: null })
+
+      wrapper.unmount()
+    })
   })
 })

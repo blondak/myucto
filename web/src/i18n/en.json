@@ -2690,6 +2690,36 @@
       "failed_title": "Could not be filled in ({count})",
       "recalculate_notice": "The payroll run for which you filled in the workplace needs to be recalculated and approved as a new revision for the new value to be reflected in the report."
     },
+    "warning_suppressions": {
+      "title": "Hidden warnings",
+      "intro": "Warnings you permanently hid on a payroll run. They are not counted in run checks or their totals until you restore them. Blocking errors cannot be hidden.",
+      "empty": "No warning is hidden.",
+      "load_failed": "Hidden warnings could not be loaded.",
+      "restore": "Restore",
+      "restore_all": "Restore all ({count})",
+      "restored": "Warnings restored: {count}.",
+      "restore_failed": "The warning could not be restored.",
+      "no_permission": "Only a user allowed to approve payroll runs can hide and restore warnings.",
+      "scope_company": "Whole type for the company",
+      "subject_unknown": "Person no. {id}",
+      "hidden_by": "Hidden by {name}, {date}",
+      "hide_type": "Hide this type for the company",
+      "hide_people": "Hide for all {count} people | Hide for this person | Hide for all {count} people",
+      "hide_selected": "Hide for selected ({count})",
+      "hide_failed": "The warning could not be hidden.",
+      "type_scope_hint": "Warnings of this type will stop showing for everyone in the company, including new people, in all following payroll runs.",
+      "people_scope_hint": "The warning will stop showing only for the selected people, in all following payroll runs. It stays for everyone else.",
+      "filter_people": "Search person",
+      "select_all": "Select all",
+      "select_none": "Clear selection",
+      "selected": "Selected {count} of {total}",
+      "reason_prompt": "Reason (optional)",
+      "codes": {
+        "tax_declaration_not_signed_summary": "Unsigned taxpayer declaration",
+        "time_month_missing": "Approved working time missing",
+        "employment_without_inputs": "Employment without payroll inputs"
+      }
+    },
     "runs": {
       "person_picker": {
         "placeholder": "Search for an employee",
@@ -2775,6 +2805,13 @@
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
       "validations": "Run checks",
+      "hidden_warnings_link": "Hidden warnings ({count})",
+      "calculation_warnings_link": "Warnings at calculation ({count})",
+      "calculation_warnings_hide": "Hide calculation warnings",
+      "calculation_warnings_hint": "You accepted these warnings by approving the run. Blocking errors are still shown.",
+      "hide_warning_people": "Hide for all {count} people | Hide for this person | Hide for all {count} people",
+      "hide_warning_type": "Hide this type for the company",
+      "hide_warning_done": "The warning is hidden. You can restore it in Employer settings → Hidden warnings.",
       "validation_scope": {
         "blocking": "Blocking approval ({count})",
         "all": "All checks ({count})",
@@ -8246,7 +8283,8 @@
         "accounting": "Automatic posting",
         "policies": "Policies and readiness",
         "submissions": "Submissions",
-        "dimensions": "Dimensions"
+        "dimensions": "Dimensions",
+        "warnings": "Hidden warnings"
       },
       "jmhz_annual": {
         "title": "Annual employer data for JMHZ",

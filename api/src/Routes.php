@@ -162,6 +162,7 @@ use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRetentionAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
 use MyInvoice\Action\Payroll\PayrollRunValidationOverrideAction;
+use MyInvoice\Action\Payroll\PayrollWarningSuppressionsAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollSicknessCaseAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
@@ -1267,6 +1268,14 @@ final class Routes
             $g->post(
                 '/runs/{id:[0-9]+}/validations/override-bulk',
                 [PayrollRunValidationOverrideAction::class, 'grantBulk'],
+            );
+            // Trvale skrytá varování (po osobě nebo celý typ ve firmě).
+            $g->get('/warning-suppressions', [PayrollWarningSuppressionsAction::class, 'list']);
+            $g->post('/warning-suppressions', [PayrollWarningSuppressionsAction::class, 'hide']);
+            $g->post('/warning-suppressions/restore', [PayrollWarningSuppressionsAction::class, 'restore']);
+            $g->delete(
+                '/warning-suppressions/{id:[0-9]+}',
+                [PayrollWarningSuppressionsAction::class, 'restoreOne'],
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);

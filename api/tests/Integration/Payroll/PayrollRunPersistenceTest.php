@@ -2668,6 +2668,10 @@ final class PayrollRunPersistenceTest extends TestCase
                 // na několik desítek jmen, takže jeho délka počet neříká.
                 'entity_total',
                 'entities',
+                // Trvalé skrytí: jde-li varování skrýt a u koho všeho.
+                'hideable',
+                'subject_type',
+                'subject_ids',
             ], array_keys($finding));
             self::assertIsInt($finding['entity_total']);
             self::assertGreaterThanOrEqual(count($finding['entities']), $finding['entity_total']);
