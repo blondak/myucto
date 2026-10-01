@@ -223,6 +223,48 @@ final class CardClearingPostingTest extends BankPostingTestCase
         self::assertEqualsWithDelta(0.00, $this->balance($code), 0.001);
     }
 
+    /**
+     * Haléřové dorovnání vypořádání se navrhuje na 548, ale účtuje se na jeho jedinou
+     * analytiku. Opakovaný průchod proto musí vypořádání poznat jako nezměněné, jinak
+     * se přepisovalo při každém dalším načtení pohybu.
+     */
+    public function testRepeatedRunKeepsSettlementWithRoundingOnSingleAnalytic(): void
+    {
+        $parent = $this->accounts->findByCode($this->supplierId, '548');
+        self::assertNotNull($parent);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND parent_id = ? AND tax_deductibility = 'deductible'")
+            ->execute([$this->supplierId, (int) $parent['id']]);
+        $analyticId = $this->accounts->insert($this->supplierId, [
+            'account_code' => '548.777', 'name' => 'Dorovnání test',
+            'account_type' => $parent['account_type'], 'normal_side' => $parent['normal_side'],
+            'is_synthetic' => false, 'parent_id' => (int) $parent['id'], 'is_active' => true,
+        ]);
+        $this->accounts->setTaxDeductibility($this->supplierId, $analyticId, 'deductible');
+        $pdo->prepare('UPDATE accounting_supplier_settings SET single_analytic_redirect = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+
+        $this->card('4321');
+        $pi = $this->postedPurchase(499.60);
+        $tx = $this->cardTx(-500.00, '4321');
+        $this->match($tx, $pi, 500.00);
+
+        $this->service->handleTransaction($tx, $this->userId);
+        $settlement = $this->liveSettlement($tx);
+        self::assertArrayHasKey('548.777', $this->linesByAccountCode((int) $settlement), 'Předpoklad: dorovnání na analytice.');
+        $state = static fn (\PDO $pdo, int $entryId): array => [
+            $pdo->query("SELECT row_version FROM journal_entries WHERE id = {$entryId}")->fetchColumn(),
+            $pdo->query("SELECT GROUP_CONCAT(id ORDER BY id) FROM journal_entry_lines WHERE entry_id = {$entryId}")->fetchColumn(),
+        ];
+        $before = $state($pdo, (int) $settlement);
+
+        $this->service->handleTransaction($tx, $this->userId);
+        $this->service->syncCardSettlement($this->supplierId, $tx, $this->userId);
+
+        self::assertSame($settlement, $this->liveSettlement($tx));
+        self::assertSame($before, $state($pdo, (int) $settlement), 'Vypořádání se nepřepisuje.');
+    }
+
     public function testRoundingDifferenceGoesTo548(): void
     {
         $card = $this->card('4321');

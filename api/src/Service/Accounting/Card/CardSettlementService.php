@@ -84,7 +84,11 @@ final class CardSettlementService
             $this->reverseLive($supplierId, $txId, $sourceType, $meta + ['reason' => 'sync']);
             return ['action' => 'reversed', 'entry_id' => (int) $live['id']];
         }
-        if ($live !== null && self::signature($live['lines']) === self::signature($lines)) {
+        $posted = array_map(
+            fn (array $l): array => ['account_code' => $this->posting->redirectedAccountCode($supplierId, (string) $l['account_code'])] + $l,
+            $lines,
+        );
+        if ($live !== null && self::signature($live['lines']) === self::signature($posted)) {
             return ['action' => 'unchanged', 'entry_id' => (int) $live['id']];
         }
         if ($live !== null && !$this->policy->isOpenDate($supplierId, (string) $live['entry_date'])) {

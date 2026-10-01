@@ -61,6 +61,59 @@ final class BankPostingServiceIdempotenceTest extends BankPostingTestCase
         self::assertSame(0, $pending, 'Nad zaúčtovanou tx nesmí viset pending návrh.');
     }
 
+    /**
+     * Haléřové dorovnání se sestaví na syntetiku 548, ale účtuje se na její jedinou
+     * analytiku (PostingService::singleAnalyticMap). Porovnání živého zápisu s náhledem
+     * proto musí počítat s tímtéž přesměrem, jinak se každý další průchod nad touž
+     * platbou (každé stažení z banky, nahrání výpisu) tvářil jako změna a zápis se
+     * přepsal znovu: nový návrh, nové datum zaúčtování, nové řádky se stejným obsahem.
+     */
+    public function testOpakovanyPruchodSDorovnanimNaJedinouAnalytikuNepreuctuje(): void
+    {
+        $parent = $this->accounts->findByCode($this->supplierId, '548');
+        self::assertNotNull($parent, 'Syntetika 548 musí být v osnově.');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND parent_id = ? AND tax_deductibility = 'deductible'")
+            ->execute([$this->supplierId, (int) $parent['id']]);
+        $analyticId = $this->accounts->insert($this->supplierId, [
+            'account_code' => '548.777',
+            'name'         => 'Ostatní provozní náklady test',
+            'account_type' => $parent['account_type'],
+            'normal_side'  => $parent['normal_side'],
+            'is_synthetic' => false,
+            'parent_id'    => (int) $parent['id'],
+            'is_active'    => true,
+        ]);
+        $this->accounts->setTaxDeductibility($this->supplierId, $analyticId, 'deductible');
+        $pdo->prepare('UPDATE accounting_supplier_settings SET single_analytic_redirect = 1 WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+
+        $vendor = $this->client('Dodavatel s.r.o.');
+        $pf = $this->purchaseInvoice('PF-ID-ROUND', $vendor, 298.50);
+        $this->postPredpis('purchase_invoice', $pf, '501', '321', 298.50);
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, -299.00, ['match_status' => 'manual']);
+        $this->paymentMatch($tx, $pf, 299.00);
+
+        $r1 = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $r1['action'], json_encode($r1));
+        $entryId = (int) $r1['entry_id'];
+        $codes = array_map('strval', array_keys($this->linesByAccountCode($entryId)));
+        self::assertContains('548.777', $codes, 'Předpoklad testu: dorovnání skončí na jediné analytice. ' . json_encode($codes));
+
+        $lines = static fn (int $id, \PDO $pdo): array => $pdo->query(
+            "SELECT id FROM journal_entry_lines WHERE entry_id={$id} ORDER BY id"
+        )->fetchAll(\PDO::FETCH_COLUMN);
+        $before = $lines($entryId, $this->db->pdo());
+        $suggestions = $this->suggestionCountForTx($tx);
+
+        $r2 = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('already_posted', $r2['reason'] ?? null, 'Totožný zápis se nepřepisuje: ' . json_encode($r2));
+        self::assertSame($before, $lines($entryId, $this->db->pdo()), 'Řádky zápisu zůstávají tytéž.');
+        self::assertSame($suggestions, $this->suggestionCountForTx($tx), 'Žádný další protokolový návrh.');
+    }
+
     public function testRematchSupersedesPendingSuggestion(): void
     {
         $client = $this->client('Odběratel s.r.o.');

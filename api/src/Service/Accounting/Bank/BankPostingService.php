@@ -172,9 +172,9 @@ final class BankPostingService
         };
 
         $proposed = $signature(array_map(
-            static fn (array $l): array => [
+            fn (array $l): array => [
                 'side'   => $l['side'],
-                'code'   => $l['account_code'],
+                'code'   => $this->posting->redirectedAccountCode($supplierId, (string) $l['account_code']),
                 'amount' => $l['amount'],
                 'is_red_storno' => $l['is_red_storno'] ?? false,
             ],
