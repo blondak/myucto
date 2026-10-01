@@ -9,16 +9,16 @@
  *
  * Zaúčtování (`/invoices/{id}/book`) tu není a být nesmí, server ho tokenu odmítá.
  *
- * Modul se načítá VÝHRADNĚ přes `tools.mjs`: sdílené pomocné funkce importuje
- * odtamtud a `tools.mjs` zase registruje tenhle katalog, takže jde o kruhový
- * import. Je bezpečný proto, že importované funkce se volají až uvnitř `run()`,
- * kdy je `tools.mjs` vyhodnocený. Hodnoty potřebné už při načtení (CONFIRM)
- * jsou proto zkopírované sem.
+ * Modul se načítá VÝHRADNĚ přes `tools.mjs`: pomocné funkce konceptu faktury
+ * importuje odtamtud a `tools.mjs` zase registruje tenhle katalog, takže jde
+ * o kruhový import. Je bezpečný proto, že importované funkce se volají až uvnitř
+ * `run()`, kdy je `tools.mjs` vyhodnocený. Hodnoty potřebné už při načtení
+ * (CONFIRM) jsou v `tool-shared.mjs`, který nic dalšího neimportuje.
  */
 
+import { CONFIRM, requireConfirm, confirmed, changed, merged } from './tool-shared.mjs';
 import {
-  requireConfirm, confirmed, changed, merged, invoiceLines, loadDraftInvoice, lineForPut,
-  draftPayload, draftResult,
+  invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
 } from './tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -30,13 +30,6 @@ const id = (description) => int(description, { minimum: 1 });
 const schema = (properties = {}, required = []) => ({
   type: 'object', properties, required, additionalProperties: false,
 });
-
-/** Stejný text jako v `tools.mjs`; tam ho při načtení modulu ještě nejde přečíst. */
-const CONFIRM = bool(
-  'Potvrzení nevratné operace. Bez `true` se NIC nesmaže — nástroj jen vrátí, '
-  + 'čeho by se změna týkala. Ten výpis ukaž uživateli a zavolej nástroj znovu '
-  + 's `confirm: true` teprve po jeho souhlasu.',
-);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Popis dokladu do potvrzovacích hlášek
