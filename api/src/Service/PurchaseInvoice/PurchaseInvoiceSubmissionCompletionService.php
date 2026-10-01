@@ -26,6 +26,7 @@ final class PurchaseInvoiceSubmissionCompletionService
         private readonly InvoiceExtractionRouter $router,
         private readonly SubmissionOriginalFiler $filer,
         private readonly Connection $db,
+        private readonly SubmissionDimensions $dimensions,
     ) {}
 
     public function complete(
@@ -66,6 +67,8 @@ final class PurchaseInvoiceSubmissionCompletionService
             $this->links->attach($supplierId, $documentId, 'purchase_invoice', $purchaseInvoiceId);
         }
         $this->filer->archive($supplierId, $submission);
+        // Středisko (a další dimenze) zvolené při nahrání → hlavička vzniklé faktury.
+        $this->dimensions->applyToInvoice($supplierId, $submissionId, $purchaseInvoiceId);
     }
 
     private function isInvoicePdf(int $supplierId, int $purchaseInvoiceId, string $sha256): bool

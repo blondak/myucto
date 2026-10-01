@@ -23,6 +23,7 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionProcessingService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
+use MyInvoice\Service\PurchaseInvoice\SubmissionDimensions;
 use MyInvoice\Service\PurchaseInvoice\SubmissionOriginalFiler;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\Group;
@@ -63,6 +64,7 @@ final class DocumentRequestTest extends TestCase
     private ActivityLogger $activity;
     private IpMatcher $ipMatcher;
     private SubmissionOriginalFiler $filer;
+    private SubmissionDimensions $submissionDimensions;
 
     private int $supplierA = 0;
     private int $supplierB = 0;
@@ -95,6 +97,7 @@ final class DocumentRequestTest extends TestCase
             $this->storage       = $container->get(DocumentStorage::class);
             $this->activity      = $container->get(ActivityLogger::class);
             $this->ipMatcher     = $container->get(IpMatcher::class);
+            $this->submissionDimensions = $container->get(SubmissionDimensions::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -549,6 +552,7 @@ final class DocumentRequestTest extends TestCase
             $this->upload,
             $this->activity,
             $this->ipMatcher,
+            $this->submissionDimensions,
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/portal/purchase-invoice-submissions')
@@ -734,6 +738,7 @@ final class DocumentRequestTest extends TestCase
             $this->upload,
             $this->activity,
             $this->ipMatcher,
+            $this->submissionDimensions,
         );
         $response = $action->list(
             (new ServerRequestFactory())
@@ -891,6 +896,7 @@ final class DocumentRequestTest extends TestCase
             $this->db,
             $this->activity,
             $this->ipMatcher,
+            $this->submissionDimensions,
         );
     }
 

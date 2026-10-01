@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Ai\AiSuggestionRepository;
+use MyInvoice\Service\PurchaseInvoice\Review\PurchaseInvoiceReviewNeeds;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -24,6 +25,7 @@ final class GetPurchaseInvoiceAction
         private readonly PurchaseInvoiceRepository $repo,
         private readonly DocumentLockService $locks,
         private readonly AiSuggestionRepository $aiSuggestions,
+        private readonly PurchaseInvoiceReviewNeeds $reviewNeeds,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -54,6 +56,9 @@ final class GetPurchaseInvoiceAction
             SupplierGuard::currentId($request),
             $id,
         );
+        // Proč doklad potřebuje okno Kontrola vytěžených dokladů (hlášení vytěžení,
+        // chybějící povinná dimenze…) — okno i seznam rozhodují podle tohohle.
+        $invoice['review'] = $this->reviewNeeds->forInvoice(SupplierGuard::currentId($request), $invoice);
 
         return Json::ok($response, $invoice);
     }

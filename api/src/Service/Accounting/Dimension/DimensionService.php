@@ -826,9 +826,14 @@ final class DimensionService
      * Předvyplnění hlavičky dokladu v editoru: zakázka > klient, u platby dimenze
      * placeného dokladu. Klient/zakázka cizí firmy nic nevrátí (predikát firmy).
      *
+     * `$vendorHistory` (přijatý doklad, F5) doplní typy, které zbyly prázdné, hodnotami
+     * z posledního dokladu téhož dodavatele (`$clientId`) — zdroj `history` je jen návrh
+     * a má nejnižší přednost. `$excludePurchaseInvoiceId` = doklad, který se právě
+     * kontroluje (sám sobě návrhem není).
+     *
      * @return array{header:array<int,int>, sources:array<int,string>}
      */
-    public function prefill(int $supplierId, ?int $clientId, ?int $projectId, ?string $linkedDocType = null, ?int $linkedDocId = null): array
+    public function prefill(int $supplierId, ?int $clientId, ?int $projectId, ?string $linkedDocType = null, ?int $linkedDocId = null, bool $vendorHistory = false, ?int $excludePurchaseInvoiceId = null): array
     {
         if (!$this->repo->enabled($supplierId)) {
             return ['header' => [], 'sources' => []];
@@ -840,6 +845,17 @@ final class DimensionService
                 if (!isset($result['header'][$typeId])) {
                     $result['header'][$typeId] = $valueId;
                     $result['sources'][$typeId] = 'document';
+                }
+            }
+            ksort($result['header']);
+            ksort($result['sources']);
+        }
+        if ($vendorHistory && $clientId !== null) {
+            $history = (new VendorDimensionHistory($this->db))->lastHeader($supplierId, $clientId, $excludePurchaseInvoiceId);
+            foreach ($history as $typeId => $valueId) {
+                if (!isset($result['header'][$typeId])) {
+                    $result['header'][$typeId] = $valueId;
+                    $result['sources'][$typeId] = 'history';
                 }
             }
             ksort($result['header']);

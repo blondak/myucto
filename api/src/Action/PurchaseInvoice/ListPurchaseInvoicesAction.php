@@ -15,6 +15,7 @@ use MyInvoice\Repository\InvoiceListExtrasRepository;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\PurchaseInvoice\Review\PurchaseInvoiceReviewNeeds;
 use MyInvoice\Service\Report\InvoiceKhSections;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -39,6 +40,7 @@ final class ListPurchaseInvoicesAction
         private readonly InvoiceListDetailsRepository $listDetails,
         private readonly InvoiceListExtrasRepository $listExtras,
         private readonly DimensionListSummaryRepository $dimensionSummaries,
+        private readonly PurchaseInvoiceReviewNeeds $reviewNeeds,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -132,6 +134,12 @@ final class ListPurchaseInvoicesAction
             $dimensionLabels = ($filter['include_dimensions'] ?? null) === '1'
                 ? $this->dimensionSummaries->forDocuments((int) $filters['supplier_id'], 'purchase_invoice', $ids)
                 : [];
+            $review = ($filter['include_review'] ?? null) === '1'
+                ? $this->reviewNeeds->forListRows(
+                    (int) $filters['supplier_id'],
+                    array_merge(...array_map(static fn (array $g): array => $g['invoices'], $result['data'])),
+                )
+                : [];
             foreach ($result['data'] as &$group) {
                 foreach ($group['invoices'] as &$row) {
                     $lock = $map[(int) $row['id']] ?? null;
@@ -144,6 +152,9 @@ final class ListPurchaseInvoicesAction
                     }
                     if (($filter['include_dimensions'] ?? null) === '1') {
                         $row['dimension_labels'] = $dimensionLabels[(int) $row['id']] ?? [];
+                    }
+                    if (isset($review[(int) $row['id']])) {
+                        $row['review'] = $review[(int) $row['id']];
                     }
                 }
             }

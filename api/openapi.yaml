@@ -6283,6 +6283,7 @@ paths:
         - { in: query, name: 'filter[include_vat_breakdown]', description: "1 = doplnit rozpad základu a DPH podle sazeb jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_posting_accounts]', description: "1 = doplnit účty MD/Dal ze zaúčtování jen v seznamu", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_dimensions]', description: "1 = doplnit štítky dimenzí jen u firmy se zapnutými dimenzemi", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: 'filter[include_review]', description: "1 = doplnit `review` (proč doklad potřebuje kontrolu vytěžení); chybějící povinná dimenze se v seznamu počítá jen u konceptů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_vat_classification]', description: "1 = doplnit členění plnění z evidence DPH a skutečné řádky přiznání; odvozené sloupce se neřadí", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_journal_notes]', description: "1 = živé poznámky deníku; vyžaduje oprávnění accounting read", schema: { type: integer, enum: [0, 1], default: 0 } }
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
@@ -23335,6 +23336,20 @@ paths:
         schema:
           type: integer
           minimum: 1
+      - in: query
+        name: history
+        description: 1 = typy bez výchozí hodnoty doplnit z posledního nestornovaného přijatého dokladu dodavatele (client_id), zdroj `history`
+        schema:
+          type: integer
+          enum:
+          - 0
+          - 1
+      - in: query
+        name: exclude_purchase_invoice_id
+        description: Přijatý doklad, který se do historie nepočítá (právě kontrolovaný)
+        schema:
+          type: integer
+          minimum: 1
       responses:
         '200':
           description: OK
@@ -35673,6 +35688,10 @@ components:
         debit_accounts: { type: array, description: "Účty MD ze zaúčtování; jen s filter[include_posting_accounts]=1.", items: { type: string } }
         credit_accounts: { type: array, description: "Účty Dal ze zaúčtování; jen s filter[include_posting_accounts]=1.", items: { type: string } }
         dimension_labels: { type: array, description: "Jen v seznamu s filter[include_dimensions]=1 a při zapnutých dimenzích; souhrn hodnot z dokladu.", items: { type: string } }
+        review:
+          allOf:
+            - $ref: '#/components/schemas/PurchaseInvoiceReview'
+          description: "Jen v seznamu s filter[include_review]=1."
         has_small_asset:
           type: boolean
           description: "§DM — aspoň jedna položka dokladu má expense_kind='small_asset' (drobný majetek). Jen v seznamu, v detailu se odvozuje z items[]."
@@ -35965,6 +35984,34 @@ components:
         classified_items: { type: integer }
         total_items: { type: integer }
 
+    PurchaseInvoiceReview:
+      type: object
+      required: [reasons, details]
+      description: |
+        Proč doklad potřebuje kontrolu v okně Kontrola vytěžených dokladů.
+        `extraction_warning` = hlášení vytěžení; `missing_required_dimension` = nezaúčtovanému
+        dokladu chybí dimenze povinná podle pravidla dimenzí (vynucení `error`) na účtu
+        některé položky. Další důvody mohou přibýt.
+      properties:
+        reasons:
+          type: array
+          items: { type: string, enum: [extraction_warning, missing_required_dimension] }
+        details:
+          type: object
+          properties:
+            missing_required_dimension:
+              type: object
+              properties:
+                missing_dimensions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type_id, type_name, account_codes]
+                    properties:
+                      type_id: { type: integer }
+                      type_name: { type: string }
+                      account_codes: { type: array, items: { type: string } }
+
     PurchaseInvoice:
       type: object
       properties:
@@ -35995,6 +36042,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/AiPostingSuggestion'
           type: [object, "null"]
+        review:
+          allOf:
+            - $ref: '#/components/schemas/PurchaseInvoiceReview'
+          description: Proč doklad potřebuje kontrolu vytěžení (jen detail dokladu).
         currency_id: { type: integer }
         currency: { type: string }
         currency_symbol: { type: string }
@@ -37236,6 +37287,7 @@ components:
       - project
       - client
       - document
+      - history
     DimensionProfitRow:
       type: object
       required:

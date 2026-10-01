@@ -11,10 +11,12 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
+use MyInvoice\Service\PurchaseInvoice\SubmissionDimensions;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -41,6 +43,7 @@ final class PortalPurchaseInvoiceSubmissionAction
         private readonly PurchaseInvoiceSubmissionUploadService $upload,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly SubmissionDimensions $submissionDimensions,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -54,7 +57,20 @@ final class PortalPurchaseInvoiceSubmissionAction
         $offset = max(0, (int) ($q['offset'] ?? 0));
         $page = $this->submissions->paginate($supplierId, $status, $limit, $offset);
         $page['items'] = array_map([$this, 'portalView'], $page['items']);
+        $page['items'] = $this->submissionDimensions->attach($supplierId, $page['items']);
         return Json::ok($response, $page);
+    }
+
+    /**
+     * Hodnoty dimenzí, které klient smí zvolit při předání dokladu — jen aktivní
+     * střediska firmy, bez interních údajů číselníku ({@see SubmissionDimensions::portalChoices()}).
+     */
+    public function dimensions(Request $request, Response $response): Response
+    {
+        if ($denied = $this->deny($request, $response)) return $denied;
+        return Json::ok($response, [
+            'types' => $this->submissionDimensions->portalChoices(SupplierGuard::currentId($request)),
+        ]);
     }
 
     /**
@@ -100,6 +116,20 @@ final class PortalPurchaseInvoiceSubmissionAction
             return Json::error($response, 'too_many_files', 'Najednou lze předat nejvýše 20 souborů.', 413);
         }
 
+        // Středisko účtenky (jen typy a hodnoty z portalChoices). Náhrada originálu bez
+        // vlastní volby převezme volbu nahrazovaného podání.
+        $dims = [];
+        try {
+            if (is_array($body['dimensions'] ?? null)) {
+                $dims = $this->submissionDimensions->validate($supplierId, $body['dimensions'], true);
+            }
+            if ($dims === [] && $supersedesId !== null) {
+                $dims = $this->submissionDimensions->forSubmissions($supplierId, [$supersedesId])[$supersedesId] ?? [];
+            }
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
         $batch = $this->submitOriginals(
@@ -124,6 +154,16 @@ final class PortalPurchaseInvoiceSubmissionAction
             );
         }
 
+        foreach ($items as $item) {
+            if ($dims !== [] && empty($item['duplicate'])) {
+                $this->submissionDimensions->save($supplierId, (int) $item['submission']['id'], $dims);
+            }
+        }
+        $rows = $this->submissionDimensions->attach($supplierId, array_column($items, 'submission'));
+        foreach ($items as $i => $item) {
+            $items[$i]['submission'] = $rows[$i];
+        }
+
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         foreach ($items as $item) {
             $submission = $item['submission'];
@@ -137,7 +177,7 @@ final class PortalPurchaseInvoiceSubmissionAction
                     'filename' => (string) $submission['original_name'],
                     'via' => $via,
                     'supersedes_submission_id' => $supersedesId,
-                ],
+                ] + ($dims !== [] && empty($item['duplicate']) ? ['dimensions' => $dims] : []),
                 $ip,
                 $request->getHeaderLine('User-Agent'),
                 $supplierId,

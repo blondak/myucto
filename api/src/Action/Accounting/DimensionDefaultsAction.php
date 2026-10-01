@@ -24,6 +24,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET     /api/stock/items/{id}/posting-defaults — účet a dimenze položky z produktu (produkt > kategorie)
  *   GET     /api/accounting/dimensions/prefill  — předvyplnění hlavičky dokladu v editoru
  *            ?client_id=&project_id=&invoice_id=|purchase_invoice_id=
+ *            &history=1&exclude_purchase_invoice_id= — návrh z posledního dokladu dodavatele (client_id)
  *
  * Práva zrcadlí RoutePermissionMap: čtení = `clients`/`projects` READ, uložení =
  * stejné právo jako úprava karty (`clients`/`projects` WRITE). Předvyplnění patří
@@ -126,6 +127,8 @@ final class DimensionDefaultsAction
             $id('project_id'),
             $linkedType,
             $linkedId,
+            ($q['history'] ?? null) === '1',
+            $id('exclude_purchase_invoice_id'),
         );
         return Json::ok($response, ['header' => (object) $result['header'], 'sources' => (object) $result['sources']]);
     }

@@ -13,11 +13,13 @@ use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionProcessingService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
+use MyInvoice\Service\PurchaseInvoice\SubmissionDimensions;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -36,6 +38,7 @@ final class PurchaseInvoiceSubmissionAction
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly SubmissionDimensions $submissionDimensions,
     ) {}
 
     /**
@@ -56,6 +59,19 @@ final class PurchaseInvoiceSubmissionAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Dimenze (typicky středisko) zvolené při nahrání se propíšou do hlavičky
+        // vytěženého dokladu. Volit je smí, kdo smí dimenze dokladu i měnit.
+        $dims = [];
+        if (is_array($body['dimensions'] ?? null) && array_filter($body['dimensions']) !== []) {
+            if (!RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+                return Json::error($response, 'forbidden', 'Dimenze dokladu může zvolit jen uživatel s právem na účetnictví.', 403);
+            }
+            try {
+                $dims = $this->submissionDimensions->validate($supplierId, $body['dimensions'], false);
+            } catch (DimensionException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
         $userId = $this->userId($request);
         $batch = $this->submitOriginals(
             $files,
@@ -79,6 +95,13 @@ final class PurchaseInvoiceSubmissionAction
         }
 
         foreach ($items as $item) {
+            if ($dims !== [] && empty($item['duplicate'])) {
+                $this->submissionDimensions->save($supplierId, (int) $item['submission']['id'], $dims);
+            }
+        }
+        $items = $this->withDimensions($supplierId, $items);
+
+        foreach ($items as $item) {
             $submission = $item['submission'];
             $this->audit(
                 $request,
@@ -90,7 +113,7 @@ final class PurchaseInvoiceSubmissionAction
                     'document_id' => (int) $submission['document_id'],
                     'filename' => (string) $submission['original_name'],
                     'via' => 'staff',
-                ],
+                ] + ($dims !== [] && empty($item['duplicate']) ? ['dimensions' => $dims] : []),
             );
         }
 
@@ -111,21 +134,50 @@ final class PurchaseInvoiceSubmissionAction
         $q = $request->getQueryParams();
         $status = isset($q['status']) && in_array((string) $q['status'], self::STATUSES, true)
             ? (string) $q['status'] : null;
-        return Json::ok($response, $this->submissions->paginate(
-            SupplierGuard::currentId($request),
+        $supplierId = SupplierGuard::currentId($request);
+        $page = $this->submissions->paginate(
+            $supplierId,
             $status,
             (int) ($q['limit'] ?? 50),
             (int) ($q['offset'] ?? 0),
-        ));
+        );
+        $page['items'] = $this->submissionDimensions->attach($supplierId, $page['items']);
+        return Json::ok($response, $page);
     }
 
     public function get(Request $request, Response $response, array $args): Response
     {
         if ($denied = $this->deny($request, $response)) return $denied;
-        $item = $this->submissions->find((int) ($args['id'] ?? 0), SupplierGuard::currentId($request));
+        $item = $this->findWithDimensions((int) ($args['id'] ?? 0), SupplierGuard::currentId($request));
         return $item !== null
             ? Json::ok($response, $item)
             : Json::error($response, 'not_found', 'Podání nebylo nalezeno.', 404);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function findWithDimensions(int $id, int $supplierId): ?array
+    {
+        $item = $this->submissions->find($id, $supplierId);
+        if ($item === null) {
+            return $item;
+        }
+        return $this->submissionDimensions->attach($supplierId, [$item])[0];
+    }
+
+    /**
+     * @param list<array{submission:array<string,mixed>,duplicate:bool}> $items
+     * @return list<array{submission:array<string,mixed>,duplicate:bool}>
+     */
+    private function withDimensions(int $supplierId, array $items): array
+    {
+        if ($items === []) {
+            return $items;
+        }
+        $rows = $this->submissionDimensions->attach($supplierId, array_column($items, 'submission'));
+        foreach ($items as $i => $item) {
+            $items[$i]['submission'] = $rows[$i];
+        }
+        return $items;
     }
 
     public function extract(Request $request, Response $response, array $args): Response
@@ -152,7 +204,7 @@ final class PurchaseInvoiceSubmissionAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         $this->audit($request, 'purchase_invoice_submission.processed', $id, $result);
-        return Json::ok($response, $this->submissions->find($id, $supplierId));
+        return Json::ok($response, $this->findWithDimensions($id, $supplierId));
     }
 
     public function needsInformation(Request $request, Response $response, array $args): Response
@@ -244,7 +296,7 @@ final class PurchaseInvoiceSubmissionAction
             : $this->submissions->reject($id, $supplierId, $reason);
         if (!$changed) return Json::error($response, 'invalid_status', 'Stav podání se mezitím změnil.', 409);
         $this->audit($request, 'purchase_invoice_submission.' . $status, $id, ['reason' => $reason]);
-        return Json::ok($response, $this->submissions->find($id, $supplierId));
+        return Json::ok($response, $this->findWithDimensions($id, $supplierId));
     }
 
     private function deny(Request $request, Response $response, bool $write = false): ?Response
