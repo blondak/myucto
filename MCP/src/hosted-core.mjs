@@ -1,6 +1,7 @@
 import {
   ApiError, HOSTED_MAX_FILE_BYTES, MyUctoClient, ReadOnlyError,
 } from './client.mjs';
+import { validateToolArguments } from './tool-args.mjs';
 import { toolResult } from './tool-result.mjs';
 import { TOOLS, TOOLS_BY_NAME } from './tools.mjs';
 import { VERSION } from './version.mjs';
@@ -88,7 +89,8 @@ export async function runHosted(input, fetcher) {
       if (lockedSupplierId !== null && !withoutCompany.has(tool.name) && supplierId !== lockedSupplierId) {
         throw new Error('Tato doména je omezená na jinou firmu.');
       }
-      const { supplier_id: _supplierId, ...toolArguments } = args;
+      const { supplier_id: _supplierId, ...rawArguments } = args;
+      const toolArguments = validateToolArguments(tool, rawArguments);
 
       const client = new MyUctoClient({
         baseUrl: input.apiUrl,

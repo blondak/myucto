@@ -54,6 +54,22 @@ export async function confirmed(c, a, tool, { path, action, label }) {
 }
 
 /**
+ * Jeden segment cesty API z hodnoty argumentu nástroje.
+ *
+ * Druhá pojistka za validací argumentů ({@see ./tool-args.mjs}): `new URL()`
+ * vyhodnocuje tečkové segmenty, takže ID „../../invoices/123" by z nástroje pro
+ * jeden zdroj udělalo požadavek na úplně jiný. Lomítka a další oddělovače se
+ * proto kódují a samotné `.`/`..` ani prázdná hodnota se nepřipouští.
+ */
+export function seg(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (text === '' || text === '.' || text === '..') {
+    throw new Error(`Neplatná hodnota v cestě požadavku: "${text}".`);
+  }
+  return encodeURIComponent(text);
+}
+
+/**
  * Tělo požadavku jen z předaných parametrů.
  *
  * Zdroje e-shopu a skladu dělají partial update (chybějící klíč = beze změny),

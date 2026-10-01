@@ -84,6 +84,38 @@ final class McpMultipartParserTest extends TestCase
         self::assertSame([], glob($this->tmpDir . DIRECTORY_SEPARATOR . '*') ?: []);
     }
 
+    public function testExtensionMustMatchDeclaredType(): void
+    {
+        $rejected = [
+            ['x.html', 'text/plain'],
+            ['x.svg', 'image/png'],
+            ['faktura.pdf', 'image/png'],
+            ['obrazek.png', 'application/pdf'],
+            ['bez-pripony', 'application/pdf'],
+            ['skript.php', 'text/plain'],
+        ];
+        foreach ($rejected as [$filename, $type]) {
+            $body = $this->body([
+                ['name="a"', null, '1'],
+                ['name="file"; filename="' . $filename . '"', $type, 'obsah'],
+            ]);
+            try {
+                (new McpMultipartParser())->parse($body, $this->type(), $this->tmpDir);
+                self::fail($filename . ' jako ' . $type . ' neměl projít.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(415, $e->getCode(), $filename);
+            }
+        }
+        self::assertSame([], glob($this->tmpDir . DIRECTORY_SEPARATOR . '*') ?: []);
+
+        $accepted = [['data.csv', 'text/plain'], ['FAKTURA.PDF', 'application/pdf'], ['doklad.isdocx', 'application/zip']];
+        foreach ($accepted as [$filename, $type]) {
+            $body = $this->body([['name="file"; filename="' . $filename . '"', $type, 'obsah']]);
+            [, $files] = (new McpMultipartParser())->parse($body, $this->type(), $this->tmpDir);
+            self::assertSame($filename, $files['file']->getClientFilename());
+        }
+    }
+
     public function testRejectsOversizedFileAndCleansUpEarlierParts(): void
     {
         $body = $this->body([

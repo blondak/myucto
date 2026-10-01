@@ -17,6 +17,7 @@ use Slim\Psr7\UploadedFile;
  * {@see UploadedFile}, které si akce přesune `moveTo()` jako obvykle.
  *
  * Je přísnější než PHP: nepustí soubor mimo {@see McpFileLimits::ALLOWED_UPLOAD_TYPES},
+ * s příponou, která deklarovanému typu neodpovídá ({@see McpFileLimits::UPLOAD_EXTENSION_TYPES}),
  * větší než {@see McpFileLimits::MAX_FILE_BYTES}, ani název s cestou.
  * Výjimka nese HTTP status v kódu (400 / 413 / 415).
  */
@@ -130,6 +131,9 @@ final class McpMultipartParser
         $type = strtolower(trim(explode(';', $headers['content-type'] ?? '')[0]));
         if (!in_array($type, McpFileLimits::ALLOWED_UPLOAD_TYPES, true)) {
             throw new \InvalidArgumentException('Typ souboru „' . $type . '" nelze přes MCP nahrát.', 415);
+        }
+        if (!McpFileLimits::uploadTypeMatchesFilename($filename, $type)) {
+            throw new \InvalidArgumentException('Přípona souboru „' . $filename . '" neodpovídá typu „' . $type . '".', 415);
         }
         $size = strlen($content);
         if ($size === 0) {

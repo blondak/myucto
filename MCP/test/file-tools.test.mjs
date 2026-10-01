@@ -300,6 +300,17 @@ test('povolené typy a stropy souhlasí s mostem v PHP', () => {
       for (const mime of mimes) assert.ok(allowed.has(mime), `${ext}: ${mime} most v PHP nepustí`);
     }
   }
+  // Přípony: most v PHP váže typ na příponu, takže mapy musí souhlasit oběma směry.
+  const union = {};
+  for (const types of [DOCUMENT_TYPES, INVOICE_ATTACHMENT_TYPES, PRODUCT_MEDIA_TYPES, PURCHASE_PDF_TYPES, STRUCTURED_IMPORT_TYPES]) {
+    for (const [ext, mimes] of Object.entries(types)) union[ext] = [...new Set([...(union[ext] ?? []), ...mimes])].sort();
+  }
+  const extBlock = /UPLOAD_EXTENSION_TYPES = \[([\s\S]*?)\n {4}\];/.exec(php)[1];
+  const phpExtensions = Object.fromEntries([...extBlock.matchAll(/'([a-z0-9]+)' => \[([^\]]*)\]/g)]
+    .map((m) => [m[1], [...m[2].matchAll(/'([^']+)'/g)].map((t) => t[1]).sort()]));
+  const sortedKeys = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+  assert.deepEqual(sortedKeys(phpExtensions), sortedKeys(union));
+
   const constant = (name) => {
     const m = new RegExp(`const ${name} = (\\d+) \\* 1024 \\* 1024;`).exec(php);
     assert.ok(m, name);

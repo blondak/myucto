@@ -103,6 +103,29 @@ final class McpInternalRequestTest extends TestCase
         }
     }
 
+    /** Platí i pro NodeBridge, který jde rovnou do build() bez ManagedNodeRelay. */
+    public function testBinaryBodyOnlyForMultipartWrite(): void
+    {
+        $url = 'https://ucto.example.test/api/v1/documents';
+        $multipart = ['Content-Type' => 'multipart/form-data; boundary=x'];
+        $cases = [
+            'JSON v base64' => ['method' => 'POST', 'headers' => ['Content-Type' => 'application/json'], 'bodyBase64' => base64_encode('{"a":1}')],
+            'bez typu v base64' => ['method' => 'PUT', 'bodyBase64' => base64_encode('{"a":1}')],
+            'multipart přes GET' => ['method' => 'GET', 'headers' => $multipart, 'bodyBase64' => base64_encode('x')],
+            'multipart přes DELETE' => ['method' => 'DELETE', 'headers' => $multipart, 'bodyBase64' => base64_encode('x')],
+            'multipart jako text' => ['method' => 'POST', 'headers' => $multipart, 'body' => "--x--\r\n"],
+        ];
+        foreach ($cases as $label => $input) {
+            try {
+                $this->internal->build(['url' => $url] + $input);
+                self::fail($label . ': nemělo projít.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(400, $e->getCode(), $label);
+                self::assertSame(400, McpInternalRequest::uploadError($e)['status'], $label);
+            }
+        }
+    }
+
     public function testBinaryResponseIsBase64AndJsonStaysText(): void
     {
         $pdf = "%PDF-\x00\xFF\x80";

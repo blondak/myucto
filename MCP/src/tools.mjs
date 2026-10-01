@@ -42,7 +42,7 @@ import {
 } from './invoice-tools.mjs';
 import { PURCHASE_TOOLS } from './purchase-tools.mjs';
 import { OTHER_ITEM_TOOLS } from './other-item-tools.mjs';
-import { CONFIRM, changed, confirmed, merged, requireConfirm } from './tool-shared.mjs';
+import { CONFIRM, changed, confirmed, merged, requireConfirm, seg } from './tool-shared.mjs';
 import { FILE_TOOLS } from './file-tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -220,13 +220,13 @@ async function resolveHourlyRate(client, { projectId, clientId }, tool) {
   const source = [];
 
   if (projectId) {
-    const project = await client.get(`/projects/${projectId}`, null, tool);
+    const project = await client.get(`/projects/${seg(projectId)}`, null, tool);
     const rate = Number(project?.hourly_rate ?? 0);
     if (rate > 0) return { rate, from: `zakázka „${project.name ?? projectId}"` };
     source.push('zakázka nemá sazbu');
   }
   if (clientId) {
-    const c = await client.get(`/clients/${clientId}`, null, tool);
+    const c = await client.get(`/clients/${seg(clientId)}`, null, tool);
     const rate = Number(c?.hourly_rate ?? 0);
     if (rate > 0) return { rate, from: `odběratel „${c.company_name ?? clientId}"` };
     source.push('odběratel nemá sazbu');
@@ -361,7 +361,7 @@ export const invoiceLines = (invoice) => (invoice?.items ?? []).filter((item) =>
 
 /** Načte doklad a ověří, že je to koncept; vystavený se opravuje jinak. */
 export async function loadDraftInvoice(c, invoiceId, tool) {
-  const invoice = await c.get(`/invoices/${invoiceId}`, null, tool);
+  const invoice = await c.get(`/invoices/${seg(invoiceId)}`, null, tool);
   if (invoice?.status !== 'draft') {
     throw new Error(
       `Faktura #${invoiceId}${invoice?.varsymbol ? ` (${invoice.varsymbol})` : ''} není koncept `
@@ -566,7 +566,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
       description: descriptions.get,
       inputSchema: schema({ id: idField }, ['id']),
       write: false,
-      run: (c, a, tool) => c.get(`${path}/${a.id}`, null, tool),
+      run: (c, a, tool) => c.get(`${path}/${seg(a.id)}`, null, tool),
     },
     {
       name: names.create,
@@ -582,7 +582,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
       description: descriptions.update,
       inputSchema: schema({ id: idField, ...fields }, ['id']),
       write: true,
-      run: (c, a, tool) => c.put(`${path}/${a.id}`, changed(a, Object.keys(fields)), tool),
+      run: (c, a, tool) => c.put(`${path}/${seg(a.id)}`, changed(a, Object.keys(fields)), tool),
     },
     {
       name: names.delete,
@@ -592,7 +592,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
       write: true,
       destructive: true,
       run: async (c, a, tool) => {
-        const target = `${path}/${a.id}`;
+        const target = `${path}/${seg(a.id)}`;
         const was = await confirmed(c, a, tool, {
           path: target,
           action: descriptions.deleteAction,
@@ -705,7 +705,7 @@ export const TOOLS = [
       + 'sjednaná měsíční hrubá mzda v haléřích; `terms` obsahují její historické podmínky.',
     inputSchema: schema({ employee_id: int('ID zaměstnance.') }, ['employee_id']),
     write: false,
-    run: (c, a, tool) => c.get(`/payroll/people/${a.employee_id}`, null, tool),
+    run: (c, a, tool) => c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool),
   },
   {
     name: 'change_payroll_salary',
@@ -727,7 +727,7 @@ export const TOOLS = [
     }, ['employee_id', 'employment_id', 'change_kind', 'monthly_gross_minor', 'reason']),
     write: true,
     run: async (c, a, tool) => {
-      const detail = await c.get(`/payroll/people/${a.employee_id}`, null, tool);
+      const detail = await c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool);
       const employment = payrollEmploymentFrom(detail, a.employment_id);
       const body = {
         row_version: employment.row_version,
@@ -736,12 +736,12 @@ export const TOOLS = [
       };
       if (a.change_kind === 'new_terms') {
         if (!a.effective_from) throw new Error('Pro změnu mzdy je povinné effective_from.');
-        return c.put(`/payroll/employments/${a.employment_id}/terms`, {
+        return c.put(`/payroll/employments/${seg(a.employment_id)}/terms`, {
           ...body,
           effective_from: a.effective_from,
         }, tool);
       }
-      return c.patch(`/payroll/employments/${a.employment_id}/terms/current`, body, tool);
+      return c.patch(`/payroll/employments/${seg(a.employment_id)}/terms/current`, body, tool);
     },
   },
   {
@@ -830,7 +830,7 @@ export const TOOLS = [
       external_id: str('Volitelný idempotentní identifikátor externího systému.'),
     }, ['id', 'row_version', 'employee_id', 'employment_id', 'component_id', 'period', 'amount_minor']),
     write: true,
-    run: (c, a, tool) => c.put(`/payroll/inputs/${a.id}`, {
+    run: (c, a, tool) => c.put(`/payroll/inputs/${seg(a.id)}`, {
       row_version: a.row_version,
       employee_id: a.employee_id,
       employment_id: a.employment_id,
@@ -886,7 +886,7 @@ export const TOOLS = [
         if (!revisionId) throw new Error(`Pro období ${a.period} není dostupná vypočtená revize mzdy.`);
       }
       const result = await c.get(
-        `/payroll/revisions/${revisionId}/net-results/${a.employee_id}`,
+        `/payroll/revisions/${seg(revisionId)}/net-results/${seg(a.employee_id)}`,
         null,
         tool,
       );
@@ -1041,7 +1041,7 @@ export const TOOLS = [
     description: 'Kompletní karta odběratele včetně fakturačních údajů a splatnosti.',
     inputSchema: schema({ id: int('ID odběratele.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/clients/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/clients/${seg(a.id)}`, null, tool),
   },
   {
     name: 'lookup_company_in_ares',
@@ -1199,7 +1199,7 @@ export const TOOLS = [
     }, ['id']),
     write: true,
     run: async (c, a, tool) => {
-      const current = await c.get(`/clients/${a.id}`, null, tool);
+      const current = await c.get(`/clients/${seg(a.id)}`, null, tool);
       if (!current?.id) throw new Error(`Odběratel #${a.id} nenalezen.`);
 
       let ares = null;
@@ -1247,7 +1247,7 @@ export const TOOLS = [
       if (a.payment_due_days !== undefined) payload.payment_due_days = Number(a.payment_due_days);
       else if (current.payment_due_days !== undefined) payload.payment_due_days = current.payment_due_days;
 
-      const updated = await c.put(`/clients/${a.id}`, payload, tool);
+      const updated = await c.put(`/clients/${seg(a.id)}`, payload, tool);
       return { ares: aresNote, client: updated };
     },
   },
@@ -1346,7 +1346,7 @@ export const TOOLS = [
     description: 'Hlavička, položky, rozpis DPH, stav úhrady a historie dokladu.',
     inputSchema: schema({ id: int('ID faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}`, null, tool),
   },
   {
     name: 'list_invoice_payments',
@@ -1354,7 +1354,7 @@ export const TOOLS = [
     description: 'Zaevidované úhrady konkrétního dokladu (částka, datum, zdroj).',
     inputSchema: schema({ id: int('ID faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/payments`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/payments`, null, tool),
   },
   {
     name: 'create_invoice',
@@ -1416,7 +1416,7 @@ export const TOOLS = [
       + 'Vystavuj až po potvrzení uživatelem.',
     inputSchema: schema({ id: int('ID konceptu faktury.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/issue`, {}, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/issue`, {}, tool),
   },
   {
     name: 'update_invoice',
@@ -1481,7 +1481,7 @@ export const TOOLS = [
       );
       const lines = invoiceLines(invoice).map((item) => lineForPut(item, { rederive }));
 
-      const saved = await c.put(`/invoices/${invoiceId}`, draftPayload(invoice, changes, lines), tool);
+      const saved = await c.put(`/invoices/${seg(invoiceId)}`, draftPayload(invoice, changes, lines), tool);
       return draftResult(invoiceId, { changed: changes }, saved);
     },
   },
@@ -1534,7 +1534,7 @@ export const TOOLS = [
       // Pořadí se počítá znovu, ať nová položka nesdílí `order_index` s tou, za kterou se vložila.
       lines.forEach((line, index) => { line.order_index = index; });
 
-      const saved = await c.put(`/invoices/${invoiceId}`, draftPayload(invoice, {}, lines), tool);
+      const saved = await c.put(`/invoices/${seg(invoiceId)}`, draftPayload(invoice, {}, lines), tool);
       return draftResult(invoiceId, { added: { ...added, row: at + 1 } }, saved);
     },
   },
@@ -1590,7 +1590,7 @@ export const TOOLS = [
         line.duration_minutes = Math.round(Number(changes.quantity) * 60);
       }
 
-      const saved = await c.put(`/invoices/${a.invoice_id}`, draftPayload(invoice, {}, lines), tool);
+      const saved = await c.put(`/invoices/${seg(a.invoice_id)}`, draftPayload(invoice, {}, lines), tool);
       return draftResult(Number(a.invoice_id), {
         row: index + 1,
         before: { description: before.description, quantity: before.quantity, unit: before.unit,
@@ -1627,7 +1627,7 @@ export const TOOLS = [
         `${index + 1}. ${target.description} (${target.quantity} ${target.unit ?? ''} × ${target.unit_price_without_vat})`);
 
       const lines = items.filter((_, i) => i !== index).map((item) => lineForPut(item));
-      const saved = await c.put(`/invoices/${a.invoice_id}`, draftPayload(invoice, {}, lines), tool);
+      const saved = await c.put(`/invoices/${seg(a.invoice_id)}`, draftPayload(invoice, {}, lines), tool);
       return draftResult(Number(a.invoice_id), { removed: { row: index + 1, ...lineForPut(target) } }, saved);
     },
   },
@@ -1646,7 +1646,7 @@ export const TOOLS = [
       note: str('Text doplněný do těla e-mailu.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/send`, {
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/send`, {
       to: a.to, cc: a.cc, bcc: a.bcc, subject_override: a.subject_override, note: a.note,
     }, tool),
   },
@@ -1661,7 +1661,7 @@ export const TOOLS = [
       paid_at: date('Datum úhrady (RRRR-MM-DD). Výchozí dnes.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/mark-paid`, { paid_at: a.paid_at }, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/mark-paid`, { paid_at: a.paid_at }, tool),
   },
   {
     name: 'send_invoice_reminder',
@@ -1671,7 +1671,7 @@ export const TOOLS = [
       + 'jde o nevratné odeslání e-mailu zákazníkovi — jen na výslovný pokyn.',
     inputSchema: schema({ id: int('ID faktury.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/reminder`, {}, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/reminder`, {}, tool),
   },
   // ──────────────────────────────────────────────────────────────────────────
   // Výkazy práce a materiálu
@@ -1702,7 +1702,7 @@ export const TOOLS = [
       + 'a souhrnu nezaplacených dokladů. Použij před úpravou zakázky.',
     inputSchema: schema({ id: int('ID zakázky.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/projects/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/projects/${seg(a.id)}`, null, tool),
   },
   {
     name: 'project_stats',
@@ -1728,7 +1728,7 @@ export const TOOLS = [
     }),
     write: false,
     run: (c, a, tool) => a.id
-      ? c.get(`/projects/${a.id}/profit`, { date_from: a.date_from, date_to: a.date_to }, tool)
+      ? c.get(`/projects/${seg(a.id)}/profit`, { date_from: a.date_from, date_to: a.date_to }, tool)
       : c.get('/projects/profitability', {
         date_from: a.date_from,
         date_to: a.date_to,
@@ -1755,8 +1755,8 @@ export const TOOLS = [
         return c.post('/projects', changed(a, PROJECT_FIELDS), tool);
       }
 
-      const current = await c.get(`/projects/${a.id}`, null, tool);
-      return c.put(`/projects/${a.id}`, merged(current, a, PROJECT_FIELDS), tool);
+      const current = await c.get(`/projects/${seg(a.id)}`, null, tool);
+      return c.put(`/projects/${seg(a.id)}`, merged(current, a, PROJECT_FIELDS), tool);
     },
   },
   {
@@ -1770,11 +1770,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const project = await confirmed(c, a, tool, {
-        path: `/projects/${a.id}`,
+        path: `/projects/${seg(a.id)}`,
         action: 'Archivovat se má zakázka',
         label: (row) => nameOf(row, a.id),
       });
-      return { archived: project, result: await c.post(`/projects/${a.id}/archive`, {}, tool) };
+      return { archived: project, result: await c.post(`/projects/${seg(a.id)}/archive`, {}, tool) };
     },
   },
   {
@@ -1788,11 +1788,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const project = await confirmed(c, a, tool, {
-        path: `/projects/${a.id}`,
+        path: `/projects/${seg(a.id)}`,
         action: 'Smazat se má zakázka',
         label: (row) => nameOf(row, a.id),
       });
-      return { deleted: project, result: await c.del(`/projects/${a.id}`, tool) };
+      return { deleted: project, result: await c.del(`/projects/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -1803,7 +1803,7 @@ export const TOOLS = [
       + 'řádky materiálu a součty. Vrátí `null`, pokud faktura výkaz zatím nemá.',
     inputSchema: schema({ invoice_id: int('ID faktury.') }, ['invoice_id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.invoice_id}/work-report`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.invoice_id)}/work-report`, null, tool),
   },
   {
     name: 'add_work_report_entry',
@@ -1836,8 +1836,8 @@ export const TOOLS = [
       const invoiceId = target.invoiceId;
 
       const [invoice, report] = await Promise.all([
-        c.get(`/invoices/${invoiceId}`, null, tool),
-        c.get(`/invoices/${invoiceId}/work-report`, null, tool),
+        c.get(`/invoices/${seg(invoiceId)}`, null, tool),
+        c.get(`/invoices/${seg(invoiceId)}/work-report`, null, tool),
       ]);
 
       const projectId = report?.project_id ?? invoice?.project_id ?? target.projectId ?? null;
@@ -1873,7 +1873,7 @@ export const TOOLS = [
         rate,
       });
 
-      const saved = await c.put(`/invoices/${invoiceId}/work-report`, {
+      const saved = await c.put(`/invoices/${seg(invoiceId)}/work-report`, {
         project_id: projectId,
         title: report?.title || defaultReportTitle(invoice),
         vat_rate_id: report?.vat_rate_id ?? null,
@@ -1917,8 +1917,8 @@ export const TOOLS = [
       const invoiceId = target.invoiceId;
 
       const [invoice, report] = await Promise.all([
-        c.get(`/invoices/${invoiceId}`, null, tool),
-        c.get(`/invoices/${invoiceId}/work-report`, null, tool),
+        c.get(`/invoices/${seg(invoiceId)}`, null, tool),
+        c.get(`/invoices/${seg(invoiceId)}/work-report`, null, tool),
       ]);
 
       const vatRateId = a.vat_rate_id ?? report?.material_vat_rate_id ?? null;
@@ -1943,7 +1943,7 @@ export const TOOLS = [
         unit_price: Number(a.unit_price ?? 0),
       });
 
-      const saved = await c.put(`/invoices/${invoiceId}/work-report/materials`, {
+      const saved = await c.put(`/invoices/${seg(invoiceId)}/work-report/materials`, {
         project_id: report?.project_id ?? invoice?.project_id ?? target.projectId ?? null,
         material_title: report?.material_title || 'Materiál',
         material_vat_rate_id: vatRateId,
@@ -1966,8 +1966,8 @@ export const TOOLS = [
     write: true,
     run: async (c, a, tool) => {
       const [invoice, report] = await Promise.all([
-        c.get(`/invoices/${a.invoice_id}`, null, tool),
-        c.get(`/invoices/${a.invoice_id}/work-report`, null, tool),
+        c.get(`/invoices/${seg(a.invoice_id)}`, null, tool),
+        c.get(`/invoices/${seg(a.invoice_id)}/work-report`, null, tool),
       ]);
 
       const items = report?.items ?? [];
@@ -1985,7 +1985,7 @@ export const TOOLS = [
           rate: Number(it.rate),
         }));
 
-      const saved = await c.put(`/invoices/${a.invoice_id}/work-report`, {
+      const saved = await c.put(`/invoices/${seg(a.invoice_id)}/work-report`, {
         project_id: report?.project_id ?? invoice?.project_id ?? null,
         title: report?.title || defaultReportTitle(invoice),
         vat_rate_id: report?.vat_rate_id ?? null,
@@ -2309,7 +2309,7 @@ export const TOOLS = [
     description: 'Hlavička, položky, rozpis DPH a stav úhrady přijaté faktury.',
     inputSchema: schema({ id: int('ID přijaté faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/purchase-invoices/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/purchase-invoices/${seg(a.id)}`, null, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -2363,9 +2363,9 @@ export const TOOLS = [
     }, ['id']),
     write: false,
     run: async (c, a, tool) => {
-      const document = await c.get(`/documents/${a.id}`, null, tool);
+      const document = await c.get(`/documents/${seg(a.id)}`, null, tool);
       if (!a.include_text) return document;
-      const extractedText = await c.get(`/documents/${a.id}/text`, {
+      const extractedText = await c.get(`/documents/${seg(a.id)}/text`, {
         offset: a.text_offset,
         max_chars: a.text_max_chars,
       }, tool);
@@ -2385,7 +2385,7 @@ export const TOOLS = [
       entity_id: int('ID záznamu.'),
     }, ['entity_type', 'entity_id']),
     write: false,
-    run: (c, a, tool) => c.get(`/documents/by-entity/${a.entity_type}/${a.entity_id}`, null, tool),
+    run: (c, a, tool) => c.get(`/documents/by-entity/${seg(a.entity_type)}/${seg(a.entity_id)}`, null, tool),
   },
   {
     name: 'update_document',
@@ -2400,7 +2400,7 @@ export const TOOLS = [
       tags: { type: 'array', items: { type: 'string' }, description: 'Kompletní sada tagů.' },
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.patch(`/documents/${a.id}`, changed(a, ['title', 'description', 'tags']), tool),
+    run: (c, a, tool) => c.patch(`/documents/${seg(a.id)}`, changed(a, ['title', 'description', 'tags']), tool),
   },
   {
     name: 'link_document',
@@ -2416,7 +2416,7 @@ export const TOOLS = [
       entity_id: int('ID záznamu.'),
     }, ['id', 'entity_type', 'entity_id']),
     write: true,
-    run: (c, a, tool) => c.post(`/documents/${a.id}/links`, {
+    run: (c, a, tool) => c.post(`/documents/${seg(a.id)}/links`, {
       entity_type: a.entity_type,
       entity_id: a.entity_id,
     }, tool),
@@ -2439,13 +2439,13 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const document = await confirmed(c, a, tool, {
-        path: `/documents/${a.id}`,
+        path: `/documents/${seg(a.id)}`,
         action: 'Odpojit se má dokument',
         label: (row) => `${nameOf(row, a.id)} od ${a.entity_type} #${a.entity_id}`,
       });
       return {
         unlinked: document,
-        result: await c.del(`/documents/${a.id}/links`, tool, {
+        result: await c.del(`/documents/${seg(a.id)}/links`, tool, {
           entity_type: a.entity_type,
           entity_id: a.entity_id,
         }),
@@ -2466,7 +2466,7 @@ export const TOOLS = [
     }),
     write: false,
     run: (c, a, tool) => a.id
-      ? c.get(`/logbook/cars/${a.id}`, null, tool)
+      ? c.get(`/logbook/cars/${seg(a.id)}`, null, tool)
       : c.get('/logbook/cars', { include_archived: a.include_archived ? 1 : undefined }, tool),
   },
   {
@@ -2482,8 +2482,8 @@ export const TOOLS = [
         if (!String(a.registration ?? '').trim()) throw new Error('Pro nové vozidlo chybí registration.');
         return c.post('/logbook/cars', changed(a, LOGBOOK_CAR_FIELDS), tool);
       }
-      const current = await c.get(`/logbook/cars/${a.id}`, null, tool);
-      return c.put(`/logbook/cars/${a.id}`, merged(current, a, LOGBOOK_CAR_FIELDS), tool);
+      const current = await c.get(`/logbook/cars/${seg(a.id)}`, null, tool);
+      return c.put(`/logbook/cars/${seg(a.id)}`, merged(current, a, LOGBOOK_CAR_FIELDS), tool);
     },
   },
   {
@@ -2497,11 +2497,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const car = await confirmed(c, a, tool, {
-        path: `/logbook/cars/${a.id}`,
+        path: `/logbook/cars/${seg(a.id)}`,
         action: 'Smazat se má vozidlo',
         label: (row) => row?.registration ?? nameOf(row, a.id),
       });
-      return { deleted: car, result: await c.del(`/logbook/cars/${a.id}`, tool) };
+      return { deleted: car, result: await c.del(`/logbook/cars/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -2533,7 +2533,7 @@ export const TOOLS = [
     }),
     write: false,
     run: (c, a, tool) => a.id
-      ? c.get(`/logbook/trips/${a.id}`, null, tool)
+      ? c.get(`/logbook/trips/${seg(a.id)}`, null, tool)
       : c.get('/logbook/trips', {
         car_id: a.car_id,
         category_id: a.category_id,
@@ -2565,8 +2565,8 @@ export const TOOLS = [
         }
         return c.post('/logbook/trips', changed(a, LOGBOOK_TRIP_FIELDS), tool);
       }
-      const current = await c.get(`/logbook/trips/${a.id}`, null, tool);
-      return c.put(`/logbook/trips/${a.id}`, merged(current, a, LOGBOOK_TRIP_FIELDS), tool);
+      const current = await c.get(`/logbook/trips/${seg(a.id)}`, null, tool);
+      return c.put(`/logbook/trips/${seg(a.id)}`, merged(current, a, LOGBOOK_TRIP_FIELDS), tool);
     },
   },
   {
@@ -2578,11 +2578,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const trip = await confirmed(c, a, tool, {
-        path: `/logbook/trips/${a.id}`,
+        path: `/logbook/trips/${seg(a.id)}`,
         action: 'Smazat se má jízda',
         label: (row) => `${row?.trip_date ?? '?'}: ${row?.origin ?? '?'} → ${row?.destination ?? '?'}`,
       });
-      return { deleted: trip, result: await c.del(`/logbook/trips/${a.id}`, tool) };
+      return { deleted: trip, result: await c.del(`/logbook/trips/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -2603,7 +2603,7 @@ export const TOOLS = [
     }),
     write: false,
     run: (c, a, tool) => a.id
-      ? c.get(`/logbook/fuelings/${a.id}`, null, tool)
+      ? c.get(`/logbook/fuelings/${seg(a.id)}`, null, tool)
       : c.get('/logbook/fuelings', {
         car_id: a.car_id,
         vendor_id: a.vendor_id,
@@ -2633,8 +2633,8 @@ export const TOOLS = [
         if (missing.length > 0) throw new Error(`Pro nové tankování chybí: ${missing.join(', ')}.`);
         return c.post('/logbook/fuelings', changed(a, LOGBOOK_FUELING_FIELDS), tool);
       }
-      const current = await c.get(`/logbook/fuelings/${a.id}`, null, tool);
-      return c.put(`/logbook/fuelings/${a.id}`, merged(current, a, LOGBOOK_FUELING_FIELDS), tool);
+      const current = await c.get(`/logbook/fuelings/${seg(a.id)}`, null, tool);
+      return c.put(`/logbook/fuelings/${seg(a.id)}`, merged(current, a, LOGBOOK_FUELING_FIELDS), tool);
     },
   },
   {
@@ -2646,11 +2646,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const fueling = await confirmed(c, a, tool, {
-        path: `/logbook/fuelings/${a.id}`,
+        path: `/logbook/fuelings/${seg(a.id)}`,
         action: 'Smazat se má tankování',
         label: (row) => `${row?.fueled_date ?? '?'}: ${row?.amount_with_vat ?? '?'} ${row?.currency ?? ''}`,
       });
-      return { deleted: fueling, result: await c.del(`/logbook/fuelings/${a.id}`, tool) };
+      return { deleted: fueling, result: await c.del(`/logbook/fuelings/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -2885,7 +2885,7 @@ export const TOOLS = [
       ...PAGING,
     }, ['account_id', 'from', 'to']),
     write: false,
-    run: (c, a, tool) => c.get(`/accounting/reports/account-statement/${a.account_id}`, {
+    run: (c, a, tool) => c.get(`/accounting/reports/account-statement/${seg(a.account_id)}`, {
       from: a.from, to: a.to, page: a.page, per_page: a.per_page,
       after_closing: a.after_closing ? 1 : undefined,
     }, tool),
@@ -2972,7 +2972,7 @@ export const TOOLS = [
     description: 'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad.',
     inputSchema: schema({ id: int('ID účetního zápisu.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/accounting/journal/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/accounting/journal/${seg(a.id)}`, null, tool),
   },
   {
     name: 'cash_journal',
@@ -3080,7 +3080,7 @@ export const TOOLS = [
       + '`update_product`; e-shopový obsah přes `update_product_card`.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/products/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/products/${seg(a.id)}`, null, tool),
   },
   {
     name: 'get_catalog_facets',
@@ -3108,7 +3108,7 @@ export const TOOLS = [
     description: 'Načte průběh a souhrnný výsledek katalogové úlohy v aktuální firmě. Dostupnost závisí na oprávnění pro konkrétní druh úlohy.',
     inputSchema: schema({ id: int('ID úlohy.', { minimum: 1 }) }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/jobs/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/jobs/${seg(a.id)}`, null, tool),
   },
   {
     name: 'get_products_batch',
@@ -3211,7 +3211,7 @@ export const TOOLS = [
       note: str('Interní poznámka.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/items/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/stock/items/${seg(a.id)}`, changed(a, [
       'name', 'sku', 'item_type', 'unit', 'ean', 'vat_rate_id',
       'sale_price_without_vat', 'min_qty', 'is_active', 'note',
     ]), tool),
@@ -3229,11 +3229,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/items/${a.id}`,
+        path: `/stock/items/${seg(a.id)}`,
         action: 'Smazat se má skladová karta',
         label: (row) => nameOf(row, a.id),
       });
-      return { deleted: was, result: await c.del(`/stock/items/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/stock/items/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -3250,7 +3250,7 @@ export const TOOLS = [
       ...WINDOW,
     }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/items/${a.id}/movements`, {
+    run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/movements`, {
       warehouse_id: a.warehouse_id, from: a.from, to: a.to, limit: a.limit, offset: a.offset,
     }, tool),
   },
@@ -3326,7 +3326,7 @@ export const TOOLS = [
       ),
     }, ['id', 'row_version']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/products/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/eshop/products/${seg(a.id)}`, changed(a, [
       'row_version',
       'manufacturer_id', 'warranty_months', 'delivery_days', 'weight_g',
       'export_eshop', 'is_stocked', 'pricing_base',
@@ -3341,7 +3341,7 @@ export const TOOLS = [
       + 'textů, protože `update_product_card` sekci `i18n` nahrazuje celou.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/i18n`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/products/${seg(a.id)}/i18n`, null, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3355,7 +3355,7 @@ export const TOOLS = [
       + 'zaokrouhlení a spočítaná cena.',
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/prices`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/products/${seg(a.id)}/prices`, null, tool),
   },
   {
     name: 'get_product_prices_batch',
@@ -3402,7 +3402,7 @@ export const TOOLS = [
       prices: PRICE_ROWS,
     }, ['id', 'prices']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/prices`, { prices: a.prices }, tool),
+    run: (c, a, tool) => c.put(`/eshop/products/${seg(a.id)}/prices`, { prices: a.prices }, tool),
   },
   {
     name: 'recompute_product_prices',
@@ -3413,7 +3413,7 @@ export const TOOLS = [
       + 'jinou nákupní cenu. Ceny s ručním přepisem (`is_manual_override`) zůstanou.',
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/eshop/products/${a.id}/prices/recompute`, {}, tool),
+    run: (c, a, tool) => c.post(`/eshop/products/${seg(a.id)}/prices/recompute`, {}, tool),
   },
   {
     name: 'get_product_vendors',
@@ -3423,7 +3423,7 @@ export const TOOLS = [
       + 'a jejich hlášeným stavem skladem.',
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/vendors`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/products/${seg(a.id)}/vendors`, null, tool),
   },
   {
     name: 'set_product_vendors',
@@ -3439,7 +3439,7 @@ export const TOOLS = [
       vendors: VENDOR_ROWS,
     }, ['id', 'vendors']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/vendors`, { vendors: a.vendors }, tool),
+    run: (c, a, tool) => c.put(`/eshop/products/${seg(a.id)}/vendors`, { vendors: a.vendors }, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3459,7 +3459,7 @@ export const TOOLS = [
       + 'jednotka. `in_use: true` = balení už nese řádek faktury, takže mu nejde změnit poměr.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/items/${a.id}/packaging`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/packaging`, null, tool),
   },
   {
     name: 'get_product_customer_prices',
@@ -3471,7 +3471,7 @@ export const TOOLS = [
       + 's akcí) spočítá `quote_product_prices`.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/items/${a.id}/customer-prices`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/customer-prices`, null, tool),
   },
   {
     name: 'get_product_price_levels',
@@ -3483,7 +3483,7 @@ export const TOOLS = [
       + 'pro množství 1 a bez akce.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/items/${a.id}/price-levels`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/price-levels`, null, tool),
   },
   {
     name: 'quote_product_prices',
@@ -3544,9 +3544,9 @@ export const TOOLS = [
     }, ['id']),
     write: false,
     run: async (c, a, tool) => {
-      const level = await c.get(`/eshop/price-levels/${a.id}`, null, tool);
+      const level = await c.get(`/eshop/price-levels/${seg(a.id)}`, null, tool);
       if (a.include_rules === false) return level;
-      return { ...level, rules: await c.get(`/eshop/price-levels/${a.id}/rules`, null, tool) };
+      return { ...level, rules: await c.get(`/eshop/price-levels/${seg(a.id)}/rules`, null, tool) };
     },
   },
   {
@@ -3593,7 +3593,7 @@ export const TOOLS = [
       'Obrázky a přílohy karty zboží s jejich id, pořadím a příznakem hlavního obrázku.',
     inputSchema: schema({ id: int('ID zboží.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/products/${a.id}/media`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/products/${seg(a.id)}/media`, null, tool),
   },
   {
     name: 'update_product_media',
@@ -3611,7 +3611,7 @@ export const TOOLS = [
       is_primary: bool('Nastavit jako hlavní obrázek karty.'),
     }, ['media_id']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/media/${a.media_id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/eshop/media/${seg(a.media_id)}`, changed(a, [
       'title', 'alt_text', 'display_order', 'export_eshop', 'is_primary',
     ]), tool),
   },
@@ -3631,7 +3631,7 @@ export const TOOLS = [
       },
     }, ['id', 'order']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/products/${a.id}/media/reorder`, { order: a.order }, tool),
+    run: (c, a, tool) => c.put(`/eshop/products/${seg(a.id)}/media/reorder`, { order: a.order }, tool),
   },
   {
     name: 'delete_product_media',
@@ -3649,7 +3649,7 @@ export const TOOLS = [
     run: async (c, a, tool) => {
       // Médium se maže globální cestou /eshop/media/{mid}, takže příslušnost ke
       // kartě ověřujeme sami — jinak by překlep v id smazal fotku cizímu zboží.
-      const media = rows(await c.get(`/eshop/products/${a.id}/media`, null, tool));
+      const media = rows(await c.get(`/eshop/products/${seg(a.id)}/media`, null, tool));
       const hit = media.find((m) => Number(m?.id) === Number(a.media_id));
       if (!hit) {
         throw new Error(
@@ -3658,7 +3658,7 @@ export const TOOLS = [
         );
       }
       requireConfirm(a, 'Smazat se má médium zboží', `#${hit.id} ${hit.title ?? hit.file_name ?? ''}`);
-      return { deleted: hit, result: await c.del(`/eshop/media/${a.media_id}`, tool) };
+      return { deleted: hit, result: await c.del(`/eshop/media/${seg(a.media_id)}`, tool) };
     },
   },
 
@@ -3681,7 +3681,7 @@ export const TOOLS = [
     description: 'Jedna kategorie včetně jazykových verzí.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/categories/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/categories/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_category',
@@ -3718,7 +3718,7 @@ export const TOOLS = [
       archived: bool('Archivovaná kategorie — zůstane v datech, ale nenabízí se.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/categories/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/eshop/categories/${seg(a.id)}`, changed(a, [
       'code', 'name', 'display_order', 'export_eshop', 'archived',
     ]), tool),
   },
@@ -3734,7 +3734,7 @@ export const TOOLS = [
       parent_id: int('ID nového rodiče. Vynech (nebo `null`) pro přesun do kořene.', { type: ['integer', 'null'] }),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/eshop/categories/${a.id}/move`, {
+    run: (c, a, tool) => c.post(`/eshop/categories/${seg(a.id)}/move`, {
       parent_id: a.parent_id ?? null,
     }, tool),
   },
@@ -3749,11 +3749,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/eshop/categories/${a.id}`,
+        path: `/eshop/categories/${seg(a.id)}`,
         action: 'Smazat se má kategorie',
         label: (row) => nameOf(row, a.id),
       });
-      return { deleted: was, result: await c.del(`/eshop/categories/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/eshop/categories/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -3762,7 +3762,7 @@ export const TOOLS = [
     description: 'Překlady názvu, popisu a URL kategorie po jazycích.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/categories/${a.id}/i18n`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/categories/${seg(a.id)}/i18n`, null, tool),
   },
   {
     name: 'set_category_i18n',
@@ -3784,7 +3784,7 @@ export const TOOLS = [
       ),
     }, ['id', 'translations']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/categories/${a.id}/i18n`, {
+    run: (c, a, tool) => c.put(`/eshop/categories/${seg(a.id)}/i18n`, {
       translations: a.translations,
     }, tool),
   },
@@ -3946,7 +3946,7 @@ export const TOOLS = [
       + '`id` hodnoty se dosazuje do `option_id` v sekci `attributes` nástroje `update_product_card`.',
     inputSchema: schema({ attribute_id: int('ID parametru (musí být typu `enum`).') }, ['attribute_id']),
     write: false,
-    run: (c, a, tool) => c.get(`/eshop/attributes/${a.attribute_id}/options`, null, tool),
+    run: (c, a, tool) => c.get(`/eshop/attributes/${seg(a.attribute_id)}/options`, null, tool),
   },
   {
     name: 'create_attribute_option',
@@ -3959,7 +3959,7 @@ export const TOOLS = [
       display_order: int('Pořadí v nabídce.'),
     }, ['attribute_id', 'code', 'label']),
     write: true,
-    run: (c, a, tool) => c.post(`/eshop/attributes/${a.attribute_id}/options`, changed(a, [
+    run: (c, a, tool) => c.post(`/eshop/attributes/${seg(a.attribute_id)}/options`, changed(a, [
       'code', 'label', 'display_order',
     ]), tool),
   },
@@ -3977,7 +3977,7 @@ export const TOOLS = [
       display_order: int('Pořadí v nabídce.'),
     }, ['option_id', 'code', 'label']),
     write: true,
-    run: (c, a, tool) => c.put(`/eshop/attribute-options/${a.option_id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/eshop/attribute-options/${seg(a.option_id)}`, changed(a, [
       'code', 'label', 'display_order',
     ]), tool),
   },
@@ -3998,7 +3998,7 @@ export const TOOLS = [
       // Mazací cesta je globální (/eshop/attribute-options/{oid}), takže si
       // příslušnost k parametru ověříme sami — jinak by překlep v id smazal
       // hodnotu úplně jinému parametru.
-      const options = rows(await c.get(`/eshop/attributes/${a.attribute_id}/options`, null, tool));
+      const options = rows(await c.get(`/eshop/attributes/${seg(a.attribute_id)}/options`, null, tool));
       const hit = options.find((o) => Number(o?.id) === Number(a.option_id));
       if (!hit) {
         throw new Error(
@@ -4007,7 +4007,7 @@ export const TOOLS = [
         );
       }
       requireConfirm(a, 'Smazat se má hodnota parametru', `#${hit.id} ${hit.label ?? hit.code ?? ''}`);
-      return { deleted: hit, result: await c.del(`/eshop/attribute-options/${a.option_id}`, tool) };
+      return { deleted: hit, result: await c.del(`/eshop/attribute-options/${seg(a.option_id)}`, tool) };
     },
   },
 
@@ -4030,7 +4030,7 @@ export const TOOLS = [
     description: 'Jeden sklad včetně aktuální hodnoty zásob.',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/warehouses/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/warehouses/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_warehouse',
@@ -4064,7 +4064,7 @@ export const TOOLS = [
       note: str('Poznámka.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/warehouses/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/stock/warehouses/${seg(a.id)}`, changed(a, [
       'code', 'name', 'is_default', 'is_active', 'note',
     ]), tool),
   },
@@ -4079,11 +4079,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/warehouses/${a.id}`,
+        path: `/stock/warehouses/${seg(a.id)}`,
         action: 'Smazat se má sklad',
         label: (row) => nameOf(row, a.id),
       });
-      return { deleted: was, result: await c.del(`/stock/warehouses/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/stock/warehouses/${seg(a.id)}`, tool) };
     },
   },
 
@@ -4178,7 +4178,7 @@ export const TOOLS = [
       + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali".',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/items/${a.id}/tracking`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/tracking`, null, tool),
   },
   {
     name: 'list_stock_locations',
@@ -4281,7 +4281,7 @@ export const TOOLS = [
       }, tool);
       const current = existing?.items?.[0] ?? null;
       if (current) {
-        return c.patch(`/stock/vendor-offers/${current.id}`, changed(a, fields), tool);
+        return c.patch(`/stock/vendor-offers/${seg(current.id)}`, changed(a, fields), tool);
       }
       return c.post('/stock/vendor-offers', {
         stock_item_id: a.stock_item_id,
@@ -4303,11 +4303,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/vendor-offers/${a.id}`,
+        path: `/stock/vendor-offers/${seg(a.id)}`,
         action: 'Smazat se má nabídka dodavatele',
         label: (row) => `${row?.sku ?? '?'} — ${row?.client_name ?? '?'}`,
       });
-      return { deleted: was, result: await c.del(`/stock/vendor-offers/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/stock/vendor-offers/${seg(a.id)}`, tool) };
     },
   },
 
@@ -4487,7 +4487,7 @@ export const TOOLS = [
       + 'přijaté faktury a vystavené příjemky.',
     inputSchema: schema({ id: int('ID objednávky.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/purchase-orders/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/purchase-orders/${seg(a.id)}`, null, tool),
   },
   {
     name: 'purchase_orders_create',
@@ -4571,7 +4571,7 @@ export const TOOLS = [
       ),
     }, ['id', 'vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'lines']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/purchase-orders/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/stock/purchase-orders/${seg(a.id)}`, changed(a, [
       'vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'expected_date',
       'exchange_rate', 'vendor_reference', 'note', 'internal_note', 'lines',
     ]), tool),
@@ -4588,7 +4588,7 @@ export const TOOLS = [
       + 'nepřidělí, jen vrátí objednávku beze změny.',
     inputSchema: schema({ id: int('ID rozpracované objednávky.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/send`, {}, tool),
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${seg(a.id)}/send`, {}, tool),
   },
   {
     name: 'purchase_orders_confirm',
@@ -4614,7 +4614,7 @@ export const TOOLS = [
       ),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/confirm`, changed(a, [
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${seg(a.id)}/confirm`, changed(a, [
       'expected_date', 'lines',
     ]), tool),
   },
@@ -4636,7 +4636,7 @@ export const TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const order = await c.get(`/stock/purchase-orders/${a.id}`, null, tool);
+      const order = await c.get(`/stock/purchase-orders/${seg(a.id)}`, null, tool);
       requireConfirm(
         a,
         'Uzavřít se má nedodaný zbytek objednávky',
@@ -4644,7 +4644,7 @@ export const TOOLS = [
         + `${order?.qty_ordered_total ?? '?'}, přijato ${order?.qty_received_total ?? '?'}, `
         + `neuzavřený zbytek ${order?.qty_remaining_total ?? '?'}`,
       );
-      return c.post(`/stock/purchase-orders/${a.id}/close`, { reason: a.reason }, tool);
+      return c.post(`/stock/purchase-orders/${seg(a.id)}/close`, { reason: a.reason }, tool);
     },
   },
   {
@@ -4664,14 +4664,14 @@ export const TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const order = await c.get(`/stock/purchase-orders/${a.id}`, null, tool);
+      const order = await c.get(`/stock/purchase-orders/${seg(a.id)}`, null, tool);
       requireConfirm(
         a,
         'Stornovat se má objednávka',
         `${order?.order_number ?? `#${a.id}`} (${order?.vendor_name ?? '?'}) `
         + `za ${order?.total_without_vat ?? '?'} bez DPH`,
       );
-      return c.post(`/stock/purchase-orders/${a.id}/cancel`, { reason: a.reason }, tool);
+      return c.post(`/stock/purchase-orders/${seg(a.id)}/cancel`, { reason: a.reason }, tool);
     },
   },
   {
@@ -4682,7 +4682,7 @@ export const TOOLS = [
       + 'dopočítá podle toho, co už reálně dorazilo. Zboží se tím vrátí do „na cestě".',
     inputSchema: schema({ id: int('ID uzavřené objednávky.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/stock/purchase-orders/${a.id}/reopen`, {}, tool),
+    run: (c, a, tool) => c.post(`/stock/purchase-orders/${seg(a.id)}/reopen`, {}, tool),
   },
   {
     name: 'purchase_orders_delete',
@@ -4696,11 +4696,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/purchase-orders/${a.id}`,
+        path: `/stock/purchase-orders/${seg(a.id)}`,
         action: 'Smazat se má objednávka',
         label: (row) => `${row?.order_number ?? `#${a.id}`} — ${row?.vendor_name ?? '?'}`,
       });
-      return { deleted: was, result: await c.del(`/stock/purchase-orders/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/stock/purchase-orders/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -4738,7 +4738,7 @@ export const TOOLS = [
     run: async (c, a, tool) => {
       let lines = a.lines;
       if (!Array.isArray(lines) || lines.length === 0) {
-        const proposal = await c.get(`/stock/purchase-orders/${a.id}/receipt`, null, tool);
+        const proposal = await c.get(`/stock/purchase-orders/${seg(a.id)}/receipt`, null, tool);
         lines = rows(proposal?.lines ?? [])
           .filter((l) => Number(l?.remaining_qty ?? 0) > 0)
           .map((l) => ({ purchase_order_line_id: l.purchase_order_line_id, qty: Number(l.remaining_qty) }));
@@ -4749,7 +4749,7 @@ export const TOOLS = [
           );
         }
       }
-      return c.post(`/stock/purchase-orders/${a.id}/receipt`, {
+      return c.post(`/stock/purchase-orders/${seg(a.id)}/receipt`, {
         doc_date: a.doc_date,
         warehouse_id: a.warehouse_id,
         description: a.description,
@@ -4844,7 +4844,7 @@ export const TOOLS = [
     description: 'Hlavička a řádky jednoho skladového dokladu včetně ocenění.',
     inputSchema: schema({ id: int('ID skladového dokladu.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/documents/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/documents/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_stock_document',
@@ -4891,7 +4891,7 @@ export const TOOLS = [
       lines: STOCK_DOC_LINES,
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/documents/${a.id}`, changed(a, [
+    run: (c, a, tool) => c.put(`/stock/documents/${seg(a.id)}`, changed(a, [
       'doc_date', 'description', 'warehouse_id', 'warehouse_to_id', 'partner_name', 'lines',
     ]), tool),
   },
@@ -4907,7 +4907,7 @@ export const TOOLS = [
       + 'účetní období. Opakované zavolání na už zaúčtovaném dokladu nic nezmění.',
     inputSchema: schema({ id: int('ID rozpracovaného skladového dokladu.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/stock/documents/${a.id}/post`, {}, tool),
+    run: (c, a, tool) => c.post(`/stock/documents/${seg(a.id)}/post`, {}, tool),
   },
   {
     name: 'reverse_stock_document',
@@ -4926,11 +4926,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/documents/${a.id}`,
+        path: `/stock/documents/${seg(a.id)}`,
         action: 'Stornovat se má skladový doklad',
         label: (row) => `${nameOf(row, a.id)} ze dne ${row?.doc_date ?? '?'} (stav ${row?.status ?? '?'})`,
       });
-      const result = await c.post(`/stock/documents/${a.id}/reverse`, { reason: a.reason }, tool);
+      const result = await c.post(`/stock/documents/${seg(a.id)}/reverse`, { reason: a.reason }, tool);
       return { reversed: was, result };
     },
   },
@@ -4945,11 +4945,11 @@ export const TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const was = await confirmed(c, a, tool, {
-        path: `/stock/documents/${a.id}`,
+        path: `/stock/documents/${seg(a.id)}`,
         action: 'Smazat se má rozpracovaný skladový doklad',
         label: (row) => `${nameOf(row, a.id)} ze dne ${row?.doc_date ?? '?'} (stav ${row?.status ?? '?'})`,
       });
-      return { deleted: was, result: await c.del(`/stock/documents/${a.id}`, tool) };
+      return { deleted: was, result: await c.del(`/stock/documents/${seg(a.id)}`, tool) };
     },
   },
 
@@ -4979,7 +4979,7 @@ export const TOOLS = [
       + 'Řádky s `counted_qty: null` ještě nikdo nespočítal a při uzavření se přeskočí.',
     inputSchema: schema({ id: int('ID inventury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/takes/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/takes/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_stock_take',
@@ -5015,7 +5015,7 @@ export const TOOLS = [
       + 'dokud se inventura neuzavře — spouštěj to až ve chvíli, kdy se opravdu počítá.',
     inputSchema: schema({ id: int('ID inventury ve stavu `draft`.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/stock/takes/${a.id}/start`, {}, tool),
+    run: (c, a, tool) => c.post(`/stock/takes/${seg(a.id)}/start`, {}, tool),
   },
   {
     name: 'set_stock_take_counts',
@@ -5039,7 +5039,7 @@ export const TOOLS = [
       ),
     }, ['id', 'lines']),
     write: true,
-    run: (c, a, tool) => c.put(`/stock/takes/${a.id}`, {
+    run: (c, a, tool) => c.put(`/stock/takes/${seg(a.id)}`, {
       lines: a.lines.map((l) => ({
         id: l.line_id,
         counted_qty: l.counted_qty ?? null,
@@ -5061,7 +5061,7 @@ export const TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const take = await c.get(`/stock/takes/${a.id}`, null, tool);
+      const take = await c.get(`/stock/takes/${seg(a.id)}`, null, tool);
       const lines = rows(take?.lines ?? take);
       const uncounted = lines.filter((l) => l?.counted_qty === null || l?.counted_qty === undefined).length;
       requireConfirm(
@@ -5070,7 +5070,7 @@ export const TOOLS = [
         `#${a.id} na skladu ${take?.warehouse_name ?? take?.warehouse_id ?? '?'} `
         + `ze dne ${take?.take_date ?? '?'} — ${lines.length} řádků, z toho ${uncounted} nespočítaných`,
       );
-      return c.post(`/stock/takes/${a.id}/close`, {}, tool);
+      return c.post(`/stock/takes/${seg(a.id)}/close`, {}, tool);
     },
   },
 
@@ -5116,7 +5116,7 @@ export const TOOLS = [
     description: 'Objednávka i s řádky (neměnné snapshoty ceny a názvu) a zbývajícími rezervacemi zásoby.',
     inputSchema: schema({ id: int('ID prodejní objednávky.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/sales-orders/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/sales-orders/${seg(a.id)}`, null, tool),
   },
   {
     name: 'sales_order_shortages',
@@ -5144,7 +5144,7 @@ export const TOOLS = [
     description: 'Stav přípravy, okamžik uzamčení stavu (cutoff) a řádky s očekávaným a napočítaným množstvím.',
     inputSchema: schema({ id: int('ID cyklické inventury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/stock/cycle-counts/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/stock/cycle-counts/${seg(a.id)}`, null, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -5192,7 +5192,7 @@ export const TOOLS = [
       + '(`customer_overrides`) a použitím v šablonách pravidelné fakturace (`usage`).',
     inputSchema: schema({ id: int('ID položky ceníku.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/price-list-items/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`/price-list-items/${seg(a.id)}`, null, tool),
   },
   {
     name: 'resolve_price_list_item',
@@ -5210,7 +5210,7 @@ export const TOOLS = [
       rate_date: date('Datum kurzu. Výchozí dnes.'),
     }, ['id', 'currency_id']),
     write: false,
-    run: (c, a, tool) => c.get(`/price-list-items/${a.id}/resolve`, {
+    run: (c, a, tool) => c.get(`/price-list-items/${seg(a.id)}/resolve`, {
       currency_id: a.currency_id,
       client_id: a.client_id,
       prices_include_vat: a.prices_include_vat,

@@ -138,6 +138,47 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame('active', $this->schedules->get($this->supplierId, $scheduleId)['status']);
     }
 
+    /**
+     * Smazáním konceptu z automaticky účtovaného opakování by token potlačil jeho
+     * zaúčtování, proto platí stejný guard jako u úpravy. Webové rozhraní ho
+     * smaže, koncept bez automatiky smaže i token.
+     */
+    public function testBearerCannotDeleteAutoPostedDraft(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], null);
+        $scheduleId = (int) $schedule['id'];
+        $draftIds = $this->schedules->generate($this->supplierId, $scheduleId, '2099-03-31', null)['created_ids'];
+        self::assertCount(2, $draftIds);
+        $this->schedules->setStatus($this->supplierId, $scheduleId, 'active', true);
+
+        $itemAction = $this->container->get(OtherItemAction::class);
+        $role = new EffectiveRole(0, 'Test', 'staff', true, ['other_items' => 2, 'accounting.journal.post' => 2], 'custom');
+        $request = (new ServerRequestFactory())->createServerRequest('DELETE', '/')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', $role);
+        $bearer = $request->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        $session = $request->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+
+        $response = $itemAction->delete($bearer, new Response(), ['id' => (string) $draftIds[0]]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('other_items.error.auto_post_session_only',
+            json_decode((string) $response->getBody(), true)['error']['code'] ?? null);
+        self::assertSame('draft', $this->items->get($this->supplierId, $draftIds[0])['status']);
+
+        self::assertSame(200, $itemAction->delete($session, new Response(), ['id' => (string) $draftIds[0]])->getStatusCode());
+
+        $plain = $this->items->create($this->supplierId, $this->input(), null);
+        self::assertSame(200, $itemAction->delete($bearer, new Response(), ['id' => (string) $plain['id']])->getStatusCode());
+
+        // Vypnout automatiku token smí; pak už koncept smaže i on.
+        $this->schedules->setStatus($this->supplierId, $scheduleId, 'active', false);
+        self::assertSame(200, $itemAction->delete($bearer, new Response(), ['id' => (string) $draftIds[1]])->getStatusCode());
+    }
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();

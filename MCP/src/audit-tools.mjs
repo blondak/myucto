@@ -1,3 +1,5 @@
+import { seg } from './tool-shared.mjs';
+
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
 const num = (description, extra = {}) => ({ type: 'number', description, ...extra });
@@ -59,7 +61,7 @@ const TAX_VARIANT = {
   variant: str('Druh přiznání.', { enum: ['radne', 'opravne', 'dodatecne'] }),
   seq: int('Pořadí dodatečného přiznání. Nula = poslední existující.', { minimum: 0 }),
 };
-const taxPath = (a, suffix = '') => `/tax-return/${a.type}/${a.year}${suffix}`;
+const taxPath = (a, suffix = '') => `/tax-return/${seg(a.type)}/${seg(a.year)}${suffix}`;
 const taxRead = (name, title, description, suffix, variants = false) => read(
   name, title, description, { ...TAX_INPUT, ...(variants ? TAX_VARIANT : {}) },
   (a) => taxPath(a, suffix), variants ? Object.keys(TAX_VARIANT) : [], ['type', 'year'],
@@ -91,7 +93,7 @@ export const AUDIT_TOOLS = [
       weeks: int('Počet týdnů prognózy (výchozí 8).', { minimum: 1, maximum: 12 }) }, '/portfolio/group-dashboard'),
   read('portfolio_monthly_check', 'Měsíční kontrola firmy v portfoliu',
     'Souhrn měsíční účetní kontroly jedné přístupné firmy.',
-    { company_id: id('ID firmy z portfolio_overview.') }, (a) => `/portfolio/monthly-check/${a.company_id}`, [], ['company_id']),
+    { company_id: id('ID firmy z portfolio_overview.') }, (a) => `/portfolio/monthly-check/${seg(a.company_id)}`, [], ['company_id']),
   read('automation_overview', 'Souhrn účetní automatizace',
     'Stav účetní automatizace a front v přístupné firmě.', supplierQuery, '/automation/overview', ['company_id'], [], { company_id: 'supplier_id' }),
   read('automation_stats', 'Statistika účetní automatizace',
@@ -119,7 +121,7 @@ export const AUDIT_TOOLS = [
     'Vrátí aktuální pracovní XML DPFO nebo DPPO jako text. XML nikam neodesílá.', '/xml/preview', true),
   read('tax_return_insurance', 'Pojistné OSVČ z přiznání',
     'Výpočet sociálního a zdravotního pojistného z přiznání DPFO.',
-    { year: YEAR }, (a) => `/tax-return/fo/${a.year}/insurance`, [], ['year']),
+    { year: YEAR }, (a) => `/tax-return/fo/${seg(a.year)}/insurance`, [], ['year']),
   taxRead('list_tax_advances', 'Předpisy záloh na daň',
     'Čte předpisy a stav záloh souvisejících s rokem přiznání; zálohy negeneruje ani nemění.', '/advances'),
   read('upcoming_tax_advances', 'Blížící se daňové zálohy',
@@ -129,7 +131,7 @@ export const AUDIT_TOOLS = [
     {}, '/tax-evidence/receivables-payables'),
   read('tax_evidence_closing', 'Stav roční uzávěrky daňové evidence',
     'Čte roční podklady a stav uzávěrky daňové evidence. Uzávěrku nemění.',
-    { year: YEAR }, (a) => `/tax-evidence/closing/${a.year}`, [], ['year']),
+    { year: YEAR }, (a) => `/tax-evidence/closing/${seg(a.year)}`, [], ['year']),
   read('tax_evidence_transition_report', 'Přechod mezi daňovou evidencí a účetnictvím',
     'Čtecí podklady pro změnu režimu; evidenci firmy nepřepíná.', {
       as_of: date('Rozhodný den.'),
@@ -150,29 +152,29 @@ export const AUDIT_TOOLS = [
     'Čerpání limitu 10 000 EUR před registrací i po ní.', { year: YEAR }, '/reports/oss/threshold'),
   read('accounting_closing_status', 'Stav účetní uzávěrky',
     'Čte stav a podklady účetní uzávěrky. Nezahajuje ani neuzavírá období.',
-    { period_id: id('ID účetního období.') }, (a) => `/accounting/periods/${a.period_id}/closing`, [], ['period_id']),
+    { period_id: id('ID účetního období.') }, (a) => `/accounting/periods/${seg(a.period_id)}/closing`, [], ['period_id']),
   read('accounting_monthly_check', 'Měsíční kontrola účetnictví',
     'Čtecí kontroly účetního období ve zvoleném rozsahu dat.', {
       period_id: id('ID účetního období.'), date_from: date('Od data.'), date_to: date('Do data.'),
-    }, (a) => `/accounting/periods/${a.period_id}/monthly-check`, ['date_from', 'date_to'], ['period_id']),
+    }, (a) => `/accounting/periods/${seg(a.period_id)}/monthly-check`, ['date_from', 'date_to'], ['period_id']),
   read('list_assets', 'Seznam majetku', 'Majetkové karty firmy s filtrem stavu a názvu.', {
     status: str('Stav majetku.', { enum: ['draft', 'in_use', 'disposed'] }), query: QUERY, ...PAGING,
   }, '/accounting/assets', ['status', 'query', 'page', 'per_page'], [], { query: 'q' }),
   read('get_asset', 'Detail majetku', 'Majetková karta včetně technického zhodnocení a zámků.',
-    { id: id('ID majetkové karty.') }, (a) => `/accounting/assets/${a.id}`, [], ['id']),
+    { id: id('ID majetkové karty.') }, (a) => `/accounting/assets/${seg(a.id)}`, [], ['id']),
   read('asset_depreciation_plan', 'Plán odpisů majetku', 'Čte účetní a daňový plán odpisů. Odpisy neúčtuje.',
-    { id: id('ID majetkové karty.') }, (a) => `/accounting/assets/${a.id}/depreciation-plan`, [], ['id']),
+    { id: id('ID majetkové karty.') }, (a) => `/accounting/assets/${seg(a.id)}/depreciation-plan`, [], ['id']),
   read('list_cash_registers', 'Seznam pokladen', 'Pokladny firmy včetně volitelné nabídky neaktivních.',
     { include_inactive: bool('Zahrnout neaktivní pokladny.') }, '/accounting/cash-registers'),
   read('get_cash_register', 'Detail a zůstatek pokladny', 'Čte pokladnu a zůstatek k datu.', {
     id: id('ID pokladny.'), date: date('Datum zůstatku, jinak dnešek.'),
-  }, (a) => `/accounting/cash-registers/${a.id}`, ['date'], ['id']),
+  }, (a) => `/accounting/cash-registers/${seg(a.id)}`, ['date'], ['id']),
   read('list_cash_documents', 'Seznam pokladních dokladů', 'Pokladní doklady s filtry na pokladnu, stav a datum.', {
     register_id: id('ID pokladny.'), doc_type: str('Směr dokladu.', { enum: ['in', 'out'] }),
     purpose: str('Účel dokladu.'), status: str('Stav dokladu.'), ...DATES, query: QUERY, ...PAGING,
   }, '/accounting/cash-documents', ['register_id', 'doc_type', 'purpose', 'status', 'from', 'to', 'query', 'page', 'per_page'], [], { query: 'q' }),
   read('get_cash_document', 'Detail pokladního dokladu', 'Čte řádky, částky a vazby pokladního dokladu.',
-    { id: id('ID pokladního dokladu.') }, (a) => `/accounting/cash-documents/${a.id}`, [], ['id']),
+    { id: id('ID pokladního dokladu.') }, (a) => `/accounting/cash-documents/${seg(a.id)}`, [], ['id']),
   {
     ...read('list_bank_statements', 'Seznam bankovních výpisů',
     'Bankovní výpisy a jejich stav párování. Stránka má 50 záznamů.', {
@@ -192,12 +194,12 @@ export const AUDIT_TOOLS = [
       id: id('ID výpisu.'),
       status: str('Stav párování transakcí.', { enum: ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] }),
       posting_status: str('Stav zaúčtování transakcí.', { enum: ['unposted', 'posted'] }), ...PAGING,
-    }, (a) => `/bank-statements/${a.id}`, ['status', 'posting_status', 'page', 'per_page'], ['id']),
+    }, (a) => `/bank-statements/${seg(a.id)}`, ['status', 'posting_status', 'page', 'per_page'], ['id']),
   read('bank_account_balances', 'Zůstatky bankovních účtů',
     'Zůstatky vlastních účtů ze skutečných výpisů a historie podle měn.', {}, '/bank-statements/account-balances'),
   read('list_bank_match_suggestions', 'Návrhy párování bankovního výpisu',
     'Čte návrhy párování k výpisu. Žádný návrh nepřijímá.',
-    { id: id('ID bankovního výpisu.') }, (a) => `/bank-statements/${a.id}/match-suggestions`, [], ['id']),
+    { id: id('ID bankovního výpisu.') }, (a) => `/bank-statements/${seg(a.id)}/match-suggestions`, [], ['id']),
   read('list_recurring_invoices', 'Šablony pravidelné fakturace',
     'Čte šablony pravidelné fakturace, jejich částky a příští termíny.', {
       client_id: id('ID odběratele.'), status: str('Stav šablony.'),
@@ -206,14 +208,14 @@ export const AUDIT_TOOLS = [
     }, '/recurring'),
   read('get_recurring_invoice', 'Detail šablony pravidelné fakturace',
     'Čte nastavení a řádky pravidelné fakturace. Fakturu nevytváří.',
-    { id: id('ID šablony.') }, (a) => `/recurring/${a.id}`, [], ['id']),
+    { id: id('ID šablony.') }, (a) => `/recurring/${seg(a.id)}`, [], ['id']),
   read('recurring_invoice_history', 'Faktury ze šablony', 'Vystavené faktury vygenerované jednou pravidelnou šablonou.',
-    { id: id('ID šablony.'), ...PAGING }, (a) => `/recurring/${a.id}/invoices`, ['page', 'per_page'], ['id']),
+    { id: id('ID šablony.'), ...PAGING }, (a) => `/recurring/${seg(a.id)}/invoices`, ['page', 'per_page'], ['id']),
   read('list_document_requests', 'Požadavky na podklady',
     'Čte požadavky účetní na podklady od klienta a jejich stav.',
     { status: str('Stavy oddělené čárkou, např. requested,uploaded,resolved.') }, '/document-requests'),
   read('get_document_request', 'Detail požadavku na podklad', 'Čte požadavek, termín a stav dodání podkladu.',
-    { id: id('ID požadavku.') }, (a) => `/document-requests/${a.id}`, [], ['id']),
+    { id: id('ID požadavku.') }, (a) => `/document-requests/${seg(a.id)}`, [], ['id']),
   read('catalog_changes', 'Změny katalogu od cursoru',
     'Přírůstkový seznam změn zboží, cen, médií a dostupnosti. Cursor je oddělený pro každou firmu.', {
       after_cursor: int('Poslední uložený cursor, jinak 0.', { minimum: 0 }),

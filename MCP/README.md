@@ -159,11 +159,17 @@ prvního — zápis hodin na cizí doklad je horší než doptání se.
 ## Struktura
 
 ```
-src/index.mjs   vstupní bod — konfigurace, MCP handshake, mapování chyb
+src/index.mjs   vstupní bod — konfigurace, MCP handshake
+src/local-call.mjs  volání nástroje v lokálním serveru, mapování chyb
+src/tool-args.mjs   ověření argumentů proti inputSchema (obě cesty, i serverový MCP)
 src/client.mjs  HTTP klient — throttling, retry, hlavičky, serializace query
 src/tools.mjs   katalog nástrojů (jediné místo, kam se přidává nový nástroj)
 test/           automatické testy katalogu a bezpečných zápisových vzorů
 ```
+
+Argumenty se před `run()` ověří proti `inputSchema` (`additionalProperties: false`
+je povinné), takže `run()` dostane jen deklarované parametry. Hodnotu z argumentů
+skládanou do cesty API vždy obal `seg()` z `tool-shared.mjs`.
 
 Přidání nástroje = jeden záznam v `TOOLS`. `write: true` u čehokoli, co mění data —
 podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v popisu.

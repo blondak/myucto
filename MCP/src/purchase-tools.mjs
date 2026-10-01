@@ -19,7 +19,7 @@
  * přesně ten krok, který token dělat nemá.
  */
 
-import { CONFIRM, changed, merged, requireConfirm } from './tool-shared.mjs';
+import { CONFIRM, changed, merged, requireConfirm, seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -93,7 +93,7 @@ function purchaseLabel(pi, fallbackId) {
 /** Zaúčtovaný doklad: má datum zaúčtování nebo živý zápis v deníku. */
 const isPosted = (pi) => Boolean(pi?.booked_at || pi?.locked?.journal_entry_id);
 
-const loadPurchase = (c, invoiceId, tool) => c.get(`${BASE}/${invoiceId}`, null, tool);
+const loadPurchase = (c, invoiceId, tool) => c.get(`${BASE}/${seg(invoiceId)}`, null, tool);
 
 async function loadDraftPurchase(c, invoiceId, tool) {
   const pi = await loadPurchase(c, invoiceId, tool);
@@ -186,7 +186,7 @@ async function loadEditableLines(c, invoiceId, tool) {
   return { pi, items: pi.items ?? [] };
 }
 
-const saveLines = (c, invoiceId, lines, tool) => c.put(`${BASE}/${invoiceId}/items`, { items: lines }, tool);
+const saveLines = (c, invoiceId, lines, tool) => c.put(`${BASE}/${seg(invoiceId)}/items`, { items: lines }, tool);
 
 const lineSummary = (item) => `${item.description} (${item.quantity} ${item.unit ?? ''} × ${item.unit_price_without_vat})`;
 
@@ -404,7 +404,7 @@ export const PURCHASE_TOOLS = [
       if (vendorChanged) {
         // Plátcovství je na dokladu zmrazené (snapshot); bez klíče by u nového
         // dodavatele zůstal stav toho starého.
-        const vendor = await c.get(`/clients/${changes.vendor_id}`, null, tool);
+        const vendor = await c.get(`/clients/${seg(changes.vendor_id)}`, null, tool);
         if (vendor?.is_vat_payer !== undefined && vendor?.is_vat_payer !== null) {
           body.vendor_is_vat_payer = Boolean(vendor.is_vat_payer);
           if (!body.vendor_is_vat_payer && a.vat_deduction === undefined) delete body.vat_deduction;
@@ -419,7 +419,7 @@ export const PURCHASE_TOOLS = [
         body.items = (pi.items ?? []).map((item) => lineForPut(item, { rederive: true }));
       }
 
-      const saved = await c.put(`${BASE}/${a.id}`, body, tool);
+      const saved = await c.put(`${BASE}/${seg(a.id)}`, body, tool);
       return { purchase_invoice_id: Number(a.id), changed: changes, items_reclassified: rederive, invoice: saved };
     },
   },
@@ -563,7 +563,7 @@ export const PURCHASE_TOOLS = [
     run: async (c, a, tool) => {
       const pi = await loadDraftPurchase(c, a.id, tool);
       requireConfirm(a, 'Smazat se má koncept přijaté faktury', purchaseLabel(pi, a.id));
-      return { deleted: purchaseLabel(pi, a.id), result: await c.del(`${BASE}/${a.id}`, tool) };
+      return { deleted: purchaseLabel(pi, a.id), result: await c.del(`${BASE}/${seg(a.id)}`, tool) };
     },
   },
 
@@ -594,7 +594,7 @@ export const PURCHASE_TOOLS = [
         throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} už je přijatá, do stavu „přijato" ji převést nejde.`);
       }
       requireConfirm(a, action, purchaseLabel(pi, a.id));
-      return c.post(`${BASE}/${a.id}/transition`, { target: 'received' }, tool);
+      return c.post(`${BASE}/${seg(a.id)}/transition`, { target: 'received' }, tool);
     },
   },
   {
@@ -609,7 +609,7 @@ export const PURCHASE_TOOLS = [
       paid_date: date('Datum úhrady (RRRR-MM-DD). Výchozí dnes.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`${BASE}/${a.id}/transition`, {
+    run: (c, a, tool) => c.post(`${BASE}/${seg(a.id)}/transition`, {
       target: 'paid', ...changed(a, ['paid_date']),
     }, tool),
   },
@@ -628,7 +628,7 @@ export const PURCHASE_TOOLS = [
       const pi = await loadPurchase(c, a.id, tool);
       if (pi?.status === 'cancelled') throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} už je stornovaná.`);
       requireConfirm(a, 'Stornovat se má přijatá faktura', purchaseLabel(pi, a.id));
-      return c.post(`${BASE}/${a.id}/transition`, { target: 'cancelled' }, tool);
+      return c.post(`${BASE}/${seg(a.id)}/transition`, { target: 'cancelled' }, tool);
     },
   },
 
@@ -650,7 +650,7 @@ export const PURCHASE_TOOLS = [
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       refuseIfPosted(pi, a.id, 'Změna druhu dokladu');
-      return c.post(`${BASE}/${a.id}/document-kind`, { document_kind: a.document_kind }, tool);
+      return c.post(`${BASE}/${seg(a.id)}/document-kind`, { document_kind: a.document_kind }, tool);
     },
   },
   {
@@ -665,7 +665,7 @@ export const PURCHASE_TOOLS = [
       project_id: int('ID zakázky (`list_projects`); 0 zakázku odebere.', { minimum: 0 }),
     }, ['id', 'project_id']),
     write: true,
-    run: (c, a, tool) => c.post(`${BASE}/${a.id}/project`, {
+    run: (c, a, tool) => c.post(`${BASE}/${seg(a.id)}/project`, {
       project_id: Number(a.project_id) > 0 ? a.project_id : null,
     }, tool),
   },
@@ -699,7 +699,7 @@ export const PURCHASE_TOOLS = [
         id: Number(items[pickLine(items, entry)].id),
         expense_kind: entry.expense_kind ?? null,
       }));
-      return c.put(`${BASE}/${a.id}/expense-kinds`, { items: body }, tool);
+      return c.put(`${BASE}/${seg(a.id)}/expense-kinds`, { items: body }, tool);
     },
   },
   {
@@ -720,7 +720,7 @@ export const PURCHASE_TOOLS = [
       if (String(pi.currency ?? '').toUpperCase() === 'CZK') {
         throw new Error('Doklad je v korunách, kurz nemá.');
       }
-      return c.post(`${BASE}/${a.id}/exchange-rate`, {
+      return c.post(`${BASE}/${seg(a.id)}/exchange-rate`, {
         rate: a.rate,
         rate_date: a.rate === null ? null : (a.rate_date ?? pi.tax_date ?? pi.issue_date),
         source: 'user',
@@ -739,7 +739,7 @@ export const PURCHASE_TOOLS = [
       + 'které jde s konečnou fakturou spárovat. Nejbližší částka první.',
     inputSchema: schema({ id: id('ID konečné přijaté faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`${BASE}/${a.id}/advance-candidates`, null, tool),
+    run: (c, a, tool) => c.get(`${BASE}/${seg(a.id)}/advance-candidates`, null, tool),
   },
   {
     name: 'list_purchase_settlement_candidates',
@@ -747,7 +747,7 @@ export const PURCHASE_TOOLS = [
     description: 'Opačný směr: z detailu zálohy nepropojené konečné faktury stejného dodavatele.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`${BASE}/${a.id}/settlement-candidates`, null, tool),
+    run: (c, a, tool) => c.get(`${BASE}/${seg(a.id)}/settlement-candidates`, null, tool),
   },
   {
     name: 'link_purchase_advance',
@@ -765,7 +765,7 @@ export const PURCHASE_TOOLS = [
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       refuseIfPosted(pi, a.id, 'Spárování se zálohou');
-      return c.post(`${BASE}/${a.id}/link-advance`, { advance_id: a.advance_id }, tool);
+      return c.post(`${BASE}/${seg(a.id)}/link-advance`, { advance_id: a.advance_id }, tool);
     },
   },
   {
@@ -783,7 +783,7 @@ export const PURCHASE_TOOLS = [
       if (!advance) throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} se zálohou spárovaná není.`);
       requireConfirm(a, `Od faktury ${purchaseLabel(pi, a.id)} se má odpojit záloha`,
         `${advance.vendor_invoice_number ?? advance.varsymbol ?? `#${advance.id}`}${amountText(advance)}`);
-      return c.del(`${BASE}/${a.id}/link-advance`, tool);
+      return c.del(`${BASE}/${seg(a.id)}/link-advance`, tool);
     },
   },
 
@@ -798,7 +798,7 @@ export const PURCHASE_TOOLS = [
       + 'Obrázek QR kódu se nevrací (`has_qr_image` říká, jestli by šel vygenerovat).',
     inputSchema: schema({ id: id('ID přijaté faktury.') }, ['id']),
     write: false,
-    run: async (c, a, tool) => withoutQrImage(await c.get(`${BASE}/${a.id}/payment-qr`, null, tool)),
+    run: async (c, a, tool) => withoutQrImage(await c.get(`${BASE}/${seg(a.id)}/payment-qr`, null, tool)),
   },
   {
     name: 'set_purchase_invoice_payment_account',
@@ -831,7 +831,7 @@ export const PURCHASE_TOOLS = [
       ].filter(Boolean).join(', ') || 'žádný';
       requireConfirm(a, `U faktury ${purchaseLabel(pi, a.id)} se má změnit účet příjemce`,
         `${show(current)} → ${show(next)}`);
-      return withoutQrImage(await c.put(`${BASE}/${a.id}/payment-account`, next, tool));
+      return withoutQrImage(await c.put(`${BASE}/${seg(a.id)}/payment-account`, next, tool));
     },
   },
   {
@@ -875,7 +875,7 @@ export const PURCHASE_TOOLS = [
     description: 'Dávka příkazu k úhradě s jednotlivými platbami (příjemce, účet, částka, VS).',
     inputSchema: schema({ id: id('ID příkazu k úhradě.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`${ORDERS}/${a.id}`, null, tool),
+    run: (c, a, tool) => c.get(`${ORDERS}/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_purchase_payment_order',
@@ -928,10 +928,10 @@ export const PURCHASE_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const order = await c.get(`${ORDERS}/${a.id}`, null, tool);
+      const order = await c.get(`${ORDERS}/${seg(a.id)}`, null, tool);
       requireConfirm(a, 'Smazat se má příkaz k úhradě',
         `#${a.id}, ${order?.item_count ?? '?'} plateb, ${order?.total_amount ?? '?'} ${order?.currency ?? ''}, splatnost ${order?.payment_date ?? '?'}`);
-      return { deleted: Number(a.id), result: await c.del(`${ORDERS}/${a.id}`, tool) };
+      return { deleted: Number(a.id), result: await c.del(`${ORDERS}/${seg(a.id)}`, tool) };
     },
   },
 
@@ -944,7 +944,7 @@ export const PURCHASE_TOOLS = [
     description: 'Kdo a kdy doklad založil, upravil, přijal, uhradil nebo stornoval.',
     inputSchema: schema({ id: id('ID přijaté faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`${BASE}/${a.id}/activity`, null, tool),
+    run: (c, a, tool) => c.get(`${BASE}/${seg(a.id)}/activity`, null, tool),
   },
   {
     name: 'list_expense_categories',

@@ -13,7 +13,7 @@
  * a aby se nic nezapsalo napůl.
  */
 
-import { CONFIRM, requireConfirm, changed, merged } from './tool-shared.mjs';
+import { CONFIRM, requireConfirm, changed, merged, seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -163,7 +163,7 @@ function updateBody(current, a) {
 }
 
 async function loadDraft(c, itemId, tool, verb) {
-  const current = await c.get(`${BASE}/${itemId}`, null, tool);
+  const current = await c.get(`${BASE}/${seg(itemId)}`, null, tool);
   if (current?.status !== 'draft') {
     throw new Error(`NEPROVEDENO: ${verb} lze jen koncept; doklad ${itemLabel(current)} je ve stavu `
       + `„${current?.status ?? '?'}". Potvrzený nebo zaúčtovaný doklad mění účetní ve webovém rozhraní.`);
@@ -244,17 +244,17 @@ export const OTHER_ITEM_TOOLS = [
     }),
   read('get_other_item', 'Detail ostatní pohledávky nebo závazku',
     'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky.',
-    { id: id('ID dokladu.') }, (a) => `${BASE}/${a.id}`, () => null, ['id']),
+    { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu. Párování se dělá ve webovém rozhraní.',
-    { id: id('ID dokladu.') }, (a) => `${BASE}/${a.id}/allocations`, () => null, ['id']),
+    { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}/allocations`, () => null, ['id']),
   read('other_item_payment_candidates', 'Kandidáti úhrady ostatní položky',
     'Volné bankovní a pokladní platby v Kč, které by mohly doklad uhradit. Jen k přehledu, nic nepáruje. '
     + 'Vyžaduje právo číst banku nebo pokladnu.', {
       id: id('ID dokladu.'),
       query: str('Hledaný text v popisu platby.'),
       limit: int('Počet kandidátů (1 až 50).', { minimum: 1, maximum: 50 }),
-    }, (a) => `${BASE}/${a.id}/payment-candidates`, (a) => {
+    }, (a) => `${BASE}/${seg(a.id)}/payment-candidates`, (a) => {
       const q = changed(a, ['limit']);
       if (a.query !== undefined) q.q = a.query;
       return q;
@@ -264,10 +264,10 @@ export const OTHER_ITEM_TOOLS = [
     {}, () => `${BASE}/schedules`),
   read('get_other_item_schedule', 'Detail opakování ostatní položky',
     'Rozvrh opakování včetně všech vygenerovaných dokladů a jejich stavu.',
-    { id: id('ID rozvrhu.') }, (a) => `${BASE}/schedules/${a.id}`, () => null, ['id']),
+    { id: id('ID rozvrhu.') }, (a) => `${BASE}/schedules/${seg(a.id)}`, () => null, ['id']),
   read('get_other_item_installments', 'Splátkový kalendář ostatní položky',
     'Termíny a částky splátek dokladu. Prázdný seznam znamená, že doklad kalendář nemá.',
-    { item_id: id('ID dokladu.') }, (a) => `${BASE}/${a.item_id}/installments`, () => null, ['item_id']),
+    { item_id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.item_id)}/installments`, () => null, ['item_id']),
 
   {
     name: 'create_other_item',
@@ -303,7 +303,7 @@ export const OTHER_ITEM_TOOLS = [
       const current = await loadDraft(c, a.id, tool, 'upravit');
       const body = updateBody(current, a);
       if (cents(body.amount) === null) throw new Error('NEPROVEDENO: částka musí být kladná a zadaná na haléře.');
-      return c.put(`${BASE}/${a.id}`, body, tool);
+      return c.put(`${BASE}/${seg(a.id)}`, body, tool);
     },
   },
   {
@@ -311,14 +311,15 @@ export const OTHER_ITEM_TOOLS = [
     title: 'Smazat koncept ostatní pohledávky nebo závazku',
     description:
       'Smaže KONCEPT (koncept z opakování se zruší). Potvrzený nebo zaúčtovaný doklad smazat nejde, '
-      + `to řeší účetní stornem v aplikaci. Bez \`confirm: true\` jen vypíše, co by se smazalo. ${NO_POSTING}`,
+      + 'to řeší účetní stornem v aplikaci. Koncept z opakování s automatickým účtováním lze smazat '
+      + `jen ve webovém rozhraní. Bez \`confirm: true\` jen vypíše, co by se smazalo. ${NO_POSTING}`,
     inputSchema: schema({ id: id('ID konceptu.'), confirm: CONFIRM }, ['id']),
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
       const current = await loadDraft(c, a.id, tool, 'smazat');
       requireConfirm(a, 'Smazat se má koncept', itemLabel(current));
-      return { deleted: current, result: await c.del(`${BASE}/${a.id}`, tool) };
+      return { deleted: current, result: await c.del(`${BASE}/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -347,9 +348,9 @@ export const OTHER_ITEM_TOOLS = [
     write: true,
     run: async (c, a, tool) => {
       const rows = Array.isArray(a.installments) ? a.installments : [];
-      const item = await c.get(`${BASE}/${a.item_id}`, null, tool);
+      const item = await c.get(`${BASE}/${seg(a.item_id)}`, null, tool);
       assertInstallments(item, rows);
-      return c.put(`${BASE}/${a.item_id}/installments`, {
+      return c.put(`${BASE}/${seg(a.item_id)}/installments`, {
         items: rows.map((row) => ({ due_on: row.due_on, amount: row.amount })),
       }, tool);
     },
@@ -364,13 +365,13 @@ export const OTHER_ITEM_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const item = await c.get(`${BASE}/${a.item_id}`, null, tool);
-      const existing = (await c.get(`${BASE}/${a.item_id}/installments`, null, tool))?.items ?? [];
+      const item = await c.get(`${BASE}/${seg(a.item_id)}`, null, tool);
+      const existing = (await c.get(`${BASE}/${seg(a.item_id)}/installments`, null, tool))?.items ?? [];
       if (existing.length === 0) {
         return { cleared: false, message: 'Doklad splátkový kalendář nemá, není co rušit.' };
       }
       requireConfirm(a, `Zrušit se má splátkový kalendář (${existing.length} splátek)`, itemLabel(item));
-      return { cleared: existing, result: await c.put(`${BASE}/${a.item_id}/installments`, { items: [] }, tool) };
+      return { cleared: existing, result: await c.put(`${BASE}/${seg(a.item_id)}/installments`, { items: [] }, tool) };
     },
   },
   {
@@ -386,7 +387,7 @@ export const OTHER_ITEM_TOOLS = [
       ends_on: date('Poslední možné datum vzniku dokladu; bez zadání bez konce.'),
     }, ['item_id', 'frequency']),
     write: true,
-    run: (c, a, tool) => c.post(`${BASE}/${a.item_id}/schedule`, {
+    run: (c, a, tool) => c.post(`${BASE}/${seg(a.item_id)}/schedule`, {
       frequency: a.frequency,
       ...(a.ends_on !== undefined ? { ends_on: a.ends_on } : {}),
       auto_post: false,
@@ -406,13 +407,13 @@ export const OTHER_ITEM_TOOLS = [
     write: true,
     run: async (c, a, tool) => {
       if (a.status === 'active') {
-        const schedule = await c.get(`${BASE}/schedules/${a.id}`, null, tool);
+        const schedule = await c.get(`${BASE}/schedules/${seg(a.id)}`, null, tool);
         if (schedule?.auto_post) {
           throw new Error('NEPROVEDENO: opakování má zapnuté automatické účtování; obnovit ho může jen '
             + 'účetní ve webovém rozhraní.');
         }
       }
-      return c.put(`${BASE}/schedules/${a.id}/status`, { status: a.status }, tool);
+      return c.put(`${BASE}/schedules/${seg(a.id)}/status`, { status: a.status }, tool);
     },
   },
 ];

@@ -218,7 +218,7 @@ export class MyUctoClient {
    * @returns {Promise<{filename: string|null, content_type: string, size: number, content_base64: string}>}
    */
   async download(path, query, tool) {
-    const url = new URL(this.baseUrl + path);
+    const url = apiUrl(this.baseUrl, path);
     appendQuery(url.searchParams, query);
     const headers = this.#headers(tool, '*/*');
     return this.throttle.run(() => this.#send('GET', url, headers, undefined, false, 'binary'));
@@ -241,14 +241,14 @@ export class MyUctoClient {
       contentType: normalizeContentType(file.content_type),
       bytes,
     });
-    const url = new URL(this.baseUrl + path);
+    const url = apiUrl(this.baseUrl, path);
     const headers = this.#headers(tool);
     headers['Content-Type'] = multipart.contentType;
     return this.throttle.run(() => this.#send(method, url, headers, multipart.body, false));
   }
 
   async request(method, path, { query, body, tool, retryRead = false } = {}) {
-    const url = new URL(this.baseUrl + path);
+    const url = apiUrl(this.baseUrl, path);
     appendQuery(url.searchParams, query);
 
     const headers = this.#headers(tool);
@@ -587,6 +587,21 @@ function safeJson(text) {
   } catch {
     return { raw: text };
   }
+}
+
+const DOT_SEGMENT = /^(?:\.|%2e){1,2}$/i;
+
+/**
+ * Adresa požadavku. Tečkové segmenty (i zakódované `%2e`) by `new URL()`
+ * vyhodnotil a požadavek by mířil na jiný endpoint, než který nástroj sestavil;
+ * takovou cestu proto odmítne dřív, než cokoli odejde.
+ */
+export function apiUrl(baseUrl, path) {
+  const pathname = String(path).split(/[?#]/, 1)[0];
+  if (pathname.split('/').some((part) => DOT_SEGMENT.test(part))) {
+    throw new Error(`Neplatná cesta požadavku "${pathname}".`);
+  }
+  return new URL(baseUrl + path);
 }
 
 /**

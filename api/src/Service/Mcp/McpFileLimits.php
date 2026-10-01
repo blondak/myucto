@@ -62,6 +62,49 @@ final class McpFileLimits
         'application/vnd.oasis.opendocument.presentation',
     ];
 
+    /**
+     * Přípona názvu souboru → typy obsahu, se kterými ji smí MCP nahrát.
+     * Zrcadlí sjednocení map v `MCP/src/file-tools.mjs`; shodu hlídá test.
+     *
+     * Bez vazby na příponu by prošel `x.html` deklarovaný jako `text/plain`
+     * a cílová akce, která typ odvozuje z přípony, by ho uložila jako HTML.
+     *
+     * @var array<string, list<string>>
+     */
+    public const UPLOAD_EXTENSION_TYPES = [
+        'pdf' => ['application/pdf'],
+        'jpg' => ['image/jpeg'],
+        'jpeg' => ['image/jpeg'],
+        'png' => ['image/png'],
+        'gif' => ['image/gif'],
+        'webp' => ['image/webp'],
+        'heic' => ['image/heic'],
+        'heif' => ['image/heif'],
+        'isdoc' => ['application/xml', 'text/xml'],
+        'xml' => ['application/xml', 'text/xml'],
+        'isdocx' => ['application/zip'],
+        'zip' => ['application/zip'],
+        'txt' => ['text/plain'],
+        'csv' => ['text/csv', 'text/plain'],
+        'doc' => ['application/msword'],
+        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        'xls' => ['application/vnd.ms-excel'],
+        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        'ppt' => ['application/vnd.ms-powerpoint'],
+        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+        'odt' => ['application/vnd.oasis.opendocument.text'],
+        'ods' => ['application/vnd.oasis.opendocument.spreadsheet'],
+        'odp' => ['application/vnd.oasis.opendocument.presentation'],
+    ];
+
+    /** Typ obsahu odpovídá příponě názvu souboru (porovnává se bez ohledu na velikost písmen). */
+    public static function uploadTypeMatchesFilename(string $filename, string $type): bool
+    {
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        $allowed = self::UPLOAD_EXTENSION_TYPES[$extension] ?? [];
+        return in_array(strtolower($type), $allowed, true);
+    }
+
     private const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
     /**
@@ -109,6 +152,10 @@ final class McpFileLimits
         $name = trim($name, ". _\t");
         if ($name === '' || mb_check_encoding($name, 'UTF-8') === false) {
             return null;
+        }
+        // Rezervované názvy zařízení Windows platí i s příponou (CON.pdf).
+        if (preg_match('/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i', $name) === 1) {
+            $name = '_' . $name;
         }
         if (strlen($name) > 200) {
             $ext = pathinfo($name, PATHINFO_EXTENSION);

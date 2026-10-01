@@ -45,4 +45,27 @@ final class McpFileLimitsTest extends TestCase
         self::assertNull(McpFileLimits::sanitizeFilename("\xFF\xFE.pdf"));
         self::assertSame(194, strlen((string) McpFileLimits::sanitizeFilename(str_repeat('a', 300) . '.pdf')));
     }
+
+    public function testSanitizeFilenameDefusesWindowsDeviceNames(): void
+    {
+        foreach (['CON', 'con.pdf', 'PRN.txt', 'Aux.jpg', 'NUL', 'COM1.pdf', 'lpt9.csv'] as $name) {
+            self::assertSame('_' . $name, McpFileLimits::sanitizeFilename($name), $name);
+        }
+        foreach (['CONTRACT.pdf', 'console.txt', 'COM10.pdf', 'nul_hodnota.pdf'] as $name) {
+            self::assertSame($name, McpFileLimits::sanitizeFilename($name), $name);
+        }
+    }
+
+    public function testUploadTypeIsBoundToExtension(): void
+    {
+        self::assertTrue(McpFileLimits::uploadTypeMatchesFilename('a.PDF', 'application/pdf'));
+        self::assertTrue(McpFileLimits::uploadTypeMatchesFilename('a.csv', 'text/plain'));
+        self::assertFalse(McpFileLimits::uploadTypeMatchesFilename('a.html', 'text/plain'));
+        self::assertFalse(McpFileLimits::uploadTypeMatchesFilename('a', 'application/pdf'));
+        foreach (McpFileLimits::UPLOAD_EXTENSION_TYPES as $extension => $types) {
+            foreach ($types as $type) {
+                self::assertContains($type, McpFileLimits::ALLOWED_UPLOAD_TYPES, $extension);
+            }
+        }
+    }
 }

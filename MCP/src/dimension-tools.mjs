@@ -1,3 +1,5 @@
+import { seg } from './tool-shared.mjs';
+
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description) => ({ type: 'integer', minimum: 1, description });
 const bool = (description) => ({ type: 'boolean', description });
@@ -60,13 +62,13 @@ export const DIMENSION_TOOLS = [
     }, tool)),
   read('get_document_dimensions', 'Dimenze dokladu', 'Přiřazené dimenze na hlavičce, položkách a rozdělení dokladu.',
     { document_type: str('Typ dokladu.', { enum: ['purchase-invoices', 'invoices', 'cash-documents', 'bank-transactions', 'journal-templates'] }), id: int('ID dokladu.') },
-    ['document_type', 'id'], (c, a, tool) => c.get(`/accounting/dimensions/documents/${a.document_type}/${a.id}`, null, tool)),
+    ['document_type', 'id'], (c, a, tool) => c.get(`/accounting/dimensions/documents/${seg(a.document_type)}/${seg(a.id)}`, null, tool)),
   read('get_journal_dimensions', 'Dimenze účetního zápisu', 'Dimenze přiřazené jednotlivým řádkům účetního zápisu.',
-    { id: int('ID účetního zápisu.') }, ['id'], (c, a, tool) => c.get(`/accounting/dimensions/journal/${a.id}`, null, tool)),
+    { id: int('ID účetního zápisu.') }, ['id'], (c, a, tool) => c.get(`/accounting/dimensions/journal/${seg(a.id)}`, null, tool)),
   read('get_client_dimensions', 'Výchozí dimenze odběratele', 'Výchozí hodnoty dimenzí na kartě odběratele.',
-    { id: int('ID odběratele.') }, ['id'], (c, a, tool) => c.get(`/clients/${a.id}/dimensions`, null, tool)),
+    { id: int('ID odběratele.') }, ['id'], (c, a, tool) => c.get(`/clients/${seg(a.id)}/dimensions`, null, tool)),
   read('get_project_dimensions', 'Výchozí dimenze zakázky', 'Výchozí hodnoty dimenzí na kartě zakázky.',
-    { id: int('ID zakázky.') }, ['id'], (c, a, tool) => c.get(`/projects/${a.id}/dimensions`, null, tool)),
+    { id: int('ID zakázky.') }, ['id'], (c, a, tool) => c.get(`/projects/${seg(a.id)}/dimensions`, null, tool)),
   read('list_dimension_rules', 'Pravidla dimenzí', 'Pravidla povinného vyplnění a předvyplnění dimenzí podle účtů.',
     {}, [], (c, _a, tool) => c.get('/accounting/dimensions/rules', null, tool)),
   ...[

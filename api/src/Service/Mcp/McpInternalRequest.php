@@ -53,13 +53,23 @@ final class McpInternalRequest
             $request = $request->withHeader($name, $value);
         }
 
-        $body = array_key_exists('bodyBase64', $input)
-            ? McpFileLimits::decodeBase64($input['bodyBase64'])
-            : (string) ($input['body'] ?? '');
+        // Platí pro oba mosty (NodeBridge i ManagedNodeRelay): binární tělo smí
+        // nést jen nahrání souboru zápisovou metodou a nahrání jen v base64.
+        $contentType = $request->getHeaderLine('Content-Type');
+        $multipart = preg_match('#^multipart/form-data\b#i', $contentType) === 1;
+        if (array_key_exists('bodyBase64', $input)) {
+            if (!$multipart || !in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+                throw new \InvalidArgumentException('Binární tělo smí nést jen nahrání souboru.', 400);
+            }
+            $body = McpFileLimits::decodeBase64($input['bodyBase64']);
+        } elseif ($multipart) {
+            throw new \InvalidArgumentException('Nahrávaný soubor musí přijít v base64.', 400);
+        } else {
+            $body = (string) ($input['body'] ?? '');
+        }
         $request = $request->withBody((new StreamFactory())->createStream($body));
 
-        $contentType = $request->getHeaderLine('Content-Type');
-        if (preg_match('#^multipart/form-data\b#i', $contentType) === 1) {
+        if ($multipart) {
             [$fields, $files, $this->tmpFiles] = (new McpMultipartParser())->parse($body, $contentType, $this->tmpDir);
             $request = $request->withParsedBody($fields)->withUploadedFiles($files);
         }

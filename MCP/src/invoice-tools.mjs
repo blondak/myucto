@@ -16,7 +16,7 @@
  * (CONFIRM) jsou v `tool-shared.mjs`, který nic dalšího neimportuje.
  */
 
-import { CONFIRM, requireConfirm, confirmed, changed, merged } from './tool-shared.mjs';
+import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
 } from './tools.mjs';
@@ -65,7 +65,7 @@ const invoiceSummary = (inv) => ({
   currency: inv?.currency,
 });
 
-const getInvoice = (c, invoiceId, tool) => c.get(`/invoices/${invoiceId}`, null, tool);
+const getInvoice = (c, invoiceId, tool) => c.get(`/invoices/${seg(invoiceId)}`, null, tool);
 
 const ISSUED = ['issued', 'sent', 'reminded', 'paid'];
 
@@ -306,7 +306,7 @@ export const INVOICE_TOOLS = [
         );
       }
       requireConfirm(a, 'Smazat se má koncept', invoiceLabel(invoice, a.id));
-      return { deleted: invoiceSummary(invoice), result: await c.del(`/invoices/${a.id}`, tool) };
+      return { deleted: invoiceSummary(invoice), result: await c.del(`/invoices/${seg(a.id)}`, tool) };
     },
   },
   {
@@ -348,7 +348,7 @@ export const INVOICE_TOOLS = [
       );
       const body = { mode: a.mode };
       if (a.reason !== undefined) body.reason = a.reason;
-      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${a.id}/cancel`, body, tool) };
+      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/cancel`, body, tool) };
     },
   },
   {
@@ -368,7 +368,7 @@ export const INVOICE_TOOLS = [
         throw new Error(`${invoiceLabel(invoice, a.id)}: zrušit storno lze jen u stornované faktury nebo zálohy.`);
       }
       requireConfirm(a, 'Zrušit storno a obnovit se má', invoiceLabel(invoice, a.id));
-      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${a.id}/uncancel`, {}, tool) };
+      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/uncancel`, {}, tool) };
     },
   },
 
@@ -387,7 +387,7 @@ export const INVOICE_TOOLS = [
     }, ['id']),
     write: true,
     run: (c, a, tool) => c.post(
-      `/invoices/${a.id}/clone`,
+      `/invoices/${seg(a.id)}/clone`,
       changed(a, ['issue_date', 'increment_month_in_descriptions']),
       tool,
     ),
@@ -408,7 +408,7 @@ export const INVOICE_TOOLS = [
     }, ['id']),
     write: true,
     run: (c, a, tool) => c.post(
-      `/invoices/${a.id}/issue-final`,
+      `/invoices/${seg(a.id)}/issue-final`,
       changed(a, ['tax_date', 'due_date', 'advance_paid_amount', 'final_total']),
       tool,
     ),
@@ -421,7 +421,7 @@ export const INVOICE_TOOLS = [
       + 'a nejbližší částka), se kterými ji jde propojit přes `link_invoice_advance`.',
     inputSchema: schema({ id: id('ID faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/advance-candidates`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/advance-candidates`, null, tool),
   },
   {
     name: 'list_proforma_final_candidates',
@@ -431,7 +431,7 @@ export const INVOICE_TOOLS = [
       + '`link_invoice_advance` s `id` faktury a `advance_id` zálohy.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/final-candidates`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/final-candidates`, null, tool),
   },
   {
     name: 'link_invoice_advance',
@@ -446,7 +446,7 @@ export const INVOICE_TOOLS = [
       advance_id: id('ID zálohové faktury.'),
     }, ['id', 'advance_id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/link-advance`, { advance_id: a.advance_id }, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/link-advance`, { advance_id: a.advance_id }, tool),
   },
   {
     name: 'unlink_invoice_advance',
@@ -457,7 +457,7 @@ export const INVOICE_TOOLS = [
       + 's odpočty záloh podle § 37a ZDPH.',
     inputSchema: schema({ id: id('ID faktury.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${a.id}/link-advance`, tool),
+    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/link-advance`, tool),
   },
 
   // ── Penále ───────────────────────────────────────────────────────────────
@@ -473,7 +473,7 @@ export const INVOICE_TOOLS = [
       principal: num('Jiná jistina než zbývající dlužná částka.', { exclusiveMinimum: 0 }),
     }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/penalty/preview`, changed(a, ['as_of', 'principal']), tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/penalty/preview`, changed(a, ['as_of', 'principal']), tool),
   },
   {
     name: 'create_invoice_penalty',
@@ -488,7 +488,7 @@ export const INVOICE_TOOLS = [
       principal: num('Jiná jistina než zbývající dlužná částka.', { exclusiveMinimum: 0 }),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/penalty`, changed(a, ['as_of', 'principal']), tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/penalty`, changed(a, ['as_of', 'principal']), tool),
   },
 
   // ── Úhrady ───────────────────────────────────────────────────────────────
@@ -513,7 +513,7 @@ export const INVOICE_TOOLS = [
     }, ['id', 'amount']),
     write: true,
     run: (c, a, tool) => c.post(
-      `/invoices/${a.id}/payments`,
+      `/invoices/${seg(a.id)}/payments`,
       changed(a, ['amount', 'paid_on', 'variable_symbol', 'bank_reference', 'note', 'send_payment_thanks']),
       tool,
     ),
@@ -535,7 +535,7 @@ export const INVOICE_TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const invoice = await getInvoice(c, a.id, tool);
-      const listing = await c.get(`/invoices/${a.id}/payments`, null, tool);
+      const listing = await c.get(`/invoices/${seg(a.id)}/payments`, null, tool);
       const payment = (listing?.payments ?? []).find((p) => Number(p.id) === Number(a.payment_id));
       if (!payment) throw new Error(`Platba #${a.payment_id} u dokladu #${a.id} není.`);
       requireConfirm(
@@ -546,7 +546,7 @@ export const INVOICE_TOOLS = [
       );
       return {
         deleted: payment,
-        result: await c.del(`/invoices/${a.id}/payments/${a.payment_id}`, tool),
+        result: await c.del(`/invoices/${seg(a.id)}/payments/${seg(a.payment_id)}`, tool),
       };
     },
   },
@@ -562,7 +562,7 @@ export const INVOICE_TOOLS = [
       payment_id: id('ID platby z `list_invoice_payments`.'),
     }, ['id', 'payment_id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${a.id}/payments/${a.payment_id}/tax-document`, {}, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/payments/${seg(a.payment_id)}/tax-document`, {}, tool),
   },
   {
     name: 'unmark_invoice_paid',
@@ -581,7 +581,7 @@ export const INVOICE_TOOLS = [
         throw new Error(`${invoiceLabel(invoice, a.id)}: vrátit zpět lze jen zaplacený doklad.`);
       }
       requireConfirm(a, 'Úhrady se mají smazat u dokladu', invoiceLabel(invoice, a.id));
-      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${a.id}/unmark-paid`, {}, tool) };
+      return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/unmark-paid`, {}, tool) };
     },
   },
 
@@ -628,7 +628,7 @@ export const INVOICE_TOOLS = [
       // Položky jdou zpět všechny i se skrytými poli: PUT je nahrazuje celé.
       const lines = invoiceLines(invoice).map((item) => lineForPut(item));
       const saved = await c.put(
-        `/invoices/${invoiceId}`,
+        `/invoices/${seg(invoiceId)}`,
         { ...draftPayload(invoice, {}, lines), payment_schedule: rows },
         tool,
       );
@@ -649,7 +649,7 @@ export const INVOICE_TOOLS = [
     inputSchema: schema({ id: id('ID vystaveného dokladu.') }, ['id']),
     write: false,
     run: async (c, a, tool) => {
-      const response = await c.get(`/invoices/${a.id}/isdoc`, null, tool);
+      const response = await c.get(`/invoices/${seg(a.id)}/isdoc`, null, tool);
       if (typeof response?.raw !== 'string') return response;
       return { invoice_id: a.id, format: 'ISDOC', xml: response.raw };
     },
@@ -665,7 +665,7 @@ export const INVOICE_TOOLS = [
       type: str('Účel zprávy; výchozí `documents`.', { enum: ['documents', 'reminders', 'approvals'] }),
     }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/recipients`, changed(a, ['type']), tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/recipients`, changed(a, ['type']), tool),
   },
   {
     name: 'send_invoice_reminders_bulk',
@@ -730,14 +730,14 @@ export const INVOICE_TOOLS = [
     inputSchema: schema({ id: id('ID šablony.'), ...RECURRING_INPUT }, ['id']),
     write: true,
     run: async (c, a, tool) => {
-      const current = await c.get(`/recurring/${a.id}`, null, tool);
+      const current = await c.get(`/recurring/${seg(a.id)}`, null, tool);
       const changes = recurringInput(a);
       const body = merged(current, changes, RECURRING_FIELDS);
       // Den v měsíci a „poslední den měsíce" se vylučují; platí to, co uživatel zadal.
       if (changes.end_of_month === true) body.day_of_month = null;
       if (changes.day_of_month !== undefined) body.end_of_month = false;
       body.items = changes.items ?? (current?.items ?? []).map(recurringLine);
-      return c.put(`/recurring/${a.id}`, body, tool);
+      return c.put(`/recurring/${seg(a.id)}`, body, tool);
     },
   },
   {
@@ -751,7 +751,7 @@ export const INVOICE_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const path = `/recurring/${a.id}`;
+      const path = `/recurring/${seg(a.id)}`;
       const template = await confirmed(c, a, tool, {
         path,
         action: 'Smazat se má pravidelná fakturace',
@@ -766,7 +766,7 @@ export const INVOICE_TOOLS = [
     description: 'Pozastaví šablonu; dokud se neobnoví, žádné faktury z ní nevzniknou.',
     inputSchema: schema({ id: id('ID šablony.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/recurring/${a.id}/pause`, {}, tool),
+    run: (c, a, tool) => c.post(`/recurring/${seg(a.id)}/pause`, {}, tool),
   },
   {
     name: 'resume_recurring_invoice',
@@ -776,7 +776,7 @@ export const INVOICE_TOOLS = [
       + 'je-li to po konci platnosti, aplikace obnovení odmítne.',
     inputSchema: schema({ id: id('ID šablony.') }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/recurring/${a.id}/resume`, {}, tool),
+    run: (c, a, tool) => c.post(`/recurring/${seg(a.id)}/resume`, {}, tool),
   },
   {
     name: 'reschedule_recurring_invoice',
@@ -790,8 +790,8 @@ export const INVOICE_TOOLS = [
     }, ['id', 'next_run_date']),
     write: true,
     run: async (c, a, tool) => {
-      const current = await c.get(`/recurring/${a.id}`, null, tool);
-      return c.post(`/recurring/${a.id}/reschedule`, {
+      const current = await c.get(`/recurring/${seg(a.id)}`, null, tool);
+      return c.post(`/recurring/${seg(a.id)}/reschedule`, {
         next_run_date: a.next_run_date,
         expected_next_run_date: current?.next_run_date ?? null,
       }, tool);
@@ -815,13 +815,13 @@ export const INVOICE_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const template = await c.get(`/recurring/${a.id}`, null, tool);
+      const template = await c.get(`/recurring/${seg(a.id)}`, null, tool);
       const issues = a.draft !== true && Boolean(template?.auto_issue);
       const outcome = issues
         ? `faktura se rovnou VYSTAVÍ${template?.auto_send_email ? ' a ODEŠLE e-mailem' : ''}`
         : 'vznikne koncept';
       requireConfirm(a, `Ze šablony se má hned vygenerovat faktura (${outcome})`, recurringLabel(template, a.id));
-      return c.post(`/recurring/${a.id}/run-now`, changed(a, ['draft', 'issue_date', 'advance_schedule']), tool);
+      return c.post(`/recurring/${seg(a.id)}/run-now`, changed(a, ['draft', 'issue_date', 'advance_schedule']), tool);
     },
   },
 ];

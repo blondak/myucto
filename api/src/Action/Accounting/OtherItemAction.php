@@ -105,14 +105,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
         return $this->run($response, function () use ($request, $args) {
             $id = (int) $args['id'];
-            // Koncept z opakování s automatickým účtováním zaúčtuje cron bez dalšího
-            // potvrzení. Kdyby ho upravil token, zaúčtoval by se obsah, který
-            // žádný člověk neviděl, takže tuhle úpravu necháváme webovému rozhraní.
-            if (!RequestAuthorization::isSessionAuth($request)
-                && $this->service->belongsToAutoPostSchedule($this->currentSupplierId($request), $id)) {
-                throw new OtherItemException('auto_post_session_only',
-                    'Koncept patří do opakování s automatickým účtováním. Upravit ho lze jen ve webovém rozhraní.', 403);
-            }
+            $this->assertSessionForAutoPostDraft($request, $id, 'Upravit');
             $item = $this->service->update($this->currentSupplierId($request), $id, (array) ($request->getParsedBody() ?? []), $this->userId($request));
             $this->log($request, 'other_item.updated', $id);
             return $item;
@@ -124,6 +117,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
         return $this->run($response, function () use ($request, $args) {
             $id = (int) $args['id'];
+            $this->assertSessionForAutoPostDraft($request, $id, 'Smazat');
             $this->service->deleteDraft($this->currentSupplierId($request), $id);
             $this->log($request, 'other_item.deleted', $id);
             return ['deleted' => true];
@@ -248,6 +242,22 @@ final class OtherItemAction
             $this->log($request, 'other_item.payment_unallocated', $id);
             return $item;
         });
+    }
+
+    /**
+     * Koncept z opakování s automatickým účtováním zaúčtuje cron bez dalšího
+     * potvrzení. Kdyby ho upravil token, zaúčtoval by se obsah, který žádný
+     * člověk neviděl; kdyby ho token smazal, tiše by zmizelo jeho zaúčtování.
+     * Obojí proto necháváme webovému rozhraní. Vypnout automatiku (pozastavit
+     * nebo přepnout rozvrh bez auto_post) token smí, tím účtování jen zastaví.
+     */
+    private function assertSessionForAutoPostDraft(Request $request, int $id, string $action): void
+    {
+        if (!RequestAuthorization::isSessionAuth($request)
+            && $this->service->belongsToAutoPostSchedule($this->currentSupplierId($request), $id)) {
+            throw new OtherItemException('auto_post_session_only',
+                'Koncept patří do opakování s automatickým účtováním. ' . $action . ' ho lze jen ve webovém rozhraní.', 403);
+        }
     }
 
     private function canManagePayment(Request $request, string $source): bool

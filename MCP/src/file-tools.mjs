@@ -19,6 +19,7 @@ import {
   contentTypeForFilename, extensionOf, normalizeContentType, sanitizeFilename,
 } from './client.mjs';
 import { fileResult } from './tool-result.mjs';
+import { seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -143,14 +144,14 @@ export const FILE_TOOLS = [
     'download_invoice_pdf', 'Stáhnout PDF vydané faktury',
     'PDF vydané faktury tak, jak ho dostane odběratel. Když PDF ještě nebylo vytvořené, aplikace ho vyrenderuje.',
     { id: id('ID vydané faktury.') }, ['id'],
-    (a) => `/invoices/${a.id}/pdf`,
+    (a) => `/invoices/${seg(a.id)}/pdf`,
     { query: () => ({ download: 1 }), uri: (a) => `myucto://invoices/${a.id}/pdf`, meta: (a) => ({ invoice_id: a.id }) },
   ),
   download(
     'download_invoice_isdoc', 'Stáhnout ISDOC vydané faktury',
     'Strukturovaná faktura ve formátu ISDOC (XML). Jen u vystavené faktury, ne u konceptu ani stornované.',
     { id: id('ID vydané faktury.') }, ['id'],
-    (a) => `/invoices/${a.id}/isdoc`,
+    (a) => `/invoices/${seg(a.id)}/isdoc`,
     { uri: (a) => `myucto://invoices/${a.id}/isdoc`, meta: (a) => ({ invoice_id: a.id }) },
   ),
   {
@@ -159,13 +160,13 @@ export const FILE_TOOLS = [
     description: 'Seznam souborů přiložených k vydané faktuře (id, název, velikost, typ). Obsah nevrací.',
     inputSchema: schema({ id: id('ID vydané faktury.') }, ['id']),
     write: false,
-    run: (c, a, tool) => c.get(`/invoices/${a.id}/attachments`, null, tool),
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/attachments`, null, tool),
   },
   download(
     'download_invoice_attachment', 'Stáhnout přílohu vydané faktury',
     'Obsah jedné přílohy vydané faktury. Id přílohy vrátí `list_invoice_attachments`.',
     { id: id('ID vydané faktury.'), attachment_id: id('ID přílohy.') }, ['id', 'attachment_id'],
-    (a) => `/invoices/${a.id}/attachments/${a.attachment_id}`,
+    (a) => `/invoices/${seg(a.id)}/attachments/${seg(a.attachment_id)}`,
     {
       query: () => ({ download: 1 }),
       uri: (a) => `myucto://invoices/${a.id}/attachments/${a.attachment_id}`,
@@ -184,7 +185,7 @@ export const FILE_TOOLS = [
       ['id', 'content_base64', 'filename']),
     write: true,
     run: async (c, a, tool) => c.upload(
-      `/invoices/${a.id}/attachments`,
+      `/invoices/${seg(a.id)}/attachments`,
       fileInput(a, INVOICE_ATTACHMENT_TYPES, 'Příloha faktury'),
       tool,
     ),
@@ -203,7 +204,7 @@ export const FILE_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const list = await c.get(`/invoices/${a.id}/attachments`, null, tool);
+      const list = await c.get(`/invoices/${seg(a.id)}/attachments`, null, tool);
       const attachment = (list?.items ?? []).find((row) => Number(row.id) === a.attachment_id);
       if (!attachment) {
         throw new Error(`Příloha #${a.attachment_id} u faktury #${a.id} neexistuje.`);
@@ -212,7 +213,7 @@ export const FILE_TOOLS = [
         `${attachment.original_name ?? `#${a.attachment_id}`} (${kb(attachment.size_bytes)})`);
       return {
         deleted: attachment,
-        result: await c.del(`/invoices/${a.id}/attachments/${a.attachment_id}`, tool),
+        result: await c.del(`/invoices/${seg(a.id)}/attachments/${seg(a.attachment_id)}`, tool),
       };
     },
   },
@@ -224,7 +225,7 @@ export const FILE_TOOLS = [
     'download_purchase_invoice_pdf', 'Stáhnout PDF přijaté faktury',
     'Originál dokladu od dodavatele, archivovaný u přijaté faktury. Když doklad PDF nemá, vrátí chybu `no_pdf`.',
     { id: id('ID přijaté faktury.') }, ['id'],
-    (a) => `/purchase-invoices/${a.id}/pdf`,
+    (a) => `/purchase-invoices/${seg(a.id)}/pdf`,
     { uri: (a) => `myucto://purchase-invoices/${a.id}/pdf`, meta: (a) => ({ purchase_invoice_id: a.id }) },
   ),
   {
@@ -243,12 +244,12 @@ export const FILE_TOOLS = [
     write: true,
     run: async (c, a, tool) => {
       const file = fileInput(a, PURCHASE_PDF_TYPES, 'PDF přijaté faktury');
-      const invoice = await c.get(`/purchase-invoices/${a.id}`, null, tool);
+      const invoice = await c.get(`/purchase-invoices/${seg(a.id)}`, null, tool);
       const current = invoice?.pdf_path ? (invoice.pdf_original_name || invoice.pdf_path) : null;
       if (current) {
         requireConfirm(a, 'Faktura už má archivované PDF a nahrání ho nahradí', current);
       }
-      return c.upload(`/purchase-invoices/${a.id}/pdf`, file, tool);
+      return c.upload(`/purchase-invoices/${seg(a.id)}/pdf`, file, tool);
     },
   },
   {
@@ -261,14 +262,14 @@ export const FILE_TOOLS = [
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
-      const invoice = await c.get(`/purchase-invoices/${a.id}`, null, tool);
+      const invoice = await c.get(`/purchase-invoices/${seg(a.id)}`, null, tool);
       if (!invoice?.pdf_path) {
         throw new Error(`Přijatá faktura #${a.id} nemá archivované PDF.`);
       }
       const label = `${invoice.pdf_original_name || invoice.pdf_path} u faktury `
         + `${invoice.vendor_invoice_number ?? invoice.doc_number ?? `#${a.id}`}`;
       requireConfirm(a, 'Smazat se má PDF přijaté faktury', label);
-      return { deleted: { id: a.id, pdf: invoice.pdf_original_name ?? invoice.pdf_path }, result: await c.del(`/purchase-invoices/${a.id}/pdf`, tool) };
+      return { deleted: { id: a.id, pdf: invoice.pdf_original_name ?? invoice.pdf_path }, result: await c.del(`/purchase-invoices/${seg(a.id)}/pdf`, tool) };
     },
   },
   {
@@ -336,10 +337,10 @@ export const FILE_TOOLS = [
         return result;
       }
       if (wantsMeta) {
-        result.document = await c.patch(`/documents/${result.document_id}`, meta, tool);
+        result.document = await c.patch(`/documents/${seg(result.document_id)}`, meta, tool);
       }
       if (a.entity_type) {
-        result.link = await c.post(`/documents/${result.document_id}/links`, {
+        result.link = await c.post(`/documents/${seg(result.document_id)}/links`, {
           entity_type: a.entity_type,
           entity_id: a.entity_id,
         }, tool);
@@ -353,9 +354,9 @@ export const FILE_TOOLS = [
       + 'dokladu (seznam vrací `get_document`). Pro práci s textem stačí levnější `get_document` '
       + 's `include_text: true`.',
     { id: id('ID dokumentu.'), file_id: id('ID dalšího souboru dokumentu; bez zadání hlavní soubor.') }, ['id'],
-    (a) => (a.file_id ? `/documents/${a.id}/files/${a.file_id}/download` : `/documents/${a.id}/download`),
+    (a) => (a.file_id ? `/documents/${seg(a.id)}/files/${seg(a.file_id)}/download` : `/documents/${seg(a.id)}/download`),
     {
-      uri: (a) => `myucto://documents/${a.id}${a.file_id ? `/files/${a.file_id}` : ''}`,
+      uri: (a) => `myucto://documents/${a.id}${a.file_id ? `/files/${seg(a.file_id)}` : ''}`,
       meta: (a) => ({ document_id: a.id, ...(a.file_id ? { file_id: a.file_id } : {}) }),
     },
   ),
@@ -373,7 +374,7 @@ export const FILE_TOOLS = [
       ['id', 'content_base64', 'filename']),
     write: true,
     run: async (c, a, tool) => c.upload(
-      `/eshop/products/${a.id}/media`,
+      `/eshop/products/${seg(a.id)}/media`,
       fileInput(a, PRODUCT_MEDIA_TYPES, 'Média zboží'),
       tool,
     ),

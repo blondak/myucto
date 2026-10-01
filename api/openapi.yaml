@@ -45,7 +45,7 @@ info:
     (`POST …/{item_id}/schedule`) a opakování pozastavit nebo obnovit
     (`PUT …/schedules/{id}/status`). Nic z toho nezapisuje do deníku. Automatické
     účtování opakování token nezapne ani neobnoví a koncept z automaticky
-    účtovaného opakování neupraví (`403 other_items.error.auto_post_session_only`).
+    účtovaného opakování neupraví ani nesmaže (`403 other_items.error.auto_post_session_only`).
     Potvrzení a zaúčtování (`post`), storno (`reverse`), přeúčtování (`repost`),
     párování úhrad (`allocations`) i generování opakování (`generate`) zůstávají
     jen ve webovém rozhraní. Oprávnění uživatele `other_items` (zápis) platí dál.
@@ -13877,7 +13877,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Měkce smaže pouze koncept
-      description: Koncept z opakování se zruší, zdrojový doklad opakování smazat nelze. Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write.
+      description: Koncept z opakování se zruší, zdrojový doklad opakování smazat nelze. Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write, kromě konceptu z opakování s automatickým účtováním (403 other_items.error.auto_post_session_only).
       responses:
         '200': { description: Smazáno }
         '403': { $ref: '#/components/responses/Forbidden' }

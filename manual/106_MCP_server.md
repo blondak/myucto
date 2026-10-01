@@ -766,8 +766,9 @@ potvrzení. Splátky slouží k plánu cashflow a do deníku nic nezapisují.
 Aplikace další doklady zakládá dopředu jako koncepty. Automatické účtování
 přes asistenta zapnout nejde: opakování vzniká vždy bez něj a asistent smí
 opakování pozastavit nebo obnovit jen tehdy, když automatiku nemá. Koncept
-z automaticky účtovaného opakování asistent neupraví, protože by ho aplikace
-zaúčtovala bez další kontroly.
+z automaticky účtovaného opakování asistent neupraví ani nesmaže: úpravu by
+aplikace zaúčtovala bez další kontroly a smazáním by zaúčtování tiše zmizelo.
+Vypnout automatiku asistent smí, účtování tím jen zastaví.
 
 Přes asistenta **nejde**: potvrdit nebo zaúčtovat doklad, stornovat ho,
 přeúčtovat, spárovat nebo odpojit úhradu ani ručně vygenerovat doklady
@@ -1039,6 +1040,11 @@ Online připojení používá přihlášení a souhlas popsané v [§ 106.3.5](#
   (viz [§ 106.9](#1069-e-shop-a-sklad)). Je to pojistka proti tomu, aby asistent
   smazal něco, co si domyslel — ne náhrada za `MYUCTO_READ_ONLY=1`, který je
   u nedozorovaného provozu pořád ta správná volba.
+- **Argumenty se ověřují proti schématu nástroje.** Lokální i serverový MCP
+  odmítne volání s neznámým parametrem, špatným typem nebo hodnotou mimo
+  povolený rozsah dřív, než cokoli odejde do aplikace. ID záznamu musí být celé
+  číslo, takže podvržená hodnota typu `../../invoices/123` nesměruje nástroj
+  na jiný záznam. Chyba uvede název parametru a asistent volání opraví.
 
 ## 106.12 Řešení problémů
 
@@ -1053,6 +1059,7 @@ Online připojení používá přihlášení a souhlas popsané v [§ 106.3.5](#
 | `403 other_items.error.auto_post_session_only` | Automatické účtování opakování nebo koncept, který by se automaticky zaúčtoval. Řeší se ve webovém rozhraní. |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý. |
 | `409` u mazání zboží, výrobce, kategorie, skladu… | Záznam je někde použitý — server ho nepustí. Archivuj ho (`archived`), případně zboží či sklad jen deaktivuj. |
+| „Neplatné argumenty nástroje …“ | Asistent poslal parametr, který nástroj nezná, nebo hodnotu špatného typu či mimo rozsah. Hláška jmenuje parametr; asistent obvykle volání sám opraví. |
 | „NEPROVEDENO — chybí potvrzení“ | Není chyba: takhle vypadá náhled nevratné operace. Zkontroluj výpis a řekni asistentovi, ať to potvrdí. |
 | `429` | Překročen limit — sniž `MYUCTO_MAX_RPS`. |
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |

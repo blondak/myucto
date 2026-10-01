@@ -209,8 +209,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * koncept nemá zápis, splátky slouží jen k plánu cashflow a opakování bez
      * automatiky vyrábí zase jen koncepty. Úprava a smazání nekonceptu odmítne
      * služba (409 `not_draft`). Automatické účtování opakování token nezapne ani
-     * neobnoví a koncept z automaticky účtovaného opakování neupraví; to hlídá
-     * akce, protože závisí na těle požadavku a stavu rozvrhu.
+     * neobnoví a koncept z automaticky účtovaného opakování neupraví ani nesmaže
+     * (smazáním by potlačil jeho zaúčtování); to hlídá akce, protože závisí na
+     * těle požadavku a stavu rozvrhu. Vypnout automatiku token smí, účtování
+     * tím jen zastaví.
      *
      * Zakázané zůstává vše, co účtuje nebo páruje: `post`, `reverse`, `repost`,
      * alokace úhrad i `schedules/{id}/generate` (u rozvrhu s automatikou by
