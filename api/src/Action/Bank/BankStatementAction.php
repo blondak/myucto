@@ -4006,6 +4006,11 @@ final class BankStatementAction
             return Json::error($response, 'invalid_status',
                 "Přijatou fakturu ve stavu '{$pi['status']}' nelze spárovat.", 409);
         }
+        if ($advance = $this->unpaidAdvanceOfFinal($supplierId, $purchaseInvoiceId, $txId)) {
+            return Json::error($response, 'advance_payment_belongs_to_advance', $advance['message'], 409, [
+                'advance_id' => $advance['id'],
+            ]);
+        }
 
         // Load transaction for amount + posted_at
         $tx = $pdo->prepare(
@@ -4121,6 +4126,51 @@ final class BankStatementAction
             $result['currency'] = $partial['currency'];
         }
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Konečná faktura navázaná na zálohovou fakturu, která zatím nemá úhradu: platbu,
+     * která odpovídá záloze (nebo na faktuře už nic nezbývá k úhradě), patří spárovat
+     * se ZÁLOHOU. Spárovaná s fakturou by se zaúčtovala 321/221, záloha by zůstala
+     * neuhrazená a její zúčtování 321/314 by se nikdy nezapsalo.
+     *
+     * @return array{id:int, message:string}|null
+     */
+    private function unpaidAdvanceOfFinal(int $supplierId, int $purchaseInvoiceId, int $txId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.id, COALESCE(NULLIF(a.vendor_invoice_number, ''), a.varsymbol) AS label,
+                    a.total_with_vat, f.amount_to_pay,
+                    (SELECT ABS(bt.amount) FROM bank_transactions bt WHERE bt.id = ?) AS tx_amount
+               FROM purchase_invoices f
+               JOIN purchase_invoices a
+                 ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
+                AND a.document_kind = 'advance' AND a.status <> 'cancelled'
+              WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
+                AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = a.id)
+                AND NOT EXISTS (SELECT 1 FROM cash_documents cd
+                                 WHERE cd.supplier_id = a.supplier_id AND cd.purchase_invoice_id = a.id
+                                   AND cd.status = 'posted')
+                AND NOT EXISTS (SELECT 1 FROM invoice_settlements s
+                                 WHERE s.supplier_id = a.supplier_id AND s.doc_type = 'purchase_invoice'
+                                   AND s.doc_id = a.id AND s.status = 'confirmed')"
+        );
+        $stmt->execute([$txId, $purchaseInvoiceId, $supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $nothingLeft = (float) $row['amount_to_pay'] <= 0.005;
+        $matchesAdvance = abs((float) $row['tx_amount'] - (float) $row['total_with_vat']) <= 1.0;
+        if (!$nothingLeft && !$matchesAdvance) {
+            return null; // doplatek konečné faktury nad zálohu se na fakturu párovat smí
+        }
+        $label = (string) ($row['label'] ?? ('#' . $row['id']));
+        return [
+            'id'      => (int) $row['id'],
+            'message' => 'Faktura vyúčtovává zálohu ' . $label . ', která zatím nemá úhradu. Spárujte platbu se '
+                . 'zálohou ' . $label . ' — zaúčtuje se na 314 a tato faktura zálohu zúčtuje (321/314).',
+        ];
     }
 
     private function recordManualMatchV2(int $transactionId, int $supplierId, int $userId): void

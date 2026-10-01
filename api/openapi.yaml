@@ -36288,6 +36288,12 @@ components:
         settled_by: { type: [object, "null"], description: "Jen u zálohy — brief finální faktury, která ji vyúčtovává" }
         has_advance_candidates: { type: boolean }
         has_settlement_candidates: { type: boolean }
+        linked_advance_unpaid:
+          type: boolean
+          description: |
+            Jen u konečné faktury navázané na zálohovou fakturu v podvojném účetnictví: záloha
+            nemá zaúčtovanou úhradu (banka/pokladna), takže zápis faktury zálohu nezúčtoval
+            (321/314). Platba zálohy patří spárovat se zálohou, ne s konečnou fakturou.
         unsettled_notice:
           type: [object, "null"]
           description: |
@@ -41293,6 +41299,13 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/JournalLine'
+          relation:
+            type: string
+            enum: [own, advance_payment, advance_final]
+            description: |
+              Vztah zápisu k dokladu (jen u /journal/for-document). `own` = zápis dokladu.
+              Záloha (zálohová PF, proforma) vlastní zápis nemá; vrací se živé zápisy její úhrady
+              (`advance_payment`, banka/pokladna) a konečné faktury se zúčtováním zálohy (`advance_final`).
 
     RefundOrderPrefill:
       type: object

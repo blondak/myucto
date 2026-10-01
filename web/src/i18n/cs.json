@@ -15376,7 +15376,11 @@
         "entry": "Zápis",
         "reversal": "Storno",
         "open_in_journal": "Otevřít v deníku",
-        "load_failed": "Zaúčtování se nepodařilo načíst."
+        "load_failed": "Zaúčtování se nepodařilo načíst.",
+        "advance_unpaid": "Záloha se zaúčtuje při úhradě (314). Spárujte s ní platbu z banky nebo ji uhraďte pokladnou, ne konečnou fakturu.",
+        "advance_posted": "Záloha se neúčtuje jako předpis. Její zaúčtování tvoří úhrada na účet zálohy a zúčtování zálohy v konečné faktuře.",
+        "relation_advance_payment": "Úhrada zálohy",
+        "relation_advance_final": "Zúčtování v konečné faktuře"
       }
     },
     "manual": {
@@ -17976,6 +17980,7 @@
       "open_journal": "Zaúčtování",
       "open_cash": "Pokladna",
       "mark_paid_unposted": "Označeno jako uhrazeno ručně dne {date} — úhrada NENÍ zaúčtovaná (závazek 321 zůstává v deníku otevřený).",
+      "mark_paid_unposted_advance": "Záloha je označená jako uhrazená ručně dne {date}, ale úhrada NENÍ zaúčtovaná: na účtu 314 nic není a konečná faktura zálohu nezúčtuje. Spárujte s touto zálohou platbu z banky, případně ji uhraďte pokladnou.",
       "settlement_unposted": "nezaúčtováno",
       "post_settlement": "Doúčtovat",
       "settlement_posted": "Zápočet doúčtován do deníku."
@@ -18136,6 +18141,7 @@
       "vendor_unreliable_payer": "Dodavatel je dle registru plátců DPH (CRPDPH) veden jako nespolehlivý plátce — při úhradě hrozí ručení za nepřiznanou DPH (§109 ZDPH). Zvaž úhradu zvláštním způsobem (§109a) nebo ověření u dodavatele.",
       "exchange_rate_cnb_deviation": "Kurz na dokladu ({used}) se liší od denního kurzu ČNB ({cnb}) k rozhodnému dni o {diff} %. Zkontroluj prosím kurz. Účetní přepočet — korunová částka DPH na dokladu (§73/6) tím není dotčena.",
       "advance_has_tax_document": "K navázané záloze už existuje daňový doklad k platbě (DDKP) — DPH z ní byla uplatněna zvlášť. Na této vyúčtovací faktuře uplatni nárok na odpočet jen z DOPLATKU DPH (rozdíl proti DDKP), jinak by se odpočet uplatnil dvakrát.",
+      "linked_advance_unpaid": "Záloha {advance} zatím nemá zaúčtovanou úhradu, proto tato faktura zálohu nezúčtovala (321/314). Platbu zálohy spárujte se zálohou {advance}, ne s touto fakturou — zúčtování se pak do zápisu faktury doplní samo.",
       "receipt_looks_like_prepayment": "Doklad je zařazený jako účtenka/paragon, ale obsahem vypadá jako daňový doklad k přijaté platbě (záloze). Účtenka zaúčtuje rovnou náklad 518 — když pak dorazí konečná faktura, náklad se zdvojí. Zvaž typ „Daňový doklad k platbě\" (DDKP → jen odpočet DPH 343/314) nebo „Záloha\".",
       "exchange_rate_not_reloaded": "Změnilo se rozhodné datum (DUZP) nebo měna, ale kurz zůstal původní ({rate} k {date}) — {reason} Zkontroluj prosím kurz na dokladu.",
       "exchange_rate_not_reloaded_source_locked": "kurz na dokladu nepochází z automatického přepočtu (zadal ho člověk, přišel z importu nebo je jeho původ neznámý), takže ho automatika nepřepisuje.",

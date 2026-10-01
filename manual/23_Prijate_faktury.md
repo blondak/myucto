@@ -728,6 +728,18 @@ DPH (viz níže), aby nezůstal viset beze stopy.
 > automatiku zůstává vazba záloha↔víc než jedna finální faktura — takový případ
 > zaúčtuj ručním zápisem.
 >
+> **Platba zálohy patří na zálohu, i když je konečná faktura už zaúčtovaná.**
+> Spáruješ-li platbu zálohy (i platbu kartou) se zálohovou fakturou až po zaúčtování
+> konečné faktury, nebo ji odpáruješ a spáruješ znovu, zúčtovací řádek 321/314
+> v zápisu konečné faktury se sám doplní, opraví nebo odebere; ostatní řádky zápisu
+> (i ručně přeúčtovaný nákladový účet) zůstávají. V uzavřeném nebo zamčeném období se
+> zápis nepřepíše a v historii faktury zůstane záznam, že zúčtování zálohy nesedí.
+> Platbu nespárované zálohy nejde spárovat s konečnou fakturou, která ji vyúčtovává —
+> aplikace nabídne zálohu. Sekce **Zaúčtování** na detailu zálohy ukazuje zápis úhrady
+> (314) a zápis konečné faktury se zúčtováním; dokud záloha uhrazená není, říká, že se
+> zaúčtuje při úhradě. Zálohová faktura se jako předpis neúčtuje záměrně, automatické
+> účtování ji proto ani nezkouší a nehlásí chybu.
+>
 > **Záloha (nebo samostatný DDKP) s vlastním daňovým dokladem k platbě.** Má-li
 > navázaná záloha svůj DDKP — nebo je-li zálohou přímo samostatný DDKP — část účtu
 > 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Automatické

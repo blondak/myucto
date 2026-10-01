@@ -30,9 +30,12 @@ const props = withDefaults(defineProps<{
   alwaysVisible?: boolean
   /** Popisek dokladu do hlavičky dialogu Přeúčtovat (číslo faktury). */
   docLabel?: string | null
+  /** Záloha (zálohová PF / proforma): vlastní zápis nemá, účtuje se její úhrada. */
+  advance?: boolean
 }>(), {
   alwaysVisible: false,
   docLabel: null,
+  advance: false,
 })
 
 const emit = defineEmits<{ reposted: [] }>()
@@ -76,7 +79,15 @@ function isReversal(entry: JournalEntryWithLines): boolean {
  * zapisuje server novým zápisem, viz DocumentRepostService).
  */
 function canRepost(entry: JournalEntryWithLines): boolean {
-  return auth.canWrite('accounting') && entry.reversed_by === null && !isReversal(entry)
+  return auth.canWrite('accounting') && isOwn(entry) && entry.reversed_by === null && !isReversal(entry)
+}
+
+/** Záloha má zaúčtovanou úhradu (banka/pokladna) — jinak se zaúčtuje až při ní. */
+const advancePaid = computed(() => entries.value.some(e => e.relation === 'advance_payment'))
+
+/** Zápis jiného dokladu (úhrada zálohy, konečná faktura) — přeúčtovává se u něj. */
+function isOwn(entry: JournalEntryWithLines): boolean {
+  return (entry.relation ?? 'own') === 'own'
 }
 
 async function onReposted(): Promise<void> {
@@ -103,6 +114,9 @@ defineExpose({ reload: () => load(props.docId) })
       </svg>
     </button>
     <div v-show="open" class="px-5 py-4 space-y-5">
+      <p v-if="advance" class="text-sm text-neutral-600">
+        {{ advancePaid ? t('accounting.journal.document_posting.advance_posted') : t('accounting.journal.document_posting.advance_unpaid') }}
+      </p>
       <div v-for="entry in entries" :key="entry.id">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <span class="flex items-center gap-2 text-xs text-neutral-500">
@@ -110,6 +124,11 @@ defineExpose({ reload: () => load(props.docId) })
             <span>{{ formatDate(entry.entry_date) }}</span>
             <span v-if="isReversal(entry)" class="px-1.5 py-0.5 rounded bg-danger-50 text-danger-500 font-medium">
               {{ t('accounting.journal.document_posting.reversal') }}
+            </span>
+            <span v-if="!isOwn(entry)" class="px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-medium">
+              {{ entry.relation === 'advance_payment'
+                ? t('accounting.journal.document_posting.relation_advance_payment')
+                : t('accounting.journal.document_posting.relation_advance_final') }}
             </span>
             <span v-if="entry.description" class="text-neutral-400 truncate max-w-[24rem]">{{ entry.description }}</span>
           </span>

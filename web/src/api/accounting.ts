@@ -206,9 +206,17 @@ export type JournalDocumentSource = 'invoices' | 'purchase-invoices'
  */
 export type JournalPostingSource = JournalDocumentSource | 'bank-transactions'
 
+/**
+ * Vztah zápisu k dokladu v sekci Zaúčtování. Záloha (zálohová PF, proforma) vlastní
+ * zápis nemá, její zaúčtování tvoří úhrada (314/221, 221/324) a zúčtování v konečné
+ * faktuře. Takové zápisy se jen ukazují, přeúčtovávají se u svého dokladu.
+ */
+export type JournalEntryRelation = 'own' | 'advance_payment' | 'advance_final'
+
 /** Zápis i s řádky, jak ho vrací /journal/for-document/{source}/{id}. */
 export interface JournalEntryWithLines extends JournalEntry {
   lines: JournalLine[]
+  relation?: JournalEntryRelation
 }
 
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */

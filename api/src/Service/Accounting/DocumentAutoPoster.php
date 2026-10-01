@@ -107,6 +107,12 @@ final class DocumentAutoPoster
         if (!$this->commercialFeatures->isAvailable() || !$this->isEnabled($supplierId, $sourceType)) {
             return;
         }
+        // Zálohová PF, proforma a interní storno se jako předpis neúčtují ZÁMĚRNĚ (účtuje
+        // se úhrada zálohy). Pokus o zaúčtování by v historii dokladu skončil jako
+        // accounting.auto_post_failed a účetní by v tom četla chybu, která není.
+        if (!$this->isPostableKind($supplierId, $sourceType, $docId)) {
+            return;
+        }
 
         // Před zaúčtováním doplnit JISTOU klasifikaci nákladu na položky, které ji nemají.
         // Bez tohoto kroku čte purchaseExpenseWeights() prázdné sloupce a celý řádek spadne
@@ -194,6 +200,22 @@ final class DocumentAutoPoster
         }
         $operation = $sourceType === 'invoice' ? OperationType::DOCUMENT_INVOICE : OperationType::DOCUMENT_PURCHASE;
         return $mode === 'double_entry' && $this->policy->levelFor($supplierId, $operation) === 'auto';
+    }
+
+    /** Druh dokladu, který se do deníku účtuje jako předpis (zrcadlo guardů v PostingService). */
+    private function isPostableKind(int $supplierId, string $sourceType, int $docId): bool
+    {
+        $stmt = $this->db->pdo()->prepare($sourceType === 'invoice'
+            ? 'SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?'
+            : 'SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$docId, $supplierId]);
+        $kind = $stmt->fetchColumn();
+        if ($kind === false) {
+            return true; // neexistující doklad ohlásí post() jako dosud
+        }
+        return $sourceType === 'invoice'
+            ? in_array((string) $kind, PostingService::POSTABLE_ISSUED_INVOICE_TYPES, true)
+            : (string) $kind !== 'advance';
     }
 
     /** Datum účetního případu z dokladu (DUZP / vystavení). NULL = doklad neexistuje. */

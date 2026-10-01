@@ -15376,7 +15376,11 @@
         "entry": "Entry",
         "reversal": "Reversal",
         "open_in_journal": "Open in journal",
-        "load_failed": "Could not load the posting."
+        "load_failed": "Could not load the posting.",
+        "advance_unpaid": "The advance is posted when it is paid (314). Match the bank payment with the advance or pay it in cash, not with the final invoice.",
+        "advance_posted": "The advance is not posted as a document. Its posting consists of the payment to the advance account and the advance settlement in the final invoice.",
+        "relation_advance_payment": "Advance payment",
+        "relation_advance_final": "Settlement in final invoice"
       }
     },
     "manual": {
@@ -17976,6 +17980,7 @@
       "open_journal": "Posting",
       "open_cash": "Cash register",
       "mark_paid_unposted": "Marked as paid manually on {date} — the payment is NOT posted (the 321 payable stays open in the journal).",
+      "mark_paid_unposted_advance": "The advance was marked as paid manually on {date}, but the payment is NOT posted: account 314 holds nothing and the final invoice will not settle the advance. Match the bank payment with this advance or pay it in cash.",
       "settlement_unposted": "not posted",
       "post_settlement": "Post to journal",
       "settlement_posted": "Set-off posted to the journal."
@@ -18136,6 +18141,7 @@
       "vendor_non_payer_deduction": "The vendor is not a VAT payer, yet a VAT deduction is claimed. VAT cannot be deducted from a non-payer — please check the deduction setting.",
       "vendor_unreliable_payer": "According to the VAT payer registry (CRPDPH), the vendor is listed as an unreliable VAT payer — paying them carries liability risk for unpaid VAT (§109 VAT Act). Consider special-mode payment (§109a) or verifying with the vendor.",
       "advance_has_tax_document": "The linked advance already has a tax document for payment (DDKP) — its VAT was claimed separately. On this final invoice claim the deduction only from the VAT TOP-UP (the difference against the DDKP), otherwise the deduction would be taken twice.",
+      "linked_advance_unpaid": "Advance {advance} has no posted payment yet, so this invoice did not settle the advance (321/314). Match the advance payment with advance {advance}, not with this invoice; the settlement is then added to this invoice's entry automatically.",
       "receipt_looks_like_prepayment": "This document is classified as a receipt, but its content looks like a tax document for a received payment (advance). A receipt books the cost (518) immediately — when the final invoice later arrives, the cost is double-counted. Consider the type \"Tax document for payment\" (DDKP → VAT deduction only, 343/314) or \"Advance\".",
       "exchange_rate_not_reloaded": "The relevant date (tax point) or the currency changed, but the exchange rate stayed as it was ({rate} as of {date}) — {reason} Please check the rate on the document.",
       "exchange_rate_not_reloaded_source_locked": "the rate on the document does not come from an automatic conversion (a person entered it, it came from an import, or its origin is unknown), so automation does not overwrite it.",

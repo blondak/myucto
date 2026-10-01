@@ -456,6 +456,11 @@ export interface PurchaseInvoice {
    * zápočet) → závazek 321 zůstává v deníku otevřený. FE zobrazí výrazné upozornění.
    */
   mark_paid_unposted?: boolean
+  /**
+   * Konečná faktura navázaná na zálohovou fakturu, jejíž úhrada není zaúčtovaná
+   * (podvojné účetnictví) — zúčtování 321/314 v zápisu faktury proto chybí.
+   */
+  linked_advance_unpaid?: boolean
   /** Vyúčtovací faktura bez vazby: existuje nespárovaná záloha téhož dodavatele? */
   has_advance_candidates?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */

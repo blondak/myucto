@@ -1177,8 +1177,18 @@ const purchaseActions = computed<ActionItem[]>(() => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
         </svg>
         <div class="text-danger-600 min-w-0">
-          {{ t('purchase_invoice.payment_provenance.mark_paid_unposted', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
+          {{ invoice.document_kind === 'advance'
+            ? t('purchase_invoice.payment_provenance.mark_paid_unposted_advance', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' })
+            : t('purchase_invoice.payment_provenance.mark_paid_unposted', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
         </div>
+      </div>
+
+      <!-- ═══ Konečná faktura zálohy, jejíž úhrada není zaúčtovaná → zúčtování 321/314 chybí ═══ -->
+      <div v-if="invoice.linked_advance_unpaid && invoice.linked_advance"
+        class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+        ⚠ {{ t('purchase_invoice.warning.linked_advance_unpaid', {
+          advance: invoice.linked_advance.varsymbol || invoice.linked_advance.vendor_invoice_number || ('#' + invoice.linked_advance.id),
+        }) }}
       </div>
 
       <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
@@ -1287,6 +1297,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
       <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
+        :advance="invoice.document_kind === 'advance' && isDoubleEntry"
         :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
         <!-- Účetní údaje dokladu jako dvousloupcová tabulka: popisek vlevo, hodnota hned
              vedle, ať se nemusí hledat přes celou šířku sekce. -->

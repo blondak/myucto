@@ -62,7 +62,13 @@ final class JournalForDocumentAction
             return Json::ok($response, ['items' => []]);
         }
 
-        $entries = $this->journal->listBySourceWithLines($supplierId, $sourceType, $docId);
+        $entries = array_map(
+            static fn (array $e): array => $e + ['relation' => 'own'],
+            $this->journal->listBySourceWithLines($supplierId, $sourceType, $docId),
+        );
+        if ($entries === []) {
+            $entries = $this->advanceEntries($supplierId, $sourceType, $docId);
+        }
         if ($entries !== []) {
             $accMap = $this->accounts->idToAccountMap($supplierId);
             // Dimenze řádků (Firma → Dimenze) — štítky v sekci Zaúčtování.
@@ -85,5 +91,61 @@ final class JournalForDocumentAction
         }
 
         return Json::ok($response, ['items' => $entries]);
+    }
+
+    /**
+     * Záloha (zálohová PF, proforma) vlastní zápis nemá — zaúčtuje se její úhrada
+     * (314/221, 221/324) a zúčtování v konečné faktuře. Prázdná sekce Zaúčtování
+     * vypadala jako chyba „nic se nezaúčtovalo", proto se ukážou živé zápisy úhrad
+     * (banka, pokladna) a konečné faktury, označené vztahem k záloze.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function advanceEntries(int $supplierId, string $sourceType, int $docId): array
+    {
+        $pdo = $this->db->pdo();
+        if ($sourceType === 'purchase_invoice') {
+            $kind = $pdo->prepare('SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+            $kind->execute([$docId, $supplierId]);
+            if ($kind->fetchColumn() !== 'advance') {
+                return [];
+            }
+            $sources = [
+                'bank' => 'SELECT DISTINCT bank_transaction_id FROM payment_matches
+                            WHERE supplier_id = ? AND purchase_invoice_id = ? AND bank_transaction_id IS NOT NULL',
+                'cash' => 'SELECT id FROM cash_documents WHERE supplier_id = ? AND purchase_invoice_id = ?',
+                'purchase_invoice' => "SELECT id FROM purchase_invoices
+                            WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND status <> 'cancelled'",
+            ];
+        } else {
+            $kind = $pdo->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');
+            $kind->execute([$docId, $supplierId]);
+            if ($kind->fetchColumn() !== 'proforma') {
+                return [];
+            }
+            $sources = [
+                'bank' => 'SELECT DISTINCT bank_transaction_id FROM invoice_payments
+                            WHERE supplier_id = ? AND invoice_id = ? AND bank_transaction_id IS NOT NULL',
+                'cash' => 'SELECT id FROM cash_documents WHERE supplier_id = ? AND invoice_id = ?',
+                'invoice' => "SELECT id FROM invoices
+                            WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'",
+            ];
+        }
+
+        $out = [];
+        foreach ($sources as $type => $sql) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$supplierId, $docId]);
+            foreach (array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: []) as $id) {
+                foreach ($this->journal->listBySourceWithLines($supplierId, $type, $id) as $entry) {
+                    if ($entry['reversed_by'] !== null || $entry['posted_at'] === null || $entry['source_id'] === null) {
+                        continue; // jen živé zaúčtování, historii ukazuje doklad, kterému patří
+                    }
+                    $entry['relation'] = in_array($type, ['bank', 'cash'], true) ? 'advance_payment' : 'advance_final';
+                    $out[] = $entry;
+                }
+            }
+        }
+        return $out;
     }
 }

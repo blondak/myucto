@@ -274,10 +274,27 @@ final class PurchaseInvoiceRepository
         // ani účet 321 neexistuje, ruční „Uhrazeno" je tam jediný způsob, jak úhradu
         // zaznamenat — varování by hlásilo závadu, která nemůže nastat. Režim viz
         // $isDoubleEntry výš (k roku dokladu, ne k dnešku).
+        //
+        // Konečná faktura navázaná na zálohovou fakturu: o zaúčtování rozhoduje úhrada
+        // ZÁLOHY (314), ne vlastní platba faktury. Zaplacená záloha kryje fakturu přes
+        // zúčtování 321/314 v jejím zápisu, takže „uhrazeno bez zaúčtované úhrady" tu
+        // není pravda. Nezaplacená záloha naopak znamená, že zúčtování chybí — platbu
+        // patří spárovat se zálohou, ne s fakturou ({@see linked_advance_unpaid}).
+        $linkedAdvanceId = (string) ($row['document_kind'] ?? 'invoice') === 'invoice'
+            && is_array($row['linked_advance'] ?? null)
+            && (string) ($row['linked_advance']['document_kind'] ?? '') === 'advance'
+                ? (int) $row['linked_advance']['id']
+                : null;
+        $linkedAdvancePaid = $linkedAdvanceId !== null && $this->paidAdvanceAmount($linkedAdvanceId, $supplierId) > 0.0;
+        $row['linked_advance_unpaid'] = $linkedAdvanceId !== null && $isDoubleEntry && !$linkedAdvancePaid
+            && ($row['status'] ?? '') !== 'cancelled';
+        $coveredByAdvance = $linkedAdvancePaid && (float) ($row['amount_to_pay'] ?? 0) <= 0.005;
+
         $row['mark_paid_unposted'] = ($row['status'] === 'paid')
             && $row['bank_payments'] === []
             && $row['cash_payments'] === []
             && $row['settlement_payments'] === []
+            && !$coveredByAdvance
             && $isDoubleEntry;
         return $row;
     }

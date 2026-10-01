@@ -192,6 +192,40 @@ describe('DocumentPostingPanel', () => {
     expect(notes.map(n => n.props('entryId'))).toEqual([64157, 64160])
   })
 
+  /**
+   * Záloha vlastní zápis nemá. Bez věty o tom, kdy se zaúčtuje, prázdná sekce
+   * vypadala jako chyba a účetní platbu zálohy přesunula na konečnou fakturu.
+   */
+  it('nezaplacená záloha řekne, že se zaúčtuje při úhradě', async () => {
+    // Konečná faktura je zaúčtovaná, ale úhrada zálohy ne — pořád „zaúčtuje se při úhradě".
+    journalForDocumentMock.mockResolvedValueOnce([entry(70002, { source_type: 'purchase_invoice', relation: 'advance_final' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'purchase-invoices', docId: 271, alwaysVisible: true, advance: true },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('accounting.journal.document_posting.advance_unpaid')
+  })
+
+  it('úhradu zálohy a zúčtování v konečné faktuře ukáže, ale přeúčtovat nenabídne', async () => {
+    journalForDocumentMock.mockResolvedValueOnce([
+      entry(70001, { source_type: 'bank', relation: 'advance_payment' }),
+      entry(70002, { source_type: 'purchase_invoice', relation: 'advance_final' }),
+    ])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'purchase-invoices', docId: 271, alwaysVisible: true, advance: true },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+
+    expect(wrapper.text()).toContain('accounting.journal.document_posting.advance_posted')
+    expect(wrapper.text()).toContain('accounting.journal.document_posting.relation_advance_payment')
+    expect(wrapper.text()).toContain('accounting.journal.document_posting.relation_advance_final')
+    expect(wrapper.findAll('button').filter(b => b.text() === 'accounting.repost.action')).toHaveLength(0)
+  })
+
   it('protizápis se označí jako storno', async () => {
     journalForDocumentMock.mockResolvedValueOnce([
       entry(64157, { reversed_by: 64160 }),

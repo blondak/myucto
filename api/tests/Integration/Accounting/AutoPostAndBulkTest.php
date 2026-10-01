@@ -275,6 +275,29 @@ final class AutoPostAndBulkTest extends TestCase
         self::assertSame('document_not_postable', $payload['error_code']);
     }
 
+    /**
+     * Zálohová PF se jako předpis neúčtuje záměrně (účtuje se její úhrada na 314).
+     * Auto-post ji proto nesmí zkoušet a hlásit accounting.auto_post_failed — v historii
+     * dokladu to účetní četla jako chybu „nic se nezaúčtovalo".
+     */
+    public function testAutoPostSkipsPurchaseAdvanceWithoutFailureAudit(): void
+    {
+        $this->setAutoPost(purchases: true);
+        $vendorId = $this->client('Dodavatel záloha');
+        $advanceId = $this->purchase('ZPF-2099-AP5', $vendorId, '40', 1000.00, 210.00, 21.00);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET document_kind = 'advance' WHERE id = ?")->execute([$advanceId]);
+
+        $this->autoPoster->maybeAutoPost($this->supplierId, 'purchase_invoice', $advanceId, $this->userId);
+
+        self::assertNull($this->journal->findBySource($this->supplierId, 'purchase_invoice', $advanceId));
+        $failed = (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM activity_log
+              WHERE supplier_id = {$this->supplierId} AND action = 'accounting.auto_post_failed'
+                AND entity_type = 'purchase_invoice' AND entity_id = {$advanceId}"
+        )->fetchColumn();
+        self::assertSame(0, $failed, 'Záloha nemá v historii chybu zaúčtování.');
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function setAutoPost(bool $invoices = false, bool $purchases = false): void
