@@ -159,6 +159,24 @@ export interface AiCredentialsPayload {
   api_version?: string
   // openai
   base_url?: string
+  /** Rozkopírovat do dalších firem uživatele (cílové firmy určuje server). */
+  apply_to_all_companies?: boolean
+  /** Jen firmy, jejichž aktivní poskytovatel nemá klíč. */
+  only_unconfigured?: boolean
+}
+
+export interface AiBulkCompany {
+  id: number
+  name: string
+}
+
+export interface AiBulkResult {
+  applied: boolean
+  reason?: 'test_failed'
+  updated?: AiBulkCompany[]
+  skipped_configured?: AiBulkCompany[]
+  skipped_forbidden?: AiBulkCompany[]
+  skipped_constraint?: (AiBulkCompany & { reason: 'eu_residency' })[]
 }
 
 export interface AiCredentialsUpdateResult {
@@ -166,6 +184,7 @@ export interface AiCredentialsUpdateResult {
   test_ok: boolean
   test_error: string | null
   model: string | null
+  bulk?: AiBulkResult
 }
 
 export interface AiExtractResult {

@@ -5,7 +5,8 @@ import { integrationsApi,
   type IdokladCredentialsStatus, type FakturoidCredentialsStatus,
   type ImportJob,
   type AiProvider, type AiDataRegion, type AiCredentialsResponse, type AiCredentialsPayload,
-  type AiEffort } from '@/api/integrations'
+  type AiEffort, type AiBulkResult } from '@/api/integrations'
+import { aiProviderBadge } from './aiProviderBadge'
 import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/settings'
 import { useRoute } from 'vue-router'
 import { useToast } from '@/composables/useToast'
@@ -312,11 +313,17 @@ const aiTuningDirty = computed(() =>
 const credSaving = ref(false)
 const credTesting = ref(false)
 const credTestMsg = ref<{ ok: boolean; text: string } | null>(null)
+// „Uložit nastavení do všech firem" — výchozí VYPNUTO; po zapnutí jen do firem bez
+// funkční AI, aby hromadné uložení nikdy nepřepsalo klíč, který jinde už funguje.
+const bulkApply = ref(false)
+const bulkOnlyUnconfigured = ref(true)
+const bulkResult = ref<AiBulkResult | null>(null)
 
 const providerInfo = computed(() => aiCreds.value?.providers?.[aiProvider.value])
 const models = computed(() => providerInfo.value?.models ?? [])
 function euCapable(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.eu_capable ?? false }
 function providerConfigured(p: AiProvider): boolean { return aiCreds.value?.providers?.[p]?.configured ?? false }
+function providerBadge(p: AiProvider) { return aiProviderBadge(p, aiCreds.value?.ai_provider, providerConfigured(p)) }
 // EU-required → provider musí být EU-capable (fail-closed vizuálně; server ho stejně odmítne)
 const providerBlockedByEu = computed(() => aiEuRequired.value && !euCapable(aiProvider.value))
 
@@ -459,7 +466,17 @@ async function saveAiCredentials() {
   if (!credForm.api_key && !providerConfigured(aiProvider.value)) { toast.error(t('aiGateway.err_key_required')); return }
   credSaving.value = true
   credTestMsg.value = null
+  bulkResult.value = null
   try {
+    const switching = !!aiCreds.value && aiCreds.value.ai_provider !== aiProvider.value
+    const selection = {
+      ai_provider: aiProvider.value,
+      ai_data_region: aiRegion.value,
+      ai_eu_residency_required: aiEuRequired.value,
+    }
+    // Server kopiuje region a EU rezidenci z uloženého stavu této firmy, takže
+    // při rozkopírování musí být volba brány uložená dřív než klíč.
+    if (bulkApply.value) await settingsApi.updateSupplier(selection)
     const payload: AiCredentialsPayload = { provider: aiProvider.value }
     if (credForm.api_key) payload.api_key = credForm.api_key
     if (credForm.default_model) payload.default_model = credForm.default_model
@@ -469,6 +486,10 @@ async function saveAiCredentials() {
       payload.api_version = credForm.api_version
     }
     if (aiProvider.value === 'openai') payload.base_url = credForm.base_url
+    if (bulkApply.value) {
+      payload.apply_to_all_companies = true
+      payload.only_unconfigured = bulkOnlyUnconfigured.value
+    }
     const r = await integrationsApi.setAiCredentials(payload)
     credTestMsg.value = r.test_ok
       ? { ok: true, text: t('aiGateway.test_ok', { model: r.model || '' }) }
@@ -477,21 +498,29 @@ async function saveAiCredentials() {
     // Vybraný poskytovatel = aktivní poskytovatel: „Uložit" ukládá i volbu brány.
     // Jinak by uživatel uložil klíč a extrakce by dál běžela přes jiného poskytovatele
     // (typicky bez klíče). Výsledek testu se jen ohlásí, volbu nepodmiňuje.
-    if (aiCreds.value && aiCreds.value.ai_provider !== aiProvider.value) {
-      await settingsApi.updateSupplier({
-        ai_provider: aiProvider.value,
-        ai_data_region: aiRegion.value,
-        ai_eu_residency_required: aiEuRequired.value,
-      })
+    if (switching) {
+      if (!bulkApply.value) await settingsApi.updateSupplier(selection)
       await loadAiAssist()
       toast.success(t('aiGateway.switched_active', { provider: providerLabel(aiProvider.value) }))
     }
+    if (r.bulk) reportBulk(r.bulk)
     await loadAiCreds(true)
   } catch (e) {
     credTestMsg.value = { ok: false, text: apiErrorMessage(e) }
   } finally {
     credSaving.value = false
   }
+}
+
+function reportBulk(b: AiBulkResult) {
+  bulkResult.value = b
+  if (!b.applied) {
+    toast.warning(t('aiGateway.bulk_not_applied'))
+    return
+  }
+  const n = b.updated?.length ?? 0
+  if (n > 0) toast.success(t('aiGateway.bulk_updated', { n }))
+  else toast.info(t('aiGateway.bulk_none'))
 }
 
 async function testAiConnection() {
@@ -972,10 +1001,16 @@ onMounted(() => {
                   aiProvider === p ? 'bg-primary-600 text-white border-primary-600 font-medium' : 'bg-surface text-neutral-700 border-neutral-300 hover:border-neutral-400']">
                 {{ providerLabel(p) }}
                 <span v-if="providerConfigured(p)" class="text-success-500" :class="aiProvider === p ? 'text-white' : ''">✓</span>
-                <span v-if="aiCreds?.ai_provider === p"
+                <span v-if="providerBadge(p) === 'active'" data-test="badge-active"
                   class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
                   :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-success-50 text-success-700'">
                   {{ t('aiGateway.active_badge') }}
+                </span>
+                <span v-else-if="providerBadge(p) === 'no_key'" data-test="badge-no-key"
+                  :title="t('aiGateway.no_key_badge_title')"
+                  class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
+                  :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-warning-50 text-warning-700'">
+                  {{ t('aiGateway.no_key_badge') }}
                 </span>
                 <span v-if="p === RECOMMENDED_PROVIDER"
                   class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
@@ -985,7 +1020,8 @@ onMounted(() => {
               </button>
             </div>
             <p v-if="aiCreds && aiCreds.ai_provider !== aiProvider" class="mt-2 text-xs text-warning-700">
-              {{ t('aiGateway.not_active_hint', { active: providerLabel(aiCreds.ai_provider), provider: providerLabel(aiProvider) }) }}
+              {{ t(providerConfigured(aiCreds.ai_provider) ? 'aiGateway.not_active_hint' : 'aiGateway.not_active_hint_no_key',
+                   { active: providerLabel(aiCreds.ai_provider), provider: providerLabel(aiProvider) }) }}
             </p>
           </div>
 
@@ -1140,6 +1176,43 @@ onMounted(() => {
                 {{ aiTuningSaving ? t('common.loading') : t('aiGateway.save_tuning') }}
               </button>
             </div>
+          </div>
+
+          <!-- Rozkopírování klíče do dalších firem (cílové firmy určuje server) -->
+          <div class="mt-4 pt-4 border-t border-neutral-100 space-y-2">
+            <label class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer">
+              <input v-model="bulkApply" type="checkbox" data-test="bulk-apply" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>{{ t('aiGateway.bulk_apply') }}</span>
+            </label>
+            <div v-if="bulkApply" class="ml-6 space-y-1">
+              <label class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer">
+                <input v-model="bulkOnlyUnconfigured" type="checkbox" data-test="bulk-only-unconfigured" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>{{ t('aiGateway.bulk_only_unconfigured') }}</span>
+              </label>
+              <p class="text-xs text-neutral-500">{{ t('aiGateway.bulk_hint') }}</p>
+            </div>
+          </div>
+
+          <div v-if="bulkResult" data-test="bulk-result" class="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700 space-y-1">
+            <strong class="block">{{ t('aiGateway.bulk_result_title') }}</strong>
+            <p v-if="!bulkResult.applied" class="text-warning-700">{{ t('aiGateway.bulk_not_applied') }}</p>
+            <template v-else>
+              <p v-if="bulkResult.updated?.length" class="text-success-600">
+                {{ t('aiGateway.bulk_updated', { n: bulkResult.updated.length }) }}: {{ bulkResult.updated.map(c => c.name).join(', ') }}
+              </p>
+              <p v-if="bulkResult.skipped_configured?.length">
+                {{ t('aiGateway.bulk_skipped_configured', { n: bulkResult.skipped_configured.length }) }}: {{ bulkResult.skipped_configured.map(c => c.name).join(', ') }}
+              </p>
+              <p v-if="bulkResult.skipped_constraint?.length" class="text-warning-700">
+                {{ t('aiGateway.bulk_skipped_constraint', { n: bulkResult.skipped_constraint.length }) }}: {{ bulkResult.skipped_constraint.map(c => c.name).join(', ') }}
+              </p>
+              <p v-if="bulkResult.skipped_forbidden?.length" class="text-warning-700">
+                {{ t('aiGateway.bulk_skipped_forbidden', { n: bulkResult.skipped_forbidden.length }) }}: {{ bulkResult.skipped_forbidden.map(c => c.name).join(', ') }}
+              </p>
+              <p v-if="!bulkResult.updated?.length && !bulkResult.skipped_configured?.length && !bulkResult.skipped_constraint?.length && !bulkResult.skipped_forbidden?.length">
+                {{ t('aiGateway.bulk_none') }}
+              </p>
+            </template>
           </div>
 
           <div class="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-neutral-100">

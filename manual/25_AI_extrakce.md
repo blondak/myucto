@@ -279,7 +279,10 @@ V sekci nastavíš:
 
 1. **Poskytovatele AI** — přepínač se čtyřmi tlačítky (Anthropic / Azure OpenAI
    / OpenAI / Gemini), zelené ✓ u tlačítka znamená, že ten poskytovatel má už
-   uložené přihlašovací údaje. Klik na tlačítko jen přepne, které přihlašovací
+   uložené přihlašovací údaje. Štítek **aktivní** nese poskytovatel, přes kterého
+   extrakce opravdu běží: je pro firmu zvolený a má uložený klíč. Zvolený
+   poskytovatel bez klíče má místo toho štítek **bez klíče** a extrakce zatím
+   neběží. Klik na tlačítko jen přepne, které přihlašovací
    údaje a model se dole zobrazí/upravují — **neuloží** to ještě aktivní volbu.
 2. **Vynutit EU rezidenci dat** (checkbox) a **Region dat** (EU/US) — viz
    [§ 25.7.2](#2522-eu-rezidence-dat-co-to-znamena-a-jak-se-vynucuje).
@@ -303,6 +306,17 @@ Pod tím je formulář **Přihlašovací údaje — {poskytovatel}**:
 - Tlačítko **koš** u nastaveného poskytovatele smaže jeho uložené přihlašovací
   údaje (po potvrzení) — pokud byl zrovna aktivní, extrakce přestane fungovat,
   dokud nenastavíš jiného poskytovatele nebo klíč nevložíš znovu.
+- Zaškrtnutím **Uložit nastavení do všech firem** uloží **Uložit a otestovat**
+  stejného poskytovatele, klíč, model, region dat, EU rezidenci a míru
+  uvažování i do ostatních firem, ve kterých smíš měnit nastavení AI. Volba
+  **Jen do firem s nenastavenou AI** (výchozí zapnutá) přeskočí firmy, jejichž
+  aktivní poskytovatel už má klíč, takže fungující nastavení jinde nepřepíšeš.
+  Klíč se otestuje jen jednou, na aktuální firmě; když test neprojde, do dalších
+  firem se nic neuloží. Každá firma dostane vlastní šifrovanou kopii klíče.
+  **Poznámky k extrakci** se nekopírují, každá firma si drží vlastní. Firma,
+  která vyžaduje EU rezidenci dat, nastavení bez EU regionu nedostane a ve
+  výsledku je uvedená jako přeskočená. Po uložení se pod formulářem vypíše, do
+  kterých firem se nastavení uložilo a které se přeskočily a proč.
 
 U nakonfigurovaného poskytovatele vidíš i **počet dosud provedených extrakcí**
 (počítadlo per poskytovatel, nezávislé na tom, jestli je zrovna aktivní) a jeho

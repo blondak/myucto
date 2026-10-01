@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Import\AiCredentialsBulkApplier;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
 use MyInvoice\Service\Import\GeminiClient;
@@ -67,6 +68,7 @@ final class AiProviderCredentialsAction
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly AiCredentialsBulkApplier $bulkApplier,
     ) {}
 
     public function status(Request $request, Response $response): Response
@@ -144,6 +146,14 @@ final class AiProviderCredentialsAction
             return Json::error($response, 'validation_failed', 'Neplatný model.', 400);
         }
 
+        // Rozkopírování do dalších firem jen z přihlášené relace: hromadný zápis
+        // klíčů napříč firmami nemá jít přes API token.
+        $bulk = ($body['apply_to_all_companies'] ?? false) === true;
+        $onlyUnconfigured = ($body['only_unconfigured'] ?? true) !== false;
+        if ($bulk && !RequestAuthorization::isSessionAuth($request)) {
+            return Json::error($response, 'forbidden', 'Hromadné uložení je dostupné jen z přihlášené relace.', 403);
+        }
+
         $existing = $this->clientFor($provider)->getCredentials($supplierId);
 
         // Config-only update (klíč zůstává) — nemění secret, jen non-secret sloupce.
@@ -153,9 +163,14 @@ final class AiProviderCredentialsAction
                 return Json::error($response, 'validation_failed', $err, 400);
             }
             $this->logger->log('import.ai_config_changed', $userId, 'supplier', $supplierId, ['provider' => $provider], $ip, $ua);
-            // Nešahali jsme na secret ani nevolali testConnection → NEpředstírej úspěšný test
-            // (`test_ok=null`, `tested=false`), ať FE neukáže falešný „spojení OK".
-            return Json::ok($response, ['saved' => true, 'tested' => false, 'test_ok' => null, 'test_error' => null]);
+            if (!$bulk) {
+                // Nešahali jsme na secret ani nevolali testConnection → NEpředstírej úspěšný test
+                // (`test_ok=null`, `tested=false`), ať FE neukáže falešný „spojení OK".
+                return Json::ok($response, ['saved' => true, 'tested' => false, 'test_ok' => null, 'test_error' => null]);
+            }
+            // Do dalších firem jde jen klíč ověřený v tomhle požadavku.
+            $result = ['saved' => true, 'tested' => true] + $this->runTest($provider, $supplierId);
+            return Json::ok($response, $result + $this->bulkOutcome($request, $supplierId, $provider, $onlyUnconfigured, $result, $ip, $ua));
         }
 
         if ($apiKey === '') {
@@ -191,23 +206,51 @@ final class AiProviderCredentialsAction
         $this->persistCredentials($provider, $supplierId, $apiKey, $body);
         $this->logger->log('import.ai_credentials_set', $userId, 'supplier', $supplierId, ['provider' => $provider], $ip, $ua);
 
+        $result = ['saved' => true] + $this->runTest($provider, $supplierId);
+        if ($bulk) {
+            $result += $this->bulkOutcome($request, $supplierId, $provider, $onlyUnconfigured, $result, $ip, $ua);
+        }
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Jediné volání poskytovatele za celé uložení — i při rozkopírování do dalších
+     * firem se klíč testuje jen tady, na aktuální firmě (test stojí uživatele peníze).
+     *
+     * @return array{test_ok:bool, test_error:?string, model:?string}
+     */
+    private function runTest(string $provider, int $supplierId): array
+    {
         // L1: EU-required tenant nesmí testovat us endpoint — fail-closed před testConnection.
         if ($this->residencyConflict($provider, $supplierId)) {
-            return Json::ok($response, [
-                'saved'      => true,
-                'test_ok'    => false,
-                'test_error' => 'residency_conflict',
-                'model'      => null,
-            ]);
+            return ['test_ok' => false, 'test_error' => 'residency_conflict', 'model' => null];
         }
-
         $test = $this->clientFor($provider)->testConnection($supplierId);
-        return Json::ok($response, [
-            'saved'      => true,
-            'test_ok'    => $test['ok'] ?? false,
+        return [
+            'test_ok'    => (bool) ($test['ok'] ?? false),
             'test_error' => ($test['ok'] ?? false) ? null : ($test['error'] ?? null),
             'model'      => $test['model'] ?? null,
-        ]);
+        ];
+    }
+
+    /**
+     * @param array{test_ok:bool} $test
+     * @return array{bulk: array<string,mixed>}
+     */
+    private function bulkOutcome(
+        Request $request,
+        int $supplierId,
+        string $provider,
+        bool $onlyUnconfigured,
+        array $test,
+        ?string $ip,
+        string $ua,
+    ): array {
+        if (!$test['test_ok']) {
+            return ['bulk' => ['applied' => false, 'reason' => 'test_failed']];
+        }
+        return ['bulk' => ['applied' => true]
+            + $this->bulkApplier->apply($request, $supplierId, $provider, $onlyUnconfigured, $ip, $ua)];
     }
 
     public function delete(Request $request, Response $response): Response

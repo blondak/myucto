@@ -1,0 +1,160 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AiCredentialsResponse, AiProvider } from '@/api/integrations'
+
+const m = vi.hoisted(() => ({
+  getAiCredentials: vi.fn(),
+  setAiCredentials: vi.fn(),
+  updateSupplier: vi.fn(),
+}))
+
+vi.mock('@/api/integrations', () => ({
+  integrationsApi: {
+    getIdokladCreds: vi.fn().mockResolvedValue(null),
+    getFakturoidCreds: vi.fn().mockResolvedValue(null),
+    getAiCredentials: m.getAiCredentials,
+    setAiCredentials: m.setAiCredentials,
+  },
+}))
+
+vi.mock('@/api/settings', () => ({
+  settingsApi: {
+    getAiAssist: vi.fn().mockRejectedValue(new Error('not needed')),
+    updateSupplier: m.updateSupplier,
+  },
+}))
+
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: { tab: 'ai' } }) }))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+}))
+
+vi.mock('@/composables/useSessionAwarePolling', () => ({ useSessionAwarePolling: vi.fn() }))
+
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
+}))
+
+import Integrations from '@/pages/admin/Integrations.vue'
+import { aiProviderBadge } from '@/pages/admin/aiProviderBadge'
+
+function creds(active: AiProvider, configured: Partial<Record<AiProvider, boolean>>): AiCredentialsResponse {
+  const info = (p: AiProvider) => ({
+    configured: configured[p] ?? false,
+    default_model: 'model-x',
+    models: ['model-x'],
+    data_region: 'us',
+    eu_capable: p === 'openai' || p === 'azure_openai',
+    residency_label: null,
+    extractions_count: 0,
+  })
+  return {
+    ai_provider: active,
+    ai_data_region: 'us',
+    ai_eu_residency_required: false,
+    ai_extraction_notes: '',
+    ai_effort: 'default',
+    ai_efforts: ['default', 'fast', 'accurate'],
+    ai_extraction_notes_max: 2000,
+    providers: {
+      anthropic: info('anthropic'),
+      azure_openai: info('azure_openai'),
+      openai: info('openai'),
+      gemini: info('gemini'),
+    },
+  } as unknown as AiCredentialsResponse
+}
+
+async function mountPage() {
+  const w = mount(Integrations)
+  await flushPromises()
+  return w
+}
+
+describe('aiProviderBadge', () => {
+  it('ukazuje „aktivní" jen u zvoleného poskytovatele s klíčem', () => {
+    expect(aiProviderBadge('anthropic', 'anthropic', true)).toBe('active')
+    expect(aiProviderBadge('anthropic', 'anthropic', false)).toBe('no_key')
+    expect(aiProviderBadge('openai', 'anthropic', true)).toBeNull()
+    expect(aiProviderBadge('openai', 'anthropic', false)).toBeNull()
+    expect(aiProviderBadge('anthropic', null, true)).toBeNull()
+  })
+})
+
+describe('Externí integrace → AI extrakce', () => {
+  beforeEach(() => {
+    m.getAiCredentials.mockReset()
+    m.setAiCredentials.mockReset()
+    m.updateSupplier.mockReset().mockResolvedValue({})
+  })
+
+  it('firma bez klíče nevidí u Anthropicu odznak „aktivní"', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    const w = await mountPage()
+    expect(w.find('[data-test="badge-active"]').exists()).toBe(false)
+    const noKey = w.findAll('[data-test="badge-no-key"]')
+    expect(noKey).toHaveLength(1)
+    expect(noKey[0].element.closest('button')?.textContent).toContain('aiGateway.provider.anthropic')
+  })
+
+  it('odznak „aktivní" se objeví, až má zvolený poskytovatel klíč', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', { anthropic: true, openai: true }))
+    const w = await mountPage()
+    const active = w.findAll('[data-test="badge-active"]')
+    expect(active).toHaveLength(1)
+    expect(active[0].element.closest('button')?.textContent).toContain('aiGateway.provider.anthropic')
+    expect(w.find('[data-test="badge-no-key"]').exists()).toBe(false)
+  })
+
+  it('volba „jen do firem s nenastavenou AI" se ukáže až po zapnutí hromadného uložení', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    const w = await mountPage()
+    const bulk = w.find('[data-test="bulk-apply"]')
+    expect((bulk.element as HTMLInputElement).checked).toBe(false)
+    expect(w.find('[data-test="bulk-only-unconfigured"]').exists()).toBe(false)
+
+    await bulk.setValue(true)
+    const only = w.find('[data-test="bulk-only-unconfigured"]')
+    expect(only.exists()).toBe(true)
+    expect((only.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('hromadné uložení posílá příznaky serveru a vypíše výsledek', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    m.setAiCredentials.mockResolvedValue({
+      saved: true, test_ok: true, test_error: null, model: 'model-x',
+      bulk: { applied: true, updated: [{ id: 2, name: 'Firma B' }], skipped_configured: [{ id: 3, name: 'Firma C' }], skipped_forbidden: [], skipped_constraint: [] },
+    })
+    const w = await mountPage()
+    await w.find('input[type="password"]').setValue('sk-ant-synthetic')
+    await w.find('[data-test="bulk-apply"]').setValue(true)
+    const save = w.findAll('button').find(b => b.text().includes('integrations.idoklad.save_and_test'))!
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(m.updateSupplier).toHaveBeenCalledWith({ ai_provider: 'anthropic', ai_data_region: 'us', ai_eu_residency_required: false })
+    expect(m.setAiCredentials).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'anthropic', api_key: 'sk-ant-synthetic', apply_to_all_companies: true, only_unconfigured: true,
+    }))
+    const result = w.find('[data-test="bulk-result"]')
+    expect(result.text()).toContain('Firma B')
+    expect(result.text()).toContain('Firma C')
+  })
+
+  it('bez zaškrtnutí se do dalších firem nic neposílá', async () => {
+    m.getAiCredentials.mockResolvedValue(creds('anthropic', {}))
+    m.setAiCredentials.mockResolvedValue({ saved: true, test_ok: true, test_error: null, model: 'model-x' })
+    const w = await mountPage()
+    await w.find('input[type="password"]').setValue('sk-ant-synthetic')
+    const save = w.findAll('button').find(b => b.text().includes('integrations.idoklad.save_and_test'))!
+    await save.trigger('click')
+    await flushPromises()
+
+    const payload = m.setAiCredentials.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('apply_to_all_companies')
+    expect(payload).not.toHaveProperty('only_unconfigured')
+    expect(w.find('[data-test="bulk-result"]').exists()).toBe(false)
+  })
+})
