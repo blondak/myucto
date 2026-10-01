@@ -83,6 +83,9 @@ final class StatementMatcher
         // Bootstrap injektuje vždy.
         private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
         private readonly ?MatchedInvoicePaymentRepair $paymentRepair = null,
+        // Jistý převod mezi vlastními účty se spáruje dřív, než by se pohyb nabídl
+        // k úhradě dokladu (i bez VS). Nullable kvůli izolovaným konstrukcím v testech.
+        private readonly ?\MyInvoice\Service\Accounting\Bank\TransferPairService $ownTransfers = null,
     ) {}
 
     /**
@@ -528,6 +531,11 @@ final class StatementMatcher
         }
         if ($supplierId === 0) {
             return ['status' => 'unmatched', 'reason' => 'unknown_supplier_for_account'];
+        }
+        // Převod mezi vlastními účty se zrcadlovým protipohybem je jistý i bez VS; jinak
+        // by odchozí noha bez VS šla do párování podle částky a data na přijatou fakturu.
+        if ($this->ownTransfers?->pairIfCertain($supplierId, $transactionId) !== null) {
+            return ['status' => 'unmatched', 'reason' => 'own_transfer_matched'];
         }
 
         // ── Outgoing → purchase_invoice (přijaté faktury) ────────────────

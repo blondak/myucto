@@ -244,11 +244,111 @@ final class TransferPairService
             return $this->otherTxId($existing, $txId);
         }
 
-        $amount = (float) $tx['amount'];
+        $candidates = $this->mirrorCandidates($supplierId, $tx);
+        if ($candidates === []) {
+            return null;
+        }
+        return $this->insertPair($supplierId, $tx, (int) $candidates[0]['id']);
+    }
+
+    /**
+     * Jistý převod mezi vlastními účty, který matcher spáruje dřív, než by pohyb nabídl
+     * k úhradě faktury. Variabilní symbol nerozhoduje: jistotu dává registr vlastních účtů.
+     *
+     * Podmínky: protiúčet pohybu je evidovaný vlastní účet téže firmy ve stejné měně
+     * ({@see OwnTransferDetector}), na tom účtu leží v okně {@see PAIR_WINDOW_DAYS} právě
+     * jeden protipohyb s opačnou částkou a shodnou měnou, jehož protiúčet je zpětně účet
+     * prvního pohybu ({@see mirrorAccounts()}), a oba pohyby jsou volné
+     * ({@see FREE_TX_SQL}). Víc kandidátů (i když je některý obsazený) nebo obsazený pohyb
+     * nechá párování na dosavadní cestě. Zaúčtování zůstává na {@see handle()} podle úrovně automatiky.
+     *
+     * @return int|null ID druhé nohy, když je pár jistý (nebo už existuje)
+     */
+    public function pairIfCertain(int $supplierId, int $txId): ?int
+    {
+        if ($this->policy->level($supplierId) === 'off') {
+            return null;
+        }
+        $tx = $this->loadTx($txId);
+        if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
+            return null;
+        }
+        $detected = $this->detector->detect($supplierId, $tx);
+        if ($detected === null || $detected['cross_currency']) {
+            return null;
+        }
+        $existing = $this->pairRowForTx($supplierId, $txId);
+        if ($existing !== null) {
+            return $this->otherTxId($existing, $txId);
+        }
+        if (!$this->isFree($supplierId, $txId)) {
+            return null;
+        }
+        $candidates = array_values(array_filter(
+            $this->mirrorCandidates($supplierId, $tx),
+            fn (array $row): bool => (int) ($row['statement_supplier_id'] ?? 0) === $supplierId
+                && !($this->detector->detect($supplierId, $row)['cross_currency'] ?? true),
+        ));
+        if (count($candidates) !== 1 || !$this->isFree($supplierId, (int) $candidates[0]['id'])) {
+            return null;
+        }
+        $otherId = $this->insertPair($supplierId, $tx, (int) $candidates[0]['id'], true);
+        if ($otherId === null) {
+            return null;
+        }
+        $this->db->pdo()->prepare(
+            "UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW()
+              WHERE supplier_id = ? AND bank_transaction_id IN (?, ?) AND status = 'pending'"
+        )->execute([$supplierId, $txId, $otherId]);
+        $this->activity->log('bank_transfer.paired', null, 'bank_transaction', $txId, [
+            'other_transaction_id' => $otherId,
+            'rule' => 'registered_own_account_mirror',
+        ], null, null, $supplierId);
+        return $otherId;
+    }
+
+    /**
+     * Pohyb není spotřebovaný jinou evidencí: párování s dokladem, úhrada ostatní položky,
+     * záloha na daň, GoPay, mzdy, ignorování ani jiný živý bankovní zápis než převod.
+     */
+    private const FREE_TX_SQL = "bt.match_status = 'unmatched' AND bt.matched_invoice_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.bank_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM other_item_allocations oa WHERE oa.bank_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules ta WHERE ta.matched_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM gopay_clearings gc
+                         WHERE gc.bank_transaction_id = bt.id OR gc.payout_match_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm
+                         WHERE ppm.supplier_id = :sid AND ppm.bank_transaction_id = bt.id)
+        AND NOT EXISTS (SELECT 1 FROM journal_entries je
+                         WHERE je.supplier_id = :sid2 AND je.source_type = 'bank' AND je.source_id = bt.id
+                           AND je.reversed_by IS NULL
+                           AND NOT EXISTS (SELECT 1 FROM bank_posting_suggestions bps
+                                            WHERE bps.supplier_id = je.supplier_id AND bps.bank_transaction_id = bt.id
+                                              AND bps.source = 'transfer' AND bps.journal_entry_id = je.id))";
+
+    private function isFree(int $supplierId, int $txId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM bank_transactions bt WHERE bt.id = :id AND ' . self::FREE_TX_SQL
+        );
+        $stmt->execute(['id' => $txId, 'sid' => $supplierId, 'sid2' => $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Protipohyby převodu: opačná částka, shodná měna, okno {@see PAIR_WINDOW_DAYS},
+     * zatím nespárované, protiúčet evidovaný vlastní účet a zrcadlové účty. Nejbližší datum první.
+     *
+     * @param array<string,mixed> $tx
+     * @return list<array<string,mixed>>
+     */
+    private function mirrorCandidates(int $supplierId, array $tx): array
+    {
         $windowDays = self::PAIR_WINDOW_DAYS;
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.*, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
-                    bs.currency AS statement_currency
+                    bs.currency AS statement_currency, bs.supplier_id AS statement_supplier_id
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id <> ? AND bt.amount = ? AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ' . $windowDays . ' DAY) AND DATE_ADD(?, INTERVAL ' . $windowDays . ' DAY)
@@ -258,19 +358,21 @@ final class TransferPairService
               ORDER BY ABS(DATEDIFF(bt.posted_at, ?)), bt.id
               LIMIT 20'
         );
-        $stmt->execute([$txId, -$amount, $tx['posted_at'], $tx['posted_at'], $this->effectiveCurrency($tx), $tx['posted_at']]);
-        $candidate = null;
+        $stmt->execute([(int) $tx['id'], -(float) $tx['amount'], $tx['posted_at'], $tx['posted_at'], $this->effectiveCurrency($tx), $tx['posted_at']]);
+        $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if ($this->detector->detect($supplierId, $row) !== null && $this->mirrorAccounts($tx, $row)) {
-                $candidate = $row;
-                break;
+                $out[] = $row;
             }
         }
-        if ($candidate === null) {
-            return null;
-        }
+        return $out;
+    }
 
-        $otherId = (int) $candidate['id'];
+    /** @param array<string,mixed> $tx */
+    private function insertPair(int $supplierId, array $tx, int $otherId, bool $requireFree = false): ?int
+    {
+        $txId = (int) $tx['id'];
+        $amount = (float) $tx['amount'];
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
@@ -281,7 +383,8 @@ final class TransferPairService
             sort($ids, SORT_NUMERIC);
             $lock = $pdo->prepare('SELECT id FROM bank_transactions WHERE id IN (?, ?) ORDER BY id FOR UPDATE');
             $lock->execute($ids);
-            if ($this->pairRowForTx($supplierId, $txId) !== null || $this->pairRowForTx($supplierId, $otherId) !== null) {
+            if ($this->pairRowForTx($supplierId, $txId) !== null || $this->pairRowForTx($supplierId, $otherId) !== null
+                || ($requireFree && (!$this->isFree($supplierId, $txId) || !$this->isFree($supplierId, $otherId)))) {
                 if ($ownTx) $pdo->commit();
                 return null;
             }
@@ -508,7 +611,7 @@ final class TransferPairService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.*, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
-                    bs.currency AS statement_currency
+                    bs.currency AS statement_currency, bs.supplier_id AS statement_supplier_id
                FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ?'
         );

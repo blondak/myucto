@@ -20882,6 +20882,8 @@
     "match_reason_title": "Why automatic matching left this transaction unmatched",
     "match_reason": {
       "payroll_settled": "Already used by a payroll payment",
+      "own_transfer_matched": "Transfer between own accounts, paired with its counter-movement",
+      "other_item_allocated": "Already used to settle another receivable or payable",
       "unknown_supplier_for_account": "Statement account belongs to no company",
       "no_vs": "Missing variable symbol",
       "ambiguous_vs": "VS matches several invoices",

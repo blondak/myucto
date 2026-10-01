@@ -601,6 +601,7 @@ final class Bootstrap
                 // nabídnout znovu k fakturačnímu párování.
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable

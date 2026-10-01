@@ -20882,6 +20882,8 @@
     "match_reason_title": "Proč automatické párování pohyb nespárovalo",
     "match_reason": {
       "payroll_settled": "Pohyb už uhradil mzdu",
+      "own_transfer_matched": "Převod mezi vlastními účty, spárovaný s protipohybem",
+      "other_item_allocated": "Pohyb už uhradil ostatní pohledávku nebo závazek",
       "unknown_supplier_for_account": "Účet výpisu nepatří žádné firmě",
       "no_vs": "Chybí variabilní symbol",
       "ambiguous_vs": "VS odpovídá více fakturám",

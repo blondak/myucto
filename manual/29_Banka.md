@@ -872,6 +872,15 @@ Obě nohy se propojí, jakmile dorazí ve výpisech. V detailu výpisu lze přej
 druhou nohu; dokud ještě nedorazila, zůstává zůstatek 261 doloženým převodem na
 cestě. To je běžné například při odeslání 31. prosince a připsání 2. ledna.
 
+Variabilní symbol pro spárování převodu potřeba není. Za jistou shodu MyÚčto
+považuje převod, jehož protiúčet je evidovaný vlastní bankovní účet firmy a na
+tomto účtu v okně sedmi dní leží právě jeden protipohyb s opačnou částkou ve
+stejné měně, jehož protiúčtem je zpětně účet prvního pohybu. Takový převod
+spáruje hned při načtení výpisu, dřív než by pohyb nabídl k úhradě faktury, a
+zaúčtuje ho podle nastavené úrovně automatiky. Pokud odpovídá víc protipohybů,
+protipohyb patří jiné firmě, je v jiné měně, ignorovaný nebo už spárovaný s
+dokladem, mzdami či ostatní položkou, převod se tímto způsobem nespáruje.
+
 Převod mezi účty v různých měnách systém pouze označí k ručnímu zaúčtování,
 protože je potřeba zohlednit kurzový rozdíl. Pokud už existuje podobný ruční
 zápis přes 261, automatika upozorní na možné zdvojení a bez kontroly jej
