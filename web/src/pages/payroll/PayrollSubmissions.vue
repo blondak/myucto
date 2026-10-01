@@ -554,7 +554,7 @@ function rememberDetails(tab: string, event: Event) {
         <label class="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.overview.period') }}
           <input
-            v-model="healthPeriod"
+            v-model="overviewPeriod"
             type="month"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             data-test="submissions-action-card-period"
@@ -562,7 +562,7 @@ function rememberDetails(tab: string, event: Event) {
         </label>
         <PayrollMonthlyChecklistPanel
           v-model:environment="environment"
-          :period="healthPeriod"
+          :period="overviewPeriod"
           :agendas="['PPZ_2026', 'HOZ_2026']"
           compact
         />

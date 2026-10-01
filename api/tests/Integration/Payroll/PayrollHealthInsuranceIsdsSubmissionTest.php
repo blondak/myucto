@@ -317,7 +317,7 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
 
     /**
      * Podání doručená před zavedením automatického uzavření dorovná migrace
-     * 1951 — jinak by u nich povinnost visela „odeslaná" navždy.
+     * 1955 — jinak by u nich povinnost visela „odeslaná" navždy.
      */
     public function testBackfillMigrationFulfilsAlreadyDeliveredOverview(): void
     {
@@ -336,7 +336,7 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         self::assertSame('submitted', $this->obligationStatus($delivered));
 
         $sql = (string) file_get_contents(
-            \dirname(__DIR__, 4) . '/db/migrations/1951_payroll_health_delivery_fulfils_obligation.sql',
+            \dirname(__DIR__, 4) . '/db/migrations/1955_payroll_health_delivery_fulfils_obligation.sql',
         );
         $sql = (string) preg_replace('/^--.*$/m', '', $sql);
         foreach (array_filter(array_map('trim', explode(';', $sql))) as $statement) {

@@ -9,7 +9,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Migrace 1951 dorovnává povinnosti, které splnilo samo doručení. SQL nemůže
+ * Migrace 1955 dorovnává povinnosti, které splnilo samo doručení. SQL nemůže
  * zavolat {@see PayrollSubmissionSettlementPolicy::settlesOnDelivery()},
  * takže agendy vyjmenovává — a tenhle test hlídá, že jde o tytéž agendy.
  */
@@ -27,7 +27,7 @@ final class PayrollDeliverySettlementMigrationTest extends TestCase
         self::assertNotSame([], $expected);
 
         $sql = (string) file_get_contents(
-            \dirname(__DIR__, 3) . '/db/migrations/1951_payroll_health_delivery_fulfils_obligation.sql',
+            \dirname(__DIR__, 3) . '/db/migrations/1955_payroll_health_delivery_fulfils_obligation.sql',
         );
         self::assertSame(
             1,
