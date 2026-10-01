@@ -306,6 +306,8 @@ final class MatchSuggestionService
                     $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
                         ->execute([$postedAt, $id, $supplierId]);
                 }
+                (new \MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus($this->db))
+                    ->afterPaymentsChanged($supplierId, [$id]);
             }
             $this->markTransaction((int) $tx['id'], null, $manual ? 'manual' : 'auto_exact', $userId);
             $this->recountStatement((int) $tx['statement_id']);

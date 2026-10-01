@@ -10,6 +10,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\PurchasePaymentMatchWriter;
+use MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -231,6 +232,8 @@ final class AdvancePaymentRelink
             $pdo->prepare(
                 "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?"
             )->execute([(string) $c['tx_date'], (int) $c['advance_id'], $sid]);
+            // Konečná faktura krytá zálohou je uhrazená k datu úhrady zálohy.
+            (new AdvanceCoveredPaidStatus($this->db))->afterPaymentsChanged($sid, [(int) $c['advance_id'], (int) $c['final_id']]);
 
             $this->activity->log(
                 'purchase_invoice.advance_payment_relinked',

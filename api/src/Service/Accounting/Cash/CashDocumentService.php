@@ -305,6 +305,7 @@ final class CashDocumentService
 
             $docNumber = self::nullableString($doc['doc_number'] ?? null);
             $this->documents->deleteDocument($supplierId, $id);
+            $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
             if ($ownTx) {
                 $pdo->commit();
@@ -500,6 +501,7 @@ final class CashDocumentService
                 $this->documents->markReversed($supplierId, $id, $reversalId);
                 $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
             }
+            $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
             $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId, $entryDate);
 
@@ -780,6 +782,7 @@ final class CashDocumentService
         if ($taxEvidence) {
             $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
             $this->documents->markPostedNoJournal($supplierId, $id, $docNumber);
+            $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
             return [
                 'doc_number'       => $docNumber,
@@ -810,6 +813,7 @@ final class CashDocumentService
 
         $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
         $this->documents->markPosted($supplierId, $id, $docNumber, $entryId);
+        $this->syncAdvanceCoveredStatus($supplierId, $doc);
         // Hotovostní úhrada zálohy po zaúčtování konečné faktury → doplnit její zúčtování.
         $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
 
@@ -858,6 +862,20 @@ final class CashDocumentService
         $this->documents->markPosted($supplierId, $id, (string) $doc['doc_number'], $entryId);
 
         return ['journal_entry_id' => $entryId, 'already' => false];
+    }
+
+    /**
+     * Úhrada přijatého dokladu v hotovosti se změnila: datum úhrady podle plateb
+     * a stav konečné faktury kryté zálohou (v téže transakci).
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function syncAdvanceCoveredStatus(int $supplierId, array $doc): void
+    {
+        if (($doc['purpose'] ?? null) === 'purchase_payment' && ($doc['purchase_invoice_id'] ?? null) !== null) {
+            (new \MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus($this->db))
+                ->afterPaymentsChanged($supplierId, [(int) $doc['purchase_invoice_id']]);
+        }
     }
 
     /** Side-effecty úhrad faktur (v téže transakci). */

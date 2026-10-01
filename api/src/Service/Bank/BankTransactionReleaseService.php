@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
+use MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus;
 use PDO;
 
 /**
@@ -216,6 +217,8 @@ final class BankTransactionReleaseService
         $pdo->prepare('DELETE FROM payment_matches WHERE bank_transaction_id = ? AND supplier_id = ?')
             ->execute([$txId, $supplierId]);
         $this->restorePurchaseInvoices($pdo, $supplierId, $purchaseInvoiceIds, $postedAt);
+        // Konečná faktura krytá zálohou přestává být uhrazená spolu se zálohou.
+        (new AdvanceCoveredPaidStatus($this->db))->afterPaymentsChanged($supplierId, $purchaseInvoiceIds);
         $this->restoreRefundDocuments($pdo, $supplierId, $refundInvoiceIds, $postedAt);
         // Konečná faktura zálohy už nesmí čerpat 314/324 za úhradu, která tu není.
         $this->bankPosting->syncAdvanceSettlements($supplierId, $advances, $userId);

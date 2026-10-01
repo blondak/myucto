@@ -9,6 +9,10 @@ declare(strict_types=1);
  * Logika a hranice (jen otevřené a nezamčené období, jen platba = částka zálohy, jen
  * pohyb hradící jediný doklad): MyInvoice\Service\Accounting\AdvancePaymentRelink.
  *
+ * Druhá fáze srovná stav dvojic: záloha uhrazená platbami dostane datum úhrady podle
+ * poslední platby (místo ručního data), konečná faktura krytá uhrazenou zálohou je
+ * uhrazená k témuž datu (MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus).
+ *
  * Idempotentní, bezpečné pouštět opakovaně — opravená dvojice už kritéria nesplní.
  *
  * Použití:
@@ -73,7 +77,41 @@ foreach ($result['rows'] as $row) {
 
 echo "\n{$mode}Plateb zálohy na konečné faktuře: kandidátů {$result['candidates']}, "
     . ($apply ? 'opraveno' : 'k opravě') . " {$result['fixed']}.\n";
-if (!$apply && $result['fixed'] > 0) {
+
+// Druhá fáze: stav dvojic záloha → konečná faktura (MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus).
+// Záloha uhrazená platbami má datum úhrady podle poslední platby, konečná faktura krytá
+// uhrazenou zálohou je uhrazená k témuž datu. V dry-runu bere stav po případné první fázi
+// tak, jak je v DB teď.
+$pdo = $app->getContainer()->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
+$status = $app->getContainer()->get(\MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus::class);
+$pdo->beginTransaction();
+try {
+    $statusRows = $status->backfill($supplierId, $apply);
+    $pdo->commit();
+} catch (\Throwable $e) {
+    $pdo->rollBack();
+    fwrite(STDERR, 'Srovnání stavů selhalo, beze změny: ' . $e->getMessage() . "\n");
+    exit(1);
+}
+$statusChanged = 0;
+foreach ($statusRows as $row) {
+    if ($row['kind'] === 'advance_paid_at') {
+        $statusChanged++;
+        printf("  %sfirma #%d záloha #%d: datum úhrady %s → %s (poslední platba)\n",
+            $mode, $row['supplier_id'], $row['id'], $row['from'] ?? '—', $row['to']);
+    } elseif ($row['kind'] === 'final_paid') {
+        $statusChanged++;
+        printf("  %sfirma #%d konečná faktura #%d (záloha #%d): %s %s → %s %s\n",
+            $mode, $row['supplier_id'], $row['id'], $row['advance_id'],
+            $row['from_status'], $row['from_paid_at'] ?? '—', $row['to_status'], $row['to_paid_at'] ?? '—');
+    } else {
+        printf("  firma #%d konečná faktura #%d je uhrazená, ale záloha #%d ne — jen report, zkontroluj ručně\n",
+            $row['supplier_id'], $row['id'], $row['advance_id']);
+    }
+}
+echo "\n{$mode}Stav záloh a konečných faktur: " . ($apply ? 'srovnáno' : 'ke srovnání') . " {$statusChanged}.\n";
+
+if (!$apply && ($result['fixed'] > 0 || $statusChanged > 0)) {
     echo "Spusť znovu s --apply pro skutečný zápis.\n";
 }
 exit(array_filter($result['rows'], static fn (array $r): bool => $r['status'] === 'failed') === [] ? 0 : 1);

@@ -411,11 +411,32 @@ final class StatementMatcher
     /** @return array<string,mixed> */
     private function afterMatch(int $transactionId, array $result): array
     {
+        if (($result['status'] ?? 'unmatched') !== 'unmatched' && empty($result['already_recorded'])) {
+            $this->syncAdvanceCoveredStatus($transactionId);
+        }
         if ($this->matchV2 === null) return $result;
         try {
             return $this->matchV2->afterMatch($transactionId, $result);
         } catch (\Throwable) {
             return $result;
+        }
+    }
+
+    /** Spárovaná úhrada přijatých dokladů: datum úhrady a konečné faktury krytá zálohou. */
+    private function syncAdvanceCoveredStatus(int $transactionId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT supplier_id, purchase_invoice_id FROM payment_matches
+              WHERE bank_transaction_id = ? AND purchase_invoice_id IS NOT NULL'
+        );
+        $stmt->execute([$transactionId]);
+        $bySupplier = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $bySupplier[(int) $row['supplier_id']][] = (int) $row['purchase_invoice_id'];
+        }
+        $sync = new \MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus($this->db);
+        foreach ($bySupplier as $supplierId => $ids) {
+            $sync->afterPaymentsChanged($supplierId, $ids);
         }
     }
 
