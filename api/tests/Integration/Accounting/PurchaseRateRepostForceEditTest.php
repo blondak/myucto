@@ -347,6 +347,7 @@ final class PurchaseRateRepostForceEditTest extends TestCase
             ->createServerRequest('PUT', '/api/purchase-invoices/' . $id)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withQueryParams(['force' => '1'])
             ->withParsedBody($body);
 

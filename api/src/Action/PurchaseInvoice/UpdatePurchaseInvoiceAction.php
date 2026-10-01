@@ -9,6 +9,7 @@ use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -117,6 +118,11 @@ final class UpdatePurchaseInvoiceAction
         }
 
         if ($existing['status'] !== 'draft') {
+            // Vynucená úprava přijatého/zaúčtovaného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace.
+            if ($isForce
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucená úprava přijatého nebo zaúčtovaného dokladu'))) {
+                return $deny;
+            }
             // Force-update: admin smí upravit received / booked / paid (s ?force=1).
             // cancelled zůstává immutable (storno = auditní stopa, nemá se editovat).
             if (!$isAdmin || !$isForce || $existing['status'] === 'cancelled') {

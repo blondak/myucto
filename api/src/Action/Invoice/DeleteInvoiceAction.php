@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -103,6 +104,13 @@ final class DeleteInvoiceAction
                 'Smazat vystavenou, odeslanou, zaplacenou nebo stornovanou fakturu může jen admin.',
                 403,
             );
+        }
+
+        // Vynucené smazání vystaveného dokladu maže i jeho zápisy v deníku, takže jen z relace.
+        if ($status !== 'draft'
+            && ($request->getQueryParams()['force'] ?? '') === '1'
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucené smazání vystaveného dokladu'))) {
+            return $deny;
         }
 
         $supplierId = (int) ($existing['supplier_id'] ?? 0);

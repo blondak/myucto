@@ -205,7 +205,8 @@ final class InvoiceNumberReleaseTest extends StockTestCase
         $request = (new ServerRequestFactory())
             ->createServerRequest('DELETE', '/api/invoices/' . $invoiceId)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         return ($this->container->get(DeleteInvoiceAction::class))($request, new Psr7Response(), ['id' => (string) $invoiceId]);
     }
 
@@ -215,6 +216,7 @@ final class InvoiceNumberReleaseTest extends StockTestCase
         $request = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/invoices/' . $invoiceId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withQueryParams(['force' => '1'])
             ->withParsedBody($body);

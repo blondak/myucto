@@ -345,7 +345,8 @@ final class StockInvoiceIntegrationTest extends StockTestCase
             ->createServerRequest('DELETE', '/api/invoices/' . $invoiceId)
             ->withQueryParams(['force' => '1'])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         $response = $action($request, new Psr7Response(), ['id' => (string) $invoiceId]);
 
         self::assertSame(200, $response->getStatusCode());
@@ -384,7 +385,8 @@ final class StockInvoiceIntegrationTest extends StockTestCase
             ->createServerRequest('DELETE', '/api/invoices/' . $invoiceId)
             ->withQueryParams(['force' => '1'])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         $response = $action($request, new Psr7Response(), ['id' => (string) $invoiceId]);
 
         self::assertSame(

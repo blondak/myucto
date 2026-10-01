@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -92,6 +93,11 @@ final class SetPurchaseInvoiceExpenseKindsAction
             return Json::error($response, 'posted_in_closed_period',
                 'Doklad je zaúčtovaný v uzavřeném období. Druh nákladu opravte v editoru (vynucená úprava s dorovnáním).',
                 409);
+        }
+        // Zaúčtovaný doklad se níž přeúčtuje; nezaúčtovaný (kontrola po importu) token klasifikovat smí.
+        if ($lock->posted
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Změna druhu nákladu u zaúčtovaného dokladu'))) {
+            return $deny;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

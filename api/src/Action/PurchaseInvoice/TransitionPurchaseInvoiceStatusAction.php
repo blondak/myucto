@@ -7,6 +7,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -94,6 +95,13 @@ final class TransitionPurchaseInvoiceStatusAction
         // 403 forbidden_transition VŽDY, bez ohledu na zámek i stav dokladu.
         if (RequestAuthorization::isClientType($request) && !in_array($target, self::CLIENT_TARGETS, true)) {
             return Json::error($response, 'forbidden_transition', 'Tento přechod stavu provádí účetní.', 403);
+        }
+
+        // Ruční zaúčtování přes API token ne. Automatické zaúčtování při přijetí (hook
+        // u 'received' níž) je volba firmy a token ho spouští stejně jako uživatel.
+        if ($target === 'booked'
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Ruční zaúčtování přijaté faktury'))) {
+            return $deny;
         }
 
         // Zámek dokladu (Epic F6): received ⇄ paid jen na nezamčených dokladech (jen client;

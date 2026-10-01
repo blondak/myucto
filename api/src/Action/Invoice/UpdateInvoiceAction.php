@@ -8,6 +8,7 @@ use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockPriceLevelService;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -123,6 +124,11 @@ final class UpdateInvoiceAction
         }
 
         if ($existing['status'] !== 'draft') {
+            // Vynucená úprava vystaveného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace.
+            if ($isForce
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucená úprava vystaveného dokladu'))) {
+                return $deny;
+            }
             // Pouze admin smí upravovat vystavenou fakturu, a to jen s explicit ?force=1.
             if (!$isAdmin || !$isForce) {
                 return Json::error($response, 'not_editable', 'Vystavenou fakturu nelze editovat.', 409);

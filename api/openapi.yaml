@@ -1225,6 +1225,10 @@ paths:
         na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
         z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
         (DELETE + INSERT), takže payload musí nést kompletní seznam.
+
+        Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
+        přeúčtuje deník) i úprava v uzavřeném účetním období je účetní úkon:
+        přes API token vrací 403 `token_write_forbidden`, provádí se v aplikaci.
       requestBody:
         required: true
         content:
@@ -1236,6 +1240,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
+        '403':
+          description: |
+            Doklad je uzamčený pro roli (`document_locked`), nebo API token žádá vynucenou
+            úpravu vystaveného dokladu či přebití uzavřeného období (`token_write_forbidden`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: Faktura už není draft (vystavená/storno) — nelze editovat
           content:
@@ -1256,10 +1267,13 @@ paths:
         brána se neuplatní. U zaúčtovaného dokladu zůstává retenční lhůta aktivní;
         její administrátorské přehlasování vyžaduje navíc `ack_retention=1` a
         zaznamená se do activity logu.
+
+        Force-delete nedraftové faktury maže i její zápisy v deníku, proto je to
+        účetní úkon: přes API token vrací 403 `token_write_forbidden`.
       parameters:
         - in: query
           name: force
-          description: Admin force-delete nedraftové faktury
+          description: Admin force-delete nedraftové faktury (jen z aplikace, ne přes API token)
           schema: { type: integer, enum: [1] }
         - in: query
           name: ack_retention
@@ -1269,7 +1283,7 @@ paths:
         '200':
           description: OK
         '403':
-          description: Nedostatečné oprávnění nebo admin role
+          description: Nedostatečné oprávnění, admin role, nebo force-delete přes API token (`token_write_forbidden`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6272,7 +6286,8 @@ paths:
           description: |
             Admin override pro nedraftové doklady — dovolí upravit `received`,
             `booked` i `paid`. Nedotknutelný zůstává jen `cancelled`: storno je
-            auditní stopa a needituje se.
+            auditní stopa a needituje se. Je to účetní úkon (zaúčtovaný doklad se
+            přeúčtuje), takže přes API token vrací 403 `token_write_forbidden`.
           schema: { type: boolean }
         - in: query
           name: force_mode
@@ -6304,7 +6319,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
-          description: Doklad je v uzamčeném období a role na jeho úpravu nedosáhne (Epic F6)
+          description: |
+            Doklad je v uzamčeném období a role na jeho úpravu nedosáhne (Epic F6), nebo
+            API token žádá vynucenou úpravu či přebití uzavřeného období (`token_write_forbidden`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6332,9 +6349,19 @@ paths:
     delete:
       tags: [Purchase invoices]
       summary: Smaže draft (vystavené faktury použij transition cancel)
-      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      description: |
+        Admin smí s `force=1` smazat i doklad ve stavu `received`/`booked`; jeho zápis
+        v deníku se stornuje. Přes API token je to účetní úkon a vrací 403
+        `token_write_forbidden`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: force
+          description: Admin force-delete dokladu `received`/`booked` (jen z aplikace, ne přes API token)
+          schema: { type: integer, enum: [1] }
       responses:
         '200': { description: OK }
+        '403': { description: 'Force-delete přes API token (`token_write_forbidden`) nebo uzamčený doklad' }
         '409': { description: Lze smazat jen draft }
 
   /api/v1/purchase-invoices/{id}/preview:
@@ -6441,6 +6468,11 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Přechod stavu (state machine draft → received → booked → paid; + cancelled)
+      description: |
+        `target=booked` je ruční zaúčtování dokladu, tedy účetní úkon: přes API token
+        vrací 403 `token_write_forbidden` a provádí se v aplikaci. Ostatní přechody
+        token smí; automatické zaúčtování při přijetí (`received`), které má firma
+        zapnuté, proběhne stejně jako z aplikace.
       parameters:
         - in: path
           name: id
@@ -6466,6 +6498,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+        '403': { description: 'Klientský účet (`forbidden_transition`), nebo `target=booked` přes API token (`token_write_forbidden`)' }
         '409': { description: Invalid transition }
 
   /api/v1/purchase-invoices/{id}/pdf:
@@ -24519,7 +24552,10 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write. U zaúčtovaného dokladu změna druhu nákladu přeúčtuje
+        deník, takže je to účetní úkon: přes API token vrací 403 `token_write_forbidden`.
+        Nezaúčtovaný doklad (typicky kontrola po importu) token klasifikovat smí.
       requestBody:
         required: true
         content:

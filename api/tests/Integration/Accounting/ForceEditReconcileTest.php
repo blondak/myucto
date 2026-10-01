@@ -357,6 +357,7 @@ final class ForceEditReconcileTest extends TestCase
             ->createServerRequest('PUT', '/api/invoices/' . $invoiceId)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body)
             ->withQueryParams($query);
         $resp = ($this->updateInvoice)($req, new Psr7Response(), ['id' => (string) $invoiceId]);
