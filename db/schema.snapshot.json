@@ -937,7 +937,8 @@
         "1953_payroll_external_jmhz_manual_attestation.sql",
         "1954_payroll_payment_batch_discards.sql",
         "1955_payroll_health_delivery_fulfils_obligation.sql",
-        "1956_isds_mobile_key_session_follow_up.sql"
+        "1956_isds_mobile_key_session_follow_up.sql",
+        "1957_payroll_warning_suppressions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -15428,6 +15429,7 @@
                 "requires_override": "tinyint(1) NOT NULL DEFAULT 0",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "severity": "enum('blocker','warning','info') NOT NULL",
+                "subject_ids_json": "longtext NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -16986,6 +16988,33 @@
                 "chk_payroll_wage_statement_hashes": "`snapshot_hash` regexp '^[0-9a-f]{64}$' and `source_manifest_hash` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_wage_statement_revision_number": "`revision_no` > 0",
                 "snapshot_json": "json_valid(`snapshot_json`)"
+            }
+        },
+        "payroll_warning_suppressions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(96) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "reason": "varchar(500) NULL DEFAULT NULL",
+                "subject_id": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "subject_type": "enum('supplier','employee','employment') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_pws_user": "BTREE (created_by)",
+                "uq_pws_subject": "UNIQUE BTREE (supplier_id, code, subject_type, subject_id)"
+            },
+            "foreign_keys": {
+                "fk_pws_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pws_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_pws_subject": "`subject_type` = 'supplier' and `subject_id` = 0 or `subject_type` <> 'supplier' and `subject_id` > 0"
             }
         },
         "payroll_work_calendars": {
