@@ -2,7 +2,7 @@
 
 Nastavení datové schránky je vždy svázané s právě vybranou firmou. Otevřete je přes **Mzdy → Datová schránka** (v nabídce hned za Podáními a hlášeními). Produkční a testovací prostředí mají oddělené přístupy, uložené údaje i historii.
 
-Když v odchozích podáních něco čeká na odeslání nebo na doručenku, stránka se otevře rovnou na záložce **Odchozí podání**.
+Když v odchozích podáních něco čeká na odeslání nebo na doručenku, stránka se otevře rovnou na záložce **Odchozí podání**. Delší vysvětlivky (doručenky, doručení fikcí, archiv a ochrana příchozích zpráv, výzvy) jsou sbalené pod **Vysvětlení**.
 
 Na stránce najdete pět záložek:
 

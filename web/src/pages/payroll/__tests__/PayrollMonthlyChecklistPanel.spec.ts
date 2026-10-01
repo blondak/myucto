@@ -681,6 +681,17 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(pending.find('[data-test="mobile-key-receipts-action"]').text()).toContain('load_receipts_count 1')
   })
 
+  it('oznámení HOZ z jiného měsíce označí jako mimo zvolené období', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [
+      { ...agendaDutyItem(), key: 'submission:99', agenda_code: 'HOZ_2026', period: '2026-09', outside_period: true },
+    ] }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('tbody [data-test="monthly-checklist-outside-period"]').text()).toContain('outside_period')
+  })
+
   it('akční karta agendy ukáže jen své agendy a bez souhrnných dlaždic', async () => {
     m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [
       agendaDutyItem(),

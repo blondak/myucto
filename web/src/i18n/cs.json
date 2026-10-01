@@ -6905,6 +6905,8 @@
       "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
       "tabs_label": "Druhy mzdových podání",
       "details_health": "Podrobnosti: oznámení HOZ, ruční sestavení a historie",
+      "details_sickness": "Nemocenské případy a hlášení",
+      "details_eldp": "Evidenční listy a ruční dokončení",
       "details_jmhz": "Podrobnosti: náhledy, právní skutečnosti, podání předchozím programem a historie",
       "tabs_more": "Další",
       "tabs": {
@@ -6942,6 +6944,7 @@
         "not_applicable": "netýká se",
         "done_by_delivery_label": "Doručeno",
         "done_by_delivery_hint": "Splněno doručením do schránky pojišťovny — pojišťovna výsledek zpracování neposílá. Vadu by oznámila samostatnou výzvou.",
+        "outside_period": "mimo zvolené období",
         "done_label": "Hotovo",
         "col_agenda": "Agenda a předmět",
         "col_document": "Co se generuje",
@@ -27573,6 +27576,7 @@
         "deleted": "Registrace smazaná."
       }
     },
+    "explain_toggle": "Vysvětlení",
     "tabs": {
       "access": "Přístup",
       "outbox": "Odchozí podání",

@@ -29,7 +29,7 @@ import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
-import { localPayrollPeriod, payrollWorkingPeriod } from './payrollComponentsUi'
+import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -44,26 +44,19 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 /*
- * Záložka zdravotního pojištění má JEDNO období pro povinnosti, přehled
- * o platbě i hlášení pojišťovnám. Oznámení běží v osmidenních lhůtách od
- * události, proto se otevírá na dnešním měsíci; `?period=RRRR-MM` z karty
- * osoby má přednost.
+ * JEDNO období pro celou stránku Podání — všechny záložky i sekce (Měsíc,
+ * JMHZ, zdravotní pojišťovny včetně HOZ, nemocenské, ELDP). Drží se v adrese
+ * (`?period=RRRR-MM`), takže odkaz z karty osoby i obnovení stránky ho zachová.
+ * Bez období v adrese se otevře nejstarší měsíc s nesplněným měsíčním hlášením
+ * (`suggested_period` Měsíčního přehledu), jinak předchozí měsíc — mzdy se
+ * podávají zpětně. Oznámení HOZ s lhůtou mimo zvolené období ukáže akční
+ * karta jako samostatné řádky, ne druhým výběrem období.
  */
-const routedHealthPeriod = route.query.period
-/*
- * Období Měsíčního přehledu, JMHZ a Ostatních. Dřív si ho panely braly
- * natvrdo jako předchozí kalendářní měsíc a `?period=` z odkazu (nebo výchozí
- * první měsíc vedení mezd u převzaté firmy) ignorovaly.
- */
-const routedPeriod = typeof routedHealthPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedHealthPeriod)
-  ? routedHealthPeriod
+const routedQueryPeriod = route.query.period
+const routedPeriod = typeof routedQueryPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedQueryPeriod)
+  ? routedQueryPeriod
   : null
 const overviewPeriod = ref(routedPeriod ?? payrollWorkingPeriod())
-const healthPeriod = ref(
-  typeof routedHealthPeriod === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedHealthPeriod)
-    ? routedHealthPeriod
-    : localPayrollPeriod(),
-)
 /*
  * „Co mám tenhle měsíc udělat" je ta úplně první otázka, se kterou účetní na
  * stránku přichází — proto je Měsíční přehled výchozí záložka. Dřív tu byl
@@ -330,8 +323,24 @@ if (routedTab !== null) activeTab.value = routedTab
 
 watch(activeTab, (tab) => {
   if (tabFromRoute(route.params.tab) === tab) return
-  void router.replace({ name: 'payroll-submissions-tab', params: { tab } })
+  void router.replace({ name: 'payroll-submissions-tab', params: { tab }, query: route.query })
 })
+
+watch(overviewPeriod, (period) => {
+  if (route.query.period === period) return
+  void router.replace({ query: { ...route.query, period } })
+})
+
+async function applySuggestedPeriod() {
+  if (routedPeriod !== null) return
+  try {
+    const checklist = await payrollApi.monthlyChecklist(environment.value, overviewPeriod.value)
+    if (checklist.suggested_period) overviewPeriod.value = checklist.suggested_period
+  } catch {
+    // Bez návrhu zůstává předchozí měsíc.
+  }
+}
+onMounted(applySuggestedPeriod)
 
 watch(() => route.params.tab, (value) => {
   const tab = tabFromRoute(value)
@@ -414,6 +423,28 @@ function rememberDetails(tab: string, event: Event) {
       </button>
     </header>
 
+    <div class="flex flex-wrap items-end gap-4" data-test="submissions-period-bar">
+      <label class="block text-sm font-medium text-neutral-700">
+        {{ t('payroll.submissions.overview.period') }}
+        <input
+          v-model="overviewPeriod"
+          type="month"
+          class="mt-1 block h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20"
+          data-test="submissions-period"
+        >
+      </label>
+      <div class="block text-sm font-medium text-neutral-700">
+        {{ t('payroll.submissions.overview.environment') }}
+        <div class="mt-1">
+          <EnvironmentSwitch
+            v-model="environment"
+            :aria-label="t('payroll.submissions.overview.environment')"
+            data-test="submissions-environment"
+          />
+        </div>
+      </div>
+    </div>
+
     <nav
       class="flex flex-wrap gap-1 border-b border-neutral-200"
       role="tablist"
@@ -495,7 +526,7 @@ function rememberDetails(tab: string, event: Event) {
     <PayrollMonthlyChecklistPanel
       v-if="activeTab === 'monthly'"
       v-model:environment="environment"
-      :initial-period="routedPeriod ?? undefined"
+      :period="overviewPeriod"
     />
 
     <!--
@@ -535,15 +566,49 @@ function rememberDetails(tab: string, event: Event) {
       záměrem slevy: obojí je podání mimo měsíční hlášení, které si data
       obstarává samo a na REGZEL profilu nezávisí.
     -->
-    <PayrollSicknessCasesPanel
-      v-else-if="activeTab === 'sickness'"
-      v-model:environment="environment"
-    />
+    <template v-else-if="activeTab === 'sickness'">
+      <PayrollMonthlyChecklistPanel
+        v-model:environment="environment"
+        :period="overviewPeriod"
+        :agendas="['NEMPRI', 'HZUPN']"
+        compact
+      />
+      <details
+        class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        :open="detailsOpen.sickness !== false"
+        data-test="submissions-details-sickness"
+        @toggle="rememberDetails('sickness', $event)"
+      >
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-neutral-800 sm:px-6">
+          {{ t('payroll.submissions.details_sickness') }}
+        </summary>
+        <div class="border-t border-neutral-200 p-4 sm:p-6">
+          <PayrollSicknessCasesPanel v-model:environment="environment" />
+        </div>
+      </details>
+    </template>
 
-    <PayrollEldpPanel
-      v-else-if="activeTab === 'eldp'"
-      v-model:environment="environment"
-    />
+    <template v-else-if="activeTab === 'eldp'">
+      <PayrollMonthlyChecklistPanel
+        v-model:environment="environment"
+        :period="overviewPeriod"
+        :agendas="['ELDP']"
+        compact
+      />
+      <details
+        class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        :open="detailsOpen.eldp !== false"
+        data-test="submissions-details-eldp"
+        @toggle="rememberDetails('eldp', $event)"
+      >
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-neutral-800 sm:px-6">
+          {{ t('payroll.submissions.details_eldp') }}
+        </summary>
+        <div class="border-t border-neutral-200 p-4 sm:p-6">
+          <PayrollEldpPanel v-model:environment="environment" />
+        </div>
+      </details>
+    </template>
 
     <!--
       Zdravotní agenda si data obstarává sama a na REGZEL profilu
@@ -551,15 +616,6 @@ function rememberDetails(tab: string, event: Event) {
     -->
     <template v-else-if="activeTab === 'health'">
       <section class="space-y-3" data-test="submissions-action-card">
-        <label class="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-700">
-          {{ t('payroll.submissions.overview.period') }}
-          <input
-            v-model="overviewPeriod"
-            type="month"
-            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
-            data-test="submissions-action-card-period"
-          >
-        </label>
         <PayrollMonthlyChecklistPanel
           v-model:environment="environment"
           :period="overviewPeriod"
@@ -569,7 +625,7 @@ function rememberDetails(tab: string, event: Event) {
       </section>
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
-        v-model:period="healthPeriod"
+        v-model:period="overviewPeriod"
         mode="health"
       />
       <details
@@ -583,7 +639,7 @@ function rememberDetails(tab: string, event: Event) {
         </summary>
         <div class="border-t border-neutral-200 p-4 sm:p-6">
           <PayrollHealthNotificationPanel
-            v-model:period="healthPeriod"
+            v-model:period="overviewPeriod"
             v-model:environment="environment"
           />
         </div>
@@ -855,15 +911,6 @@ function rememberDetails(tab: string, event: Event) {
 
     <template v-else-if="activeTab === 'jmhz'">
       <section class="space-y-3" data-test="submissions-action-card">
-        <label class="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-700">
-          {{ t('payroll.submissions.overview.period') }}
-          <input
-            v-model="overviewPeriod"
-            type="month"
-            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
-            data-test="submissions-action-card-period"
-          >
-        </label>
         <PayrollMonthlyChecklistPanel
           v-model:environment="environment"
           :period="overviewPeriod"

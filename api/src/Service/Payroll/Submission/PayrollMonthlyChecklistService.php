@@ -149,6 +149,7 @@ final readonly class PayrollMonthlyChecklistService
             0,
             null,
         )['items'];
+        $outsideHoz = $this->openHozOutsidePeriod($supplierId, $environment, $periodStart, $periodEnd);
 
         // Odchozí zprávy datové schránky k posledním podáním — JEDNÍM dotazem.
         // Z nich se čte skutečný kanál odeslaného podání a doložené doručení.
@@ -157,12 +158,16 @@ final readonly class PayrollMonthlyChecklistService
             $environment,
             array_values(array_filter(array_map(
                 static fn (array $row): int => (int) ($row['latest_submission']['id'] ?? 0),
-                $registered,
+                [...$registered, ...$outsideHoz],
             ))),
         );
 
         $items = [
             ...$this->submissionRows($registered, $transport, $outboxes),
+            ...array_map(
+                static fn (array $row): array => $row + ['outside_period' => true],
+                $this->submissionRows($outsideHoz, $transport, $outboxes),
+            ),
             ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
             ...$this->predecessorJmhzRows($supplierId, $environment, $period),
@@ -172,6 +177,7 @@ final readonly class PayrollMonthlyChecklistService
         // jen řádky evidence, ostatní nesou prázdné hodnoty.
         $items = array_map(
             static fn (array $item): array => $item + [
+                'outside_period' => false,
                 'submission_id' => null,
                 'dispatchable' => false,
                 'dispatch_mode' => null,
@@ -204,6 +210,43 @@ final readonly class PayrollMonthlyChecklistService
             'summary' => $summary,
             'items' => $items,
         ];
+    }
+
+    /**
+     * Otevřené povinnosti hromadného oznámení pojišťovně (HOZ) z OKOLNÍCH
+     * měsíců. Oznámení běží v osmidenních lhůtách od události, takže může
+     * hořet i tehdy, když účetní pracuje na předchozím měsíci. Stránka Podání
+     * má jedno období; tyhle řádky ho doplní, místo aby vedle něj stál druhý
+     * výběr měsíce.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function openHozOutsidePeriod(
+        int $supplierId,
+        string $environment,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $from = (new \DateTimeImmutable($periodStart))->modify('-3 months')->format('Y-m-01');
+        $to = (new \DateTimeImmutable($periodStart))->modify('+1 month')->format('Y-m-t');
+        $rows = $this->submissions->listOverview(
+            $supplierId,
+            $environment,
+            $from,
+            $to,
+            PayrollSubmissionRepository::LIST_MAX_LIMIT,
+            0,
+            PayrollAgendaGroupCatalog::GROUP_HEALTH,
+        )['items'];
+
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool
+                => PayrollDispatchCapabilityCatalog::canonical((string) $row['agenda_code'])
+                    === HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION
+                && !in_array((string) $row['status'], ['fulfilled', 'cancelled'], true)
+                && ((string) $row['period_start'] < $periodStart || (string) $row['period_start'] > $periodEnd),
+        ));
     }
 
     /**

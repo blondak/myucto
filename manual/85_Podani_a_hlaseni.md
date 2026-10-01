@@ -34,6 +34,13 @@ podání** (nemocenské a další povinnosti mimo měsíční cyklus). Ostatní 
 (JMHZ, Zdravotní pojišťovny, K odeslání, ELDP, Inbox, Certifikát a další) jsou
 v nabídce **Další ▾**; odkazy na ně platí beze změny.
 
+Celá stránka má **jedno období** (a jedno prostředí) nad záložkami; platí pro
+všechny záložky a je vidět i v adrese stránky. Bez období v adrese se otevře
+nejstarší měsíc s nesplněným měsíčním hlášením, jinak předchozí měsíc.
+Oznámení zdravotní pojišťovně (HOZ) z jiného měsíce, které má ještě otevřenou
+lhůtu, ukáže akční karta jako samostatný řádek s označením **mimo zvolené
+období** — druhý výběr měsíce k tomu není potřeba.
+
 Záložka **Měsíc** (a tentýž panel pod uzavřeným mzdovým během) skládá
 za zvolené období jeden seznam: co se generuje a odesílá, komu, jakou cestou a
 do kdy, a u toho, co MyÚčto neodesílá samo, také proč. Bez zvoleného měsíce se
@@ -75,8 +82,8 @@ je stáhne pro všechny zprávy jedním přihlášením Mobilním klíčem. Po n
 řádek sám přepne na **Doručeno**. Dokud nějaká ostrá zpráva odeslaná před víc
 než hodinou doručenku nemá, ukazuje totéž upozornění i přehled mezd.
 
-Záložky **JMHZ** a **Zdravotní pojišťovny** začínají stejnou akční kartou za
-své agendy (co, komu, stav, lhůta, jedno tlačítko). Ostatní — podání
+Záložky **JMHZ**, **Zdravotní pojišťovny**, **Dávky nemocenského** a
+**Evidenční list DP** začínají stejnou akční kartou za své agendy (co, komu, stav, lhůta, jedno tlačítko). Ostatní — podání
 předchozím programem, náhledy, právní skutečnosti, oznámení HOZ a ruční
 sestavení — je pod **Podrobnosti**; prohlížeč si pamatuje, co máte rozbalené.
 

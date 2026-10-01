@@ -586,6 +586,32 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertFalse($eldp['dispatchable']);
     }
 
+    /**
+     * Stránka Podání má jedno období. Otevřené hromadné oznámení pojišťovně
+     * z jiného měsíce (osmidenní lhůta) se ukáže jako samostatný řádek,
+     * ne přes druhý výběr období.
+     */
+    public function testOpenHozFromAnotherMonthIsListedOutsidePeriod(): void
+    {
+        $hoz = $this->submissionRow(
+            agendaCode: HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            latestSubmissionStatus: null,
+        );
+        $hoz['id'] = 99;
+        $hoz['period_start'] = '2026-08-01';
+        $hoz['period_end'] = '2026-08-31';
+        $closed = $hoz;
+        $closed['id'] = 100;
+        $closed['status'] = 'fulfilled';
+
+        $result = $this->service(healthRows: [$hoz, $closed])->checklist(11, 'production', self::PERIOD);
+
+        $outside = array_values(array_filter($result['items'], static fn (array $item): bool => $item['outside_period']));
+        self::assertCount(1, $outside);
+        self::assertSame('submission:99', $outside[0]['key']);
+        self::assertSame('2026-08', $outside[0]['period']);
+    }
+
     /** Bez nesplněného měsíce přehled navrhne předchozí měsíc. */
     public function testSuggestedPeriodFallsBackToPreviousMonth(): void
     {
@@ -633,12 +659,15 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         array $transport = ['automatic' => false, 'channel' => 'manual_upload', 'reason' => 'isds_transport_unavailable'],
         array $agendaDuties = [],
         array $outboxes = [],
+        array $healthRows = [],
     ): PayrollMonthlyChecklistService {
         $submissions = $this->createStub(PayrollSubmissionRepository::class);
-        $submissions->method('listOverview')->willReturn([
-            'items' => $submissionRows,
-            'total' => count($submissionRows),
-        ]);
+        $submissions->method('listOverview')->willReturnCallback(
+            static fn (int $supplierId, string $environment, string $from, string $to, int $limit, int $offset, ?string $group): array
+                => $group === 'health'
+                    ? ['items' => $healthRows, 'total' => count($healthRows)]
+                    : ['items' => $submissionRows, 'total' => count($submissionRows)],
+        );
         $submissions->method('dispatchOutboxesBySubmission')->willReturn($outboxes);
 
         $deadlines = $this->createStub(PayrollDeadlineOverviewService::class);

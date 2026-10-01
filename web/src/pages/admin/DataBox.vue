@@ -1982,7 +1982,10 @@ onUnmounted(clearReceiptsTimer)
         class="rounded-lg border border-neutral-200 bg-surface p-4"
       >
         <h2 class="font-medium">{{ t('databox.receipts.title', { count: unmatchedReceipts.length }) }}</h2>
-        <p class="mb-3 text-sm text-neutral-500">{{ t('databox.receipts.intro') }}</p>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 text-sm text-neutral-500">{{ t('databox.receipts.intro') }}</p>
+        </details>
         <div v-for="m in unmatchedReceipts" :key="m.id" class="border-t border-neutral-100 py-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="min-w-0">
@@ -2578,7 +2581,10 @@ onUnmounted(clearReceiptsTimer)
         data-test="outbox-receipts-batch"
       >
         <h2 class="font-medium text-neutral-900">{{ t('databox.outbox.receiptsBatch.title') }}</h2>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.outbox.receiptsBatch.intro') }}</p>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 text-sm text-neutral-500">{{ t('databox.outbox.receiptsBatch.intro') }}</p>
+        </details>
         <p class="mt-2 text-sm font-medium text-neutral-700" data-test="outbox-receipts-batch-count">
           {{ t('databox.outbox.receiptsBatch.waiting', { count: receiptsAwaiting.length }) }}
         </p>
@@ -2755,7 +2761,10 @@ onUnmounted(clearReceiptsTimer)
       />
       <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
         <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.archive.title') }}</h2>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.archive.description') }}</p>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.archive.description') }}</p>
+        </details>
         <div class="mt-4 flex flex-wrap items-end gap-3">
           <label class="min-w-[16rem] flex-1">
             <span class="mb-1 block text-sm font-medium">{{ t('databox.inbox.archive.folder') }}</span>
@@ -2795,7 +2804,10 @@ onUnmounted(clearReceiptsTimer)
           {{ t('databox.delivery.refresh') }}
         </button>
       </div>
-      <p class="text-sm text-neutral-500">{{ t('databox.delivery.explain') }}</p>
+      <details class="text-sm" data-test="databox-explain">
+        <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.delivery.explain') }}</p>
+      </details>
       <p class="text-sm text-neutral-500">
         {{ t('databox.inbox.manualOnly') }}
       </p>
@@ -2804,7 +2816,10 @@ onUnmounted(clearReceiptsTimer)
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.privacy.title') }}</h2>
-            <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.inbox.privacy.description') }}</p>
+            <details class="text-sm" data-test="databox-explain">
+              <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+              <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.inbox.privacy.description') }}</p>
+            </details>
           </div>
           <div class="flex flex-wrap gap-2" data-test="inbox-visibility">
             <button
@@ -3252,7 +3267,10 @@ onUnmounted(clearReceiptsTimer)
     <section v-else-if="tab === 'notices'" class="space-y-4">
       <div class="rounded-lg border border-neutral-200 bg-surface p-4 text-sm">
         <h2 class="mb-1 font-medium">{{ t('databox.notices.title') }}</h2>
-        <p class="text-neutral-500">{{ t('databox.notices.intro') }}</p>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 text-neutral-500">{{ t('databox.notices.intro') }}</p>
+        </details>
       </div>
 
       <!-- Prázdno není „nic nepřišlo" a tahle věta to musí říct nahlas. -->

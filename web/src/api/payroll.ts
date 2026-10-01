@@ -3338,6 +3338,8 @@ export interface PayrollMonthlyChecklistItem {
    * `done` u něj zůstává `false` a akce vede na přípravu nového.
    */
   done: boolean
+  /** Otevřené oznámení HOZ z jiného měsíce než zvoleného (osmidenní lhůta). */
+  outside_period?: boolean
   /** Poslední podání povinnosti (jen řádky evidence podání). */
   submission_id: number | null
   /** Připravené podání, které jde odeslat frontou přímo z přehledu. */

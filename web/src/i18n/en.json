@@ -6905,6 +6905,8 @@
       "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
       "tabs_label": "Payroll submission types",
       "details_health": "Details: HOZ notifications, manual preparation and history",
+      "details_sickness": "Sickness cases and reports",
+      "details_eldp": "Pension record sheets and manual completion",
       "details_jmhz": "Details: previews, legal facts, submissions by the previous program and history",
       "tabs_more": "More",
       "tabs": {
@@ -6942,6 +6944,7 @@
         "not_applicable": "not applicable",
         "done_by_delivery_label": "Delivered",
         "done_by_delivery_hint": "Fulfilled by delivery to the insurer's data box — the insurer does not send a processing result. A defect would come as a separate notice.",
+        "outside_period": "outside the selected period",
         "done_label": "Done",
         "col_agenda": "Agenda and subject",
         "col_document": "What is generated",
@@ -27573,6 +27576,7 @@
         "deleted": "Registration deleted."
       }
     },
+    "explain_toggle": "Explanation",
     "tabs": {
       "access": "Access",
       "outbox": "Outgoing filings",

@@ -527,6 +527,36 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.get('[data-test="submissions-more-menu"]').text()).toContain('payroll.submissions.tabs.jmhz')
   })
 
+  /* Jedno období pro celou stránku: návrh serveru, v adrese, sdílené záložkami. */
+  it('drží jedno období stránky — navržené serverem a zapsané do adresy', async () => {
+    m.monthlyChecklist.mockResolvedValue({
+      environment: 'production',
+      period: '2026-05',
+      suggested_period: '2026-05',
+      window: { from: '2026-05-01', to: '2026-05-31' },
+      summary: { total: 0, send: 0, generate: 0, manual: 0, await: 0, done: 0 },
+      items: [],
+    })
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="submissions-period"]').element as HTMLInputElement).value).toBe('2026-05')
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-05' } })
+    await clickTab(wrapper, 'health')
+    expect(m.monthlyChecklist).toHaveBeenLastCalledWith('production', '2026-05')
+  })
+
+  it('na záložkách nemocenské a ELDP je akční karta před podrobnostmi', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    for (const tab of ['sickness', 'eldp']) {
+      await clickTab(wrapper, tab)
+      const card = wrapper.get('[data-test="monthly-checklist-panel"]')
+      const details = wrapper.get(`[data-test="submissions-details-${tab}"]`)
+      expect(card.element.compareDocumentPosition(details.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+
   /* „Co odesílám, mám vidět hned": akční karta je na záložce agendy první. */
   it('na záložce JMHZ je akční karta první a zbytek je pod Podrobnostmi', async () => {
     const wrapper = mount(PayrollSubmissions)

@@ -733,6 +733,13 @@ onMounted(() => { void load() })
                   <span class="block font-medium text-neutral-900">{{ agendaLabel(item) }}</span>
                   <span v-if="item.subject" class="mt-0.5 block text-xs text-neutral-500">{{ item.subject }}</span>
                   <span v-if="item.period" class="mt-0.5 block text-xs text-neutral-400">{{ formatPeriod(item.period) }}</span>
+                  <span
+                    v-if="item.outside_period"
+                    class="mt-1 inline-flex rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-800"
+                    data-test="monthly-checklist-outside-period"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.outside_period') }}
+                  </span>
                 </td>
                 <td class="px-4 py-3 text-neutral-700">
                   <span v-if="item.document.format" class="block">{{ item.document.format }}</span>
