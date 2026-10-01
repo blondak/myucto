@@ -2236,7 +2236,7 @@ final class PostingService
         }
 
         $paid = min(
-            $this->postedAdvancePaid($supplierId, $advId),
+            $this->postedAdvancePaid($supplierId, $adv),
             abs((float) ($pi['total_with_vat'] ?? 0) * $this->fxRate($pi)),
         );
         if (self::cents($paid) <= 0) {
@@ -2307,32 +2307,67 @@ final class PostingService
     }
 
     /**
-     * Skutečně zaplacená poskytnutá záloha k zálohové PF = součet ALOKOVANÝCH úhrad navázaných
-     * na zálohu (payment_matches.amount z banky + cash_documents.total_amount z pokladny) z
-     * ŽIVÝCH zápisů. Symetrie k {@see postedAdvanceReceived}: jedna odchozí platba smí přes
-     * payment_matches uhradit víc dokladů → sčítáme jen alokaci k této záloze, ne 314 celého zápisu.
+     * Skutečně zaplacená poskytnutá záloha k zálohové PF V KČ = součet ALOKOVANÝCH úhrad
+     * navázaných na zálohu (payment_matches.amount z banky + cash_documents.total_amount
+     * z pokladny) z ŽIVÝCH zápisů. Symetrie k {@see postedAdvanceReceived}: jedna odchozí
+     * platba smí přes payment_matches uhradit víc dokladů → sčítáme jen alokaci k této
+     * záloze, ne 314 celého zápisu.
+     *
+     * Alokace je v MĚNĚ POHYBU (banka) resp. POKLADNY, ne v měně zálohy. Korunová částka
+     * se bere, jak je; částka v měně zálohy se přepočte kurzem zálohy (zrcadlo vydané strany,
+     * která přijatou zálohu přepočítává kurzem proformy). Úhradu v jiné cizí měně nejde
+     * jednoznačně ocenit — zúčtování se pak neúčtuje automaticky. Dřív se cizoměnová
+     * alokace sčítala jako koruny: záloha 100 EUR zaplacená z eurového účtu zúčtovala
+     * na 321/314 sto korun.
+     *
+     * @param array<string,mixed> $advance hlavička zálohy (z fetchDocHeader)
      */
-    private function postedAdvancePaid(int $supplierId, int $advanceId): float
+    private function postedAdvancePaid(int $supplierId, array $advance): float
     {
-        $bank = $this->scalarFloat(
-            'SELECT COALESCE(SUM(pm.amount), 0)
+        $advanceId = (int) $advance['id'];
+        $advanceCurrency = strtoupper((string) ($advance['currency_code'] ?? 'CZK'));
+        $txCurrency = "UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''), 'CZK'))";
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT {$txCurrency} AS currency, COALESCE(SUM(pm.amount), 0) AS amount
                FROM payment_matches pm
+               JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+               JOIN bank_statements bs ON bs.id = bt.statement_id
                JOIN journal_entries je
-                 ON je.supplier_id = pm.supplier_id AND je.source_type = :st
+                 ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
                 AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
-              WHERE pm.supplier_id = :sid AND pm.purchase_invoice_id = :pid',
-            [':st' => 'bank', ':sid' => $supplierId, ':pid' => $advanceId],
-        );
-        $cash = $this->scalarFloat(
-            'SELECT COALESCE(SUM(cd.total_amount), 0)
+              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?
+              GROUP BY {$txCurrency}
+             UNION ALL
+             SELECT UPPER(COALESCE(NULLIF(cd.currency_code, ''), 'CZK')), COALESCE(SUM(cd.total_amount), 0)
                FROM cash_documents cd
                JOIN journal_entries je
-                 ON je.supplier_id = cd.supplier_id AND je.source_type = :st
+                 ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
                 AND je.source_id = cd.id AND je.reversed_by IS NULL
-              WHERE cd.supplier_id = :sid AND cd.purchase_invoice_id = :pid',
-            [':st' => 'cash', ':sid' => $supplierId, ':pid' => $advanceId],
+              WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ?
+              GROUP BY UPPER(COALESCE(NULLIF(cd.currency_code, ''), 'CZK'))"
         );
-        return round($bank + $cash, 2);
+        $stmt->execute([$supplierId, $advanceId, $supplierId, $advanceId]);
+
+        $czk = 0.0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $amount = (float) $row['amount'];
+            if (self::cents($amount) === 0) {
+                continue;
+            }
+            $currency = (string) $row['currency'];
+            if ($currency === 'CZK') {
+                $czk += $amount;
+            } elseif ($currency === $advanceCurrency) {
+                $czk += round($amount * $this->fxRate($advance), 2);
+            } else {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Úhrada poskytnuté zálohy #' . $advanceId . ' je v měně ' . $currency . ', jiné než měna zálohy ('
+                        . $advanceCurrency . ') i koruna — zúčtování zálohy nejde ocenit automaticky, zaúčtuj ho ručně.',
+                );
+            }
+        }
+        return round($czk, 2);
     }
 
     /**

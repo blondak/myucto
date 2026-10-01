@@ -158,6 +158,31 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
+    // (d1) — cizoměnová záloha zaplacená z eurového účtu: alokace payment_matches je v EUR,
+    //        zúčtování 321/314 musí být v Kč kurzem zálohy (zrcadlo vydané strany), ne 121 „korun".
+    public function testForeignCurrencyAdvanceSettlementIsConvertedToCzk(): void
+    {
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $vendor = $this->client('Dodavatel EUR záloha');
+        $advance = $this->purchaseInvoice('ZPF-FX', $vendor, 121.00, 'advance');
+        $final = $this->purchaseWithItem('PF-FX', $vendor, 100.00, 21.00, 'invoice', $advance);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET currency_id = ?, exchange_rate = 25 WHERE id IN (?, ?)')
+            ->execute([$eur, $advance, $final]);
+        $tx = $this->transaction($this->statement(), -121.00, ['currency' => 'EUR', 'match_status' => 'manual']);
+        $this->paymentMatch($tx, $advance, 121.00);
+        $this->postPredpis('bank', $tx, '314', '221', 3025.00);
+
+        $byAcc = $this->linesByAccountCode($this->posting->postDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $final,
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $final),
+            ['entry_date' => self::YEAR . '-06-20'],
+        ));
+        self::assertEqualsWithDelta(3025.00, $byAcc['314']['credit'] ?? 0.0, 0.001, '314 D = 121 EUR × 25.');
+        self::assertEqualsWithDelta(3025.00, $byAcc['321']['debit'] ?? 0.0, 0.001);
+    }
+
     // (d2) — poskytnutá záloha vedená přímo na závazku (předkontace 321/321): zúčtování by
     //        byl pár 321 MD / 321 D, který se vyruší a jen zdvojí obrat → nezapisuje se.
     public function testPurchaseAdvanceOnPayableHasNoSelfCancellingSettlementPair(): void
