@@ -41,7 +41,10 @@ final class OtherItemScheduleAction
         return $this->run($response, function () use ($request, $args) {
             $supplierId = $this->currentSupplierId($request);
             $body = (array) ($request->getParsedBody() ?? []);
-            if (($body['auto_post'] ?? false) === true) $this->assertAutoPostPermission($request, $supplierId);
+            if (($body['auto_post'] ?? false) === true) {
+                $this->assertAutoPostChannel($request);
+                $this->assertAutoPostPermission($request, $supplierId);
+            }
             return $this->service->create($supplierId, (int) $args['item_id'], $body, $this->userId($request));
         }, 201);
     }
@@ -53,7 +56,10 @@ final class OtherItemScheduleAction
         return $this->run($response, function () use ($request, $args, $body) {
             $supplierId = $this->currentSupplierId($request);
             $schedule = $this->service->get($supplierId, (int) $args['id']);
-            if ($schedule['auto_post']) $this->assertAutoPostPermission($request, $supplierId);
+            if ($schedule['auto_post']) {
+                $this->assertAutoPostChannel($request);
+                $this->assertAutoPostPermission($request, $supplierId);
+            }
             return $this->service->generate($supplierId, (int) $args['id'], (string) ($body['through'] ?? ''), $this->userId($request), $this->canAutoPost($request, $supplierId));
         });
     }
@@ -70,6 +76,7 @@ final class OtherItemScheduleAction
             $schedule = $this->service->get($supplierId, (int) $args['id']);
             if (($body['auto_post'] ?? false) === true
                 || ($body['status'] ?? '') === 'active' && ($body['auto_post'] ?? $schedule['auto_post'])) {
+                $this->assertAutoPostChannel($request);
                 $this->assertAutoPostPermission($request, $supplierId);
             }
             return $this->service->setStatus($supplierId, (int) $args['id'], (string) ($body['status'] ?? ''), $body['auto_post'] ?? null, $this->canAutoPost($request, $supplierId));
@@ -93,6 +100,20 @@ final class OtherItemScheduleAction
         }
         return $this->run($response, fn () => ['items' => $this->service->setInstallments(
             $this->currentSupplierId($request), (int) $args['item_id'], $rows)]);
+    }
+
+    /**
+     * Automatické účtování opakování smí zapnout, obnovit nebo spustit jen člověk
+     * v aplikaci. API token (a MCP nad ním) má k ostatním položkám zápisovou
+     * výjimku jen pro koncepty, viz ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS;
+     * zapnutá automatika by z tokenu udělala účtující kanál přes cron.
+     */
+    private function assertAutoPostChannel(Request $request): void
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            throw new OtherItemException('auto_post_session_only',
+                'Automatické účtování opakování lze zapnout jen ve webovém rozhraní. Přes API token vzniknou pouze koncepty.', 403);
+        }
     }
 
     private function assertAutoPostPermission(Request $request, int $supplierId): void

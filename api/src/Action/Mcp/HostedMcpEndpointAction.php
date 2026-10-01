@@ -83,7 +83,7 @@ final class HostedMcpEndpointAction
                     'protocolVersion' => $this->protocolVersion($message['params']['protocolVersion'] ?? null),
                     'capabilities' => ['tools' => ['listChanged' => false]],
                     'serverInfo' => ['name' => 'myucto', 'version' => $this->version->getCurrentVersion()],
-                    'instructions' => 'Nástrojem list_suppliers načtěte firmy dostupné uživateli. U firemních nástrojů zadejte supplier_id; členství a práva se ověřují při každém volání. Účetnictví a daně jsou pouze ke čtení. Zápisové a mazací akce vyžadují potvrzení uživatele.',
+                    'instructions' => 'Nástrojem list_suppliers načtěte firmy dostupné uživateli. U firemních nástrojů zadejte supplier_id; členství a práva se ověřují při každém volání. Účetnictví a daně jsou pouze ke čtení; výjimkou jsou koncepty ostatních pohledávek a závazků, které se nezaúčtují. Zápisové a mazací akce vyžadují potvrzení uživatele.',
                 ],
                 'ping' => (object) [],
                 'tools/list' => $this->listTools($message['params'] ?? null, $input),
