@@ -10,6 +10,9 @@ const m = vi.hoisted(() => ({
   updateValue: vi.fn(),
   createDefaults: vi.fn(),
   responsibleCandidates: vi.fn(),
+  accountMap: vi.fn(),
+  accountCandidates: vi.fn(),
+  saveAccountMap: vi.fn(),
   patchSupplier: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -27,6 +30,9 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
     updateValue: m.updateValue,
     createDefaults: m.createDefaults,
     responsibleCandidates: m.responsibleCandidates,
+    accountMap: m.accountMap,
+    accountCandidates: m.accountCandidates,
+    saveAccountMap: m.saveAccountMap,
   },
 }))
 vi.mock('@/api/logbook', () => ({ logbookApi: { listCars: vi.fn().mockResolvedValue([]) } }))
@@ -69,6 +75,9 @@ describe('Dimensions.vue', () => {
     m.overview.mockResolvedValue(overview())
     m.group.mockResolvedValue({ group: null, candidates: [] })
     m.responsibleCandidates.mockResolvedValue([{ id: 3, name: 'Jana Syntetická' }])
+    for (const fn of [m.accountMap, m.accountCandidates, m.saveAccountMap]) fn.mockReset()
+    m.accountMap.mockResolvedValue([])
+    m.accountCandidates.mockResolvedValue([])
   })
 
   it('ukáže firemní typy a strom hodnot, podřízené se rozbalí', async () => {
@@ -118,6 +127,40 @@ describe('Dimensions.vue', () => {
     await flushPromises()
     expect(m.setEnabled).toHaveBeenCalledWith(true, true)
     expect(m.patchSupplier).toHaveBeenCalledWith(1, { dimensions_enabled: true })
+  })
+
+  it('účtotvorná dimenze: hodnota ukáže a uloží mapu syntetika → analytika', async () => {
+    const data = overview()
+    data.types[0] = { ...data.types[0], drives_accounts: true, drives_accounts_mask: '5, 6' }
+    m.overview.mockResolvedValue(data)
+    m.accountMap.mockResolvedValue([{
+      id: 1, dimension_type_id: 5, dimension_value_id: 11, synthetic_account_id: 100, synthetic_code: '518', synthetic_name: 'Služby',
+      analytic_account_id: 101, analytic_code: '518.100', analytic_name: 'Služby FVE', valid_from: null, valid_to: null,
+    }])
+    m.accountCandidates.mockResolvedValue([{ id: 100, code: '518', name: 'Služby', analytics: [
+      { id: 101, code: '518.100', name: 'Služby FVE' }, { id: 102, code: '518.200', name: 'Služby kancelář' },
+    ] }])
+    m.updateValue.mockResolvedValue({ id: 11 })
+    m.saveAccountMap.mockResolvedValue([])
+    const wrapper = mount(Dimensions, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="dimension-value-VYROBA"]').text()).toContain('518 → 518.100')
+
+    const edit = wrapper.get('[data-test="dimension-value-VYROBA"]').findAll('button').find(b => b.attributes('title') === 'common.edit')
+    await edit!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="dimension-account-map-row-0"]').exists()).toBe(true)
+    await wrapper.get('[data-test="dimension-account-map-add"]').trigger('click')
+    const row = () => wrapper.get('[data-test="dimension-account-map-row-1"]')
+    await row().findAll('select')[0].setValue('100')
+    await flushPromises()
+    await row().findAll('select')[1].setValue('102')
+    await wrapper.get('[data-test="dimension-value-save"]').trigger('click')
+    await flushPromises()
+    expect(m.saveAccountMap).toHaveBeenCalledWith(11, [
+      { synthetic_account_id: 100, analytic_account_id: 101, valid_from: null, valid_to: null },
+      { synthetic_account_id: 100, analytic_account_id: 102, valid_from: null, valid_to: null },
+    ])
   })
 
   it('bez účetní licence nenabídne zapnutí dimenzí', async () => {

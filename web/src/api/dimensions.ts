@@ -14,6 +14,40 @@ export interface DimensionType {
   is_active: boolean
   show_on_documents: boolean
   sort_order: number
+  /** Účtotvorná dimenze — hodnota určí analytický účet podle mapy (nejvýš jeden typ na firmu). */
+  drives_accounts?: boolean
+  /** Výsledkové účty, na které se mapa uplatní (výchozí `5, 6`). */
+  drives_accounts_mask?: string
+}
+
+/** Řádek mapy účtotvorné dimenze: hodnota × syntetika → analytika (per firma). */
+export interface DimensionAccountMapRow {
+  id: number
+  dimension_type_id: number
+  dimension_value_id: number
+  synthetic_account_id: number
+  synthetic_code: string
+  synthetic_name: string
+  analytic_account_id: number
+  analytic_code: string
+  analytic_name: string
+  valid_from: string | null
+  valid_to: string | null
+}
+
+export interface DimensionAccountMapRowPayload {
+  synthetic_account_id: number
+  analytic_account_id: number
+  valid_from: string | null
+  valid_to: string | null
+}
+
+/** Syntetika v masce účtotvorného typu a její analytiky se stejnou daňovou uznatelností. */
+export interface DimensionAccountCandidate {
+  id: number
+  code: string
+  name: string
+  analytics: { id: number; code: string; name: string }[]
 }
 
 export interface DimensionValue {
@@ -170,7 +204,7 @@ export interface DimensionCoverageRow {
 
 export interface DocumentDimensionsSaveResult extends DocumentDimensions {
   /** `locked` = zápis leží v uzavřeném nebo zamčeném období (mění se jen analytika). */
-  restamp: { lines: number; needs_repost: boolean; locked?: boolean }
+  restamp: { lines: number; needs_repost: boolean; account_change?: boolean; locked?: boolean }
 }
 
 /** Zaúčtovaný řádek dokladu s dimenzemi, jaké by nesl po uložení (náhled). */
@@ -243,6 +277,8 @@ export interface DimensionTypePayload {
   is_active?: boolean
   show_on_documents?: boolean
   sort_order?: number
+  drives_accounts?: boolean
+  drives_accounts_mask?: string
 }
 
 export interface DimensionValuePayload {
@@ -408,6 +444,12 @@ export const dimensionsApi = {
     api.patch<DimensionValue>(`/accounting/dimensions/values/${id}`, payload).then(r => r.data),
   deleteValue: (id: number) =>
     api.delete<{ deleted: boolean }>(`/accounting/dimensions/values/${id}`).then(r => r.data),
+  accountMap: (valueId?: number) =>
+    api.get<DimensionAccountMapRow[]>('/accounting/dimensions/account-map', { params: valueId ? { value_id: valueId } : {} }).then(r => r.data),
+  accountCandidates: (typeId: number) =>
+    api.get<DimensionAccountCandidate[]>(`/accounting/dimensions/types/${typeId}/account-candidates`).then(r => r.data),
+  saveAccountMap: (valueId: number, rows: DimensionAccountMapRowPayload[]) =>
+    api.put<DimensionAccountMapRow[]>(`/accounting/dimensions/values/${valueId}/account-map`, { rows }).then(r => r.data),
   responsibleCandidates: () =>
     api.get<{ id: number; name: string }[]>('/accounting/dimensions/responsible-candidates').then(r => r.data),
 

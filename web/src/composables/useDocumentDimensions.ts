@@ -149,7 +149,9 @@ export function useDocumentDimensions(docType: DimensionDocType) {
     if (!dims.canEdit.value || docId <= 0) return
     try {
       const result = await dimensionsApi.saveDocument(docType, docId, { header: header.value, items })
-      if (result.restamp.needs_repost) toast.warning(t('dimensions.needs_repost'))
+      if (result.restamp.needs_repost) {
+        toast.warning(t(result.restamp.account_change ? 'dimensions.needs_repost_account' : 'dimensions.needs_repost'))
+      }
     } catch (e: any) {
       toast.error(t('dimensions.save_failed', { message: e?.response?.data?.error?.message || e?.message || '' }))
     }

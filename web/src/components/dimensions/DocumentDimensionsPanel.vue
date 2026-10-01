@@ -41,6 +41,8 @@ const saved = ref<string>('{}')
 const loading = ref(false)
 const saving = ref(false)
 const needsRepost = ref(false)
+/** Změna by přesunula řádek na jinou analytiku (účtotvorná dimenze), ne jen rozdělila náklad. */
+const needsRepostAccount = ref(false)
 const autoFilled = ref<Record<number, number>>({})
 
 /** Rozpady dokladu podle pořadí položky (0 = hlavička); panel upravuje jen hlavičku. */
@@ -116,6 +118,7 @@ async function save() {
     savedSplits.value = JSON.stringify(splits.value)
     autoFilled.value = {}
     needsRepost.value = result.restamp.needs_repost
+    needsRepostAccount.value = result.restamp.account_change === true
     toast.success(result.restamp.lines > 0
       ? t('dimensions.saved_restamped', { count: result.restamp.lines })
       : t('dimensions.saved'))
@@ -164,7 +167,7 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
     />
     <p v-if="!loading && hasAutoFilled" class="mt-2 text-xs text-neutral-500" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
     <p v-if="needsRepost" class="mt-3 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800">
-      {{ t('dimensions.needs_repost') }}
+      {{ t(needsRepostAccount ? 'dimensions.needs_repost_account' : 'dimensions.needs_repost') }}
     </p>
   </section>
 </template>

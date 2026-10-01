@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
   dimensionsApi,
+  type DimensionAccountCandidate,
+  type DimensionAccountMapRow,
   type DimensionGroupInfo,
   type DimensionKind,
   type DimensionLevel,
@@ -82,6 +84,7 @@ onMounted(async () => {
   }
   await load()
   await loadGroup()
+  await loadAccountMap()
 })
 
 watch(level, () => {
@@ -135,6 +138,8 @@ const typeForm = reactive({
   show_on_documents: true,
   is_active: true,
   sort_order: 100,
+  drives_accounts: false,
+  drives_accounts_mask: '5, 6',
 })
 
 function newType() {
@@ -148,6 +153,7 @@ function editType(type: DimensionType) {
   Object.assign(typeForm, {
     id: type.id, code: type.code, name: type.name, kind: type.kind, level: type.level,
     show_on_documents: type.show_on_documents, is_active: type.is_active, sort_order: type.sort_order,
+    drives_accounts: type.drives_accounts === true, drives_accounts_mask: type.drives_accounts_mask || '5, 6',
   })
   typeFormOpen.value = true
 }
@@ -161,11 +167,16 @@ async function saveType() {
   }
   const result = typeForm.id === null
     ? await run(() => dimensionsApi.createType({ ...payload, code: typeForm.code.trim(), kind: typeForm.kind, level: typeForm.level }), t('common.saved'))
-    : await run(() => dimensionsApi.updateType(typeForm.id as number, payload), t('common.saved'))
+    : await run(() => dimensionsApi.updateType(typeForm.id as number, {
+      ...payload,
+      drives_accounts: typeForm.drives_accounts,
+      ...(typeForm.drives_accounts ? { drives_accounts_mask: typeForm.drives_accounts_mask.trim() } : {}),
+    }), t('common.saved'))
   if (!result) return
   typeFormOpen.value = false
   await load()
   selectedTypeId.value = result.id
+  await loadAccountMap()
 }
 
 async function removeType(type: DimensionType) {
@@ -275,8 +286,82 @@ function newValue(parentId: number | null = null) {
     responsible_note: '', car_id: null, project_id: null, cost_center_id: null, note: '',
   })
   if (parentId !== null) expanded.value = new Set([...expanded.value, parentId])
+  mapRows.value = []
   valueFormOpen.value = true
   void loadLinks()
+}
+
+// ── účtotvorná dimenze: hodnota × syntetika → analytika ─────────────────
+
+interface AccountMapRowForm {
+  synthetic_account_id: number | null
+  analytic_account_id: number | null
+  valid_from: string
+  valid_to: string
+  creating: boolean
+  new_code: string
+  new_name: string
+}
+
+const accountMap = ref<DimensionAccountMapRow[]>([])
+const accountCandidates = ref<DimensionAccountCandidate[]>([])
+const mapRows = ref<AccountMapRowForm[]>([])
+const drivingSelected = computed(() => selectedType.value?.drives_accounts === true)
+
+async function loadAccountMap() {
+  if (!drivingSelected.value) {
+    accountMap.value = []
+    return
+  }
+  try {
+    accountMap.value = await dimensionsApi.accountMap()
+  } catch {
+    accountMap.value = []
+  }
+}
+
+watch(selectedTypeId, () => { void loadAccountMap() })
+
+function mapOf(valueId: number) {
+  return accountMap.value.filter(r => r.dimension_value_id === valueId)
+}
+
+async function loadAccountCandidates() {
+  if (!selectedType.value) return
+  try {
+    accountCandidates.value = await dimensionsApi.accountCandidates(selectedType.value.id)
+  } catch {
+    accountCandidates.value = []
+  }
+}
+
+function analyticsOf(syntheticId: number | null) {
+  return accountCandidates.value.find(c => c.id === syntheticId)?.analytics ?? []
+}
+
+function emptyMapRow(): AccountMapRowForm {
+  return { synthetic_account_id: null, analytic_account_id: null, valid_from: '', valid_to: '', creating: false, new_code: '', new_name: '' }
+}
+
+function startCreateAnalytic(row: AccountMapRowForm) {
+  const synthetic = accountCandidates.value.find(c => c.id === row.synthetic_account_id)
+  if (!synthetic) return
+  row.creating = true
+  row.new_code = `${synthetic.code}.`
+  row.new_name = valueForm.name.trim()
+}
+
+async function createAnalytic(row: AccountMapRowForm) {
+  if (row.synthetic_account_id === null) return
+  const code = row.new_code.trim()
+  const account = await run(
+    () => accountingApi.createAccount({ parent_id: row.synthetic_account_id as number, account_code: code, name: row.new_name.trim() }),
+    t('dimensions.account_map_created', { code }),
+  )
+  if (!account) return
+  await loadAccountCandidates()
+  row.analytic_account_id = account.id
+  row.creating = false
 }
 
 function editValue(value: DimensionValue) {
@@ -286,8 +371,16 @@ function editValue(value: DimensionValue) {
     responsible_user_id: value.responsible_user_id, responsible_note: value.responsible_note ?? '',
     car_id: value.car_id, project_id: value.project_id, cost_center_id: value.cost_center_id, note: value.note ?? '',
   })
+  mapRows.value = mapOf(value.id).map(r => ({
+    ...emptyMapRow(),
+    synthetic_account_id: r.synthetic_account_id,
+    analytic_account_id: r.analytic_account_id,
+    valid_from: r.valid_from ?? '',
+    valid_to: r.valid_to ?? '',
+  }))
   valueFormOpen.value = true
   void loadLinks()
+  if (drivingSelected.value) void loadAccountCandidates()
 }
 
 function closeForms() {
@@ -315,8 +408,22 @@ async function saveValue() {
     ? await run(() => dimensionsApi.createValue(typeId, { ...payload, code: valueForm.code.trim() }), t('common.saved'))
     : await run(() => dimensionsApi.updateValue(valueForm.id as number, payload), t('common.saved'))
   if (!result) return
+  // Mapa účtů se ukládá týmž tlačítkem (jedno společné Uložit).
+  if (drivingSelected.value && valueForm.id !== null) {
+    const rows = mapRows.value
+      .filter(r => r.synthetic_account_id !== null && r.analytic_account_id !== null)
+      .map(r => ({
+        synthetic_account_id: r.synthetic_account_id as number,
+        analytic_account_id: r.analytic_account_id as number,
+        valid_from: r.valid_from || null,
+        valid_to: r.valid_to || null,
+      }))
+    const saved = await run(() => dimensionsApi.saveAccountMap(valueForm.id as number, rows))
+    if (!saved) return
+  }
   valueFormOpen.value = false
   await load()
+  await loadAccountMap()
 }
 
 async function toggleActive(value: DimensionValue) {
@@ -482,7 +589,7 @@ function valueCount(typeId: number) {
               <span class="text-xs text-neutral-400">{{ valueCount(type.id) }}</span>
             </div>
             <div class="text-xs text-neutral-500">
-              {{ kindLabel(type.kind) }}<span v-if="!type.show_on_documents"> · {{ t('dimensions.type_hidden_on_documents') }}</span>
+              {{ kindLabel(type.kind) }}<span v-if="!type.show_on_documents"> · {{ t('dimensions.type_hidden_on_documents') }}</span><span v-if="type.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }}</span>
             </div>
           </button>
         </nav>
@@ -492,7 +599,9 @@ function valueCount(typeId: number) {
           <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-200">
             <div>
               <h2 class="text-lg font-semibold">{{ selectedType.name }}</h2>
-              <p class="text-xs text-neutral-500">{{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}</p>
+              <p class="text-xs text-neutral-500">
+                {{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}<span v-if="selectedType.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }} ({{ selectedType.drives_accounts_mask }})</span>
+              </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button v-if="parentIds.length > 0" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="dimension-toggle-all" @click="toggleAll">
@@ -534,6 +643,9 @@ function valueCount(typeId: number) {
                 <span v-if="value.responsible_user_name || value.responsible_note" class="text-xs text-neutral-500 truncate">
                   · {{ value.responsible_user_name || value.responsible_note }}
                 </span>
+                <span v-for="m in (drivingSelected ? mapOf(value.id) : [])" :key="m.id"
+                      class="rounded bg-primary-50 px-1.5 py-0.5 text-xs font-mono text-primary-700 whitespace-nowrap"
+                      :title="m.analytic_name">{{ m.synthetic_code }} → {{ m.analytic_code }}</span>
               </div>
               <div v-if="canWrite" class="flex flex-wrap justify-end gap-1">
                 <button type="button" :class="btnOutlineSm('neutral')" :title="t('dimensions.value_add_child')" @click="newValue(value.id)">
@@ -598,6 +710,18 @@ function valueCount(typeId: number) {
           <input v-model="typeForm.is_active" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.type_active') }}
         </label>
+        <div v-if="typeForm.id !== null" class="border-t border-neutral-200 pt-4 space-y-2">
+          <label class="flex items-center gap-2 text-sm font-medium text-neutral-700">
+            <input v-model="typeForm.drives_accounts" type="checkbox" class="rounded border-neutral-300" data-test="dimension-type-drives-accounts" />
+            {{ t('dimensions.drives_accounts') }}
+          </label>
+          <p class="text-xs text-neutral-500">{{ t('dimensions.drives_accounts_hint') }}</p>
+          <div v-if="typeForm.drives_accounts" class="max-w-sm">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.drives_accounts_mask') }}</label>
+            <input v-model="typeForm.drives_accounts_mask" type="text" maxlength="190" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="dimension-type-drives-mask" />
+            <p class="text-xs text-neutral-400 mt-1">{{ t('dimensions.drives_accounts_mask_hint') }}</p>
+          </div>
+        </div>
        </div>
        <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
@@ -680,6 +804,74 @@ function valueCount(typeId: number) {
           <input v-model="valueForm.is_active" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.value_active') }}
         </label>
+        <section v-if="drivingSelected" class="border-t border-neutral-200 pt-4" data-test="dimension-account-map">
+          <h3 class="text-sm font-semibold text-neutral-700">{{ t('dimensions.account_map_title') }}</h3>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('dimensions.account_map_hint') }}</p>
+          <p v-if="valueForm.id === null" class="text-sm text-neutral-500 mt-3">{{ t('dimensions.account_map_after_create') }}</p>
+          <template v-else>
+            <p v-if="mapRows.length === 0" class="text-sm text-neutral-500 mt-3">{{ t('dimensions.account_map_empty') }}</p>
+            <div v-for="(row, i) in mapRows" :key="i" class="mt-3 rounded-md border border-neutral-200 p-3 space-y-2" :data-test="`dimension-account-map-row-${i}`">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_9rem_9rem] gap-2">
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_synthetic') }}</label>
+                  <select v-model="row.synthetic_account_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+                          @change="row.analytic_account_id = null; row.creating = false">
+                    <option :value="null">{{ t('dimensions.account_map_select') }}</option>
+                    <option v-for="c in accountCandidates" :key="c.id" :value="c.id">{{ c.code }} – {{ c.name }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_analytic') }}</label>
+                  <select v-model="row.analytic_account_id" :disabled="row.synthetic_account_id === null"
+                          class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100">
+                    <option :value="null">{{ t('dimensions.account_map_select') }}</option>
+                    <option v-for="a in analyticsOf(row.synthetic_account_id)" :key="a.id" :value="a.id">{{ a.code }} – {{ a.name }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_valid_from') }}</label>
+                  <input v-model="row.valid_from" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_valid_to') }}</label>
+                  <input v-model="row.valid_to" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+                </div>
+              </div>
+              <div v-if="row.creating" class="flex flex-wrap items-end gap-2">
+                <div>
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_new_code') }}</label>
+                  <input v-model="row.new_code" type="text" maxlength="10" class="w-32 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                </div>
+                <div class="flex-1 min-w-[12rem]">
+                  <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_new_name') }}</label>
+                  <input v-model="row.new_name" type="text" maxlength="190" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+                </div>
+                <button type="button" :disabled="busy || !row.new_code.trim() || !row.new_name.trim()" :class="btnFilledSm('success')" class="whitespace-nowrap" @click="createAnalytic(row)">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                  {{ t('dimensions.account_map_create') }}
+                </button>
+                <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" @click="row.creating = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('common.cancel') }}
+                </button>
+              </div>
+              <div class="flex flex-wrap justify-end gap-2">
+                <button v-if="!row.creating && row.synthetic_account_id !== null" type="button" :class="btnOutlineSm('primary')" class="whitespace-nowrap" @click="startCreateAnalytic(row)">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                  {{ t('dimensions.account_map_new_analytic') }}
+                </button>
+                <button type="button" :class="btnOutlineSm('danger')" class="whitespace-nowrap" @click="mapRows.splice(i, 1)">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                  {{ t('dimensions.account_map_remove') }}
+                </button>
+              </div>
+            </div>
+            <button type="button" :class="btnOutlineSm('primary')" class="whitespace-nowrap mt-3" data-test="dimension-account-map-add" @click="mapRows.push(emptyMapRow())">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('dimensions.account_map_add') }}
+            </button>
+          </template>
+        </section>
        </div>
        <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
