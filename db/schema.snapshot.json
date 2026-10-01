@@ -931,7 +931,8 @@
         "1947_bank_transaction_processing_state.sql",
         "1948_payroll_dimensions_company_link_and_split.sql",
         "1949_product_posting_defaults.sql",
-        "1950_purchase_submission_dimensions.sql"
+        "1950_purchase_submission_dimensions.sql",
+        "1951_dimensions_other_items_assets.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4157,7 +4158,7 @@
                 "dimension_type_id": "bigint(20) unsigned NOT NULL",
                 "dimension_value_id": "bigint(20) unsigned NOT NULL",
                 "doc_id": "bigint(20) unsigned NOT NULL",
-                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template','other_item','asset') NOT NULL",
                 "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "share": "decimal(12,10) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -4183,7 +4184,7 @@
                 "dimension_type_id": "bigint(20) unsigned NOT NULL",
                 "dimension_value_id": "bigint(20) unsigned NOT NULL",
                 "doc_id": "bigint(20) unsigned NOT NULL",
-                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template') NOT NULL",
+                "doc_type": "enum('purchase_invoice','invoice','cash_document','bank_transaction','journal_template','recurring_template','other_item','asset') NOT NULL",
                 "item_no": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
