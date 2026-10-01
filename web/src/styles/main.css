@@ -707,6 +707,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     line-height: 1.25;
   }
 
+  /* Rozbalený detail (colspan přes celý řádek) nesmí určovat šířku tabulky:
+     tabulka je `w-max`, takže široký obsah detailu ji roztáhl a seznam se
+     začal posouvat, i když žádný sloupec tak široký nebyl. Procentní min-width
+     se do vnitřní šířky buňky nepočítá — detail jen vyplní šířku řádků. */
+  .singleline-list-table > tbody > tr.table-detail-row > td > * {
+    width: 0;
+    min-width: 100%;
+  }
+
   @media (min-width: 768px) {
     .singleline-list-table:not(.multirow-table) > thead > tr > th,
     .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td {
