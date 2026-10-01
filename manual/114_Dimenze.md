@@ -166,6 +166,40 @@ Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u do
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.
 Smazáním klienta, zakázky nebo hodnoty dimenze se výchozí nastavení odstraní.
 
+## Dimenze při vytěžení a nahrání dokladu
+
+Přijatý doklad může dostat dimenze hned při vstupu, ne až při zaúčtování.
+
+**Kontrola vytěžených dokladů.** Okno po vytěžení
+([§ 25.1.12](25_AI_extrakce.md#25112-kontrola-vytezenych-dokladu)) má sekci
+**Dimenze dokladu**. Prázdné typy hlavičky předvyplní:
+
+1. výchozí dimenze zakázky, pak dodavatele (viz výše),
+2. co zbude, **návrh z historie**: hodnoty z hlavičky posledního nestornovaného
+   přijatého dokladu téhož dodavatele. Bere se jen dimenze uložená na dokladu,
+   uzavřená hodnota se nenavrhuje. Návrh nic nestojí, AI se při něm nevolá.
+
+Ruční volba má vždy přednost. Předvyplněná hodnota je v okně označená jako
+**Návrh** se zdrojem (výchozí dodavatele, výchozí zakázky, z posledního dokladu
+dodavatele). **Uložit a další** ji uloží přímo do dokladu jako jeho dimenzi.
+
+Okno se otevře i u dokladu bez hlášení vytěžení, pokud mu chybí dimenze, kterou
+[pravidlo](#pravidla-dimenzi-podle-uctu) s vynucením **Chyba** vyžaduje na účtu
+některé položky. Počítá se přitom se vším, co by doklad dostal při zaúčtování
+(položka, produkt, hlavička, zakázka, dodavatel, výchozí hodnota pravidla).
+Detail takového dokladu ukáže červené upozornění s tlačítkem **Zkontrolovat**.
+
+**Příchozí doklady.** Při nahrání do **Nákup → Příchozí doklady** jde zvolit
+dimenze dokladu, typicky středisko, pro které účtenka je. Podání je ukazuje jako
+štítky. Při zpracování (vytěžení i ruční přepis) se volba propíše do hlavičky
+vzniklé přijaté faktury. Před výchozími dimenzemi dodavatele má přednost, dimenzi,
+kterou už faktura má, nepřepíše.
+
+**Portál.** Klient v **Portál → Doklady pro účetní** vybírá jen **středisko**,
+a to z aktivních hodnot firmy, které se ukazují na dokladech. Ostatní typy
+a interní údaje číselníku (odpovědná osoba, poznámky, vazby) portál nevidí.
+Náhrada originálu převezme středisko nahrazovaného podání.
+
 ## Produkt a kategorie
 
 Skladová karta (produkt) a kategorie produktů mohou nést výchozí **účet výnosů**,

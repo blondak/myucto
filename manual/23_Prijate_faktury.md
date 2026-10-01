@@ -146,7 +146,9 @@ Do fronty vede několik cest:
 | **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní; doklad je rovnou navázaný na platbu kartou |
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
-fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
+fronty sama a zpracuje to stejným postupem. Při zapnutých dimenzích jde při nahrání
+zvolit i středisko (a další dimenze); propíše se do hlavičky vytěženého dokladu
+([§ 114](114_Dimenze.md#dimenze-pri-vytezeni-a-nahrani-dokladu)). Podrobný průchod klientskou stranou je v
 [§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
 
 Originály všech příchozích dokladů (z portálu, e-mailu i nahrané ručně) se ukládají

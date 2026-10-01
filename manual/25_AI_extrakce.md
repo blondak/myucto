@@ -187,8 +187,10 @@ s odkazem do seznamu. Starší importy najdeš v seznamu přijatých faktur ve f
 ### 25.1.12 Kontrola vytěžených dokladů
 
 Po AI importu se otevře okno **Kontrola vytěžených dokladů**. Prochází doklady
-jeden po druhém a ukáže jen ty, které mají hlášení ke kontrole. Když žádný
-nemá, okno jen oznámí, že není co kontrolovat.
+jeden po druhém a ukáže jen ty, které kontrolu potřebují: mají hlášení z vytěžení,
+nebo jim chybí dimenze povinná podle [pravidel dimenzí](114_Dimenze.md#pravidla-dimenzi-podle-uctu)
+(bez ní by doklad nešel zaúčtovat). Když takový doklad není, okno jen oznámí, že
+není co kontrolovat.
 
 - Nahoře je dodavatel, číslo dokladu, datum, stav a částka a odkaz **Otevřít doklad**.
 - Pod tím jsou ostatní části hlášení (reverse charge, nesouhlasící součty apod.),
@@ -197,9 +199,17 @@ nemá, okno jen oznámí, že není co kontrolovat.
   nákladu a druh zatím není zvolený, je **orámovaná červeně**. U návrhu je jistota
   a zdůvodnění, tlačítko **Použít** ho převezme. **Použít návrhy AI** převezme
   všechny najednou.
-- **Uložit a další** uloží druhy nákladu a přejde na další doklad. Odrážky
+- Má-li firma zapnuté [dimenze](114_Dimenze.md), je nad položkami sekce
+  **Dimenze dokladu** (středisko, zakázka a další typy hlavičky). Prázdné typy se
+  předvyplní výchozími dimenzemi dodavatele a zakázky a co zbude, návrhem
+  z posledního dokladu téhož dodavatele. Předvyplněná hodnota je označená
+  **Návrh** i se zdrojem. Chybí-li povinná dimenze, sekce je orámovaná červeně
+  a řekne, na kterém účtu ji pravidlo vyžaduje. Jinou dimenzi pro jednotlivou
+  položku nastavíte štítkem u řádku.
+- **Uložit a další** uloží druhy nákladu i dimenze a přejde na další doklad.
+  Dimenze, včetně převzatého návrhu, se uloží přímo do dokladu. Odrážky
   vyřešených řádků z hlášení zmizí, nevyřešené body zůstanou.
-  **Přeskočit** nechá doklad beze změny.
+  **Přeskočit** nechá doklad beze změny, návrh dimenzí se neuloží.
 
 Doklad, na kterém je napsáno „zaplaceno", import zakládá jako **koncept**, aby šel
 po vytěžení volně upravit. Hlášení na to upozorní a tlačítko **Potvrdit a označit
@@ -219,9 +229,11 @@ Okno se otevírá:
   znovu tlačítkem **Zkontrolovat vytěžené**,
 - po **Vytěžit a vytvořit** v příchozích dokladech, před otevřením editoru,
 - po ručním spuštění **scan inboxu** ([§ 21](21_Importy.md)),
-- tlačítkem **Zkontrolovat** ve žlutém hlášení v detailu faktury,
+- tlačítkem **Zkontrolovat** ve žlutém hlášení v detailu faktury, případně
+  v červeném upozornění na chybějící povinnou dimenzi,
 - tlačítkem **Zkontrolovat vytěžené** v seznamu přijatých faktur (vybrané
-  řádky, jinak všechny načtené doklady s hlášením).
+  řádky, jinak všechny načtené doklady s hlášením a koncepty bez povinné
+  dimenze).
 
 V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u výběru
 druhu nákladu s tlačítkem **Použít**.

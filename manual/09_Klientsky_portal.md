@@ -251,6 +251,9 @@ Na stránce **Dokumenty → Předat doklady účetní**
 (`/portal/purchase-invoice-submissions`) lze najednou vybrat až 20 souborů ve
 formátu PDF, JPG, PNG, ISDOC, XML nebo ISDOCX. Ke skupině lze přidat poznámku pro
 účetní a nepovinný tip na typ dokladu. Každý soubor vytvoří samostatné podání.
+Používá-li firma střediska ([§ 114 Dimenze](114_Dimenze.md#dimenze-pri-vytezeni-a-nahrani-dokladu)),
+lze vybrat i středisko, kterého se doklad týká; účetní ho dostane rovnou do
+hlavičky vytěženého dokladu.
 
 Přehled rozlišuje stavy **Předáno**, **Zpracovává se**, **Čeká na doplnění**,
 **Zpracováno** a **Odmítnuto**. Originál lze vždy zobrazit nebo stáhnout. Pokud
