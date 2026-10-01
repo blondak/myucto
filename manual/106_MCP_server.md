@@ -38,7 +38,8 @@ Podstatné vlastnosti:
 | Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), přijetí, úhrada, storno, zálohy, zakázka, druh nákladu, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 106.8.4](#10684-prijate-faktury)) |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** — založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb; nahrání a stažení originálu |
+| Soubory a přílohy | stažení PDF a ISDOC vydané faktury, příloh, PDF přijaté faktury a originálu dokumentu; nahrání přílohy faktury, PDF přijaté faktury, dokumentu a obrázku ke zboží; založení přijaté faktury ze souboru ISDOC (viz [§ 106.8.6](#10686-soubory-a-prilohy)) |
 | Kniha jízd | **čtení i zápis** — vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
@@ -319,6 +320,7 @@ Lokální server `.mjs` se konfiguruje proměnnými prostředí:
 | `MYUCTO_MAX_RPS` | `8` | Nejvýš tolik požadavků za sekundu. |
 | `MYUCTO_MAX_CONCURRENT` | `3` | Nejvýš tolik souběžných volání. |
 | `MYUCTO_TIMEOUT_MS` | `30000` | Timeout jednoho požadavku. |
+| `MYUCTO_MAX_FILE_MB` | `10` | Největší soubor, který asistent stáhne nebo nahraje, v MB (nejvýš 50). |
 | `MYUCTO_SYSTEM_CA` | `1` | Načíst certifikační autority z operačního systému. `0` = nenačítat. |
 | `MYUCTO_INSECURE_TLS` | `0` | `1` = vůbec neověřovat HTTPS certifikát. **Jen pro vývojovou instanci.** |
 
@@ -406,6 +408,16 @@ Podrobnosti v [§ 106.7](#1067-koncept-faktury-vykazy-prace-a-materialu).
 - „Zapiš tankování 40 litrů za 1 520 Kč.“ *(token čtení a zápis)*
 
 Podrobnosti v [§ 106.8](#1068-zakazky-dokumenty-a-kniha-jizd).
+
+**Soubory a přílohy**
+
+- „Stáhni PDF faktury 2026015 a shrň mi, co na ní je.“
+- „Pošli mi ISDOC k faktuře pro ACME.“
+- „Přilož tuhle objednávku v PDF k faktuře 2026015.“ *(token čtení a zápis)*
+- „Tady je ISDOC od dodavatele, založ z něj přijatou fakturu.“ *(token čtení a zápis)*
+- „Nahraj tuhle smlouvu do Dokumentů, označ ji tagem smlouvy a připoj ji k ACME.“ *(token čtení a zápis)*
+
+Podrobnosti v [§ 106.8.6](#10686-soubory-a-prilohy).
 
 **Daně**
 
@@ -643,9 +655,10 @@ omezený úsek textu, upravit název, popis a tagy a připojit dokument k odběr
 dokladu nebo zakázce. Dlouhý text se vrací po částech nejvýše 50 000 znaků.
 Platí stejná firemní a osobní oprávnění jako v aplikaci.
 
-Přes tento MCP server se **nenahrávají ani nestahují binární soubory**. PDF,
-obrázek nebo ZIP nahraj v aplikaci; asistent pak pracuje s jeho metadaty a
-vytěženým textem. Odpojení vazby vyžaduje potvrzení, dokument samotný ale nemaže.
+Soubor umí asistent do Dokumentů i nahrát a originál stáhnout, postup a limity
+popisuje [§ 106.8.6](#10686-soubory-a-prilohy). Pro práci s obsahem dokumentu je
+ale levnější vytěžený text než celý soubor. Odpojení vazby vyžaduje potvrzení,
+dokument samotný ale nemaže.
 
 ### 106.8.3 Kniha jízd
 
@@ -710,7 +723,7 @@ Platí přitom:
   `link_purchase_advance`; náklad se pak nepočítá dvakrát.
 - **Příkaz k úhradě asistent jen připraví.** Do banky nic neodesílá a faktury
   neoznačí jako uhrazené. Soubor pro banku stáhneš a odešleš v aplikaci.
-- Soubory (PDF dokladu, ISDOC, import) se přes MCP nenahrávají ani nestahují.
+- PDF dokladu nahraješ, stáhneš nebo z ISDOC založíš doklad nástroji ze [§ 106.8.6](#10686-soubory-a-prilohy).
 
 V režimu jen pro čtení se zápisové nástroje nenabízejí; vyžadují token
 s oprávněním čtení a zápis.
@@ -760,6 +773,56 @@ Přes asistenta **nejde**: potvrdit nebo zaúčtovat doklad, stornovat ho,
 přeúčtovat, spárovat nebo odpojit úhradu ani ručně vygenerovat doklady
 z opakování. Tyto kroky dělá účetní v aplikaci.
 
+### 106.8.6 Soubory a přílohy
+
+Asistent umí soubory stahovat i nahrávat. Soubor přitom **jde celý přes
+asistenta**: obsah se přenáší v konverzaci a model s ním pracuje stejně jako se
+souborem, který mu přiložíš sám. Proto si o soubor řekni jen tehdy, když ho
+opravdu potřebuješ. Na otázku, co je v dokumentu napsané, stačí vytěžený text
+(`get_document`), který je mnohem menší.
+
+| Agenda | Stažení | Nahrání a mazání |
+|---|---|---|
+| **Vydané faktury** | PDF faktury, ISDOC (jen vystavená faktura), přílohy | přidat přílohu, smazat přílohu |
+| **Přijaté faktury** | archivované PDF originálu | nahrát PDF nebo fotku dokladu, smazat PDF, založit fakturu ze souboru ISDOC |
+| **Dokumenty** | originál dokumentu i další soubory dokladu | nahrát soubor do složky, rovnou s názvem, popisem, tagy a vazbou na záznam |
+| **E-shop** | nic | nahrát obrázek nebo PDF ke kartě zboží |
+
+**Velikost.** Lokální server přenese soubor do 10 MB (mění se proměnnou
+`MYUCTO_MAX_FILE_MB`, [§ 106.4](#1064-nastaveni)), serverový MCP do 5 MB, protože
+tam soubor putuje několika procesy aplikace. Větší soubor nástroj odmítne se
+zprávou `file_too_large`; stáhni nebo nahraj ho přímo v aplikaci. Platí i limity
+samotné agendy, například u přílohy faktury nejvýš 10 MB na soubor a 20 MB na
+všechny přílohy jedné faktury.
+
+**Podporované typy při nahrání.**
+
+| Kam | Typy |
+|---|---|
+| Příloha vydané faktury | PDF, Word, Excel, PowerPoint, OpenDocument, TXT, CSV, JPG, PNG, GIF, WEBP, HEIC, ZIP |
+| PDF přijaté faktury | PDF; fotku JPG nebo PNG aplikace převede na PDF |
+| Založení přijaté faktury | ISDOC, ISDOCX a PDF s vloženým ISDOC |
+| Dokumenty | PDF, ISDOC a XML, obrázky, Word, Excel, PowerPoint, OpenDocument, TXT, CSV, ZIP |
+| Obrázky zboží | JPG, PNG, WEBP, GIF a PDF |
+
+Přípona souboru musí odpovídat jeho typu a aplikace typ znovu ověří z obsahu.
+HTML, SVG, skripty a spustitelné soubory přes MCP nahrát nejde. Z názvu souboru se
+odstraní cesta i znaky, které do názvu nepatří.
+
+**Založení přijaté faktury ze souboru** je deterministický import strukturovaných
+dat, nepoužívá AI vytěžení. Když PDF vložený ISDOC nemá, asistent dostane chybu
+`no_embedded_isdoc`; doklad pak založí ručně a PDF k němu nahraje jako originál.
+Stejný doklad, který už v evidenci je, se podruhé nezaloží.
+
+**Výsledek stažení.** Obrázek se vrátí jako obrázek, PDF jako vložený soubor
+a ISDOC jako text. Na požádání vrátí asistent obsah i jako base64, třeba když ho
+chce předat dalšímu nástroji.
+
+Pro nahrání musí mít token oprávnění čtení a zápis a v režimu jen pro čtení se
+nahrávací nástroje nenabízejí. Doklad v uzavřeném období aplikace změnit
+nedovolí stejně jako v aplikaci. Smazání přílohy nebo PDF a náhrada už
+archivovaného PDF vyžadují potvrzení ([§ 106.9.4](#10694-potvrzovani-nevratnych-kroku)).
+
 ## 106.9 E-shop a sklad
 
 Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** — asistent
@@ -782,7 +845,7 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 | **Balení a šarže** | balení karty (poměr, EAN balení, výchozí prodejní jednotka), šarže a sériová čísla s expirací a historií | — |
 | **Dodavatelé zboží** | seznam s nákupní cenou a dodací lhůtou | nahradit seznam dodavatelů zboží |
 | **Nabídky dodavatelů („u dodavatele")** | přehled dvojic zboží × dodavatel napříč katalogem — nákupní cena a měna, kód u dodavatele, dodací lhůta, minimální odběr, balení a množství hlášené dodavatelem | založit a upravit nabídku (upsert podle dvojice zboží × dodavatel), odebrat nabídku |
-| **Média** | seznam obrázků a příloh | popisky, pořadí, hlavní obrázek, smazání |
+| **Média** | seznam obrázků a příloh | nahrání obrázku nebo PDF, popisky, pořadí, hlavní obrázek, smazání |
 | **Kategorie** | strom, detail, překlady | založit, upravit, přesunout v stromu, uložit překlady, smazat |
 | **Číselníky** | výrobci, štítky, typy poplatků, parametry i jejich hodnoty; balení, cenové hladiny i s pravidly, jazyky a prodejní měny | výrobci, štítky, typy poplatků a parametry: založit / upravit / smazat |
 | **Sklady** | seznam, detail, hodnota zásob, skladové lokace | založit, upravit, smazat |
@@ -845,8 +908,9 @@ jen čte.
 ### 106.9.4 Potvrzování nevratných kroků
 
 Mazání, storno dokladu, uzavření inventury, odebrání položky z konceptu
-faktury, smazání konceptu ostatní pohledávky nebo závazku a zrušení celého
-splátkového kalendáře vyžadují **výslovné potvrzení**. U vydaných faktur
+faktury, smazání konceptu ostatní pohledávky nebo závazku, zrušení celého
+splátkového kalendáře, smazání přílohy faktury nebo PDF přijaté faktury a náhrada
+už archivovaného PDF vyžadují **výslovné potvrzení**. U vydaných faktur
 a pravidelné fakturace jde o smazání konceptu, storno a dobropis, zrušení storna,
 smazání úhrady, vrácení stavu zaplaceno, hromadné upomínky, smazání šablony
 pravidelné fakturace a ruční vygenerování faktury ze šablony. U přijatých faktur
@@ -941,11 +1005,8 @@ kolik řádků zůstalo nespočítaných (ty se přeskočí).
 
 ### 106.9.9 Co přes MCP nejde
 
-- **Nahrát fotku ke zboží.** Přenos souborů běží mimo formát, se kterým tenhle
-  server pracuje. Fotky nahraješ v aplikaci, asistent s nimi pak umí pracovat
-  (popisky, pořadí, hlavní obrázek, smazání).
-- **Hromadný import zboží z XLSX/CSV** ani **import ceníku dodavatele**. Ze
-  stejného důvodu; oba importy mají v aplikaci vlastní průvodce s náhledem.
+- **Hromadný import zboží z XLSX/CSV** ani **import ceníku dodavatele**. Oba
+  importy mají v aplikaci vlastní průvodce s náhledem.
   Jednotlivé nabídky dodavatelů ale asistent zakládat i upravovat umí.
 - **Stáhnout PDF nebo XLSX** skladového dokladu, inventurního soupisu či sestavy.
   Data sestav asistent přečte, hotový soubor si stáhneš v aplikaci.

@@ -139,6 +139,30 @@ final class HostedMcpManagedRelayTest extends TestCase
         self::assertIsObject($result['structuredContent'] ?? null);
     }
 
+    /**
+     * Nahraný soubor projde celým řetězem (Node → PHP relé → interní API →
+     * Slim akce) jako UploadedFile. Neplatný ISDOC akce odmítne ještě před
+     * zápisem čehokoli, takže test nic neukládá.
+     */
+    public function testUploadedFileReachesActionThroughRelay(): void
+    {
+        putenv('MYINVOICE_MCP_NODE_BINARY=' . $this->node());
+        $token = $this->createToken('read_write');
+
+        $result = (new ManagedNodeRelay($this->hosted(true), $this->config))->execute([
+            'operation' => 'call', 'name' => 'import_purchase_invoice_file',
+            'arguments' => ['filename' => 'faktura.isdoc', 'content_base64' => base64_encode('<Invoice>neplatný</Invoice>')],
+            'scope' => 'read_write', 'token' => $token,
+            'boundSupplierId' => $this->supplierId, 'lockedSupplierId' => null,
+            'serverParams' => ['REMOTE_ADDR' => '127.0.0.1'],
+        ]);
+
+        self::assertTrue($result['isError'] ?? false, json_encode($result));
+        $text = (string) ($result['content'][0]->text ?? '');
+        self::assertMatchesRegularExpression('/HTTP 422 \((invalid_isdoc|invalid_document)\)/', $text);
+        self::assertStringNotContainsString('no_file', $text);
+    }
+
     public function testApiRequestIsBuiltFromApprovedConnectionNotFromBridgeOutput(): void
     {
         $relay = new ManagedNodeRelay($this->hosted(true), $this->config);
@@ -185,7 +209,7 @@ final class HostedMcpManagedRelayTest extends TestCase
         return is_string($configured) && trim($configured) !== '' ? $configured : 'node';
     }
 
-    private function createToken(): string
+    private function createToken(string $scope = 'read'): string
     {
         $pdo = $this->db->pdo();
         $roleId = (int) $pdo->query("SELECT id FROM roles WHERE system_key = 'superadmin' AND is_active = 1 LIMIT 1")->fetchColumn();
@@ -212,6 +236,6 @@ final class HostedMcpManagedRelayTest extends TestCase
         $this->userId = (int) $pdo->lastInsertId();
 
         return (new ApiTokenService($this->db, new RedisFactory($this->config)))
-            ->generate($this->userId, $this->supplierId, 'MCP relay test', 'read')['plaintext'];
+            ->generate($this->userId, $this->supplierId, 'MCP relay test', $scope)['plaintext'];
     }
 }

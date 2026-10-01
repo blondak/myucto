@@ -10,12 +10,17 @@
  *   stdin   {"id":1,"status":200,"headers":{…},"body":"…"}  nebo  {"id":1,"error":"…"}
  *   stdout  {"type":"result","result":{…}}
  *
+ * Nahrávaný soubor (multipart) jde místo `body` v `bodyBase64`, stažený soubor
+ * se vrací stejně (viz `hosted-body.mjs`). Velikost i tvar hlídá PHP.
+ *
  * Token ani hlavičku firmy sem PHP neposílá, doplňuje je až k požadavku na API.
  * Verzi instalace posílá v zadání, takže procesu stačí vidět složku `MCP`
  * a nepotřebuje kořenový soubor `VERSION`.
  */
 import { stdin, stdout } from 'node:process';
 import { createInterface } from 'node:readline';
+
+import { decodeBody, encodeBody } from './hosted-body.mjs';
 
 const pending = new Map();
 let nextId = 1;
@@ -42,7 +47,7 @@ function relayFetch(url, options) {
     }, { once: true });
     send({
       type: 'fetch', id, url: String(url), method: options.method,
-      headers: options.headers, body: options.body ?? '',
+      headers: options.headers, ...encodeBody(options.body),
     });
   });
 }
@@ -88,7 +93,7 @@ lines.on('line', (line) => {
     return;
   }
   try {
-    waiting.resolve(new Response([204, 205, 304].includes(message.status) ? null : message.body, {
+    waiting.resolve(new Response(decodeBody(message), {
       status: message.status,
       headers: message.headers,
     }));

@@ -89,3 +89,38 @@ test('doména firmy nepovolí volání nástroje pro jinou firmu', () => {
   assert.equal(mismatch.isError, true);
   assert.match(mismatch.content[0].text, /doména je omezená na jinou firmu/);
 });
+
+test('most s vlastním PHP předá nahrávaný soubor a stažené PDF v base64', (t) => {
+  const php = process.env.MYINVOICE_MCP_PHP_BINARY || 'php';
+  if (spawnSync(php, ['-v']).error) return t.skip('PHP CLI není dostupné.');
+  const directory = mkdtempSync(join(tmpdir(), 'myucto-mcp-files-'));
+  try {
+    const apiScript = join(directory, 'api.php');
+    writeFileSync(apiScript, `<?php
+      $input = json_decode(stream_get_contents(STDIN), true);
+      if ($input['method'] === 'GET') {
+        echo json_encode(['status' => 200, 'headers' => ['Content-Type' => 'application/pdf',
+          'Content-Disposition' => 'attachment; filename="F-1.pdf"'], 'body' => '',
+          'bodyBase64' => base64_encode("%PDF-\\x00\\xff")]);
+        return;
+      }
+      $body = base64_decode($input['bodyBase64'], true);
+      echo json_encode(['status' => 200, 'headers' => ['Content-Type' => 'application/json'],
+        'body' => json_encode(['has_pdf' => str_contains($body, "%PDF-\\x00\\xff"),
+          'multipart' => str_starts_with($input['headers']['Content-Type'], 'multipart/form-data; boundary=')])]);
+    `);
+    const base = { scope: 'read_write', operation: 'call', phpBinary: php, apiScript,
+      apiUrl: 'https://example.test/api/v1', token: 'synthetic-token', boundSupplierId: 1 };
+    const download = run({ ...base, name: 'download_invoice_pdf', arguments: { id: 1, format: 'base64' } });
+    assert.equal(download.isError, undefined, JSON.stringify(download));
+    assert.equal(JSON.parse(download.content[0].text).content_base64, Buffer.from('%PDF-\x00\xff', 'latin1').toString('base64'));
+
+    const upload = run({ ...base, name: 'upload_invoice_attachment', arguments: {
+      id: 1, filename: 'a.pdf', content_base64: Buffer.from('%PDF-\x00\xff', 'latin1').toString('base64'),
+    } });
+    assert.equal(upload.isError, undefined, JSON.stringify(upload));
+    assert.deepEqual(upload.structuredContent, { has_pdf: true, multipart: true });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

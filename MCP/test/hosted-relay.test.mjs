@@ -104,3 +104,48 @@ test('neplatné zadání skončí chybou, ne zavěšeným procesem', async () =>
   const { result } = await run('tohle není JSON');
   assert.equal(result.isError, true);
 });
+
+test('reléový most přenese stažený soubor i nahrávaný multipart jako base64', async () => {
+  const pdf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff, 0x80, 0x0a]);
+  const download = await run(
+    { operation: 'call', scope: 'read', boundSupplierId: 1, name: 'download_invoice_pdf', arguments: { id: 4 }, apiUrl: 'https://example.test/api/v1' },
+    () => ({
+      status: 200,
+      headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="F-4.pdf"' },
+      body: '',
+      bodyBase64: pdf.toString('base64'),
+    }),
+  );
+  assert.equal(download.result.isError, undefined, JSON.stringify(download.result));
+  assert.equal(download.fetches[0].url, 'https://example.test/api/v1/invoices/4/pdf?download=1');
+  assert.equal(download.result.content[1].resource.blob, pdf.toString('base64'));
+  assert.equal(download.result.structuredContent.filename, 'F-4.pdf');
+  assert.equal(download.result.structuredContent.size, pdf.length);
+
+  const upload = await run(
+    {
+      operation: 'call', scope: 'read_write', boundSupplierId: 1, name: 'upload_invoice_attachment', apiUrl: 'https://example.test/api/v1',
+      arguments: { id: 4, content_base64: pdf.toString('base64'), filename: 'priloha.pdf' },
+    },
+    () => ({ status: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ created: [9] }) }),
+  );
+  assert.equal(upload.result.isError, undefined, JSON.stringify(upload.result));
+  const [request] = upload.fetches;
+  assert.equal(request.method, 'POST');
+  assert.equal(request.body, undefined);
+  assert.match(request.headers['Content-Type'], /^multipart\/form-data; boundary=/);
+  const body = Buffer.from(request.bodyBase64, 'base64');
+  assert.ok(body.includes(pdf));
+  assert.match(body.toString('latin1'), /name="file"; filename="priloha\.pdf"\r\nContent-Type: application\/pdf/);
+});
+
+test('soubor nad strop serverového MCP most odmítne bez volání API', async () => {
+  const big = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+  const { result, fetches } = await run({
+    operation: 'call', scope: 'read_write', boundSupplierId: 1, name: 'upload_document', apiUrl: 'https://example.test/api/v1',
+    arguments: { content_base64: big, filename: 'velky.pdf' },
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /file_too_large/);
+  assert.equal(fetches.length, 0);
+});

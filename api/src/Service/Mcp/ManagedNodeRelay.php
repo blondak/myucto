@@ -22,8 +22,8 @@ use MyInvoice\Service\IpMatcher;
 final class ManagedNodeRelay
 {
     private const DEADLINE_SECONDS = 100;
-    private const MAX_LINE_BYTES = 9 * 1024 * 1024;
-    private const MAX_API_BYTES = 8 * 1024 * 1024;
+    private const MAX_LINE_BYTES = McpFileLimits::MAX_LINE_BYTES;
+    private const MAX_API_BYTES = McpFileLimits::MAX_ENVELOPE_BYTES;
     private const FORWARDED_HEADERS = [
         'accept', 'content-type', 'x-myucto-client', 'x-myucto-client-version', 'x-myucto-tool',
     ];
@@ -98,6 +98,8 @@ final class ManagedNodeRelay
                 try {
                     $request = $this->apiRequest((array) json_decode($line, true, 512), $input);
                     $reply = $request === null ? $this->forbidden() : $this->internalApi($php, $request);
+                } catch (\InvalidArgumentException $e) {
+                    $reply = McpInternalRequest::uploadError($e);
                 } catch (\Throwable) {
                     $reply = ['error' => 'Interní PHP API selhalo.'];
                 }
@@ -130,7 +132,12 @@ final class ManagedNodeRelay
      * Požadavek na interní API sestavený z toho, co si Node vyžádal. Vrací null,
      * když schválené připojení volání API nedovoluje.
      *
-     * @return array{url:string,method:string,headers:array<string,string>,body:string,serverParams:array<string,mixed>}|null
+     * Nahrávaný soubor posílá Node v `bodyBase64`. Tělo se pustí dál jen jako
+     * multipart u zápisové metody a jen v platném base64 do stropu
+     * {@see McpFileLimits::MAX_BODY_BYTES}; jinak výjimka s HTTP statusem v kódu.
+     *
+     * @return array{url:string,method:string,headers:array<string,string>,body:string,bodyBase64?:string,serverParams:array<string,mixed>}|null
+     * @throws \InvalidArgumentException
      */
     public function apiRequest(array $message, array $input): ?array
     {
@@ -147,13 +154,31 @@ final class ManagedNodeRelay
         $headers['Authorization'] = 'Bearer ' . (string) ($input['token'] ?? '');
         if ($supplier !== null) $headers['X-Supplier-Id'] = (string) $supplier;
 
-        return [
+        $request = [
             'url' => (string) ($message['url'] ?? ''),
             'method' => (string) ($message['method'] ?? ''),
             'headers' => $headers,
             'body' => (string) ($message['body'] ?? ''),
             'serverParams' => (array) ($input['serverParams'] ?? []),
         ];
+
+        $contentType = '';
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) === 'content-type') $contentType = $value;
+        }
+        $multipart = preg_match('#^multipart/form-data\b#i', $contentType) === 1;
+        if (array_key_exists('bodyBase64', $message)) {
+            if (!$multipart || !in_array(strtoupper($request['method']), ['POST', 'PUT', 'PATCH'], true)) {
+                throw new \InvalidArgumentException('Binární tělo smí nést jen nahrání souboru.', 400);
+            }
+            McpFileLimits::assertBase64($message['bodyBase64']);
+            $request['body'] = '';
+            $request['bodyBase64'] = (string) $message['bodyBase64'];
+        } elseif ($multipart) {
+            throw new \InvalidArgumentException('Nahrávaný soubor musí přijít v base64.', 400);
+        }
+
+        return $request;
     }
 
     /**
@@ -218,11 +243,15 @@ final class ManagedNodeRelay
         if (!is_array($decoded) || !is_int($decoded['status'] ?? null)) {
             throw new \RuntimeException('Interní PHP API vrátilo neplatnou odpověď.');
         }
-        return [
+        $reply = [
             'status' => $decoded['status'],
             'headers' => (object) array_filter((array) ($decoded['headers'] ?? []), 'is_string'),
             'body' => (string) ($decoded['body'] ?? ''),
         ];
+        if (is_string($decoded['bodyBase64'] ?? null)) {
+            $reply['bodyBase64'] = $decoded['bodyBase64'];
+        }
+        return $reply;
     }
 
     /**

@@ -14,7 +14,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | čtení i zápis — založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb; nahrání a stažení originálu |
 | Kniha jízd | čtení i zápis — vozidla, jízdy, tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
@@ -33,8 +33,14 @@ skladové knize a zaúčtovaný doklad jde stornovat protidokladem, takže je ch
 napravitelná v aplikaci. Mazání, storno dokladu a uzavření inventury přesto
 vyžadují `confirm: true`: první volání nic neprovede a jen vrátí, čeho by se
 změna týkala (`destructive: true` u nástroje, `destructiveHint` v anotaci).
-Nahrání médií a import zboží z XLSX/CSV v katalogu nejsou — jedou přes
-multipart, který tenhle klient neposílá.
+Import zboží z XLSX/CSV v katalogu není, má v aplikaci průvodce s náhledem.
+
+Soubory (`src/file-tools.mjs`): stažení PDF a ISDOC vydané faktury, příloh, PDF
+přijaté faktury a originálu dokumentu; nahrání přílohy faktury, PDF přijaté
+faktury, dokumentu a obrázku ke zboží a založení přijaté faktury z ISDOC. Klient
+skládá multipart z base64 v paměti a stažený soubor vrací jako obrázek, vložený
+prostředek nebo base64. Strop je `MYUCTO_MAX_FILE_MB` (výchozí 10 MB), serverový
+MCP 5 MB (`McpFileLimits` v PHP).
 
 Účetní a daňová vrstva je **jednosměrná**. Zaúčtování, storno zápisu, uzavření
 období, zaevidování opravy podle § 46 / § 74b a odeslání podání na EPO v katalogu
@@ -108,6 +114,7 @@ Token se generuje v aplikaci: **Nastavení firmy → API tokeny → Nový token*
 | `MYUCTO_MAX_RPS` | ne | `8` | Strop požadavků za sekundu |
 | `MYUCTO_MAX_CONCURRENT` | ne | `3` | Souběžná volání |
 | `MYUCTO_TIMEOUT_MS` | ne | `30000` | Timeout jednoho požadavku |
+| `MYUCTO_MAX_FILE_MB` | ne | `10` | Strop staženého i nahraného souboru v MB (nejvýš 50) |
 | `MYUCTO_SYSTEM_CA` | ne | `1` | Načíst certifikační autority z OS; `0` = nenačítat |
 | `MYUCTO_INSECURE_TLS` | ne | `0` | `1` = neověřovat HTTPS certifikát (JEN vývoj) |
 
