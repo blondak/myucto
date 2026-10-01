@@ -20764,6 +20764,17 @@
     "transaction_balance": "Disponibilní zůstatek",
     "transaction_description": "Popis z banky",
     "ignore_note": "Poznámka k ignorování (volitelné)",
+    "ignore_transfer": {
+      "title": "Přenést ignorování z avíz?",
+      "intro": "Vyberte platby, u kterých chcete převzít ruční ignorování i poznámku z e-mailového avíza. Vybrané pohyby se nebudou automaticky párovat. Při změně avíz se výběr zobrazí znovu.",
+      "changed": "Nabídka se změnila; nyní není žádná jednoznačná shoda. Pokračujte bez přenosu nebo import zrušte.",
+      "dates": "Výpis: {statement} · Avízo: {notice}",
+      "by_vs": "Shoda VS",
+      "by_account": "Shoda protiúčtu",
+      "skip": "Importovat bez přenosu",
+      "confirm": "Přenést vybrané ({count}) a importovat",
+      "done": "Převzato ignorování z {count} avíz."
+    },
     "ignore_note_label": "Poznámka k ignorování",
     "ignore_failed": "Transakci se nepodařilo ignorovat.",
     "unmatch_note_removed": "Potvrzením se poznámka k ignorování odstraní.",

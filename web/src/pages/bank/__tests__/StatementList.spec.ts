@@ -51,7 +51,7 @@ vi.mock('@/api/bank', () => ({
   bankApi: {
     list: m.list,
     upload: m.upload,
-    importPdf: vi.fn(),
+    importPdf: m.upload,
     scan: vi.fn(),
     delete: vi.fn(),
     downloadUrl: (id: number) => `/download/${id}`,
@@ -105,6 +105,7 @@ import StatementList from '@/pages/bank/StatementList.vue'
 
 
 const stubs = {
+  Teleport: true,
   FilterBar: true,
   SavedFiltersMenu: true,
   EmptyState: true,
@@ -170,6 +171,7 @@ async function selectFiles(wrapper: ReturnType<typeof mount>, files: File[]) {
 describe('StatementList.vue — varování z importu bankovního výpisu (#19)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.upload.mockReset()
     m.list.mockResolvedValue(emptyPage())
   })
 
@@ -361,9 +363,9 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
     await selection
 
-    expect(m.upload).toHaveBeenNthCalledWith(1, file, undefined, [])
-    expect(m.upload).toHaveBeenNthCalledWith(2, file, undefined, [candidate.confirmation_key])
-    expect(m.upload).toHaveBeenNthCalledWith(3, file, undefined, [candidate.confirmation_key, nextCandidate.confirmation_key])
+    expect(m.upload).toHaveBeenNthCalledWith(1, file, undefined, [], undefined)
+    expect(m.upload).toHaveBeenNthCalledWith(2, file, undefined, [candidate.confirmation_key], undefined)
+    expect(m.upload).toHaveBeenNthCalledWith(3, file, undefined, [candidate.confirmation_key, nextCandidate.confirmation_key], undefined)
     await flushPromises()
     expect(m.push).toHaveBeenCalledWith('/bank/42')
   })
@@ -396,8 +398,8 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
     await selection
 
-    expect(m.upload).toHaveBeenNthCalledWith(2, file, 7, [])
-    expect(m.upload).toHaveBeenNthCalledWith(3, file, 7, [candidate.confirmation_key])
+    expect(m.upload).toHaveBeenNthCalledWith(2, file, 7, [], undefined)
+    expect(m.upload).toHaveBeenNthCalledWith(3, file, 7, [candidate.confirmation_key], undefined)
   })
 
   it('zrušení review neodesílá potvrzení ani další upload', async () => {
@@ -418,6 +420,7 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
 describe('StatementList counterparty lookup', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.upload.mockReset()
     m.query = {}
     m.list.mockResolvedValue(emptyPage())
     m.clientsList.mockReset().mockResolvedValue({ data: [], meta: { pages: 10, total: 500 } })
@@ -481,4 +484,80 @@ describe('StatementList counterparty lookup', () => {
     expect(select.props('selectedOption')).toEqual({ value: 22, label: 'Synthetic current' })
     wrapper.unmount()
   })
+  function ignoreConflict(fingerprint = 'preview') {
+    return { response: { data: { error: {
+      code: 'ignored_notices_confirmation', fingerprint,
+      candidates: [2, 5].map(index => ({ index, notice_id: index + 10, posted_at: '2026-09-16', notice_date: '2026-09-15',
+        amount: -101, currency: 'CZK', counterparty: 'Synthetic party', reason: 'variable_symbol', variable_symbol: '123', ignore_note: 'Synthetic note' })),
+    } } } }
+  }
+
+  it('přenese hromadný výběr a zachová předchozí potvrzení deduplikace', async () => {
+    const candidate = reconciliationCandidate()
+    m.upload.mockRejectedValueOnce(reconciliationConflict(candidate)).mockRejectedValueOnce(ignoreConflict())
+      .mockResolvedValueOnce({ ...importedResult(), ignored_transferred: 2 })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const file = gpcFile()
+    await selectFiles(wrapper, [file])
+    await wrapper.get('[data-testid="confirm-reconciliation"]').trigger('click')
+    await flushPromises()
+    const checks = () => wrapper.findAll<HTMLInputElement>('input[type="checkbox"]')
+    expect(checks()).toHaveLength(3)
+    expect(checks().every(c => !c.element.checked)).toBe(true)
+    await checks()[1]!.setValue(true)
+    await flushPromises()
+    expect(wrapper.findAll<HTMLInputElement>('input[type="checkbox"]')[0]!.element.indeterminate).toBe(true)
+    await checks()[0]!.setValue(true)
+    expect(checks().every(c => c.element.checked)).toBe(true)
+    await checks()[0]!.setValue(false)
+    expect(checks().every(c => !c.element.checked)).toBe(true)
+    await checks()[0]!.setValue(true)
+    await wrapper.findAll('button').find(b => b.text().startsWith('bank.ignore_transfer.confirm'))!.trigger('click')
+    await flushPromises()
+    expect(m.upload).toHaveBeenLastCalledWith(file, undefined, [candidate.confirmation_key], { fingerprint: 'preview', selected: [2, 5] })
+    expect(m.toastSuccess).toHaveBeenCalledWith('bank.ignore_transfer.done:{"count":2}')
+    wrapper.unmount()
+  })
+
+  it('PDF předá vybrané ignorování jako třetí argument', async () => {
+    m.upload.mockRejectedValueOnce(ignoreConflict()).mockResolvedValueOnce({ ...importedResult(), ignored_transferred: 2 })
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const file = gpcFile('synthetic.pdf')
+    await selectFiles(wrapper, [file])
+    await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true)
+    await wrapper.findAll('button').find(b => b.text().startsWith('bank.ignore_transfer.confirm'))!.trigger('click')
+    await flushPromises()
+    expect(m.upload).toHaveBeenLastCalledWith(file, undefined, { fingerprint: 'preview', selected: [2, 5] })
+    wrapper.unmount()
+  })
+
+  it.each(['cancel', 'skip', 'unmount'])('přenos ignorování: %s', async mode => {
+    m.upload.mockRejectedValueOnce(ignoreConflict()).mockResolvedValueOnce(importedResult())
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    const file = gpcFile()
+    await selectFiles(wrapper, [file])
+    if (mode === 'unmount') wrapper.unmount()
+    else await wrapper.findAll('button').find(b => b.text() === (mode === 'cancel' ? 'common.cancel' : 'bank.ignore_transfer.skip'))!.trigger('click')
+    await flushPromises()
+    if (mode === 'skip') expect(m.upload).toHaveBeenLastCalledWith(file, undefined, [], { skip: true })
+    else expect(m.upload).toHaveBeenCalledTimes(1)
+    if (mode !== 'unmount') wrapper.unmount()
+    m.upload.mockReset()
+  })
+
+  it('změněný náhled vyžaduje nový výběr', async () => {
+    m.upload.mockRejectedValueOnce(ignoreConflict()).mockRejectedValueOnce(ignoreConflict('changed'))
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+    await selectFiles(wrapper, [gpcFile()])
+    await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true)
+    await wrapper.findAll('button').find(b => b.text().startsWith('bank.ignore_transfer.confirm'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll<HTMLInputElement>('input[type="checkbox"]').every(c => !c.element.checked)).toBe(true)
+    wrapper.unmount()
+  })
+
 })

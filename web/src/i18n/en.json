@@ -20764,6 +20764,17 @@
     "transaction_balance": "Available balance",
     "transaction_description": "Bank description",
     "ignore_note": "Ignore note (optional)",
+    "ignore_transfer": {
+      "title": "Transfer ignored status from email notices?",
+      "intro": "Select payments whose manually ignored status and note should be copied from an email notice. Selected transactions will not be matched automatically. If notices change, you will be asked to review the selection again.",
+      "changed": "The suggestions have changed; there are no unambiguous matches now. Import without transferring or cancel the import.",
+      "dates": "Statement: {statement} · Notice: {notice}",
+      "by_vs": "Matching variable symbol",
+      "by_account": "Matching counterparty account",
+      "skip": "Import without transferring",
+      "confirm": "Transfer selected ({count}) and import",
+      "done": "Transferred ignored status from {count} notices."
+    },
     "ignore_note_label": "Ignore note",
     "ignore_failed": "Failed to ignore the transaction.",
     "unmatch_note_removed": "Confirming will remove the ignore note.",

@@ -5181,8 +5181,9 @@ paths:
       tags: [Bank]
       summary: Nahraje bankovní výpis (GPC/CSV/ABO)
       description: |
+        Před uložením může vrátit 409 ignored_notices_confirmation pro výběr přenosu ignorování z avíz.
         Multipart upload. Server detekuje formát z obsahu a parsuje transakce.
-        Auto-matching proti otevřeným fakturám se spustí po `POST /scan`.
+        Po importu spustí automatické párování; pohyby s převzatým ignorováním vynechá.
 
         GPC/ABO hlavička neobsahuje měnu. Pokud jedno číslo účtu evidujete ve více
         měnách (např. Raiffeisenbank: CZK/EUR/USD = jedno číslo), je nutné zvolit
@@ -5213,6 +5214,9 @@ paths:
                   description: |
                     Cílový měnový účet (`currencies.id`). Povinné jen u víceměnového účtu
                     se sdíleným číslem účtu (jinak server vrátí 409 `ambiguous_account_currency`).
+                ignore_decision:
+                  type: string
+                  description: 'JSON podle IgnoreNoticeDecision; bez přenosu použijte {"skip":true}.'
                 reconciliation_confirmations:
                   type: string
                   contentMediaType: application/json
@@ -5256,6 +5260,7 @@ paths:
                 anyOf:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/StatementReconciliationError'
+                  - $ref: '#/components/schemas/IgnoreNoticeConfirmation'
         '422':
           description: |
             Zvolený `account_id` neodpovídá číslu účtu výpisu nebo dodavateli
@@ -5271,7 +5276,7 @@ paths:
     post:
       tags: [Bank]
       summary: Nahraje bankovní výpis z PDF (banky bez GPC/CSV exportu)
-      description: Multipart upload, max 5 MiB. Extrakce transakcí z PDF.
+      description: Multipart upload, max 5 MiB. Před uložením může vrátit 409 ignored_notices_confirmation pro výběr přenosu ignorování.
       requestBody:
         required: true
         content:
@@ -5282,12 +5287,15 @@ paths:
               properties:
                 file: { type: string, format: binary }
                 account_id: { type: integer, description: "Cílový měnový účet u víceměnového čísla účtu" }
+                ignore_decision:
+                  type: string
+                  description: 'JSON podle IgnoreNoticeDecision; bez přenosu použijte {"skip":true}.'
       responses:
         '200':
-          description: "Naparsováno {statement_id, transaction_count, duplicates_count, skipped}"
+          description: Souhrn importu nebo připojení PDF k existujícímu výpisu.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: '#/components/schemas/BankStatementImportResult' }
         '400':
           description: Chybí soubor / neplatný formát / parsování selhalo
           content:
@@ -5295,10 +5303,13 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Číslo účtu neodpovídá dodavateli (`wrong_supplier_account`)
+          description: Nesouhlas účtu nebo potvrzení přenosu ignorování.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/IgnoreNoticeConfirmation'
         '413': { description: Soubor je příliš velký }
 
   /api/v1/bank-statements/{id}/rematch:
@@ -34056,6 +34067,7 @@ components:
         Souhrn importu výpisu (odpověď `/bank-statements/upload`). Není to entita
         výpisu — detail se načítá přes `GET /bank-statements/{id}`.
       properties:
+        ignored_transferred: { type: integer, description: Počet převzatých ignorování z avíz }
         statement_id: { type: integer, format: int64 }
         evidence_statement_id: { type: integer, format: int64, description: "Původní importní doklad při začlenění do měsíčního přehledu. statement_id v tom případě odkazuje na měsíční přehled." }
         statement_ids:
@@ -34158,6 +34170,49 @@ components:
         tax_document_id: { type: integer, format: int64 }
         payment_thanks_sent: { type: boolean }
 
+    IgnoreNoticeDecision:
+      oneOf:
+        - type: object
+          required: [skip]
+          properties:
+            skip: { type: boolean, const: true }
+        - type: object
+          required: [fingerprint, selected]
+          properties:
+            fingerprint: { type: string }
+            selected:
+              type: array
+              uniqueItems: true
+              items: { type: integer, minimum: 0 }
+    IgnoreNoticeConfirmation:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, fingerprint, candidates]
+          properties:
+            code: { type: string, const: ignored_notices_confirmation }
+            message: { type: string }
+            fingerprint: { type: string }
+            candidates:
+              type: array
+              items: { $ref: '#/components/schemas/IgnoreNoticeCandidate' }
+    IgnoreNoticeCandidate:
+      type: object
+      properties:
+        index: { type: integer, description: "Index řádku v importovaném výpisu." }
+        notice_id: { type: integer }
+        posted_at: { type: string, format: date }
+        notice_date: { type: string, format: date }
+        amount: { type: number }
+        currency: { type: string }
+        variable_symbol: { type: [string, "null"] }
+        counterparty: { type: [string, "null"] }
+        counterparty_account: { type: string }
+        reason: { type: string, enum: [variable_symbol, counterparty_account] }
+        ignore_note: { type: [string, "null"], maxLength: 1000 }
+
     BankStatement:
       type: object
       description: |
@@ -34250,6 +34305,7 @@ components:
     BankTransaction:
       type: object
       properties:
+        ignore_origin: { type: [string, "null"], enum: [manual, notice_transfer, null], description: Původ ignorování }
         id: { type: integer, format: int64 }
         source: { type: string, enum: [statement, email_notice, idoklad] }
         statement_id: { type: integer, format: int64, description: ID původního výpisu pohybu. U pohybu sdíleného mezi API a GPC se může lišit od ID právě zobrazeného výpisu. }
