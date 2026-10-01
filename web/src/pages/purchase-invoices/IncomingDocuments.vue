@@ -16,6 +16,10 @@ import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { useDimensions } from '@/composables/useDimensions'
+import type { DimensionMap } from '@/api/dimensions'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -33,6 +37,9 @@ const error = ref('')
 const files = ref<File[]>([])
 const note = ref('')
 const kindHint = ref<PurchaseInvoiceSubmissionKindHint | null>(null)
+/** Středisko (a další dimenze) účtenky — propíše se do hlavičky vytěženého dokladu. */
+const uploadDims = ref<DimensionMap>({})
+const dims = useDimensions()
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -92,7 +99,7 @@ async function upload() {
   if (uploading.value || files.value.length === 0) return
   uploading.value = true
   try {
-    const result = await purchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value)
+    const result = await purchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value, dims.canEdit.value ? uploadDims.value : {})
     if (result.errors.length > 0) {
       toast.warning(t('purchase_submissions.uploaded_partial', {
         accepted: result.items.length,
@@ -109,6 +116,7 @@ async function upload() {
     clearFiles()
     note.value = ''
     kindHint.value = null
+    uploadDims.value = {}
     // Nahraný doklad čeká ve stavu `submitted`. Kdyby účetní zrovna filtrovala jinak,
     // přepnutím filtru se seznam načte přes watch — jinak ho obnovíme sami.
     const uploadedId = result.items[0]?.id ?? null
@@ -222,7 +230,7 @@ function kindLabel(item: PurchaseInvoiceSubmission): string {
     : t('purchase_submissions.kind_other')
 }
 
-onMounted(() => load(false))
+onMounted(() => { void load(false); void dims.load() })
 watch(status, () => { selected.value = null; void load(false) })
 watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void load(false) })
 </script>
@@ -278,6 +286,12 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
           <input v-model="note" maxlength="8000" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface"
             :placeholder="t('purchase_submissions.inbox_note_placeholder')" />
         </label>
+      </div>
+
+      <div v-if="dims.canEdit.value && dims.documentTypes.value.length" class="space-y-1" data-test="inbox-dimensions">
+        <span class="block text-sm text-neutral-700">{{ t('purchase_submissions.dimensions_title') }}</span>
+        <DimensionFields v-model="uploadDims" compact />
+        <p class="text-xs text-neutral-500">{{ t('purchase_submissions.dimensions_hint') }}</p>
       </div>
 
       <PdfDropzone
@@ -363,6 +377,7 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
             </span>
           </div>
           <p v-if="selected.note" class="text-sm text-neutral-700">{{ selected.note }}</p>
+          <DimensionChips v-if="selected.dimensions && Object.keys(selected.dimensions).length" :dimensions="selected.dimensions" />
           <p v-if="selected.document_kind_hint" class="text-xs text-neutral-500">
             {{ t('purchase_submissions.kind_provided', { kind: kindLabel(selected) }) }}
           </p>

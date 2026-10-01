@@ -287,6 +287,22 @@ export interface PurchaseInvoiceSettlementPayment {
   journal_entry_id: number | null
 }
 
+/** Chybějící povinná dimenze podle pravidel dimenzí (vynucení error) na účtech položek. */
+export interface PurchaseInvoiceMissingDimension {
+  type_id: number
+  type_name: string
+  account_codes: string[]
+}
+
+/** Proč doklad potřebuje okno Kontrola vytěžených dokladů (SSOT je backend). */
+export interface PurchaseInvoiceReview {
+  /** `extraction_warning`, `missing_required_dimension`; další mohou přibýt. */
+  reasons: string[]
+  details: {
+    missing_required_dimension?: { missing_dimensions: PurchaseInvoiceMissingDimension[] }
+  }
+}
+
 export interface PurchaseInvoice {
   id: number
   supplier_id: number
@@ -469,6 +485,8 @@ export interface PurchaseInvoice {
   extraction_warning: string | null
   /** Strukturované návrhy ke kontrole — maže se spolu s extraction_warning. */
   extraction_review?: ExtractionReview | null
+  /** Proč doklad potřebuje okno kontroly vytěžení (jen detail; v seznamu s include_review). */
+  review?: PurchaseInvoiceReview
   created_by: number
   created_at: string
   updated_at: string
@@ -566,6 +584,8 @@ export interface PurchaseInvoiceListItem {
   /** §DM — aspoň jedna položka je drobný majetek (EXISTS v list SELECTu) → ikonka v seznamu. */
   has_small_asset?: boolean
   extraction_warning: string | null
+  /** Jen s include_review — chybějící povinná dimenze se v seznamu počítá jen u konceptů. */
+  review?: PurchaseInvoiceReview
   payment_ordered_at: string | null
   /** Zámek dokladu (F6) — jediný zdroj pravdy je BE, FE nic nedopočítává. Optional = BC. */
   locked?: DocumentLock
@@ -673,6 +693,8 @@ export interface PurchaseListFilters {
   include_vat_breakdown?: boolean
   include_posting_accounts?: boolean
   include_dimensions?: boolean
+  /** Doplnit `review` — proč doklad potřebuje kontrolu vytěžení. */
+  include_review?: boolean
   status?: PurchaseInvoiceStatus | PurchaseInvoiceStatus[]
   document_kind?: PurchaseDocumentKind | PurchaseDocumentKind[]
   vendor_id?: number
@@ -783,6 +805,7 @@ export const purchaseInvoicesApi = {
     if (filters.include_vat_breakdown) params['filter[include_vat_breakdown]'] = 1
     if (filters.include_posting_accounts) params['filter[include_posting_accounts]'] = 1
     if (filters.include_dimensions) params['filter[include_dimensions]'] = 1
+    if (filters.include_review) params['filter[include_review]'] = 1
     return api.get<{ data: PurchaseMonthGroup[]; meta: PurchaseListMeta }>(
       '/purchase-invoices',
       { params },

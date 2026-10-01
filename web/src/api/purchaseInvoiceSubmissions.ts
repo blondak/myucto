@@ -41,6 +41,8 @@ export interface PurchaseInvoiceSubmission {
   purchase_invoice_varsymbol: string | null
   vendor_name: string | null
   request_count: number
+  /** Dimenze zvolené při nahrání (typ → hodnota), propíšou se do hlavičky vytěženého dokladu. */
+  dimensions?: Record<number, number>
   duplicate?: boolean
   /**
    * Interní diagnostika zpracování — servíruje ji jen účetní fronta.
@@ -86,12 +88,23 @@ function uploadForm(
   files: File[],
   note: string,
   documentKindHint: PurchaseInvoiceSubmissionKindHint | null,
+  dimensions: Record<number, number | null> = {},
 ): FormData {
   const fd = new FormData()
   for (const file of files) fd.append('file[]', file, file.name)
   if (note.trim()) fd.append('note', note.trim())
   if (documentKindHint) fd.append('document_kind_hint', documentKindHint)
+  for (const [typeId, valueId] of Object.entries(dimensions)) {
+    if (valueId) fd.append(`dimensions[${typeId}]`, String(valueId))
+  }
   return fd
+}
+
+/** Hodnoty dimenze, které smí zvolit klient na portálu (jen aktivní střediska firmy). */
+export interface PortalDimensionChoiceType {
+  id: number
+  name: string
+  values: Array<{ id: number; code: string; name: string; parent_id: number | null }>
 }
 
 export const portalPurchaseInvoiceSubmissionsApi = {
@@ -99,10 +112,12 @@ export const portalPurchaseInvoiceSubmissionsApi = {
     api.get<PurchaseInvoiceSubmissionPage>('/portal/purchase-invoice-submissions', {
       params: status ? { status } : undefined,
     }).then(r => r.data),
-  upload: (files: File[], note: string, documentKindHint: PurchaseInvoiceSubmissionKindHint | null) =>
+  dimensions: () =>
+    api.get<{ types: PortalDimensionChoiceType[] }>('/portal/purchase-invoice-submissions/dimensions').then(r => r.data.types),
+  upload: (files: File[], note: string, documentKindHint: PurchaseInvoiceSubmissionKindHint | null, dimensions: Record<number, number | null> = {}) =>
     api.post<SubmissionUploadResult>(
       '/portal/purchase-invoice-submissions',
-      uploadForm(files, note, documentKindHint),
+      uploadForm(files, note, documentKindHint, dimensions),
       { headers: { 'Content-Type': 'multipart/form-data' } },
     ).then(r => r.data),
   resubmit: (id: number, file: File, note: string) =>
@@ -121,10 +136,10 @@ export const purchaseInvoiceSubmissionsApi = {
       params: status ? { status } : undefined,
     }).then(r => r.data),
   /** Doklad, který přišel mimo portál (e-mailem, papírově) — účetní ho vloží do fronty sama. */
-  upload: (files: File[], note: string, documentKindHint: PurchaseInvoiceSubmissionKindHint | null) =>
+  upload: (files: File[], note: string, documentKindHint: PurchaseInvoiceSubmissionKindHint | null, dimensions: Record<number, number | null> = {}) =>
     api.post<SubmissionUploadResult>(
       '/purchase-invoice-submissions',
-      uploadForm(files, note, documentKindHint),
+      uploadForm(files, note, documentKindHint, dimensions),
       { headers: { 'Content-Type': 'multipart/form-data' } },
     ).then(r => r.data),
   get: (id: number) =>

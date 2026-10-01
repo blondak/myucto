@@ -36,6 +36,7 @@ import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifi
 import WhyChip from '@/components/automation/WhyChip.vue'
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate } from '@/utils/date'
+import { missingDimensions } from '@/utils/purchaseReview'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -107,6 +108,22 @@ const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
+
+function onReviewUpdated(inv: PurchaseInvoice) {
+  invoice.value = inv
+}
+/** Okno kontroly mohlo doplnit dimenze — `review` (a tím upozornění) přepočítá jen backend. */
+async function onReviewClose() {
+  reviewOpen.value = false
+  const current = invoice.value
+  if (!current) return
+  try {
+    const fresh = await purchaseInvoicesApi.get(current.id)
+    if (invoice.value?.id === fresh.id) invoice.value = fresh
+  } catch {
+    // Upozornění zmizí při příštím načtení dokladu.
+  }
+}
 
 async function dismissWarning(section?: string) {
   if (!invoice.value || dismissingWarning.value) return
@@ -848,7 +865,17 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </button>
         </div>
       </div>
-      <ExtractionReviewModal v-if="reviewOpen" :invoice-ids="[invoice.id]" @updated="(inv) => (invoice = inv)" @close="reviewOpen = false" />
+      <!-- Bez hlášení vytěžení, ale s chybějící povinnou dimenzí: totéž okno kontroly. -->
+      <div v-else-if="missingDimensions(invoice).length" class="p-3 bg-danger-50 border border-danger-500/40 rounded-md flex flex-wrap gap-3 items-center justify-between" data-test="missing-dimension-notice">
+        <span class="text-sm text-danger-600">
+          {{ t('purchase_invoice.extraction_review.dimensions.detail_notice', { types: missingDimensions(invoice).map(m => m.type_name).join(', ') }) }}
+        </span>
+        <button type="button" :class="btnFilledSm('warning')" class="whitespace-nowrap" @click="reviewOpen = true">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          {{ t('purchase_invoice.extraction_review.open') }}
+        </button>
+      </div>
+      <ExtractionReviewModal v-if="reviewOpen" :invoice-ids="[invoice.id]" @updated="onReviewUpdated" @close="onReviewClose" />
 
       <!-- ═══ Hlavička: varsymbol + status + akce ═══ -->
       <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">

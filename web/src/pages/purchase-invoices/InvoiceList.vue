@@ -42,6 +42,7 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
+import { needsReview } from '@/utils/purchaseReview'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -242,7 +243,7 @@ const flatRows = computed(() => groups.value.flatMap(g => g.invoices))
 // Kontrola AI vytěžených dokladů faktura po faktuře — vybrané řádky, jinak vše načtené s hlášením.
 const reviewIds = ref<number[] | null>(null)
 const reviewableIds = computed(() => {
-  const flagged = flatRows.value.filter(r => r.extraction_warning)
+  const flagged = flatRows.value.filter(r => needsReview(r))
   const selected = new Set(selectedIds.value)
   const pick = selected.size ? flagged.filter(r => selected.has(r.id)) : flagged
   return pick.map(r => r.id)
@@ -676,6 +677,8 @@ async function fetchPage(reset: boolean) {
       include_vat_breakdown: tbl.isVisible('vat_breakdown'),
       include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
       include_dimensions: tbl.isVisible('dimensions'),
+      // Koncept bez povinné dimenze patří do kontroly vytěžení stejně jako doklad s hlášením.
+      include_review: dimensions.enabled.value,
     })
     if (seq !== loadSeq) return
     if (reset) {

@@ -609,6 +609,10 @@ async function loadSubmissionOrigin(): Promise<void> {
     if (item.document_kind_hint && item.document_kind_hint !== 'other') {
       form.value.document_kind = item.document_kind_hint
     }
+    // Středisko zvolené při nahrání je ruční volba — výchozí dimenze dodavatele ho nepřebijí.
+    if (item.dimensions && Object.keys(item.dimensions).length) {
+      docDims.header.value = { ...docDims.header.value, ...item.dimensions }
+    }
   } catch (e) {
     if (submissionId.value === requestedId) error.value = apiErrorMessage(e)
   }

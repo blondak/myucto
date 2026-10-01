@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   portalPurchaseInvoiceSubmissionsApi,
+  type PortalDimensionChoiceType,
   type PurchaseInvoiceSubmission,
   type PurchaseInvoiceSubmissionKindHint,
 } from '@/api/purchaseInvoiceSubmissions'
@@ -22,6 +23,9 @@ const items = ref<PurchaseInvoiceSubmission[]>([])
 const files = ref<File[]>([])
 const note = ref('')
 const kindHint = ref<PurchaseInvoiceSubmissionKindHint | null>(null)
+/** Střediska, která firma na portálu nabízí (jen aktivní), a volba k předávanému dokladu. */
+const dimensionTypes = ref<PortalDimensionChoiceType[]>([])
+const chosenDims = ref<Record<number, number | null>>({})
 const loading = ref(true)
 const uploading = ref(false)
 const error = ref('')
@@ -35,6 +39,30 @@ const openItems = computed(() => items.value.filter(i =>
 const closedItems = computed(() => items.value.filter(i =>
   i.status === 'processed' || i.status === 'rejected' || i.replacement_submission_id !== null,
 ))
+
+async function loadDimensionChoices() {
+  try {
+    dimensionTypes.value = await portalPurchaseInvoiceSubmissionsApi.dimensions()
+  } catch {
+    dimensionTypes.value = []
+  }
+  chosenDims.value = {}
+}
+
+function valueLabel(value: { code: string; name: string }): string {
+  return value.code === value.name ? value.name : `${value.code} – ${value.name}`
+}
+
+/** Zvolené dimenze podání jako text (Typ: hodnota) podle nabídky portálu. */
+function dimensionSummary(item: PurchaseInvoiceSubmission): string {
+  const parts: string[] = []
+  for (const [typeId, valueId] of Object.entries(item.dimensions ?? {})) {
+    const type = dimensionTypes.value.find(ty => ty.id === Number(typeId))
+    const value = type?.values.find(v => v.id === valueId)
+    if (type && value) parts.push(`${type.name}: ${valueLabel(value)}`)
+  }
+  return parts.join(', ')
+}
 
 async function load() {
   loading.value = true
@@ -56,7 +84,7 @@ async function submit() {
   if (uploading.value || files.value.length === 0) return
   uploading.value = true
   try {
-    const result = await portalPurchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value)
+    const result = await portalPurchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value, chosenDims.value)
     if (result.errors.length > 0) {
       toast.warning(t('purchase_submissions.uploaded_partial', {
         accepted: result.items.length,
@@ -70,6 +98,7 @@ async function submit() {
     files.value = []
     note.value = ''
     kindHint.value = null
+    chosenDims.value = {}
     if (fileInput.value) fileInput.value.value = ''
     await load()
   } catch (e) {
@@ -122,8 +151,8 @@ function size(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-onMounted(load)
-watch(() => supplierStore.currentSupplierId, () => { void load() })
+onMounted(() => { void load(); void loadDimensionChoices() })
+watch(() => supplierStore.currentSupplierId, () => { void load(); void loadDimensionChoices() })
 </script>
 
 <template>
@@ -163,6 +192,13 @@ watch(() => supplierStore.currentSupplierId, () => { void load() })
           <span class="block mb-1">{{ t('purchase_submissions.note') }}</span>
           <input v-model="note" maxlength="8000" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface"
             :placeholder="t('purchase_submissions.note_placeholder')" />
+        </label>
+        <label v-for="type in dimensionTypes" :key="type.id" class="block text-sm text-neutral-700" data-test="portal-dimension">
+          <span class="block mb-1">{{ t('purchase_submissions.dimension_optional', { type: type.name }) }}</span>
+          <select v-model="chosenDims[type.id]" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+            <option :value="null">{{ t('purchase_submissions.dimension_none') }}</option>
+            <option v-for="value in type.values" :key="value.id" :value="value.id">{{ valueLabel(value) }}</option>
+          </select>
         </label>
       </div>
 
@@ -204,6 +240,7 @@ watch(() => supplierStore.currentSupplierId, () => { void load() })
               </div>
               <p class="text-xs text-neutral-500 mt-1">{{ size(item.size_bytes) }} · {{ new Date(item.created_at).toLocaleString() }}</p>
               <p v-if="item.note" class="text-sm text-neutral-600 mt-2">{{ item.note }}</p>
+              <p v-if="dimensionSummary(item)" class="text-xs text-neutral-500 mt-1">{{ t('purchase_submissions.dimensions_chosen', { list: dimensionSummary(item) }) }}</p>
               <p v-if="item.status_reason" class="text-sm text-danger-600 mt-2">{{ item.status_reason }}</p>
             </div>
             <div class="flex flex-wrap gap-2">

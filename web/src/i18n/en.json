@@ -11794,6 +11794,11 @@
     "kind_provided": "Type supplied by the client: {kind}",
     "note": "Note for your accountant (optional)",
     "note_placeholder": "For example, what the expense relates to",
+    "dimensions_title": "Document dimensions (optional)",
+    "dimensions_hint": "They are copied to the header of the extracted document; vendor defaults do not override this choice.",
+    "dimension_optional": "{type} (optional)",
+    "dimension_none": "— not specified —",
+    "dimensions_chosen": "Dimensions: {list}",
     "choose_files": "Choose files",
     "files_selected": "Files selected: {n}",
     "uploading": "Sending…",
@@ -17769,7 +17774,20 @@
       "readonly_cancelled": "A cancelled document cannot be edited.",
       "readonly_locked": "The document is locked (closed period or filed return). Fix the expense kind in the editor.",
       "readonly_client": "The document is no longer a draft; your accountant will set the expense kind.",
-      "confirm_paid": "Confirm and mark as paid"
+      "confirm_paid": "Confirm and mark as paid",
+      "dimensions": {
+        "title": "Document dimensions",
+        "items_hint": "Set a different dimension for a line with the tag button next to it.",
+        "required": "Required by the dimension rules: {type} (account {accounts}). The document cannot be posted without it.",
+        "suggestion": "Suggestion",
+        "detail_notice": "The document is missing a required dimension: {types}.",
+        "source": {
+          "client": "vendor default",
+          "project": "project default",
+          "document": "paid document",
+          "history": "from the vendor's last document"
+        }
+      }
     },
     "advance_link": {
       "title": "Advance invoice",

@@ -215,7 +215,8 @@ export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-document
 /** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
 export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories'
 
-export type DimensionPrefillSource = 'project' | 'client' | 'document'
+/** history = návrh z posledního přijatého dokladu téhož dodavatele (nejnižší přednost). */
+export type DimensionPrefillSource = 'project' | 'client' | 'document' | 'history'
 
 /** Předvyplnění hlavičky dokladu: typ → hodnota a odkud se vzala. */
 export interface DimensionPrefill {
@@ -228,6 +229,10 @@ export interface DimensionPrefillParams {
   project_id?: number | null
   invoice_id?: number | null
   purchase_invoice_id?: number | null
+  /** 1 = prázdné typy doplnit z historie dodavatele (client_id). */
+  history?: 0 | 1
+  /** Kontrolovaný přijatý doklad — do historie se nepočítá. */
+  exclude_purchase_invoice_id?: number | null
 }
 
 export interface DimensionTypePayload {

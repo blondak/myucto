@@ -16,6 +16,16 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { withoutExpenseKindSection } from '@/utils/extractionWarning'
+import { missingDimensions, needsReview } from '@/utils/purchaseReview'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import { useDimensions } from '@/composables/useDimensions'
+import {
+  compactDimensions,
+  dimensionsApi,
+  type DimensionMap,
+  type DimensionPrefillSource,
+} from '@/api/dimensions'
 
 /**
  * Kontrola AI vytěžených přijatých faktur po importu — faktura po faktuře.
@@ -24,6 +34,12 @@ import { withoutExpenseKindSection } from '@/utils/extractionWarning'
  * orámované červeně a návrh jde převzít jedním klikem. Uložení jde přes úzký
  * endpoint `expense-kinds`, takže funguje i u dokladu, který import rovnou označil
  * jako zaplacený (dřív jen přes vynucenou úpravu).
+ *
+ * Při zapnutých dimenzích má okno i sekci Dimenze: hlavička (a volitelně položky)
+ * předvyplněná výchozími hodnotami dodavatele a zakázky, prázdné typy návrhem
+ * z posledního dokladu dodavatele. Návrh je vyznačený; uloží se až „Uložit a další"
+ * jako explicitní dimenze dokladu. Které doklady okno ukáže, rozhoduje backend
+ * (`review`): hlášení vytěžení i chybějící povinná dimenze.
  */
 const props = withDefaults(defineProps<{
   invoiceIds: number[]
@@ -103,6 +119,126 @@ function applyAll(): void {
 function goTo(i: number): void {
   index.value = i
   resetKinds()
+  const inv = invoice.value
+  if (inv) void loadDimensions(inv)
+}
+
+// ── Dimenze dokladu ─────────────────────────────────────────────────────────
+const dims = useDimensions()
+const dimsShown = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
+const dimsEditable = computed(() => dimsShown.value && dims.canEdit.value && !readOnlyReason.value)
+const dimHeader = ref<DimensionMap>({})
+const dimLoadedHeader = ref<Record<number, number>>({})
+/** Dimenze položek podle id položky (pořadí pro backend se dopočítá při uložení). */
+const dimItems = reactive<Record<number, DimensionMap>>({})
+const dimLoadedItems = ref<Record<number, Record<number, number>>>({})
+const openItemDims = reactive(new Set<number>())
+/** Typ → hodnota a zdroj, které doplnilo předvyplnění (návrh, dokud ho uživatel nezmění). */
+const suggestions = ref<Record<number, { value: number; source: DimensionPrefillSource }>>({})
+let dimSeq = 0
+
+/** Položky v pořadí, v jakém je backend čísluje (order_index, od 1). */
+const orderedItems = computed(() => [...(invoice.value?.items ?? [])]
+  .sort((a, b) => (a.order_index - b.order_index) || ((a.id ?? 0) - (b.id ?? 0))))
+
+function sameMap(a: Record<number, number>, b: Record<number, number>): boolean {
+  const ka = Object.keys(a)
+  return ka.length === Object.keys(b).length && ka.every(k => a[Number(k)] === b[Number(k)])
+}
+
+async function loadDimensions(inv: PurchaseInvoice): Promise<void> {
+  const seq = ++dimSeq
+  dimHeader.value = {}
+  dimLoadedHeader.value = {}
+  dimLoadedItems.value = {}
+  suggestions.value = {}
+  openItemDims.clear()
+  for (const k of Object.keys(dimItems)) delete dimItems[Number(k)]
+  if (!dims.enabled.value) return
+  try {
+    await dims.load()
+    const [doc, prefill] = await Promise.all([
+      dimensionsApi.getDocument('purchase-invoices', inv.id),
+      dimsEditable.value
+        ? dimensionsApi.prefill({
+          client_id: inv.vendor_id,
+          project_id: inv.project_id,
+          history: 1,
+          exclude_purchase_invoice_id: inv.id,
+        }).catch(() => null)
+        : Promise.resolve(null),
+    ])
+    if (seq !== dimSeq) return
+    const header: DimensionMap = { ...doc.header }
+    dimLoadedHeader.value = compactDimensions(doc.header)
+    const loadedItems: Record<number, Record<number, number>> = {}
+    orderedItems.value.forEach((it, i) => {
+      if (it.id === undefined) return
+      const map = compactDimensions(doc.items[i + 1])
+      dimItems[it.id] = { ...map }
+      loadedItems[it.id] = map
+      if (Object.keys(map).length) openItemDims.add(it.id)
+    })
+    dimLoadedItems.value = loadedItems
+    const next: Record<number, { value: number; source: DimensionPrefillSource }> = {}
+    for (const [typeId, valueId] of Object.entries(prefill?.header ?? {})) {
+      const key = Number(typeId)
+      if (!header[key] && valueId) {
+        header[key] = valueId
+        next[key] = { value: valueId, source: prefill?.sources[key] ?? 'client' }
+      }
+    }
+    dimHeader.value = header
+    suggestions.value = next
+  } catch {
+    // Doklad jde zkontrolovat i bez dimenzí (např. chybí právo na účetnictví).
+  }
+}
+
+/** Návrhy, které uživatel nezměnil — vyznačené v okně. */
+const activeSuggestions = computed(() => Object.entries(suggestions.value)
+  .filter(([typeId, s]) => dimHeader.value[Number(typeId)] === s.value)
+  .map(([typeId, s]) => ({ typeId: Number(typeId), ...s })))
+
+const missingRequired = computed(() => missingDimensions(invoice.value)
+  .filter(m => !dimHeader.value[m.type_id]))
+
+function typeName(typeId: number): string {
+  return dims.typeById.value.get(typeId)?.name ?? `#${typeId}`
+}
+
+function itemDims(id: number | undefined): DimensionMap {
+  return id === undefined ? {} : (dimItems[id] ?? {})
+}
+function setItemDims(id: number | undefined, map: DimensionMap): void {
+  if (id !== undefined) dimItems[id] = map
+}
+function toggleItemDims(id: number | undefined): void {
+  if (id === undefined) return
+  if (openItemDims.has(id)) {
+    openItemDims.delete(id)
+    dimItems[id] = {}
+  } else {
+    openItemDims.add(id)
+  }
+}
+
+const itemDimsChanged = computed(() => orderedItems.value.some(it => it.id !== undefined
+  && !sameMap(compactDimensions(dimItems[it.id]), dimLoadedItems.value[it.id] ?? {})))
+const dimsChanged = computed(() => !sameMap(compactDimensions(dimHeader.value), dimLoadedHeader.value) || itemDimsChanged.value)
+
+async function saveDimensions(inv: PurchaseInvoice): Promise<void> {
+  if (!dimsEditable.value || !dimsChanged.value) return
+  const items: Record<number, DimensionMap> = {}
+  orderedItems.value.forEach((it, i) => {
+    const map = compactDimensions(itemDims(it.id))
+    if (Object.keys(map).length) items[i + 1] = map
+  })
+  const result = await dimensionsApi.saveDocument('purchase-invoices', inv.id, {
+    header: dimHeader.value,
+    ...(itemDimsChanged.value ? { items } : {}),
+  })
+  if (result.restamp.needs_repost) toast.warning(t('dimensions.needs_repost'))
 }
 
 async function save(): Promise<void> {
@@ -121,6 +257,7 @@ async function save(): Promise<void> {
       if (res._repost) toast.info(t('purchase_invoice.extraction_review.reposted'))
       updated = res
     }
+    await saveDimensions(inv)
     queue.value[index.value] = updated
     emit('updated', updated)
     next()
@@ -182,7 +319,7 @@ onMounted(async () => {
   try {
     const loaded = await Promise.all(props.invoiceIds.map((id) => purchaseInvoicesApi.get(id).catch(() => null)))
     queue.value = loaded.filter((inv): inv is PurchaseInvoice =>
-      inv !== null && (!props.onlyFlagged || !!inv.extraction_warning))
+      inv !== null && (!props.onlyFlagged || needsReview(inv)))
   } finally {
     loading.value = false
   }
@@ -224,6 +361,24 @@ onMounted(async () => {
         </button>
       </div>
 
+      <!-- Dimenze dokladu (hlavička; položky rozbalením u řádku níž) -->
+      <div v-if="dimsShown" class="rounded-md border p-3 space-y-2" data-test="review-dimensions"
+        :class="missingRequired.length ? 'border-danger-500 ring-2 ring-danger-500/30' : 'border-neutral-200'">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.extraction_review.dimensions.title') }}</h3>
+          <span class="text-xs text-neutral-500">{{ t('purchase_invoice.extraction_review.dimensions.items_hint') }}</span>
+        </div>
+        <DimensionFields v-model="dimHeader" compact :disabled="!dimsEditable" />
+        <p v-for="m in missingRequired" :key="`missing-${m.type_id}`" class="text-xs text-danger-600" data-test="review-dimension-missing">
+          {{ t('purchase_invoice.extraction_review.dimensions.required', { type: m.type_name, accounts: m.account_codes.join(', ') }) }}
+        </p>
+        <p v-for="s in activeSuggestions" :key="`suggest-${s.typeId}`" class="text-xs text-primary-700 flex flex-wrap items-center gap-1.5" data-test="review-dimension-suggestion">
+          <span class="px-1.5 py-0.5 rounded bg-primary-50 font-medium">{{ t('purchase_invoice.extraction_review.dimensions.suggestion') }}</span>
+          <span>{{ typeName(s.typeId) }}: {{ dims.valueLabel(s.value) }}</span>
+          <span class="text-neutral-500">({{ t(`purchase_invoice.extraction_review.dimensions.source.${s.source}`) }})</span>
+        </p>
+      </div>
+
       <!-- Druh nákladu po položkách -->
       <div>
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -241,7 +396,7 @@ onMounted(async () => {
 
         <ul class="space-y-2">
           <li v-for="it in items" :key="it.id"
-            class="rounded-md border p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"
+            class="rounded-md border p-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
             :class="needsAttention(it) ? 'border-danger-500 ring-2 ring-danger-500/30 bg-danger-50/40' : 'border-neutral-200'">
             <div class="min-w-0 flex-1">
               <div class="text-sm text-neutral-900 break-words">
@@ -268,6 +423,13 @@ onMounted(async () => {
               <option :value="null">{{ t('purchase_invoice.extraction_review.kind_unset') }}</option>
               <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ t(`purchase_invoice.expense_kind.${k}`) }}</option>
             </select>
+            <ItemDimensionsToggle v-if="dimsShown" class="self-end sm:self-auto"
+              :open="openItemDims.has(it.id as number)" :filled="Object.values(itemDims(it.id)).some(v => !!v)"
+              :disabled="!dimsEditable" @toggle="toggleItemDims(it.id)" />
+            <div v-if="dimsShown && openItemDims.has(it.id as number)" class="w-full sm:basis-full" data-test="review-item-dimensions">
+              <DimensionFields compact :model-value="itemDims(it.id)" :disabled="!dimsEditable"
+                @update:model-value="setItemDims(it.id, $event)" />
+            </div>
           </li>
         </ul>
         <p v-if="readOnlyReason" :class="BTN_DISABLED_NOTE" class="mt-2">{{ readOnlyReason }}</p>

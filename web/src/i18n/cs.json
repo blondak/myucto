@@ -11794,6 +11794,11 @@
     "kind_provided": "Typ uvedený klientem: {kind}",
     "note": "Poznámka pro účetní (nepovinné)",
     "note_placeholder": "Například čeho se náklad týká",
+    "dimensions_title": "Dimenze dokladu (nepovinné)",
+    "dimensions_hint": "Propíšou se do hlavičky vytěženého dokladu, výchozí hodnoty dodavatele nepřebijí ruční volbu.",
+    "dimension_optional": "{type} (nepovinné)",
+    "dimension_none": "— neuvedeno —",
+    "dimensions_chosen": "Dimenze: {list}",
     "choose_files": "Vybrat soubory",
     "files_selected": "Vybráno souborů: {n}",
     "uploading": "Předávám…",
@@ -17769,7 +17774,20 @@
       "readonly_cancelled": "Stornovaný doklad nelze upravit.",
       "readonly_locked": "Doklad je zamčený (uzavřené období nebo podané přiznání). Druh nákladu opravte v editoru.",
       "readonly_client": "Doklad už není koncept, druh nákladu doplní vaše účetní.",
-      "confirm_paid": "Potvrdit a označit jako uhrazenou"
+      "confirm_paid": "Potvrdit a označit jako uhrazenou",
+      "dimensions": {
+        "title": "Dimenze dokladu",
+        "items_hint": "Jinou dimenzi položky nastavíte štítkem u řádku.",
+        "required": "Povinné podle pravidel dimenzí: {type} (účet {accounts}). Bez ní doklad nepůjde zaúčtovat.",
+        "suggestion": "Návrh",
+        "detail_notice": "Dokladu chybí povinná dimenze: {types}.",
+        "source": {
+          "client": "výchozí dodavatele",
+          "project": "výchozí zakázky",
+          "document": "placený doklad",
+          "history": "z posledního dokladu dodavatele"
+        }
+      }
     },
     "advance_link": {
       "title": "Zálohová faktura",
