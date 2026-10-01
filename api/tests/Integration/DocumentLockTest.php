@@ -368,7 +368,7 @@ final class DocumentLockTest extends TestCase
 
         $client = $this->mkUserWithToken('client', $sid);
         $accountant = $this->mkUserWithToken('accountant', $sid);
-        $admin = $this->mkUserWithToken('admin', $sid);
+        $adminSession = $this->mkSessionUser('admin', $sid);
         $body = $this->invoiceBody($sid, '2024-06-15');
 
         $res = $this->request('PUT', "/api/invoices/$invoiceId", $client, $sid, $body);
@@ -384,7 +384,7 @@ final class DocumentLockTest extends TestCase
         self::assertSame(409, $res->getStatusCode());
         self::assertSame('period_closed', $this->errorCode($res));
 
-        $res = $this->request('PUT', "/api/invoices/$invoiceId?force=1", $admin, $sid, $body);
+        $res = $this->sessionRequest('PUT', "/api/invoices/$invoiceId?force=1", $adminSession, $sid, $body);
         self::assertSame(200, $res->getStatusCode(), 'admin ?force=1 projde: ' . (string) $res->getBody());
 
         $cnt = $this->db->pdo()->prepare(
@@ -420,7 +420,7 @@ final class DocumentLockTest extends TestCase
 
         $client = $this->mkUserWithToken('client', $sid);
         $accountant = $this->mkUserWithToken('accountant', $sid);
-        $admin = $this->mkUserWithToken('admin', $sid);
+        $adminSession = $this->mkSessionUser('admin', $sid);
 
         // create s datem v zavřeném období
         $res = $this->request('POST', '/api/invoices', $client, $sid, $this->invoiceBody($sid, '2024-06-15'));
@@ -449,7 +449,7 @@ final class DocumentLockTest extends TestCase
         $res = $this->request('PUT', "/api/invoices/$draft2026", $accountant, $sid, $moveBody);
         self::assertSame(409, $res->getStatusCode());
         self::assertSame('period_closed', $this->errorCode($res));
-        $res = $this->request('PUT', "/api/invoices/$draft2026?force=1", $admin, $sid, $moveBody);
+        $res = $this->sessionRequest('PUT', "/api/invoices/$draft2026?force=1", $adminSession, $sid, $moveBody);
         self::assertSame(200, $res->getStatusCode(), 'admin force přesun projde: ' . (string) $res->getBody());
     }
 
@@ -529,7 +529,8 @@ final class DocumentLockTest extends TestCase
         $pi = $this->mkPurchaseInvoice($sid, 'received');
 
         // Účetní omylem zabookuje…
-        $res = $this->request('POST', "/api/purchase-invoices/$pi/transition", $accountant, $sid, ['target' => 'booked']);
+        $accountantSession = $this->mkSessionUser('accountant', $sid);
+        $res = $this->sessionRequest('POST', "/api/purchase-invoices/$pi/transition", $accountantSession, $sid, ['target' => 'booked']);
         self::assertSame(200, $res->getStatusCode(), 'booked: ' . (string) $res->getBody());
         $row = $this->db->pdo()->query("SELECT booked_at, booked_by FROM purchase_invoices WHERE id = $pi")->fetch(\PDO::FETCH_ASSOC);
         self::assertNotNull($row['booked_at']);
@@ -574,12 +575,13 @@ final class DocumentLockTest extends TestCase
         $this->mkPeriod($sid, 2024, 'closed');
         $this->mkPeriod($sid, 2026, 'open');
         $accountant = $this->mkUserWithToken('accountant', $sid);
-        $admin = $this->mkUserWithToken('admin', $sid);
+        $accountantSession = $this->mkSessionUser('accountant', $sid);
+        $adminSession = $this->mkSessionUser('admin', $sid);
 
         $pi = $this->mkPurchaseInvoice($sid, 'received', '2024-06-15');
 
         // booked/cancelled = účetní akt → v zavřeném období 409 period_closed
-        $res = $this->request('POST', "/api/purchase-invoices/$pi/transition", $accountant, $sid, ['target' => 'booked']);
+        $res = $this->sessionRequest('POST', "/api/purchase-invoices/$pi/transition", $accountantSession, $sid, ['target' => 'booked']);
         self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
         self::assertSame('period_closed', $this->errorCode($res));
         $res = $this->request('POST', "/api/purchase-invoices/$pi/transition", $accountant, $sid, ['target' => 'cancelled']);
@@ -593,7 +595,7 @@ final class DocumentLockTest extends TestCase
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
 
         // admin ?force=1 projde + audit
-        $res = $this->request('POST', "/api/purchase-invoices/$pi/transition?force=1", $admin, $sid, ['target' => 'booked']);
+        $res = $this->sessionRequest('POST', "/api/purchase-invoices/$pi/transition?force=1", $adminSession, $sid, ['target' => 'booked']);
         self::assertSame(200, $res->getStatusCode(), 'admin force booked: ' . (string) $res->getBody());
         $cnt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM activity_log WHERE action = 'document_lock.force_override' AND entity_id = ?"

@@ -17,6 +17,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   client + lockedForClient()                          → 403 'document_locked'
  *   non-client + inClosedPeriod && !(admin && ?force=1) → 409 'period_closed'
  *   admin + ?force=1 + inClosedPeriod                   → null + ActivityLogger warning
+ *   admin + ?force=1 + inClosedPeriod přes API token    → 403 'token_write_forbidden'
  *   client + ?force=1                                   → force IGNOROVÁN (M6)
  *   jinak                                               → null (pokračuj)
  *
@@ -52,6 +53,10 @@ trait GuardsDocumentLock
         }
 
         if (RequestAuthorization::isCompanyAdmin($request) && !empty($request->getQueryParams()['force'])) {
+            // Přebití uzavřeného období je účetní úkon; token ho neprovede ani jako admin.
+            if ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Úprava dokladu v uzavřeném účetním období')) {
+                return $deny;
+            }
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log(
                 'document_lock.force_override',

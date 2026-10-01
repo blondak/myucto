@@ -166,6 +166,7 @@ final class PurchaseInvoiceMissingTaxDateTransitionTest extends TestCase
             ->createServerRequest('POST', '/api/purchase-invoices')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body);
 
         $res = ($this->createAction)($req, new Psr7Response());
@@ -186,6 +187,7 @@ final class PurchaseInvoiceMissingTaxDateTransitionTest extends TestCase
             ->createServerRequest('POST', "/api/purchase-invoices/{$id}/transition")
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body);
 
         return ($this->transitionAction)($req, new Psr7Response(), ['id' => (string) $id]);

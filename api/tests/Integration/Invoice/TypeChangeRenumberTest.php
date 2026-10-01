@@ -141,6 +141,7 @@ final class TypeChangeRenumberTest extends TestCase
         $req = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/invoices/' . $id)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withQueryParams(['force' => '1'])
             ->withParsedBody($body);

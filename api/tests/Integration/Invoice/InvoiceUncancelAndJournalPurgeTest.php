@@ -248,7 +248,8 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
         $req = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/test')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         if ($body !== []) {
             $req = $req->withParsedBody($body);
         }

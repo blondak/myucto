@@ -6,6 +6,7 @@ namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -71,6 +72,11 @@ final class DeletePurchaseInvoiceAction
         $isAdmin = RequestAuthorization::isCompanyAdmin($request);
         $allowedForce = ['received', 'booked'];
         if ($existing['status'] !== 'draft') {
+            // Vynucené smazání přijatého/zaúčtovaného dokladu stornuje i jeho zápis, takže jen z relace.
+            if ($force
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucené smazání přijatého nebo zaúčtovaného dokladu'))) {
+                return $deny;
+            }
             if (!($force && $isAdmin && in_array($existing['status'], $allowedForce, true))) {
                 return Json::error(
                     $response,
