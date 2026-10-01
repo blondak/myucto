@@ -9,7 +9,7 @@ import {
   type PayrollStatutoryEvidenceRow,
   type PayrollStatutoryEvidenceSection,
 } from '@/api/payroll'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -38,6 +38,7 @@ import {
   type StatutorySectionSpec,
 } from './statutoryEvidenceForm'
 import DateInput from '@/components/ui/DateInput.vue'
+import { fieldSelector, revealField } from '@/utils/revealField'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import { usePersonCardSaveSection } from './personCardSave'
 
@@ -78,11 +79,15 @@ import { usePersonCardSaveSection } from './personCardSave'
  *    hranici drží — obojí přímo odsud, protože jinak uživatel jen čte, že něco
  *    nejde, a nedozví se, jak to udělat.
  *
- * Sbalená historie ale nesmí schovat editaci: u každé sekce je proto vlastní
- * „Upravit" přímo vedle hodnoty, kterou uživatel čte — rozbalí tu sekci,
- * zapne editaci a postaví kurzor do prvního pole. Společné „Upravit evidenci"
- * dole rozbalí všechny sekce, aby po kliknutí bylo vidět, do čeho se píše.
- * Ukládá se pořád jedním tlačítkem dole; per-sekci se neukládá.
+ * Sbalená historie ale nesmí schovat editaci: prázdná sekce nabízí v hlavičce
+ * rovnou „Přidat záznam" (otevře předvyplněný záznam a postaví kurzor do
+ * prvního povinného pole), vyplněná „Upravit", které zapne editaci JEN té
+ * sekce. Společné „Upravit evidenci" dole otevře všechny sekce.
+ *
+ * Ukládá se pořád jedním mechanismem (společná lišta karty, mimo kartu
+ * tlačítko dole). Lišta pod rozpracovanou sekcí „Neuloženo, Uložit" volá
+ * přesně totéž uložení; jen ho staví tam, kde se zrovna píše, protože kdo
+ * přidal záznam, viděl jinak dole jen další „Přidat záznam" a změnu neuložil.
  *
  * Běžný český zaměstnanec ale nemá co vyplňovat: „Přidat záznam" rovnou
  * nabídne rezidenta CZ, český sociální i zdravotní režim a pojišťovnu, u které
@@ -109,7 +114,12 @@ const auth = useAuthStore()
 
 const loading = ref(true)
 const saving = ref(false)
-const editing = ref(false)
+/**
+ * Sekce v editaci. Editace je po sekcích: „Upravit" u jedné sekce nesmí
+ * odemknout celou stránku, jinak uživatel neví, kde právě píše.
+ */
+const editingSections = reactive(new Set<string>())
+const editing = computed(() => editingSections.size > 0)
 const correcting = ref(false)
 const loadError = ref('')
 const saveError = ref('')
@@ -413,21 +423,175 @@ async function focusSection(key: string) {
  * všechny sekce, aby bylo vidět, do čeho se píše.
  */
 function startEditing() {
-  editing.value = true
-  for (const section of SECTIONS) historyToggled[section.key] = true
+  for (const section of SECTIONS) {
+    editingSections.add(section.key)
+    historyToggled[section.key] = true
+  }
+}
+
+function isEditing(section: StatutorySectionSpec): boolean {
+  return editingSections.has(section.key)
 }
 
 /**
  * Cesta „chci změnit tenhle údaj" → vstupní pole na jedno kliknutí: tlačítko
- * u sekce zapne editaci, rozbalí právě tu sekci a postaví kurzor do prvního
- * pole. Ukládá se dál jedním společným Uložit dole — per-sekci se neukládá,
- * server bere celý cílový stav jedním zápisem.
+ * u sekce zapne editaci právě té sekce, rozbalí ji a postaví kurzor do
+ * prvního pole. Ukládá se dál jedním společným uložením, server bere celý
+ * cílový stav jedním zápisem.
  */
 function editSection(section: StatutorySectionSpec) {
   historyToggled[section.key] = true
-  editing.value = true
+  editingSections.add(section.key)
   void focusSection(section.key)
 }
+
+/**
+ * Pole, na které má po otevření nového záznamu skočit kurzor, když je
+ * předvyplněné. U zdravotního pojištění je to pojišťovna, kvůli ní sem
+ * uživatel z varování přišel, jurisdikci má předvyplněnou správně.
+ */
+const PREFERRED_FOCUS: Partial<Record<PayrollStatutoryEvidenceSection, string>> = {
+  health_coverages: 'insurer_code',
+}
+
+/** Kurzor do řádku: preferované pole, jinak první prázdné, jinak první vůbec. */
+async function focusRow(section: StatutorySectionSpec, index: number) {
+  await nextTick()
+  const container = sectionElements[section.key]?.querySelector<HTMLElement>(
+    `[data-test="row-${section.key}-${index}"] [data-row-primary]`,
+  )
+  if (!container) return
+  const controls = Array.from(container.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+    'input:not([disabled]):not([type="hidden"]), select:not([disabled])',
+  ))
+  const preferredKey = PREFERRED_FOCUS[section.key]
+  const preferred = preferredKey === undefined
+    ? undefined
+    : controls.find(control => control.dataset.test === `${section.key}-${index}-${preferredKey}`)
+  const target = preferred
+    ?? controls.find(control => control.value === '')
+    ?? controls[0]
+  target?.focus({ preventScroll: true })
+}
+
+/** Výchozí „Platí od" nového záznamu. */
+function newRowStart(section: StatutorySectionSpec): string {
+  // Do sekce s historií navazuje nový záznam od vybraného měsíce; měsíční
+  // evidence se vede k vybranému měsíci vždycky.
+  if (section.kind === 'month' || rowsOf(section).length > 0) return monthStart(effectiveOn.value)
+  // Prázdná sekce platí od začátku vztahu (jako hromadné doplnění), ne
+  // od náhodně zvoleného měsíce, jinak by vznikla díra od nástupu.
+  const candidate = defaultsEffectiveOn.value
+  const unlock = unlockDay.value
+  return unlock !== null && candidate < unlock ? unlock : candidate
+}
+
+/**
+ * „Přidat záznam" otevře editaci jen té sekce, založí předvyplněný záznam
+ * a postaví kurzor do prvního pole, které je potřeba doplnit.
+ */
+function startAdd(section: StatutorySectionSpec) {
+  editingSections.add(section.key)
+  historyToggled[section.key] = true
+  addRow(section)
+  void focusRow(section, rowsOf(section).length - 1)
+}
+
+/** Zahodí rozepsané změny jedné sekce a zavře její editaci. */
+function discardSection(section: StatutorySectionSpec) {
+  drafts.value[section.key] = JSON.parse(baselines.value[section.key] ?? '[]')
+  editingSections.delete(section.key)
+  delete historyToggled[section.key]
+  saveError.value = ''
+}
+
+function sectionDirty(section: StatutorySectionSpec): boolean {
+  return JSON.stringify(rowsOf(section)) !== (baselines.value[section.key] ?? '[]')
+}
+
+/** Záznamy sekce jsou vyplněné tak, že je formulář pustí na server. */
+function sectionReady(section: StatutorySectionSpec): boolean {
+  const rows = rowsOf(section)
+  return sectionIssues(section, rows).length === 0
+    && rows.every(row => issuesFor(section, row).length === 0)
+}
+
+const dirtySections = computed(() => SECTIONS.filter(section => sectionDirty(section)))
+
+const hintExpanded = reactive<Record<string, boolean>>({})
+
+/**
+ * Bloky pod nadpisy skupin. Pořadí uvnitř skupin drží `STATUTORY_SECTIONS`;
+ * sekce, kterou by sem nikdo nezařadil, spadne do „Ostatní", ne z obrazovky.
+ */
+const GROUPS: ReadonlyArray<{ key: string; sections: readonly PayrollStatutoryEvidenceSection[] }> = [
+  { key: 'tax', sections: ['tax_declarations', 'tax_residences', 'tax_credit_claims'] },
+  { key: 'social', sections: ['social_jurisdictions', 'social_discount_claims'] },
+  {
+    key: 'health',
+    sections: [
+      'health_coverages',
+      'health_month_evidence',
+      'health_minimum_reductions',
+      'health_other_employer_bases',
+    ],
+  },
+]
+
+const sectionGroups = computed(() => {
+  const grouped = new Set<string>(GROUPS.flatMap(group => group.sections))
+  const groups = GROUPS.map(group => ({
+    key: group.key,
+    sections: SECTIONS.filter(section => group.sections.includes(section.key)),
+  }))
+  const other = SECTIONS.filter(section => !grouped.has(section.key))
+  if (other.length > 0) groups.push({ key: 'other', sections: other })
+  return groups.filter(group => group.sections.length > 0)
+})
+
+/**
+ * Doskok z varování („chybí zdravotní pojišťovna"). U prázdné sekce rovnou
+ * otevře nový záznam, u vyplněné její editaci. V obou případech s kurzorem
+ * v poli, kvůli kterému uživatel přišel. Vysvícení samotné sekce nestačilo:
+ * účetní klikla na „Upravit" a „jakoby se nic nestalo".
+ */
+const pendingReveal = ref<string | null>(null)
+
+async function revealSection(key: string): Promise<boolean> {
+  const section = SECTIONS.find(item => item.key === key)
+  if (section === undefined) return false
+  if (root.value instanceof HTMLDetailsElement) root.value.open = true
+  if (loading.value) {
+    pendingReveal.value = key
+    return true
+  }
+  historyToggled[section.key] = true
+  let index: number | null = null
+  if (props.canWrite) {
+    const rows = rowsOf(section)
+    if (rows.length === 0) {
+      startAdd(section)
+      index = 0
+    } else {
+      editingSections.add(section.key)
+      const current = effectiveRows(section)[0]
+      index = current === undefined ? rows.length - 1 : rows.indexOf(current)
+    }
+  }
+  await nextTick()
+  const element = sectionElements[section.key]
+  if (element) revealField(fieldSelector(`statutory.${section.key}`), element.parentElement ?? document)
+  if (index !== null) {
+    const target = index
+    await focusRow(section, target)
+    // revealField dává kurzor prvnímu poli sekce se zpožděním; tady má
+    // skončit v poli, které uživatel přišel doplnit.
+    window.setTimeout(() => { void focusRow(section, target) }, 400)
+  }
+  return true
+}
+
+defineExpose({ revealSection })
 
 /** Doklad je nepovinný — rozbalí se jen tam, kde už něco nese. */
 function evidenceDetailFilled(
@@ -528,19 +692,39 @@ function hydrate(value: PayrollStatutoryEvidence) {
     next[section.key] = (value.sections[section.key] ?? []).map(row => ({ ...row }))
   }
   drafts.value = next
-  baseline.value = JSON.stringify(next)
+  const nextBaselines: Record<string, string> = {}
+  for (const section of SECTIONS) nextBaselines[section.key] = JSON.stringify(next[section.key])
+  baselines.value = nextBaselines
 }
 
 const root = ref<HTMLElement | null>(null)
-const baseline = ref('')
-const dirty = computed(() => editing.value && JSON.stringify(drafts.value) !== baseline.value)
-const { managed } = usePersonCardSaveSection({
-  label: () => t('payroll.people.statutory_evidence.title'),
+/** Uložený stav po sekcích. Podle něj se pozná, KTERÝ blok má neuložené změny. */
+const baselines = ref<Record<string, string>>({})
+const dirty = computed(() => dirtySections.value.length > 0)
+const cardSave = usePersonCardSaveSection({
+  // Lišta „Neuložené změny" jmenuje konkrétní blok, ne celou evidenci;
+  // „Zákonná evidence osoby" neříkala, kde změna leží.
+  label: () => dirtySections.value.length > 0
+    ? dirtySections.value
+      .map(section => t(`payroll.people.statutory_evidence.section.${section.key}`))
+      .join(', ')
+    : t('payroll.people.statutory_evidence.title'),
   dirty: () => dirty.value,
   save,
   discard: cancel,
   focus: () => root.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }),
 })
+const managed = cardSave.managed
+
+/**
+ * Uložení z lišty pod sekcí. Na kartě je to TOTÉŽ společné uložení jako
+ * lišta dole (uloží i rozepsané sekce jiných panelů a zastaví se na první
+ * chybě), mimo kartu totéž jako tlačítko dole. Druhá cesta ukládání nevzniká.
+ */
+async function requestSave() {
+  if (cardSave.saveAll !== undefined) await cardSave.saveAll()
+  else await save()
+}
 
 /**
  * Běžný zaměstnanec — rezident ČR v českém pojištění — nemá v zákonné
@@ -567,7 +751,7 @@ function onDefaultsApplied() {
 
 function addRow(section: StatutorySectionSpec) {
   const rows = rowsOf(section)
-  const row = defaultRow(section, monthStart(effectiveOn.value), {
+  const row = defaultRow(section, newRowStart(section), {
     effectiveOn: effectiveOn.value,
     defaultInsurerCode: defaultInsurerCode.value,
     employerReferences: [],
@@ -607,7 +791,7 @@ function changeFromNextPeriod(
   next.effective_to = null
   if (source !== null) source.effective_to = boundary
   drafts.value[section.key] = [...rows, next]
-  editing.value = true
+  editingSections.add(section.key)
   historyToggled[section.key] = true
 }
 
@@ -693,10 +877,13 @@ async function load() {
   } finally {
     loading.value = false
   }
+  const pending = pendingReveal.value
+  pendingReveal.value = null
+  if (pending !== null && loadError.value === '') await revealSection(pending)
 }
 
 function cancel() {
-  editing.value = false
+  editingSections.clear()
   saveError.value = ''
   resetSectionToggles()
   if (evidence.value) hydrate(evidence.value)
@@ -717,12 +904,16 @@ async function save(): Promise<boolean> {
     for (const section of SECTIONS) {
       sections[section.key] = rowsOf(section).map(row => ({ ...row }))
     }
+    const savedKeys = dirtySections.value.map(section => section.key)
     hydrate(await payrollApi.saveStatutoryEvidence(props.personId, {
       effective_on: effectiveOn.value,
       sections,
     }))
-    editing.value = false
+    editingSections.clear()
     resetSectionToggles()
+    // Uložený blok zůstane rozbalený: uživatel vidí, co se uložilo, a pod tím
+    // „Přidat další záznam", kdyby jich potřeboval víc.
+    for (const key of savedKeys) historyToggled[key] = true
     toast.success(t('payroll.people.statutory_evidence.saved'))
     emit('saved')
     return true
@@ -739,8 +930,8 @@ async function save(): Promise<boolean> {
   }
 }
 
-watch(() => props.personId, () => { editing.value = false; resetSectionToggles(); void load() })
-watch(effectiveOn, () => { editing.value = false; resetSectionToggles(); void load() })
+watch(() => props.personId, () => { editingSections.clear(); resetSectionToggles(); void load() })
+watch(effectiveOn, () => { editingSections.clear(); resetSectionToggles(); void load() })
 // Datum nástupu může dorazit až po prvním vykreslení karty; výchozí den se
 // posune jen tehdy, když ho uživatel ještě sám nezměnil.
 watch(() => props.employmentStartOn, (_start, previous) => {
@@ -827,371 +1018,485 @@ onMounted(() => {
           data-test="statutory-evidence-frozen"
         >{{ t('payroll.people.statutory_evidence.frozen_hint', { day: frozenThrough }) }}</p>
 
-        <div class="space-y-3">
-          <section
-            v-for="section in SECTIONS"
-            :key="section.key"
-            class="scroll-mt-24 rounded-md border border-neutral-200"
-            :data-test="`section-${section.key}`"
-            :ref="element => setSectionRef(section.key, element)"
-            :data-a1-field="`statutory.${section.key}`"
+        <div class="space-y-6">
+          <div
+            v-for="group in sectionGroups"
+            :key="group.key"
+            :data-test="`group-${group.key}`"
           >
-            <!--
-              Přehled stavu je jediný řádek a stojí NAD historií: „co teď platí"
-              je otázka, kterou má uživatel v devíti z deseti návštěv, kdežto
-              „co platilo loni" se hledá výjimečně.
-            -->
-            <div class="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
-              <div class="min-w-0">
-                <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                  {{ t(`payroll.people.statutory_evidence.section.${section.key}`) }}
-                </h4>
-                <p class="mt-0.5 text-xs text-neutral-500">
-                  {{ t(`payroll.people.statutory_evidence.section_hint.${section.key}`) }}
-                </p>
-              </div>
-              <div class="flex shrink-0 items-start gap-2">
-                <p class="text-right" :data-test="`current-${section.key}`">
-                  <span
-                    class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-                    :class="summaryIsBlocking(section)
-                      ? 'bg-warning-100 text-warning-800'
-                      : 'bg-success-50 text-success-800'"
-                  >{{ summaryLabel(section) }}</span>
-                  <span v-if="summaryDetail(section)" class="mt-0.5 block text-xs text-neutral-600">
-                    {{ summaryDetail(section) }}
-                  </span>
-                  <span class="mt-0.5 block text-xs text-neutral-500">
-                    {{ summaryFrom(section)
-                      ? t('payroll.people.statutory_evidence.current_from', { day: summaryFrom(section) })
-                      : t('payroll.people.statutory_evidence.current_none') }}
-                  </span>
-                </p>
+            <h3 class="mb-2 border-b border-neutral-200 pb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              {{ t(`payroll.people.statutory_evidence.group.${group.key}`) }}
+            </h3>
+            <div class="space-y-3">
+              <section
+                v-for="section in group.sections"
+                :key="section.key"
+                class="scroll-mt-24 overflow-hidden rounded-lg border bg-surface shadow-sm"
+                :class="isEditing(section)
+                  ? 'border-payroll-500/40 border-l-4 border-l-payroll-500'
+                  : 'border-neutral-200'"
+                :data-test="`section-${section.key}`"
+                :data-editing="isEditing(section) ? 'true' : undefined"
+                :ref="element => setSectionRef(section.key, element)"
+                :data-a1-field="`statutory.${section.key}`"
+              >
                 <!--
-                  Editaci je potřeba nabídnout TAM, kde uživatel čte hodnotu,
-                  kterou chce změnit. Jediné tlačítko dole panel jen přepnulo do
-                  editace, ale pole zůstala schovaná ve sbalené historii.
+                  Hlavička bloku: název, stav (co teď platí a od kdy) a akce
+                  vpravo. „Co teď platí" je otázka devíti z deseti návštěv, takže
+                  stojí nad historií.
                 -->
-                <button
-                  v-if="canWrite && !editing"
-                  type="button"
-                  :class="btnOutlineSm('primary')"
-                  :disabled="saving"
-                  :aria-label="t('payroll.people.statutory_evidence.edit_section_aria', {
-                    section: t(`payroll.people.statutory_evidence.section.${section.key}`),
-                  })"
-                  :data-test="`edit-${section.key}`"
-                  @click="editSection(section)"
-                >
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
-                  {{ t('payroll.people.statutory_evidence.edit_section') }}
-                </button>
-              </div>
-            </div>
-
-            <details
-              class="border-t border-neutral-200"
-              :open="historyOpen(section)"
-              :data-test="`history-${section.key}`"
-              @toggle="onHistoryToggle(section, $event)"
-            >
-              <summary class="cursor-pointer list-none px-3 py-1.5 text-xs font-medium text-neutral-600">
-                {{ t('payroll.people.statutory_evidence.history', { count: (drafts[section.key] ?? []).length }, (drafts[section.key] ?? []).length) }}
-              </summary>
-
-              <div class="px-3 pb-3">
-                <p
-                  v-if="(drafts[section.key] ?? []).length === 0"
-                  class="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
-                >{{ t('payroll.people.statutory_evidence.empty') }}</p>
-
                 <div
-                  v-for="(row, index) in drafts[section.key] ?? []"
-                  :key="`${section.key}-${row.id ?? `new-${index}`}`"
-                  class="mt-2 rounded-md border border-neutral-200 p-2"
-                  :class="isFrozen(section, row) ? 'bg-neutral-50' : ''"
-                  :data-test="`row-${section.key}-${index}`"
+                  class="flex flex-wrap items-start justify-between gap-2 px-3 py-2.5"
+                  :class="isEditing(section) ? 'bg-payroll-50' : ''"
                 >
-                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    <label v-if="section.kind === 'month'" class="block text-xs text-neutral-600">
-                      {{ t('payroll.people.statutory_evidence.period_start') }}
-                      <DateInput
-                        v-model="row.period_start"
-                        :disabled="!editing || saving || isFrozen(section, row)"
-                        :data-test="`${section.key}-${index}-period_start`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
-                    </label>
-                    <template v-else>
-                      <label class="block text-xs text-neutral-600">
-                        {{ t('payroll.people.statutory_evidence.effective_from') }}
-                        <DateInput
-                          v-model="row.effective_from"
-                          :disabled="!editing || saving || isFrozen(section, row)"
-                          :data-test="`${section.key}-${index}-effective_from`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
-                      </label>
-                      <label class="block text-xs text-neutral-600">
-                        {{ t('payroll.people.statutory_evidence.effective_to') }}
-                        <DateInput
-                          v-model="row.effective_to"
-                          :disabled="!editing || saving"
-                          :data-test="`${section.key}-${index}-effective_to`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
-                      </label>
-                    </template>
-
-                    <label
-                      v-for="field in primaryFields(section, row)"
-                      :key="field.key"
-                      class="block text-xs text-neutral-600"
-                    >
-                      {{ t(`payroll.people.statutory_evidence.field.${field.key}`) }}
-
-                      <select
-                        v-if="field.kind === 'enum'"
-                        :value="fieldValue(row, field.key)"
-                        :disabled="!editing || saving"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @change="onSelect(section, row, field.key, $event)"
-                      >
-                        <option v-for="option in field.options" :key="option" :value="option">
-                          {{ t(`payroll.people.statutory_evidence.option.${field.key}.${option}`) }}
-                        </option>
-                      </select>
-
-                      <CountrySelect
-                        v-else-if="field.kind === 'country'"
-                        :model-value="fieldValue(row, field.key)"
-                        :disabled="!editing || saving"
-                        :clearable="false"
-                        required
-                        accent="payroll"
-                        class="mt-1 block"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        @update:model-value="setField(section, row, field.key, $event)"
-                      />
-
-                      <select
-                        v-else-if="field.kind === 'insurer'"
-                        :value="fieldValue(row, field.key)"
-                        :disabled="!editing || saving"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @change="onSelect(section, row, field.key, $event)"
-                      >
-                        <option value="">{{ t('payroll.people.statutory_evidence.insurer_unset') }}</option>
-                        <option v-for="insurer in insurerOptions" :key="insurer.value" :value="insurer.value">
-                          {{ insurer.label }}
-                        </option>
-                      </select>
-
-                      <select
-                        v-else-if="field.kind === 'employer'"
-                        :value="fieldValue(row, field.key)"
-                        :disabled="!editing || saving"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @change="onSelect(section, row, field.key, $event)"
-                      >
-                        <option value="">{{ t('payroll.people.statutory_evidence.employer_none') }}</option>
-                        <option
-                          v-for="reference in employerReferencesFor(row)"
-                          :key="reference"
-                          :value="reference"
-                        >{{ reference }}</option>
-                      </select>
-
-                      <input
-                        v-else-if="field.kind === 'reference'"
-                        :value="fieldValue(row, field.key)"
-                        type="text"
-                        :disabled="!editing || saving || isFrozen(section, row)"
-                        :placeholder="t('payroll.people.statutory_evidence.employer_reference_placeholder')"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @input="onInput(section, row, field.key, $event)"
-                      >
-
-                      <span v-else-if="field.kind === 'money'" class="mt-1 flex items-center gap-1">
-                        <input
-                          :value="moneyText(row, field.key)"
-                          type="text"
-                          inputmode="decimal"
-                          :disabled="!editing || saving"
-                          :data-test="`${section.key}-${index}-${field.key}`"
-                          class="w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-right text-sm tabular-nums disabled:bg-neutral-100"
-                          @input="onMoneyInput(row, field.key, $event)"
-                        >
-                        <span class="shrink-0 text-neutral-500">{{ t('payroll.people.statutory_evidence.currency_czk') }}</span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h4 class="text-sm font-semibold text-neutral-900">
+                        {{ t(`payroll.people.statutory_evidence.section.${section.key}`) }}
+                      </h4>
+                      <span class="inline-flex flex-wrap items-center gap-2" :data-test="`current-${section.key}`">
+                        <span
+                          class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                          :class="summaryIsBlocking(section)
+                            ? 'bg-warning-100 text-warning-800'
+                            : 'bg-success-50 text-success-800'"
+                        >{{ summaryLabel(section) }}<template v-if="summaryDetail(section)"> · {{ summaryDetail(section) }}</template></span>
+                        <span v-if="summaryFrom(section)" class="text-xs text-neutral-500">
+                          {{ t('payroll.people.statutory_evidence.current_from', { day: summaryFrom(section) }) }}
+                        </span>
                       </span>
-
-                      <DateInput
-                        v-else-if="field.kind === 'date'"
-                        :model-value="fieldValue(row, field.key)"
-                        :disabled="!editing || saving"
-                        :data-test="`${section.key}-${index}-${field.key}`"
-                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        @change="onDateChange(section, row, field.key, $event)"
-                      />
-                    </label>
+                      <span
+                        v-if="isEditing(section)"
+                        class="inline-block rounded-full bg-payroll-100 px-2 py-0.5 text-xs font-medium text-neutral-800"
+                      >{{ t('payroll.people.statutory_evidence.editing_badge') }}</span>
+                    </div>
+                    <p class="mt-1 flex items-start gap-1 text-xs text-neutral-500">
+                      <span
+                        :class="hintExpanded[section.key] ? '' : 'line-clamp-1'"
+                        :data-test="`hint-${section.key}`"
+                      >{{ t(`payroll.people.statutory_evidence.section_hint.${section.key}`) }}</span>
+                      <button
+                        type="button"
+                        class="shrink-0 whitespace-nowrap font-medium text-primary-600 hover:underline"
+                        :aria-expanded="hintExpanded[section.key] === true"
+                        :data-test="`hint-toggle-${section.key}`"
+                        @click="hintExpanded[section.key] = !hintExpanded[section.key]"
+                      >{{ hintExpanded[section.key]
+                        ? t('payroll.people.statutory_evidence.hint_less')
+                        : t('payroll.people.statutory_evidence.hint_more') }}</button>
+                    </p>
                   </div>
-
-                  <!--
-                    Doklad a poznámka jsou NEPOVINNÉ a zabíraly většinu plochy
-                    řádku. Sbalí se; otevřou se samy tam, kde už něco nesou.
-                  -->
-                  <details
-                    class="mt-2 rounded-md border border-neutral-200 bg-surface"
-                    :open="evidenceDetailFilled(section, row)"
-                    :data-test="`evidence-details-${section.key}-${index}`"
-                  >
-                    <summary class="cursor-pointer list-none px-2 py-1 text-xs text-neutral-600">
-                      {{ t('payroll.people.statutory_evidence.evidence_details') }}
-                    </summary>
-                    <div class="grid grid-cols-1 gap-2 border-t border-neutral-200 p-2 sm:grid-cols-2 lg:grid-cols-3">
-                      <label
-                        v-for="field in evidenceDetailFields(section, row)"
-                        :key="field.key"
-                        class="block text-xs text-neutral-600"
-                      >
-                        {{ t(`payroll.people.statutory_evidence.field.${field.key}`) }}
-
-                        <input
-                          v-if="field.kind === 'document'"
-                          :value="fieldValue(row, field.key)"
-                          type="number"
-                          min="1"
-                          inputmode="numeric"
-                          :disabled="!editing || saving || isFrozen(section, row)"
-                          :data-test="`${section.key}-${index}-${field.key}`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                          @input="onInput(section, row, field.key, $event)"
-                        >
-
-                        <template v-else>
-                          <select
-                            :value="reasonSelection(section, row, field)"
-                            :disabled="!editing || saving"
-                            :data-test="`${section.key}-${index}-${field.key}-reason`"
-                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                            @change="onReason(row, field, $event)"
-                          >
-                            <option value="">
-                              {{ t('payroll.people.statutory_evidence.reference_optional') }}
-                            </option>
-                            <option
-                              v-for="reason in reasonOptions(section.key, field.key, row)"
-                              :key="reason"
-                              :value="reason"
-                            >{{ t(`payroll.people.statutory_evidence.reason.${reasonLabelKey(reason)}`) }}</option>
-                            <option :value="CUSTOM_REASON">
-                              {{ t('payroll.people.statutory_evidence.reason_custom') }}
-                            </option>
-                          </select>
-                          <template v-if="reasonSelection(section, row, field) === CUSTOM_REASON">
-                            <input
-                              v-model="row[field.key]"
-                              type="text"
-                              :disabled="!editing || saving"
-                              :placeholder="t('payroll.people.statutory_evidence.reference_placeholder')"
-                              :data-test="`${section.key}-${index}-${field.key}`"
-                              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                            >
-                            <span class="mt-0.5 block text-neutral-400">
-                              {{ t('payroll.people.statutory_evidence.reference_hint') }}
-                            </span>
-                          </template>
-                        </template>
-                      </label>
-
-                      <label class="block text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">
-                        {{ t('payroll.people.statutory_evidence.evidence_note') }}
-                        <input
-                          v-model="row.evidence_note"
-                          type="text"
-                          :disabled="!editing || saving"
-                          :placeholder="t('payroll.people.statutory_evidence.evidence_note_placeholder')"
-                          :data-test="`${section.key}-${index}-evidence_note`"
-                          class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                        >
-                      </label>
-                    </div>
-                  </details>
-
-                  <ul
-                    v-if="issuesFor(section, row).length > 0"
-                    class="mt-2 list-disc space-y-0.5 rounded-md border border-warning-500/30 bg-warning-50 py-1.5 pl-6 pr-2 text-xs text-warning-800"
-                    :data-test="`issues-${section.key}-${index}`"
-                  >
-                    <li v-for="issue in issuesFor(section, row)" :key="issue.key">
-                      {{ issueText(issue) }}
-                    </li>
-                  </ul>
-
-                  <!--
-                    Zamčený řádek dostane AKCI, ne jen konstatování. Bez ní si
-                    uživatel musel sám odvodit, že smí založit novou verzi, nebo
-                    odejít jinam otevřít mzdu k opravě.
-                  -->
-                  <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span v-if="isFrozen(section, row)" class="text-xs text-neutral-500">
-                      {{ t('payroll.people.statutory_evidence.row_frozen') }}
-                    </span>
-                    <span v-else />
-                    <div class="flex flex-wrap gap-2">
-                      <button
-                        v-if="canWrite && offersNewVersion(section, row)"
-                        type="button"
-                        :class="btnOutlineSm('accent')"
-                        :disabled="saving"
-                        :data-test="`change-from-${section.key}`"
-                        @click="changeFromNextPeriod(section, row)"
-                      >{{ t('payroll.people.statutory_evidence.change_from', { day: formatDate(unlockDay ?? '') }) }}</button>
-                      <button
-                        v-if="canWrite && isFrozen(section, row) && correctableRuns.length > 0"
-                        type="button"
-                        :class="btnOutlineSm('warning')"
-                        :disabled="correcting || saving"
-                        :data-test="`open-run-${section.key}`"
-                        @click="openRunsForCorrection"
-                      >{{ t('payroll.people.statutory_evidence.open_run') }}</button>
-                      <button
-                        v-if="editing && !isFrozen(section, row)"
-                        type="button"
-                        :class="btnOutline('danger')"
-                        :disabled="saving"
-                        :data-test="`remove-${section.key}-${index}`"
-                        @click="removeRow(section, index)"
-                      >
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
-                        {{ t('payroll.people.statutory_evidence.remove_row') }}
-                      </button>
-                    </div>
+                  <div v-if="canWrite && !isEditing(section)" class="flex shrink-0 flex-wrap items-start gap-2">
+                    <!--
+                      Prázdná sekce nemá co upravovat. „Upravit" tu jen přeplo
+                      režim a uživatel pak přehlédl malé „Přidat záznam" dole.
+                      Proto rovnou přidání, u chybějícího údaje jako hlavní akce.
+                    -->
+                    <button
+                      v-if="(drafts[section.key] ?? []).length === 0"
+                      type="button"
+                      :class="[summaryIsBlocking(section) ? btnFilledSm('primary') : btnOutlineSm('primary'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      :aria-label="t('payroll.people.statutory_evidence.add_section_aria', {
+                        section: t(`payroll.people.statutory_evidence.section.${section.key}`),
+                      })"
+                      :data-test="`add-first-${section.key}`"
+                      @click="startAdd(section)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                      {{ t('payroll.people.statutory_evidence.add_row') }}
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      :aria-label="t('payroll.people.statutory_evidence.edit_section_aria', {
+                        section: t(`payroll.people.statutory_evidence.section.${section.key}`),
+                      })"
+                      :data-test="`edit-${section.key}`"
+                      @click="editSection(section)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                      {{ t('payroll.people.statutory_evidence.edit_section') }}
+                    </button>
                   </div>
                 </div>
 
-                <p
-                  v-for="issue in sectionIssues(section, drafts[section.key] ?? [])"
-                  :key="issue.key"
-                  class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
-                  :data-test="`issues-${section.key}`"
-                >{{ issueText(issue) }}</p>
-
-                <button
-                  v-if="editing"
-                  type="button"
-                  :class="`mt-2 ${btnOutline('neutral')}`"
-                  :disabled="saving"
-                  :data-test="`add-${section.key}`"
-                  @click="addRow(section)"
+                <details
+                  class="border-t border-neutral-200"
+                  :open="historyOpen(section)"
+                  :data-test="`history-${section.key}`"
+                  @toggle="onHistoryToggle(section, $event)"
                 >
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
-                  {{ t('payroll.people.statutory_evidence.add_row') }}
-                </button>
-              </div>
-            </details>
-          </section>
+                  <summary class="cursor-pointer list-none px-3 py-1.5 text-xs font-medium text-neutral-600">
+                    {{ t('payroll.people.statutory_evidence.history', { count: (drafts[section.key] ?? []).length }, (drafts[section.key] ?? []).length) }}
+                  </summary>
+
+                  <div class="px-3 pb-3">
+                    <p
+                      v-if="(drafts[section.key] ?? []).length === 0"
+                      class="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+                    >{{ t('payroll.people.statutory_evidence.empty') }}</p>
+
+                    <div
+                      v-for="(row, index) in drafts[section.key] ?? []"
+                      :key="`${section.key}-${row.id ?? `new-${index}`}`"
+                      class="mt-2 rounded-md border p-2"
+                      :class="isFrozen(section, row)
+                        ? 'border-neutral-200 bg-neutral-50'
+                        : isEditing(section)
+                          ? 'border-payroll-500/40 bg-payroll-50'
+                          : 'border-neutral-200'"
+                      :data-test="`row-${section.key}-${index}`"
+                    >
+                      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3" data-row-primary>
+                        <label v-if="section.kind === 'month'" class="block text-xs text-neutral-600">
+                          {{ t('payroll.people.statutory_evidence.period_start') }}
+                          <DateInput
+                            v-model="row.period_start"
+                            :disabled="!isEditing(section) || saving || isFrozen(section, row)"
+                            :data-test="`${section.key}-${index}-period_start`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
+                        </label>
+                        <template v-else>
+                          <label class="block text-xs text-neutral-600">
+                            {{ t('payroll.people.statutory_evidence.effective_from') }}
+                            <DateInput
+                              v-model="row.effective_from"
+                              :disabled="!isEditing(section) || saving || isFrozen(section, row)"
+                              :data-test="`${section.key}-${index}-effective_from`"
+                              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
+                          </label>
+                          <label class="block text-xs text-neutral-600">
+                            {{ t('payroll.people.statutory_evidence.effective_to') }}
+                            <DateInput
+                              v-model="row.effective_to"
+                              :disabled="!isEditing(section) || saving"
+                              :data-test="`${section.key}-${index}-effective_to`"
+                              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100" />
+                          </label>
+                        </template>
+
+                        <label
+                          v-for="field in primaryFields(section, row)"
+                          :key="field.key"
+                          class="block text-xs text-neutral-600"
+                        >
+                          {{ t(`payroll.people.statutory_evidence.field.${field.key}`) }}
+
+                          <select
+                            v-if="field.kind === 'enum'"
+                            :value="fieldValue(row, field.key)"
+                            :disabled="!isEditing(section) || saving"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            @change="onSelect(section, row, field.key, $event)"
+                          >
+                            <option v-for="option in field.options" :key="option" :value="option">
+                              {{ t(`payroll.people.statutory_evidence.option.${field.key}.${option}`) }}
+                            </option>
+                          </select>
+
+                          <CountrySelect
+                            v-else-if="field.kind === 'country'"
+                            :model-value="fieldValue(row, field.key)"
+                            :disabled="!isEditing(section) || saving"
+                            :clearable="false"
+                            required
+                            accent="payroll"
+                            class="mt-1 block"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            @update:model-value="setField(section, row, field.key, $event)"
+                          />
+
+                          <select
+                            v-else-if="field.kind === 'insurer'"
+                            :value="fieldValue(row, field.key)"
+                            :disabled="!isEditing(section) || saving"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            @change="onSelect(section, row, field.key, $event)"
+                          >
+                            <option value="">{{ t('payroll.people.statutory_evidence.insurer_unset') }}</option>
+                            <option v-for="insurer in insurerOptions" :key="insurer.value" :value="insurer.value">
+                              {{ insurer.label }}
+                            </option>
+                          </select>
+
+                          <select
+                            v-else-if="field.kind === 'employer'"
+                            :value="fieldValue(row, field.key)"
+                            :disabled="!isEditing(section) || saving"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            @change="onSelect(section, row, field.key, $event)"
+                          >
+                            <option value="">{{ t('payroll.people.statutory_evidence.employer_none') }}</option>
+                            <option
+                              v-for="reference in employerReferencesFor(row)"
+                              :key="reference"
+                              :value="reference"
+                            >{{ reference }}</option>
+                          </select>
+
+                          <input
+                            v-else-if="field.kind === 'reference'"
+                            :value="fieldValue(row, field.key)"
+                            type="text"
+                            :disabled="!isEditing(section) || saving || isFrozen(section, row)"
+                            :placeholder="t('payroll.people.statutory_evidence.employer_reference_placeholder')"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            @input="onInput(section, row, field.key, $event)"
+                          >
+
+                          <span v-else-if="field.kind === 'money'" class="mt-1 flex items-center gap-1">
+                            <input
+                              :value="moneyText(row, field.key)"
+                              type="text"
+                              inputmode="decimal"
+                              :disabled="!isEditing(section) || saving"
+                              :data-test="`${section.key}-${index}-${field.key}`"
+                              class="w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-right text-sm tabular-nums disabled:bg-neutral-100"
+                              @input="onMoneyInput(row, field.key, $event)"
+                            >
+                            <span class="shrink-0 text-neutral-500">{{ t('payroll.people.statutory_evidence.currency_czk') }}</span>
+                          </span>
+
+                          <DateInput
+                            v-else-if="field.kind === 'date'"
+                            :model-value="fieldValue(row, field.key)"
+                            :disabled="!isEditing(section) || saving"
+                            :data-test="`${section.key}-${index}-${field.key}`"
+                            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            @change="onDateChange(section, row, field.key, $event)"
+                          />
+                        </label>
+                      </div>
+
+                      <!--
+                        Doklad a poznámka jsou NEPOVINNÉ a zabíraly většinu plochy
+                        řádku. Sbalí se; otevřou se samy tam, kde už něco nesou.
+                      -->
+                      <details
+                        class="mt-2 rounded-md border border-neutral-200 bg-surface"
+                        :open="evidenceDetailFilled(section, row)"
+                        :data-test="`evidence-details-${section.key}-${index}`"
+                      >
+                        <summary class="cursor-pointer list-none px-2 py-1 text-xs text-neutral-600">
+                          {{ t('payroll.people.statutory_evidence.evidence_details') }}
+                        </summary>
+                        <div class="grid grid-cols-1 gap-2 border-t border-neutral-200 p-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <label
+                            v-for="field in evidenceDetailFields(section, row)"
+                            :key="field.key"
+                            class="block text-xs text-neutral-600"
+                          >
+                            {{ t(`payroll.people.statutory_evidence.field.${field.key}`) }}
+
+                            <input
+                              v-if="field.kind === 'document'"
+                              :value="fieldValue(row, field.key)"
+                              type="number"
+                              min="1"
+                              inputmode="numeric"
+                              :disabled="!isEditing(section) || saving || isFrozen(section, row)"
+                              :data-test="`${section.key}-${index}-${field.key}`"
+                              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                              @input="onInput(section, row, field.key, $event)"
+                            >
+
+                            <template v-else>
+                              <select
+                                :value="reasonSelection(section, row, field)"
+                                :disabled="!isEditing(section) || saving"
+                                :data-test="`${section.key}-${index}-${field.key}-reason`"
+                                class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                                @change="onReason(row, field, $event)"
+                              >
+                                <option value="">
+                                  {{ t('payroll.people.statutory_evidence.reference_optional') }}
+                                </option>
+                                <option
+                                  v-for="reason in reasonOptions(section.key, field.key, row)"
+                                  :key="reason"
+                                  :value="reason"
+                                >{{ t(`payroll.people.statutory_evidence.reason.${reasonLabelKey(reason)}`) }}</option>
+                                <option :value="CUSTOM_REASON">
+                                  {{ t('payroll.people.statutory_evidence.reason_custom') }}
+                                </option>
+                              </select>
+                              <template v-if="reasonSelection(section, row, field) === CUSTOM_REASON">
+                                <input
+                                  v-model="row[field.key]"
+                                  type="text"
+                                  :disabled="!isEditing(section) || saving"
+                                  :placeholder="t('payroll.people.statutory_evidence.reference_placeholder')"
+                                  :data-test="`${section.key}-${index}-${field.key}`"
+                                  class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                                >
+                                <span class="mt-0.5 block text-neutral-400">
+                                  {{ t('payroll.people.statutory_evidence.reference_hint') }}
+                                </span>
+                              </template>
+                            </template>
+                          </label>
+
+                          <label class="block text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">
+                            {{ t('payroll.people.statutory_evidence.evidence_note') }}
+                            <input
+                              v-model="row.evidence_note"
+                              type="text"
+                              :disabled="!isEditing(section) || saving"
+                              :placeholder="t('payroll.people.statutory_evidence.evidence_note_placeholder')"
+                              :data-test="`${section.key}-${index}-evidence_note`"
+                              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                            >
+                          </label>
+                        </div>
+                      </details>
+
+                      <ul
+                        v-if="issuesFor(section, row).length > 0"
+                        class="mt-2 list-disc space-y-0.5 rounded-md border border-warning-500/30 bg-warning-50 py-1.5 pl-6 pr-2 text-xs text-warning-800"
+                        :data-test="`issues-${section.key}-${index}`"
+                      >
+                        <li v-for="issue in issuesFor(section, row)" :key="issue.key">
+                          {{ issueText(issue) }}
+                        </li>
+                      </ul>
+
+                      <!--
+                        Zamčený řádek dostane AKCI, ne jen konstatování. Bez ní si
+                        uživatel musel sám odvodit, že smí založit novou verzi, nebo
+                        odejít jinam otevřít mzdu k opravě.
+                      -->
+                      <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span v-if="isFrozen(section, row)" class="text-xs text-neutral-500">
+                          {{ t('payroll.people.statutory_evidence.row_frozen') }}
+                        </span>
+                        <span v-else />
+                        <div class="flex flex-wrap gap-2">
+                          <button
+                            v-if="canWrite && offersNewVersion(section, row)"
+                            type="button"
+                            :class="btnOutlineSm('accent')"
+                            :disabled="saving"
+                            :data-test="`change-from-${section.key}`"
+                            @click="changeFromNextPeriod(section, row)"
+                          >{{ t('payroll.people.statutory_evidence.change_from', { day: formatDate(unlockDay ?? '') }) }}</button>
+                          <button
+                            v-if="canWrite && isFrozen(section, row) && correctableRuns.length > 0"
+                            type="button"
+                            :class="btnOutlineSm('warning')"
+                            :disabled="correcting || saving"
+                            :data-test="`open-run-${section.key}`"
+                            @click="openRunsForCorrection"
+                          >{{ t('payroll.people.statutory_evidence.open_run') }}</button>
+                          <button
+                            v-if="isEditing(section) && !isFrozen(section, row)"
+                            type="button"
+                            :class="btnOutline('danger')"
+                            :disabled="saving"
+                            :data-test="`remove-${section.key}-${index}`"
+                            @click="removeRow(section, index)"
+                          >
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                            {{ t('payroll.people.statutory_evidence.remove_row') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p
+                      v-for="issue in sectionIssues(section, drafts[section.key] ?? [])"
+                      :key="issue.key"
+                      class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
+                      :data-test="`issues-${section.key}`"
+                    >{{ issueText(issue) }}</p>
+
+                    <!--
+                      Další záznam až pod existujícími a až po uložení: dokud je
+                      v sekci neuložená změna, hlavní krok je Uložit v liště níž,
+                      ne další „Přidat záznam", které by ji jen odsunulo.
+                    -->
+                    <button
+                      v-if="canWrite && !sectionDirty(section)
+                        && (isEditing(section) || (drafts[section.key] ?? []).length > 0)"
+                      type="button"
+                      :class="['mt-2 whitespace-nowrap', btnOutlineSm('primary')]"
+                      :disabled="saving"
+                      :data-test="`add-${section.key}`"
+                      @click="startAdd(section)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                      {{ (drafts[section.key] ?? []).length > 0
+                        ? t('payroll.people.statutory_evidence.add_another')
+                        : t('payroll.people.statutory_evidence.add_row') }}
+                    </button>
+                  </div>
+                </details>
+
+                <!--
+                  Lišta přímo pod rozpracovanou sekcí. Volá TOTÉŽ uložení jako
+                  společná lišta dole (`requestSave`), jen ho staví tam, kde se
+                  píše. Uložit je plné až ve chvíli, kdy formulář nic nehlásí.
+                -->
+                <div
+                  v-if="isEditing(section)"
+                  class="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2"
+                  :class="sectionDirty(section)
+                    ? 'border-warning-500/30 bg-warning-50'
+                    : 'border-neutral-200 bg-neutral-50'"
+                  :data-test="`inline-bar-${section.key}`"
+                >
+                  <span
+                    v-if="sectionDirty(section)"
+                    class="flex items-center gap-1.5 text-xs font-medium text-warning-800"
+                  >
+                    <span class="h-2 w-2 shrink-0 rounded-full bg-warning-500" aria-hidden="true" />
+                    {{ sectionReady(section)
+                      ? t('payroll.people.statutory_evidence.inline_unsaved')
+                      : t('payroll.people.statutory_evidence.inline_unsaved_incomplete') }}
+                  </span>
+                  <span v-else class="text-xs text-neutral-600">
+                    {{ t('payroll.people.statutory_evidence.inline_editing') }}
+                  </span>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      :data-test="`inline-discard-${section.key}`"
+                      @click="discardSection(section)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+                      {{ sectionDirty(section)
+                        ? t('payroll.people.statutory_evidence.inline_discard')
+                        : t('payroll.people.statutory_evidence.inline_close') }}
+                    </button>
+                    <button
+                      v-if="sectionDirty(section)"
+                      type="button"
+                      :class="[sectionReady(section) ? btnFilledSm('primary') : btnOutlineSm('primary'), 'whitespace-nowrap']"
+                      :disabled="saving"
+                      :data-test="`inline-save-${section.key}`"
+                      @click="requestSave"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                      {{ saving ? t('common.saving') : t('payroll.people.statutory_evidence.inline_save') }}
+                    </button>
+                  </div>
+                  <p
+                    v-if="saveError && sectionDirty(section)"
+                    class="w-full text-xs text-danger-700"
+                    :data-test="`inline-error-${section.key}`"
+                  >{{ saveError }}</p>
+                </div>
+              </section>
+            </div>
+          </div>
         </div>
 
         <p

@@ -5818,7 +5818,24 @@
           }
         },
         "edit_section": "Upravit",
-        "edit_section_aria": "Upravit: {section}"
+        "edit_section_aria": "Upravit: {section}",
+        "add_section_aria": "Přidat záznam: {section}",
+        "add_another": "Přidat další záznam",
+        "editing_badge": "Upravujete",
+        "inline_unsaved": "Neuloženo. Záznam je vyplněný, uložte ho.",
+        "inline_unsaved_incomplete": "Neuloženo. Doplňte údaje vypsané výše a uložte.",
+        "inline_editing": "Sekce je otevřená k úpravám.",
+        "inline_save": "Uložit",
+        "inline_discard": "Zahodit",
+        "inline_close": "Zavřít úpravy",
+        "hint_more": "Více",
+        "hint_less": "Méně",
+        "group": {
+          "tax": "Daň",
+          "social": "Sociální pojištění",
+          "health": "Zdravotní pojištění",
+          "other": "Ostatní"
+        }
       },
       "taxable_income_requests": {
         "title": "Žádosti o potvrzení o zdanitelných příjmech",

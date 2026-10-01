@@ -47,7 +47,9 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   }),
 }))
 
+import { defineComponent, h } from 'vue'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
+import { providePersonCardSave, type PersonCardSaveRegistry } from '@/pages/payroll/personCardSave'
 import { resetDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import PayrollPersonStatutoryEvidencePanel from '@/pages/payroll/PayrollPersonStatutoryEvidencePanel.vue'
 
@@ -357,8 +359,11 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(wrapper.find('[data-test="statutory-evidence-save"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="section-tax_declarations"]').element
       .contains(document.activeElement)).toBe(true)
-    // V editaci už tlačítko u sekce nepřekáží — režim je zapnutý pro celý panel.
+    // V editaci už tlačítko u sekce nepřekáží…
     expect(wrapper.find('[data-test="edit-tax_declarations"]').exists()).toBe(false)
+    // …a ostatní sekce zůstávají zamčené: „Upravit" otevírá jen tu jednu.
+    expect(wrapper.find('[data-test="add-first-tax_residences"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="inline-bar-tax_residences"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -366,8 +371,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
     const wrapper = await mounted()
 
-    await wrapper.get('[data-test="edit-tax_residences"]').trigger('click')
-    await wrapper.get('[data-test="add-tax_residences"]').trigger('click')
+    await wrapper.get('[data-test="add-first-tax_residences"]').trigger('click')
 
     expect(wrapper.findAll('[data-test="statutory-evidence-save"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-test^="save-"]')).toHaveLength(0)
@@ -506,8 +510,17 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
    * proto nesmí platit přes celou sekci, jinak by souběh nešlo uložit.
    */
   it('dvě slevy různého druhu můžou platit současně', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      sections: {
+        ...emptyEvidence().sections,
+        tax_credit_claims: [{
+          id: 8, row_version: 1, credit_kind: 'taxpayer', evidence_status: 'verified',
+          evidence_reference: null, evidence_note: null,
+          effective_from: currentMonthStart(), effective_to: null,
+        }],
+      },
+    }))
     const wrapper = await startEditing()
-    await wrapper.get('[data-test="add-tax_credit_claims"]').trigger('click')
     await wrapper.get('[data-test="add-tax_credit_claims"]').trigger('click')
 
     // Táž dvojice ve stejném druhu je chyba — tu pravidlo dál hlídá.
@@ -1115,6 +1128,197 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     const current = wrapper.get('[data-test="current-health_other_employer_bases"]').text()
     expect(current).toContain('zamestnavatel:firma-b')
     expect(current).toMatch(/15\s000/)
+  })
+})
+
+/**
+ * Hlášení účetní (1. 10. 2026): po kliknutí na „Upravit" u prázdné sekce se
+ * „jakoby nic nestalo", a kdo přidal záznam, viděl pod ním jen další „Přidat
+ * záznam" a změnu neuložil, protože Uložit bylo jen ve společné liště dole.
+ */
+describe('PayrollPersonStatutoryEvidencePanel — přidání a uložení v sekci', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.canWrite.mockReturnValue(true)
+    resetDefaultHealthInsurerCode()
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence())
+    mocks.saveStatutoryEvidence.mockResolvedValue(filledEvidence())
+    mocks.employerSettings.mockResolvedValue({ default_health_insurer_code: '205' })
+    // happy-dom scroll neumí; doskok ho volá a v prohlížeči ho má.
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  function mountOnCard(onRegistry: (registry: PersonCardSaveRegistry) => void) {
+    const Card = defineComponent({
+      setup() {
+        onRegistry(providePersonCardSave())
+        return () => h(PayrollPersonStatutoryEvidencePanel, { personId: 17, canWrite: true })
+      },
+    })
+    return mount(Card, { attachTo: document.body })
+  }
+
+  it('prázdná sekce nabízí rovnou Přidat záznam a otevře formulář jen v ní', async () => {
+    const wrapper = await mounted(true, true)
+
+    expect(wrapper.find('[data-test="edit-health_coverages"]').exists()).toBe(false)
+    const add = wrapper.get('[data-test="add-first-health_coverages"]')
+    // Chybějící údaj: hlavní akce, plné tlačítko.
+    expect(add.classes()).toContain('bg-primary-600')
+
+    await add.trigger('click')
+    await flushPromises()
+
+    const insurer = wrapper.get('[data-test="health_coverages-0-insurer_code"]')
+    expect(insurer.attributes('disabled')).toBeUndefined()
+    expect(document.activeElement).toBe(insurer.element)
+    expect(wrapper.get('[data-test="section-health_coverages"]').attributes('data-editing'))
+      .toBe('true')
+    // Ostatní sekce zůstávají zavřené.
+    expect(wrapper.find('[data-test="add-first-tax_declarations"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="inline-bar-tax_declarations"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('nový záznam prázdné sekce platí od měsíce nástupu', async () => {
+    const wrapper = mount(PayrollPersonStatutoryEvidencePanel, {
+      props: { personId: 17, canWrite: true, employmentStartOn: '2026-03-15' },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="add-first-health_coverages"]').trigger('click')
+    await wrapper.get('[data-test="inline-save-health_coverages"]').trigger('click')
+    await flushPromises()
+
+    expect(savedRow('health_coverages')).toMatchObject({ effective_from: '2026-03-01' })
+  })
+
+  it('doskok z varování otevře nový záznam a kurzor postaví do pojišťovny', async () => {
+    const wrapper = await mounted(true, true)
+
+    const revealed = await (wrapper.vm as unknown as {
+      revealSection: (key: string) => Promise<boolean>
+    }).revealSection('health_coverages')
+    await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 450))
+
+    expect(revealed).toBe(true)
+    const insurer = wrapper.get('[data-test="health_coverages-0-insurer_code"]')
+    expect(insurer.attributes('disabled')).toBeUndefined()
+    expect(document.activeElement).toBe(insurer.element)
+    expect(wrapper.find('[data-test="inline-bar-health_coverages"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('doskok před dokončením načtení počká na data', async () => {
+    let resolve: (value: PayrollStatutoryEvidence) => void = () => {}
+    mocks.statutoryEvidence.mockReturnValue(new Promise((done) => { resolve = done }))
+    const wrapper = mount(PayrollPersonStatutoryEvidencePanel, {
+      props: { personId: 17, canWrite: true },
+      attachTo: document.body,
+    })
+    await (wrapper.vm as unknown as {
+      revealSection: (key: string) => Promise<boolean>
+    }).revealSection('health_coverages')
+    resolve(emptyEvidence())
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="health_coverages-0-insurer_code"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('rozpracovaný záznam má Uložit přímo pod sebou a další přidání až po uložení', async () => {
+    const wrapper = await mounted()
+    await wrapper.get('[data-test="add-first-tax_declarations"]').trigger('click')
+
+    expect(wrapper.find('[data-test="add-tax_declarations"]').exists()).toBe(false)
+    const save = wrapper.get('[data-test="inline-save-tax_declarations"]')
+    // Předvyplněný záznam je hned platný, Uložit je hlavní krok.
+    expect(save.classes()).toContain('bg-primary-600')
+
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="inline-bar-tax_declarations"]').exists()).toBe(false)
+    // Po uložení je vidět, co se uložilo, a nabídne se další záznam.
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-test="add-tax_declarations"]').text())
+      .toContain('payroll.people.statutory_evidence.add_another')
+  })
+
+  it('neúplný záznam nechá Uložit jen obrysové a pojmenuje, co chybí', async () => {
+    const wrapper = await mounted()
+    await wrapper.get('[data-test="add-first-health_other_employer_bases"]').trigger('click')
+
+    const save = wrapper.get('[data-test="inline-save-health_other_employer_bases"]')
+    expect(save.classes()).not.toContain('bg-primary-600')
+    expect(wrapper.get('[data-test="inline-bar-health_other_employer_bases"]').text())
+      .toContain('payroll.people.statutory_evidence.inline_unsaved_incomplete')
+  })
+
+  it('Zahodit vrátí jen tu sekci a zavře její úpravy', async () => {
+    const wrapper = await mounted()
+    await wrapper.get('[data-test="add-first-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="add-first-tax_residences"]').trigger('click')
+
+    await wrapper.get('[data-test="inline-discard-tax_declarations"]').trigger('click')
+
+    expect(wrapper.find('[data-test="tax_declarations-0-status"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="inline-bar-tax_declarations"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="inline-save-tax_residences"]').exists()).toBe(true)
+  })
+
+  it('na kartě volá Uložit pod sekcí totéž společné uložení jako lišta dole', async () => {
+    let registry: PersonCardSaveRegistry | null = null
+    const wrapper = mountOnCard((value) => { registry = value })
+    await flushPromises()
+    const saveAll = vi.spyOn(registry!, 'saveAll')
+
+    await wrapper.get('[data-test="add-first-health_coverages"]').trigger('click')
+    // Lišta karty jmenuje konkrétní blok, ne celou evidenci.
+    expect(registry!.dirtySections.value.map(section => section.label()))
+      .toEqual(['payroll.people.statutory_evidence.section.health_coverages'])
+    // Na kartě panel vlastní Uložit dole nekreslí.
+    expect(wrapper.find('[data-test="statutory-evidence-save"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="inline-save-health_coverages"]').trigger('click')
+    await flushPromises()
+
+    expect(saveAll).toHaveBeenCalledTimes(1)
+    expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
+    expect(registry!.hasChanges.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('zastavené uložení ohlásí karta stejně, ať ho spustí kterákoli lišta', async () => {
+    mocks.saveStatutoryEvidence.mockRejectedValue(new Error('x'))
+    const onStopped = vi.fn()
+    const Card = defineComponent({
+      setup() {
+        providePersonCardSave({ onStopped })
+        return () => h(PayrollPersonStatutoryEvidencePanel, { personId: 17, canWrite: true })
+      },
+    })
+    const wrapper = mount(Card)
+    await flushPromises()
+    await wrapper.get('[data-test="add-first-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="inline-save-tax_declarations"]').trigger('click')
+    await flushPromises()
+
+    expect(onStopped).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="inline-error-tax_declarations"]').exists()).toBe(true)
+  })
+
+  it('bloky seskupí pod nadpisy Daň, Sociální a Zdravotní pojištění', async () => {
+    const wrapper = await mounted()
+
+    expect(wrapper.get('[data-test="group-tax"]').find('[data-test="section-tax_residences"]').exists())
+      .toBe(true)
+    expect(wrapper.get('[data-test="group-social"]').find('[data-test="section-social_jurisdictions"]').exists())
+      .toBe(true)
+    expect(wrapper.get('[data-test="group-health"]').find('[data-test="section-health_coverages"]').exists())
+      .toBe(true)
+    expect(wrapper.find('[data-test="group-other"]').exists()).toBe(false)
   })
 })
 

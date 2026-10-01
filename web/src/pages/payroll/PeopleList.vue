@@ -314,7 +314,10 @@ const selectedEmploymentCount = computed(
  * Karta se zavírá, přepíná nebo opouští jen přes dotaz, pokud v ní zůstala
  * neuložená práce — dřív tiše zmizela.
  */
-const cardSave = providePersonCardSave()
+const cardSave = providePersonCardSave({
+  onStopped: section => toast.error(t('payroll.people.card_save.stopped', { section: section.label() })),
+})
+const statutoryPanel = ref<InstanceType<typeof PayrollPersonStatutoryEvidencePanel> | null>(null)
 const selectedEmploymentStartOn = computed(() => {
   const starts = (selectedDetail.value?.employments ?? [])
     .filter(employment => !['archived', 'no_show'].includes(employment.status))
@@ -336,9 +339,7 @@ function confirmDiscardCardChanges(): boolean {
 
 async function saveCard() {
   if (!cardSave.hasChanges.value) return
-  if (await cardSave.saveAll()) return
-  const failed = cardSave.failedSection.value
-  if (failed) toast.error(t('payroll.people.card_save.stopped', { section: failed.label() }))
+  await cardSave.saveAll()
 }
 
 function onBeforeUnload(event: BeforeUnloadEvent) {
@@ -1239,6 +1240,12 @@ async function focusPanel(panel: string) {
 
     return
   }
+  // Varování „chybí pojišťovna" nemá jen vysvítit sekci: panel rovnou otevře
+  // nový záznam (u prázdné sekce) a postaví kurzor do pole, které chybí.
+  if (panel === 'statutory_evidence' && field?.startsWith('statutory.') === true) {
+    await nextTick()
+    if (await statutoryPanel.value?.revealSection(field.slice('statutory.'.length))) return
+  }
   if (field !== undefined) {
     await nextTick()
     if (revealField(fieldSelector(field))) return
@@ -1775,6 +1782,7 @@ onMounted(async () => {
 
       <div data-panel-anchor="statutory_evidence" class="scroll-mt-24">
         <PayrollPersonStatutoryEvidencePanel
+          ref="statutoryPanel"
           :person-id="expandedId"
           :can-write="auth.canWrite('payroll.person.write')"
           :employment-start-on="selectedEmploymentStartOn"

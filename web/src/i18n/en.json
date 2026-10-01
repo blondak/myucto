@@ -5818,7 +5818,24 @@
           }
         },
         "edit_section": "Edit",
-        "edit_section_aria": "Edit: {section}"
+        "edit_section_aria": "Edit: {section}",
+        "add_section_aria": "Add record: {section}",
+        "add_another": "Add another record",
+        "editing_badge": "Editing",
+        "inline_unsaved": "Not saved. The record is complete, save it.",
+        "inline_unsaved_incomplete": "Not saved. Fill in the details listed above and save.",
+        "inline_editing": "This section is open for editing.",
+        "inline_save": "Save",
+        "inline_discard": "Discard",
+        "inline_close": "Close editing",
+        "hint_more": "More",
+        "hint_less": "Less",
+        "group": {
+          "tax": "Tax",
+          "social": "Social insurance",
+          "health": "Health insurance",
+          "other": "Other"
+        }
       },
       "taxable_income_requests": {
         "title": "Requests for a certificate of taxable income",

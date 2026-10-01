@@ -40,7 +40,16 @@ export interface PersonCardSaveRegistry {
 
 const KEY: InjectionKey<PersonCardSaveRegistry> = Symbol('personCardSave')
 
-export function createPersonCardSaveRegistry(): PersonCardSaveRegistry {
+export interface PersonCardSaveOptions {
+  /**
+   * Ohlášení sekce, u které se společné uložení zastavilo. Patří k uložení,
+   * ne k tlačítku: ať ho spustí lišta karty, nebo lišta pod rozpracovanou
+   * sekcí, uživatel dostane stejnou zprávu.
+   */
+  onStopped?: (section: PersonCardSaveSection) => void
+}
+
+export function createPersonCardSaveRegistry(options: PersonCardSaveOptions = {}): PersonCardSaveRegistry {
   const sections = shallowRef<PersonCardSaveSection[]>([])
   const saving = ref(false)
   const failedSection = shallowRef<PersonCardSaveSection | null>(null)
@@ -72,6 +81,7 @@ export function createPersonCardSaveRegistry(): PersonCardSaveRegistry {
         if (!ok) {
           failedSection.value = section
           section.focus?.()
+          options.onStopped?.(section)
           return false
         }
       }
@@ -93,20 +103,24 @@ export function createPersonCardSaveRegistry(): PersonCardSaveRegistry {
   return { register, dirtySections, hasChanges, isDirty, saving, failedSection, saveAll, discardAll }
 }
 
-export function providePersonCardSave(): PersonCardSaveRegistry {
-  const registry = createPersonCardSaveRegistry()
+export function providePersonCardSave(options: PersonCardSaveOptions = {}): PersonCardSaveRegistry {
+  const registry = createPersonCardSaveRegistry(options)
   provide(KEY, registry)
   return registry
 }
 
 /**
  * Přihlášení panelu ke společnému Uložit. Vrací `managed` — když je true,
- * panel své vlastní Uložit nekreslí.
+ * panel své vlastní Uložit nekreslí. `saveAll` je totéž uložení, jaké spouští
+ * lišta karty; panel ho smí nabídnout i u rozpracované sekce, ale nesmí
+ * vymýšlet vlastní.
  */
-export function usePersonCardSaveSection(section: PersonCardSaveSection): { managed: boolean } {
+export function usePersonCardSaveSection(
+  section: PersonCardSaveSection,
+): { managed: boolean; saveAll?: () => Promise<boolean> } {
   const registry = inject(KEY, null)
   if (registry === null) return { managed: false }
   const unregister = registry.register(section)
   onBeforeUnmount(unregister)
-  return { managed: true }
+  return { managed: true, saveAll: () => registry.saveAll() }
 }
