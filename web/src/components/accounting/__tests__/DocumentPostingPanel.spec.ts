@@ -100,10 +100,12 @@ describe('DocumentPostingPanel', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('accounting.journal.document_posting.title')
-    expect((wrapper.get('.classification').element.parentElement as HTMLElement).style.display).toBe('none')
+    // Obsah sekce je v bloku údajů dokladu pod zápisy; sbaluje se tělo sekce o úroveň výš.
+    const body = () => wrapper.get('.classification').element.parentElement!.parentElement as HTMLElement
+    expect(body().style.display).toBe('none')
 
     await wrapper.get('button').trigger('click')
-    expect((wrapper.get('.classification').element.parentElement as HTMLElement).style.display).toBe('')
+    expect(body().style.display).toBe('')
   })
 
   it('zaúčtovaný doklad ukáže sbalenou sekci a rozbalí se až na klik', async () => {
