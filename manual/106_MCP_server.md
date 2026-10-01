@@ -34,6 +34,7 @@ Podstatné vlastnosti:
 |---|---|
 | Fakturace | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), vystavování, odesílání, evidence úhrad, upomínky |
 | Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
+| Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), přijetí, úhrada, storno, zálohy, zakázka, druh nákladu, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 106.8.4](#10684-prijate-faktury)) |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** — založení, úprava, archivace, rozpočty a ziskovost |
 | Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb |
@@ -341,6 +342,16 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 
 Podrobnosti v [§ 106.7.4](#10674-uprava-konceptu-faktury).
 
+**Přijaté faktury** *(token čtení a zápis)*
+
+- „Zapiš fakturu od Dodavatel s.r.o. číslo FA-118 na 2 000 Kč bez DPH, sazba 21 %, DUZP 9. září, splatnost 24. září.“
+- „U té faktury oprav číslo dokladu na FA-2026-118 a přidej položku Doprava 350 Kč.“
+- „Přijmi ji.“ *(asistent nejdřív ukáže, co přijetí udělá, a čeká na potvrzení)*
+- „Spáruj fakturu od Dodavatele se zálohou, kterou jsme platili v srpnu.“
+- „Připrav příkaz k úhradě na všechny faktury splatné tento týden.“
+
+Podrobnosti v [§ 106.8.4](#10684-prijate-faktury).
+
 **Odběratelé**
 
 - „Založ klienta podle IČO 45274649.“
@@ -547,6 +558,62 @@ Smazání vozidla, jízdy nebo tankování vyžaduje potvrzení. Používané vo
 nelze smazat; lze ho pouze archivovat. Roční daňový souhrn je dostupný jen ke
 čtení a žádný účetní zápis z MCP nevytváří.
 
+### 106.8.4 Přijaté faktury
+
+Došlý doklad od dodavatele asistent zapíše jako **koncept**. Do evidence DPH,
+závazků a účetnictví vstoupí až přijetím, do té doby jde koncept opravit nebo
+smazat.
+
+| Nástroj | Co dělá |
+|---|---|
+| `create_purchase_invoice` | založí koncept: dodavatel, číslo dokladu dodavatele, data, měna, druh dokladu, odpočet DPH, kategorie nákladu, zakázka, položky |
+| `update_purchase_invoice` | změní hlavičku konceptu, ostatní pole i položky zůstanou |
+| `add_purchase_invoice_item`, `update_purchase_invoice_item`, `remove_purchase_invoice_item` | přidá, změní nebo odebere jednu položku konceptu |
+| `delete_purchase_invoice` | smaže koncept |
+| `receive_purchase_invoice` | přijme doklad; také zruší označení úhrady nebo obnoví stornovaný doklad |
+| `mark_purchase_invoice_paid` | zaeviduje úhradu, která nepřišla z výpisu ani z pokladny |
+| `cancel_purchase_invoice` | stornuje doklad |
+| `set_purchase_invoice_document_kind`, `set_purchase_invoice_project`, `set_purchase_invoice_expense_kinds` | změní druh dokladu, zakázku nebo druh nákladu po položkách |
+| `set_purchase_invoice_exchange_rate` | nastaví ruční kurz konceptu v cizí měně |
+| `list_purchase_advance_candidates`, `link_purchase_advance`, `unlink_purchase_advance` | spáruje konečnou fakturu se zálohou, nebo vazbu zruší |
+| `get_purchase_invoice_payment`, `set_purchase_invoice_payment_account`, `verify_purchase_payment_account` | platební údaje, změna účtu dodavatele a jeho ověření v registru plátců DPH |
+| `list_purchase_payment_candidates`, `create_purchase_payment_order`, `list_purchase_payment_orders`, `delete_purchase_payment_order` | příprava a přehled příkazů k úhradě |
+| `get_purchase_invoice_activity`, `list_expense_categories` | historie dokladu a číselník kategorií nákladů |
+
+Platí přitom:
+
+- **Sazbu DPH a DUZP si asistent nevymýšlí.** Bere je z dokladu, a když na
+  dokladu nejsou, zeptá se nebo je vynechá. DUZP a datum přijetí dokladu
+  rozhodují o období, ve kterém se uplatní odpočet DPH; bez data přijetí se
+  použije datum vystavení.
+- U cizí měny se kurz načte z ČNB k DUZP, a když DUZP chybí, k datu vystavení.
+  Ruční kurz zadává asistent jen na výslovný pokyn.
+- **Mění se jen to, co řekneš.** Při úpravě hlavičky i položek zůstanou ostatní
+  údaje beze změny, včetně těch, které v rozhovoru nevidíš: druh nákladu,
+  nákladový účet, časové rozlišení, vazba na sklad a pořadí položek.
+- Po změně dodavatele nebo přenesené daňové povinnosti si aplikace zařazení
+  položek pro přiznání k DPH odvodí znovu. Změna data zařazení nemění.
+- Doklad s ruční rekapitulací DPH podle dokladu upravuj v aplikaci; asistent
+  jeho položky nemění, protože by rekapitulace přestala sedět.
+- **Upravit jde jen koncept.** Přijatý doklad opravuje účetní v aplikaci.
+- **Přijetí může doklad rovnou zaúčtovat.** Má-li firma zapnuté automatické
+  účtování přijatých faktur, aplikace doklad při přijetí zaúčtuje; u úhrady
+  hotově z pokladny založí výdajový pokladní doklad. Asistent to před přijetím
+  řekne a čeká na potvrzení.
+- **Zaúčtovat doklad asistent neumí.** Ruční zaúčtování je účetní úkon a přes
+  token nejde. U zaúčtovaného dokladu proto odmítne i změnu druhu dokladu,
+  druhu nákladu, kurzu a spárování se zálohou, protože by se doklad rozešel
+  s deníkem. Zakázku přiřadit jde, je to jen analytický údaj.
+- Zálohová faktura se zakládá jako druh „záloha“, daňový doklad k zaplacené
+  záloze jako „daňový doklad k záloze“. Konečnou fakturu se zálohou spáruje
+  `link_purchase_advance`; náklad se pak nepočítá dvakrát.
+- **Příkaz k úhradě asistent jen připraví.** Do banky nic neodesílá a faktury
+  neoznačí jako uhrazené. Soubor pro banku stáhneš a odešleš v aplikaci.
+- Soubory (PDF dokladu, ISDOC, import) se přes MCP nenahrávají ani nestahují.
+
+V režimu jen pro čtení se zápisové nástroje nenabízejí; vyžadují token
+s oprávněním čtení a zápis.
+
 ## 106.9 E-shop a sklad
 
 Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** — asistent
@@ -632,7 +699,11 @@ jen čte.
 ### 106.9.4 Potvrzování nevratných kroků
 
 Mazání, storno dokladu, uzavření inventury a odebrání položky z konceptu
-faktury vyžadují **výslovné potvrzení**.
+faktury vyžadují **výslovné potvrzení**. U přijatých faktur navíc přijetí
+dokladu (může ho rovnou zaúčtovat), storno, smazání konceptu, odebrání
+položky, zrušení vazby na zálohu, změna účtu dodavatele a smazání příkazu
+k úhradě. Potvrzovací výpis u přijaté faktury vždy uvádí dodavatele, číslo
+dokladu dodavatele a částku.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
 změna týkala:
 
