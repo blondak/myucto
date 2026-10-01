@@ -23,7 +23,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzMonthCompletionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
@@ -444,6 +447,11 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 new PayrollSubmissionRepository($this->db),
                 $this->submissions,
                 new NullLogger(),
+                new PayrollSubmissionSettlementService(
+                    new PayrollSubmissionRepository($this->db),
+                    new SubmissionOutboxRepository($this->db),
+                    new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog()),
+                ),
             ),
             $this->outboxService,
             new JmhzFrozenPayloadReader(
@@ -618,6 +626,11 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 new PayrollSubmissionRepository($this->db),
                 $this->submissions,
                 new NullLogger(),
+                new PayrollSubmissionSettlementService(
+                    new PayrollSubmissionRepository($this->db),
+                    new SubmissionOutboxRepository($this->db),
+                    new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog()),
+                ),
             ),
             $this->outboxService,
             new JmhzFrozenPayloadReader(

@@ -581,17 +581,17 @@ final readonly class SubmissionOutboxService
             );
         }
 
-        return [
-            'row' => $this->outbox->attachReceipt(
-                $supplierId,
-                $id,
-                $documentId,
-                $inboxMessageId,
-                $matchedBy,
-                (int) $row['row_version'],
-            ),
-            'attached' => true,
-        ];
+        $attached = $this->outbox->attachReceipt(
+            $supplierId,
+            $id,
+            $documentId,
+            $inboxMessageId,
+            $matchedBy,
+            (int) $row['row_version'],
+        );
+        $this->payrollProjection?->projectDelivery($supplierId, $attached);
+
+        return ['row' => $attached, 'attached' => true];
     }
 
     /**
@@ -686,6 +686,9 @@ final readonly class SubmissionOutboxService
         ) {
             $row = $this->outbox->markDelivered($supplierId, $id, $status->deliveredAt, $version);
             $version = (int) $row['row_version'];
+            // Vlastní zápis až po doručení: povinnost se mění v jiné tabulce
+            // a osu vyřízení tahle cesta nehýbe.
+            $this->payrollProjection?->projectDelivery($supplierId, $row);
         }
 
         // 2) osa vyřízení — jen když na to kanál má

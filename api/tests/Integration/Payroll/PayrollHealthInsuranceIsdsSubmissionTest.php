@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -20,6 +21,7 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelCat
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -172,6 +174,103 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
             '123456789',
             $submission['correlation_reference'],
         );
+    }
+
+    /**
+     * Přehled o platbě je podaný dodáním do schránky pojišťovny; pojišťovna
+     * výsledek neposílá. Doručení proto samo splní povinnost — dřív zůstala
+     * „odeslaná" navždy a měsíc šlo uzavřít jen ručně.
+     */
+    public function testDeliveryOfPaymentOverviewFulfilsTheObligation(): void
+    {
+        $submissionId = $this->sentSubmission('delivered');
+        self::assertSame('submitted', $this->obligationStatus($submissionId));
+
+        $outboxId = $this->outboxIdOf($submissionId);
+        $row = $this->outbox->applyStatus(
+            $this->supplierId,
+            $outboxId,
+            ChannelStatus::deliveredOnly(new \DateTimeImmutable('+1 second')),
+        );
+
+        self::assertSame('delivered', $row['dispatch_state']);
+        self::assertSame('fulfilled', $this->obligationStatus($submissionId));
+        // Výrok úřadu se nevymýšlí: osa vyřízení i stav podání zůstávají.
+        self::assertSame('unknown', $row['acceptance_state']);
+        self::assertSame(
+            'submitted',
+            $this->submissions->get($this->supplierId, $submissionId)['status'],
+        );
+    }
+
+    public function testHozDeliveryFulfilsTheObligationToo(): void
+    {
+        $submissionId = $this->readyBulkNotificationSubmission('hoz-delivered');
+        $queued = $this->isds->enqueue($this->supplierId, $submissionId, self::INSURER, null);
+        $this->outbox->markSentManually(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $this->userId,
+            '123456790',
+        );
+
+        $this->outbox->applyStatus(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            ChannelStatus::deliveredOnly(new \DateTimeImmutable('+1 second')),
+        );
+
+        self::assertSame('fulfilled', $this->obligationStatus($submissionId));
+    }
+
+    /** Odeslání bez doloženého dodání povinnost neuzavře. */
+    public function testSentWithoutDeliveryKeepsTheObligationOpen(): void
+    {
+        $submissionId = $this->sentSubmission('sent-only');
+
+        $this->outbox->applyStatus(
+            $this->supplierId,
+            $this->outboxIdOf($submissionId),
+            ChannelStatus::sentOnly(),
+        );
+
+        self::assertSame('submitted', $this->obligationStatus($submissionId));
+    }
+
+    /**
+     * Podání doručená před zavedením automatického uzavření dorovná migrace
+     * 1951 — jinak by u nich povinnost visela „odeslaná" navždy.
+     */
+    public function testBackfillMigrationFulfilsAlreadyDeliveredOverview(): void
+    {
+        $delivered = $this->sentSubmission('backfill-delivered');
+        $sentOnly = $this->sentSubmission('backfill-sent', '207');
+        $outboxId = $this->outboxIdOf($delivered);
+        $row = (new SubmissionOutboxRepository($this->db))->find($this->supplierId, $outboxId);
+        self::assertNotNull($row);
+        // Doručení zapsané přímo, bez služby — tak, jak ho zapsala starší verze.
+        (new SubmissionOutboxRepository($this->db))->markDelivered(
+            $this->supplierId,
+            $outboxId,
+            new \DateTimeImmutable('+1 second'),
+            (int) $row['row_version'],
+        );
+        self::assertSame('submitted', $this->obligationStatus($delivered));
+
+        $sql = (string) file_get_contents(
+            \dirname(__DIR__, 4) . '/db/migrations/1951_payroll_health_delivery_fulfils_obligation.sql',
+        );
+        $sql = (string) preg_replace('/^--.*$/m', '', $sql);
+        foreach (array_filter(array_map('trim', explode(';', $sql))) as $statement) {
+            $this->db->pdo()->exec($statement);
+        }
+        // Druhý běh nic nezmění (idempotence).
+        foreach (array_filter(array_map('trim', explode(';', $sql))) as $statement) {
+            $this->db->pdo()->exec($statement);
+        }
+
+        self::assertSame('fulfilled', $this->obligationStatus($delivered));
+        self::assertSame('submitted', $this->obligationStatus($sentOnly));
     }
 
     public function testOfficialCodebookContainsAllSevenInsurers(): void
@@ -476,6 +575,44 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         $this->expectException(SubmissionChannelException::class);
         $this->expectExceptionMessage('nepatří zvolené zdravotní pojišťovně');
         $this->isds->enqueue($this->supplierId, $submissionId, '207', null);
+    }
+
+    private function sentSubmission(string $key, string $insurer = self::INSURER): int
+    {
+        $submissionId = $this->readySubmission($key, $insurer);
+        $queued = $this->isds->enqueue($this->supplierId, $submissionId, $insurer, null);
+        $this->outbox->markSentManually(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $this->userId,
+            (string) random_int(100000000, 999999999),
+        );
+
+        return $submissionId;
+    }
+
+    private function outboxIdOf(int $submissionId): int
+    {
+        $row = (new PayrollSubmissionRepository($this->db))->findDispatchOutboxForSubmission(
+            $this->supplierId,
+            'production',
+            $submissionId,
+        );
+        self::assertNotNull($row);
+
+        return (int) $row['id'];
+    }
+
+    private function obligationStatus(int $submissionId): string
+    {
+        $obligation = (new PayrollSubmissionRepository($this->db))->findObligationOfSubmission(
+            $this->supplierId,
+            'production',
+            $submissionId,
+        );
+        self::assertNotNull($obligation);
+
+        return $obligation['status'];
     }
 
     private function readyBulkNotificationSubmission(

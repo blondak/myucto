@@ -258,4 +258,74 @@ final class PayrollSubmissionSettlementGateTest extends TestCase
             'acceptance_state' => 'unknown',
         ]));
     }
+
+    /**
+     * Přehled o platbě a hromadné oznámení zdravotní pojišťovně jsou podané
+     * dodáním do schránky — pojišťovna výsledek neposílá. JMHZ a ELDP ne:
+     * u JMHZ rozhoduje protokol ČSSZ, ELDP aplikace neodesílá.
+     */
+    public function testOnlyAgendasWithoutAuthorityResultSettleOnDelivery(): void
+    {
+        self::assertTrue($this->policy->settlesOnDelivery(
+            HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+        ));
+        self::assertTrue($this->policy->settlesOnDelivery(
+            HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+        ));
+        self::assertFalse($this->policy->settlesOnDelivery(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+        ));
+        self::assertFalse($this->policy->settlesOnDelivery(
+            EldpStatementService::AGENDA_CODE,
+        ));
+        self::assertFalse($this->policy->settlesOnDelivery('NEZNAMA'));
+    }
+
+    /** Samo `sent` nestačí — povinnost uzavírá jen doložené dodání. */
+    public function testDeliverySettlementRequiresProvenDelivery(): void
+    {
+        $ppz = HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW;
+        self::assertNotNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'submitted',
+            'submitted',
+            ['dispatch_state' => 'sent', 'acceptance_state' => 'unknown'],
+        ));
+        self::assertNotNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'submitted',
+            'submitted',
+            null,
+        ));
+        self::assertNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'submitted',
+            'submitted',
+            ['dispatch_state' => 'delivered', 'acceptance_state' => 'unknown'],
+        ));
+        self::assertNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'overdue',
+            'submitted',
+            ['dispatch_state' => 'sent', 'receipt_document_id' => 7, 'acceptance_state' => 'unknown'],
+        ));
+        self::assertNotNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'fulfilled',
+            'submitted',
+            ['dispatch_state' => 'delivered'],
+        ));
+        self::assertNotNull($this->policy->deliverySettlementBlockedReason(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'submitted',
+            'submitted',
+            ['dispatch_state' => 'delivered'],
+        ));
+        self::assertNotNull($this->policy->deliverySettlementBlockedReason(
+            $ppz,
+            'submitted',
+            'ready',
+            ['dispatch_state' => 'delivered'],
+        ));
+    }
 }

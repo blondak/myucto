@@ -166,6 +166,83 @@ final readonly class PayrollSubmissionSettlementService
     }
 
     /**
+     * Uzavře povinnost, kterou splnilo samo DODÁNÍ zprávy do schránky úřadu
+     * ({@see PayrollSubmissionSettlementPolicy::settlesOnDelivery()}).
+     *
+     * Volá ji odchozí fronta ve chvíli, kdy se dozví o doručení nebo
+     * k podání připojí doručenku, a zpětně i migrace pro starší doručená
+     * podání. Je idempotentní: nepoužitelný stav (jiná agenda, nedoložené
+     * dodání, už uzavřená povinnost) vrací `null`, ne výjimku — doručení se
+     * kvůli tomu nesmí vrátit.
+     *
+     * Osu vyřízení odchozí zprávy NECHÁVÁ BÝT. `acceptance_state` je výrok
+     * úřadu a doručenka ho podle {@see \MyInvoice\Service\Submission\Channel\AcceptanceEvidence}
+     * nikdy nevyslovuje; splněnou dělá povinnost, stejně jako u ručního
+     * uzavření. Přehledy z ní čtou „Splněno".
+     *
+     * @return array{obligation:array{id:int,status:string,row_version:int},submission:array{id:int,status:string}}|null
+     */
+    public function settleByDelivery(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?array {
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $environment,
+            $submissionId,
+        ): ?array {
+            $submission = $this->repository->findSubmission($supplierId, $submissionId);
+            if ($submission === null
+                || (string) $submission['environment'] !== $environment
+            ) {
+                return null;
+            }
+            $obligation = $this->repository->findObligationOfSubmission(
+                $supplierId,
+                $environment,
+                $submissionId,
+            );
+            if ($obligation === null) {
+                return null;
+            }
+            $outboxRow = $this->repository->findDispatchOutboxForSubmission(
+                $supplierId,
+                $environment,
+                $submissionId,
+            );
+            if ($this->policy->deliverySettlementBlockedReason(
+                $obligation['agenda_code'],
+                $obligation['status'],
+                (string) $submission['status'],
+                $outboxRow,
+            ) !== null) {
+                return null;
+            }
+
+            $this->repository->updateObligationStatus(
+                $supplierId,
+                $environment,
+                $obligation['id'],
+                $obligation['row_version'],
+                'fulfilled',
+            );
+
+            return [
+                'obligation' => [
+                    'id' => $obligation['id'],
+                    'status' => 'fulfilled',
+                    'row_version' => $obligation['row_version'] + 1,
+                ],
+                'submission' => [
+                    'id' => $submissionId,
+                    'status' => (string) $submission['status'],
+                ],
+            ];
+        });
+    }
+
+    /**
      * Společné jádro obou cest: ověř bránu, zamkni povinnost, uzavři ji
      * a zapiš do fronty, KDO a o co se opřel.
      *

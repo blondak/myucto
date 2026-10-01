@@ -99,6 +99,71 @@ final readonly class PayrollSubmissionSettlementPolicy
     }
 
     /**
+     * Je u agendy povinnost splněná už DODÁNÍM zprávy do schránky úřadu?
+     *
+     * Platí pro agendy, které aplikace odesílá a na které úřad výsledek
+     * zpracování neposílá — přehled o platbě pojistného a hromadné oznámení
+     * zaměstnavatele zdravotní pojišťovně. Podání je u nich učiněné dodáním
+     * do datové schránky pojišťovny; vadu pojišťovna oznamuje samostatnou
+     * výzvou ({@see \MyInvoice\Service\Submission\DefectNoticeService}).
+     * Čekat na odpověď, která nepřijde, znamenalo nutit účetní každý měsíc
+     * ručně „označovat za vyřízené" něco, co už podala.
+     *
+     * Odvozeno z {@see PayrollDispatchCapabilityCatalog}, ne vyjmenováno:
+     * stejná dvojice podmínek rozhoduje i o ručním uzavření, takže se obě
+     * cesty nemohou rozejít v tom, které agendy pokrývají.
+     */
+    public function settlesOnDelivery(string $agendaCode): bool
+    {
+        $capability = $this->capabilities->forAgenda($agendaCode);
+
+        return $capability->isDispatchable() && !$capability->authorityReportsResult;
+    }
+
+    /**
+     * Smí aplikace sama uzavřít povinnost, protože zpráva prokazatelně
+     * dorazila do schránky úřadu? `null` = ano.
+     *
+     * Na rozdíl od {@see self::blockedReason()} nestačí, že zpráva aplikaci
+     * opustila (`sent`) — rozhoduje DOLOŽENÉ dodání (stav `delivered` nebo
+     * připojená doručenka), protože tady nerozhoduje člověk.
+     *
+     * @param array<string,mixed>|null $outbox
+     */
+    public function deliverySettlementBlockedReason(
+        string $agendaCode,
+        string $obligationStatus,
+        string $submissionStatus,
+        ?array $outbox,
+    ): ?string {
+        if (in_array($obligationStatus, ['fulfilled', 'cancelled'], true)) {
+            return 'Povinnost už je uzavřená.';
+        }
+        if (!$this->settlesOnDelivery($agendaCode)) {
+            return 'U téhle agendy povinnost uzavírá výsledek od úřadu, ne doručení.';
+        }
+        if (!in_array(
+            $submissionStatus,
+            self::SETTLEABLE_SUBMISSION_STATUSES,
+            true,
+        )) {
+            return sprintf(
+                'Doručením se uzavírá jen odeslané podání; tohle je ve stavu „%s".',
+                $submissionStatus,
+            );
+        }
+        if (!in_array(
+            PayrollSubmissionDeliveryProof::reason($outbox),
+            ['delivered', 'receipt'],
+            true,
+        )) {
+            return 'Dodání zprávy do schránky úřadu zatím není doložené.';
+        }
+
+        return null;
+    }
+
+    /**
      * Smí účetní prohlásit, že podání odeslala MIMO aplikaci (na portálu úřadu)?
      *
      * Proč je to druhá brána, a ne uvolnění té první: běžné ruční uzavření se
