@@ -411,6 +411,38 @@ describe('PayrollInsuranceBreakdown', () => {
     })
   })
 
+  it('u běžného zaměstnance ukáže doplatek jako varování s rozepsaným proč', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    payload.health.minimum = { ...payload.health.minimum, top_up_applied: true, top_up_base_minor: 1_130_000 }
+    const wrapper = await mountWith(payload)
+
+    expect(wrapper.get('[data-testid="health-minimum-top-up"]').attributes('data-tone')).toBe('warning')
+    expect(wrapper.find('[data-testid="health-top-up-why-toggle"]').exists()).toBe(false)
+  })
+
+  it('u jednatele nebo společníka ukáže doplatek jako informaci a proč sbalí', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    payload.health.minimum = { ...payload.health.minimum, top_up_applied: true, top_up_base_minor: 1_130_000 }
+    payload.health.relationships = payload.health.relationships.map(relationship => ({
+      ...relationship,
+      kind: 'corporate_body',
+    }))
+    const wrapper = await mountWith(payload)
+
+    const box = wrapper.get('[data-testid="health-minimum-top-up"]')
+    expect(box.attributes('data-tone')).toBe('info')
+    expect(box.classes()).not.toContain('bg-payroll-50')
+    const toggle = wrapper.get('[data-testid="health-top-up-why-toggle"]')
+    expect(toggle.element.tagName).toBe('DETAILS')
+    expect(toggle.attributes('open')).toBeUndefined()
+    expect(toggle.get('summary').text()).toBe('payroll.runs.insurance.health_top_up_why_toggle')
+    expect(wrapper.get('[data-testid="health-top-up-why"]').text())
+      .toBe('payroll.runs.insurance.health_top_up_why_detail')
+    expect(wrapper.find('[data-testid="health-top-up-exemption-link"]').exists()).toBe(true)
+  })
+
   it('bez doplatku proklik na výjimky nenabízí', async () => {
     const wrapper = await mountWith(fixture())
 

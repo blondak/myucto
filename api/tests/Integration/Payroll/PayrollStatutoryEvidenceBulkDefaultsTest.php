@@ -525,6 +525,57 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         self::assertStringContainsString('prohlášením poplatníka k dani: 2.', $warnings[0]->message);
     }
 
+    /**
+     * Jednatel nebo společník bez podepsaného prohlášení je vědomý stav, běh
+     * o něm nemá varovat. Osoba, která má vedle funkce ještě jiný vztah, se
+     * počítá dál.
+     */
+    public function testRunSnapshotSkipsCompanyBodiesInUnsignedDeclarationWarning(): void
+    {
+        $this->policies->create($this->supplierId, [
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'payday_day' => 10,
+            'payday_month_offset' => 1,
+            'payday_business_day_rule' => 'previous_business_day',
+            'balance_rounding_mode' => 'exact_minor_units',
+            'home_office_policy' => 'not_used',
+            'travel_expense_policy' => 'not_used',
+            'leave_entitlement_weeks' => 4,
+            'automatic_posting_enabled' => true,
+            'delivery_channel' => 'disabled',
+            'delivery_verified_on' => null,
+            'source_kind' => 'manual',
+            'source_reference' => 'synthetic:bulk-defaults-policy',
+        ], $this->userId);
+        $fixture = new PayrollRunScaleFixture($this->db, $this->supplierId, $this->userId, 7_960_000_000);
+        // Osoba 0 má dva vztahy, osoba 2 jeden.
+        $fixture->seed(3);
+        foreach ([$fixture->employeeIds[0], $fixture->employeeIds[2]] as $employeeId) {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_person_tax_declarations
+                    (supplier_id, employee_id, status, effective_from)
+                 VALUES (?, ?, "not-signed", "2026-01-01")'
+            )->execute([$this->supplierId, $employeeId]);
+        }
+        $relation = $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = ? WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $relation->execute(['statutory_body', $this->supplierId, $fixture->employeeIds[2]]);
+        $oneOfTwo = $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "partner_dependent"
+              WHERE supplier_id = ? AND employee_id = ? ORDER BY id LIMIT 1'
+        );
+        $oneOfTwo->execute([$this->supplierId, $fixture->employeeIds[0]]);
+
+        $warnings = $this->summaryWarnings();
+        self::assertCount(1, $warnings);
+        self::assertStringContainsString('prohlášením poplatníka k dani: 1.', $warnings[0]->message);
+
+        $relation->execute(['partner_dependent', $this->supplierId, $fixture->employeeIds[0]]);
+        self::assertSame([], $this->summaryWarnings());
+    }
+
     // --- pomocníci ---------------------------------------------------------
 
     /** @return list<PayrollRunValidation> */

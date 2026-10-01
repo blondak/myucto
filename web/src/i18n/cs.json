@@ -3010,6 +3010,8 @@
         "health_minimum_days": "Minimum se krátí na {applicable} kalendářních dnů ({excluded} dnů se nezapočítává); plné měsíční minimum je {statutory}.",
         "health_other_employers": "U jiných zaměstnavatelů je doložen základ {other}, dohromady tedy {combined} — proto se minimum posuzuje ze součtu.",
         "health_top_up_why": "Proč: zdravotní pojistné zaměstnance se odvádí nejméně z minimální mzdy (§ 3 odst. 6 a 10 zákona č. 592/1992 Sb.). Platí to i pro jednatele nebo člena orgánu s nízkou odměnou a bez prohlášení. Některé mzdové programy u nich doplatek nepočítají, zákon ho přesto ukládá. Doplatek odpadá jen u výjimky: státní pojištěnec (např. poživatel důchodu, student, rodič na rodičovské), držitel průkazu ZTP nebo ZTP/P, důchodový věk bez nároku na důchod, OSVČ platící zálohy alespoň z minima, jen odměna pěstouna; při souběhu zaměstnání se základy sčítají.",
+        "health_top_up_why_toggle": "Proč?",
+        "health_top_up_why_detail": "Zdravotní pojistné zaměstnance se odvádí nejméně z minimální mzdy (§ 3 odst. 6 a 10 zákona č. 592/1992 Sb.), a to i u jednatele, člena orgánu nebo společníka s nízkou odměnou. Doplatek odpadá jen u výjimky: státní pojištěnec (např. poživatel důchodu, student, rodič na rodičovské), držitel průkazu ZTP nebo ZTP/P, důchodový věk bez nároku na důchod, OSVČ platící zálohy alespoň z minima, jen odměna pěstouna; při souběhu zaměstnání se základy sčítají.",
         "health_top_up_exemption_link": "Zadat výjimku z minima",
         "health_minimum_reductions_title": "Minimum snižují výjimky",
         "health_minimum_reduction_line": "{reason}: od {from} do {to}",

@@ -12,4 +12,10 @@ enum PayrollRelationType: string
     case Dpc = 'dpc';
     case PartnerDependent = 'partner_dependent';
     case StatutoryBody = 'statutory_body';
+
+    /** Jednatel, člen statutárního orgánu nebo společník (§ 6 odst. 1 písm. b) a c) ZDP). */
+    public function isCompanyBody(): bool
+    {
+        return $this === self::StatutoryBody || $this === self::PartnerDependent;
+    }
 }

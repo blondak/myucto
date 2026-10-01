@@ -75,6 +75,17 @@ const healthRateReconstructed = computed(() =>
   health.value?.contribution.rate_source === 'reconstructed',
 )
 
+/**
+ * Jednatel nebo společník (všechny vztahy osoby jsou orgánem společnosti):
+ * dopočet do minima je u nich běžný a vědomý stav, ne chyba k řešení. Výpočet
+ * se nemění, box se jen ukáže jako informace a „Proč" se sbalí.
+ */
+const topUpAsInformation = computed(() => {
+  const relationships = health.value?.relationships ?? []
+  return relationships.length > 0
+    && relationships.every(relationship => relationship.kind === 'corporate_body')
+})
+
 /** Rozdělení pojistného zaměstnavatele na osobu — alokace, ne zákonná částka. */
 const employerAllocation = computed(() => social.value?.employer.allocation ?? null)
 
@@ -630,7 +641,11 @@ watch(
 
           <div
             v-if="health.minimum.top_up_applied"
-            class="rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-900"
+            class="rounded-lg border p-3 text-sm"
+            :class="topUpAsInformation
+              ? 'border-neutral-200 bg-neutral-50 text-neutral-800'
+              : 'border-payroll-200 bg-payroll-50 text-payroll-900'"
+            :data-tone="topUpAsInformation ? 'info' : 'warning'"
             data-testid="health-minimum-top-up"
           >
             <p class="font-medium">{{ t('payroll.runs.insurance.health_top_up_title') }}</p>
@@ -680,7 +695,15 @@ watch(
               ale ukládá každému zaměstnanci bez výjimky. A kde výjimka je,
               musí jít zadat jedním kliknutím, ne hledáním po kartě osoby.
             -->
-            <p class="mt-2 text-xs text-payroll-800" data-testid="health-top-up-why">
+            <details v-if="topUpAsInformation" class="mt-2 text-xs" data-testid="health-top-up-why-toggle">
+              <summary class="cursor-pointer font-medium text-neutral-700">
+                {{ t('payroll.runs.insurance.health_top_up_why_toggle') }}
+              </summary>
+              <p class="mt-1 text-neutral-700" data-testid="health-top-up-why">
+                {{ t('payroll.runs.insurance.health_top_up_why_detail') }}
+              </p>
+            </details>
+            <p v-else class="mt-2 text-xs text-payroll-800" data-testid="health-top-up-why">
               {{ t('payroll.runs.insurance.health_top_up_why') }}
             </p>
             <div class="mt-2 flex flex-wrap gap-2">

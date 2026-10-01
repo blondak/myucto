@@ -15,6 +15,7 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -659,8 +660,18 @@ final class PayrollRunSnapshotBuilder
         // kliknutí. Jedno souhrnné varování za firmu, ne řádek na osobu:
         // u 200 lidí by jednotlivá varování přehlušila skutečné problémy.
         // Validace do `$data` nevstupují, takže `input_hash` se nemění.
+        //
+        // Jednatel a společník (osoba jen se vztahy orgánu společnosti) se
+        // nepočítají: prohlášení u nich obvykle vědomě nepodepisují, protože
+        // ho uplatňují u jiného plátce, a záloha bez slevy je běžný stav, ne
+        // přehlédnutí. Daňový dopad je stejný jako u kohokoliv jiného (včetně
+        // srážky pod rozhodnou částkou), mění se jen to, co běh hlásí.
+        // Osoba, která má vedle funkce i jiný vztah, se počítá dál.
         $unsignedDeclarations = 0;
-        foreach (array_keys($people) as $personId) {
+        foreach ($people as $personId => $person) {
+            if (self::onlyCompanyBodyRelations($person['employments'])) {
+                continue;
+            }
             $declaration = $statutoryEvidence[$personId]['income_tax']['declaration'] ?? null;
             if (is_array($declaration) && ($declaration['status'] ?? null) === 'not-signed') {
                 $unsignedDeclarations++;
@@ -779,6 +790,22 @@ final class PayrollRunSnapshotBuilder
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
         ];
+    }
+
+    /** @param list<array<string,mixed>> $employments */
+    private static function onlyCompanyBodyRelations(array $employments): bool
+    {
+        if ($employments === []) {
+            return false;
+        }
+        foreach ($employments as $employment) {
+            $type = PayrollRelationType::tryFrom((string) ($employment['employment']['relation_type'] ?? ''));
+            if ($type === null || !$type->isCompanyBody()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
