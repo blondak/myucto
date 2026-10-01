@@ -57,7 +57,8 @@ final class NodeBridge
         try {
             fwrite($pipes[0], json_encode($input, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
             fclose($pipes[0]);
-            $output = stream_get_contents($pipes[1], 4 * 1024 * 1024 + 1);
+            // Výsledek může nést stažený soubor v base64, proto strop obálky.
+            $output = stream_get_contents($pipes[1], McpFileLimits::MAX_ENVELOPE_BYTES + 1);
             fclose($pipes[1]);
             $error = stream_get_contents($pipes[2], 8192);
             fclose($pipes[2]);
@@ -71,7 +72,7 @@ final class NodeBridge
             throw $e;
         }
 
-        if ($exit !== 0 || $output === false || strlen($output) > 4 * 1024 * 1024) {
+        if ($exit !== 0 || $output === false || strlen($output) > McpFileLimits::MAX_ENVELOPE_BYTES) {
             throw new \RuntimeException('Node.js MCP proces selhal: ' . substr((string) $error, 0, 500));
         }
         $decoded = json_decode($output, false, 512, JSON_THROW_ON_ERROR);

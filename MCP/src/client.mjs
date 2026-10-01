@@ -13,14 +13,31 @@
  *
  *  3) ZÁMĚRNÉ OMEZENÍ ZÁPISŮ. Token se scope `read` odmítne zápis až server; my ho
  *     zastavíme dřív (MYUCTO_READ_ONLY), ať agent nedostane 403 uprostřed úlohy.
+ *
+ *  4) SOUBORY. Běžná volání jsou JSON. Stažení souboru (`download`) čte binární
+ *     tělo se stropem velikosti a vrací base64, nahrání (`upload`) skládá
+ *     multipart/form-data z base64 v paměti, nic se nezapisuje na disk.
  */
+
+import { randomBytes } from 'node:crypto';
 
 const DEFAULTS = {
   maxRps: 8,
   maxConcurrent: 3,
   timeoutMs: 30_000,
   maxRetries: 3,
+  maxFileBytes: 10 * 1024 * 1024,
 };
+
+/**
+ * Strop souboru v hostovaném MCP. Soubor tam putuje jako base64 v JSON zprávách
+ * mezi PHP a Node, proto je nižší než u lokálního serveru. Musí odpovídat
+ * `McpFileLimits::MAX_FILE_BYTES` v PHP (hlídá test).
+ */
+export const HOSTED_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+/** Strop jedné JSON zprávy mostu, která nese base64 tělo. Zrcadlí `McpFileLimits::MAX_ENVELOPE_BYTES`. */
+export const HOSTED_MAX_ENVELOPE_BYTES = 12 * 1024 * 1024;
 
 const READ_POST_PATHS = new Set([
   '/catalog/products/batch',
@@ -144,6 +161,7 @@ export class MyUctoClient {
     this.version = cfg.version;
     this.fetcher = cfg.fetcher ?? fetch;
     this.timeoutMs = cfg.timeoutMs ?? DEFAULTS.timeoutMs;
+    this.maxFileBytes = cfg.maxFileBytes ?? DEFAULTS.maxFileBytes;
     this.throttle = new Throttle(
       cfg.maxRps ?? DEFAULTS.maxRps,
       cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
@@ -193,24 +211,65 @@ export class MyUctoClient {
     return this.request('DELETE', path, { query, tool });
   }
 
+  /**
+   * Stáhne soubor. Vrací metadata a obsah v base64; nad `maxFileBytes`
+   * skončí chybou `file_too_large` dřív, než se celé tělo načte do paměti.
+   *
+   * @returns {Promise<{filename: string|null, content_type: string, size: number, content_base64: string}>}
+   */
+  async download(path, query, tool) {
+    const url = new URL(this.baseUrl + path);
+    appendQuery(url.searchParams, query);
+    const headers = this.#headers(tool, '*/*');
+    return this.throttle.run(() => this.#send('GET', url, headers, undefined, false, 'binary'));
+  }
+
+  /**
+   * Nahraje soubor jako multipart/form-data. Obsah přijde v base64 a do těla
+   * požadavku se složí v paměti. Upload je zápis, takže se v režimu jen pro
+   * čtení odmítne a po výpadku se neopakuje.
+   *
+   * @param {{content_base64: string, filename: string, content_type: string, field?: string}} file
+   * @param {{fields?: Record<string, string|number|boolean|null|undefined>, method?: string}} [options]
+   */
+  async upload(path, file, tool, { fields = {}, method = 'POST' } = {}) {
+    if (this.readOnly) throw new ReadOnlyError(tool);
+    const bytes = decodeBase64(file.content_base64, this.maxFileBytes);
+    const multipart = buildMultipart(fields, {
+      field: file.field ?? 'file',
+      filename: sanitizeFilename(file.filename),
+      contentType: normalizeContentType(file.content_type),
+      bytes,
+    });
+    const url = new URL(this.baseUrl + path);
+    const headers = this.#headers(tool);
+    headers['Content-Type'] = multipart.contentType;
+    return this.throttle.run(() => this.#send(method, url, headers, multipart.body, false));
+  }
+
   async request(method, path, { query, body, tool, retryRead = false } = {}) {
     const url = new URL(this.baseUrl + path);
     appendQuery(url.searchParams, query);
 
-    const headers = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/json',
-      'X-MyUcto-Client': 'mcp',
-      'X-MyUcto-Client-Version': this.version,
-    };
-    if (tool) headers['X-MyUcto-Tool'] = tool;
-    if (this.supplierId) headers['X-Supplier-Id'] = String(this.supplierId);
+    const headers = this.#headers(tool);
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     return this.throttle.run(() => this.#send(method, url, headers, body, retryRead));
   }
 
-  async #send(method, url, headers, body, retryRead) {
+  #headers(tool, accept = 'application/json') {
+    const headers = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: accept,
+      'X-MyUcto-Client': 'mcp',
+      'X-MyUcto-Client-Version': this.version,
+    };
+    if (tool) headers['X-MyUcto-Tool'] = tool;
+    if (this.supplierId) headers['X-Supplier-Id'] = String(this.supplierId);
+    return headers;
+  }
+
+  async #send(method, url, headers, body, retryRead, mode = 'json') {
     let lastError;
     const canRetry = method === 'GET' || retryRead;
 
@@ -223,7 +282,7 @@ export class MyUctoClient {
         response = await this.fetcher(url, {
           method,
           headers,
-          body: body === undefined ? undefined : JSON.stringify(body),
+          body: body === undefined || body instanceof Uint8Array ? body : JSON.stringify(body),
           signal: controller.signal,
         });
       } catch (e) {
@@ -253,7 +312,9 @@ export class MyUctoClient {
         await sleep(backoffMs(attempt));
         continue;
       }
-      clearTimeout(timer);
+      // Binární tělo se čte pod stejným časovým limitem jako hlavičky: velký
+      // soubor po pomalé lince nesmí nástroj zablokovat bez konce.
+      if (mode !== 'binary' || !response.ok) clearTimeout(timer);
 
       // 429 / 5xx = přechodné. Retry-After posílá server u rate limitu.
       if (response.status === 429 || response.status >= 500) {
@@ -263,6 +324,17 @@ export class MyUctoClient {
             ? retryAfter * 1000
             : backoffMs(attempt));
           continue;
+        }
+      }
+
+      if (mode === 'binary' && response.ok) {
+        try {
+          return await readFile(response, this.maxFileBytes);
+        } catch (e) {
+          if (e instanceof ApiError) throw e;
+          throw new ApiError(0, 'network_error', `Stažení souboru z ${url.origin} selhalo: ${e.message}`);
+        } finally {
+          clearTimeout(timer);
         }
       }
 
@@ -289,6 +361,224 @@ export class MyUctoClient {
 function backoffMs(attempt) {
   // 400 / 800 / 1600 ms + jitter, ať se souběžné retry nesrovnají do špičky
   return 400 * 2 ** attempt + Math.floor(Math.random() * 200);
+}
+
+const megabytes = (bytes) => `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+
+function fileTooLarge(maxBytes) {
+  return new ApiError(
+    413,
+    'file_too_large',
+    `Soubor je větší než ${megabytes(maxBytes)}, což je strop pro přenos souboru přes MCP. `
+      + 'Stáhněte nebo nahrajte ho přímo v aplikaci.',
+  );
+}
+
+/** Přípona → typ obsahu. Slouží, když server pošle obecný `application/octet-stream`. */
+const EXTENSION_TYPES = {
+  pdf: 'application/pdf',
+  isdoc: 'application/xml',
+  xml: 'application/xml',
+  isdocx: 'application/zip',
+  zip: 'application/zip',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+};
+
+export const extensionOf = (filename) => {
+  const match = /\.([A-Za-z0-9]{1,10})$/.exec(String(filename ?? ''));
+  return match ? match[1].toLowerCase() : '';
+};
+
+export const contentTypeForFilename = (filename) => EXTENSION_TYPES[extensionOf(filename)] ?? null;
+
+/**
+ * Načte binární tělo se stropem. Deklarovaná délka se kontroluje předem,
+ * skutečná průběžně — hlavička může chybět nebo lhát.
+ */
+async function readFile(response, maxBytes) {
+  const declared = Number(response.headers.get('Content-Length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw fileTooLarge(maxBytes);
+  }
+
+  const chunks = [];
+  let size = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw fileTooLarge(maxBytes);
+      }
+      chunks.push(value);
+    }
+  }
+  const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)), size);
+
+  const filename = filenameFromDisposition(response.headers.get('Content-Disposition'));
+  let contentType = normalizeHeaderType(response.headers.get('Content-Type'));
+  if (contentType === '' || contentType === 'application/octet-stream') {
+    contentType = contentTypeForFilename(filename) ?? 'application/octet-stream';
+  }
+
+  return {
+    filename,
+    content_type: contentType,
+    size,
+    content_base64: bytes.toString('base64'),
+  };
+}
+
+const normalizeHeaderType = (raw) => String(raw ?? '').split(';')[0].trim().toLowerCase();
+
+/**
+ * Název souboru z Content-Disposition. Aplikace posílá `filename="…"` se syrovým
+ * UTF-8, které fetch přečte jako latin1 — bez zpětného převodu by se z
+ * „Faktura č. 1.pdf" stal nečitelný název.
+ */
+export function filenameFromDisposition(header) {
+  if (!header) return null;
+  const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header);
+  let name = null;
+  if (extended) {
+    try {
+      name = decodeURIComponent(extended[1].trim());
+    } catch {
+      name = null;
+    }
+  }
+  if (name === null) {
+    const plain = /filename\s*=\s*(?:"([^"]*)"|([^;]+))/i.exec(header);
+    if (!plain) return null;
+    name = (plain[1] ?? plain[2] ?? '').trim();
+    if (/[\u0080-ÿ]/.test(name) && !/[^\u0000-ÿ]/.test(name)) {
+      const utf8 = Buffer.from(name, 'latin1').toString('utf8');
+      if (!utf8.includes('�')) name = utf8;
+    }
+  }
+  try {
+    return sanitizeFilename(name);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Název souboru bez cesty a bez znaků, které by rozbily hlavičku multipartu
+ * nebo název na disku. Z „../../faktura.pdf" zůstane „faktura.pdf".
+ */
+export function sanitizeFilename(raw) {
+  const base = String(raw ?? '').normalize('NFC').split(/[\\/]/).pop() ?? '';
+  let name = base
+    .replace(/[\u0000-\u001f\u007f"<>|*?:]/g, '_')
+    .trim()
+    .replace(/^[. _]+|[. _]+$/g, '');
+  if (name === '') {
+    throw new Error('Chybí platný název souboru (filename), například "faktura.pdf".');
+  }
+  if (Buffer.byteLength(name, 'utf8') > 200) {
+    const ext = extensionOf(name);
+    const stem = ext ? name.slice(0, -(ext.length + 1)) : name;
+    let cut = stem;
+    while (Buffer.byteLength(cut, 'utf8') > 190) cut = cut.slice(0, -1);
+    name = ext ? `${cut}.${ext}` : cut;
+  }
+  return name;
+}
+
+/** Typ obsahu bez parametrů; cokoli s CR/LF nebo mimo tvar `typ/podtyp` se odmítne. */
+export function normalizeContentType(raw) {
+  const value = normalizeHeaderType(raw);
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(value)) {
+    throw new Error(`Neplatný content_type "${String(raw ?? '')}".`);
+  }
+  return value;
+}
+
+/**
+ * Přísné base64: jiný než standardní abeceda nebo špatné zarovnání se odmítne,
+ * místo aby Buffer tiše zahodil neplatné znaky a nahrál poškozený soubor.
+ * Prefix `data:…;base64,` se toleruje. Velikost se kontroluje před dekódováním.
+ */
+export function decodeBase64(input, maxBytes) {
+  if (typeof input !== 'string') {
+    throw new Error('content_base64 musí být text v base64.');
+  }
+  const clean = input.trim().replace(/^data:[^,]*;base64,/i, '').replace(/\s+/g, '');
+  if (clean === '') {
+    throw new Error('content_base64 je prázdný, soubor nemá žádný obsah.');
+  }
+  if (clean.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) {
+    throw new Error('content_base64 není platné base64 (standardní abeceda, délka dělitelná čtyřmi).');
+  }
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  if ((clean.length / 4) * 3 - padding > maxBytes) {
+    throw fileTooLarge(maxBytes);
+  }
+  return Buffer.from(clean, 'base64');
+}
+
+/**
+ * Tělo multipart/form-data. Hranice je náhodná a ověřuje se, že se v obsahu
+ * nevyskytuje, takže ji soubor nemůže předčasně ukončit.
+ */
+export function buildMultipart(fields, { field, filename, contentType, bytes }) {
+  if (!/^[A-Za-z0-9_[\]-]+$/.test(field)) {
+    throw new Error(`Neplatné pole formuláře "${field}".`);
+  }
+  let boundary;
+  do {
+    boundary = `----MyUctoMcp${randomBytes(16).toString('hex')}`;
+  } while (bytes.includes(boundary));
+
+  const parts = [];
+  for (const [name, value] of Object.entries(fields ?? {})) {
+    if (value === undefined || value === null) continue;
+    if (!/^[A-Za-z0-9_[\]-]+$/.test(name)) {
+      throw new Error(`Neplatné pole formuláře "${name}".`);
+    }
+    const text = String(value);
+    if (text.includes(boundary)) {
+      throw new Error(`Hodnota pole "${name}" je neplatná.`);
+    }
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${text}\r\n`,
+      'utf8',
+    ));
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${filename}"\r\n`
+      + `Content-Type: ${contentType}\r\n\r\n`,
+    'utf8',
+  ));
+  parts.push(bytes);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+
+  return {
+    body: Buffer.concat(parts),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 function safeJson(text) {

@@ -15,6 +15,7 @@
  *   MYUCTO_MAX_RPS         volitelné, strop požadavků za sekundu (výchozí 8)
  *   MYUCTO_MAX_CONCURRENT  volitelné, souběžná volání (výchozí 3)
  *   MYUCTO_TIMEOUT_MS      volitelné, timeout požadavku (výchozí 30000)
+ *   MYUCTO_MAX_FILE_MB     volitelné, strop staženého i nahraného souboru v MB (výchozí 10, nejvýš 50)
  *   MYUCTO_INSECURE_TLS    volitelné, "1" = nekontrolovat HTTPS certifikát (JEN vývoj)
  */
 
@@ -29,6 +30,7 @@ import {
 
 import { ApiError, MyUctoClient, ReadOnlyError } from './client.mjs';
 import { TOOLS, TOOLS_BY_NAME } from './tools.mjs';
+import { toolResult } from './tool-result.mjs';
 import { UPDATE_TOOL, checkUpdate } from './update.mjs';
 import { VERSION } from './version.mjs';
 
@@ -65,6 +67,7 @@ function readConfig(env) {
     maxRps: positiveNumber(env.MYUCTO_MAX_RPS, 8),
     maxConcurrent: positiveNumber(env.MYUCTO_MAX_CONCURRENT, 3),
     timeoutMs: positiveNumber(env.MYUCTO_TIMEOUT_MS, 30_000),
+    maxFileBytes: Math.round(Math.min(positiveNumber(env.MYUCTO_MAX_FILE_MB, 10), 50) * 1024 * 1024),
     version: VERSION,
   };
 }
@@ -113,16 +116,6 @@ function trustSystemCertificates(env) {
   } catch (e) {
     return `systémové certifikáty se nepodařilo načíst: ${e.message}`;
   }
-}
-
-/** Odpověď nástroje: JSON v textovém obsahu + strojově čitelný `structuredContent`. */
-function toolResult(payload) {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-    structuredContent: payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload
-      : { result: payload },
-  };
 }
 
 /**

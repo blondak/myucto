@@ -11,6 +11,7 @@ use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
+use MyInvoice\Service\Mcp\McpFileLimits;
 use MyInvoice\Service\Mcp\NodeBridge;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
@@ -44,8 +45,9 @@ final class HostedMcpEndpointAction
             return $response->withStatus(405)->withHeader('Allow', 'POST');
         }
 
+        // Strop nese nahrávaný soubor v base64 (McpFileLimits), ostatní volání jsou malá.
         $body = (string) $request->getBody();
-        if (strlen($body) > 1024 * 1024) {
+        if (strlen($body) > McpFileLimits::MAX_ENVELOPE_BYTES) {
             return $this->rpc($response, null, -32600, 'Požadavek je příliš velký.', 413);
         }
         try {

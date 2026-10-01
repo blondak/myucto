@@ -30,6 +30,7 @@
 
 import { DIMENSION_TOOLS, DIMENSION_FILTER, dimensionQuery } from './dimension-tools.mjs';
 import { AUDIT_TOOLS } from './audit-tools.mjs';
+import { FILE_TOOLS } from './file-tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -652,6 +653,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
 export const TOOLS = [
   ...DIMENSION_TOOLS,
   ...AUDIT_TOOLS,
+  ...FILE_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────
@@ -2345,7 +2347,8 @@ export const TOOLS = [
   },
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Dokumenty — metadata, vytěžený text a vazby (bez binárního upload/download)
+  // Dokumenty — metadata, vytěžený text a vazby (nahrání a stažení souboru
+  // je v `file-tools.mjs`)
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_documents',
@@ -3614,9 +3617,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   // E-shop — média zboží
   //
-  // Nahrání souboru tady není: API ho bere jako multipart upload a tenhle
-  // server umí posílat jen JSON. Fotky se nahrávají v aplikaci, agent s nimi
-  // pak může pracovat (popisky, pořadí, hlavní obrázek, smazání).
+  // Nahrání souboru je v `file-tools.mjs` (`upload_product_media`), tady se
+  // s nahranými médii pracuje (popisky, pořadí, hlavní obrázek, smazání).
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_product_media',

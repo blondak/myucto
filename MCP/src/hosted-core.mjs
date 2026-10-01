@@ -1,4 +1,7 @@
-import { ApiError, MyUctoClient, ReadOnlyError } from './client.mjs';
+import {
+  ApiError, HOSTED_MAX_FILE_BYTES, MyUctoClient, ReadOnlyError,
+} from './client.mjs';
+import { toolResult } from './tool-result.mjs';
 import { TOOLS, TOOLS_BY_NAME } from './tools.mjs';
 import { VERSION } from './version.mjs';
 
@@ -93,15 +96,11 @@ export async function runHosted(input, fetcher) {
         supplierId: withoutCompany.has(tool.name) ? (lockedSupplierId ?? boundSupplierId) : supplierId,
         readOnly,
         maxConcurrent: 1,
+        maxFileBytes: HOSTED_MAX_FILE_BYTES,
         version: VERSION,
         fetcher,
       });
-      const payload = await tool.run(client, toolArguments, input.name);
-      return {
-        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-        structuredContent: payload && typeof payload === 'object' && !Array.isArray(payload)
-          ? payload : { result: payload },
-      };
+      return toolResult(await tool.run(client, toolArguments, input.name));
     }
     throw new Error('Neznámá operace MCP mostu.');
   } catch (error) {
