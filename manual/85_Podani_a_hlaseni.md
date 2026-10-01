@@ -886,6 +886,17 @@ prostředí lze použít k bezpečnému testu celého toku.
   protokol a případné chyby se sledují na záložce **Odesláno**. Převzetí
   transportem ještě není přijetí podání.
 
+Záložka **Odesláno** řadí podání podle období od nejnovějšího. V každém
+období stojí nahoře platný stav, tedy poslední přijaté podání se štítkem
+výsledku (**Přijato**, **Částečně přijato**, **Odmítnuto**, **Čeká na
+výsledek**). Podání odeslané datovou schránkou nese štítek **Odesláno datovou
+schránkou** s datem. Podání nahrazená opravným nebo stornovacím podáním jsou
+pod tlačítkem **Historie období** se štítkem, kterým podáním byla nahrazena.
+Načtený protokol z datové schránky je připojený ke kartě podání, ke kterému
+patří; samostatně se ukáže jen protokol, který k žádnému podání jednoznačně
+přiřadit nejde. **Opravit hodnoty hlášení** a **Stornovat podání** nabízí jen
+platná karta období.
+
 Stav podání převezme aplikace jen z protokolu, jehož podpis ČSSZ ověřila.
 Protokol, který ověřením neprošel, zůstane u podání uložený jako neověřený
 a podání se nepohne. U takového pokusu ukáže **Odesláno** tlačítko
