@@ -1900,6 +1900,84 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Tentýž otisk přes všechny cesty, které F3 přepojila na `addCostPair()`:
+     * cestovní náhrada (512), nedaňová část benefitu podle § 25 odst. 1
+     * písm. h) ZDP (528), příspěvek na spoření u rizikové práce (527),
+     * výslovná předkontace složky (528 / 366.523) a stavba proti předchozím
+     * alokacím (opravná dávka). Otisky spočtené kódem před F3.
+     */
+    public function testEveryCostPathWithoutCompanyDimensionsIsByteIdenticalToBeforeF3(): void
+    {
+        [$snapshot, $result] = $this->everyCostPathRevision(true);
+        $sets = $this->statutorySetsWithRelationships();
+        $target = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+        [$plainSnapshot, $plainResult] = $this->everyCostPathRevision(false);
+        $previous = $this->builder->build(
+            $plainSnapshot,
+            $plainResult,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+        $correction = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+            $previous->targetAllocations,
+        );
+
+        self::assertSame(
+            [
+                self::PRE_F3_EVERY_PATH_TARGET_HASH,
+                self::PRE_F3_EVERY_PATH_DELTA_HASH,
+                self::PRE_F3_EVERY_PATH_CORRECTION_HASH,
+            ],
+            [$target->targetHash, $target->deltaHash, $correction->deltaHash],
+        );
+    }
+
+    private const PRE_F3_EVERY_PATH_TARGET_HASH = '5d0b8703cbcdef5c84af0b47f061a6c9a7109c4ea058f20b9069277e9666fb34';
+    private const PRE_F3_EVERY_PATH_DELTA_HASH = '07b9765b167129a27fc6c49f2877afc6f8fec1f86749b6513dc4786e5377c1cc';
+    private const PRE_F3_EVERY_PATH_CORRECTION_HASH = '9fd4870ad7ac306252552a65cd630916f5a80c71ca117e352d8c05ad40688d19';
+
+    /**
+     * Revize se všemi nákladovými cestami: 101 cestovné, 102 benefit v koši
+     * osvobození, 103 výslovná předkontace, k tomu rizikové spoření 101 a 103.
+     *
+     * @return array{array<string,mixed>,array<string,mixed>}
+     */
+    private function everyCostPathRevision(bool $withCostCentres): array
+    {
+        $snapshot = $withCostCentres ? $this->snapshotWithCostCentres() : $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component']['component_kind'] =
+            'travel_reimbursement';
+        $snapshot['people'][0]['employments'][1]['inputs'][0]['benefit_basket'] = 'non_cash_leisure';
+        $snapshot['people'][0]['employments'][1]['inputs'][0]['benefit_exempt_minor'] = 120_000;
+        $snapshot['people'][0]['employments'][1]['inputs'][0]['benefit_taxable_minor'] = 80_000;
+        $snapshot['people'][0]['employments'][2]['inputs'][0]['component']['accounting_debit_code'] = '528';
+        $snapshot['people'][0]['employments'][2]['inputs'][0]['component']['accounting_credit_code'] = '366.523';
+        $result = $this->calculatedResult();
+        $result['people'][0]['employments'][2]['inputs'][0]['accounting'] = [
+            'debit_code' => '528',
+            'credit_code' => '366.523',
+            'amount_minor' => 300_000,
+        ];
+        $result['statutory']['risky_savings_period_start'] = '2026-06-01';
+        $result['statutory']['risky_savings'] = [
+            $this->riskySavingsRow(101, 4_000),
+            $this->riskySavingsRow(103, 2_001),
+        ];
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        return [$snapshot, $result];
+    }
+
     private const PRE_F3_PLAIN_TARGET_HASH = '83f9879b7d1982ffa5879edad388eb311cdf07cec6963a5601557080395d4440';
     private const PRE_F3_PLAIN_DELTA_HASH = 'a85dc49650d9ab963b062fe9b74c6ec86685e7a2fffc4d6da68276a65ba96b89';
     private const PRE_F3_COST_CENTRE_TARGET_HASH = '974b145d7ba5e1fd38ce504670cf1593f261fba60a38376a109c2b5674bc3b4f';
@@ -2063,6 +2141,145 @@ final class PayrollPostingLineBuilderTest extends TestCase
             '524|7:71' => -6_760,
             '524|7:72' => 6_760,
         ], $net);
+    }
+
+    /**
+     * Rozpad dvou typů najednou (středisko 70/30 × zakázka 50/50) dá čtyři
+     * části s vahami 35/35/15/15 a každá nese obě firemní dimenze.
+     */
+    public function testSplitOfTwoTypesCombinesAsACartesianProduct(): void
+    {
+        $snapshot = $this->snapshotWithSplit(7_000, 3_000);
+        $snapshot['people'][0]['employments'][0]['dimensions'][] =
+            $this->dimension('project', 'ZAK-1', null)
+            + ['share_bp' => 5_000, 'dimension_type_id' => 8, 'dimension_value_id' => 81];
+        $snapshot['people'][0]['employments'][0]['dimensions'][] =
+            $this->dimension('project', 'ZAK-2', null)
+            + ['share_bp' => 5_000, 'dimension_type_id' => 8, 'dimension_value_id' => 82];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame([
+            '7:71,8:81' => 35_000,
+            '7:71,8:82' => 35_000,
+            '7:72,8:81' => 15_000,
+            '7:72,8:82' => 15_000,
+        ], $this->dimensionMap($preview->lines, '521', 'debit'));
+        self::assertSame(
+            ['STR-A' => 70_000, 'STR-B' => 30_000],
+            $this->costCentreMap($preview->lines, '521', 'debit'),
+        );
+        self::assertSame([
+            '' => 169_000,
+            '7:71,8:81' => 11_830,
+            '7:71,8:82' => 11_830,
+            '7:72,8:81' => 5_070,
+            '7:72,8:82' => 5_070,
+        ], $this->dimensionMap($preview->lines, '524', 'debit'));
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /**
+     * Záporná složka (oprava minulého měsíce) se rozdělí stejně jako kladná,
+     * jen se znaménkem: −30 001 na 70/30 = −21 001 / −9 000 (haléř navíc
+     * dostane podíl s větším zbytkem). Náklad po střediscích sedí na haléř.
+     */
+    public function testNegativeAmountSplitsLikeAPositiveOne(): void
+    {
+        $snapshot = $this->snapshotWithSplit(7_000, 3_000);
+        $snapshot['people'][0]['employments'][0]['inputs'][] = [
+            'id' => 4,
+            'amount_minor' => -30_001,
+            'component' => [
+                'code' => 'OPRAVA',
+                'accounting_debit_code' => null,
+                'accounting_credit_code' => null,
+            ],
+        ];
+        $result = $this->calculatedResult();
+        $result['people'][0]['employments'][0]['inputs'][] = [
+            'input_id' => 4,
+            'totals' => ['source_amount_minor' => -30_001, 'cash_payable_minor' => -30_001],
+            'accounting' => ['debit_code' => null, 'credit_code' => null, 'amount_minor' => -30_001],
+        ];
+        $result['people'][0]['employments'][0]['totals']['cash_payable_minor'] = 69_999;
+        $result['people'][0]['totals']['cash_payable_minor'] = 569_999;
+        $result['people'][0]['payable_after_enforcement_minor'] = 435_999;
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $sets = $this->statutorySetsWithRelationships();
+        $sets['net_pay']['people'][0]['result_snapshot']['net_payable_minor_units'] = 440_999;
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['7:71' => 21_001, '7:72' => 9_000],
+            $this->dimensionMap($preview->lines, '521', 'credit'),
+        );
+        self::assertSame(
+            ['7:71' => 70_000, '7:72' => 30_000],
+            $this->dimensionMap($preview->lines, '521', 'debit'),
+        );
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /**
+     * Opravná dávka nad dávkou zaúčtovanou bez dimenzí: náklad se jen
+     * přeúčtuje z „bez dimenze" na střediska — nezdvojí se ani neztratí.
+     * Závazky (331, 336) se nemění, takže na nich nevznikne žádný řádek.
+     */
+    public function testCorrectionFromBatchWithoutDimensionsOnlyReclassifiesTheCost(): void
+    {
+        $previous = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $snapshot = $this->snapshotWithSplit(7_000, 3_000);
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $correction = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+            $previous->targetAllocations,
+        );
+
+        $net = [];
+        foreach ($correction->lines as $line) {
+            $key = $line['account_code'] . '|' . self::dimensionsKey($line['dimensions'] ?? []);
+            $net[$key] = ($net[$key] ?? 0)
+                + ($line['side'] === 'debit' ? $line['amount_minor'] : -$line['amount_minor']);
+        }
+        ksort($net);
+        self::assertSame([
+            '521|' => -100_000,
+            '521|7:71' => 70_000,
+            '521|7:72' => 30_000,
+            '524|' => -33_800,
+            '524|7:71' => 23_660,
+            '524|7:72' => 10_140,
+        ], $net);
+        foreach ($correction->lines as $line) {
+            self::assertFalse(
+                str_starts_with($line['account_code'], '331') || str_starts_with($line['account_code'], '336'),
+                'Závazky se přeřazením na střediska nemění.',
+            );
+        }
     }
 
     /** @return array<string,mixed> */

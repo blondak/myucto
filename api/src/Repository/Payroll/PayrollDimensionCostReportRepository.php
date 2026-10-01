@@ -15,6 +15,12 @@ use PDO;
  * bezezměnová revize), ne deník: do deníku se po zaměstnanci neúčtuje
  * a alokace nesou pracovní vztah v klíči. Účinnou dávku vybírá stejné
  * pravidlo jako {@see PayrollPostingBatchRepository::latestEffectiveBefore()}.
+ *
+ * Nákladová alokace se pozná podle NÁKLADOVÉ STRANY (klíč `…:debit`)
+ * a účtu třídy 5, ne podle znaménka: záporná složka (oprava minulého měsíce,
+ * srážka z hrubé mzdy) nese zápornou částku na téže straně a náklad snižuje.
+ * Filtr na kladné částky by ji zahodil a report by náklad nadhodnotil
+ * oproti deníku.
  */
 final class PayrollDimensionCostReportRepository
 {
@@ -59,7 +65,7 @@ final class PayrollDimensionCostReportRepository
                  ON allocation.supplier_id = ?
                 AND allocation.batch_id = effective.batch_id
               WHERE effective.position = 1
-                AND allocation.signed_minor > 0
+                AND allocation.allocation_key LIKE "%:debit"
                 AND allocation.account_code LIKE "5%"
               ORDER BY effective.period_start, allocation.allocation_key'
         );

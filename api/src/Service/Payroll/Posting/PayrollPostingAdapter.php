@@ -120,6 +120,8 @@ final class PayrollPostingAdapter
                 );
             }
 
+            $this->assertDimensionValuesUsable($supplierId, $preview);
+
             $userId = $meta['user_id'] ?? null;
             try {
                 $this->periodOwnership->claimPayroll(
@@ -220,6 +222,38 @@ final class PayrollPostingAdapter
                 'preview' => $preview,
             ];
         });
+    }
+
+    /**
+     * Firemní dimenze řádků jsou zmrazené ve snapshotu revize. Než se zapíšou
+     * do deníku, musí hodnota pořád existovat pod svým typem a patřit firmě
+     * nebo její skupině — jinak by zápis spadl na FK, nebo by firma, která
+     * skupinu opustila, účtovala na cizí hodnotu skupiny.
+     */
+    private function assertDimensionValuesUsable(int $supplierId, PayrollPostingPreview $preview): void
+    {
+        $pairs = [];
+        foreach ($preview->lines as $line) {
+            foreach ($line['dimensions'] ?? [] as $typeId => $valueId) {
+                $pairs["{$typeId}:{$valueId}"] = ['type_id' => (int) $typeId, 'value_id' => (int) $valueId];
+            }
+        }
+        if ($pairs === []) {
+            return;
+        }
+        $unusable = $this->batches->unusableDimensionValues($supplierId, array_values($pairs));
+        if ($unusable === []) {
+            return;
+        }
+        throw new \DomainException(sprintf(
+            'Mzdové dimenze revize odkazují na firemní dimenzi, kterou firma už nemůže použít '
+            . '(smazaná hodnota, jiný typ nebo hodnota skupiny, do které firma nepatří): %s. '
+            . 'Opravte vazbu mzdové dimenze a revizi přepočítejte opravnou revizí.',
+            implode(', ', array_map(
+                static fn (array $pair): string => "typ {$pair['type_id']} / hodnota {$pair['value_id']}",
+                $unusable,
+            )),
+        ));
     }
 
     /**

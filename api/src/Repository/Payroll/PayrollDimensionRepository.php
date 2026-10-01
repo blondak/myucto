@@ -185,6 +185,14 @@ final class PayrollDimensionRepository
             if ($historyChanged && $this->isUsedInApprovedRevision($supplierId, $id)) {
                 throw new PayrollDimensionHistoryLockedException();
             }
+            $this->assertSplitStaysComplete(
+                $supplierId,
+                $id,
+                $newType !== $current['dimension_type'],
+                self::requiredBool($data, 'is_active'),
+                $newValidFrom,
+                self::nullableString($data, 'valid_to'),
+            );
 
             $this->assertNoOverlap(
                 $supplierId,
@@ -310,6 +318,50 @@ final class PayrollDimensionRepository
         $stmt->execute([$supplierId, $dimensionId]);
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Dimenze, která je částí procentního rozpadu pracovního vztahu (podíl
+     * pod 100 %), nesmí z rozpadu tiše vypadnout. Snapshot bere jen aktivní
+     * dimenze účinné k začátku období — deaktivace, zkrácení platnosti nebo
+     * změna typu by v něm nechaly třeba jen 70 % a zaúčtování by spadlo až
+     * po schválení běhu. Rozpad se musí nejdřív změnit na kartě vztahu.
+     */
+    private function assertSplitStaysComplete(
+        int $supplierId,
+        int $dimensionId,
+        bool $typeChanged,
+        bool $isActive,
+        string $validFrom,
+        ?string $validTo,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_employment_dimensions
+              WHERE supplier_id = ?
+                AND dimension_id = ?
+                AND share_percent < 100
+                AND (? = 1
+                     OR ? = 0
+                     OR valid_from < ?
+                     OR COALESCE(valid_to, "9999-12-31") > COALESCE(?, "9999-12-31"))
+              LIMIT 1',
+        );
+        $stmt->execute([
+            $supplierId,
+            $dimensionId,
+            $typeChanged ? 1 : 0,
+            $isActive ? 1 : 0,
+            $validFrom,
+            $validTo,
+        ]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new \InvalidArgumentException(
+                'Dimenze je částí procentního rozpadu pracovního vztahu. Deaktivace, '
+                . 'zkrácení platnosti ani změna typu by rozpad nechaly pod 100 %. '
+                . 'Nejdřív upravte rozpad na kartě pracovního vztahu.',
+            );
+        }
     }
 
     private function lockTenant(int $supplierId): void

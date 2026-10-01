@@ -573,6 +573,46 @@ final class PayrollPostingBatchRepository
         return $result;
     }
 
+    /**
+     * Které dvojice typ → hodnota firemní dimenze firma dnes NEMŮŽE použít.
+     *
+     * Hodnota je zmrazená ve snapshotu revize. Mezitím mohla být smazána
+     * (zápis deníku by spadl na FK), převedena pod jiný typ, nebo firma
+     * opustila skupinu firem a hodnota skupiny jí už nepatří.
+     *
+     * @param list<array{type_id:int,value_id:int}> $pairs
+     * @return list<array{type_id:int,value_id:int}>
+     */
+    public function unusableDimensionValues(int $supplierId, array $pairs): array
+    {
+        if ($pairs === []) {
+            return [];
+        }
+        $valueIds = array_values(array_unique(array_column($pairs, 'value_id')));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT value.type_id, value.id
+               FROM dimension_values value
+               JOIN supplier firm ON firm.id = ?
+              WHERE value.id IN (' . implode(',', array_fill(0, count($valueIds), '?')) . ')
+                AND (value.supplier_id = firm.id
+                     OR (value.supplier_group_id IS NOT NULL
+                         AND value.supplier_group_id = firm.supplier_group_id))'
+        );
+        $statement->execute([$supplierId, ...$valueIds]);
+        $usable = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $usable[(int) $row['id']] = (int) $row['type_id'];
+        }
+        $result = [];
+        foreach ($pairs as $pair) {
+            if (($usable[$pair['value_id']] ?? null) !== $pair['type_id']) {
+                $result[] = $pair;
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array<int,int> typ firemní dimenze → hodnota */
     private static function databaseDimensions(mixed $value): array
     {

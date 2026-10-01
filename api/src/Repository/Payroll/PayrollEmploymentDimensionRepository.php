@@ -285,7 +285,9 @@ final class PayrollEmploymentDimensionRepository
      * takže jednotlivé řádky po jednom uložit nejde. Dosavadní přiřazení
      * téhož typu, které začalo dřív a trvá do `valid_from`, se ukončí den
      * před ním — rozpad tak jde nastavit i změnit „od data". Přiřazení, které
-     * začíná až v novém období, se nepřepisuje a uložení odmítne.
+     * začíná až v období rozpadu (100 % od téhož dne, chybně zadaný rozpad),
+     * rozpad nahradí. Obojí jen tehdy, když se tím nemění měsíc už schválený
+     * ve mzdové revizi; jinak uložení srozumitelně odmítne.
      *
      * Jediná hodnota se 100 % je platný „rozpad" — vrací vztah k jednomu
      * středisku.
@@ -350,14 +352,36 @@ final class PayrollEmploymentDimensionRepository
                     SET valid_to = ?, updated_by = ?, row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ?',
             );
+            $delete = $pdo->prepare(
+                'DELETE FROM payroll_employment_dimensions WHERE supplier_id = ? AND id = ?',
+            );
             foreach ($existing->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $endsAfterSplit = $validTo !== null
-                    && ($row['valid_to'] === null || (string) $row['valid_to'] > $validTo);
-                if ((string) $row['valid_from'] >= $validFrom || $endsAfterSplit) {
+                $rowFrom = (string) $row['valid_from'];
+                $rowTo = $row['valid_to'] === null ? null : (string) $row['valid_to'];
+                $endsAfterSplit = $validTo !== null && ($rowTo === null || $rowTo > $validTo);
+                if ($endsAfterSplit) {
                     throw new PayrollEmploymentDimensionOverlapException(
-                        'V období rozpadu už pracovní vztah má jiné přiřazení tohoto typu, '
-                        . 'které nejde jen ukončit. Upravte nejdřív jeho platnost.',
+                        'Přiřazení tohoto typu trvá i po konci rozpadu. Zadejte rozpad bez data '
+                        . 'konce, nebo nejdřív upravte platnost dosavadního přiřazení.',
                     );
+                }
+                // Od data rozpadu se mění, co dosavadní přiřazení tvrdí. Měsíc už
+                // schválený podle něj se přepsat nesmí — oprava jde opravnou revizí
+                // po změně od data, které schválené měsíce nezasahuje.
+                $affectedFrom = max($rowFrom, $validFrom);
+                if ($this->usedInApprovedRevision($supplierId, $employmentId, $affectedFrom, $rowTo)) {
+                    throw new PayrollEmploymentDimensionOverlapException(sprintf(
+                        'Přiřazení platné od %s je od %s použité ve schválené mzdové revizi. '
+                        . 'Rozpad zadejte od data, které schválené měsíce nezasahuje.',
+                        $rowFrom,
+                        $affectedFrom,
+                    ));
+                }
+                if ($rowFrom >= $validFrom) {
+                    // Přiřazení začíná až v období rozpadu (třeba chybně zadaný
+                    // rozpad nebo 100 % od téhož dne) — rozpad ho nahradí.
+                    $delete->execute([$supplierId, (int) $row['id']]);
+                    continue;
                 }
                 $close->execute([$closeOn, $actorUserId, $supplierId, (int) $row['id']]);
             }
@@ -401,6 +425,34 @@ final class PayrollEmploymentDimensionRepository
         }
 
         return $rows;
+    }
+
+    /** Byl pracovní vztah v období [od, do] ve schválené mzdové revizi? */
+    private function usedInApprovedRevision(
+        int $supplierId,
+        int $employmentId,
+        string $from,
+        ?string $to,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_run_employments rune
+               JOIN payroll_run_revisions rev
+                 ON rev.supplier_id = rune.supplier_id
+                AND rev.id = rune.revision_id
+                AND rev.status = "approved"
+               JOIN payroll_runs run
+                 ON run.supplier_id = rev.supplier_id
+                AND run.id = rev.run_id
+              WHERE rune.supplier_id = ?
+                AND rune.employment_id = ?
+                AND run.period_start >= ?
+                AND run.period_start <= COALESCE(?, "9999-12-31")
+              LIMIT 1',
+        );
+        $stmt->execute([$supplierId, $employmentId, $from, $to]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

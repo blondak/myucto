@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll\Posting;
 
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\Payroll\PayrollPostingBatchRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Report\PayrollDimensionCostReportService;
@@ -143,6 +144,181 @@ final class PayrollCompanyDimensionPostingFlowTest extends TestCase
         );
     }
 
+    /**
+     * Záporná nákladová alokace (záporná složka, oprava) náklad SNIŽUJE.
+     * Report, který by bral jen kladné alokace, by ji zahodil a náklad
+     * nadhodnotil proti deníku. Běžný mzdový běh zápornou složku blokuje,
+     * proto se dávka skládá přímo z alokací — přesně v tvaru, jaký staví
+     * účetní můstek (MD alokace se zápornou částkou na 521).
+     */
+    public function testNegativeCostAllocationLowersTheReportedCost(): void
+    {
+        $run = $this->calculateEnforcementRun();
+        $this->approveEnforcementRun($run);
+        $batches = $this->service(PayrollPostingBatchRepository::class);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_posting_batches
+                (supplier_id, run_id, revision_id, previous_batch_id,
+                 entry_date, status, target_hash, delta_hash, created_by)
+             VALUES (?, ?, ?, NULL, "2026-06-30", "prepared", ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $run['run_id'],
+            $run['revision_id'],
+            hash('sha256', 'target-f3'),
+            hash('sha256', 'delta-f3'),
+            $this->actorId,
+        ]);
+        $batchId = (int) $pdo->lastInsertId();
+        $employment = $this->employmentId;
+        $batches->insertAllocations($this->supplierId, $batchId, [
+            $this->allocation("gross:employment:{$employment}:input:1:debit", '521', 3_500_000, $this->valueA),
+            $this->allocation("gross:employment:{$employment}:input:1:credit", '331', -3_500_000),
+            $this->allocation("gross:employment:{$employment}:input:2:debit", '521', -200_000, $this->valueA),
+            $this->allocation("gross:employment:{$employment}:input:2:credit", '331', 200_000),
+        ]);
+        $batches->markNoChange($this->supplierId, $batchId);
+
+        $report = $this->service(PayrollDimensionCostReportService::class)
+            ->report($this->supplierId, 2026);
+
+        self::assertSame(3_300_000, $report['totals']['wages_minor']);
+        self::assertSame(3_300_000, $report['totals']['total_minor']);
+    }
+
+    /** @return array<string,mixed> */
+    private function allocation(string $key, string $account, int $signedMinor, ?int $valueId = null): array
+    {
+        $allocation = [
+            'allocation_key' => $key,
+            'account_code' => $account,
+            'signed_minor' => $signedMinor,
+            'description' => 'Syntetická alokace',
+        ];
+        if ($valueId !== null) {
+            $allocation['dimensions'] = [$this->typeId => $valueId];
+        }
+
+        return $allocation;
+    }
+
+    /** Dimenzi z rozpadu nejde deaktivovat — snapshot by nesl jen 70 %. */
+    public function testDeactivatingADimensionOfASplitIsRejected(): void
+    {
+        [$dimensionA] = $this->splitSeventyThirty();
+        $current = $this->service(\MyInvoice\Repository\Payroll\PayrollDimensionRepository::class)
+            ->find($this->supplierId, $dimensionA);
+        self::assertNotNull($current);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('částí procentního rozpadu');
+        $this->service(PayrollDimensionService::class)->save(
+            $this->supplierId,
+            $dimensionA,
+            [
+                'dimension_type' => 'cost_center',
+                'code' => 'STR-A',
+                'name' => 'STR-A',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'is_active' => false,
+                'default_account_code' => null,
+                'dimension_value_id' => $this->valueA,
+            ],
+            $current['row_version'],
+            $this->actorId,
+        );
+    }
+
+    /**
+     * Druhá pojistka: kdyby se rozpad přesto rozpadl (přímý zásah do dat),
+     * zastaví ho už zmrazení vstupů, ne až zaúčtování schváleného běhu.
+     */
+    public function testIncompleteSplitIsStoppedWhenTheSnapshotIsFrozen(): void
+    {
+        [$dimensionA] = $this->splitSeventyThirty();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_dimensions SET is_active = 0, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $dimensionA]);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Procentní rozpad mzdových dimenzí');
+        $this->calculateEnforcementRun();
+    }
+
+    /** 100 % od 1. 1. jde nahradit rozpadem od téhož dne a chybný rozpad opravit. */
+    public function testSplitFromTheSameDayReplacesTheAssignment(): void
+    {
+        $dimensionA = $this->payrollDimension('STR-A', $this->valueA);
+        $dimensionB = $this->payrollDimension('STR-B', $this->valueB);
+        $splits = $this->service(PayrollEmploymentDimensionService::class);
+        $splits->create(
+            $this->supplierId,
+            $this->employmentId,
+            ['dimension_id' => $dimensionA, 'valid_from' => '2026-01-01'],
+            $this->actorId,
+        );
+
+        $splits->split($this->supplierId, $this->employmentId, $this->splitInput($dimensionA, $dimensionB, 60, 40), $this->actorId);
+        $splits->split($this->supplierId, $this->employmentId, $this->splitInput($dimensionA, $dimensionB, 70, 30), $this->actorId);
+
+        $rows = $this->service(\MyInvoice\Repository\Payroll\PayrollEmploymentDimensionRepository::class)
+            ->listForEmployment($this->supplierId, $this->employmentId);
+        $shares = [];
+        foreach ($rows as $row) {
+            $shares[$row['dimension_id']] = $row['share_percent'];
+        }
+        ksort($shares);
+        self::assertSame([$dimensionA => 70, $dimensionB => 30], $shares);
+    }
+
+    /** Měsíc schválený podle dosavadního přiřazení se rozpadem přepsat nesmí. */
+    public function testSplitOverAnApprovedMonthIsRejected(): void
+    {
+        [$dimensionA, $dimensionB] = $this->splitSeventyThirty();
+        $run = $this->calculateEnforcementRun();
+        $this->approveEnforcementRun($run);
+
+        $this->expectException(\MyInvoice\Repository\Payroll\PayrollEmploymentDimensionOverlapException::class);
+        $this->expectExceptionMessage('schválené mzdové revizi');
+        $this->service(PayrollEmploymentDimensionService::class)->split(
+            $this->supplierId,
+            $this->employmentId,
+            $this->splitInput($dimensionA, $dimensionB, 50, 50),
+            $this->actorId,
+        );
+    }
+
+    /** Hodnota, která firmě mezitím přestala patřit, se do deníku nezapíše. */
+    public function testFrozenValueThatNoLongerBelongsToTheFirmStopsThePosting(): void
+    {
+        $this->splitSeventyThirty();
+        $run = $this->calculateEnforcementRun();
+        $this->approveEnforcementRun($run);
+        $pdo = $this->db->pdo();
+        $foreignSupplier = (int) $pdo->query(
+            'SELECT MIN(id) FROM supplier WHERE id <> ' . $this->supplierId
+        )->fetchColumn();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'CIZI-F3B', 'Cizí', 'cost_center')")
+            ->execute([$foreignSupplier]);
+        $foreignType = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE dimension_values SET type_id = ?, supplier_id = ? WHERE id = ?')
+            ->execute([$foreignType, $foreignSupplier, $this->valueB]);
+
+        [$input, $result] = $this->revisionSnapshots($run['revision_id']);
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('už nemůže použít');
+        $this->service(PayrollApprovedRevisionPostingService::class)->postManually(
+            $this->supplierId,
+            $run['revision_id'],
+            $input,
+            $result,
+            $this->actorId,
+        );
+    }
+
     public function testSplitThatDoesNotSumToHundredPercentIsRejected(): void
     {
         $dimensionA = $this->payrollDimension('STR-A', $this->valueA);
@@ -200,6 +376,34 @@ final class PayrollCompanyDimensionPostingFlowTest extends TestCase
         );
 
         self::assertSame(100, $assignment['share_percent']);
+    }
+
+    /** @return array{int,int} mzdové dimenze STR-A a STR-B */
+    private function splitSeventyThirty(): array
+    {
+        $dimensionA = $this->payrollDimension('STR-A', $this->valueA);
+        $dimensionB = $this->payrollDimension('STR-B', $this->valueB);
+        $this->service(PayrollEmploymentDimensionService::class)->split(
+            $this->supplierId,
+            $this->employmentId,
+            $this->splitInput($dimensionA, $dimensionB, 70, 30),
+            $this->actorId,
+        );
+
+        return [$dimensionA, $dimensionB];
+    }
+
+    /** @return array<string,mixed> */
+    private function splitInput(int $dimensionA, int $dimensionB, int $shareA, int $shareB): array
+    {
+        return [
+            'dimension_type' => 'cost_center',
+            'valid_from' => '2026-01-01',
+            'shares' => [
+                ['dimension_id' => $dimensionA, 'share_percent' => $shareA],
+                ['dimension_id' => $dimensionB, 'share_percent' => $shareB],
+            ],
+        ];
     }
 
     private function companyValue(string $code, string $name): int

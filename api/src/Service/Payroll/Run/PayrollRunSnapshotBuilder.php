@@ -617,7 +617,7 @@ final class PayrollRunSnapshotBuilder
                 'absences' => $absences,
                 'inputs' => $inputs,
                 'risky_savings_evidence' => $riskySavingsEvidence,
-                'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
+                'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? [], $employmentId),
                 // Potvrzený odložený příjem (JMHZ 10548) za tento měsíc; jen
                 // tam, kde ho účetní potvrdila, ostatní vstup se nemění.
                 ...($deferredIncome === null ? [] : ['deferred_income' => $deferredIncome]),
@@ -2094,9 +2094,11 @@ final class PayrollRunSnapshotBuilder
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    private function dimensions(array $rows): array
+    private function dimensions(array $rows, int $employmentId = 0): array
     {
         $result = [];
+        /** @var array<string,array{count:int,total:int}> $shares typ → součet podílů */
+        $shares = [];
         foreach ($rows as $row) {
             $account = $row['default_account_code'];
             $dimension = [
@@ -2118,7 +2120,24 @@ final class PayrollRunSnapshotBuilder
                 $dimension['dimension_type_id'] = (int) $typeId;
                 $dimension['dimension_value_id'] = (int) $valueId;
             }
+            $shares[$dimension['type']] ??= ['count' => 0, 'total' => 0];
+            $shares[$dimension['type']]['count']++;
+            $shares[$dimension['type']]['total'] += $shareBp;
             $result[] = $dimension;
+        }
+        // Rozpad, ze kterého k začátku období vypadla část (deaktivovaná nebo
+        // neúčinná dimenze), se nesmí zmrazit: účetní můstek by ho odmítl až po
+        // schválení běhu. Zastaví se tady, kdy se dá ještě opravit.
+        foreach ($shares as $type => $share) {
+            if ($share['total'] !== 10_000) {
+                throw new \DomainException(sprintf(
+                    'Procentní rozpad mzdových dimenzí typu %s u pracovního vztahu %d dává k začátku '
+                    . 'období %s %% místo 100 %%. Upravte rozpad na kartě pracovního vztahu.',
+                    $type,
+                    $employmentId,
+                    number_format($share['total'] / 100, 2, ',', ' '),
+                ));
+            }
         }
         return $result;
     }
