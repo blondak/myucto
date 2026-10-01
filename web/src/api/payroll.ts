@@ -9891,12 +9891,30 @@ export const payrollApi = {
       `/payroll/submissions/jmhz-external/${id}`,
       { params: { environment } },
     ).then(response => response.data),
+  /** Potvrdí, že řádné hlášení vybraných převzatých měsíců podal předchozí program mimo MyÚčto. */
+  attestJmhzExternalSubmissions: (
+    payload: { periods: string[]; submitted_on: string; note?: string | null },
+    environment: PayrollJmhzTransportEnvironment,
+  ) =>
+    api.post<{ attested: Array<{ id: number; period: string }> }>(
+      '/payroll/submissions/jmhz-external/attestations',
+      payload,
+      { params: { environment } },
+    ).then(response => response.data),
+  revokeJmhzExternalAttestation: (id: number, environment: PayrollJmhzTransportEnvironment) =>
+    api.delete<{ revoked: boolean; id: number; period: string }>(
+      `/payroll/submissions/jmhz-external/attestations/${id}`,
+      { params: { environment } },
+    ).then(response => response.data),
 }
 
 /** Podání ČSSZ předchozím mzdovým programem (historie převzatých podání). */
 export interface PayrollJmhzExternalSubmission {
   id: number
-  source: 'pamica' | 'jmhz_xml'
+  /** `manual_attestation` = účetní potvrdila podání mimo MyÚčto, doklad v aplikaci není. */
+  source: 'pamica' | 'jmhz_xml' | 'manual_attestation'
+  /** Poznámka k potvrzení podání mimo MyÚčto. */
+  note?: string | null
   document_kind: 'monthly' | 'registration'
   period: string | null
   submission_type: 'R' | 'O' | 'S' | null

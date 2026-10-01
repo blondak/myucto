@@ -11546,8 +11546,6 @@
       "load_failed": "Submissions by the previous program could not be loaded.",
       "open_history": "Open submissions by the previous program",
       "open_migration": "Open the PAMICA migration",
-      "missing_title": "The report for {period} has not been filed",
-      "missing_hint": "The previous payroll program processed this month, but the submission history holds no JMHZ report for it. MyÚčto does not calculate taken-over months, so it will not prepare the report: file it from the previous program. If it was already sent, repeat the migration with a new export or upload the sent report (XML) in Payroll → Imports and the status will be filled in.",
       "unsent_registration": {
         "title": "Registration from the previous program not sent: {actions} (prepared {date})",
         "hint": "ČSSZ did not receive this registration and the deadline for the registration or deregistration keeps running. Send it from the previous program, or file it from MyÚčto on the person card in the ČSSZ registration panel. If it was already sent, repeat the migration with a new export and the status will be filled in.",
@@ -11619,7 +11617,27 @@
       "source": {
         "pamica": "PAMICA",
         "jmhz_xml": "Uploaded XML report",
-        "jmhz_xml_file": "Uploaded XML ({file})"
+        "jmhz_xml_file": "Uploaded XML ({file})",
+        "manual_attestation": "Confirmed: filed outside MyÚčto",
+        "manual_attestation_note": "Confirmed: filed outside MyÚčto ({note})"
+      },
+      "history_show": "Show history",
+      "history_hide": "Hide history",
+      "missing_group_title": "JMHZ reports for {count} taken-over months are not in the filing history: {periods}",
+      "missing_group_hint": "These months were processed by the previous payroll program and MyÚčto will not prepare reports for them. If the previous program or the ČSSZ portal filed them, confirm the filing outside MyÚčto, or repeat the migration with a new export or upload the sent XML in Payroll → Imports. Otherwise file them from the previous program.",
+      "attest": {
+        "open": "Confirm filing outside MyÚčto",
+        "title": "Confirm filing outside MyÚčto",
+        "intro": "Record that the regular monthly report for the selected months was filed by the previous program or the ČSSZ portal. MyÚčto will hold no filing document, only this confirmation.",
+        "periods": "Months",
+        "date": "Filing date",
+        "note": "Note (optional)",
+        "note_placeholder": "e.g. filed via the ČSSZ portal",
+        "consequence": "A confirmed month is no longer reported as unfiled and MyÚčto will not prepare a second regular report for it. The confirmation can be revoked in the history.",
+        "confirm": "Confirm ({count})",
+        "failed": "The filing could not be confirmed.",
+        "revoke": "Revoke confirmation",
+        "revoke_consequence": "The month {period} will reappear among taken-over months without a report."
       }
     }
   },

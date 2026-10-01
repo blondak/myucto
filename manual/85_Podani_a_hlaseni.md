@@ -335,7 +335,10 @@ je druh, stav, akce s počtem formulářů (u registrací *A1 přihláška*,
 neodesláno) a kolik osob se spárovalo se vztahy v evidenci. Tlačítko
 **Detail** ukáže všechny formuláře podání: osobu s odkazem na její kartu,
 akci a den účinnosti; formulář, který se se vztahem nespároval, nese číslo
-vztahu v předchozím programu. Firma bez převodu tenhle oddíl nevidí.
+vztahu v předchozím programu. Historie je ve výchozím stavu sbalená, rozbalí ji
+tlačítko **Zobrazit historii** a aplikace si volbu pamatuje pro každého
+uživatele v jeho prohlížeči. Upozornění, která vyžadují akci, jsou vidět vždy.
+Firma bez převodu tenhle oddíl nevidí.
 
 **Měsíc, za který řádné hlášení odešlo, MyÚčto znovu nepodá.** Druhé řádné
 hlášení za stejný měsíc ČSSZ zamítne jako duplicitní (kontrola č. 22 katalogu
@@ -346,6 +349,23 @@ jako opravné podání z programu, který řádné hlášení podal.
 **Neodeslaný měsíc je upozornění.** Když předchozí program hlášení za měsíc
 připravil, ale neodeslal, oddíl na to upozorní: ČSSZ ho nemá a je potřeba ho
 podat.
+
+**Převzaté měsíce bez hlášení v historii.** Měsíce, které zpracoval předchozí
+program a za které v historii není žádné hlášení JMHZ, oddíl vypíše v jednom
+upozornění (například *duben–červenec 2026*). Hlášení JMHZ se podává za období
+od ledna 2026; leden až březen 2026 se hlásil zpětně do 30. 6. 2026. Měsíce
+roku 2025 a starší proto upozornění nikdy neobsahuje.
+
+Podal-li hlášení předchozí program nebo portál ČSSZ, ale doklad v MyÚčtu není,
+použijte **Potvrdit podání mimo MyÚčto**. V dialogu vyberete měsíce, datum
+podání a nepovinnou poznámku (například *podáno portálem ČSSZ*). Potvrzený měsíc
+se zapíše do historie jako odeslané řádné hlášení se zdrojem *Potvrzeno: podáno
+mimo MyÚčto*: přestane se hlásit jako nepodaný v oddílu, v Měsíčním přehledu
+i v hlídači termínů a MyÚčto za něj nepřipraví druhé řádné hlášení. Potvrzení
+jde vzít zpět akcí **Vzít potvrzení zpět** u záznamu v historii; měsíc se pak
+znovu objeví mezi nepodanými. Potvrzení i jeho zpětvzetí se zapisuje do
+auditního logu. Potvrdit jde jen v ostrém prostředí a jen měsíc, který oddíl
+právě hlásí jako nepodaný.
 
 **Záznam, který převod převzal chybně, jde odebrat.** Volba *Odebrat
 z historie* je v nabídce **…** u podání. Dialog vysvětlí, kdy odebrání použít

@@ -11548,8 +11548,6 @@
       "open_migration": "Otevřít převod z PAMICA",
       "unsent_title": "Hlášení za {period} předchozí program neodeslal",
       "unsent_hint": "PAMICA hlášení připravila, ale ČSSZ ho nedostala. Odešlete ho z předchozího programu (měsíce před začátkem vedení mezd MyÚčto nepočítá). Když už odešlo, převod z PAMICA zopakujte s novým exportem, stav se doplní.",
-      "missing_title": "Hlášení za {period} nebylo podáno",
-      "missing_hint": "Měsíc zpracoval předchozí mzdový program, ale v historii podání za něj žádné hlášení JMHZ není. MyÚčto převzatý měsíc nepočítá, takže hlášení nepřipraví: podejte ho z předchozího programu. Když už odešlo, zopakujte převod s novým exportem nebo nahrajte odeslané hlášení (XML) v Mzdy → Importy, stav se doplní.",
       "unsent_registration": {
         "title": "Registrace od předchozího programu neodeslána: {actions} (připraveno {date})",
         "hint": "ČSSZ tuto registraci nedostala a lhůta pro přihlášku nebo odhlášku běží dál. Odešlete ji z předchozího programu, nebo ji podejte z MyÚčta na kartě osoby v panelu Registrace ČSSZ. Když už odešla, zopakujte převod s novým exportem, stav se doplní.",
@@ -11619,7 +11617,27 @@
       "source": {
         "pamica": "PAMICA",
         "jmhz_xml": "Nahrané XML hlášení",
-        "jmhz_xml_file": "Nahrané XML ({file})"
+        "jmhz_xml_file": "Nahrané XML ({file})",
+        "manual_attestation": "Potvrzeno: podáno mimo MyÚčto",
+        "manual_attestation_note": "Potvrzeno: podáno mimo MyÚčto ({note})"
+      },
+      "history_show": "Zobrazit historii",
+      "history_hide": "Skrýt historii",
+      "missing_group_title": "Hlášení JMHZ za {count} převzatých měsíců nejsou v historii podání: {periods}",
+      "missing_group_hint": "Tyto měsíce zpracoval předchozí mzdový program a MyÚčto za ně hlášení nepřipraví. Podal-li je předchozí program nebo portál ČSSZ, potvrďte podání mimo MyÚčto, nebo zopakujte převod s novým exportem či nahrajte odeslané XML v Mzdy → Importy. Jinak je podejte z předchozího programu.",
+      "attest": {
+        "open": "Potvrdit podání mimo MyÚčto",
+        "title": "Potvrdit podání mimo MyÚčto",
+        "intro": "Zaznamenejte, že řádné měsíční hlášení za vybrané měsíce podal předchozí program nebo portál ČSSZ. Doklad o podání v MyÚčtu nebude, jen toto potvrzení.",
+        "periods": "Měsíce",
+        "date": "Datum podání",
+        "note": "Poznámka (nepovinná)",
+        "note_placeholder": "např. podáno portálem ČSSZ",
+        "consequence": "Potvrzený měsíc se přestane hlásit jako nepodaný a MyÚčto za něj nepřipraví druhé řádné hlášení. Potvrzení jde v historii vzít zpět.",
+        "confirm": "Potvrdit ({count})",
+        "failed": "Podání se nepodařilo potvrdit.",
+        "revoke": "Vzít potvrzení zpět",
+        "revoke_consequence": "Měsíc {period} se znovu objeví mezi převzatými měsíci bez hlášení."
       }
     }
   },

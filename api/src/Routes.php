@@ -2077,6 +2077,15 @@ final class Routes
                 '/submissions/jmhz-external/{id:[0-9]+}',
                 [PayrollJmhzExternalSubmissionAction::class, 'delete'],
             );
+            // Potvrzení, že řádné hlášení převzatého měsíce podal předchozí program.
+            $g->post(
+                '/submissions/jmhz-external/attestations',
+                [PayrollJmhzExternalSubmissionAction::class, 'attest'],
+            );
+            $g->delete(
+                '/submissions/jmhz-external/attestations/{id:[0-9]+}',
+                [PayrollJmhzExternalSubmissionAction::class, 'revokeAttestation'],
+            );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',
                 PayrollSubmissionDetailAction::class,

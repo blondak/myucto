@@ -13,7 +13,8 @@ import {
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
-import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatPeriod, formatPeriodRange } from '@/composables/useFormat'
+import { usePerUserFlag } from '@/composables/usePerUserFlag'
 import { useAuthStore } from '@/stores/auth'
 
 /*
@@ -50,6 +51,83 @@ const detailError = ref('')
 const confirmTarget = ref<PayrollJmhzExternalSubmission | null>(null)
 
 const PEOPLE_PREVIEW = 3
+
+/*
+ * Historie podání je hotová věc, kterou člověk otevře jen občas; ve výchozím
+ * stavu je proto sbalená a volbu si pamatuje každý uživatel zvlášť. Upozornění,
+ * která vyžadují akci (nepodané nebo neodeslané měsíce), zůstávají vidět vždy.
+ */
+const historyFlag = usePerUserFlag('payroll.external-jmhz.history-expanded')
+const historyExpanded = ref(historyFlag.read() ?? false)
+
+function toggleHistory() {
+  historyExpanded.value = !historyExpanded.value
+  historyFlag.write(historyExpanded.value)
+}
+
+/**
+ * Seznam měsíců jako souvislé úseky: „duben–červenec 2026", nesouvislé
+ * oddělené čárkou.
+ */
+function periodsLabel(periods: string[]): string {
+  const sorted = [...periods].sort()
+  const runs: Array<[string, string]> = []
+  for (const period of sorted) {
+    const last = runs[runs.length - 1]
+    if (last && nextPeriod(last[1]) === period) {
+      last[1] = period
+    } else {
+      runs.push([period, period])
+    }
+  }
+  return runs.map(([from, to]) => formatPeriodRange(from, to)).join(', ')
+}
+
+function nextPeriod(period: string): string {
+  const [year, month] = period.split('-').map(Number)
+  return month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}`
+}
+
+function todayIso(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+const attestOpen = ref(false)
+const attestPeriods = ref<string[]>([])
+const attestDate = ref('')
+const attestNote = ref('')
+const attesting = ref(false)
+const attestError = ref('')
+
+function openAttest() {
+  attestPeriods.value = [...missingPeriods.value]
+  attestDate.value = todayIso()
+  attestNote.value = ''
+  attestError.value = ''
+  attestOpen.value = true
+}
+
+async function confirmAttest() {
+  if (!canWrite.value || attesting.value || attestPeriods.value.length === 0 || attestDate.value === '') return
+  attesting.value = true
+  attestError.value = ''
+  try {
+    await payrollApi.attestJmhzExternalSubmissions({
+      periods: [...attestPeriods.value].sort(),
+      submitted_on: attestDate.value,
+      note: attestNote.value.trim() === '' ? null : attestNote.value.trim(),
+    }, props.environment)
+    attestOpen.value = false
+    await load()
+  } catch (exception) {
+    attestError.value = apiErrorMessage(exception, t('payroll.external_jmhz.attest.failed'))
+  } finally {
+    attesting.value = false
+  }
+}
 
 const monthly = computed(() => items.value.filter(item => item.document_kind === 'monthly'))
 const registrations = computed(() => items.value.filter(item => item.document_kind === 'registration'))
@@ -140,7 +218,16 @@ function effectiveLabel(item: PayrollJmhzExternalSubmission): string {
   return `${formatDate(item.effective_from)} – ${formatDate(item.effective_to)}`
 }
 
+function isAttestation(item: PayrollJmhzExternalSubmission): boolean {
+  return item.source === 'manual_attestation'
+}
+
 function sourceLabel(item: PayrollJmhzExternalSubmission): string {
+  if (isAttestation(item)) {
+    return item.note
+      ? t('payroll.external_jmhz.source.manual_attestation_note', { note: item.note })
+      : t('payroll.external_jmhz.source.manual_attestation')
+  }
   if (item.source === 'jmhz_xml') {
     return item.file_name
       ? t('payroll.external_jmhz.source.jmhz_xml_file', { file: item.file_name })
@@ -177,11 +264,12 @@ function rowActions(item: PayrollJmhzExternalSubmission): RowAction[] {
       key: 'detail',
       label: t('payroll.external_jmhz.detail'),
       icon: 'eye',
+      show: !isAttestation(item),
       run: () => { void openDetail(item.id) },
     },
     {
       key: 'remove',
-      label: t('payroll.external_jmhz.remove'),
+      label: isAttestation(item) ? t('payroll.external_jmhz.attest.revoke') : t('payroll.external_jmhz.remove'),
       icon: 'trash',
       variant: 'danger',
       show: canWrite.value,
@@ -232,6 +320,9 @@ function detailTitle(item: PayrollJmhzExternalSubmission): string {
 }
 
 function removeConsequence(item: PayrollJmhzExternalSubmission): string {
+  if (isAttestation(item)) {
+    return t('payroll.external_jmhz.attest.revoke_consequence', { period: formatPeriod(item.period) })
+  }
   if (item.document_kind === 'registration') return t('payroll.external_jmhz.remove_dialog.registration')
   return item.status === 'sent'
     ? t('payroll.external_jmhz.remove_dialog.monthly_sent', { period: formatPeriod(item.period) })
@@ -244,6 +335,13 @@ async function confirmRemove() {
   removing.value = item.id
   error.value = ''
   try {
+    if (isAttestation(item)) {
+      await payrollApi.revokeJmhzExternalAttestation(item.id, props.environment)
+      confirmTarget.value = null
+      // Měsíc se vrací mezi nepodané — ty počítá server.
+      await load()
+      return
+    }
     await payrollApi.deleteJmhzExternalSubmission(item.id, props.environment)
     items.value = items.value.filter(row => row.id !== item.id)
     if (detail.value?.id === item.id) closeDetail()
@@ -274,8 +372,29 @@ onMounted(async () => {
     data-test="external-jmhz-panel"
   >
     <div class="border-b border-neutral-200 p-4 sm:p-6">
-      <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.external_jmhz.title') }}</h2>
-      <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.external_jmhz.description') }}</p>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-lg font-semibold text-neutral-900">
+          {{ t('payroll.external_jmhz.title') }}
+          <span v-if="items.length" class="text-sm font-normal text-neutral-500" data-test="external-jmhz-count">
+            ({{ items.length }})
+          </span>
+        </h2>
+        <button
+          v-if="items.length"
+          type="button"
+          :class="btnOutline('neutral')"
+          class="whitespace-nowrap"
+          :aria-expanded="historyExpanded"
+          data-test="external-jmhz-history-toggle"
+          @click="toggleHistory"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="historyExpanded ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'" />
+          </svg>
+          {{ historyExpanded ? t('payroll.external_jmhz.history_hide') : t('payroll.external_jmhz.history_show') }}
+        </button>
+      </div>
+      <p v-if="historyExpanded" class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.external_jmhz.description') }}</p>
     </div>
 
     <div
@@ -305,20 +424,37 @@ onMounted(async () => {
     </div>
 
     <div
-      v-for="period in missingPeriods"
-      :key="`missing-${period}`"
+      v-if="missingPeriods.length"
       class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
       role="status"
       data-test="external-jmhz-missing"
     >
-      <p class="font-medium">{{ t('payroll.external_jmhz.missing_title', { period: formatPeriod(period) }) }}</p>
-      <p class="mt-1">{{ t('payroll.external_jmhz.missing_hint') }}</p>
-      <RouterLink
-        :to="{ name: 'imports-pamica' }"
-        class="mt-1 inline-block font-medium text-payroll-600 underline hover:text-payroll-700"
-      >
-        {{ t('payroll.external_jmhz.open_migration') }}
-      </RouterLink>
+      <p class="font-medium">
+        {{ t('payroll.external_jmhz.missing_group_title', {
+          count: missingPeriods.length,
+          periods: periodsLabel(missingPeriods),
+        }) }}
+      </p>
+      <p class="mt-1">{{ t('payroll.external_jmhz.missing_group_hint') }}</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button
+          v-if="canWrite && environment === 'production'"
+          type="button"
+          :class="[btnFilled('success'), 'whitespace-nowrap']"
+          data-test="external-jmhz-attest-open"
+          @click="openAttest"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+          {{ t('payroll.external_jmhz.attest.open') }}
+        </button>
+        <RouterLink
+          :to="{ name: 'imports-pamica' }"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
+          {{ t('payroll.external_jmhz.open_migration') }}
+        </RouterLink>
+      </div>
     </div>
 
     <div
@@ -380,7 +516,7 @@ onMounted(async () => {
       ]"
       :key="section.key"
     >
-      <div v-if="section.groups.length" class="border-t border-neutral-200 first:border-t-0" :data-test="`external-jmhz-section-${section.key}`">
+      <div v-if="historyExpanded && section.groups.length" class="border-t border-neutral-200 first:border-t-0" :data-test="`external-jmhz-section-${section.key}`">
         <div class="px-4 pt-4 sm:px-6">
           <h3 class="text-base font-semibold text-neutral-900">{{ section.title }}</h3>
           <p class="mt-0.5 max-w-3xl text-xs text-neutral-500">{{ section.hint }}</p>
@@ -526,9 +662,9 @@ onMounted(async () => {
     >
       <div class="space-y-3 text-sm text-neutral-700" data-test="external-jmhz-remove-dialog">
         <p class="font-medium text-neutral-900">{{ detailTitle(confirmTarget) }}</p>
-        <p>{{ t('payroll.external_jmhz.remove_dialog.when') }}</p>
+        <p v-if="!isAttestation(confirmTarget)">{{ t('payroll.external_jmhz.remove_dialog.when') }}</p>
         <p>{{ removeConsequence(confirmTarget) }}</p>
-        <p class="text-xs text-neutral-500">{{ t('payroll.external_jmhz.remove_dialog.restore') }}</p>
+        <p v-if="!isAttestation(confirmTarget)" class="text-xs text-neutral-500">{{ t('payroll.external_jmhz.remove_dialog.restore') }}</p>
       </div>
       <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
@@ -551,7 +687,90 @@ onMounted(async () => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.trash" />
             </svg>
-            {{ t('payroll.external_jmhz.remove_dialog.confirm') }}
+            {{ isAttestation(confirmTarget) ? t('payroll.external_jmhz.attest.revoke') : t('payroll.external_jmhz.remove_dialog.confirm') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      v-if="attestOpen"
+      :title="t('payroll.external_jmhz.attest.title')"
+      width-class="max-w-lg"
+      @close="attestOpen = false"
+    >
+      <div class="space-y-3 text-sm text-neutral-700" data-test="external-jmhz-attest-dialog">
+        <p>{{ t('payroll.external_jmhz.attest.intro') }}</p>
+        <fieldset>
+          <legend class="text-xs font-medium text-neutral-600">{{ t('payroll.external_jmhz.attest.periods') }}</legend>
+          <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <label
+              v-for="period in missingPeriods"
+              :key="period"
+              class="inline-flex items-center gap-2 whitespace-nowrap"
+            >
+              <input
+                v-model="attestPeriods"
+                type="checkbox"
+                :value="period"
+                :data-test="`external-jmhz-attest-period-${period}`"
+              >
+              {{ formatPeriod(period) }}
+            </label>
+          </div>
+        </fieldset>
+        <label class="block">
+          <span class="text-xs font-medium text-neutral-600">{{ t('payroll.external_jmhz.attest.date') }}</span>
+          <input
+            v-model="attestDate"
+            type="date"
+            :max="todayIso()"
+            class="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            data-test="external-jmhz-attest-date"
+          >
+        </label>
+        <label class="block">
+          <span class="text-xs font-medium text-neutral-600">{{ t('payroll.external_jmhz.attest.note') }}</span>
+          <input
+            v-model="attestNote"
+            type="text"
+            maxlength="500"
+            :placeholder="t('payroll.external_jmhz.attest.note_placeholder')"
+            class="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            data-test="external-jmhz-attest-note"
+          >
+        </label>
+        <p class="text-xs text-neutral-500">{{ t('payroll.external_jmhz.attest.consequence') }}</p>
+        <p
+          v-if="attestError"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-2 text-danger-700"
+          role="alert"
+        >
+          {{ attestError }}
+        </p>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            class="whitespace-nowrap"
+            @click="attestOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            :class="btnFilled('success')"
+            class="whitespace-nowrap"
+            :disabled="attesting || attestPeriods.length === 0 || attestDate === ''"
+            data-test="external-jmhz-attest-confirm"
+            @click="confirmAttest"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.check" />
+            </svg>
+            {{ t('payroll.external_jmhz.attest.confirm', { count: attestPeriods.length }) }}
           </button>
         </div>
       </template>

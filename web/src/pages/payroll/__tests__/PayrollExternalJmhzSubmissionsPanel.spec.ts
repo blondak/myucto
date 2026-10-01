@@ -5,6 +5,8 @@ const m = vi.hoisted(() => ({
   list: vi.fn(),
   detail: vi.fn(),
   remove: vi.fn(),
+  attest: vi.fn(),
+  revoke: vi.fn(),
   canWrite: true,
   query: {} as Record<string, string>,
 }))
@@ -14,8 +16,12 @@ vi.mock('@/api/payroll', () => ({
     jmhzExternalSubmissions: m.list,
     jmhzExternalSubmission: m.detail,
     deleteJmhzExternalSubmission: m.remove,
+    attestJmhzExternalSubmissions: m.attest,
+    revokeJmhzExternalAttestation: m.revoke,
   },
 }))
+
+const HISTORY_KEY = 'myinvoice.ui.payroll.external-jmhz.history-expanded.0.0'
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
   useRoute: () => ({ query: m.query }),
@@ -104,6 +110,93 @@ describe('PayrollExternalJmhzSubmissionsPanel', () => {
     m.canWrite = true
     m.query = {}
     document.body.innerHTML = ''
+    localStorage.clear()
+    // Historie je ve výchozím stavu sbalená; testy výpisu ji mají rozbalenou.
+    localStorage.setItem(HISTORY_KEY, '1')
+  })
+
+  it('historii drží ve výchozím stavu sbalenou a rozbalení si zapamatuje', async () => {
+    localStorage.clear()
+    m.list.mockResolvedValue({ environment: 'production', items: [row()] })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="external-jmhz-panel"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-test="external-jmhz-row"]')).toHaveLength(0)
+    await wrapper.get('[data-test="external-jmhz-history-toggle"]').trigger('click')
+    expect(wrapper.findAll('[data-test="external-jmhz-row"]')).toHaveLength(1)
+    expect(localStorage.getItem(HISTORY_KEY)).toBe('1')
+  })
+
+  /**
+   * Sedm převzatých měsíců bez hlášení dřív znamenalo sedm velkých červených
+   * boxů. Jeden box se souhrnem, vysvětlení i akce jednou.
+   */
+  it('chybějící měsíce sloučí do jednoho upozornění i při sbalené historii', async () => {
+    localStorage.clear()
+    m.list.mockResolvedValue({
+      environment: 'production',
+      items: [row()],
+      missing_periods: ['2026-04', '2026-05', '2026-06', '2026-07'],
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const missing = wrapper.findAll('[data-test="external-jmhz-missing"]')
+    expect(missing).toHaveLength(1)
+    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_group_title 4 duben–červenec 2026')
+    expect(missing[0].text().match(/payroll\.external_jmhz\.missing_group_hint/g)).toHaveLength(1)
+    expect(missing[0].findAll('[data-test="external-jmhz-attest-open"]')).toHaveLength(1)
+  })
+
+  it('podání mimo MyÚčto potvrdí hromadně za vybrané měsíce s datem a poznámkou', async () => {
+    m.list.mockResolvedValue({
+      environment: 'production',
+      items: [row()],
+      missing_periods: ['2026-04', '2026-05'],
+    })
+    m.attest.mockResolvedValue({ attested: [{ id: 9, period: '2026-04' }] })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="external-jmhz-attest-open"]').trigger('click')
+    await wrapper.get('[data-test="external-jmhz-attest-period-2026-05"]').setValue(false)
+    await wrapper.get('[data-test="external-jmhz-attest-date"]').setValue('2026-05-15')
+    await wrapper.get('[data-test="external-jmhz-attest-note"]').setValue('  portál ČSSZ ')
+    await wrapper.get('[data-test="external-jmhz-attest-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(m.attest).toHaveBeenCalledWith(
+      { periods: ['2026-04'], submitted_on: '2026-05-15', note: 'portál ČSSZ' },
+      'production',
+    )
+    expect(m.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('potvrzení podání mimo MyÚčto jde vzít zpět', async () => {
+    m.list.mockResolvedValue({
+      environment: 'production',
+      items: [row({ id: 9, source: 'manual_attestation', period: '2026-04', note: 'portál', form_count: 0, matched_forms: 0, program: null })],
+    })
+    m.revoke.mockResolvedValue({ revoked: true, id: 9, period: '2026-04' })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('[data-test="external-jmhz-row"]').text())
+      .toContain('payroll.external_jmhz.source.manual_attestation_note portál')
+    // Detail potvrzení nemá co ukázat, takže zpětvzetí je jediná (inline) akce.
+    const revoke = wrapper.get('[data-test="external-jmhz-row"]').findAll('button')
+      .find(button => button.text().includes('payroll.external_jmhz.attest.revoke'))
+    expect(revoke).toBeDefined()
+    await revoke!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="external-jmhz-remove-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(m.revoke).toHaveBeenCalledWith(9, 'production')
+    expect(m.remove).not.toHaveBeenCalled()
   })
 
   it('registrace seskupí po měsíci a řekne, kdo v nich byl a jakou akcí', async () => {
@@ -223,8 +316,8 @@ describe('PayrollExternalJmhzSubmissionsPanel', () => {
 
     const missing = wrapper.findAll('[data-test="external-jmhz-missing"]')
     expect(missing).toHaveLength(1)
-    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_title')
-    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_hint')
+    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_group_title')
+    expect(missing[0].text()).toContain('payroll.external_jmhz.missing_group_hint')
   })
 
   it('neodeslaný měsíc, za který jiné podání odešlo, neupozorňuje', async () => {

@@ -25,6 +25,8 @@ final class JmhzExternalSubmissionStore
 {
     public const SOURCE_PAMICA = 'pamica';
     public const SOURCE_JMHZ_XML = 'jmhz_xml';
+    /** Účetní potvrdila, že řádné hlášení podal předchozí program nebo portál ČSSZ (migrace 1951). */
+    public const SOURCE_MANUAL_ATTESTATION = 'manual_attestation';
     public const STATUS_SENT = 'sent';
     public const STATUS_NOT_SENT = 'not_sent';
 
@@ -42,7 +44,7 @@ final class JmhzExternalSubmissionStore
     /**
      * @param array{source_key:string,document_kind:string,period:?string,submission_type:?string,
      *   submission_guid:?string,corrected_source_key:?string,status:string,filled_at:?string,
-     *   submitted_at:?string,accepted_at:?string,program:?string,file_name:?string,payload:array<string,mixed>} $submission
+     *   submitted_at:?string,accepted_at:?string,program:?string,file_name:?string,note?:?string,payload:array<string,mixed>} $submission
      * @param list<array{position:int,form_guid:?string,form_type:?string,source_relation_ref:?string,
      *   employee_id:?int,employment_id:?int,payload:array<string,mixed>}> $forms
      * @return array{id:int,status:string}
@@ -52,10 +54,13 @@ final class JmhzExternalSubmissionStore
         if (!in_array($environment, ['production', 'test'], true)) {
             throw new \InvalidArgumentException('Prostředí převzatého podání musí být production nebo test.');
         }
-        if (!in_array($source, [self::SOURCE_PAMICA, self::SOURCE_JMHZ_XML], true)) {
+        if (!in_array($source, [self::SOURCE_PAMICA, self::SOURCE_JMHZ_XML, self::SOURCE_MANUAL_ATTESTATION], true)) {
             throw new \InvalidArgumentException("Zdroj převzatého podání {$source} neznám.");
         }
         $payload = CanonicalJson::encode($submission['payload']);
+        $note = isset($submission['note']) && is_string($submission['note']) && trim($submission['note']) !== ''
+            ? mb_substr(trim($submission['note']), 0, 500)
+            : null;
         $meta = [
             'document_kind' => $submission['document_kind'],
             'period' => $submission['period'],
@@ -69,6 +74,7 @@ final class JmhzExternalSubmissionStore
             'form_count' => count($forms),
             'program' => $submission['program'] === null ? null : mb_substr($submission['program'], 0, 100),
             'file_name' => $submission['file_name'] === null ? null : mb_substr($submission['file_name'], 0, 255),
+            'note' => $note,
             'payload_sha256' => hash('sha256', $payload),
         ];
         $formRows = [];
@@ -103,14 +109,14 @@ final class JmhzExternalSubmissionStore
                     'INSERT INTO payroll_external_jmhz_submissions
                        (supplier_id, environment, source, source_key, document_kind, period, submission_type, submission_guid,
                         corrected_source_key, status, filled_at, submitted_at, accepted_at, form_count, program, file_name,
-                        payload_ciphertext, payload_hash, payload_sha256, imported_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                        note, payload_ciphertext, payload_hash, payload_sha256, imported_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $insert->execute([
                     $supplierId, $environment, $source, $submission['source_key'], $meta['document_kind'], $meta['period'],
                     $meta['submission_type'], $meta['submission_guid'], $meta['corrected_source_key'], $meta['status'],
                     $meta['filled_at'], $meta['submitted_at'], $meta['accepted_at'], $meta['form_count'], $meta['program'],
-                    $meta['file_name'], 'pending', str_repeat("\0", 32), $meta['payload_sha256'], $userId,
+                    $meta['file_name'], $meta['note'], 'pending', str_repeat("\0", 32), $meta['payload_sha256'], $userId,
                 ]);
                 $id = (int) $pdo->lastInsertId();
                 $this->sealSubmission($supplierId, $id, $payload);
@@ -163,7 +169,7 @@ final class JmhzExternalSubmissionStore
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT s.id, s.source, s.document_kind, s.period, s.submission_type, s.submission_guid, s.status,
-                    s.filled_at, s.submitted_at, s.accepted_at, s.form_count, s.program, s.file_name, s.updated_at,
+                    s.filled_at, s.submitted_at, s.accepted_at, s.form_count, s.program, s.file_name, s.note, s.updated_at,
                     (SELECT COUNT(*) FROM payroll_external_jmhz_submission_forms f
                       WHERE f.supplier_id = s.supplier_id AND f.submission_id = s.id AND f.employment_id IS NOT NULL) AS matched_forms
                FROM payroll_external_jmhz_submissions s
@@ -192,7 +198,7 @@ final class JmhzExternalSubmissionStore
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT s.id, s.source, s.document_kind, s.period, s.submission_type, s.submission_guid, s.status,
-                    s.filled_at, s.submitted_at, s.accepted_at, s.form_count, s.program, s.file_name, s.updated_at,
+                    s.filled_at, s.submitted_at, s.accepted_at, s.form_count, s.program, s.file_name, s.note, s.updated_at,
                     s.corrected_source_key, s.source_key,
                     (SELECT COUNT(*) FROM payroll_external_jmhz_submission_forms f
                       WHERE f.supplier_id = s.supplier_id AND f.submission_id = s.id AND f.employment_id IS NOT NULL) AS matched_forms
@@ -265,6 +271,7 @@ final class JmhzExternalSubmissionStore
             'matched_forms' => (int) $row['matched_forms'],
             'program' => $row['program'],
             'file_name' => $row['file_name'],
+            'note' => $row['note'] ?? null,
             'updated_at' => $row['updated_at'],
             'actions' => $actions,
             'people' => array_map(static fn (array $form): array => [
@@ -419,6 +426,83 @@ final class JmhzExternalSubmissionStore
         $stmt->execute([$supplierId, $environment, $id]);
 
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Potvrzení, že řádné měsíční hlášení za období podal předchozí program nebo
+     * portál ČSSZ mimo MyÚčto. Zapisuje se do téže historie jako převzatá podání
+     * (zdroj `manual_attestation`), takže zákaz druhého řádného hlášení, hlídač
+     * převzatých měsíců i přehled podání ho berou jako podané. Opakované potvrzení
+     * téhož měsíce záznam přepíše.
+     *
+     * @return array{id:int,status:string}
+     */
+    public function attestMonthly(
+        int $supplierId,
+        string $environment,
+        string $period,
+        string $submittedOn,
+        ?string $note,
+        ?int $userId,
+    ): array {
+        if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+            throw new \InvalidArgumentException('Období musí mít tvar RRRR-MM.');
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $submittedOn);
+        if ($date === false || $date->format('Y-m-d') !== $submittedOn) {
+            throw new \InvalidArgumentException('Datum podání musí mít tvar RRRR-MM-DD.');
+        }
+
+        return $this->store($supplierId, $environment, self::SOURCE_MANUAL_ATTESTATION, [
+            'source_key' => 'manual:' . $period,
+            'document_kind' => 'monthly',
+            'period' => $period,
+            'submission_type' => 'R',
+            'submission_guid' => null,
+            'corrected_source_key' => null,
+            'status' => self::STATUS_SENT,
+            'filled_at' => null,
+            'submitted_at' => $submittedOn,
+            'accepted_at' => null,
+            'program' => null,
+            'file_name' => null,
+            'note' => $note,
+            'payload' => [
+                'kind' => 'manual_attestation',
+                'period' => $period,
+                'submitted_on' => $submittedOn,
+                'attested_by' => $userId,
+            ],
+        ], [], $userId);
+    }
+
+    /**
+     * Vezme potvrzení podání mimo MyÚčto zpět. Maže jen záznam se zdrojem
+     * `manual_attestation`; převzatý doklad (PAMICA, XML) tudy smazat nejde.
+     *
+     * @return array{period:string,submitted_at:?string,note:?string}|null null, když takové potvrzení není
+     */
+    public function revokeAttestation(int $supplierId, string $environment, int $id): ?array
+    {
+        $find = $this->db->pdo()->prepare(
+            'SELECT period, submitted_at, note FROM payroll_external_jmhz_submissions
+              WHERE supplier_id = ? AND environment = ? AND id = ? AND source = ?'
+        );
+        $find->execute([$supplierId, $environment, $id, self::SOURCE_MANUAL_ATTESTATION]);
+        $row = $find->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_external_jmhz_submissions
+              WHERE supplier_id = ? AND environment = ? AND id = ? AND source = ?'
+        )->execute([$supplierId, $environment, $id, self::SOURCE_MANUAL_ATTESTATION]);
+
+        return [
+            'period' => (string) $row['period'],
+            'submitted_at' => $row['submitted_at'],
+            'note' => $row['note'],
+        ];
     }
 
     private function sealSubmission(int $supplierId, int $id, string $payload): void
