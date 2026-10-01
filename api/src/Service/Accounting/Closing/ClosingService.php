@@ -11,6 +11,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ClosingRepository;
+use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\SmallAssetRepository;
@@ -18,6 +19,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
+use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
@@ -1400,10 +1402,12 @@ final class ClosingService
                     $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
                 }
             }
-            $account = $this->prepaidExpenseCreditAccount($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
+            $accounts = $this->prepaidExpenseCreditAccounts($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
 
             $total = round($total + $deferred, 2);
-            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $deferred, 2);
+            foreach (self::spreadByAccount($deferred, $accounts) as $account => $part) {
+                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
+            }
             $piId = (int) $row['purchase_invoice_id'];
             $documents[$piId] = [
                 'purchase_invoice_id' => $piId,
@@ -1418,7 +1422,7 @@ final class ClosingService
                 'currency_code' => (string) $row['currency_code'],
                 'total_without_vat' => round((float) $row['total_without_vat'], 2),
                 'total_czk' => $netCzk,
-                'credit_account' => $account,
+                'credit_account' => implode(', ', array_keys($accounts)),
                 'accrual_from' => $from,
                 'accrual_to' => $to,
                 'total_days' => $totalDays,
@@ -1613,8 +1617,10 @@ final class ClosingService
             if ((int) round($release * 100) === 0) {
                 continue;
             }
-            $account = $this->prepaidExpenseCreditAccount($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
-            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $release, 2);
+            $accounts = $this->prepaidExpenseCreditAccounts($supplierId, (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accountsByInvoice);
+            foreach (self::spreadByAccount($release, $accounts) as $account => $part) {
+                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
+            }
             $total = round($total + $release, 2);
         }
         return ['by_account' => $byAccount, 'total' => $total];
@@ -1642,18 +1648,49 @@ final class ClosingService
      * přijatá faktura ({@see PostingService::purchaseItemExpenseAccounts()}, SSOT): účet
      * položky > druh výdaje včetně jistého automatického návrhu > produkt > kategorie >
      * předkontace. Jinak by se náklad odložil z jiného účtu, než na kterém leží.
+     *
+     * Účtotvorná dimenze (Firma → Dimenze) mohla náklad položky zaúčtovat na analytiku
+     * (518 → 518.100) nebo ho rozpadem rozdělit mezi analytiky — odklad i rozpuštění
+     * proto jdou na tytéž analytiky ve stejném poměru
+     * ({@see PostingService::itemAccountsByDimension()}). Bez dimenze vrací jediný účet.
+     *
+     * @param array<int,array<int,array<string,float>>> $accountsByInvoice cache jednoho průchodu (faktura => položka => účet => podíl)
+     * @return array<string,float> účet => podíl
      */
-    /** @param array<int,array<int,string>> $accountsByInvoice cache jednoho průchodu (faktura => položka => účet) */
-    private function prepaidExpenseCreditAccount(int $supplierId, int $purchaseInvoiceId, int $itemId, array &$accountsByInvoice): string
+    private function prepaidExpenseCreditAccounts(int $supplierId, int $purchaseInvoiceId, int $itemId, array &$accountsByInvoice): array
     {
         if (!isset($accountsByInvoice[$purchaseInvoiceId])) {
             try {
-                $accountsByInvoice[$purchaseInvoiceId] = $this->posting->purchaseItemExpenseAccounts($supplierId, $purchaseInvoiceId);
+                $accountsByInvoice[$purchaseInvoiceId] = $this->posting->itemAccountsByDimension(
+                    $supplierId,
+                    'purchase_invoice',
+                    $purchaseInvoiceId,
+                    $this->posting->purchaseItemExpenseAccounts($supplierId, $purchaseInvoiceId),
+                );
             } catch (PostingException $e) {
                 throw new ClosingException($e->errorCode, $e->getMessage());
             }
         }
-        return $accountsByInvoice[$purchaseInvoiceId][$itemId] ?? '518';
+        return $accountsByInvoice[$purchaseInvoiceId][$itemId] ?? ['518' => 1.0];
+    }
+
+    /**
+     * Rozdělí částku položky mezi účty podle podílů na haléř (zbytek na největší podíl).
+     *
+     * @param array<string,float> $shares
+     * @return array<string,float>
+     */
+    private static function spreadByAccount(float $amount, array $shares): array
+    {
+        if (count($shares) === 1) {
+            return [(string) array_key_first($shares) => $amount];
+        }
+        $cents = DimensionStamper::distributeCents((int) round($amount * 100), array_values($shares));
+        $out = [];
+        foreach (array_keys($shares) as $i => $account) {
+            $out[(string) $account] = $cents[$i] / 100;
+        }
+        return $out;
     }
 
     // ── časové rozlišení výnosů příštích období — 384 z označených řádků vydaných faktur ──
@@ -1700,7 +1737,7 @@ final class ClosingService
             }
             $deferFrom = $from < $nextStart ? $nextStart : $from;
             $deferDays = self::daysInclusive($deferFrom, $to);
-            [$netCzk, $account] = $this->deferredRevenueItem($supplierId, $row, $contexts);
+            [$netCzk, $accounts] = $this->deferredRevenueItem($supplierId, $row, $contexts);
             $deferred = round($netCzk - self::prepaidCumRecognized($netCzk, $from, $to, $endsOn), 2);
             if ((int) round($deferred * 100) === 0) {
                 continue;
@@ -1719,7 +1756,9 @@ final class ClosingService
             }
 
             $total = round($total + $deferred, 2);
-            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $deferred, 2);
+            foreach (self::spreadByAccount($deferred, $accounts) as $account => $part) {
+                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
+            }
             $invoiceId = (int) $row['invoice_id'];
             $documents[$invoiceId] = [
                 'invoice_id' => $invoiceId,
@@ -1734,7 +1773,7 @@ final class ClosingService
                 'currency_code' => (string) $row['currency_code'],
                 'total_without_vat' => round((float) $row['total_without_vat'], 2),
                 'total_czk' => $netCzk,
-                'debit_account' => $account,
+                'debit_account' => implode(', ', array_keys($accounts)),
                 'accrual_from' => $from,
                 'accrual_to' => $to,
                 'total_days' => $totalDays,
@@ -1895,15 +1934,20 @@ final class ClosingService
     /**
      * Základ řádku v Kč a výnosový účet, ze kterého se odkládá.
      *
+     * Výnos rozeslaný účtotvornou dimenzí na víc analytik se odkládá z týchž analytik
+     * ve stejném poměru ({@see PostingService::itemAccountsByDimension()}); má-li zápis
+     * jediný výnosový účet, je to i po dimenzi ten jediný.
+     *
      * @param array<string,mixed> $row
-     * @param array<int,array{rate:float,accounts:array<int,string>,single:?string}> $contexts
-     * @return array{0:float,1:string}
+     * @param array<int,array{rate:float,accounts:array<int,string>,mapped:array<int,array<string,float>>,single:?string}> $contexts
+     * @return array{0:float,1:array<string,float>} základ v Kč, účet => podíl
      */
     private function deferredRevenueItem(int $supplierId, array $row, array &$contexts): array
     {
         $invoiceId = (int) $row['invoice_id'];
         if (!isset($contexts[$invoiceId])) {
             $resolved = $this->posting->issuedItemRevenueAccounts($supplierId, $invoiceId);
+            $resolved['mapped'] = $this->posting->itemAccountsByDimension($supplierId, 'invoice', $invoiceId, $resolved['accounts']);
             $stmt = $this->db->pdo()->prepare(
                 'SELECT DISTINCT coa.account_code
                    FROM journal_entries je
@@ -1918,8 +1962,10 @@ final class ClosingService
             $contexts[$invoiceId] = $resolved + ['single' => count($posted) === 1 ? (string) $posted[0] : null];
         }
         $context = $contexts[$invoiceId];
-        $account = $context['single'] ?? ($context['accounts'][(int) $row['item_id']] ?? '602');
-        return [round((float) $row['total_without_vat'] * $context['rate'], 2), $account];
+        $accounts = $context['single'] !== null
+            ? [$context['single'] => 1.0]
+            : ($context['mapped'][(int) $row['item_id']] ?? ['602' => 1.0]);
+        return [round((float) $row['total_without_vat'] * $context['rate'], 2), $accounts];
     }
 
     /**
@@ -1937,14 +1983,16 @@ final class ClosingService
         foreach ($this->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd) as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
-            [$netCzk, $account] = $this->deferredRevenueItem($supplierId, $row, $contexts);
+            [$netCzk, $accounts] = $this->deferredRevenueItem($supplierId, $row, $contexts);
             $upper = self::prepaidCumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
             $lower = self::prepaidCumRecognized($netCzk, $from, $to, $originEndsOn);
             $release = round($upper - $lower, 2);
             if ((int) round($release * 100) === 0) {
                 continue;
             }
-            $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $release, 2);
+            foreach (self::spreadByAccount($release, $accounts) as $account => $part) {
+                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
+            }
             $total = round($total + $release, 2);
         }
         return ['by_account' => $byAccount, 'total' => $total];
@@ -4665,6 +4713,10 @@ final class ClosingService
             ];
         }
 
+        if ($wants('dimension_account_unmapped')) {
+            $checks[] = $this->checkDimensionAccountUnmapped($supplierId, $rangeFrom, $rangeTo);
+        }
+
         if ($wants('small_asset_cards_incomplete')) {
             $checks[] = $this->checkSmallAssetCards($supplierId, $rangeFrom, $rangeTo);
         }
@@ -5149,6 +5201,27 @@ final class ClosingService
             'severity' => 'warning',
             'ok' => abs($diff) <= 1000.0,
             'value' => ['cards_total' => $cardsTotal, 'turnover_501' => $turnover501, 'diff' => $diff],
+        ];
+    }
+
+    /**
+     * Účtotvorná dimenze (Firma → Dimenze): výsledkový zápis, který zůstal na syntetice
+     * s mapou hodnot → analytik. Řádku chyběla hodnota účtotvorného typu (nebo hodnota
+     * bez mapování), takže náklad/výnos neleží na analytice střediska. Firma bez
+     * účtotvorné dimenze kontrolu nemá (vždy ok).
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}
+     */
+    private function checkDimensionAccountUnmapped(int $supplierId, string $from, string $to): array
+    {
+        $repo = new DimensionAccountMapRepository($this->db);
+        $type = $repo->drivingType($supplierId);
+        $accounts = $type === null ? [] : $repo->unmappedSyntheticLines($supplierId, $type['id'], $from, $to);
+        return [
+            'key' => 'dimension_account_unmapped',
+            'severity' => 'warning',
+            'ok' => $accounts === [],
+            'value' => ['count' => count($accounts), 'accounts' => $accounts],
         ];
     }
 

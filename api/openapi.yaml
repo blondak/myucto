@@ -23220,6 +23220,84 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/account-map:
+    get:
+      tags:
+      - Accounting
+      summary: Účtotvorná dimenze — mapa hodnota × syntetika → analytika
+      description: Mapa firmy (u skupinové hodnoty per firma). Při zaúčtování přepíše výsledkovou syntetiku na analytiku podle hodnoty účtotvorné dimenze řádku.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - name: value_id
+        in: query
+        required: false
+        description: Jen mapa jedné hodnoty dimenze.
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DimensionAccountMapRow'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/accounting/dimensions/types/{id}/account-candidates:
+    get:
+      tags:
+      - Accounting
+      summary: Syntetiky v masce účtotvorného typu a jejich analytiky
+      description: Aktivní výsledkové syntetiky odpovídající masce typu a jejich aktivní analytiky se stejnou daňovou uznatelností — nabídka pro mapu hodnoty.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - id
+                  - code
+                  - name
+                  - analytics
+                  properties:
+                    id:
+                      type: integer
+                    code:
+                      type: string
+                    name:
+                      type: string
+                    analytics:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                        - id
+                        - code
+                        - name
+                        properties:
+                          id:
+                            type: integer
+                          code:
+                            type: string
+                          name:
+                            type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/accounting/dimensions/documents/{doc}/{id}:
     get:
       tags:
@@ -36905,6 +36983,8 @@ components:
       - is_active
       - show_on_documents
       - sort_order
+      - drives_accounts
+      - drives_accounts_mask
       - created_at
       - updated_at
       properties:
@@ -36932,10 +37012,59 @@ components:
           type: boolean
         sort_order:
           type: integer
+        drives_accounts:
+          type: boolean
+          description: Účtotvorná dimenze — hodnota určí analytický účet podle mapy (nejvýš jeden typ na firmu).
+        drives_accounts_mask:
+          type: string
+          description: Výsledkové účty, na které se mapa uplatní (předpony, vyloučení s !), výchozí `5, 6`.
         created_at:
           type: string
         updated_at:
           type: string
+    DimensionAccountMapRow:
+      type: object
+      required:
+      - id
+      - dimension_type_id
+      - dimension_value_id
+      - synthetic_account_id
+      - synthetic_code
+      - synthetic_name
+      - analytic_account_id
+      - analytic_code
+      - analytic_name
+      - valid_from
+      - valid_to
+      properties:
+        id:
+          type: integer
+        dimension_type_id:
+          type: integer
+        dimension_value_id:
+          type: integer
+        synthetic_account_id:
+          type: integer
+        synthetic_code:
+          type: string
+        synthetic_name:
+          type: string
+        analytic_account_id:
+          type: integer
+        analytic_code:
+          type: string
+        analytic_name:
+          type: string
+        valid_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
     DimensionLevel:
       type: string
       enum:

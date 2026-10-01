@@ -181,6 +181,8 @@ final class TenantPredicateTest extends TestCase
         'document_dimensions',
         // Výchozí dimenze klienta a zakázky (1861).
         'dimension_defaults',
+        // Účtotvorná dimenze — mapa hodnota × syntetika → analytika je per firma (1950).
+        'dimension_account_map',
     ];
 
     /**

@@ -194,7 +194,7 @@ final class AnonymizationPolicy
         'de_movement_classification_history' => ['new_tax_bucket' => 'keep', 'previous_tax_bucket' => 'keep'],
         'depreciation_entries' => ['detail' => 'json', 'override_reason' => 'text'],
         'dimension_account_rules' => ['account_mask' => 'keep', 'note' => 'text'],
-        'dimension_types' => ['code' => 'keep', 'name' => 'text'],
+        'dimension_types' => ['code' => 'keep', 'drives_accounts_mask' => 'keep', 'name' => 'text'],
         'dimension_values' => ['code' => 'keep', 'name' => 'text', 'note' => 'text', 'responsible_note' => 'text'],
         'document_dms_messages' => ['annotation' => 'text', 'dm_id' => 'keep', 'dm_status' => 'keep', 'dm_type' => 'keep', 'envelope_xml' => 'text', 'recipient_address' => 'address', 'recipient_box_id' => 'data_box', 'recipient_ident' => 'shape', 'recipient_name' => 'party_name', 'recipient_ref_number' => 'keep', 'sender_address' => 'address', 'sender_box_id' => 'data_box', 'sender_ident' => 'shape', 'sender_name' => 'party_name', 'sender_ref_number' => 'keep', 'sender_type' => 'keep'],
         'document_extractions' => ['barcode' => 'keep', 'buyer_dic' => 'dic', 'buyer_ico' => 'ico', 'buyer_name' => 'party_name', 'card_last4' => 'card_last4', 'currency' => 'keep', 'document_kind' => 'keep', 'document_number' => 'keep', 'error' => 'text', 'license_plate' => 'shape', 'model' => 'keep', 'payload' => 'json', 'provider' => 'keep', 'sha256' => 'keep', 'variable_symbol' => 'symbol', 'vendor_dic' => 'dic', 'vendor_ico' => 'ico', 'vendor_name' => 'party_name'],

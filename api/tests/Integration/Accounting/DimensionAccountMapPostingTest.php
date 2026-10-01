@@ -281,7 +281,79 @@ final class DimensionAccountMapPostingTest extends TestCase
         self::assertSame(['518' => 10_000], $this->expenseCents($this->postPurchase($purchase)), 'Mapa platná od července červnový doklad nemění.');
     }
 
+    /** Kontrola uzávěrky: výsledkový řádek, který zůstal na syntetice s mapou, je varování. */
+    public function testClosingCheckWarnsAboutExpenseLeftOnMappedSynthetic(): void
+    {
+        $this->enableDriving();
+        $mapped = $this->purchase('F2-CHK-OK', [[100.00, 21.00]]);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $mapped, [$this->centerType => $this->fve], []);
+        $this->postPurchase($mapped);
+        self::assertTrue($this->unmappedCheck()['ok'], 'Řádek na analytice z mapy kontrolu nespouští.');
+
+        $this->postPurchase($this->purchase('F2-CHK-MISSING', [[250.00, 52.50]]));
+        $check = $this->unmappedCheck();
+        self::assertFalse($check['ok']);
+        self::assertSame(['518'], array_column($check['value']['findings'], 'account_code'));
+        self::assertSame(250.0, $check['value']['findings'][0]['amount']);
+    }
+
+    /**
+     * Časové rozlišení (381): náklad rozdělený účtotvornou dimenzí na 518.100 / 518.200
+     * se odkládá z týchž analytik ve stejném poměru — jinak by syntetika 518 šla do mínusu.
+     */
+    public function testPrepaidExpenseDeferralFollowsMappedAnalytics(): void
+    {
+        $this->enableDriving();
+        $purchase = $this->purchase('F2-381', [[1_200.00, 252.00]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET accrual_from = ?, accrual_to = ? WHERE purchase_invoice_id = ?')
+            ->execute([self::YEAR . '-07-01', (self::YEAR + 1) . '-06-30', $purchase]);
+        $this->dimensions->saveDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $purchase,
+            [],
+            [],
+            false,
+            [0 => [$this->centerType => [
+                ['value_id' => $this->fve, 'share' => 0.6],
+                ['value_id' => $this->office, 'share' => 0.4],
+            ]]],
+        );
+        self::assertSame(['518.100' => 72_000, '518.200' => 48_000], $this->expenseCents($this->postPurchase($purchase)));
+
+        $preview = $this->closing()->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId());
+        $deferred = (int) round($preview['total'] * 100);
+        self::assertGreaterThan(0, $deferred);
+        $byAccount = array_map(static fn (float $a): int => (int) round($a * 100), $preview['by_account']);
+        ksort($byAccount);
+        self::assertSame(['518.100', '518.200'], array_keys($byAccount), 'Odklad jde z analytik, ne ze syntetiky 518.');
+        self::assertSame($deferred, array_sum($byAccount), 'Haléř se neztratí.');
+        self::assertEqualsWithDelta($deferred * 0.6, $byAccount['518.100'], 1);
+    }
+
     // ── pomocné ──────────────────────────────────────────────────────────────
+
+    private function closing(): \MyInvoice\Service\Accounting\Closing\ClosingService
+    {
+        return Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+    }
+
+    private function periodId(): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?');
+        $stmt->execute([$this->supplierId, self::YEAR]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** @return array<string,mixed> */
+    private function unmappedCheck(): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM accounting_periods WHERE id = ?');
+        $stmt->execute([$this->periodId()]);
+        $checks = $this->closing()->buildChecks($this->supplierId, (array) $stmt->fetch(\PDO::FETCH_ASSOC), null, null, 50, ['dimension_account_unmapped']);
+        self::assertCount(1, $checks);
+        return $checks[0];
+    }
 
     private function enableDriving(bool $withMap = true): void
     {

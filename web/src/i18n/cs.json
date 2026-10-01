@@ -16948,6 +16948,7 @@
         "paid_purchases_open_saldo": "Zaplacené přijaté faktury s otevřeným saldem na 321 (úhrada chybí v deníku)",
         "realized_fx_unbooked": "Realizovaný kurzový rozdíl nezaúčtovaný na 563/663 (zaplacený cizoměnový doklad)",
         "small_asset_cards_incomplete": "Evidence karet drobného majetku nesedí na obrat 501.200 (chybí karty)",
+        "dimension_account_unmapped": "Výsledkové zápisy na syntetice s účtotvornou dimenzí bez analytiky (chybí hodnota dimenze nebo mapování)",
         "cnb_rate_deviation": "Kurz na dokladu se odchyluje od denního kurzu ČNB",
         "payment_match_audit": "Spárované platby, které nesedí (měna, částka, kurzový rozdíl, protistrana)",
         "clearing_accounts_open": "Zúčtovací (průběžné) účty s otevřeným zůstatkem k rozvahovému dni",

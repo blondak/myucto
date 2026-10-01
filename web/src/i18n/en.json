@@ -16963,6 +16963,7 @@
         "related_party_transactions": "Related-party transactions in the period — prices must match arm's-length prices (§ 36a VAT Act, § 23(7) Income Tax Act)",
         "realized_fx_unbooked": "Realized FX difference not booked to 563/663 (settled foreign-currency document)",
         "small_asset_cards_incomplete": "Small-asset cards do not match the 501.200 turnover (missing cards)",
+        "dimension_account_unmapped": "P&L entries left on a synthetic account with an account-driving dimension, without an analytic account (missing dimension value or mapping)",
         "cnb_rate_deviation": "Document exchange rate deviates from the daily CNB rate",
         "payment_match_audit": "Matched payments that don't add up (currency, amount, FX difference, counterparty)",
         "inventory_unresolved": "Balance-sheet account stocktaking (§29–30 of the Accounting Act) is not completed or has unresolved differences",

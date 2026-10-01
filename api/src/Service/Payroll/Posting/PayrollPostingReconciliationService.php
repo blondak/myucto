@@ -779,8 +779,11 @@ final class PayrollPostingReconciliationService
         }
         foreach ($rows as $row) {
             foreach (self::CATEGORIES as $key => $definition) {
+                // Účtotvorná dimenze (Firma → Dimenze) může alokaci na syntetiku (518)
+                // zaúčtovat na její analytiku (518.100) — deník se pak páruje přes syntetiku.
                 $matchesGrossAllocation = $key === 'gross_wages'
-                    && isset($grossDebitAccountSet[$row['account_code']]);
+                    && (isset($grossDebitAccountSet[$row['account_code']])
+                        || isset($grossDebitAccountSet[$row['prefix']]));
                 if (!$matchesGrossAllocation
                     && !in_array($row['prefix'], $definition['prefixes'], true)
                 ) {

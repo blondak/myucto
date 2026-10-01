@@ -36,6 +36,53 @@ final class PostingRegressionMasterTest extends TestCase
             $db->pdo()->rollBack();
             $db->close();
         }
+        self::assertMatchesMaster($actual);
+    }
+
+    /**
+     * Účtotvorná dimenze (F2) zapnutá, ale bez mapování hodnot, které doklady nesou:
+     * zaúčtování se nesmí změnit ani o bajt. Firma má účtotvorné Středisko a mapu pro
+     * hodnotu, kterou žádný scénář nepoužije (518 → 518.100).
+     */
+    public function testDrivingDimensionWithoutMatchingMapMatchesMaster(): void
+    {
+        if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+        }
+        $container = Bootstrap::buildContainer();
+        $db = $container->get(Connection::class);
+        $pdo = $db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+            $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($supplierId);
+            $dimensions = $container->get(\MyInvoice\Service\Accounting\Dimension\DimensionService::class);
+            $dimensions->setEnabled($supplierId, true);
+            $center = $dimensions->ensureDefaultTypes($supplierId, ['stredisko'])['cost_center'];
+            $dimensions->updateType($supplierId, $center, ['drives_accounts' => true]);
+            // Dvě daňové analytiky — jediná by sama spustila přesměr syntetiky (mimo F2).
+            foreach (['518.100', '518.200'] as $code) {
+                $pdo->prepare(
+                    "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active, tax_deductibility)
+                     SELECT supplier_id, ?, 'Regrese F2', account_type, normal_side, 0, id, 1, tax_deductibility
+                       FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '518'
+                     ON DUPLICATE KEY UPDATE is_active = 1"
+                )->execute([$code, $supplierId]);
+            }
+            $unused = (int) $dimensions->createValue($supplierId, $center, ['code' => 'REGR-F2', 'name' => 'Nepoužitá'])['id'];
+            $container->get(\MyInvoice\Service\Accounting\Dimension\DimensionAccountMapService::class)
+                ->saveForValue($supplierId, $unused, [['synthetic_code' => '518', 'analytic_code' => '518.100']], null);
+            $actual = (new PostingRegressionScenarios($container))->run();
+        } finally {
+            $pdo->rollBack();
+            $db->close();
+        }
+        self::assertMatchesMaster($actual);
+    }
+
+    /** @param array<string,mixed> $actual */
+    private static function assertMatchesMaster(array $actual): void
+    {
         $expected = json_decode(
             (string) file_get_contents(dirname(__DIR__, 2) . '/Fixtures/posting-regression-master-307179b4e.json'),
             true,

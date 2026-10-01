@@ -145,6 +145,56 @@ final class PayrollCompanyDimensionPostingFlowTest extends TestCase
     }
 
     /**
+     * Účtotvorná dimenze (F2): středisko A → 521.100, B → 521.200. Mzdy posílají
+     * výslovné dimenze řádků, zaúčtování je přesune na analytiky beze ztráty haléře
+     * a odsouhlasení mezd s deníkem zůstává bez rozdílu.
+     */
+    public function testSeventyThirtySplitWithDrivingDimensionGoesToAnalytics(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE dimension_types SET drives_accounts = 1 WHERE id = ?')->execute([$this->typeId]);
+        foreach (['521.100' => $this->valueA, '521.200' => $this->valueB] as $code => $valueId) {
+            $pdo->prepare(
+                "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active, tax_deductibility)
+                 SELECT supplier_id, ?, 'Mzdy střediska', account_type, normal_side, 0, id, 1, tax_deductibility
+                   FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '521'"
+            )->execute([$code, $this->supplierId]);
+            $this->service(\MyInvoice\Service\Accounting\Dimension\DimensionAccountMapService::class)
+                ->saveForValue($this->supplierId, $valueId, [['synthetic_code' => '521', 'analytic_code' => $code]], null);
+        }
+        $this->splitSeventyThirty();
+
+        $run = $this->calculateEnforcementRun();
+        $this->approveEnforcementRun($run);
+        [$input, $result] = $this->revisionSnapshots($run['revision_id']);
+        self::assertNotNull($this->service(PayrollApprovedRevisionPostingService::class)->postManually(
+            $this->supplierId,
+            $run['revision_id'],
+            $input,
+            $result,
+            $this->actorId,
+        ));
+
+        $byAccount = [];
+        foreach ($this->journalLines($run['revision_id']) as $line) {
+            if (str_starts_with($line['account_code'], '521') && $line['side'] === 'debit') {
+                $byAccount[$line['account_code']] = ($byAccount[$line['account_code']] ?? 0) + $line['amount_minor'];
+                self::assertSame(
+                    $line['account_code'] === '521.100' ? $this->valueA : $this->valueB,
+                    $line['dimensions'][$this->typeId] ?? null,
+                );
+            }
+        }
+        ksort($byAccount);
+        self::assertSame(['521.100' => 2_450_000, '521.200' => 1_050_000], $byAccount, 'Hrubá mzda 70/30 na analytiky středisek.');
+
+        $reconciliation = $this->service(\MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService::class)
+            ->forPeriod($this->supplierId, '2026-06');
+        $byKey = array_column($reconciliation['categories'], null, 'key');
+        self::assertSame($byKey['gross_wages']['payroll_minor'], $byKey['gross_wages']['journal_minor'], 'Hrubá mzda na analytikách sedí na mzdy.');
+    }
+
+    /**
      * Záporná nákladová alokace (záporná složka, oprava) náklad SNIŽUJE.
      * Report, který by bral jen kladné alokace, by ji zahodil a náklad
      * nadhodnotil proti deníku. Běžný mzdový běh zápornou složku blokuje,

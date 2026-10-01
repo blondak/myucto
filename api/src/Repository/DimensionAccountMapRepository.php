@@ -169,6 +169,39 @@ final class DimensionAccountMapRepository
     }
 
     /**
+     * Zaúčtované výsledkové řádky, které zůstaly na syntetice s mapou účtotvorné dimenze
+     * (řádku chyběla hodnota typu, nebo hodnota bez mapování). Uzávěrkové a otevírací
+     * zápisy se nepočítají — uzavírají zůstatek syntetiky jako celek.
+     *
+     * @return list<array{account_id:int, account_code:string, name:string, line_count:int, amount:float}>
+     */
+    public function unmappedSyntheticLines(int $supplierId, int $typeId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.id AS account_id, a.account_code, a.name, COUNT(*) AS line_count, ROUND(SUM(l.signed_amount), 2) AS amount
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ?
+                AND e.entry_date BETWEEN ? AND ?
+                AND e.posted_at IS NOT NULL
+                AND e.source_type NOT IN ('closing', 'opening')
+                AND l.account_id IN (SELECT m.synthetic_account_id FROM dimension_account_map m
+                                      WHERE m.supplier_id = ? AND m.dimension_type_id = ?)
+              GROUP BY a.id, a.account_code, a.name
+              ORDER BY a.account_code"
+        );
+        $stmt->execute([$supplierId, $from, $to, $supplierId, $typeId]);
+        return array_map(static fn (array $r): array => [
+            'account_id' => (int) $r['account_id'],
+            'account_code' => (string) $r['account_code'],
+            'name' => (string) $r['name'],
+            'line_count' => (int) $r['line_count'],
+            'amount' => (float) $r['amount'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Účty rozvrhu firmy, které mapa potřebuje: kód, rodič, druh a daňová uznatelnost.
      *
      * @return array<int,array{code:string, name:string, parent_id:?int, account_type:string, tax_deductibility:string, is_active:bool}>
