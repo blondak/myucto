@@ -1,0 +1,261 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Accounting;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\ActivityLogger;
+use PDO;
+
+/**
+ * Oprava „rozpárované" zálohy na přijaté straně: platba zálohy spárovaná s KONEČNOU
+ * fakturou, která je navázaná na zálohovou fakturu, a záloha sama bez úhrady (typicky
+ * ručně „uhrazená evidenčně").
+ *
+ * Vzniklo to obcházením chyby, kdy se zúčtování zálohy 321/314 na konečné faktuře
+ * nedorovnalo po pozdější změně úhrady zálohy ({@see AdvanceSettlementSync}). Deník je
+ * pak účetně vyrovnaný (321/221 místo 314/221 + 321/314), ale stav dokladů lže: záloha
+ * je „uhrazená" bez platby a platba visí na faktuře, kterou kryla záloha.
+ *
+ * Oprava jedné dvojice (vše v jedné transakci, jinak se nezmění nic):
+ *   1. párování pohybu se přesune z konečné faktury na zálohu,
+ *   2. bankovní zápis se přeúčtuje na místě 321/221 → 314/221 (BankPostingService),
+ *   3. zápis konečné faktury dostane zúčtování 321/314 (AdvanceSettlementSync),
+ *   4. záloha zůstane uhrazená — teď platbou, datum úhrady = datum pohybu.
+ * Jen v otevřeném a nezamčeném období (bankovní zápis i zápis konečné faktury);
+ * jinak se dvojice jen vypíše. Idempotentní: opravená dvojice už kritéria nesplní.
+ */
+final class AdvancePaymentRelink
+{
+    /** Tolerance shody platby s částkou zálohy (haléřové zaokrouhlení). */
+    private const AMOUNT_TOLERANCE_CENTS = 100;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly BankPostingService $bankPosting,
+        private readonly AdvanceSettlementSync $settlement,
+        private readonly JournalEntryRepository $journal,
+        private readonly AccountingPeriodRepository $periods,
+        private readonly ActivityLogger $activity,
+    ) {}
+
+    /**
+     * @return array{candidates:int, fixed:int, rows:list<array<string,mixed>>}
+     */
+    public function run(?int $supplierId, bool $apply, ?int $userId = null): array
+    {
+        $rows = [];
+        $fixed = 0;
+        foreach ($this->candidates($supplierId) as $c) {
+            $row = $c + ['status' => 'would_fix'];
+            $blocker = $this->blocker($c);
+            if ($blocker !== null) {
+                $rows[] = ['status' => $blocker['status'], 'message' => $blocker['message']] + $c;
+                continue;
+            }
+            if ($apply) {
+                $row = $this->fix($c, $userId);
+                if ($row['status'] === 'fixed') {
+                    $fixed++;
+                }
+            } else {
+                $fixed++;
+            }
+            $rows[] = $row;
+        }
+        return ['candidates' => count($rows), 'fixed' => $fixed, 'rows' => $rows];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function candidates(?int $supplierId): array
+    {
+        $sql = "SELECT f.supplier_id, f.id AS final_id, a.id AS advance_id,
+                       COALESCE(NULLIF(f.vendor_invoice_number, ''), f.varsymbol) AS final_no,
+                       COALESCE(NULLIF(a.vendor_invoice_number, ''), a.varsymbol) AS advance_no,
+                       a.status AS advance_status, a.paid_at AS advance_paid_at,
+                       ROUND(a.total_with_vat, 2) AS advance_total,
+                       pm.id AS match_id, pm.bank_transaction_id AS tx_id, ROUND(pm.amount, 2) AS amount,
+                       bt.posted_at AS tx_date,
+                       (SELECT COUNT(*) FROM payment_matches o WHERE o.bank_transaction_id = pm.bank_transaction_id) AS tx_matches
+                  FROM purchase_invoices f
+                  JOIN purchase_invoices a
+                    ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
+                   AND a.document_kind = 'advance' AND a.status <> 'cancelled'
+                  JOIN payment_matches pm
+                    ON pm.supplier_id = f.supplier_id AND pm.purchase_invoice_id = f.id
+                   AND pm.bank_transaction_id IS NOT NULL
+                  JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                 WHERE f.document_kind = 'invoice' AND f.status NOT IN ('draft', 'cancelled')
+                   AND NOT EXISTS (SELECT 1 FROM payment_matches x WHERE x.purchase_invoice_id = a.id)
+                   AND NOT EXISTS (SELECT 1 FROM cash_documents cd
+                                    WHERE cd.supplier_id = a.supplier_id AND cd.purchase_invoice_id = a.id
+                                      AND cd.status = 'posted')
+                   AND NOT EXISTS (SELECT 1 FROM invoice_settlements s
+                                    WHERE s.supplier_id = a.supplier_id AND s.doc_type = 'purchase_invoice'
+                                      AND s.doc_id = a.id AND s.status = 'confirmed')"
+            . ($supplierId !== null ? ' AND f.supplier_id = ?' : '')
+            . ' ORDER BY f.supplier_id, f.id, pm.id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($supplierId !== null ? [$supplierId] : []);
+
+        return array_map(static fn (array $r): array => [
+            'supplier_id'     => (int) $r['supplier_id'],
+            'final_id'        => (int) $r['final_id'],
+            'final_no'        => (string) ($r['final_no'] ?? ''),
+            'advance_id'      => (int) $r['advance_id'],
+            'advance_no'      => (string) ($r['advance_no'] ?? ''),
+            'advance_status'  => (string) $r['advance_status'],
+            'advance_paid_at' => $r['advance_paid_at'] !== null ? (string) $r['advance_paid_at'] : null,
+            'advance_total'   => (float) $r['advance_total'],
+            'match_id'        => (int) $r['match_id'],
+            'tx_id'           => (int) $r['tx_id'],
+            'tx_date'         => substr((string) $r['tx_date'], 0, 10),
+            'amount'          => (float) $r['amount'],
+            'tx_matches'      => (int) $r['tx_matches'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Proč dvojici nelze opravit automaticky (null = lze).
+     *
+     * @param array<string,mixed> $c
+     * @return array{status:string, message:string}|null
+     */
+    private function blocker(array $c): ?array
+    {
+        $sid = (int) $c['supplier_id'];
+        if ((int) $c['tx_matches'] !== 1) {
+            return ['status' => 'split_payment', 'message' => 'pohyb hradí víc dokladů, oprav ručně'];
+        }
+        if (abs((int) round(((float) $c['amount'] - (float) $c['advance_total']) * 100)) > self::AMOUNT_TOLERANCE_CENTS) {
+            return ['status' => 'amount_mismatch', 'message' => 'platba neodpovídá částce zálohy (doplatek faktury?)'];
+        }
+        $bank = $this->journal->findBySource($sid, 'bank', (int) $c['tx_id']);
+        if ($bank === null || ($bank['reversed_by'] ?? null) !== null || ($bank['posted_at'] ?? null) === null) {
+            return ['status' => 'bank_not_posted', 'message' => 'pohyb nemá živý bankovní zápis'];
+        }
+        if ((new TakenOverRecord($this->db))->hasLiveBankEntry($sid, (int) $c['tx_id'])) {
+            return ['status' => 'taken_over', 'message' => 'bankovní zápis je převzatý z jiného programu'];
+        }
+        $dates = ['bankovní zápis' => (string) $bank['entry_date']];
+        $final = $this->journal->findBySource($sid, 'purchase_invoice', (int) $c['final_id']);
+        if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
+            $dates['zápis konečné faktury'] = (string) $final['entry_date'];
+        }
+        $lockedUntil = $this->lockedUntil($sid);
+        foreach ($dates as $label => $date) {
+            $period = $this->periods->findForDate($sid, $date);
+            if ($period === null || (string) $period['status'] !== 'open') {
+                return ['status' => 'period_not_open', 'message' => $label . ' ' . $date . ' je v uzavřeném období'];
+            }
+            if ($lockedUntil !== null && $date <= $lockedUntil) {
+                return ['status' => 'date_locked', 'message' => $label . ' ' . $date . ' je zamčený k ' . $lockedUntil];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $c
+     * @return array<string,mixed>
+     */
+    private function fix(array $c, ?int $userId): array
+    {
+        $sid = (int) $c['supplier_id'];
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        $savepoint = 'advance_relink_' . (int) $c['match_id'];
+        if ($own) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . $savepoint);
+        }
+        try {
+            $pdo->prepare('UPDATE payment_matches SET purchase_invoice_id = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([(int) $c['advance_id'], (int) $c['match_id'], $sid]);
+
+            // Přeúčtování banky na 314/221; po něm BankPostingService sám dorovná
+            // zúčtování v konečné faktuře (AdvanceSettlementSync).
+            $entryId = $this->bankPosting->postMatched($sid, (int) $c['tx_id'], $userId);
+            if ($entryId === null) {
+                throw new \RuntimeException('bankovní zápis se nepřeúčtoval (politika automatiky nebo období)');
+            }
+            $sync = $this->settlement->syncAdvance($sid, 'purchase', (int) $c['advance_id'], $userId);
+            if (!in_array($sync['action'], ['synced', 'in_sync', 'none'], true)) {
+                throw new \RuntimeException('zúčtování zálohy v konečné faktuře se nedorovnalo: ' . ($sync['reason'] ?? $sync['action']));
+            }
+            $this->assertAdvanceBalanced($sid, $entryId, (int) $c['final_id']);
+
+            // Záloha zůstává uhrazená, ale skutečnou platbou: datum úhrady = datum pohybu.
+            $pdo->prepare(
+                "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?"
+            )->execute([(string) $c['tx_date'], (int) $c['advance_id'], $sid]);
+
+            $this->activity->log(
+                'purchase_invoice.advance_payment_relinked',
+                $userId,
+                'purchase_invoice',
+                (int) $c['advance_id'],
+                [
+                    'bank_transaction_id' => (int) $c['tx_id'],
+                    'from_final_id'       => (int) $c['final_id'],
+                    'bank_entry_id'       => $entryId,
+                    'previous_status'     => $c['advance_status'],
+                    'previous_paid_at'    => $c['advance_paid_at'],
+                    'settlement'          => $sync['action'],
+                ],
+                supplierId: $sid,
+            );
+            if ($own) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+            return ['status' => 'fixed', 'bank_entry_id' => $entryId, 'settlement' => $sync['action']] + $c;
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif (!$own && $pdo->inTransaction()) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            }
+            return ['status' => 'failed', 'message' => $e->getMessage()] + $c;
+        }
+    }
+
+    /** Úhrada na 314 v bance a zúčtování 314 v konečné faktuře musí sedět na haléř. */
+    private function assertAdvanceBalanced(int $supplierId, int $bankEntryId, int $finalId): void
+    {
+        $final = $this->journal->findBySource($supplierId, 'purchase_invoice', $finalId);
+        $entryIds = [$bankEntryId];
+        if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
+            $entryIds[] = (int) $final['id'];
+        } else {
+            return; // nezaúčtovaná konečná faktura si zúčtování spočítá sama při zaúčtování
+        }
+        $in = implode(',', array_fill(0, count($entryIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts c ON c.id = l.account_id
+              WHERE l.supplier_id = ? AND l.entry_id IN ({$in}) AND c.account_code LIKE '314%'"
+        );
+        $stmt->execute([$supplierId, ...$entryIds]);
+        $balance = (int) round((float) $stmt->fetchColumn() * 100);
+        if ($balance !== 0) {
+            throw new \RuntimeException('314 mezi úhradou a konečnou fakturou nesedí o ' . number_format($balance / 100, 2, ',', ' ') . ' Kč');
+        }
+    }
+
+    private function lockedUntil(int $supplierId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $v = $stmt->fetchColumn();
+        return $v === false || $v === null ? null : (string) $v;
+    }
+}
