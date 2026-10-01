@@ -82,8 +82,9 @@ final class ProductPriceAction
                     (int) $body['row_version'],
                     $rows,
                     $request->getMethod() === 'PUT',
+                    true,
                 )
-                : $this->writer->save($supplierId, $itemId, $rows, $request->getMethod() === 'PUT');
+                : $this->writer->save($supplierId, $itemId, $rows, $request->getMethod() === 'PUT', true);
         } catch (EshopException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         } catch (PricingInputException $e) {

@@ -24,7 +24,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * je součástí uzavřených čísel.
  *
  * Body: { items: [{ id: number, accrual_from: "RRRR-MM-DD"|null, accrual_to: "RRRR-MM-DD"|null }] }
- * Řádky, které v těle nejsou, se nemění.
+ * Řádky, které v těle nejsou, se nemění; vynechaný klíč řádku drží uloženou hodnotu.
  */
 final class SetInvoiceAccrualAction
 {
@@ -81,8 +81,14 @@ final class SetInvoiceAccrualAction
                 $errors["items.{$i}.id"][] = 'Řádek nepatří k této faktuře';
                 continue;
             }
-            $from = trim((string) ($item['accrual_from'] ?? ''));
-            $to = trim((string) ($item['accrual_to'] ?? ''));
+            // Vynechaný klíč = uložená hodnota (#113); řádek bez obou klíčů se nemění.
+            $hasFrom = array_key_exists('accrual_from', $item);
+            $hasTo = array_key_exists('accrual_to', $item);
+            if (!$hasFrom && !$hasTo) {
+                continue;
+            }
+            $from = trim((string) ($hasFrom ? $item['accrual_from'] : ($known[$itemId]['accrual_from'] ?? '')));
+            $to = trim((string) ($hasTo ? $item['accrual_to'] : ($known[$itemId]['accrual_to'] ?? '')));
             if ($from === '' && $to === '') {
                 $changes[$itemId] = [null, null];
                 continue;

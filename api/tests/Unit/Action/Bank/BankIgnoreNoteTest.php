@@ -88,6 +88,60 @@ final class BankIgnoreNoteTest extends TestCase
         }
     }
 
+    public static function reignoreBodies(): array
+    {
+        return [
+            'omitted keeps stored note' => [[], 'Uložená poznámka'],
+            'explicit null clears' => [['note' => null], null],
+            'empty string clears' => [['note' => ''], null],
+            'value replaces' => [['note' => 'Nová'], 'Nová'],
+        ];
+    }
+
+    #[DataProvider('reignoreBodies')]
+    public function testReignoreWithoutNoteKeyKeepsStoredNote(array $body, ?string $expected): void
+    {
+        $sqlite = new PDO('sqlite::memory:');
+        $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
+        $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Uložená poznámka', 'manual')");
+        $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
+        $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
+        $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
+
+        $scope = $this->createStub(\PDOStatement::class);
+        $scope->method('execute')->willReturn(true);
+        $scope->method('fetchColumn')->willReturn(1);
+        $pdo = $this->createStub(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($scope, $sqlite) {
+            return str_contains($sql, 'CASE WHEN bs.supplier_id') ? $scope : $sqlite->prepare($sql);
+        });
+        $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
+        $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
+        $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
+        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
+        $db = $this->createStub(Connection::class);
+        $db->method('pdo')->willReturn($pdo);
+        $reflection = new \ReflectionClass(BankStatementAction::class);
+        $action = $reflection->newInstanceWithoutConstructor();
+        foreach (['db' => $db, 'logger' => new ActivityLogger($db), 'ipMatcher' => new IpMatcher()] as $name => $value) {
+            $reflection->getProperty($name)->setValue($action, $value);
+        }
+        $reflection->getProperty('ownership')->setValue($action, new \MyInvoice\Repository\BankStatementOwnershipResolver($db));
+        $reflection->getProperty('bankPosting')->setValue($action, $this->createStub(\MyInvoice\Service\Accounting\Bank\BankPostingService::class));
+        $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);
+        $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/ignore')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 7)
+            ->withParsedBody($body);
+        $response = $action->ignore($request, new Response(), ['id' => 1]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $row = $sqlite->query('SELECT * FROM bank_transactions')->fetch(PDO::FETCH_ASSOC);
+        self::assertSame($expected, $row['ignore_note']);
+        $result = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($expected, $result['ignore_note']);
+    }
+
     public static function unmatchCases(): array
     {
         return [[false], [true]];

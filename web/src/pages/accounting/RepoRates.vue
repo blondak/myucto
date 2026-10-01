@@ -44,7 +44,7 @@ async function saveRate() {
     rates.value = await accountingApi.upsertRepoRate({
       valid_from: form.valid_from,
       rate: form.rate,
-      note: form.note || undefined,
+      note: form.note.trim() || null,
     })
     toast.success(t('accounting.repo_rates.saved'))
     form.note = ''

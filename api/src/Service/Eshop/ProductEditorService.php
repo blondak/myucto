@@ -43,11 +43,12 @@ final class ProductEditorService
             throw new EshopException('not_found', 'Karta zboží nenalezena.', 404);
         }
 
-        $item = $this->prepareItem($supplierId, $itemId, $payload['item'] ?? null, $base);
-        $product = $this->arraySection($payload, 'product');
-        $prices = $this->listSection($payload, 'prices');
-        $promos = $this->listSection($payload, 'promo_prices');
-        $vendors = $this->listSection($payload, 'vendors');
+        // Vynechaná sekce = beze změny; přítomná kolekce (prices, promo_prices, vendors) nahrazuje celek.
+        $item = $this->prepareItem($supplierId, $itemId, array_key_exists('item', $payload) ? $payload['item'] : [], $base);
+        $product = array_key_exists('product', $payload) ? $this->arraySection($payload, 'product') : [];
+        $prices = array_key_exists('prices', $payload) ? $this->listSection($payload, 'prices') : null;
+        $promos = array_key_exists('promo_prices', $payload) ? $this->listSection($payload, 'promo_prices') : null;
+        $vendors = array_key_exists('vendors', $payload) ? $this->listSection($payload, 'vendors') : null;
 
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
@@ -64,9 +65,15 @@ final class ProductEditorService
                 );
             }
             $this->cards->updateForEditor($supplierId, $itemId, $base, $product);
-            $this->vendors->save($supplierId, $itemId, $vendors);
-            $this->promos->save($supplierId, $itemId, $promos);
-            $this->prices->save($supplierId, $itemId, $prices, true);
+            if ($vendors !== null) {
+                $this->vendors->save($supplierId, $itemId, $vendors);
+            }
+            if ($promos !== null) {
+                $this->promos->save($supplierId, $itemId, $promos);
+            }
+            if ($prices !== null) {
+                $this->prices->save($supplierId, $itemId, $prices, true, true);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -110,11 +117,13 @@ final class ProductEditorService
         if (!is_array($input)) {
             throw new EshopException('validation_failed', 'Sekce item musí být objekt.', 400);
         }
-        $name = trim((string) ($input['name'] ?? ''));
+        $pick = static fn (string $key): mixed => array_key_exists($key, $input) ? $input[$key] : ($existing[$key] ?? null);
+        $name = trim((string) $pick('name'));
         if ($name === '' || mb_strlen($name) > 255) {
             throw new EshopException('validation_failed', 'Název karty je povinný (max 255 znaků).', 400);
         }
-        $sku = trim((string) ($input['sku'] ?? ''));
+        // Prázdné SKU znamená „vygenerovat z názvu“, vynechané SKU ponechá uložené.
+        $sku = trim((string) $pick('sku'));
         if ($sku === '') {
             $sku = Slugifier::slug($name, '-', 'upper', 50);
         }
@@ -125,11 +134,11 @@ final class ProductEditorService
         if ($bySku !== null && (int) $bySku['id'] !== $itemId) {
             throw new EshopException('sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
         }
-        $itemType = (string) ($input['item_type'] ?? 'goods');
+        $itemType = (string) (array_key_exists('item_type', $input) ? ($input['item_type'] ?? 'goods') : ($existing['item_type'] ?? 'goods'));
         if (!in_array($itemType, ['material', 'goods', 'product'], true)) {
             throw new EshopException('validation_failed', 'Neplatný typ skladové karty.', 400);
         }
-        $unit = trim((string) ($input['unit'] ?? 'ks'));
+        $unit = trim((string) (array_key_exists('unit', $input) ? ($input['unit'] ?? 'ks') : ($existing['unit'] ?? 'ks')));
         $trackingMode = (string) ($input['tracking_mode'] ?? $existing['tracking_mode'] ?? 'none');
         if (!in_array($trackingMode, ['none', 'lot', 'serial'], true)) {
             throw new EshopException('validation_failed', 'Neplatný režim sledování skladové karty.', 400);
@@ -153,13 +162,13 @@ final class ProductEditorService
             'item_type' => $itemType,
             'unit' => $unit === '' ? 'ks' : $unit,
             'tracking_mode' => $trackingMode,
-            'ean' => $this->stringOrNull($input['ean'] ?? null),
-            'vat_rate_id' => $this->intOrNull($input['vat_rate_id'] ?? null),
-            'sale_price_without_vat' => $this->decimalOrNull($input['sale_price_without_vat'] ?? null),
-            'min_qty' => $this->decimalOrNull($input['min_qty'] ?? null),
+            'ean' => $this->stringOrNull($pick('ean')),
+            'vat_rate_id' => $this->intOrNull($pick('vat_rate_id')),
+            'sale_price_without_vat' => $this->decimalOrNull($pick('sale_price_without_vat')),
+            'min_qty' => $this->decimalOrNull($pick('min_qty')),
             ...$this->intrastat->normalize($input, $existing),
-            'is_active' => (bool) ($input['is_active'] ?? true),
-            'note' => $this->stringOrNull($input['note'] ?? null),
+            'is_active' => (bool) (array_key_exists('is_active', $input) ? ($input['is_active'] ?? true) : ($existing['is_active'] ?? true)),
+            'note' => $this->stringOrNull($pick('note')),
         ];
     }
 

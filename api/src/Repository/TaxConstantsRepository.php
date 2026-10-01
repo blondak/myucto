@@ -219,6 +219,33 @@ final class TaxConstantsRepository
         )->execute([$year, $json]);
     }
 
+    /**
+     * Částečný update (issue #113): klíče, které tělo nepošle, zůstanou z uloženého
+     * override — jinak by klient, který blok nezná (např. `payroll`), přepsané mzdové
+     * sazby tiše vrátil na default. Seznamy se nahrazují celé (viz deepMerge).
+     *
+     * Paušál: poslaná roční částka bez rozvrhu znamená starší klient, který rozvrh nezná;
+     * uložený rozvrh by ji v upsert() přebil, proto se zahodí. Poslaný rozvrh naopak
+     * nahrazuje uloženou roční částku.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public function mergeWithOverride(int $year, array $data): array
+    {
+        $stored = $this->override($year);
+        if ($stored === null) {
+            return $data;
+        }
+        if (array_key_exists('pausal_annual', $data) && !array_key_exists('pausal_monthly', $data)) {
+            unset($stored['pausal_monthly']);
+        }
+        if (array_key_exists('pausal_monthly', $data)) {
+            unset($stored['pausal_annual']);
+        }
+        return $this->deepMerge($stored, $data);
+    }
+
     /** Smaže override (reset na default). Vrací true, pokud řádek existoval. */
     public function reset(int $year): bool
     {

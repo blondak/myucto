@@ -788,6 +788,7 @@ final class PayrollTimeService
         ?string $sourceHash = null,
     ): array {
         $employmentId = $this->positiveInt($input, 'employment_id');
+        $input = $this->withSupersededEntryValues($supplierId, $employmentId, $input);
         $category = $this->enum($input, 'category', self::CATEGORIES);
         $timezone = $this->timezone($input['timezone'] ?? null);
         $interval = PayrollTimeInterval::fromIso(
@@ -912,7 +913,10 @@ final class PayrollTimeService
             }
 
             $entryInput = $cell;
-            if (!isset($entryInput['timezone']) && $defaultTimezone !== null) {
+            // Oprava bez timezone si ji bere z opravované revize, ne z výchozí dávky.
+            if (!isset($entryInput['timezone']) && $defaultTimezone !== null
+                && (($entryInput['supersedes_id'] ?? null) === null || array_key_exists('timezone', $entryInput))
+            ) {
                 $entryInput['timezone'] = $defaultTimezone;
             }
             if (isset($monthVersions[$employmentId])) {
@@ -984,6 +988,52 @@ final class PayrollTimeService
             'code' => $code,
             'message' => $message,
         ];
+    }
+
+    /**
+     * Oprava zápisu (`supersedes_id`) je nová revize téhož záznamu: co klient
+     * neposlal, přebírá z opravované revize. Výslovný null počet vlivů maže.
+     * Počet vlivů se přebírá jen při stejné kategorii — u jiné by ho validace
+     * odmítla a z ručního zadání by se stala chyba, kterou nikdo neposlal.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    private function withSupersededEntryValues(int $supplierId, int $employmentId, array $input): array
+    {
+        $supersedesId = $this->nullablePositiveInt($input, 'supersedes_id');
+        if ($supersedesId === null) {
+            return $input;
+        }
+        $current = $this->repository->currentEntryRevision($supplierId, $employmentId, $supersedesId);
+        if ($current === null) {
+            return $input;
+        }
+        // Okamžik s literálním 'Z': '+00:00' by kontrola offsetu odmítla v každé
+        // timezone mimo UTC, i v té uložené.
+        $utc = new \DateTimeZone('UTC');
+        $stored = [
+            'category' => $current['category'] ?? null,
+            'starts_at' => (new \DateTimeImmutable((string) $current['starts_at_utc'], $utc))
+                ->format('Y-m-d\TH:i:s\Z'),
+            'ends_at' => (new \DateTimeImmutable((string) $current['ends_at_utc'], $utc))
+                ->format('Y-m-d\TH:i:s\Z'),
+            'timezone' => $current['timezone_name'] ?? null,
+            'break_minutes' => $current['break_minutes'] ?? null,
+        ];
+        foreach ($stored as $key => $value) {
+            if (!array_key_exists($key, $input)) {
+                $input[$key] = $value;
+            }
+        }
+        if (!array_key_exists('difficulty_factor_count', $input)
+            && $input['category'] === ($current['category'] ?? null)
+            && ($current['difficulty_factor_count'] ?? null) !== null
+        ) {
+            $input['difficulty_factor_count'] = (int) $current['difficulty_factor_count'];
+        }
+
+        return $input;
     }
 
     /**

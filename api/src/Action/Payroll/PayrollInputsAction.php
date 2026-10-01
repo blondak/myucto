@@ -384,11 +384,17 @@ final class PayrollInputsAction
             );
         }
         unset($body['row_version']);
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $current = $this->inputs->find($supplierId, $id);
+        if ($current === null) {
+            return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
+        }
         try {
             $input = $this->inputs->update(
-                $this->currentSupplierId($request),
-                (int) ($args['id'] ?? 0),
-                $this->validator->validate($body),
+                $supplierId,
+                $id,
+                $this->validator->validate([...self::storedInputBody($current), ...$body]),
                 $version,
             );
         } catch (\InvalidArgumentException|\DomainException $e) {
@@ -403,6 +409,32 @@ final class PayrollInputsAction
         }
         $this->audit($request, 'payroll.input.updated', $input);
         return Json::ok($response, ['input' => $input]);
+    }
+
+    /**
+     * Uložený vstup v tvaru těla požadavku — úprava přebírá, co klient
+     * neposlal. `source_kind` se neskládá: úprava ho stejně bere z uloženého
+     * původu ({@see PayrollInputRepository::update()}).
+     *
+     * @param array<string,mixed> $current
+     * @return array<string,mixed>
+     */
+    private static function storedInputBody(array $current): array
+    {
+        $month = static fn (mixed $date): ?string => is_string($date) && $date !== ''
+            ? substr($date, 0, 7)
+            : null;
+
+        return [
+            'employee_id' => $current['employee_id'] ?? null,
+            'employment_id' => $current['employment_id'] ?? null,
+            'component_id' => $current['component_id'] ?? null,
+            'period' => $month($current['period_start'] ?? null),
+            'source_period' => $month($current['source_period_start'] ?? null),
+            'amount_minor' => $current['amount_minor'] ?? null,
+            'quantity_milliunits' => $current['quantity_milliunits'] ?? null,
+            'external_id' => $current['external_id'] ?? null,
+        ];
     }
 
     /**

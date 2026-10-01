@@ -104,8 +104,10 @@ final class ReportingSettingsAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $body = (array) ($request->getParsedBody() ?? []);
+        // Chybějící klíč = ponechat uloženou hodnotu, explicitní null = smazat.
+        $current = $this->settings->get($supplierId);
 
-        $avgEmployees = $body['avg_employees'] ?? null;
+        $avgEmployees = array_key_exists('avg_employees', $body) ? $body['avg_employees'] : $current['avg_employees'];
         if ($avgEmployees !== null && $avgEmployees !== '') {
             if (!is_numeric($avgEmployees) || (int) $avgEmployees != $avgEmployees || (int) $avgEmployees < 0) {
                 return Json::error($response, 'validation_failed', 'avg_employees musí být celé číslo ≥ 0, nebo null.', 422);
@@ -115,7 +117,9 @@ final class ReportingSettingsAction
             $avgEmployees = null;
         }
 
-        $scopeOverride = $body['statement_scope_override'] ?? null;
+        $scopeOverride = array_key_exists('statement_scope_override', $body)
+            ? $body['statement_scope_override']
+            : $current['statement_scope_override'];
         if ($scopeOverride !== null && $scopeOverride !== '') {
             $scopeOverride = (string) $scopeOverride;
             if (!in_array($scopeOverride, ['full', 'small', 'micro'], true)) {
@@ -143,14 +147,18 @@ final class ReportingSettingsAction
 
         // §DM / Task 14: účetní politika časového rozlišení drobného majetku na 381
         // (§7 ZoÚ, volitelná). Partial update — ukládá se jen je-li mode v body.
-        if (array_key_exists('small_asset_accrual_mode', $body)) {
-            $mode = (string) $body['small_asset_accrual_mode'];
+        if (array_key_exists('small_asset_accrual_mode', $body) || array_key_exists('small_asset_accrual_pct', $body)) {
+            $mode = array_key_exists('small_asset_accrual_mode', $body)
+                ? (string) $body['small_asset_accrual_mode']
+                : $current['small_asset_accrual_mode'];
             if (!in_array($mode, ['none', 'pro_rata', 'flat_pct'], true)) {
                 return Json::error($response, 'validation_failed', "small_asset_accrual_mode musí být 'none', 'pro_rata' nebo 'flat_pct'.", 422);
             }
             $pct = null;
             if ($mode === 'flat_pct') {
-                $rawPct = $body['small_asset_accrual_pct'] ?? null;
+                $rawPct = array_key_exists('small_asset_accrual_pct', $body)
+                    ? $body['small_asset_accrual_pct']
+                    : $current['small_asset_accrual_pct'];
                 if (!is_numeric($rawPct)) {
                     return Json::error($response, 'validation_failed', 'small_asset_accrual_pct je u režimu flat_pct povinné (0–100).', 422);
                 }
@@ -196,12 +204,16 @@ final class ReportingSettingsAction
         }
 
         // § 58 odst. 2 vyhl. 500/2002 Sb.: souhrnné vykázání daní vůči FÚ v rozvaze.
-        if (array_key_exists('tax_authority_offset', $body)) {
-            $v = filter_var($body['tax_authority_offset'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if (array_key_exists('tax_authority_offset', $body) || array_key_exists('tax_authority_offset_from_year', $body)) {
+            $v = array_key_exists('tax_authority_offset', $body)
+                ? filter_var($body['tax_authority_offset'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
+                : $current['tax_authority_offset'];
             if ($v === null) {
                 return Json::error($response, 'validation_failed', 'tax_authority_offset musí být boolean (true/false).', 422);
             }
-            $from = $body['tax_authority_offset_from_year'] ?? null;
+            $from = array_key_exists('tax_authority_offset_from_year', $body)
+                ? $body['tax_authority_offset_from_year']
+                : $current['tax_authority_offset_from_year'];
             if ($from !== null && $from !== '') {
                 if (!is_numeric($from) || (int) $from != $from || (int) $from < 1900 || (int) $from > 2999) {
                     return Json::error($response, 'validation_failed', 'tax_authority_offset_from_year musí být rok (1900–2999), nebo null.', 422);

@@ -186,11 +186,12 @@ final class AttributeAction
             return $err;
         }
         $oid = (int) $args['oid'];
-        if ($this->attributes->findOption($supplierId, $oid) === null) {
+        $existing = $this->attributes->findOption($supplierId, $oid);
+        if ($existing === null) {
             return Json::error($response, 'not_found', 'Volba nenalezena.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        [$data, $verr] = $this->validateOption($response, $body);
+        [$data, $verr] = $this->validateOption($response, $body, $existing);
         if ($verr !== null) {
             return $verr;
         }
@@ -254,12 +255,13 @@ final class AttributeAction
 
     /**
      * @param array<string,mixed> $body
+     * @param array<string,mixed>|null $existing
      * @return array{0:array<string,mixed>, 1:?Response}
      */
-    private function validateOption(Response $response, array $body): array
+    private function validateOption(Response $response, array $body, ?array $existing = null): array
     {
-        $code = trim((string) ($body['code'] ?? ''));
-        $label = trim((string) ($body['label'] ?? ''));
+        $code = trim((string) (array_key_exists('code', $body) ? $body['code'] : ($existing['code'] ?? '')));
+        $label = trim((string) (array_key_exists('label', $body) ? $body['label'] : ($existing['label'] ?? '')));
         if ($code === '' || mb_strlen($code) > 50) {
             return [[], Json::error($response, 'validation_failed', 'Kód volby je povinný (max 50 znaků).', 400)];
         }
@@ -269,7 +271,9 @@ final class AttributeAction
         return [[
             'code'          => $code,
             'label'         => $label,
-            'display_order' => (int) ($body['display_order'] ?? 0),
+            'display_order' => array_key_exists('display_order', $body)
+                ? (int) $body['display_order']
+                : (int) ($existing['display_order'] ?? 0),
         ], null];
     }
 

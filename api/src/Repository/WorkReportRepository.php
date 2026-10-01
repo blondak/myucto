@@ -229,11 +229,23 @@ final class WorkReportRepository
      * Uloží work_report (upsert) + nahradí items (část PRÁCE).
      * Nesahá na materiál (material_*, work_report_materials).
      * Vrací id work_reportu.
+     *
+     * @param list<array<string,mixed>>|null $items null = řádky i součty existujícího výkazu ponechat
      */
-    public function save(int $invoiceId, ?int $projectId, string $title, array $items, ?int $vatRateId = null): int
+    public function save(int $invoiceId, ?int $projectId, string $title, ?array $items, ?int $vatRateId = null): int
     {
         $pdo = $this->db->pdo();
         $existing = $this->findByInvoice($invoiceId);
+
+        // project_id je nullable — faktura nemusí mít zakázku.
+        $projectIdParam = ($projectId !== null && $projectId > 0) ? $projectId : null;
+        if ($items === null && $existing) {
+            $id = (int) $existing['id'];
+            $pdo->prepare('UPDATE work_reports SET project_id=?, title=?, vat_rate_id=? WHERE id=?')
+                ->execute([$projectIdParam, $title, $vatRateId, $id]);
+            return $id;
+        }
+        $items ??= [];
 
         $items = array_map(
             static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
@@ -248,9 +260,6 @@ final class WorkReportRepository
                 ? TimeBilling::workAmount($it)
                 : TimeBilling::workAmountInput($it);
         }
-
-        // project_id je nullable — faktura nemusí mít zakázku.
-        $projectIdParam = ($projectId !== null && $projectId > 0) ? $projectId : null;
 
         if ($existing) {
             $id = (int) $existing['id'];
@@ -296,12 +305,19 @@ final class WorkReportRepository
      * Nesahá na práci (title/total_hours/total_amount/work_report_items).
      * Vrací id work_reportu.
      *
-     * @param list<array<string,mixed>> $materials
+     * @param list<array<string,mixed>>|null $materials null = řádky i součet existujícího výkazu ponechat
      */
-    public function saveMaterials(int $invoiceId, ?int $projectId, ?string $materialTitle, ?int $materialVatRateId, array $materials): int
+    public function saveMaterials(int $invoiceId, ?int $projectId, ?string $materialTitle, ?int $materialVatRateId, ?array $materials): int
     {
         $pdo = $this->db->pdo();
         $existing = $this->findByInvoice($invoiceId);
+        if ($materials === null && $existing) {
+            $id = (int) $existing['id'];
+            $pdo->prepare('UPDATE work_reports SET material_title=?, material_vat_rate_id=? WHERE id=?')
+                ->execute([$materialTitle, $materialVatRateId, $id]);
+            return $id;
+        }
+        $materials ??= [];
 
         $materialTotal = 0.0;
         foreach ($materials as $m) {

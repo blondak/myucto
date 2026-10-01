@@ -118,8 +118,20 @@ final class StockDocumentService
             if ($existing['status'] !== 'draft') {
                 throw new StockException('not_draft', 'Upravovat lze jen rozpracovaný (draft) doklad.', 409);
             }
-            $body['allow_over_delivery'] ??= $existing['allow_over_delivery'];
-            [$header, $lines] = $this->validateBody($supplierId, $body, blockInactiveItems: true);
+            // Vynechaný klíč ponechá uloženou hodnotu, explicitní null/"" ji smaže.
+            foreach (['doc_type', 'origin', 'warehouse_id', 'warehouse_to_id', 'doc_date', 'description',
+                'partner_name', 'invoice_id', 'purchase_invoice_id', 'purchase_order_id', 'stock_take_id',
+                'allow_over_delivery'] as $key) {
+                if (!array_key_exists($key, $body)) {
+                    $body[$key] = $existing[$key];
+                }
+            }
+            // B10 blokuje jen řádky poslané v těle; vynechané řádky jsou už uložené.
+            $linesSent = array_key_exists('lines', $body);
+            if (!$linesSent) {
+                $body['lines'] = $this->docs->lines($supplierId, $id);
+            }
+            [$header, $lines] = $this->validateBody($supplierId, $body, blockInactiveItems: $linesSent);
             $persistedCosts = $this->landedCosts->listForDocument($supplierId, $id);
             if (!$this->docs->updateDraftHeader($supplierId, $id, $header)) {
                 throw new StockException('not_draft', 'Doklad se během úpravy změnil.', 409);

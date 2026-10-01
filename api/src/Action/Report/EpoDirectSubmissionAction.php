@@ -102,6 +102,16 @@ final class EpoDirectSubmissionAction
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
+        // Vynechaný klíč nesmí potichu odebrat přístup; kontrola před step-upem, ať se nespálí ověření.
+        if (!array_key_exists('enabled', $body)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Chybí pole enabled.',
+                400,
+                ['fields' => ['enabled' => 'required']],
+            );
+        }
         try {
             $this->stepUp->verify($request, $userId, $body, 'credential_supplier_access');
             $enabled = filter_var(

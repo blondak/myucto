@@ -83,6 +83,22 @@ final class UpdatePurchaseInvoiceAction
         'cash_register_id',
     ];
 
+    /**
+     * Hlavičkové sloupce, které updateDraft() zapisuje vždy (issue #113). Klíč vynechaný
+     * v těle se doplní z uloženého dokladu, takže částečný PUT nic nevynuluje; explicitní
+     * null dál maže. Ostatní pole (items, payment, project_id, kurz, …) jsou presence-aware
+     * už v repository.
+     */
+    private const STORED_HEADER_FIELDS = [
+        'vendor_id', 'vendor_invoice_number', 'issue_date', 'tax_date', 'delivery_date',
+        'due_date', 'received_at', 'currency_id', 'reverse_charge', 'prices_include_vat',
+        'language', 'note_above_items', 'note_below_items', 'advance_paid_amount',
+        'payment_currency_id', 'payment_exchange_rate', 'paid_amount_payment_ccy',
+        'paid_amount_invoice_ccy', 'exchange_diff_base', 'vat_classification_code',
+        'vat_deduction', 'vat_deduction_percent', 'tax_deductible', 'is_fixed_asset',
+        'expense_category_id',
+    ];
+
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
@@ -100,7 +116,23 @@ final class UpdatePurchaseInvoiceAction
         $isAdmin = RequestAuthorization::isCompanyAdmin($request);
         $isForce = !empty($request->getQueryParams()['force']);
 
-        $body = (array) ($request->getParsedBody() ?? []);
+        $sent = (array) ($request->getParsedBody() ?? []);
+        $body = $sent;
+        foreach (self::STORED_HEADER_FIELDS as $col) {
+            if (!array_key_exists($col, $body) && array_key_exists($col, $existing)) {
+                $body[$col] = $existing[$col];
+            }
+        }
+        // Hlavičková klasifikace DPH se odvozuje z řádků (syncHeaderClassificationFromItems
+        // doplňuje jen prázdnou). Nové položky nebo změna přenesené povinnosti bez
+        // poslaného kódu → hlavičku vyprázdnit, ať ji SSOT odvodí znovu, ne ponechat starou.
+        if (!array_key_exists('vat_classification_code', $sent)
+            && (DocumentItemsPayload::replaces($sent)
+                || (array_key_exists('reverse_charge', $sent)
+                    && (bool) $sent['reverse_charge'] !== (bool) ($existing['reverse_charge'] ?? false)))
+        ) {
+            $body['vat_classification_code'] = null;
+        }
 
         // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
@@ -184,7 +216,7 @@ final class UpdatePurchaseInvoiceAction
         // (PurchaseInvoiceValidation kontroluje jen `> 0`).
         $badRefs = $this->tenantRefs->violations(
             $supplierId,
-            $body,
+            $sent,
             ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id', 'project_id'],
         );
         if ($badRefs !== []) {
@@ -202,11 +234,16 @@ final class UpdatePurchaseInvoiceAction
         // Plátcovství bereme ze snapshotu k datu plnění (`vendor_is_vat_payer` z těla, migrace
         // 0133) — ne z živého flagu klienta, aby u historické faktury šlo dodavatele označit
         // za plátce, i když dnes plátce není. Fallback na živý flag jen když snapshot chybí.
-        $vendorIsPayer = array_key_exists('vendor_is_vat_payer', $body)
-            ? (bool) $body['vendor_is_vat_payer']
-            : (isset($vendor['is_vat_payer']) ? (bool) $vendor['is_vat_payer'] : true);
+        // Režim odpočtu se doplnil z uloženého dokladu; default 'none' platí jen tam, kde
+        // ho volající neposlal A mění dodavatele (u téhož dodavatele zůstává uložená volba).
+        $vendorChanged = (int) $body['vendor_id'] !== (int) ($existing['vendor_id'] ?? 0);
+        $vendorIsPayer = match (true) {
+            array_key_exists('vendor_is_vat_payer', $body) => (bool) $body['vendor_is_vat_payer'],
+            !$vendorChanged && isset($existing['vendor_is_vat_payer']) => (bool) $existing['vendor_is_vat_payer'],
+            default => isset($vendor['is_vat_payer']) ? (bool) $vendor['is_vat_payer'] : true,
+        };
         $vendorNonPayer = !$vendorIsPayer;
-        if ($vendorNonPayer && !array_key_exists('vat_deduction', $body)) {
+        if ($vendorNonPayer && !array_key_exists('vat_deduction', $sent) && $vendorChanged) {
             $body['vat_deduction'] = 'none';
         }
 
@@ -245,7 +282,7 @@ final class UpdatePurchaseInvoiceAction
         if (array_key_exists('parent_purchase_invoice_id', $body)) {
             $body['parent_purchase_invoice_id'] = CreatePurchaseInvoiceAction::sanitizeParentLink(
                 $this->db, $body['parent_purchase_invoice_id'] ?? null,
-                (string) ($body['document_kind'] ?? ''), $supplierId, $id,
+                (string) ($body['document_kind'] ?? $existing['document_kind'] ?? ''), $supplierId, $id,
             );
         }
 

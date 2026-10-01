@@ -188,6 +188,16 @@ final class TaxSubmissionAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Opakované označení už podaného snapshotu: vynechaný klíč drží uložené datum podání
+        // i číslo jednací (issue #113); now() jen při prvním označení nebo na explicitní "".
+        if (in_array((string) ($existing['status'] ?? ''), ['submitted', 'accepted'], true)) {
+            if (!array_key_exists('submitted_at', $body) && !empty($existing['submitted_at'])) {
+                $body['submitted_at'] = (string) $existing['submitted_at'];
+            }
+            if (!array_key_exists('submission_ref', $body)) {
+                $body['submission_ref'] = $existing['submission_ref'] ?? null;
+            }
+        }
         $submittedAt = trim((string) ($body['submitted_at'] ?? ''));
         if ($submittedAt === '') {
             $submittedAt = date('Y-m-d H:i:s');

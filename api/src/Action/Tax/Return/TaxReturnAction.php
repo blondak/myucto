@@ -92,7 +92,7 @@ final class TaxReturnAction
         $inputs = (array) ($body['inputs'] ?? []);
         $rowVersion = (int) ($body['row_version'] ?? 0);
         return $this->run($response, fn () => $this->service->saveInputs(
-            SupplierGuard::currentId($request), $year, $type, $inputs, $rowVersion, $this->userId($request), $this->variant($request), $this->seq($request)
+            SupplierGuard::currentId($request), $year, $type, $inputs, $rowVersion, $this->userId($request), $this->variant($request), $this->seq($request), partial: true
         ));
     }
 
@@ -365,7 +365,13 @@ final class TaxReturnAction
             return $bad($response);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $amount = (float) ($body['amount'] ?? 0);
+        // Jediná hodnota akce — chybějící částka nesmí tiše vynulovat předpis (explicitní null ano).
+        $rawAmount = $body['amount'] ?? null;
+        if (!array_key_exists('amount', $body)
+            || ($rawAmount !== null && $rawAmount !== '' && !is_numeric($rawAmount))) {
+            return Json::error($response, 'validation_failed', 'Chybí nebo není číslo: amount.', 400, ['fields' => ['amount' => 'required']]);
+        }
+        $amount = (float) ($rawAmount ?? 0);
         return $this->run($response, fn () => $this->service->updateAdvanceAmount(
             SupplierGuard::currentId($request), $year, $type, (int) ($args['scheduleId'] ?? 0), $amount
         ));

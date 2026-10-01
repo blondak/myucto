@@ -4213,6 +4213,7 @@ final class BankStatementAction
         }
 
         $body = (array) $request->getParsedBody();
+        $noteSent = array_key_exists('note', $body);
         $note = $body['note'] ?? null;
         if ($note !== null && (!is_string($note) || mb_strlen($note) > 1000)) {
             return Json::error($response, 'validation_error', 'Poznámka musí být text o nejvýše 1000 znacích.', 422);
@@ -4223,10 +4224,14 @@ final class BankStatementAction
         $pdo = $this->db->pdo();
         // Načti previous state pro audit log (před UPDATE)
         $prev = $pdo->prepare(
-            'SELECT statement_id, match_status, matched_invoice_id FROM bank_transactions WHERE id = ?'
+            'SELECT statement_id, match_status, matched_invoice_id, ignore_note FROM bank_transactions WHERE id = ?'
         );
         $prev->execute([$txId]);
         $prevRow = $prev->fetch(\PDO::FETCH_ASSOC) ?: [];
+        if (!$noteSent) {
+            // Vynechaný klíč = ponechat uloženou poznámku; smaže ji jen explicitní null / "".
+            $note = isset($prevRow['ignore_note']) && $prevRow['ignore_note'] !== '' ? (string) $prevRow['ignore_note'] : null;
+        }
         $statementId = (int) ($prevRow['statement_id'] ?? 0);
         $previousStatus = (string) ($prevRow['match_status'] ?? '');
         $previousInvoiceId = $prevRow['matched_invoice_id'] !== null ? (int) $prevRow['matched_invoice_id'] : null;

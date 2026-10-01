@@ -311,6 +311,7 @@ final class StockTakeService
                     $present[$itemId] = true;
                 }
             }
+            $stored = null;
             foreach ($rawLines as $rl) {
                 if (!is_array($rl)) {
                     continue;
@@ -319,7 +320,13 @@ final class StockTakeService
                 if ($lineId <= 0) {
                     continue;
                 }
-                $raw = $rl['counted_qty'] ?? null;
+                // Vynechaný counted_qty ponechá uložený počet, explicitní null ho smaže.
+                if (!array_key_exists('counted_qty', $rl)) {
+                    $stored ??= array_column($this->takes->lines($supplierId, $id), null, 'id');
+                    $raw = $stored[$lineId]['counted_qty'] ?? null;
+                } else {
+                    $raw = $rl['counted_qty'];
+                }
                 $counted = ($raw === null || $raw === '')
                     ? null
                     : StockValuation::tToDecimal(StockValuation::qtyToT((string) $raw));

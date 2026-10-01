@@ -32,6 +32,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class CarsAction
 {
     private const USAGE_KEYS = ['usage_mode', 'vat_deduction_mode', 'vat_deduction_percent'];
+    private const UPDATABLE = ['registration', 'name', 'brand', 'model', 'vin', 'fuel_type', 'odometer_start',
+        'odometer_start_date', 'is_default', 'is_archived', 'note'];
 
     public function __construct(
         private readonly CarRepository $repo,
@@ -88,12 +90,14 @@ final class CarsAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
-        $err = $this->validate($body);
-        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         $current = $this->repo->find($id, $supplierId);
         if ($current === null) {
             return Json::error($response, 'not_found', 'Auto nenalezeno.', 404);
         }
+        // Vynechaný klíč = ponechat uloženou hodnotu; poslaný null / "" = vymazat.
+        $merged = $body + array_intersect_key($current, array_flip(self::UPDATABLE));
+        $err = $this->validate($merged);
+        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         try {
             $usage = $this->usagePatch($body, $current);
         } catch (\InvalidArgumentException $e) {
@@ -103,7 +107,7 @@ final class CarsAction
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($bad), 400);
         }
         try {
-            $this->repo->update($id, $supplierId, $body);
+            $this->repo->update($id, $supplierId, $merged);
         } catch (\PDOException $e) {
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate', 'Auto s touto SPZ už existuje.', 409);

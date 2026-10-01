@@ -52,7 +52,11 @@ final class FuelCashDocumentsAction
         $supplierId = SupplierGuard::currentId($request);
         $docId = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
-        $carId = isset($body['car_id']) && $body['car_id'] !== '' && $body['car_id'] !== null ? (int) $body['car_id'] : null;
+        // Jediná hodnota akce: vynechaný car_id nesmí tiše odebrat auto, vymazává jen explicitní null.
+        if (!array_key_exists('car_id', $body)) {
+            return Json::error($response, 'validation_failed', 'Pole car_id je povinné (null = bez auta).', 400);
+        }
+        $carId = $body['car_id'] !== '' && $body['car_id'] !== null ? (int) $body['car_id'] : null;
         if ($carId !== null && $this->cars->find($carId, $supplierId) === null) {
             return Json::error($response, 'car_not_found', 'Auto neexistuje.', 404);
         }

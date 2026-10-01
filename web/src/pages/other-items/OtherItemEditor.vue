@@ -137,7 +137,8 @@ async function save() {
     variable_symbol: form.variable_symbol.trim() || null,
     account_code: isDoubleEntry.value ? form.account_code || null : null,
     counter_account_code: isDoubleEntry.value && !splitPosting.value ? form.counter_account_code || null : null,
-    ...(isDoubleEntry.value && splitPosting.value ? { posting_lines: postingLines.value } : {}),
+    // Úprava je částečná — bez rozpadu se posílá prázdný seznam, jinak by zůstal uložený.
+    posting_lines: isDoubleEntry.value && splitPosting.value ? postingLines.value : [],
     note: form.note.trim() || null,
   }
   saving.value = true

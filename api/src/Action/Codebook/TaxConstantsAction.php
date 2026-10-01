@@ -50,6 +50,7 @@ final class TaxConstantsAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $data = isset($body['data']) && is_array($body['data']) ? $body['data'] : $body;
+        $data = $this->repo->mergeWithOverride($year, $data);
         $err = $this->validate($data, $year);
         if ($err !== null) {
             return Json::error($response, 'validation_failed', $err, 422);

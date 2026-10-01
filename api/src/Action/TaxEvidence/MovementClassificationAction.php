@@ -70,6 +70,10 @@ final class MovementClassificationAction
         if (!$this->repo->belongsToSupplier($supplierId, $sourceType, $sourceId)) {
             return Json::error($response, 'not_found', 'Pohyb nebyl nalezen.', 404);
         }
+        // Vynechaná poznámka = uložená poznámka (issue #113); smaže ji jen explicitní null/"".
+        if (!array_key_exists('note', $body)) {
+            $note = $this->repo->find($supplierId, $sourceType, $sourceId)['note'] ?? null;
+        }
 
         $row = $this->repo->upsert($supplierId, $sourceType, $sourceId, $taxBucket, $note, $this->userId($request));
 

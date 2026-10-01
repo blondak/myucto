@@ -27,6 +27,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   material_vat_rate_id: int|null,   // sazba DPH materiálu (12/21); povinná, je-li ≥1 řádek
  *   materials: [{ description, quantity, unit, unit_price, order_index? }]
  * }
+ * Vynechaný klíč drží hodnotu uloženého výkazu.
  *
  * Ukládá část MATERIÁL téže work_reports řádky (sdílí ji s výkazem práce). Oba editory
  * ukládají nezávisle — tato akce nesahá na práci ani na invoice_items (řádek „Materiál"
@@ -89,20 +90,29 @@ final class SaveWorkReportMaterialsAction
             }
         }
 
-        $materialTitle = trim((string) ($body['material_title'] ?? ''));
+        // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (materials = jeho řádky).
+        $stored = $this->repo->findByInvoice($invoiceId);
+
+        $materialTitle = trim((string) (array_key_exists('material_title', $body)
+            ? $body['material_title']
+            : ($stored['material_title'] ?? '')));
         if ($materialTitle === '') {
             $materialTitle = 'Materiál';
         }
 
-        $materials = array_values((array) ($body['materials'] ?? []));
+        $materials = array_key_exists('materials', $body) || $stored === null
+            ? array_values((array) ($body['materials'] ?? []))
+            : null;
 
-        $vatRateIdRaw = $body['material_vat_rate_id'] ?? null;
+        $vatRateIdRaw = array_key_exists('material_vat_rate_id', $body)
+            ? $body['material_vat_rate_id']
+            : ($stored['material_vat_rate_id'] ?? null);
         $materialVatRateId = ($vatRateIdRaw !== null && $vatRateIdRaw !== '' && (int) $vatRateIdRaw > 0)
             ? (int) $vatRateIdRaw
             : null;
 
         // Validace řádků materiálu.
-        foreach ($materials as $idx => $m) {
+        foreach ($materials ?? [] as $idx => $m) {
             $row = $idx + 1;
             if (trim((string) ($m['description'] ?? '')) === '') {
                 return Json::error($response, 'validation_failed', "Řádek $row: chybí popis.", 400);
@@ -119,7 +129,7 @@ final class SaveWorkReportMaterialsAction
         }
 
         // Je-li aspoň jeden materiál, sazba DPH je povinná a musí existovat.
-        if (count($materials) > 0) {
+        if (count($materials ?? (array) ($stored['materials'] ?? [])) > 0) {
             if ($materialVatRateId === null) {
                 return Json::error($response, 'validation_failed', 'Chybí sazba DPH výkazu materiálu.', 400);
             }

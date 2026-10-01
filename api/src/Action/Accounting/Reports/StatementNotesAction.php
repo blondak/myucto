@@ -64,7 +64,11 @@ final class StatementNotesAction
         $periodId = (int) ($args['id'] ?? 0);
         $section = trim((string) ($args['section'] ?? ''));
         $body = (array) ($request->getParsedBody() ?? []);
-        $content = array_key_exists('content', $body) ? (string) $body['content'] : null;
+        // Chybějící klíč nesmí tiše smazat sekci — mazání je jen explicitní null / prázdný text.
+        if (!array_key_exists('content', $body)) {
+            return Json::error($response, 'validation_failed', 'Zadej content (text sekce, nebo null pro smazání).', 400);
+        }
+        $content = $body['content'] === null ? null : (string) $body['content'];
 
         try {
             $data = $this->notes->build($supplierId, $periodId);

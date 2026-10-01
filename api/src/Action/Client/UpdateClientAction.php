@@ -41,7 +41,10 @@ final class UpdateClientAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $errors = Validation::client($body);
+        // Validuje se karta po sloučení s uloženými hodnotami — chybějící klíč = beze změny (#113).
+        $merged = $this->repo->mergeWithStored($existing, $body);
+        $merged['is_vendor'] = array_key_exists('is_vendor', $body) ? $body['is_vendor'] : $existing['is_vendor'];
+        $errors = Validation::client($merged);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
@@ -81,9 +84,9 @@ final class UpdateClientAction
                 return Json::error($response, 'invalid_email_contacts', $e->getMessage(), 422);
             }
         }
-        if (!empty($body['is_vendor']) && !empty($body['dic'])) {
+        if (!empty($merged['is_vendor']) && !empty($merged['dic'])) {
             try {
-                $this->bankAccountRegistry->sync($id, $supplierId, (string) $body['dic']);
+                $this->bankAccountRegistry->sync($id, $supplierId, (string) $merged['dic']);
             } catch (\Throwable) {
             }
         }
@@ -103,14 +106,14 @@ final class UpdateClientAction
         $client['revenue_category_backfilled'] = $backfilled['revenue'];
 
         // Non-blocking varování (IČO mod 11 / DIČ formát — audit 2026-07).
-        $warnings = Validation::clientWarnings($body);
+        $warnings = Validation::clientWarnings($merged);
         if (!empty($warnings)) {
             $client['_warnings'] = $warnings;
         }
 
         // FR 2 (vendor bugreport 2026-08-06) — non-blocking upozornění na JINOU kartu
         // se stejným IČO/DIČ po normalizaci (sama editovaná karta je vyřazená).
-        $duplicates = $this->repo->findDuplicateCandidates($supplierId, $body['ic'] ?? null, $body['dic'] ?? null, $id);
+        $duplicates = $this->repo->findDuplicateCandidates($supplierId, $merged['ic'] ?? null, $merged['dic'] ?? null, $id);
         if (!empty($duplicates)) {
             $client['_duplicate_candidates'] = $duplicates;
         }

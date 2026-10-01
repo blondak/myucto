@@ -136,10 +136,17 @@ final class PaymentQrAction
 
         if ($found !== null && $this->bankParser->hasAccount($found['account_number'] ?? null, $found['bank_code'] ?? null, $found['iban'] ?? null)) {
             $found['source'] = $source;
+            // Vytěžení VS nenašlo → uložený VS zůstává. BIC patří k účtu, takže uložený
+            // se převezme jen k témuž účtu.
+            $found['variable_symbol'] ??= $invoice['payment_variable_symbol'] ?? null;
+            if ($this->sameAccount($found, $invoice)) {
+                $found['bic'] ??= $invoice['payment_bic'] ?? null;
+            }
             $this->repo->updatePaymentAccount($id, $found, $supplierId);
         } else {
-            // Nenalezeno → označ checked, ať se lazy extrakce už nespouští.
-            $this->repo->updatePaymentAccount($id, ['checked' => true], $supplierId);
+            // Nenalezeno → jen označ checked, ať se lazy extrakce už nespouští; rozpracované
+            // údaje účtu (číslo bez kódu banky, VS) se nemažou.
+            $this->repo->markPaymentAccountChecked($id, $supplierId);
         }
 
         $fresh = $this->repo->find($id, $supplierId);
@@ -173,16 +180,23 @@ final class PaymentQrAction
             $id,
         )) return $denied;
 
+        // Vynechaný klíč = ponech uloženou hodnotu, null/'' = vymaž (issue #113).
         $body = (array) ($request->getParsedBody() ?? []);
-        $payment = [
-            'account_number'  => $this->cleanInput($body['account_number'] ?? null, 34),
-            'bank_code'       => $this->cleanInput($body['bank_code'] ?? null, 10),
-            'iban'            => $this->normalizeIban($body['iban'] ?? null),
-            'bic'             => $this->cleanInput($body['bic'] ?? null, 11),
-            'variable_symbol' => $this->cleanInput($body['variable_symbol'] ?? null, 20),
-            'source'          => 'manual',
-        ];
-        $this->repo->updatePaymentAccount($id, $payment, $supplierId);
+        $value = static fn (string $key): mixed => array_key_exists($key, $body)
+            ? $body[$key]
+            : ($invoice['payment_' . $key] ?? null);
+        $keys = ['account_number', 'bank_code', 'iban', 'bic', 'variable_symbol'];
+        if (array_intersect($keys, array_keys($body)) !== []) {
+            $payment = [
+                'account_number'  => $this->cleanInput($value('account_number'), 34),
+                'bank_code'       => $this->cleanInput($value('bank_code'), 10),
+                'iban'            => $this->normalizeIban($value('iban')),
+                'bic'             => $this->cleanInput($value('bic'), 11),
+                'variable_symbol' => $this->cleanInput($value('variable_symbol'), 20),
+                'source'          => 'manual',
+            ];
+            $this->repo->updatePaymentAccount($id, $payment, $supplierId);
+        }
 
         $fresh = $this->repo->find($id, $supplierId);
         if ($fresh === null) {
@@ -414,6 +428,21 @@ final class PaymentQrAction
             return dirname($uploads) . '/purchase-invoices';
         }
         return RuntimePaths::storage('purchase-invoices');
+    }
+
+    /** Nalezený účet = uložený (IBAN, nebo číslo + kód banky). */
+    private function sameAccount(array $found, array $invoice): bool
+    {
+        $norm = static fn (mixed $v): string => strtoupper((string) preg_replace('/[\s-]+/', '', (string) ($v ?? '')));
+        $iban = $norm($found['iban'] ?? null);
+        if ($iban !== '' && $iban === $norm($invoice['payment_iban'] ?? null)) {
+            return true;
+        }
+        $number = ltrim($norm($found['account_number'] ?? null), '0');
+        $bank = $norm($found['bank_code'] ?? null);
+        return $number !== '' && $bank !== ''
+            && $number === ltrim($norm($invoice['payment_account_number'] ?? null), '0')
+            && $bank === $norm($invoice['payment_bank_code'] ?? null);
     }
 
     private function cleanInput(mixed $v, int $maxLen): ?string

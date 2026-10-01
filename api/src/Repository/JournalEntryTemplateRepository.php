@@ -414,9 +414,10 @@ final class JournalEntryTemplateRepository
     }
 
     /**
-     * @param list<array{account_code:string, side:'debit'|'credit', amount:?float, label:?string, cost_center:?string}> $lines
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:?float, label:?string, cost_center:?string}>|null $lines
+     *        null = řádky beze změny (mění se jen hlavička)
      */
-    public function update(int $supplierId, int $id, string $name, ?string $description, array $lines): bool
+    public function update(int $supplierId, int $id, string $name, ?string $description, ?array $lines): bool
     {
         $pdo = $this->db->pdo();
         $exists = $pdo->prepare('SELECT 1 FROM journal_entry_templates WHERE id = ? AND supplier_id = ?');
@@ -435,13 +436,15 @@ final class JournalEntryTemplateRepository
             );
             $header->execute([$name, $description, $id, $supplierId]);
 
-            $pdo->prepare('DELETE FROM journal_entry_template_lines WHERE template_id = ?')->execute([$id]);
+            if ($lines !== null) {
+                $pdo->prepare('DELETE FROM journal_entry_template_lines WHERE template_id = ?')->execute([$id]);
+            }
             $insLine = $pdo->prepare(
                 'INSERT INTO journal_entry_template_lines
                     (template_id, line_no, label, account_code, side, default_amount, cost_center)
                  VALUES (?, ?, ?, ?, ?, ?, ?)'
             );
-            foreach (array_values($lines) as $i => $l) {
+            foreach (array_values($lines ?? []) as $i => $l) {
                 $insLine->execute([
                     $id,
                     $i + 1,

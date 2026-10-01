@@ -1511,6 +1511,14 @@ final class PurchaseInvoiceRepository
         )->execute([$account, $bank, $iban, $bic, $vs, $source, $checkedAt, $id, $supplierId]);
     }
 
+    /** Lazy extrakce účtu proběhla bez výsledku — zapíše jen otisk, údaje účtu nechá být. */
+    public function markPaymentAccountChecked(int $id, int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET payment_account_checked_at = NOW() WHERE id = ? AND supplier_id = ?'
+        )->execute([$id, $supplierId]);
+    }
+
     /**
      * Nezaplacené přijaté faktury vhodné do platebního příkazu (status received/booked
      * a zbývá k úhradě). Vrací platební údaje příjemce + DIČ dodavatele (pro CRPDPH

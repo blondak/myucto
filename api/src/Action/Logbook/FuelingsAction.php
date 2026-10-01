@@ -38,6 +38,11 @@ final class FuelingsAction
     /** Vazby na doklad, kterým bylo tankování zaplaceno (migrace 1801). */
     private const LINK_COLUMNS = ['source_purchase_invoice_id', 'source_cash_document_id', 'source_bank_transaction_id', 'source_journal_entry_id'];
 
+    /** Sloupce upravitelné přes PUT; vynechané se berou z uloženého záznamu. */
+    private const UPDATABLE = ['car_id', 'fueled_date', 'fueled_time', 'fuel_type', 'quantity', 'unit', 'unit_price',
+        'amount_without_vat', 'amount_vat', 'amount_with_vat', 'currency', 'odometer', 'station', 'vendor_id',
+        'receipt_number', 'note'];
+
     public function __construct(
         private readonly FuelingRepository $repo,
         private readonly CarRepository $cars,
@@ -176,17 +181,20 @@ final class FuelingsAction
             return Json::error($response, 'not_found', 'Tankování nenalezeno.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $err = $this->validate($supplierId, $body);
+        // Vynechaný klíč = ponechat uloženou hodnotu; poslaný null / "" = vymazat.
+        $merged = $body + array_intersect_key($before, array_flip(self::UPDATABLE));
+        $this->rescaleVatSplit($body, $before, $merged);
+        $err = $this->validate($supplierId, $merged);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         if ($ref = $this->tenantRefError($supplierId, $body)) {
             return Json::error($response, 'invalid_reference', $ref, 400);
         }
         $this->adoptBankStatement($supplierId, $body);
-        $this->repo->update($id, $supplierId, $body);
+        $this->repo->update($id, $supplierId, $merged);
         // Vazby na doklad mění jen klíče, které klient poslal — ruční úprava údajů
         // tankování (bez vazeb v těle) provenienci nepřepisuje.
         $this->repo->setLinks($id, $supplierId, array_intersect_key($body, array_flip(self::LINK_COLUMNS)));
-        $this->assignVehicle($supplierId, $id, $body, $before);
+        $this->assignVehicle($supplierId, $id, $merged + $body, $before);
         $this->log($request, 'fueling.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));
     }
@@ -201,6 +209,31 @@ final class FuelingsAction
         $this->repo->delete($id, $supplierId);
         $this->log($request, 'fueling.deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
+    }
+
+    /**
+     * Změní-li se celková částka a klient rozpis DPH neposlal, uložený rozpis by byl
+     * nekonzistentní s novým součtem - přepočte se poměrem původního rozpisu.
+     *
+     * @param array<string,mixed> $body
+     * @param array<string,mixed> $before
+     * @param array<string,mixed> $merged
+     */
+    private function rescaleVatSplit(array $body, array $before, array &$merged): void
+    {
+        if (array_key_exists('amount_without_vat', $body) || array_key_exists('amount_vat', $body)
+            || !array_key_exists('amount_with_vat', $body) || !is_numeric($body['amount_with_vat'])) {
+            return;
+        }
+        $old = (float) ($before['amount_with_vat'] ?? 0);
+        $new = (float) $body['amount_with_vat'];
+        if ($old <= 0 || $new <= 0 || abs($new - $old) < 0.005
+            || $before['amount_without_vat'] === null || $before['amount_vat'] === null) {
+            return;
+        }
+        $without = round($new * (float) $before['amount_without_vat'] / $old, 2);
+        $merged['amount_without_vat'] = $without;
+        $merged['amount_vat'] = round($new - $without, 2);
     }
 
     private function validate(int $supplierId, array $body): ?string

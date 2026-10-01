@@ -538,12 +538,12 @@ final class PurchaseOrderRepository
         return $stmt->rowCount() > 0;
     }
 
-    public function setLineConfirmed(int $supplierId, int $lineId, ?string $qtyConfirmed, ?string $expectedDate): void
+    public function setLineConfirmed(int $supplierId, int $lineId, ?string $qtyConfirmed, ?string $expectedDate, bool $setQty = true): void
     {
         $this->db->pdo()->prepare(
-            'UPDATE purchase_order_lines SET qty_confirmed = ?, expected_date = COALESCE(?, expected_date)
+            'UPDATE purchase_order_lines SET qty_confirmed = IF(?, ?, qty_confirmed), expected_date = COALESCE(?, expected_date)
               WHERE id = ? AND supplier_id = ?'
-        )->execute([$qtyConfirmed, $expectedDate, $lineId, $supplierId]);
+        )->execute([$setQty ? 1 : 0, $qtyConfirmed, $expectedDate, $lineId, $supplierId]);
     }
 
     public function setLineCancelled(int $supplierId, int $lineId, string $qtyCancelled): void

@@ -89,6 +89,14 @@ final class GoPayService
     {
         $this->assertDoubleEntry($supplierId);
         $currency = $this->currency((string) ($input['currency'] ?? 'CZK'));
+        // Chybějící klíč = ponechat uloženou hodnotu (částečná aktualizace); validuje se sloučený stav.
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM gopay_settings WHERE supplier_id=? AND currency=?');
+        $stmt->execute([$supplierId, $currency]);
+        $stored = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $input += array_intersect_key($stored, array_flip([
+            'gopay_account_id', 'receivable_account_id', 'fee_account_id', 'clearing_account_id',
+            'destination_bank_account_id', 'payout_account_number', 'payout_bank_code', 'payout_date_tolerance_days',
+        ]));
         $ids = [
             'gopay_account_id' => (int) ($input['gopay_account_id'] ?? 0),
             'receivable_account_id' => (int) ($input['receivable_account_id'] ?? 0),

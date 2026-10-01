@@ -167,14 +167,21 @@ final class CategoryAction
             return Json::error($response, 'not_found', 'Kategorie nenalezena.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $rows = is_array($body['translations'] ?? null) ? $body['translations'] : $body;
+        $rows = is_array($body['translations'] ?? null)
+            ? $body['translations']
+            : (is_array($body['i18n'] ?? null) ? $body['i18n'] : $body);
         $known = $this->locales->codes($supplierId);
+        $stored = [];
+        foreach ($this->i18n->listForCategory($supplierId, $id) as $row) {
+            $stored[(string) $row['locale']] = $row;
+        }
         foreach ($rows as $r) {
             if (!is_array($r)) {
                 continue;
             }
             $locale = trim((string) ($r['locale'] ?? ''));
-            $name = trim((string) ($r['name'] ?? ''));
+            $current = $stored[$locale] ?? null;
+            $name = trim((string) (array_key_exists('name', $r) ? $r['name'] : ($current['name'] ?? '')));
             if ($locale === '' || $name === '' || mb_strlen($locale) > 5) {
                 continue;
             }
@@ -184,12 +191,25 @@ final class CategoryAction
             }
             $this->i18n->upsert($supplierId, $id, $locale, [
                 'name'        => $name,
-                'description' => isset($r['description']) && trim((string) $r['description']) !== '' ? trim((string) $r['description']) : null,
-                'seo_slug'    => isset($r['seo_slug']) && trim((string) $r['seo_slug']) !== '' ? trim((string) $r['seo_slug']) : null,
+                'description' => $this->localeField($r, 'description', $current),
+                'seo_slug'    => $this->localeField($r, 'seo_slug', $current),
             ]);
         }
         $this->log($request, 'eshop.category_i18n_updated', $id, []);
         return Json::ok($response, $this->i18n->listForCategory($supplierId, $id));
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,mixed>|null $current
+     */
+    private function localeField(array $row, string $field, ?array $current): ?string
+    {
+        if (!array_key_exists($field, $row)) {
+            return $current[$field] ?? null;
+        }
+        $value = trim((string) ($row[$field] ?? ''));
+        return $value !== '' ? $value : null;
     }
 
     private function fail(Response $response, EshopException $e): Response

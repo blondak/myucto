@@ -82,6 +82,25 @@ info:
     nedostupné. Interní session endpointy, které nejsou výslovně popsané pod
     tagem Payroll, se do veřejného API automaticky nepromítají.
 
+    ## Částečná aktualizace (PUT)
+
+    Úpravné endpointy (`PUT`, `PATCH`) mají sémantiku částečné aktualizace:
+
+    - **Vynechaný klíč** zachová uloženou hodnotu. Úprava jednoho pole proto
+      nevyžaduje poslat celý objekt.
+    - **Explicitní `null` nebo `""`** vymaže nullable pole (u nenulovatelných polí se
+      použije výchozí hodnota, případně vrátí chybu validace).
+    - **Podřízená kolekce** (`items`, `lines`, `payment_schedule` apod.): vynechaná
+      zůstane beze změny, poslaná nahradí celou uloženou sadu.
+    - **Kolekční endpointy** (ceny, dodavatelé, akční ceny, překlady): vynechané klíče
+      v řádku zachovají uložené hodnoty řádku.
+    - Schémata sdílená s `POST` (`*Input`) popisují vytvoření, kde zůstávají povinné
+      vlastnosti uvedené v `required`; na `PUT` jsou všechny vlastnosti nepovinné a slučený
+      výsledek se validuje.
+    - **Jednohodnotové akce** (např. `POST /invoices/{id}/project`,
+      `POST /purchase-invoices/{id}/project`) klíč vyžadují: chybí-li, vrací 400
+      `validation_failed`, hodnota `null` vymaže.
+
     ## Logování volání
 
     Každé volání tokenem se zaznamenává (cesta, metoda, návratový kód, doba
@@ -690,6 +709,19 @@ paths:
     put:
       tags: [Clients]
       summary: Aktualizace klienta
+      description: |
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""`
+        vymaže nullable sloupce (`first_name`, `last_name`, `ic`, `dic`, `tax_number`, `main_email`,
+        `phone`, `note`, `payment_due_default`, `payment_due_unit`, `default_payment_method`,
+        formáty a perioda číslování, `related_party_type`, `related_party_note`).
+        `related_party_type: null` nebo `""` smaže typ i při `related_party: true`.
+
+        Schéma `ClientInput` je sdílené s POST, kde zůstávají povinné `company_name`, `street`,
+        `city` a `zip`. Na PUT jsou všechny vlastnosti nepovinné, ale jsou-li `company_name`,
+        `street`, `city` nebo `zip` poslány, nesmí být prázdné. Vynechané `country_iso2` zachová
+        zemi; vynechání obou `currency_default_id` i `currency_default` zachová měnu (samotný kód
+        `currency_default` přepíše uložené id měny). `email_contacts` a `price_level_id`: vynecháno
+        = beze změny, poslané = nahradí, resp. nastaví.
       requestBody:
         required: true
         content:
@@ -1241,6 +1273,24 @@ paths:
         Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
         přeúčtuje deník) i úprava v uzavřeném účetním období je účetní úkon:
         přes API token vrací 403 `token_write_forbidden`, provádí se v aplikaci.
+
+        Částečná aktualizace (viz úvod). Schéma `InvoiceInput` je sdílené s POST, kde zůstávají
+        povinné `client_id` a `items`; na PUT jsou všechny vlastnosti nepovinné, včetně `client_id`.
+        Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""` vymaže nullable pole; `issue_date`
+        a `currency_id` se při `null` vrátí na výchozí hodnotu (dnes, měna
+        projektu/klienta/dodavatele). `items`, `payment_schedule` a `cash_register_id` jsou při
+        vynechání beze změny, při poslání se nahradí (`items: []` u dokladu s položkami vrátí 422
+        `no_items`).
+
+        Výjimky a odvozená pole: (1) změní-li se `client_id` a `project_id` je vynechané, zakázka se
+        odebere, protože patří klientovi. (2) `revenue_category` a `revenue_category_id` tvoří
+        dvojici; poslání jedné nahradí obě a vynechaná polovina se nastaví na `null`. (3) Vynechané
+        `vat_classification_code` se odvodí znovu, když se oproti uloženému stavu změní `items`,
+        `reverse_charge`, `client_id` nebo `tax_date` (z poslaných, jinak z uložených položek);
+        jinak zůstane uložený kód. (4) `issue_date` bez `due_date` zachová uloženou lhůtu splatnosti
+        (rozdíl `due_date` a `issue_date` ve dnech). (5) `discount_percent` bez `items` přegeneruje
+        slevové řádky z uložených položek. (6) Kurz se znovu stahuje jen tehdy, když se skutečně
+        změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám.
       requestBody:
         required: true
         content:
@@ -1407,6 +1457,10 @@ paths:
         uzávěrka (časové rozlišení výnosů příštích období, účet 384). Řádky, které
         v těle nejsou, zůstanou beze změny; `null` v obou datech rozlišení zruší.
         Stornovaný doklad a faktura v uzavřeném účetním období vrací 409.
+
+        Částečná aktualizace (viz úvod). V `items[]` je řádek bez `accrual_from` i `accrual_to` bez
+        účinku. Je-li poslána jen jedna hranice, doplní se uloženou druhou; `null` v obou vymaže
+        období.
       requestBody:
         required: true
         content:
@@ -1781,6 +1835,14 @@ paths:
     put:
       tags: [Projects]
       summary: Aktualizace zakázky
+      description: |
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu; `status` se při
+        vynechání neresetuje na `active`. Schéma `ProjectInput` je sdílené s POST, kde zůstávají
+        povinné `client_id`, `name` a `payment_due_days`; na PUT jsou všechny vlastnosti nepovinné a
+        `name` s `payment_due_days` se validují, jen když jsou poslány (jinak podle uložené
+        hodnoty). `billing_emails`: vynecháno = beze změny, poslané (i `[]` nebo `null`) = nahradí
+        seznam. Vynechání obou `currency_id` i `currency` zachová měnu; samotný kód `currency`
+        přepíše uložené id měny.
       requestBody:
         required: true
         content:
@@ -1966,6 +2028,11 @@ paths:
         příloha (2. strana PDF) a **NEmění položky ani částku faktury**. Pokud chceš
         práci i vyúčtovat, přidej odpovídající položku faktury zvlášť přes
         `PUT /api/v1/invoices/{id}` (úprava `items`). Obojí lze dělat jen u draftu.
+
+        Částečná aktualizace (viz úvod). Schéma `WorkReportInput` popisuje i založení výkazu, kde
+        jsou povinné `title` a `items`. U již existujícího výkazu jsou `project_id`, `title`,
+        `vat_rate_id` i `items` nepovinné a vynechaný klíč zachová uloženou hodnotu; vynechané
+        `items` zachová řádky i součty, `items: []` je vymaže.
       parameters:
         - in: query
           name: force
@@ -3555,6 +3622,9 @@ paths:
     post:
       tags: [Bank]
       summary: Označí transakci jako „ignorovat" (nesedí na žádnou fakturu)
+      description: |
+        Klíč `note` je nepovinný: vynechaný zachová uloženou `ignore_note`, `null` nebo `""` ji
+        vymaže a řetězec do 1000 znaků ji nastaví (delší nebo nestringová hodnota vrací 422).
       requestBody:
         required: false
         content:
@@ -5779,7 +5849,11 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Doplní bankovní účet přijaté faktury (lazy z ISDOC/AI)
-      description: "Vyžaduje roli `accountant` nebo vyšší."
+      description: |
+        Vyžaduje roli `accountant` nebo vyšší.
+
+        Když se účet nenajde, nastaví se jen `payment_account_checked_at` a uložená částečná data
+        účtu zůstanou. Liší-li se nově nalezený účet od uloženého, nepřebírá se uložený BIC.
       responses:
         '200':
           description: OK — stejný tvar jako GET /payment-qr
@@ -5798,7 +5872,11 @@ paths:
     put:
       tags: [Purchase invoices]
       summary: Ruční nastavení bankovního účtu přijaté faktury
-      description: "Vyžaduje roli `accountant` nebo vyšší. Uloží účet a nastaví `source=manual`."
+      description: |
+        Vyžaduje roli `accountant` nebo vyšší. Uloží účet a nastaví `source=manual`.
+
+        Částečná aktualizace (viz úvod). Všech pět polí je nepovinných: vynechané pole zachová
+        uloženou hodnotu, `null` nebo `""` ho vymaže a prázdné tělo je bez účinku.
       requestBody:
         required: true
         content:
@@ -5837,13 +5915,16 @@ paths:
         Vyžaduje roli `accountant` nebo vyšší. Standardně jen u konceptu faktury
         (admin může vynutit u vystavené přes `?force=1`). Materiály jsou součástí
         téhož výkazu práce jako práce a na faktuře se promítnou jako souhrnná položka.
+
+        Částečná aktualizace (viz úvod). `material_title`, `material_vat_rate_id` a `materials` jsou
+        nepovinné, vynechaný klíč zachová uloženou hodnotu. `material_vat_rate_id: null` vrátí 400,
+        pokud existují materiálové řádky (uložené nebo poslané).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [materials]
               properties:
                 material_title: { type: string, default: "Materiál" }
                 material_vat_rate_id:
@@ -6298,6 +6379,17 @@ paths:
         z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
         (DELETE + INSERT), takže payload musí nést kompletní seznam. Vyprázdnit řádky
         draftu lze dedikovaným `PUT /api/v1/purchase-invoices/{id}/items`.
+
+        Částečná aktualizace (viz úvod). Schéma `PurchaseInvoicePayload` je sdílené s POST, kde jsou
+        povinné `vendor_id`, `vendor_invoice_number`, `issue_date`, `due_date`, `currency_id` a
+        `items`; na PUT jsou všechny vlastnosti nepovinné. Vynechaný klíč hlavičky zachová uloženou
+        hodnotu, `null` vymaže nullable sloupce (`tax_date`, `delivery_date`, `notes`,
+        `expense_category_id`, platební měnová pole). `items`, `vat_overrides`, `vat_allocations`,
+        `payment` a `cash_register_id` se nahradí jen tehdy, když jsou poslány.
+
+        Vynechané `vat_deduction` zachová uloženou hodnotu; na `none` se nastaví jen při změně
+        dodavatele na neplátce. Vynechané `vat_classification_code` se odvodí znovu z položek, pokud
+        se nahrazují `items` nebo se změní `reverse_charge`; jinak zůstane uložený kód.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
@@ -6464,6 +6556,12 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Nastaví exchange rate manuálně
+      description: |
+        Částečná aktualizace (viz úvod). `rate`, `rate_date` a `source` jsou nepovinné. Tělo bez
+        `rate` zachová uložený kurz; poslané jen `rate_date` a/nebo `source` změní právě tato pole.
+        Pošle-li se `rate` (hodnota, nebo `null` pro vymazání) bez `rate_date` a `source`, nastaví
+        se `rate_date` na `null` a `source` na `manual`, takže se trojice resetuje společně.
+        Explicitní `null` v `source` se bere jako `manual`.
       parameters:
         - in: path
           name: id
@@ -6861,6 +6959,10 @@ paths:
     put:
       tags: [Reports]
       summary: Uloží kořenové složky důkazního archivu EPO
+      description: |
+        Částečná aktualizace (viz úvod). Obě ID složek jsou nepovinná: vynechané ID zůstane, `null`
+        ho vymaže. Schéma `EpoSubmissionSettings` je sdílené s odpovědí, proto v něm zůstávají
+        uvedené povinné vlastnosti.
       requestBody:
         required: true
         content:
@@ -6930,6 +7032,8 @@ paths:
     put:
       tags: [Reports]
       summary: Povolí nebo odebere vlastní certifikát pro aktuální firmu
+      description: |
+        Klíč `enabled` je povinný. Chybí-li, vrací 400 `validation_failed`.
       requestBody:
         required: true
         content:
@@ -7359,6 +7463,9 @@ paths:
     put:
       tags: [Codebooks]
       summary: Update kategorie nákladů
+      description: |
+        Částečná aktualizace (viz úvod). `code` a `label` se při úpravě nevyžadují, vynechaná pole
+        zachovají uložené hodnoty. Neexistující `id` vrací 404 ještě před validací.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7411,6 +7518,9 @@ paths:
     put:
       tags: [Codebooks]
       summary: Update kategorie tržby
+      description: |
+        Částečná aktualizace (viz úvod). `code` a `label` se při úpravě nevyžadují, vynechaná pole
+        zachovají uložené hodnoty. Neexistující `id` vrací 404 ještě před validací.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7481,6 +7591,10 @@ paths:
     put:
       tags: [Codebooks]
       summary: Update VAT kódu (jen tenant rows, globální seed read-only)
+      description: |
+        Částečná aktualizace (viz úvod). `code` a `label` se při úpravě nevyžadují (schéma
+        `VatClassificationInput` nemá povinné vlastnosti), vynechaná pole zachovají uložené hodnoty.
+        Neexistující `id` vrací 404 ještě před validací.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7542,6 +7656,9 @@ paths:
         musí být objekty/pole. Paušální daň se posílá jako rozvrh měsíčních záloh
         `pausal_monthly` (roční `pausal_annual` je odvozená a neukládá se; přijme se
         jen kvůli zpětné kompatibilitě, když rozvrh chybí).
+
+        Tělo se hluboce slévá přes uložený přepis roku; seznamy se nahrazují. Pokud pro rok žádný
+        přepis uložený není, platí dál celá sada povinných klíčů a chybějící vrací 422.
       requestBody:
         required: true
         content:
@@ -8238,6 +8355,13 @@ paths:
     put:
       tags: [Recurring]
       summary: Aktualizace šablony
+      description: |
+        Částečná aktualizace (viz úvod). Schéma `RecurringTemplateInput` je sdílené s POST, kde jsou
+        povinná pole `client_id`, `name`, `frequency`, `anchor_date`, `currency_id` a `items`; na
+        PUT jsou všechna nepovinná a vynechaný klíč zachová uloženou hodnotu. Vynechané `items`
+        zachová položky, poslané se validují a nahradí je. Samotné `end_of_month: true` vynuluje
+        `day_of_month` a samotné `day_of_month` vynuluje `end_of_month`. `branding_profile_id`:
+        vynecháno = uložený profil, `null` = výchozí profil dodavatele.
       requestBody:
         required: true
         content:
@@ -8642,6 +8766,9 @@ paths:
       description: |
         Profil pro optimalizátor — paušál/skutečné výdaje, sleva na manžela, počet
         dětí, úroky z hypotéky, penzijní/životní pojištění, dary, pásmo paušální daně.
+
+        Částečná aktualizace (viz úvod). Všechna skalární pole jsou nepovinná a vynechané pole
+        zachová uloženou hodnotu. Výchozí hodnoty se použijí jen při prvním založení profilu.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
       requestBody:
         required: true
@@ -9168,6 +9295,11 @@ paths:
     put:
       tags: [Logbook]
       summary: Upraví vozidlo
+      description: |
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""`
+        vymaže nullable sloupec. Dříve povinná `registration` se na PUT nevyžaduje (schéma
+        `CarInput` je sdílené s POST), ale slučený záznam musí být platný, jinak 400
+        `validation_failed`.
       requestBody:
         required: true
         content:
@@ -9244,6 +9376,14 @@ paths:
     put:
       tags: [Logbook]
       summary: Upraví jízdu
+      description: |
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""`
+        vymaže nullable sloupec. Dříve povinné `car_id`, `trip_date` a vzdálenost/stavy tachometru
+        se na PUT nevyžadují (schéma `TripInput` je sdílené s POST), ale slučený záznam musí být
+        platný, jinak 400 `validation_failed`. `distance_km` se přepočítá ze sloučených stavů
+        tachometru jen tehdy, když uložená vzdálenost byla odvozená z uložených stavů, tělo posílá
+        stav tachometru bez `distance_km` a sloučená dvojice je úplná; jinak zůstane uložená
+        vzdálenost (např. ruční vzdálenost s `odometer_start` samotným nebo `odometer_end: null`).
       requestBody:
         required: true
         content:
@@ -9319,6 +9459,13 @@ paths:
     put:
       tags: [Logbook]
       summary: Upraví tankování
+      description: |
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""`
+        vymaže nullable sloupec. Dříve povinné `fueled_date` a `amount_with_vat` se na PUT
+        nevyžadují (schéma `FuelingInput` je sdílené s POST), ale slučený záznam musí být platný,
+        jinak 400 `validation_failed` (např. `amount_with_vat: null`). Vynechané `car_id` zachová
+        auto. Poslané `amount_with_vat` bez `amount_without_vat` a `amount_vat` proporčně přepočte
+        uložený rozpad.
       requestBody:
         required: true
         content:
@@ -9620,7 +9767,15 @@ paths:
     put:
       tags: [Accounting]
       summary: Upraví čekající návrh před schválením
-      description: Upravuje pouze povolená pole analytiky, pravidla nákladů, předkontace nebo bankovního pravidla. Navrženou analytiku lze nahradit aktivním existujícím analytickým účtem; cíle všech jejích čekajících závislých návrhů se přepíší atomicky. Po vytvoření balíčku jsou návrhy neměnné. Bankovní návrh navíc vyžaduje oprávnění ke správě bankovních pravidel.
+      description: |
+        Upravuje pouze povolená pole analytiky, pravidla nákladů, předkontace nebo bankovního
+        pravidla. Navrženou analytiku lze nahradit aktivním existujícím analytickým účtem; cíle
+        všech jejích čekajících závislých návrhů se přepíší atomicky. Po vytvoření balíčku jsou
+        návrhy neměnné. Bankovní návrh navíc vyžaduje oprávnění ke správě bankovních pravidel.
+
+        Částečná aktualizace (viz úvod). Všechna editovatelná pole jsou nepovinná a vynechané pole
+        zachová uloženou hodnotu návrhu. Povinná pole (`name`, kódy účtů, `description_contains`
+        apod.) musí být po sloučení neprázdná.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -10535,7 +10690,13 @@ paths:
     put:
       tags: [Accounting]
       summary: Per-tenant override kontačního pravidla
-      description: Účetní/admin. Účty (CODE) musí existovat v osnově firmy.
+      description: |
+        Účetní/admin. Účty (CODE) musí existovat v osnově firmy.
+
+        Částečná aktualizace (viz úvod). Vynechaný `debit_account_code` nebo `credit_account_code`
+        zachová aktuálně platnou hodnotu (přepis firmy, jinak globální šablonu); `null` nebo `""`
+        danou stranu vymaže. Po sloučení musí zůstat alespoň jedna strana neprázdná. Neznámý účet
+        vrací 422.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: rule_key, required: true, schema: { type: string }, example: "invoice.services.issued" }
@@ -10616,7 +10777,12 @@ paths:
     put:
       tags: [Accounting]
       summary: Upraví šablonu a její řádky
-      description: Účetní/admin.
+      description: |
+        Účetní/admin.
+
+        Částečná aktualizace (viz úvod). `name`, `description` a `lines` jsou nepovinné. Vynechané
+        `lines` ponechá řádky i jejich dimenze, poslané `lines` nahradí všechny. Neexistující
+        šablona vrací 404 ještě před validací.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -10626,7 +10792,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, lines]
               properties:
                 name: { type: string, minLength: 1, maxLength: 255 }
                 description: { type: string, maxLength: 255 }
@@ -11927,6 +12092,11 @@ paths:
         Účetní/admin. Přepínače (statutory_audit §3a vyhl. → výkazy vždy v plném
         rozsahu, manual_doc_series — řada ID pro ruční zápisy, fx_reversal_at_open
         — storno FX přecenění saldokonta k 1. dni) se ukládají jen jsou-li v body.
+
+        Částečná aktualizace (viz úvod). Všechna pole jsou nepovinná. `avg_employees`,
+        `statement_scope_override` a `tax_authority_offset_from_year` se při vynechání zachovají a
+        hodnotou `null` vymažou. Samotné `tax_authority_offset_from_year` nebo samotné
+        `small_asset_accrual_pct` se použije s uloženým příznakem, resp. režimem.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -12022,7 +12192,11 @@ paths:
     put:
       tags: [Accounting]
       summary: Nastaví/posune měkký zámek účtování
-      description: Admin-only. Důvod se ukládá do auditu.
+      description: |
+        Admin-only. Důvod se ukládá do auditu.
+
+        Jednohodnotová akce: klíč `locked_until` je povinný. Chybí-li, vrací 400
+        `validation_failed`; `null` zámek zruší.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -12133,7 +12307,11 @@ paths:
     put:
       tags: [Accounting]
       summary: Upsert repo sazby k datu
-      description: Účetní/admin.
+      description: |
+        Účetní/admin.
+
+        Klíč `note` je nepovinný: chybí-li u existujícího `valid_from`, uložená poznámka zůstane;
+        `null` nebo `""` ji vymaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -12787,7 +12965,12 @@ paths:
     put:
       tags: [Accounting]
       summary: Uložení textu sekce přílohy k závěrce
-      description: Prázdný/nullový `content` sekci smaže (vrátí se k případnému automatickému předvyplnění). Vrací čerstvý stav přílohy jako GET.
+      description: |
+        Prázdný/nullový `content` sekci smaže (vrátí se k případnému automatickému předvyplnění).
+        Vrací čerstvý stav přílohy jako GET.
+
+        Klíč `content` je povinný. Chybí-li, vrací 400 `validation_failed`; `null` nebo prázdný text
+        sekci smaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13502,7 +13685,11 @@ paths:
     post:
       tags: [Accounting]
       summary: Import kontačních pravidel z XLSX/CSV
-      description: 'Výhradně firemní overridy (priority=100, R11); neznámý klíč = error. Dry-run default.'
+      description: |
+        Výhradně firemní overridy (priority=100, R11); neznámý klíč = error. Dry-run default.
+
+        Chybí-li v souboru sloupec `md_ucet` nebo `d_ucet`, příslušná strana zůstane beze změny.
+        Prázdná buňka ve sloupci, který existuje, znamená `NULL`.
       requestBody:
         required: true
         content:
@@ -13550,7 +13737,12 @@ paths:
     put:
       tags: [Accounting]
       summary: Uloží analytické účty pro automatické účtování GoPay
-      description: Dostupné pouze z přihlášeného webového rozhraní s právem účtovat banku.
+      description: |
+        Dostupné pouze z přihlášeného webového rozhraní s právem účtovat banku.
+
+        Existuje-li už řádek pro danou měnu, jsou všechna pole nepovinná a vynechané pole zachová
+        uloženou hodnotu. Pro novou měnu zůstávají povinná všechna ID účtů i výplatní účet.
+        `currency` vybírá řádek, výchozí je `CZK`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -13907,7 +14099,21 @@ paths:
     put:
       tags: [Accounting]
       summary: Změní pouze koncept
-      description: Úplná náhrada konceptu, chybějící volitelná pole se vynulují a posting_lines se nahradí. Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write, kromě konceptu z opakování s automatickým účtováním (403 other_items.error.auto_post_session_only).
+      description: |
+        Úplná náhrada konceptu, chybějící volitelná pole se vynulují a posting_lines se nahradí.
+        Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write, kromě konceptu z
+        opakování s automatickým účtováním (403 other_items.error.auto_post_session_only).
+
+        Částečná aktualizace (viz úvod). Schéma `OtherItemInput` je sdílené s POST (povinné `side`,
+        `title`, `issued_on`, `due_on`, `amount`); na PUT jsou všechna pole nepovinná.
+
+        Vynechané `posting_lines` zachová uložené rozdělení (2 a více řádků), které se musí dál
+        sečíst na (sloučenou) částku, jinak 422; `null` nebo `[]` znamená bez rozdělení (platí i při
+        založení). Samotné `counter_account_code` bez `posting_lines` přepne položku na jediný
+        protiúčet, ale `null` nebo `""` uložené rozdělení nezruší; jen jiný neprázdný kód přepne na
+        jediný protiúčet. Změní-li se `issued_on` a `accounting_on` je vynechané, `accounting_on` ho
+        následuje, pokud se dosud rovnalo uloženému `issued_on`; jinak zůstane. `due_on` se při
+        vynechání zachová.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
@@ -14189,6 +14395,18 @@ paths:
     put:
       tags: [Accounting]
       summary: Úprava draftu — účetní|admin
+      description: |
+        Částečná aktualizace (viz úvod). Jen koncept. Všechna pole jsou nepovinná a slučený doklad
+        se validuje. Na CZK pokladně se vynechané `vat_lines` zachovají. Na pokladně v cizí měně s
+        `vat_mode=vat` lze `vat_lines` vynechat jen tehdy, když jsou `amount_foreign`,
+        `total_amount`, `fx_rate`, `issue_date` a `doc_type` beze změny nebo vynechané (uložený
+        rozpis v CZK i celková částka zůstanou přesně); jinak vrací 422 `cash.error.validation` s
+        požadavkem na `vat_lines` v měně pokladny. `amount_foreign` se zdědí jen tehdy, když není
+        poslané `amount_foreign` ani `total_amount`. Uložený `fx_rate` se ponechá, jen dokud se
+        nemění měna pokladny a `issue_date`; jinak se znovu stáhne kurz ČNB (`fx_rate: null` =
+        použít ČNB). Při změně `purpose` se vazby na faktury ani `rule_key` / `counter_account_code`
+        nedědí; poslání jednoho z `rule_key` / `counter_account_code` vymaže druhé. `project_id` se
+        při vynechání zachová.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -14966,13 +15184,15 @@ paths:
     put:
       tags: [Eshop]
       summary: Upraví hodnotu (option) enum parametru
+      description: |
+        Částečná aktualizace (viz úvod). `code`, `label` a `display_order` jsou nepovinné; vynechaný
+        klíč zachová uloženou hodnotu.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code, label]
               properties:
                 code: { type: string, maxLength: 50 }
                 label: { type: string, maxLength: 120 }
@@ -15039,6 +15259,9 @@ paths:
         `{locale, name, description?, seo_slug?}`. Neplatné/prázdné řádky (chybí
         `locale` nebo `name`, `locale` > 5 znaků) se přeskočí. Vrací aktuální
         seznam překladů po zápisu.
+
+        Částečná aktualizace (viz úvod). Pole `i18n` se přijímá jako alias `translations`. Vynechané
+        klíče překladu zachovají uložené hodnoty.
       requestBody:
         required: true
         content:
@@ -15214,7 +15437,11 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Částečná aktualizace (viz úvod). `name`, `manufacturer_id`, `axis_attribute_ids` a `i18n`
+        jsou nepovinné, vynechaný klíč zachová uloženou hodnotu; `row_version` zůstává povinný.
       requestBody:
         required: true
         content:
@@ -15400,7 +15627,13 @@ paths:
       tags:
       - Eshop
       summary: Uloží ceny karty zboží (bulk) a přepočte je
-      description: 'Doplní nebo upraví ceny (`prices`). Neuvedené měny zůstanou zachovány.
+      description: |
+        'Doplní nebo upraví ceny (`prices`). Neuvedené měny zůstanou zachovány.
+
+        Částečná aktualizace (viz úvod). Vynechaný klíč řádku zachová uloženou hodnotu řádku, u
+        existující měny je povinné jen `currency_code` (schéma `EshopPriceInput` je sdílené s
+        ostatními cestami). Změní-li řádek `price_mode`, `markup_pct` a `fixed_price` se z uloženého
+        řádku nedědí.
 
         Každý řádek: `currency_code` (ISO 4217), `price_mode` (markup/target_margin/fixed),
 
@@ -15462,7 +15695,12 @@ paths:
       tags:
       - Eshop
       summary: Doplní nebo upraví pouze uvedené měny
-      description: Ostatní měny zůstávají zachovány. Validace, zápis a přepočet jsou
+      description: |
+        Ostatní měny zůstávají zachovány. Validace, zápis a přepočet jsou
+
+        Částečná aktualizace (viz úvod). Vynechaný klíč řádku zachová uloženou hodnotu řádku, u
+        existující měny je povinné jen `currency_code`. Změní-li řádek `price_mode`, `markup_pct` a
+        `fixed_price` se z uloženého řádku nedědí.
         atomické.
       requestBody:
         required: true
@@ -15575,6 +15813,9 @@ paths:
         množstevní strop (`qty_mode`) a sama cena (`promo_price`, bez DPH).
         `qty_mode=limited` vyžaduje kladný `qty_limit`; u `stock` a `unlimited`
         se `qty_limit` ignoruje.
+
+        Částečná aktualizace (viz úvod). V řádcích s `id` jsou všechny klíče nepovinné a vynechaný
+        klíč zachová uloženou hodnotu akční ceny (nové řádky bez `id` vyžadují `promo_price`).
       requestBody:
         required: true
         content:
@@ -15651,6 +15892,11 @@ paths:
         jeden dodavatel smí mít `is_preferred=true` (jinak 422
         `multiple_preferred_vendors`). Po zápisu se přepočte cena zboží
         (relevantní při `pricing_base=manual`).
+
+        Částečná aktualizace (viz úvod). Vynechané klíče řádku zachovají uložené hodnoty u
+        existujícího dodavatele (povinné je jen `client_id`). Přesouvá-li klient `is_preferred` na
+        dodavatele B, musí u dosavadního preferovaného dodavatele A poslat `is_preferred: false`,
+        jinak vrací 422 `multiple_preferred_vendors`.
       requestBody:
         required: true
         content:
@@ -15839,6 +16085,9 @@ paths:
       description: |
         `is_primary=true` nastaví médium jako hlavní obrázek karty (nejvýše
         jedno na kartu — předchozí hlavní se transakčně zruší).
+
+        Částečná aktualizace (viz úvod). Vynechané `title` a `alt_text` zůstanou, `is_primary:
+        false` je bez účinku.
       requestBody:
         required: true
         content:
@@ -16209,6 +16458,10 @@ paths:
     put:
       tags: [Stock]
       summary: Úprava skladové lokace
+      description: |
+        Částečná aktualizace (viz úvod). `warehouse_id`, `code`, `name` a `is_active` jsou nepovinné
+        (schéma `WarehouseLocationInput` je sdílené s POST); vynechaný klíč zachová uloženou
+        hodnotu, `null` vymaže nullable sloupec, u nenulovatelných se použije výchozí hodnota.
       requestBody:
         required: true
         content:
@@ -16623,6 +16876,11 @@ paths:
         nejde odebrat ani mu změnit poměr (`packaging_unit_in_use`). EAN balení je
         unikátní v rámci firmy proti EAN karet i jiných balení (`ean_duplicate`).
         Kód převodní jednotky šarží nejde použít (`packaging_unit_code_clash`).
+
+        Částečná aktualizace (viz úvod). U existujícího `unit_code` jsou klíče `factor`, `ean` a
+        poměr (`numerator`, `denominator`) nepovinné a vynechané zachová uloženou hodnotu;
+        `default_sale_unit` je také nepovinné. Uložená výchozí prodejní jednotka, která z nové sady
+        jednotek zmizí, se vymaže na `null` místo chyby 422.
       requestBody:
         required: true
         content:
@@ -17130,7 +17388,17 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Částečná aktualizace (viz úvod). Úprava konceptu: všechna pole těla jsou nepovinná,
+        vynechané pole zachová uloženou hodnotu a `null` (u textů a dat i `""`) vymaže nullable
+        pole. Vynechané `lines` zachová uložené řádky beze změny (id, snímky, sklady) a přepočítají
+        se jen součty řádků a objednávky ze sloučeného `prices_include_vat`; poslané `lines` nahradí
+        celou sadu a klíče vynechané uvnitř řádku vezmou výchozí hodnoty z vytvoření. `row_version`
+        zůstává povinný (optimistický zámek, 409 `version_conflict`). Pošle-li se `currency_id`
+        odlišné od uloženého a `exchange_rate` je vynechané, kurz se nastaví na `null`; posílejte
+        `exchange_rate` spolu s novou měnou.
       requestBody:
         required: true
         content:
@@ -17296,6 +17564,13 @@ paths:
         Replace-all včetně řádků. Odeslanou objednávku upravit nejde (`409
         order_not_editable`) — u dodavatele už existuje; změnu množství zaznamenej
         přes `confirm`, nedodaný zbytek přes `close`.
+
+        Částečná aktualizace (viz úvod). Úprava konceptu: všechna pole těla jsou nepovinná,
+        vynechané pole zachová uloženou hodnotu a `null` (u textů a dat i `""`) vymaže nullable
+        pole. Vynechané `lines` zachová uložené řádky, poslané `lines` nahradí celou sadu a klíče
+        vynechané uvnitř řádku vezmou výchozí hodnoty z vytvoření. Pošle-li se `currency_id` odlišné
+        od uloženého a `exchange_rate` je vynechané, kurz se nastaví na `null`; posílejte
+        `exchange_rate` spolu s novou měnou.
       requestBody:
         required: true
         content:
@@ -17341,6 +17616,9 @@ paths:
         `sent → confirmed`, volitelně s jiným množstvím a termínem. `qty_confirmed`
         NAHRAZUJE `qty_ordered` ve všech dalších výpočtech („na cestě" i „zbývá
         přijmout").
+
+        Vynechané `lines[].qty_confirmed` zachová uložené potvrzené množství; explicitní `null` ho
+        vymaže, čímž se řádek vrátí na objednané množství.
       requestBody:
         content:
           application/json:
@@ -18045,7 +18323,14 @@ paths:
       tags:
       - Stock
       summary: Úprava skladového dokladu (draft)
-      description: 'Přepíše hlavičku a nahradí řádky. Lze upravovat jen doklad ve stavu `draft`
+      description: |
+        'Přepíše hlavičku a nahradí řádky. Lze upravovat jen doklad ve stavu `draft`
+
+        Částečná aktualizace (viz úvod). Úprava konceptu: všechna pole těla jsou nepovinná,
+        vynechané pole zachová uloženou hodnotu a `null` (u textů a dat i `""`) vymaže nullable
+        pole. Vynechané `lines` zachová uložené řádky i tehdy, když byla některá karta mezitím
+        deaktivována; poslané `lines` nahradí celou sadu (klíče vynechané uvnitř řádku vezmou
+        výchozí hodnoty z vytvoření) a neaktivní karty odmítnou s 422.
 
         (jinak 422 `not_draft`). Tělo stejné jako u vytvoření.
 
@@ -18230,6 +18515,10 @@ paths:
     put:
       tags: [Stock]
       summary: Uloží zjištěné počty cyklické inventury
+      description: |
+        Částečná aktualizace (viz úvod). V každém uvedeném řádku zachová vynechané `counted_qty`
+        nebo `surplus_unit_cost` uloženou hodnotu a explicitní `null` ji vymaže. Neuvedené řádky
+        zůstanou beze změny.
       requestBody:
         required: true
         content:
@@ -18321,7 +18610,12 @@ paths:
     put:
       tags: [Stock]
       summary: Zadání skutečných počtů
-      description: Zadání/úprava `counted_qty` na řádcích inventury — jen ve fázi `counting`.
+      description: |
+        Zadání/úprava `counted_qty` na řádcích inventury — jen ve fázi `counting`.
+
+        Částečná aktualizace (viz úvod). V každém uvedeném řádku zachová vynechané `counted_qty`
+        nebo `surplus_unit_cost` uloženou hodnotu a explicitní `null` ji vymaže. Neuvedené řádky
+        zůstanou beze změny.
       requestBody:
         required: true
         content:
@@ -18636,6 +18930,11 @@ paths:
         `selection_source = inherit` (nebo prázdné) smaže override a doklad se vrátí
         ke zděděnému nastavení dodavatele. `admin_profile_id` smí nastavit jen admin.
         Po změně se u faktury invaliduje vygenerované PDF.
+
+        Částečná aktualizace (viz úvod). `selection_source` a `admin_profile_id` jsou nepovinné a
+        vynechané pole zachová uloženou hodnotu; explicitní `null` v `admin_profile_id` ho vymaže.
+        Bez uloženého přepisu a bez `selection_source` vrací 400 `validation_failed`. Hodnota
+        `inherit` nebo `""` přepis smaže.
       requestBody:
         required: true
         content:
@@ -20169,13 +20468,16 @@ paths:
     put:
       tags: [Logbook]
       summary: Upraví kategorii cesty
+      description: |
+        Částečná aktualizace (viz úvod). `code` a `label` se na PUT nevyžadují; vynechaný klíč
+        zachová uloženou hodnotu, `null` nebo `""` vymaže nullable sloupec a slučený záznam musí být
+        platný (400 `validation_failed`).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [code, label]
               properties:
                 code: { type: string }
                 label: { type: string }
@@ -20422,6 +20724,9 @@ paths:
         Z popisu dokladu vytáhne litry, cenu za litr, druh paliva, SPZ a tachometr; vozidlo
         určí explicitní `car_id`, jinak SPZ, jinak výchozí vůz. Jeden doklad = jedno tankování
         (idempotentně); explicitní `car_id` přepíše vozidlo i u dříve vytěženého tankování.
+
+        Klíč `car_id` je povinný. Chybí-li, vrací 400 `validation_failed`; `null` nebo `""` znamená
+        bez auta.
       requestBody:
         content:
           application/json:
@@ -20517,6 +20822,8 @@ paths:
         Vytěží položky faktury (i opakovaně — force režim doplní dříve chybějící
         litry) a přiřadí vzniklá tankování zvolenému autu. Reassign přepíše auto
         u všech tankování navázaných na tuto fakturu. `car_id: null` = zruší přiřazení.
+
+        Klíč `car_id` je povinný. Chybí-li, vrací 400 `validation_failed`; `null` auto odebere.
       requestBody:
         required: true
         content:
@@ -20616,7 +20923,10 @@ paths:
     post:
       tags: [Tax]
       summary: Ruční klasifikační override pohybu peněžního deníku (G2)
-      description: Účetní/admin. Předvyplněnou automatickou klasifikaci lze ručně přebít.
+      description: |
+        Účetní/admin. Předvyplněnou automatickou klasifikaci lze ručně přebít.
+
+        Vynechané `note` zachová uloženou poznámku, `null` nebo `""` ji vymaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -20678,7 +20988,14 @@ paths:
     put:
       tags: [Tax]
       summary: Uloží rozpracovanou roční uzávěrku daňové evidence
-      description: Účetní/admin. `row_version` chrání proti souběžné úpravě.
+      description: |
+        Účetní/admin. `row_version` chrání proti souběžné úpravě.
+
+        Částečná aktualizace (viz úvod). `checklist`, `opening_balances`, `closing_balances` a
+        `unsupported_cases` jsou při úpravě nepovinné: vynechaná sekce zůstane, poslaný objekt se
+        slučuje po klíčích a `null` sekci vyprázdní. Schéma `TaxEvidenceAnnualClosingWrite` je
+        zároveň základem odpovědi, proto v něm zůstávají uvedené povinné vlastnosti; `row_version`
+        je povinný vždy.
       requestBody:
         required: true
         content:
@@ -20849,7 +21166,12 @@ paths:
     post:
       tags: [Reports]
       summary: Zaznamená podání archivovaného EPO XML jako prokazatelně podané
-      description: Zkušební asistovaný pokus nelze touto operací potvrdit jako právně účinné podání.
+      description: |
+        Zkušební asistovaný pokus nelze touto operací potvrdit jako právně účinné podání.
+
+        Při opětovném označení již podaného snímku zůstanou vynechané `submitted_at` a
+        `submission_ref` na uložených hodnotách. Volání už nepřepíše přijaté podání zpět na
+        `submitted`.
       requestBody:
         content:
           application/json:
@@ -21141,7 +21463,15 @@ paths:
     put:
       tags: [TaxReturn]
       summary: Uloží ruční vstupy přiznání (draft)
-      description: Účetní/admin. `row_version` chrání proti souběžné úpravě (optimistic lock).
+      description: |
+        Účetní/admin. `row_version` chrání proti souběžné úpravě (optimistic lock).
+
+        Částečná aktualizace (viz úvod). Vynechaný klíč zachová uloženou hodnotu. Vnořené objekty
+        (`s6_employment`, `s8_capital`, `s9_rental`, `s10_other`, `filed_source`) se slučují po
+        klíčích. Seznamy (`manual_*_items`, `donation_items`, `s10_items`) při poslání nahradí
+        uložený seznam. `s10_items` a starší `s10_other` tvoří jednu sekci § 10: poslání jednoho bez
+        druhého nahradí celou sekci. Explicitní `null` hodnotu vymaže; u `s7_payroll_gross` a
+        `bank_account_id` znamená `null` automatický režim. `row_version` zůstává povinný.
       requestBody:
         required: true
         content:
@@ -21468,6 +21798,10 @@ paths:
     put:
       tags: [TaxReturn]
       summary: Upraví rozhodnutí FÚ (§174) podle ID
+      description: |
+        Částečná aktualizace (viz úvod). Všechna pole těla jsou při úpravě nepovinná.
+        `effective_from` se při vynechání vezme z uložené hodnoty; explicitní `null` v
+        `effective_to` znamená bez konce platnosti.
       requestBody:
         content:
           application/json:
@@ -21522,6 +21856,9 @@ paths:
     post:
       tags: [TaxReturn]
       summary: Ručně upraví předepsanou výši zálohy (jen nezaplacené)
+      description: |
+        Klíč `amount` je povinný. Chybí-li nebo není číselný, vrací 400 `validation_failed`;
+        explicitní `null` nebo `""` nastaví 0.
       requestBody:
         required: true
         content:
@@ -21808,7 +22145,13 @@ paths:
     put:
       tags: [Payroll]
       summary: Upravit rozpracovaný mzdový vstup
-      description: Upravit lze pouze vstup ve stavu `draft`.
+      description: |
+        Upravit lze pouze vstup ve stavu `draft`.
+
+        Částečná aktualizace (viz úvod). Kromě `row_version` jsou všechna pole těla nepovinná.
+        Vynechané pole zachová uloženou hodnotu; `null` nebo `""` vymaže `source_period`,
+        `quantity_milliunits` a `external_id`. `source_kind` se při úpravě ignoruje. Neexistující
+        `id` vrací 404 ještě před validací.
       requestBody:
         required: true
         content:
@@ -21947,6 +22290,12 @@ paths:
       description: |
         Uloží versionovaný záznam docházky. Pro přesčas použij `category: overtime`.
         Záznam zůstává rozpracovaný a tento endpoint neschvaluje měsíc.
+
+        U opravy záznamu (`supersedes_id` je vyplněno) jsou `category`, `starts_at`, `ends_at`,
+        `timezone` a `break_minutes` nepovinné a vynechané se zdědí z opravované revize.
+        `difficulty_factor_count` se zdědí jen při nezměněné kategorii a explicitní `null` ho
+        vymaže. Povinné zůstávají vždy `employment_id`, `row_version` a `month_row_version`. Nový
+        záznam bez `supersedes_id` vyžaduje plnou sadu polí jako dosud.
       requestBody:
         required: true
         content:
@@ -22042,6 +22391,13 @@ paths:
       tags:
       - Eshop
       summary: Atomicky uloží celý editor skladové karty
+      description: |
+        Částečná aktualizace (viz úvod). Kromě `row_version` je vše nepovinné: `item`, `product`,
+        `prices`, `promo_prices`, `vendors` i každý klíč uvnitř `item`. Poslaná kolekce nahradí
+        uloženou sadu, vynechaná zůstane beze změny. V řádcích `prices[]` jsou nepovinné všechny
+        klíče kromě `currency_code` (u existující měny), v řádcích `promo_prices[]` s `id` všechny
+        klíče a v řádcích `vendors[]` všechny klíče kromě `client_id` (u existujícího dodavatele).
+        Vynechané klíče řádku zachovají uložené hodnoty řádku.
       requestBody:
         required: true
         content:
@@ -24267,7 +24623,11 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Jednohodnotová akce: klíč `project_id` je povinný. Chybí-li v těle, vrací 400
+        `validation_failed` (`fields.project_id`); `null` zakázku odebere.
       requestBody:
         required: true
         content:
@@ -24538,7 +24898,11 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Jednohodnotová akce: klíč `project_id` je povinný (může být `null`, což zakázku odebere).
+        Chybí-li v těle, vrací 400 `validation_failed`.
       requestBody:
         required: true
         content:
@@ -24584,6 +24948,9 @@ paths:
         Vyžaduje scope read_write. U zaúčtovaného dokladu změna druhu nákladu přeúčtuje
         deník, takže je to účetní úkon: přes API token vrací 403 `token_write_forbidden`.
         Nezaúčtovaný doklad (typicky kontrola po importu) token klasifikovat smí.
+
+        V každém prvku `items[]` je klíč `expense_kind` povinný (hodnota může být `null`). Chybí-li,
+        vrací 400 `validation_failed`.
       requestBody:
         required: true
         content:
@@ -26757,7 +27124,14 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Částečná aktualizace (viz úvod). Všechna pole těla jsou nepovinná (schéma
+        `PricingProfilePayload` je sdílené s POST). Vynechaný klíč zachová uloženou hodnotu, `null`
+        nebo `""` vymaže nullable sloupec; u nenulovatelných polí se použije výchozí hodnota
+        (`rounding` = `none`, `fx_source` = `cnb`, `max_rate_age_days` = 7, `is_active` = true), u
+        `percentage` a povinného `fixed_price` vrací `null` 400.
       requestBody:
         required: true
         content:
@@ -26908,7 +27282,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
+      description: |
+        Vyžaduje scope read_write.
+
+        Částečná aktualizace (viz úvod). `profile_id`, `match_type`, `match_id`, `priority` a
+        `is_active` jsou nepovinné (schéma `PricingRulePayload` je sdílené s POST); vynechaný klíč
+        zachová uloženou hodnotu. Mění-li se `match_type`, musí se poslat i `match_id`, jinak 400.
       requestBody:
         required: true
         content:
@@ -28888,13 +29267,7 @@ components:
           description: Zbývající množství akce se stropem, v základních jednotkách; null = akce bez stropu nebo žádná.
     CatalogEditorInput:
       type: object
-      required:
-      - row_version
-      - item
-      - product
-      - prices
-      - promo_prices
-      - vendors
+      required: [row_version]
       properties:
         row_version:
           type: integer

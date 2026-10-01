@@ -48,13 +48,14 @@ final class CnbRepoRateRepository implements RepoRateProvider
         return $rate === false ? null : (float) $rate;
     }
 
-    public function upsert(string $validFrom, float $rate, ?string $note): void
+    /** $updateNote = false ponechá poznámku existujícího řádku (nový řádek dostane $note). */
+    public function upsert(string $validFrom, float $rate, ?string $note, bool $updateNote = true): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO cnb_repo_rates (valid_from, rate, note)
              VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE rate = VALUES(rate), note = VALUES(note)'
-        )->execute([$validFrom, $rate, $note]);
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate), note = IF(?, VALUES(note), note)'
+        )->execute([$validFrom, $rate, $note, $updateNote ? 1 : 0]);
     }
 
     public function delete(string $validFrom): bool

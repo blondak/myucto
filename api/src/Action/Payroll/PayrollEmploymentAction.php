@@ -442,7 +442,7 @@ final class PayrollEmploymentAction
         bool $newTerms,
     ): array {
         if (!RequestAuthorization::isBearerAuth($request)) {
-            return $body;
+            return $this->withStoredTerms($supplierId, $employmentId, $body);
         }
         $allowed = [
             'row_version' => true,
@@ -471,6 +471,43 @@ final class PayrollEmploymentAction
         if ($current === null) {
             throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek.');
         }
+        return [...$current, ...$body];
+    }
+
+    /**
+     * Klíč, který v těle chybí, drží hodnotu platné verze podmínek; výslovný
+     * null ji maže. Nepřebírá se `effective_from` (nová verze ho musí poslat,
+     * oprava ho dosazuje sama), `change_reason` (poznámka k tomuto zápisu),
+     * `monthly_gross_minor` (dědí ho repozitář) ani `row_version` verze
+     * podmínek — zámek patří pracovnímu vztahu.
+     *
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    private function withStoredTerms(int $supplierId, int $employmentId, array $body): array
+    {
+        $current = $this->employments->currentTerms($supplierId, $employmentId);
+        if ($current === null) {
+            return $body;
+        }
+        unset(
+            $current['id'],
+            $current['effective_from'],
+            $current['effective_to'],
+            $current['change_reason'],
+            $current['monthly_gross_minor'],
+            $current['row_version'],
+            $current['created_at'],
+            $current['office_code'],
+            // Odvozená hodnota sazbové kategorie; složená by s ní mohla kolidovat.
+            $current['risky_work'],
+        );
+        if (array_key_exists('risky_work', $body)
+            && !array_key_exists('social_employer_rate_category', $body)
+        ) {
+            unset($current['social_employer_rate_category']);
+        }
+
         return [...$current, ...$body];
     }
 

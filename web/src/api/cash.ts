@@ -76,13 +76,13 @@ export interface CashDocument {
 
 export interface CreateCashDocumentPayload {
   register_id: number; doc_type: CashDocType; purpose: CashPurpose
-  issue_date: string; tax_date?: string
+  issue_date: string; tax_date?: string | null
   description: string; total_amount: number
-  amount_foreign?: number | null; fx_rate?: number   // valutová pokladna — částka v cizí měně + volitelný ruční kurz
-  partner_name?: string; partner_ic?: string; partner_dic?: string
+  amount_foreign?: number | null; fx_rate?: number | null   // valutová pokladna — částka v cizí měně + volitelný ruční kurz
+  partner_name?: string | null; partner_ic?: string | null; partner_dic?: string | null
   vat_mode?: 'none' | 'vat'; vat_lines?: CashVatLine[]
-  invoice_id?: number; purchase_invoice_id?: number
-  rule_key?: string; counter_account_code?: string
+  invoice_id?: number | null; purchase_invoice_id?: number | null
+  rule_key?: string | null; counter_account_code?: string | null
   post?: boolean                          // default true — create+post v 1 transakci (O2)
 }
 

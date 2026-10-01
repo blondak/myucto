@@ -68,7 +68,14 @@ final class SignatureDocumentSelectionAction
 
         $supplierId = $this->supplierId($request);
         $body = (array) ($request->getParsedBody() ?? []);
-        $selectionSource = (string) ($body['selection_source'] ?? 'inherit');
+        $current = $this->profiles->documentOverride($supplierId, 'pdf', $entityType, $entityId);
+        if (array_key_exists('selection_source', $body)) {
+            $selectionSource = (string) ($body['selection_source'] ?? 'inherit');
+        } elseif ($current !== null) {
+            $selectionSource = (string) $current['selection_source'];
+        } else {
+            return Json::error($response, 'validation_failed', 'Chybí selection_source.', 400);
+        }
         if ($selectionSource === 'inherit' || $selectionSource === '') {
             $this->profiles->deleteDocumentOverride($supplierId, 'pdf', $entityType, $entityId);
             $this->afterSelectionChanged($entityType, $entityId);
@@ -80,9 +87,13 @@ final class SignatureDocumentSelectionAction
             return Json::error($response, 'validation_failed', 'Nepodporovaný způsob výběru podpisového profilu.', 400);
         }
 
-        $adminProfileId = $this->nullableInt($body['admin_profile_id'] ?? null);
-        if ($adminProfileId !== null && !$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Konkrétní admin profil může nastavit pouze admin.', 403);
+        if (array_key_exists('admin_profile_id', $body)) {
+            $adminProfileId = $this->nullableInt($body['admin_profile_id']);
+            if ($adminProfileId !== null && !$this->isAdmin($request)) {
+                return Json::error($response, 'forbidden', 'Konkrétní admin profil může nastavit pouze admin.', 403);
+            }
+        } else {
+            $adminProfileId = $current['admin_profile_id'] ?? null;
         }
 
         try {

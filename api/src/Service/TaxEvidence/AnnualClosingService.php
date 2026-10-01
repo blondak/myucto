@@ -43,15 +43,23 @@ final class AnnualClosingService
         if (($row['status'] ?? '') === 'final') {
             throw new \DomainException('Uzávěrka je finální; nejprve ji vraťte do rozpracovaného stavu.');
         }
+        // Vynechaná sekce i vynechaný klíč uvnitř sekce drží uložený stav (issue #113);
+        // explicitní null sekci vyprázdní.
+        $section = static fn (string $key): array => array_key_exists($key, $data)
+            ? ($data[$key] === null ? [] : array_replace((array) ($row[$key] ?? []), (array) $data[$key]))
+            : (array) ($row[$key] ?? []);
+        $checklistData = $section('checklist');
         $checklist = [];
         foreach (self::CHECKLIST_KEYS as $key) {
-            $checklist[$key] = !empty(($data['checklist'] ?? [])[$key]);
+            $checklist[$key] = !empty($checklistData[$key]);
         }
-        $opening = $this->balances((array) ($data['opening_balances'] ?? []));
-        $closing = $this->balances((array) ($data['closing_balances'] ?? []));
+        $opening = $this->balances($section('opening_balances'));
+        $closing = $this->balances($section('closing_balances'));
         $unsupported = array_values(array_filter(array_map(
             static fn ($v): string => mb_substr(trim((string) $v), 0, 500),
-            (array) ($data['unsupported_cases'] ?? []),
+            array_key_exists('unsupported_cases', $data)
+                ? (array) ($data['unsupported_cases'] ?? [])
+                : (array) ($row['unsupported_cases'] ?? []),
         )));
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();

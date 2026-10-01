@@ -83,7 +83,8 @@ final class TaxSubmissionRepository
     ): ?array {
         $stmt = $this->db->pdo()->prepare(
             "UPDATE tax_submissions
-                SET status = 'submitted', submitted_at = ?, submission_ref = ?, submitted_by = ?
+                SET status = IF(status = 'accepted', 'accepted', 'submitted'),
+                    submitted_at = ?, submission_ref = ?, submitted_by = ?
               WHERE id = ? AND supplier_id = ?"
         );
         $stmt->execute([$submittedAt, $submissionRef, $submittedBy, $id, $supplierId]);

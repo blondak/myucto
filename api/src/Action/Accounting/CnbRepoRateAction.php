@@ -51,7 +51,8 @@ final class CnbRepoRateAction
         }
         $note = isset($body['note']) && trim((string) $body['note']) !== '' ? trim((string) $body['note']) : null;
 
-        $this->rates->upsert($validFrom, $rate, $note);
+        // Bez klíče note zůstává poznámka existující sazby; null/'' ji smaže.
+        $this->rates->upsert($validFrom, $rate, $note, array_key_exists('note', $body));
 
         $this->activity->log(
             'accounting.repo_rate_upserted',

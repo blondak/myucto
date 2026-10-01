@@ -142,9 +142,11 @@ final class CycleCountService
                 $find->execute([$supplierId, $id, (int) $input['id']]);
                 $line = $find->fetch(PDO::FETCH_ASSOC);
                 if ($line === false) continue;
-                $counted = $input['counted_qty'] ?? null;
+                // Vynechaný klíč ponechá uložený počet / cenu přebytku, explicitní null je smaže.
+                $counted = array_key_exists('counted_qty', $input) ? $input['counted_qty'] : $line['counted_qty'];
                 $counted = $counted === null || $counted === '' ? null : StockValuation::tToDecimal(ExactUnitConversion::toBaseT((string) $counted, 1, 1));
-                $cost = isset($input['surplus_unit_cost']) && $input['surplus_unit_cost'] !== '' ? (string) $input['surplus_unit_cost'] : null;
+                $cost = array_key_exists('surplus_unit_cost', $input) ? $input['surplus_unit_cost'] : $line['surplus_unit_cost'];
+                $cost = $cost !== null && $cost !== '' ? (string) $cost : null;
                 if ($cost !== null && (!is_numeric($cost) || (float) $cost < 0)) throw new StockException('invalid_document', 'Cena přebytku není platná.', 422);
                 $sameCount = $counted === null
                     ? $line['counted_qty'] === null

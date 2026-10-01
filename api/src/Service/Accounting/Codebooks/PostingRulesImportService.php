@@ -99,12 +99,13 @@ final class PostingRulesImportService extends AbstractCodebookImportService
             $dcr = $this->col($cols, $map, 'credit');
             $desc = $this->col($cols, $map, 'description');
 
-            $desiredDebit = $md === '' ? null : $md;
-            $desiredCredit = $dcr === '' ? null : $dcr;
-
             $eff = $effective[$key];
             $effDebit = $eff['debit_account_code'] !== null ? (string) $eff['debit_account_code'] : null;
             $effCredit = $eff['credit_account_code'] !== null ? (string) $eff['credit_account_code'] : null;
+
+            // Chybějící sloupec = strana beze změny; prázdná buňka ve sloupci = NULL.
+            $desiredDebit = isset($map['debit']) ? ($md === '' ? null : $md) : $effDebit;
+            $desiredCredit = isset($map['credit']) ? ($dcr === '' ? null : $dcr) : $effCredit;
             $effDesc = (string) ($eff['description'] ?? $key);
             $desiredDesc = $desc !== '' ? $desc : $effDesc;
 

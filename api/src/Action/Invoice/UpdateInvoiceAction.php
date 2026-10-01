@@ -108,6 +108,10 @@ final class UpdateInvoiceAction
         // guardy: force_mode="notes_only" i auditní diff čtou už konkrétní klíč.
         $body = InvoiceNoteAlias::normalize($body);
 
+        // Částečný PUT (#113): vynechaný klíč = uložená hodnota, ne default nového dokladu.
+        // Musí předcházet guardům (zámek, notes_only, BOLA) i resolveru defaultů.
+        $body = self::mergeStoredHeader($body, $existing);
+
         // Zámek dokladu (Epic F6, H1) — PŘED status guardem (klient dostane 403
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
         // klient nesmí datem do uzavřeného období „utéct" ani ho tam přesunout.
@@ -343,7 +347,7 @@ final class UpdateInvoiceAction
         }
 
         // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
-        $this->applyVatClassificationDefaults($body, \MyInvoice\Http\SupplierGuard::currentId($request));
+        $this->applyVatClassificationDefaults($body, \MyInvoice\Http\SupplierGuard::currentId($request), (array) ($existing['items'] ?? []));
 
         // SOUDRŽNOST DOKLADU (§ H1) — táž kontrola jako u importu a u založení dokladu,
         // z téhož SSOT ({@see OssDocumentCoherence}). Počítá se při KAŽDÉM uložení, takže
@@ -424,6 +428,8 @@ final class UpdateInvoiceAction
         try {
             if (DocumentItemsPayload::replaces($body)) {
                 $this->repo->replaceItems($id, (array) $body['items']);
+            } elseif (($replay = self::storedItemsToReplay($body, $existing)) !== null) {
+                $this->repo->replaceItems($id, $replay);
             }
         } catch (\InvalidArgumentException $e) {
             // Neplatná vazba řádku na kartu majetku (1177) — hlavička je už uložená, ale položky
@@ -650,6 +656,105 @@ final class UpdateInvoiceAction
     }
 
     /**
+     * Sloupce hlavičky, které `InvoiceRepository::updateDraft()` zapisuje bezpodmínečně
+     * (a `InvoiceDefaults::resolve()` jinak doplní defaulty nového dokladu). Sloupce
+     * zapisované jen při přítomnosti klíče (varsymbol, payment_method, rounding_mode,
+     * branding_profile_id, price_level_id, is_simplified …) tu nejsou, ty se zachovávají samy.
+     */
+    private const MERGED_HEADER_FIELDS = [
+        'client_id', 'project_id', 'issue_date', 'tax_date', 'due_date', 'currency_id',
+        'reverse_charge', 'prices_include_vat', 'language',
+        'note_above_items', 'note_below_items', 'supplier_order_number',
+        'advance_paid_amount', 'discount_percent', 'vat_classification_code',
+        'revenue_category', 'revenue_category_id',
+        'income_tax_exempt', 'income_tax_exempt_reason', 'auto_send_reminders',
+    ];
+
+    /**
+     * @param  array<string,mixed> $body
+     * @param  array<string,mixed> $existing
+     * @return array<string,mixed>
+     */
+    private static function mergeStoredHeader(array $body, array $existing): array
+    {
+        // Nové datum vystavení bez due_date posune splatnost o uloženou lhůtu.
+        if (!array_key_exists('due_date', $body) && !empty($body['issue_date'])
+            && !empty($existing['issue_date']) && !empty($existing['due_date'])) {
+            $newIssue = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $body['issue_date']);
+            $oldIssue = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $existing['issue_date']);
+            $oldDue   = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $existing['due_date']);
+            if ($newIssue !== false && $oldIssue !== false && $oldDue !== false) {
+                $days = (int) $oldIssue->diff($oldDue)->format('%r%a');
+                $body['due_date'] = $newIssue->modify(sprintf('%+d days', $days))->format('Y-m-d');
+            }
+        }
+        $skip = [];
+        // Zakázka patří klientovi — při změně klienta se uložená nepřebírá.
+        if (array_key_exists('client_id', $body) && (int) $body['client_id'] !== (int) ($existing['client_id'] ?? 0)) {
+            $skip[] = 'project_id';
+        }
+        // Kategorie tržby (legacy text + id) je jedna hodnota: poslaná půlka ruší i druhou.
+        if (array_key_exists('revenue_category', $body) || array_key_exists('revenue_category_id', $body)) {
+            $skip[] = 'revenue_category';
+            $skip[] = 'revenue_category_id';
+        }
+        // Klasifikace DPH je odvozená z položek, RC, klienta a DUZP: změní-li se vstup
+        // a kód v těle není, dopočítá se znovu (applyVatClassificationDefaults).
+        if (self::vatClassificationInputsChanged($body, $existing)) {
+            $skip[] = 'vat_classification_code';
+        }
+        foreach (self::MERGED_HEADER_FIELDS as $col) {
+            if (!array_key_exists($col, $body) && array_key_exists($col, $existing) && !in_array($col, $skip, true)) {
+                $body[$col] = $existing[$col];
+            }
+        }
+        return $body;
+    }
+
+    /**
+     * @param  array<string,mixed> $body
+     * @param  array<string,mixed> $existing
+     */
+    private static function vatClassificationInputsChanged(array $body, array $existing): bool
+    {
+        if (DocumentItemsPayload::replaces($body)
+            && DocumentItemsPayload::changed((array) ($existing['items'] ?? []), (array) $body['items'])) {
+            return true;
+        }
+        if (array_key_exists('reverse_charge', $body) && !empty($body['reverse_charge']) !== !empty($existing['reverse_charge'])) {
+            return true;
+        }
+        if (array_key_exists('client_id', $body) && (int) $body['client_id'] !== (int) ($existing['client_id'] ?? 0)) {
+            return true;
+        }
+        return array_key_exists('tax_date', $body)
+            && (string) ($body['tax_date'] ?? '') !== (string) ($existing['tax_date'] ?? '');
+    }
+
+    /**
+     * Částečný PUT bez položek, který mění slevu v hlavičce: slevové řádky se generují jen
+     * v `replaceItems()`, takže se uložené položky přehrají znovu s novou slevou.
+     *
+     * @param  array<string,mixed> $body
+     * @param  array<string,mixed> $existing
+     * @return list<array<string,mixed>>|null
+     */
+    private static function storedItemsToReplay(array $body, array $existing): ?array
+    {
+        if (DocumentItemsPayload::replaces($body)) {
+            return null;
+        }
+        if (round((float) ($body['discount_percent'] ?? 0), 2) === round((float) ($existing['discount_percent'] ?? 0), 2)) {
+            return null;
+        }
+        $items = array_values(array_filter(
+            (array) ($existing['items'] ?? []),
+            static fn ($it): bool => is_array($it) && ($it['item_kind'] ?? 'standard') !== 'discount',
+        ));
+        return $items !== [] ? $items : null;
+    }
+
+    /**
      * Porovná starou a novou verzi faktury a vrátí sémantické klíče změněných polí
      * (frontend je lokalizuje přes invoice.changed_fields.*). Slouží jako audit detail
      * v activity logu — „co konkrétně se opravilo".
@@ -721,8 +826,17 @@ final class UpdateInvoiceAction
     /**
      * Auto-default vat_classification_code (sale direction) podle vat_rate na řádcích a header.
      */
-    private function applyVatClassificationDefaults(array &$body, int $supplierId): void
+    private function applyVatClassificationDefaults(array &$body, int $supplierId, array $storedItems = []): void
     {
+        // Částečný PUT bez položek a bez kódu (mergeStoredHeader ho nepřevzal, protože se
+        // změnil vstup klasifikace) — hlavička se dopočítá z uložených položek.
+        $headerItems = !empty($body['items']) ? (array) $body['items'] : [];
+        if ($headerItems === [] && !array_key_exists('vat_classification_code', $body)) {
+            $headerItems = array_values(array_filter(
+                $storedItems,
+                static fn ($it): bool => is_array($it) && ($it['item_kind'] ?? 'standard') !== 'discount',
+            ));
+        }
         $vatRates = $this->repo->vatRateMap();
         $reverseCharge = !empty($body['reverse_charge']);
         // Country-aware RC: tuzemský odběratel → §92a (ř.25), zahraniční EU → dodání do JČS (ř.20).
@@ -743,14 +857,14 @@ final class UpdateInvoiceAction
             unset($item);
         }
 
-        if (empty($body['vat_classification_code']) && !empty($body['items'])) {
+        if (empty($body['vat_classification_code']) && $headerItems !== []) {
             $itemsWithTotals = array_map(function ($it) use ($vatRates) {
                 $rateId = (int) ($it['vat_rate_id'] ?? 0);
                 $rate = (float) ($vatRates[$rateId] ?? 0);
                 $qty = (float) ($it['quantity'] ?? 1);
                 $price = (float) ($it['unit_price_without_vat'] ?? 0);
                 return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100), 'unit' => (string) ($it['unit'] ?? '')];
-            }, (array) $body['items']);
+            }, $headerItems);
             $body['vat_classification_code'] = $this->vatDefaulter->suggestHeaderForInvoice(
                 $itemsWithTotals,
                 (bool) ($body['reverse_charge'] ?? false),

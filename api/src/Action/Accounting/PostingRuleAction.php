@@ -61,8 +61,14 @@ final class PostingRuleAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $debit = $this->nullableString($body['debit_account_code'] ?? null);
-        $credit = $this->nullableString($body['credit_account_code'] ?? null);
+        // Chybějící strana = beze změny vůči efektivnímu pravidlu, explicitní null = vyprázdnit.
+        $existing = $this->rules->resolve($supplierId, $ruleKey);
+        $debit = array_key_exists('debit_account_code', $body)
+            ? $this->nullableString($body['debit_account_code'])
+            : $this->nullableString($existing['debit_account_code'] ?? null);
+        $credit = array_key_exists('credit_account_code', $body)
+            ? $this->nullableString($body['credit_account_code'])
+            : $this->nullableString($existing['credit_account_code'] ?? null);
         if ($debit === null && $credit === null) {
             return Json::error($response, 'validation_failed', 'Zadej alespoň debit_account_code nebo credit_account_code.', 422);
         }
@@ -76,7 +82,6 @@ final class PostingRuleAction
         }
 
         // Popis: převezmi z existujícího efektivního pravidla, jinak fallback na rule_key.
-        $existing = $this->rules->resolve($supplierId, $ruleKey);
         $description = $this->nullableString($body['description'] ?? null)
             ?? ($existing['description'] ?? $ruleKey);
 

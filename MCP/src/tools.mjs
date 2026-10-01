@@ -828,19 +828,20 @@ export const TOOLS = [
       quantity_milliunits: int('Množství v tisícinách jednotky.'),
       source_kind: str('Původ vstupu.', { enum: ['manual', 'correction'] }),
       external_id: str('Volitelný idempotentní identifikátor externího systému.'),
-    }, ['id', 'row_version', 'employee_id', 'employment_id', 'component_id', 'period', 'amount_minor']),
+    }, ['id', 'row_version']),
     write: true,
+    // Vynechaný argument zůstane uložený (PUT je částečný), proto bez `?? null`.
     run: (c, a, tool) => c.put(`/payroll/inputs/${seg(a.id)}`, {
       row_version: a.row_version,
       employee_id: a.employee_id,
       employment_id: a.employment_id,
       component_id: a.component_id,
       period: a.period,
-      source_period: a.source_period ?? null,
+      source_period: a.source_period,
       amount_minor: a.amount_minor,
-      quantity_milliunits: a.quantity_milliunits ?? null,
-      source_kind: a.source_kind ?? 'manual',
-      external_id: a.external_id ?? null,
+      quantity_milliunits: a.quantity_milliunits,
+      source_kind: a.source_kind,
+      external_id: a.external_id,
     }, tool),
   },
   {
@@ -3768,12 +3769,12 @@ export const TOOLS = [
     name: 'set_category_i18n',
     title: 'Uložit jazykové verze kategorie',
     description:
-      'Uloží překlady kategorie. Seznam je ÚPLNÝ — jazyk, který v něm chybí, se smaže; '
-      + 'načti proto nejdřív `get_category_i18n`. Řádky bez `locale` nebo `name` server přeskočí.',
+      'Uloží překlady kategorie. Uvedené jazyky se založí nebo přepíšou, ostatní zůstanou. '
+      + 'Vynechaný `description` nebo `seo_slug` si jazyk ponechá, prázdný řetězec ho smaže.',
     inputSchema: schema({
       id: int('ID kategorie.'),
       translations: arrayOf(
-        'Kompletní sada jazykových verzí kategorie.',
+        'Jazykové verze kategorie k uložení.',
         {
           locale: str('Kód jazyka, max 5 znaků — např. cs, en, de.', { maxLength: 5 }),
           name: str('Název kategorie v tomto jazyce.'),
@@ -3967,15 +3968,13 @@ export const TOOLS = [
     name: 'update_attribute_option',
     title: 'Upravit hodnotu parametru',
     description:
-      'Přejmenuje hodnotu parametru. Na rozdíl od ostatních úprav vyžaduje server '
-      + 'kód i text zároveň — pošli obojí, i když měníš jen jedno (současné hodnoty '
-      + 'najdeš v `list_attribute_options`).',
+      'Přejmenuje hodnotu parametru. Pošli jen to, co měníš; vynechané pole zůstane beze změny.',
     inputSchema: schema({
       option_id: int('ID hodnoty (z `list_attribute_options`).'),
       code: str('Kód hodnoty.', { maxLength: 50 }),
       label: str('Zobrazovaný text hodnoty.', { maxLength: 120 }),
       display_order: int('Pořadí v nabídce.'),
-    }, ['option_id', 'code', 'label']),
+    }, ['option_id']),
     write: true,
     run: (c, a, tool) => c.put(`/eshop/attribute-options/${seg(a.option_id)}`, changed(a, [
       'code', 'label', 'display_order',

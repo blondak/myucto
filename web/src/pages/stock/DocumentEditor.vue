@@ -259,7 +259,7 @@ function buildPayload(): StockDocumentPayload {
     description: form.description.trim(),
     warehouse_id: form.warehouse_id!,
     warehouse_to_id: isTransfer.value ? (form.warehouse_to_id ?? undefined) : undefined,
-    partner_name: form.partner_name.trim() || undefined,
+    partner_name: form.partner_name.trim() || null,
     invoice_id: doc.value?.invoice_id ?? undefined,
     purchase_invoice_id: doc.value?.purchase_invoice_id ?? undefined,
     stock_take_id: doc.value?.stock_take_id ?? undefined,

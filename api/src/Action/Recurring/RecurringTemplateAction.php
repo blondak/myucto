@@ -40,6 +40,20 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class RecurringTemplateAction
 {
+    /**
+     * Sloupce, které `RecurringTemplateRepository::update()` zapisuje bezpodmínečně.
+     * branding_profile_id a payment_variable_symbol tu nejsou — repozitář je při
+     * vynechaném klíči zachovává sám (null u brandingu znamená výchozí profil).
+     */
+    private const MERGED_TEMPLATE_FIELDS = [
+        'client_id', 'project_id', 'name', 'frequency', 'day_of_month', 'end_of_month',
+        'anchor_date', 'end_date', 'invoice_type', 'currency_id', 'language', 'payment_method',
+        'reverse_charge', 'prices_include_vat', 'discount_percent', 'revenue_category_id',
+        'payment_due_days', 'payment_due_unit', 'tax_date_mode', 'draft_open_mode',
+        'reminder_days_before', 'note_above_items', 'note_below_items',
+        'increment_month_in_descriptions', 'auto_issue', 'auto_send_email',
+    ];
+
     public function __construct(
         private readonly RecurringTemplateRepository $repo,
         private readonly RecurringInvoiceGenerator $generator,
@@ -305,6 +319,27 @@ final class RecurringTemplateAction
         $body = (array) ($request->getParsedBody() ?? []);
         $body['supplier_id'] = (int) $tpl['supplier_id'];
 
+        // Částečný PUT (#113): vynechaný klíč = uložená hodnota šablony, vynechané items
+        // = uložené položky (validují se, ale nepřepisují).
+        // Den v měsíci a „poslední den" se vylučují: poslaná jedna strana pravidla
+        // nahrazuje i tu uloženou druhou.
+        if (!array_key_exists('day_of_month', $body) && !empty($body['end_of_month'])) {
+            $body['day_of_month'] = null;
+        }
+        if (!array_key_exists('end_of_month', $body)
+            && array_key_exists('day_of_month', $body) && $body['day_of_month'] !== null && $body['day_of_month'] !== '') {
+            $body['end_of_month'] = false;
+        }
+        foreach (self::MERGED_TEMPLATE_FIELDS as $col) {
+            if (!array_key_exists($col, $body) && array_key_exists($col, $tpl)) {
+                $body[$col] = $tpl[$col];
+            }
+        }
+        $itemsSent = array_key_exists('items', $body);
+        if (!$itemsSent) {
+            $body['items'] = (array) ($tpl['items'] ?? []);
+        }
+
         // PŘED jakoukoli prací s dodanými FK (snapshot check níž čte body['currency_id']).
         if ($badRefs = $this->badTenantRefs((int) $tpl['supplier_id'], $body)) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);
@@ -336,12 +371,20 @@ final class RecurringTemplateAction
             }
         }
 
-        try {
-            $body = $this->prepareCatalogItems($body, false);
-        } catch (PriceListResolutionException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), 409, [
-                'price_list_item_id' => $e->priceListItemId,
-            ]);
+        // Uložené ceníkové položky se při změně cenového kontextu přeceňují stejně, jako
+        // kdyby je klient poslal znovu; jinak zůstávají beze změny.
+        $repriceStored = !$itemsSent
+            && ($fixedSnapshotContextChanged || (int) $body['client_id'] !== (int) $tpl['client_id'])
+            && array_filter((array) $body['items'], static fn ($it): bool => is_array($it) && !empty($it['price_list_item_id'])) !== [];
+        $writeItems = $itemsSent || $repriceStored;
+        if ($writeItems) {
+            try {
+                $body = $this->prepareCatalogItems($body, false);
+            } catch (PriceListResolutionException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), 409, [
+                    'price_list_item_id' => $e->priceListItemId,
+                ]);
+            }
         }
 
         $errors = $this->validate($body);
@@ -350,7 +393,7 @@ final class RecurringTemplateAction
         }
 
         try {
-            $this->repo->updateWithItems($id, $body, (array) ($body['items'] ?? []));
+            $this->repo->updateWithItems($id, $body, $writeItems ? (array) ($body['items'] ?? []) : null);
         } catch (\DomainException $e) {
             return Json::error($response, 'schedule_changed', $e->getMessage(), 409);
         }

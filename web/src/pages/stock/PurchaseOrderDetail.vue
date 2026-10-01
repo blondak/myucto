@@ -197,13 +197,13 @@ function buildPayload(): PurchaseOrderPayload {
   return {
     vendor_id: form.vendor_id!,
     order_date: form.order_date,
-    expected_date: form.expected_date || undefined,
+    expected_date: form.expected_date || null,
     warehouse_id: form.warehouse_id!,
     currency_id: form.currency_id!,
-    exchange_rate: form.exchange_rate || undefined,
-    vendor_reference: form.vendor_reference.trim() || undefined,
-    note: form.note.trim() || undefined,
-    internal_note: form.internal_note.trim() || undefined,
+    exchange_rate: form.exchange_rate || null,
+    vendor_reference: form.vendor_reference.trim() || null,
+    note: form.note.trim() || null,
+    internal_note: form.internal_note.trim() || null,
     lines: rows.map(l => ({
       stock_item_id: l.stock_item_id ?? undefined,
       vendor_sku: l.vendor_sku.trim() || undefined,
@@ -287,7 +287,7 @@ async function submitConfirm() {
   try {
     order.value = await purchaseOrdersApi.confirm(orderId.value, {
       expected_date: confirmExpectedDate.value || undefined,
-      lines: confirmLines.value.map(l => ({ id: l.id, qty_confirmed: l.qty_confirmed || undefined })),
+      lines: confirmLines.value.map(l => ({ id: l.id, qty_confirmed: l.qty_confirmed || null })),
     })
     toast.success(t('common.saved'))
     confirmModalOpen.value = false

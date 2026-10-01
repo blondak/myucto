@@ -61,9 +61,20 @@ final class TaxSubmissionEpoAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
-        $vatFolder = $this->nullableInt($body['vat_root_folder_id'] ?? null);
-        $incomeFolder = $this->nullableInt($body['income_tax_root_folder_id'] ?? null);
-        foreach ([$vatFolder, $incomeFolder] as $folderId) {
+        $current = $this->epo->settings($supplierId);
+        $sent = [];
+        foreach (['vat_root_folder_id', 'income_tax_root_folder_id'] as $key) {
+            if (array_key_exists($key, $body)) {
+                $sent[$key] = $this->nullableInt($body[$key]);
+            }
+        }
+        $vatFolder = array_key_exists('vat_root_folder_id', $sent)
+            ? $sent['vat_root_folder_id']
+            : $current['vat_root_folder_id'];
+        $incomeFolder = array_key_exists('income_tax_root_folder_id', $sent)
+            ? $sent['income_tax_root_folder_id']
+            : $current['income_tax_root_folder_id'];
+        foreach ($sent as $folderId) {
             if ($folderId !== null && $this->folders->find($folderId, $supplierId) === null) {
                 return Json::error(
                     $response,

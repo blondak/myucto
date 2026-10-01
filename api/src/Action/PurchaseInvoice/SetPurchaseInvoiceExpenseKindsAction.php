@@ -205,7 +205,9 @@ final class SetPurchaseInvoiceExpenseKindsAction
         }
         $out = [];
         foreach ($items as $item) {
-            if (!is_array($item) || !isset($item['id']) || (int) $item['id'] <= 0) {
+            // Bez klíče expense_kind by se druh tiše smazal — vymazání je explicitní null.
+            if (!is_array($item) || !isset($item['id']) || (int) $item['id'] <= 0
+                || !array_key_exists('expense_kind', $item)) {
                 return null;
             }
             $raw = $item['expense_kind'] ?? null;

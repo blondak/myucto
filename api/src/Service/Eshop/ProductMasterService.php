@@ -48,13 +48,13 @@ final class ProductMasterService
     public function update(int $supplierId, int $masterId, array $payload): array
     {
         $expected = $this->requiredVersion($payload, 'row_version');
-        $prepared = $this->prepareMaster($supplierId, $payload);
-        return $this->tx(function () use ($supplierId, $masterId, $expected, $prepared): array {
+        return $this->tx(function () use ($supplierId, $masterId, $expected, $payload): array {
             $before = $this->masters->detail($supplierId, $masterId)
                 ?? throw new EshopException('not_found', 'Master produktu nenalezen.', 404);
             if ($before['row_version'] !== $expected) {
                 throw new EshopException('version_conflict', 'Master mezitím změnil jiný uživatel.', 409);
             }
+            $prepared = $this->prepareMaster($supplierId, $this->mergeMasterPayload($before, $payload));
             if ($before['variants'] !== [] && $this->axisIds($before['axes']) !== $prepared['axis_attribute_ids']) {
                 throw new EshopException('axes_in_use', 'Osy masteru s připojenými variantami nelze změnit.', 409);
             }
@@ -165,9 +165,10 @@ final class ProductMasterService
             $options = array_key_exists('options', $payload)
                 ? $this->prepareOptions($supplierId, $this->loadAxisIds($supplierId, $masterId), $payload['options'])
                 : $this->loadOptions($supplierId, $masterId, $itemId);
+            $storedInheritance = $this->loadInheritance($supplierId, $masterId, $itemId, $context['inherit_manufacturer']);
             $inheritance = array_key_exists('inheritance', $payload)
-                ? $this->prepareInheritance($payload['inheritance'])
-                : $this->loadInheritance($supplierId, $masterId, $itemId, $context['inherit_manufacturer']);
+                ? $this->prepareInheritance($payload['inheritance'], $storedInheritance)
+                : $storedInheritance;
             try {
                 $stmt = $this->db->pdo()->prepare('UPDATE product_variants SET inherit_manufacturer = ?, option_signature = UNHEX(?), row_version = row_version + 1
                     WHERE supplier_id = ? AND master_id = ? AND stock_item_id = ? AND row_version = ?');
@@ -243,6 +244,38 @@ final class ProductMasterService
             }
             return ['master_id' => $masterId, 'stock_item_id' => $itemId, 'row_version' => $itemVersion + 1, 'materialized' => $effective];
         });
+    }
+
+    /**
+     * Úprava masteru: vynechaný klíč ponechá uloženou hodnotu, přítomný (i null) ji přepíše.
+     * Seznam i18n při přítomnosti nahrazuje celek, ale u již existujícího jazyka si vynechaná
+     * pole řádku ponechají uloženou hodnotu.
+     */
+    private function mergeMasterPayload(array $before, array $payload): array
+    {
+        if (!array_key_exists('name', $payload)) {
+            $payload['name'] = $before['name'];
+        }
+        if (!array_key_exists('manufacturer_id', $payload)) {
+            $payload['manufacturer_id'] = $before['manufacturer_id'];
+        }
+        if (!array_key_exists('axis_attribute_ids', $payload)) {
+            $payload['axis_attribute_ids'] = $this->axisIds($before['axes']);
+        }
+        if (!array_key_exists('i18n', $payload)) {
+            $payload['i18n'] = $before['i18n'];
+        } elseif (is_array($payload['i18n']) && array_is_list($payload['i18n'])) {
+            $stored = [];
+            foreach ($before['i18n'] as $row) {
+                $stored[$row['locale']] = $row;
+            }
+            foreach ($payload['i18n'] as $index => $row) {
+                if (is_array($row) && is_string($row['locale'] ?? null) && isset($stored[$row['locale']])) {
+                    $payload['i18n'][$index] = $row + $stored[$row['locale']];
+                }
+            }
+        }
+        return $payload;
     }
 
     private function prepareMaster(int $supplierId, array $payload): array
@@ -346,16 +379,19 @@ final class ProductMasterService
         return $out;
     }
 
-    private function prepareInheritance(mixed $value): array
+    /** @param array{manufacturer:bool, i18n:array<string,array<string,bool>>}|null $current uložené dědění u úpravy varianty */
+    private function prepareInheritance(mixed $value, ?array $current = null): array
     {
         if (!is_array($value)) {
             throw new \InvalidArgumentException('Dědění musí být objekt.');
         }
-        $manufacturer = $value['manufacturer'] ?? true;
+        $manufacturer = array_key_exists('manufacturer', $value) || $current === null
+            ? ($value['manufacturer'] ?? true)
+            : $current['manufacturer'];
         if (!is_bool($manufacturer)) {
             throw new \InvalidArgumentException('Dědění výrobce musí být boolean.');
         }
-        $i18n = $value['i18n'] ?? [];
+        $i18n = array_key_exists('i18n', $value) || $current === null ? ($value['i18n'] ?? []) : $current['i18n'];
         if (!is_array($i18n)) {
             throw new \InvalidArgumentException('Dědění překladů musí být objekt.');
         }
@@ -365,7 +401,7 @@ final class ProductMasterService
                 throw new \InvalidArgumentException('Neplatné dědění překladu.');
             }
             foreach (ProductMasterRepository::I18N_FIELDS as $field) {
-                $flag = $flags[$field] ?? true;
+                $flag = $flags[$field] ?? (isset($current['i18n'][$locale]) ? $current['i18n'][$locale][$field] : true);
                 if (!is_bool($flag)) {
                     throw new \InvalidArgumentException('Příznak dědění musí být boolean.');
                 }

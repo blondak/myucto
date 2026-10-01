@@ -549,6 +549,9 @@ async function save(post = true) {
   }
   if (vatBreakdownInvalid.value) { error.value = t('cash.validation.vat_lines'); return }
 
+  // Úprava draftu je částečná (chybějící klíč = uložená hodnota), proto se posílá
+  // každé pole formuláře a nepoužité/prázdné explicitně jako null.
+  const withVat = isTaxDoc.value && form.vat_mode === 'vat'
   const payload: CreateCashDocumentPayload = {
     register_id: Number(form.register_id),
     doc_type: form.doc_type,
@@ -556,29 +559,21 @@ async function save(post = true) {
     issue_date: form.issue_date,
     description: form.description.trim(),
     total_amount: Number(form.total_amount),
+    // Valutová pokladna: zadaná částka je v měně pokladny; CZK ekvivalent dopočítá BE
+    // kurzem ČNB, pokud uživatel nezadal vlastní kurz (fx_rate null).
+    amount_foreign: isForeign.value ? Number(form.total_amount) : null,
+    fx_rate: isForeign.value && Number(form.fx_rate) > 0 ? Number(form.fx_rate) : null,
+    partner_name: isTaxDoc.value ? form.partner_name.trim() || null : null,
+    partner_ic: isTaxDoc.value ? form.partner_ic.trim() || null : null,
+    partner_dic: isTaxDoc.value ? form.partner_dic.trim() || null : null,
+    vat_mode: withVat ? 'vat' : 'none',
+    tax_date: withVat ? form.tax_date || form.issue_date : null,
+    vat_lines: withVat ? vatLines.value : [],
+    invoice_id: form.purpose === 'invoice_payment' && form.invoice_id ? form.invoice_id : null,
+    purchase_invoice_id: form.purpose === 'purchase_payment' && form.purchase_invoice_id ? form.purchase_invoice_id : null,
+    counter_account_code: isOther.value && form.counter_account_code ? form.counter_account_code : null,
+    rule_key: isOther.value && !form.counter_account_code && form.rule_key ? form.rule_key : null,
     post,
-  }
-  // Valutová pokladna: zadaná částka je v měně pokladny; CZK ekvivalent dopočítá BE
-  // kurzem ČNB, pokud uživatel nezadal vlastní kurz.
-  if (isForeign.value) {
-    payload.amount_foreign = Number(form.total_amount)
-    if (Number(form.fx_rate) > 0) payload.fx_rate = Number(form.fx_rate)
-  }
-  if (isTaxDoc.value) {
-    payload.partner_name = form.partner_name.trim() || undefined
-    payload.partner_ic = form.partner_ic.trim() || undefined
-    payload.partner_dic = form.partner_dic.trim() || undefined
-    if (form.vat_mode === 'vat') {
-      payload.vat_mode = 'vat'
-      payload.tax_date = form.tax_date || form.issue_date
-      payload.vat_lines = vatLines.value
-    }
-  }
-  if (form.purpose === 'invoice_payment' && form.invoice_id) payload.invoice_id = form.invoice_id
-  if (form.purpose === 'purchase_payment' && form.purchase_invoice_id) payload.purchase_invoice_id = form.purchase_invoice_id
-  if (isOther.value) {
-    if (form.counter_account_code) payload.counter_account_code = form.counter_account_code
-    else if (form.rule_key) payload.rule_key = form.rule_key
   }
 
   saving.value = true

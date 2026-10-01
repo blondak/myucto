@@ -423,6 +423,30 @@ final class ClientRepository
     }
 
     /**
+     * Částečný update (#113): klíč, který v payloadu chybí, převezme uloženou hodnotu;
+     * klíč poslaný jako null / "" ji smaže. `$current` = řádek z {@see find()}.
+     * Příznaky s COALESCE / array_key_exists v update() se tu nedoplňují.
+     */
+    public function mergeWithStored(array $current, array $data): array
+    {
+        foreach ([
+            'company_name', 'first_name', 'last_name', 'ic', 'dic', 'tax_number', 'street', 'city', 'zip',
+            'country_iso2', 'main_email', 'phone', 'language', 'reverse_charge', 'auto_send_reminders',
+            'payment_due_default', 'payment_due_unit', 'default_payment_method', 'hourly_rate', 'note',
+            'invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
+            'invoice_number_period', 'related_party_type', 'related_party_note',
+        ] as $key) {
+            if (!array_key_exists($key, $data) && array_key_exists($key, $current)) {
+                $data[$key] = $current[$key];
+            }
+        }
+        if (!array_key_exists('currency_default_id', $data) && !array_key_exists('currency_default', $data)) {
+            $data['currency_default_id'] = $current['currency_default_id'] ?? null;
+        }
+        return $data;
+    }
+
+    /**
      * Vrací počty dokladů, do kterých byla doplněna výchozí kategorie (backfill
      * při nastavení/změně default_expense_category_id / default_revenue_category_id):
      *   ['expense' => počet přijatých faktur, 'revenue' => počet vydaných faktur].
@@ -432,6 +456,10 @@ final class ClientRepository
     public function update(int $id, array $data): array
     {
         $pdo = $this->db->pdo();
+        $stored = $this->find($id);
+        if ($stored !== null) {
+            $data = $this->mergeWithStored($stored, $data);
+        }
 
         // Klient nemůže měnit supplier — odvodíme z aktuálního DB záznamu pro currency lookup
         $stmt = $pdo->prepare('SELECT supplier_id, is_customer, is_vendor, default_expense_category_id, default_revenue_category_id, default_branding_profile_id FROM clients WHERE id = ?');
@@ -515,9 +543,10 @@ final class ClientRepository
                 credit_note_number_format = ?, invoice_number_period = ?, default_branding_profile_id = ?,
                 -- § 36a ZDPH / § 23/7 ZDP: COALESCE jako u is_vat_payer — částečný update
                 -- (klient bez těchhle klíčů v payloadu) nesmí příznak spojené osoby shodit.
+                -- Typ a doložení doplňuje mergeWithStored(), explicitní null je smaže.
                 related_party = COALESCE(?, related_party),
-                related_party_type = COALESCE(?, related_party_type),
-                related_party_note = COALESCE(?, related_party_note)
+                related_party_type = ?,
+                related_party_note = ?
                 WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([

@@ -149,6 +149,29 @@ final class CashJournalMovementClassificationTest extends CashJournalTestCase
         self::assertSame(404, $c['status'], 'Supplier A nesmí klasifikovat cizí pokladní doklad.');
     }
 
+    /** Issue #113 — UI (CashJournal.vue) posílá jen bucket; uložená poznámka nesmí zmizet. */
+    public function testReclassifyWithoutNoteKeepsStoredNote(): void
+    {
+        $st = $this->statement($this->supplierId, $this->accountA);
+        $tx = $this->bankTx($st, 2500.0);
+        $c = $this->call($this->supplierId, 'create', 'POST', [
+            'body' => ['source_type' => 'bank', 'source_id' => $tx, 'tax_bucket' => 'private', 'note' => 'Syntetická poznámka'],
+        ]);
+        self::assertSame(201, $c['status']);
+
+        $c = $this->call($this->supplierId, 'create', 'POST', [
+            'body' => ['source_type' => 'bank', 'source_id' => $tx, 'tax_bucket' => 'income_taxable'],
+        ]);
+        self::assertSame(201, $c['status']);
+        self::assertSame('income_taxable', $c['body']['tax_bucket']);
+        self::assertSame('Syntetická poznámka', $c['body']['note']);
+
+        $c = $this->call($this->supplierId, 'create', 'POST', [
+            'body' => ['source_type' => 'bank', 'source_id' => $tx, 'tax_bucket' => 'income_taxable', 'note' => null],
+        ]);
+        self::assertNull($c['body']['note'], 'Explicitní null poznámku maže.');
+    }
+
     public function testInvalidTaxBucketReturns422(): void
     {
         $st = $this->statement($this->supplierId, $this->accountA);

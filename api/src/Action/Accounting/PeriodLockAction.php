@@ -57,7 +57,11 @@ final class PeriodLockAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $body = (array) ($request->getParsedBody() ?? []);
 
-        $raw = $body['locked_until'] ?? null;
+        // Chybějící klíč nesmí tiše zrušit zámek — zrušení je jen explicitní null.
+        if (!array_key_exists('locked_until', $body)) {
+            return Json::error($response, 'validation_failed', 'Zadej locked_until (datum YYYY-MM-DD, nebo null pro zrušení zámku).', 400);
+        }
+        $raw = $body['locked_until'];
         $lockedUntil = null;
         if ($raw !== null && $raw !== '') {
             $lockedUntil = (string) $raw;

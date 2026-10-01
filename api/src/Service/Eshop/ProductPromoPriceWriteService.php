@@ -55,6 +55,10 @@ final class ProductPromoPriceWriteService
                     if ($existing === null || (int) $existing['stock_item_id'] !== $itemId) {
                         throw new EshopException('not_found', 'Akční cena nenalezena.', 404);
                     }
+                    // Vynechaný klíč u existující akce = ponechat uloženou hodnotu.
+                    $row += array_intersect_key($existing, array_flip(
+                        ['currency_code', 'promo_price', 'label', 'valid_from', 'valid_to', 'qty_mode', 'qty_limit', 'is_active', 'note'],
+                    ));
                 }
                 $prepared[] = ['id' => $id, 'data' => $this->prepare($row)];
             }

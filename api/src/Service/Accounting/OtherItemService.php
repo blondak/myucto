@@ -63,7 +63,7 @@ final class OtherItemService
             if ($existing['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
-            $data = $this->normalize($supplierId, $input);
+            $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input));
             $planned = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) AS total, MIN(due_on) AS first_due
                 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
             $planned->execute([$supplierId, $id]);
@@ -82,6 +82,37 @@ final class OtherItemService
             throw $e;
         }
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Částečná úprava: chybějící klíč = uložená hodnota, explicitní null/'' = smazat.
+     * Rozpad protiúčtů (2+ řádky) bez klíče posting_lines zůstává, ledaže tělo posílá
+     * jiný neprázdný protiúčet — to je přepnutí na jednu kontaci. Jediný uložený
+     * protiřádek nese counter_account_code, takže jde s novou částkou.
+     */
+    private function mergeStored(int $supplierId, int $id, array $existing, array $input): array
+    {
+        $counter = trim((string) ($input['counter_account_code'] ?? ''));
+        $keepLines = !array_key_exists('posting_lines', $input)
+            && ($counter === '' || $counter === (string) ($existing['counter_account_code'] ?? ''));
+        // Datum zaúčtování dosazené z data vzniku jde s novým datem vzniku (jako u nového dokladu).
+        if (!array_key_exists('accounting_on', $input) && array_key_exists('issued_on', $input)
+            && (string) $existing['accounting_on'] === (string) $existing['issued_on']) {
+            $input['accounting_on'] = null;
+        }
+        foreach (['side', 'kind', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
+            'currency', 'amount', 'variable_symbol', 'account_code', 'counter_account_code', 'note'] as $key) {
+            if (!array_key_exists($key, $input)) {
+                $input[$key] = $existing[$key] ?? null;
+            }
+        }
+        if ($keepLines) {
+            $stored = $this->items->postingLines($supplierId, $id);
+            if (count($stored) > 1) {
+                $input['posting_lines'] = $stored;
+            }
+        }
+        return $input;
     }
 
     public function deleteDraft(int $supplierId, int $id): void
@@ -721,7 +752,8 @@ final class OtherItemService
         if (strlen($account) > 20 || strlen($counter) > 20) {
             throw new OtherItemException('invalid_account', 'Neplatný kód účtu.');
         }
-        $postingLines = array_key_exists('posting_lines', $input)
+        // null/[] = bez rozpadu (jediný protiúčet), stejně jako chybějící klíč u nového dokladu.
+        $postingLines = ($input['posting_lines'] ?? []) !== []
             ? $this->normalizePostingLines($input['posting_lines'], round((float) $amount * $rate, 2))
             : [];
         if ($postingLines !== []) {

@@ -157,16 +157,25 @@ final class JournalTemplateAction
         $id = (int) ($args['id'] ?? 0);
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $name = trim((string) ($body['name'] ?? ''));
+        // Chybějící klíč = uložená hodnota; bez klíče lines zůstávají řádky i jejich dimenze.
+        $current = $this->templates->find($supplierId, $id);
+        if ($current === null) {
+            return Json::error($response, 'not_found', 'Šablona nenalezena.', 404);
+        }
+        $name = trim((string) (array_key_exists('name', $body) ? $body['name'] : $current['name']));
         if ($name === '' || mb_strlen($name) > 255) {
             return Json::error($response, 'validation_failed', 'Název šablony musí mít 1–255 znaků.', 422);
         }
-        $description = $this->nullableString($body['description'] ?? null);
+        $description = $this->nullableString(array_key_exists('description', $body) ? $body['description'] : $current['description']);
         if ($description !== null && mb_strlen($description) > 255) {
             return Json::error($response, 'validation_failed', 'Popis smí mít nejvýše 255 znaků.', 422);
         }
 
-        $rawLines = $body['lines'] ?? null;
+        if (!array_key_exists('lines', $body)) {
+            $this->templates->update($supplierId, $id, $name, $description, null);
+            return Json::ok($response, $this->withDimensions($supplierId, (array) $this->templates->find($supplierId, $id)));
+        }
+        $rawLines = $body['lines'];
         if (!is_array($rawLines) || $rawLines === []) {
             return Json::error($response, 'validation_failed', 'Šablona musí mít alespoň jeden řádek.', 422);
         }

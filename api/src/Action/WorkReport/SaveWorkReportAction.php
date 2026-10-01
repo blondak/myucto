@@ -23,6 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * PUT /api/invoices/{id}/work-report
  * body: { project_id: int, title: string, items: [{description, hours, duration_minutes?, rate, order_index?}] }
+ * U existujícího výkazu je každý klíč volitelný: vynechaný drží uloženou hodnotu.
  */
 final class SaveWorkReportAction
 {
@@ -60,20 +61,22 @@ final class SaveWorkReportAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (items = jeho řádky).
+        $stored = $this->repo->findByInvoice($invoiceId);
         // project_id je volitelné — faktura nemusí mít zakázku, výkaz pak také ne.
-        $projectIdRaw = $body['project_id'] ?? null;
+        $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id'] : ($stored['project_id'] ?? null);
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
             ? (int) $projectIdRaw
             : null;
-        $title = trim((string) ($body['title'] ?? ''));
-        $items = (array) ($body['items'] ?? []);
+        $title = trim((string) (array_key_exists('title', $body) ? $body['title'] : ($stored['title'] ?? '')));
+        $items = array_key_exists('items', $body) || $stored === null ? (array) ($body['items'] ?? []) : null;
 
         if ($title === '') {
             return Json::error($response, 'validation_failed', 'Chybí název výkazu.', 400);
         }
 
         // Sazba DPH práce (12/21) — volitelná; NULL = fallback default faktury.
-        $vatRateIdRaw = $body['vat_rate_id'] ?? null;
+        $vatRateIdRaw = array_key_exists('vat_rate_id', $body) ? $body['vat_rate_id'] : ($stored['vat_rate_id'] ?? null);
         $vatRateId = ($vatRateIdRaw !== null && $vatRateIdRaw !== '' && (int) $vatRateIdRaw > 0)
             ? (int) $vatRateIdRaw
             : null;
@@ -98,10 +101,12 @@ final class SaveWorkReportAction
         }
 
         try {
-            $items = array_map(
-                static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
-                array_values($items),
-            );
+            if ($items !== null) {
+                $items = array_map(
+                    static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
+                    array_values($items),
+                );
+            }
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -109,7 +114,7 @@ final class SaveWorkReportAction
         // Validace — popisujeme řádky 1-based (uživatelsky srozumitelné). Frontend
         // by měl prázdné řádky filtrovat před odesláním (inv. položka totals by se
         // jinak nesedla s uloženým výkazem).
-        foreach ($items as $idx => $it) {
+        foreach ($items ?? [] as $idx => $it) {
             $row = $idx + 1;
             if (trim((string) ($it['description'] ?? '')) === '') {
                 return Json::error($response, 'validation_failed', "Řádek $row: chybí popis.", 400);

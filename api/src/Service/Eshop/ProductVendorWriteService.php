@@ -65,6 +65,12 @@ final class ProductVendorWriteService
                     throw new EshopException('validation_failed', 'Dodavatel je v seznamu vícekrát.', 400);
                 }
                 $clientIds[$clientId] = true;
+                if (!$restoreOffer && isset($before[$clientId])) {
+                    // Vynechaný klíč u existujícího dodavatele = ponechat uloženou hodnotu.
+                    $row += array_intersect_key($before[$clientId], array_flip(
+                        ['vendor_sku', 'purchase_price', 'currency_code', 'delivery_days', 'stock_qty', 'is_preferred', 'note'],
+                    ));
+                }
                 $preferred = (bool) ($row['is_preferred'] ?? false);
                 if ($preferred) {
                     $preferredCount++;

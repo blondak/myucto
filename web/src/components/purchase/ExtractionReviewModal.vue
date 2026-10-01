@@ -113,7 +113,7 @@ async function save(): Promise<void> {
     let updated: PurchaseInvoice = inv
     const changed = items.value
       .filter((it) => (it.expense_kind ?? null) !== kinds[it.id as number])
-      .map((it) => ({ id: it.id as number, expense_kind: kinds[it.id as number] }))
+      .map((it) => ({ id: it.id as number, expense_kind: kinds[it.id as number] ?? null }))
     // Odrážky hlášení u řádků, které teď druh mají, odebere backend sám; ostatní
     // body hlášení zůstávají, dokud je uživatel neoznačí jako vyřešené.
     if (changed.length && !readOnlyReason.value) {

@@ -91,9 +91,14 @@ final class VatClassificationsAction
         $body = (array) ($request->getParsedBody() ?? []);
         // Update kód neposílá (měnit ho nejde), ale kontrola kolize „kód vs. řádek přiznání"
         // ho potřebuje — jinak by past L-1 hlídala jen zakládání, ne pozdější přenastavení řádku.
+        // Stejně tak vynechané pole drží uloženou hodnotu (issue #113) — jinak by částečný
+        // update shodil řádek přiznání, oddíl KH i sazbu a plnění by z výkazů tiše vypadlo.
         $existing = $this->repo->find($id, $supplierId);
-        if ($existing !== null && !array_key_exists('code', $body)) {
-            $body['code'] = $existing['code'];
+        if ($existing !== null) {
+            $body += array_intersect_key($existing, array_flip([
+                'code', 'label', 'direction', 'dphdp3_line', 'kh_section', 'vat_rate', 'is_reverse_charge',
+                'kod_pred_pl', 'kh_regime_code', 'kh_bad_debt', 'display_order', 'archived',
+            ]));
         }
         $err = $this->validate($body, isUpdate: true);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);

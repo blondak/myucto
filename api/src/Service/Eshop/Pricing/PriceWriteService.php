@@ -16,9 +16,9 @@ final class PriceWriteService
         private readonly PriceCalculationService $calculation,
     ) {}
 
-    public function save(int $supplierId, int $itemId, array $rows, bool $replace = false): array
+    public function save(int $supplierId, int $itemId, array $rows, bool $replace = false, bool $mergeExisting = false): array
     {
-        $prepared = $this->normalizeRows($rows);
+        $prepared = $this->normalizeRows($rows, $mergeExisting ? $this->storedByCurrency($supplierId, $itemId) : []);
         return $this->write($supplierId, $itemId, function () use ($supplierId, $itemId, $prepared, $replace): void {
             $this->savePrepared($supplierId, $itemId, $prepared, $replace);
         })['prices'];
@@ -34,11 +34,12 @@ final class PriceWriteService
         int $expectedVersion,
         array $rows,
         bool $replace = false,
+        bool $mergeExisting = false,
     ): array {
         if ($expectedVersion <= 0) {
             throw new EshopException('version_required', 'Pro uložení je nutná verze karty.', 400);
         }
-        $prepared = $this->normalizeRows($rows);
+        $prepared = $this->normalizeRows($rows, $mergeExisting ? $this->storedByCurrency($supplierId, $itemId) : []);
         return $this->write(
             $supplierId,
             $itemId,
@@ -49,8 +50,23 @@ final class PriceWriteService
         );
     }
 
-    /** @param list<array<string,mixed>> $rows @return array<string,array<string,mixed>> */
-    public function normalizeRows(array $rows): array
+    /** @return array<string,array<string,mixed>> */
+    private function storedByCurrency(int $supplierId, int $itemId): array
+    {
+        $stored = [];
+        foreach ($this->prices->listForItem($supplierId, $itemId) as $row) {
+            $stored[(string) $row['currency_code']] = $row;
+        }
+        return $stored;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param array<string,array<string,mixed>> $existingByCurrency uložené řádky karty; vynechaný klíč
+     *        u měny, která už na kartě je, převezme uloženou hodnotu (prázdné pole = čistý zápis)
+     * @return array<string,array<string,mixed>>
+     */
+    public function normalizeRows(array $rows, array $existingByCurrency = []): array
     {
         $prepared = [];
         foreach ($rows as $row) {
@@ -60,6 +76,16 @@ final class PriceWriteService
             $currency = strtoupper(trim((string) ($row['currency_code'] ?? '')));
             if (!preg_match('/^[A-Z]{3}$/D', $currency) || isset($prepared[$currency])) {
                 throw new \InvalidArgumentException('Neplatná nebo duplicitní měna.');
+            }
+            if (isset($existingByCurrency[$currency])) {
+                $stored = $existingByCurrency[$currency];
+                if (array_key_exists('price_mode', $row) && (string) $row['price_mode'] !== (string) $stored['price_mode']) {
+                    // Změna režimu nepřebírá parametry starého režimu.
+                    unset($stored['markup_pct'], $stored['fixed_price']);
+                }
+                $row += array_intersect_key($stored, array_flip(
+                    ['price_mode', 'markup_pct', 'fixed_price', 'rounding', 'is_manual_override', 'use_pricing_rules'],
+                ));
             }
             $mode = (string) ($row['price_mode'] ?? 'markup');
             $rounding = (string) ($row['rounding'] ?? 'none');

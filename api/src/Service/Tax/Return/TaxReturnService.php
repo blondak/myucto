@@ -273,15 +273,18 @@ final class TaxReturnService
      * @param array<string,mixed> $inputs
      * @return array<string,mixed>
      */
-    public function saveInputs(int $supplierId, int $year, string $type, array $inputs, int $expectedRowVersion, ?int $userId, string $variant = 'radne', int $variantSeq = 1): array
+    public function saveInputs(int $supplierId, int $year, string $type, array $inputs, int $expectedRowVersion, ?int $userId, string $variant = 'radne', int $variantSeq = 1, bool $partial = false): array
     {
         $this->assertType($type);
         $this->assertSupplierType($supplierId, $type);
         $this->assertVariant($variant);
         $seq = $this->resolveSeq($supplierId, $year, $type, $variant, $variantSeq);
+        $existing = $this->returns->find($supplierId, $year, $type, $variant, $seq);
+        if ($partial && $existing !== null) {
+            $inputs = self::mergeStoredInputs((array) ($existing['inputs'] ?? []), $inputs);
+        }
         $clean = $this->sanitizeInputs($type, $inputs, $variant);
 
-        $existing = $this->returns->find($supplierId, $year, $type, $variant, $seq);
         if ($existing === null) {
             if ($expectedRowVersion !== 0) {
                 throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím založeno jinde — načtěte znovu.', 409);
@@ -297,6 +300,38 @@ final class TaxReturnService
             throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím změněno (jiná verze) — načtěte znovu.', 409);
         }
         return $this->getReturn($supplierId, $year, $type, $userId, $variant, $seq);
+    }
+
+    /**
+     * Částečný update vstupů (issue #113, PUT .../inputs): vynechaný klíč drží uloženou
+     * hodnotu, vnořené objekty (s6_employment, s9_rental, …) se slučují po klíčích,
+     * seznamy položek poslané v těle nahrazují celé. Převzetí podání (FiledDppoImporter)
+     * dál přepisuje celé vstupy — sám si skládá úplnou sadu.
+     *
+     * `s10_items` a starší souhrn `s10_other` tvoří jeden oddíl: poslaný jeden z nich bez
+     * druhého nahrazuje celý § 10. Jinak by se souhrn přičetl k uloženým položkám znovu
+     * (opakované PUT staršího klienta se jen souhrnem by ho započítalo dvakrát).
+     *
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $sent
+     * @return array<string,mixed>
+     */
+    private static function mergeStoredInputs(array $stored, array $sent): array
+    {
+        if (array_key_exists('s10_items', $sent) && !array_key_exists('s10_other', $sent)) {
+            unset($stored['s10_other']);
+        }
+        if (array_key_exists('s10_other', $sent) && !array_key_exists('s10_items', $sent)) {
+            unset($stored['s10_items']);
+        }
+        foreach ($sent as $key => $value) {
+            if (is_array($value) && !array_is_list($value) && is_array($stored[$key] ?? null) && !array_is_list($stored[$key])) {
+                $stored[$key] = array_replace($stored[$key], $value);
+            } else {
+                $stored[$key] = $value;
+            }
+        }
+        return $stored;
     }
 
     /**
@@ -600,6 +635,13 @@ final class TaxReturnService
     {
         $this->assertType($type);
         $before = $this->advanceSchedules->findTaxOverride($supplierId, $id);
+        // Vynechaný klíč = uložená hodnota (issue #113); explicitní null zůstává nullem.
+        if ($before !== null) {
+            $body += array_intersect_key(
+                $before,
+                array_flip(['effective_from', 'effective_to', 'amount', 'periodicity', 'note', 'source']),
+            );
+        }
         $saved = $this->advanceSchedules->updateTaxOverride(
             $supplierId,
             $id,

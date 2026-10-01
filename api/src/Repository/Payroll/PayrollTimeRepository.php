@@ -1673,6 +1673,25 @@ final class PayrollTimeRepository
             ?? throw new \InvalidArgumentException('Původní záznam času nebyl nalezen.');
     }
 
+    /**
+     * Platná (nenahrazená) revize časového zápisu bez zámku — oprava z ní
+     * přebírá hodnoty, které klient neposlal.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function currentEntryRevision(int $supplierId, int $employmentId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT category, starts_at_utc, ends_at_utc, timezone_name, break_minutes,
+                    difficulty_factor_count
+               FROM payroll_time_entries
+              WHERE supplier_id = ? AND employment_id = ? AND id = ?
+                AND status <> 'superseded'"
+        );
+        $stmt->execute([$supplierId, $employmentId, $id]);
+        return self::row($stmt);
+    }
+
     private function assertEntryNoOverlap(
         int $supplierId,
         int $employmentId,

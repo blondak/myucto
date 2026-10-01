@@ -63,6 +63,12 @@ final class SetPurchaseInvoiceProjectAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Jednoúčelový endpoint: chybějící klíč není „odeber zakázku" (to je explicitní null).
+        if (!array_key_exists('project_id', $body)) {
+            return Json::error($response, 'validation_failed', 'Chybí project_id (null zakázku odebere).', 400, [
+                'fields' => ['project_id' => ['Povinný klíč; null zakázku odebere.']],
+            ]);
+        }
         $projectId = ($body['project_id'] ?? null) !== null && (int) $body['project_id'] > 0
             ? (int) $body['project_id']
             : null;

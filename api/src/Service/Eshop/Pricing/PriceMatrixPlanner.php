@@ -48,7 +48,10 @@ final class PriceMatrixPlanner
                         'use_pricing_rules' => false,
                     ],
                     'unlock_to_rules' => $this->rulesDefinition($currency, $current),
-                    'upsert' => ['currency_code' => $currency] + $override['definition'],
+                    'upsert' => ['currency_code' => $currency] + $override['definition'] + array_intersect_key(
+                        $current ?? [],
+                        array_flip(['price_mode', 'markup_pct', 'fixed_price', 'rounding', 'is_manual_override', 'use_pricing_rules']),
+                    ),
                     default => throw new \InvalidArgumentException('Neplatná operace cenové výjimky.'),
                 };
                 $upserts[$currency] = $definition;

@@ -148,7 +148,8 @@ final class CarRepository
     public function update(int $id, int $supplierId, array $data): bool
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
         try {
             if (!empty($data['is_default'])) {
                 $this->clearDefault($supplierId, $id);
@@ -166,10 +167,10 @@ final class CarRepository
                 $id, $supplierId,
             ]);
             $ok = $stmt->rowCount() >= 0;
-            $pdo->commit();
+            if ($ownTx) $pdo->commit();
             return $ok;
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            if ($ownTx) $pdo->rollBack();
             throw $e;
         }
     }

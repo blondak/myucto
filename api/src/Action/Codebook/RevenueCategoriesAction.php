@@ -79,17 +79,27 @@ final class RevenueCategoriesAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
-        $err = $this->validate($body);
-        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
-
-        if ($this->repo->find($id, $supplierId) === null) {
+        $existing = $this->repo->find($id, $supplierId);
+        if ($existing === null) {
             return Json::error($response, 'not_found', 'Kategorie nenalezena.', 404);
         }
+        // Vynechaný klíč = uložená hodnota (issue #113) — hlavně vlastní číselná řada.
+        $merged = array_replace(
+            array_intersect_key($existing, array_flip([
+                'code', 'label', 'display_order', 'archived',
+                'invoice_number_format', 'proforma_number_format',
+                'credit_note_number_format', 'invoice_number_period',
+            ])),
+            $body,
+        );
+        $err = $this->validate($merged);
+        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
+
         try {
-            $this->repo->update($id, $supplierId, $body);
+            $this->repo->update($id, $supplierId, $merged);
         } catch (\PDOException $e) {
             if (str_contains($e->getMessage(), 'Duplicate')) {
-                return Json::error($response, 'duplicate_code', "Kód '{$body['code']}' už existuje.", 409);
+                return Json::error($response, 'duplicate_code', "Kód '{$merged['code']}' už existuje.", 409);
             }
             return Json::error($response, 'update_failed', $e->getMessage(), 500);
         }

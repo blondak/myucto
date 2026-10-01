@@ -108,7 +108,7 @@ final class StockItemPackagingService
 
             [$num, $den] = $this->ratioOf($entry, $existing[$lower] ?? null);
 
-            $ean = trim((string) ($entry['ean'] ?? ''));
+            $ean = trim((string) (array_key_exists('ean', $entry) ? $entry['ean'] : ($existing[$lower]['ean'] ?? '')));
             if ($ean !== '' && (mb_strlen($ean) > 20 || preg_match('/\s/u', $ean) === 1)) {
                 throw new StockException('validation_failed', 'EAN balení má nejvýše 20 znaků bez mezer.', 422, ['index' => $index]);
             }
@@ -121,7 +121,8 @@ final class StockItemPackagingService
             $units[] = ['unit_code' => $canonical, 'numerator' => $num, 'denominator' => $den, 'ean' => $ean !== '' ? $ean : null];
         }
 
-        $default = trim((string) ($body['default_sale_unit'] ?? ''));
+        $defaultSent = array_key_exists('default_sale_unit', $body);
+        $default = trim((string) ($defaultSent ? $body['default_sale_unit'] : ($item['default_sale_unit'] ?? '')));
         $defaultCanonical = null;
         if ($default !== '') {
             foreach ($units as $u) {
@@ -129,7 +130,8 @@ final class StockItemPackagingService
                     $defaultCanonical = $u['unit_code'];
                 }
             }
-            if ($defaultCanonical === null) {
+            // Uložená výchozí jednotka, která mezi novými baleními už není, se tiše vynuluje.
+            if ($defaultCanonical === null && $defaultSent) {
                 throw new StockException('validation_failed', 'Výchozí prodejní jednotka musí být základní jednotka nebo některé balení karty.', 422, ['default_sale_unit' => $default]);
             }
         }
@@ -248,6 +250,9 @@ final class StockItemPackagingService
     {
         if (isset($entry['numerator'], $entry['denominator']) && !isset($entry['factor'])) {
             return ExactUnitConversion::reduce((int) $entry['numerator'], (int) $entry['denominator']);
+        }
+        if ($existing !== null && !array_key_exists('factor', $entry) && !array_key_exists('numerator', $entry) && !array_key_exists('denominator', $entry)) {
+            return [(int) $existing['numerator'], (int) $existing['denominator']];
         }
         if (!array_key_exists('factor', $entry) || $entry['factor'] === null || $entry['factor'] === '') {
             throw new StockException('invalid_unit_ratio', 'Poměr balení je povinný.', 422, ['unit_code' => (string) ($entry['unit_code'] ?? '')]);

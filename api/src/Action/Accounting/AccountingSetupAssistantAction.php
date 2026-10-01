@@ -486,6 +486,8 @@ final class AccountingSetupAssistantAction
             throw new \InvalidArgumentException('proposal_not_editable');
         }
         $proposal = $existing;
+        // Chybějící klíč = hodnota uloženého návrhu; validuje se sloučený stav.
+        $body += $existing;
         if ($type === 'chart_account') {
             $proposal['name'] = self::requiredText($body['name'] ?? null, 160);
             $create = array_key_exists('create', $body)

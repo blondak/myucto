@@ -591,7 +591,7 @@ final class RecurringTemplateRepository
         //    bez posunu cyklu. Tím se např. změna „20. v měsíci" → „konec měsíce"
         //    projeví hned na nejbližším vystavení (20.6. → 30.6.), ne až o cyklus dál.
         $cur = $this->db->pdo()->prepare(
-            'SELECT last_run_date, next_run_date, anchor_date, day_of_month, end_of_month, supplier_id FROM recurring_invoice_templates WHERE id = ?'
+            'SELECT last_run_date, next_run_date, anchor_date, day_of_month, end_of_month, supplier_id, branding_profile_id FROM recurring_invoice_templates WHERE id = ?'
         );
         $cur->execute([$id]);
         $existing = $cur->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -627,7 +627,10 @@ final class RecurringTemplateRepository
         $this->db->pdo()->prepare($sql)->execute([
             (int) $data['client_id'],
             !empty($data['project_id']) ? (int) $data['project_id'] : null,
-            $this->resolveBrandingProfileId($data['branding_profile_id'] ?? null, (int) ($data['supplier_id'] ?? $existing['supplier_id'] ?? 0)),
+            // Vynechaný klíč = uložený profil; null/'' = výchozí profil dodavatele.
+            array_key_exists('branding_profile_id', $data)
+                ? $this->resolveBrandingProfileId($data['branding_profile_id'], (int) ($data['supplier_id'] ?? $existing['supplier_id'] ?? 0))
+                : (isset($existing['branding_profile_id']) ? (int) $existing['branding_profile_id'] : null),
             (string) $data['name'],
             (string) $data['frequency'],
             $dayOfMonth,
@@ -658,18 +661,21 @@ final class RecurringTemplateRepository
         ]);
     }
 
-    public function updateWithItems(int $id, array $data, array $items): void
+    /** @param array<int,array<string,mixed>>|null $items null = položky šablony ponechat */
+    public function updateWithItems(int $id, array $data, ?array $items): void
     {
         $this->withScheduleLock($id, fn () => $this->updateWithItemsLocked($id, $data, $items));
     }
 
-    private function updateWithItemsLocked(int $id, array $data, array $items): void
+    private function updateWithItemsLocked(int $id, array $data, ?array $items): void
     {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
             $this->update($id, $data);
-            $this->replaceItems($id, $items);
+            if ($items !== null) {
+                $this->replaceItems($id, $items);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

@@ -86,7 +86,8 @@ final class TripCategoryRepository
     public function create(int $supplierId, array $data): int
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
         try {
             // Per tenant smí být max jedna výchozí kategorie (jako cars.is_default).
             if (!empty($data['is_default'])) {
@@ -104,10 +105,10 @@ final class TripCategoryRepository
                 (int) ($data['display_order'] ?? 0),
             ]);
             $id = (int) $pdo->lastInsertId();
-            $pdo->commit();
+            if ($ownTx) $pdo->commit();
             return $id;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }
@@ -115,7 +116,8 @@ final class TripCategoryRepository
     public function update(int $id, int $supplierId, array $data): bool
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
         try {
             if (!empty($data['is_default'])) {
                 $this->clearDefault($supplierId, $id);
@@ -136,10 +138,10 @@ final class TripCategoryRepository
                 $supplierId,
             ]);
             $ok = $stmt->rowCount() >= 0;
-            $pdo->commit();
+            if ($ownTx) $pdo->commit();
             return $ok;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

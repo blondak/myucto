@@ -34,7 +34,8 @@ final class UpdateProjectAction
         // client_id se nemění při update — vždy z existujícího záznamu
         $body['client_id'] = $existing['client_id'];
 
-        $errors = Validation::project($body);
+        // Validuje se zakázka po sloučení s uloženými hodnotami — chybějící klíč = beze změny (#113).
+        $errors = Validation::project($this->repo->mergeWithStored($existing, $body));
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }

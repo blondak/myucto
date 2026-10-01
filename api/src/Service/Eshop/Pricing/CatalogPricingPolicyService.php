@@ -34,11 +34,14 @@ final class CatalogPricingPolicyService
 
     private function saveProfileLocked(int $supplierId, ?int $id, array $input): array
     {
-        $data = $this->profileData($supplierId, $input);
         $existing = $id === null ? null : $this->profiles->find($supplierId, $id);
         if ($id !== null && $existing === null) {
             throw new EshopException('not_found', 'Cenový profil nenalezen.', 404);
         }
+        // Úprava: vynechaný klíč ponechá uloženou hodnotu, validuje se sloučený řádek.
+        $data = $this->profileData($supplierId, $existing === null ? $input : $input + array_intersect_key($existing, array_flip(
+            ['code', 'name', 'currency_code', 'calculation_mode', 'percentage', 'rounding', 'fx_source', 'max_rate_age_days', 'is_active'],
+        )));
         $sameCode = $this->profiles->findByCode($supplierId, $data['code']);
         if ($sameCode !== null && (int) $sameCode['id'] !== $id) {
             throw new EshopException('pricing_profile_code_taken', 'Kód cenového profilu už existuje.', 409);
@@ -88,11 +91,22 @@ final class CatalogPricingPolicyService
 
     private function saveRuleLocked(int $supplierId, ?int $id, array $input): array
     {
-        $data = $this->ruleData($supplierId, $input);
         $existing = $id === null ? null : $this->rules->find($supplierId, $id);
         if ($id !== null && $existing === null) {
             throw new EshopException('not_found', 'Cenové pravidlo nenalezeno.', 404);
         }
+        if ($existing !== null) {
+            // Úprava: vynechaný klíč ponechá uloženou hodnotu, validuje se sloučený řádek.
+            $storedKeys = array_intersect_key($existing, array_flip(['profile_id', 'match_type', 'match_id', 'priority', 'is_active']));
+            if (array_key_exists('match_type', $input)
+                && $input['match_type'] !== $existing['match_type']
+                && !array_key_exists('match_id', $input)) {
+                // Změna typu pravidla nesmí zdědit id z jiného typu entity.
+                $storedKeys['match_id'] = null;
+            }
+            $input += $storedKeys;
+        }
+        $data = $this->ruleData($supplierId, $input);
         return $this->transaction(function () use ($supplierId, $id, $existing, $data): array {
             if ($id === null) {
                 $id = $this->rules->insert($supplierId, $data);

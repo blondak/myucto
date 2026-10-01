@@ -174,7 +174,6 @@ final class SalesOrderService
 
     public function update(int $supplierId, int $id, int $expectedVersion, array $data): array
     {
-        $normalized = $this->normalizeDraft($supplierId, $data);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -182,6 +181,12 @@ final class SalesOrderService
             if ($locked['commercial_status'] !== 'draft') {
                 throw new SalesOrderException('state_conflict', 'Potvrzenou objednávku už nelze přepsat.', 409);
             }
+            $keepLines = !array_key_exists('lines', $data);
+            $normalized = $this->normalizeDraft(
+                $supplierId,
+                $this->mergeStoredDraft($locked, $data),
+                $keepLines ? $this->rawLines($supplierId, $id) : null,
+            );
             $stmt = $pdo->prepare(
                 'UPDATE sales_orders SET client_id = ?, allocation_policy = ?, currency_id = ?, currency_code = ?,
                     exchange_rate = ?, prices_include_vat = ?, customer_snapshot = ?, shipping_snapshot = ?,
@@ -198,8 +203,18 @@ final class SalesOrderService
                 $supplierId, $id, $expectedVersion,
             ]);
             if ($stmt->rowCount() !== 1) throw new SalesOrderException('version_conflict', 'Objednávku mezitím změnil jiný uživatel.', 409);
-            $pdo->prepare('DELETE FROM sales_order_lines WHERE supplier_id = ? AND order_id = ?')->execute([$supplierId, $id]);
-            $this->insertLines($supplierId, $id, $normalized['lines']);
+            if ($keepLines) {
+                $lineStmt = $pdo->prepare(
+                    'UPDATE sales_order_lines SET total_without_vat = ?, total_vat = ?, total_with_vat = ?
+                      WHERE supplier_id = ? AND order_id = ? AND id = ?'
+                );
+                foreach ($normalized['lines'] as $line) {
+                    $lineStmt->execute([$line['total_without_vat'], $line['total_vat'], $line['total_with_vat'], $supplierId, $id, $line['id']]);
+                }
+            } else {
+                $pdo->prepare('DELETE FROM sales_order_lines WHERE supplier_id = ? AND order_id = ?')->execute([$supplierId, $id]);
+                $this->insertLines($supplierId, $id, $normalized['lines']);
+            }
             $this->publishOrderEvent($supplierId, (string) $locked['order_uuid'], $id, $expectedVersion + 1, 'sales_order.updated', [
                 'commercial_status' => 'draft',
                 'currency_code' => $normalized['currency_code'],
@@ -556,7 +571,45 @@ final class SalesOrderService
         }
     }
 
-    private function normalizeDraft(int $supplierId, array $data): array
+    /**
+     * Klíč vynechaný v těle úpravy ponechá uloženou hodnotu, explicitní null ji smaže.
+     * Kurz patří k měně: při změně měny bez nového kurzu se uložený kurz nepřenáší.
+     */
+    private function mergeStoredDraft(array $stored, array $data): array
+    {
+        if (array_key_exists('currency_id', $data) && !array_key_exists('exchange_rate', $data)
+            && (int) $data['currency_id'] !== (int) $stored['currency_id']) {
+            $data['exchange_rate'] = null;
+        }
+        foreach (['client_id', 'currency_id', 'allocation_policy', 'exchange_rate', 'reservation_expires_at'] as $key) {
+            if (!array_key_exists($key, $data)) $data[$key] = $stored[$key];
+        }
+        if (!array_key_exists('prices_include_vat', $data)) $data['prices_include_vat'] = (bool) $stored['prices_include_vat'];
+        foreach (['shipping_snapshot', 'discount_snapshot'] as $key) {
+            if (!array_key_exists($key, $data)) {
+                $data[$key] = $stored[$key] !== null ? json_decode((string) $stored[$key], true, 512, JSON_THROW_ON_ERROR) : [];
+            }
+        }
+        return $data;
+    }
+
+    /** @return array{0:float,1:float,2:float} [bez DPH, DPH, s DPH] */
+    private static function lineTotals(string $qty, string $unitPrice, string $discount, string $vatRate, bool $pricesIncludeVat): array
+    {
+        $base = round((float) $qty * (float) $unitPrice * (1 - (float) $discount / 100), 2);
+        if ($pricesIncludeVat) {
+            $net = round($base / (1 + (float) $vatRate / 100), 2);
+            return [$net, round($base - $net, 2), $base];
+        }
+        $tax = round($base * (float) $vatRate / 100, 2);
+        return [$base, $tax, round($base + $tax, 2)];
+    }
+
+    /**
+     * @param list<array<string,mixed>>|null $storedLines uložené řádky, když tělo úpravy `lines` vynechalo:
+     *        zůstanou beze změny (snímky, sklady, id) a přepočtou se jen jejich součty.
+     */
+    private function normalizeDraft(int $supplierId, array $data, ?array $storedLines = null): array
     {
         $clientId = (int) ($data['client_id'] ?? 0);
         $currencyId = (int) ($data['currency_id'] ?? 0);
@@ -576,7 +629,7 @@ final class SalesOrderService
         $policy = (string) ($data['allocation_policy'] ?? 'all_or_nothing');
         if (!in_array($policy, ['all_or_nothing', 'partial'], true)) throw new SalesOrderException('allocation_policy_invalid', 'Neplatná politika rezervace.');
         $pricesIncludeVat = (bool) ($data['prices_include_vat'] ?? false);
-        $rawLines = is_array($data['lines'] ?? null) ? array_values($data['lines']) : [];
+        $rawLines = $storedLines ?? (is_array($data['lines'] ?? null) ? array_values($data['lines']) : []);
         if ($rawLines === []) throw new SalesOrderException('lines_required', 'Objednávka musí obsahovat alespoň jeden řádek.');
         if (count($rawLines) > 1000) throw new SalesOrderException('lines_limit', 'Objednávka má příliš mnoho řádků.');
         $lines = [];
@@ -584,6 +637,18 @@ final class SalesOrderService
         $hasNegativeLine = false;
         foreach ($rawLines as $index => $raw) {
             if (!is_array($raw)) throw new SalesOrderException('line_invalid', 'Neplatný řádek objednávky.');
+            if ($storedLines !== null) {
+                [$net, $tax, $gross] = self::lineTotals((string) $raw['quantity'], (string) $raw['unit_price'],
+                    (string) $raw['discount_percent'], (string) $raw['vat_rate_snapshot'], $pricesIncludeVat);
+                if ((float) $raw['unit_price'] < 0.0) $hasNegativeLine = true;
+                $totalNet += $net; $totalVat += $tax; $totalGross += $gross;
+                $lines[] = [
+                    'id' => (int) $raw['id'],
+                    'total_without_vat' => number_format($net, 2, '.', ''), 'total_vat' => number_format($tax, 2, '.', ''),
+                    'total_with_vat' => number_format($gross, 2, '.', ''),
+                ];
+                continue;
+            }
             $qty = self::quantity((string) ($raw['quantity'] ?? '0'));
             // Záporná cena jen u neskladového řádku: sleva nebo kupón z e-shopu nese
             // vlastní sazbu DPH a musí zůstat samostatným řádkem, aby součet i rozpad
@@ -607,16 +672,7 @@ final class SalesOrderService
             $vat->execute([$vatRateId]);
             $vatRate = $vat->fetchColumn();
             if ($vatRate === false) throw new SalesOrderException('vat_rate_not_found', 'Sazba DPH neexistuje.', 404);
-            $base = round((float) $qty * (float) $unitPrice * (1 - (float) $discount / 100), 2);
-            if ($pricesIncludeVat) {
-                $gross = $base;
-                $net = round($gross / (1 + (float) $vatRate / 100), 2);
-                $tax = round($gross - $net, 2);
-            } else {
-                $net = $base;
-                $tax = round($net * (float) $vatRate / 100, 2);
-                $gross = round($net + $tax, 2);
-            }
+            [$net, $tax, $gross] = self::lineTotals($qty, $unitPrice, $discount, (string) $vatRate, $pricesIncludeVat);
             $totalNet += $net; $totalVat += $tax; $totalGross += $gross;
             $lines[] = [
                 'line_uuid' => isset($raw['line_uuid']) && self::validUuid((string) $raw['line_uuid']) ? (string) $raw['line_uuid'] : self::uuid(),

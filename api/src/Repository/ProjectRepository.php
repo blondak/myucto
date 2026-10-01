@@ -174,12 +174,39 @@ final class ProjectRepository
     }
 
     /**
+     * Částečný update (#113): klíč, který v payloadu chybí, převezme uloženou hodnotu;
+     * null / "" ji smaže. `$current` = řádek z {@see find()}. Fakturační e-maily se
+     * nedoplňují — update() je bez klíče `billing_emails` vůbec nepřepisuje.
+     */
+    public function mergeWithStored(array $current, array $data): array
+    {
+        foreach ([
+            'name', 'payment_due_days', 'payment_due_unit', 'project_number', 'contract_number',
+            'budget_total', 'budget_yearly', 'budget_monthly', 'hourly_rate', 'status',
+            'requires_work_report_approval', 'note', 'billing_emails_mode',
+        ] as $key) {
+            if (!array_key_exists($key, $data) && array_key_exists($key, $current)) {
+                $data[$key] = $current[$key];
+            }
+        }
+        if (!array_key_exists('currency_id', $data) && !array_key_exists('currency', $data)) {
+            $data['currency_id'] = $current['currency_id'] ?? null;
+        }
+        return $data;
+    }
+
+    /**
      * Vrací počet vydaných faktur, do kterých byla doplněna výchozí kategorie tržby
      * (backfill při nastavení/změně default_revenue_category_id). 0 = žádný backfill.
      */
     public function update(int $id, array $data): int
     {
         $pdo = $this->db->pdo();
+        $stored = $this->find($id);
+        $writeBillingEmails = array_key_exists('billing_emails', $data);
+        if ($stored !== null) {
+            $data = $this->mergeWithStored($stored, $data);
+        }
         // Supplier lookup pro currency scope + aktuální default kategorie tržby (přes client projektu — nemění se)
         $stmt = $pdo->prepare('SELECT c.supplier_id, p.default_revenue_category_id
                                  FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?');
@@ -222,7 +249,9 @@ final class ProjectRepository
                 $id,
             ]);
 
-            $this->saveBillingEmails($id, $data['billing_emails'] ?? []);
+            if ($writeBillingEmails) {
+                $this->saveBillingEmails($id, is_array($data['billing_emails']) ? $data['billing_emails'] : []);
+            }
 
             // Backfill: doplnit nově nastavenou kategorii do vydaných faktur zakázky,
             // které kategorii nemají vyplněnou (revenue_category_id IS NULL).

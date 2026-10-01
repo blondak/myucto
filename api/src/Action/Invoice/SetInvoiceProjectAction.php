@@ -23,7 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * důvody, proč zakázka smí na už zaúčtovaný doklad, jsou popsané tam. Bez téhle
  * cesty by se u akce dala doplnit jen nákladová strana a marže by lhala.
  *
- * Body: { project_id: number|null }
+ * Body: { project_id: number|null } — klíč je povinný, null zakázku odebere.
  */
 final class SetInvoiceProjectAction
 {
@@ -53,6 +53,12 @@ final class SetInvoiceProjectAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Prázdné tělo nesmí zakázku tiše odebrat (#113) — odebírá jen explicitní null.
+        if (!array_key_exists('project_id', $body)) {
+            return Json::error($response, 'validation_failed', 'Chybí project_id (null zakázku odebere).', 400, [
+                'fields' => ['project_id' => ['Pole project_id je povinné.']],
+            ]);
+        }
         $projectId = ($body['project_id'] ?? null) !== null && (int) $body['project_id'] > 0
             ? (int) $body['project_id']
             : null;

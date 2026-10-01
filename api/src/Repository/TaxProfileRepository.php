@@ -14,6 +14,13 @@ use PDO;
  */
 final class TaxProfileRepository
 {
+    private const SCALAR_COLUMNS = [
+        'activity_rate', 'use_actual_expenses', 'actual_expenses', 'flat_tax_band', 'is_secondary',
+        'spouse_credit', 'children_count', 'mortgage_interest', 'mortgage_pre_2021', 'mortgage_months',
+        'pension_contrib', 'life_insurance', 'dip_contrib', 'long_term_care', 'disability_12_months',
+        'disability_3_months', 'ztpp_months', 'donations', 'sickness_insured', 'sickness_monthly_base',
+    ];
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed>|null */
@@ -54,6 +61,20 @@ final class TaxProfileRepository
             $pdo->beginTransaction();
         }
         try {
+        // Vynechaný klíč = uložená hodnota (issue #113); defaulty níž platí jen pro nový řádek.
+        // Zámek řádku, ať souběžné částečné uložení nepřepíše pole načtené před ním.
+        $pdo->prepare('SELECT id FROM tax_profiles WHERE supplier_id = ? AND year = ? FOR UPDATE')
+            ->execute([$supplierId, $year]);
+        $existing = $this->find($supplierId, $year);
+        if ($existing !== null) {
+            foreach (self::SCALAR_COLUMNS as $col) {
+                if (!array_key_exists($col, $data)) {
+                    $data[$col] = $existing[$col];
+                }
+            }
+        }
+        $activityRate = (string) ($data['activity_rate'] ?? '60');
+        $flatTaxBand = (string) ($data['flat_tax_band'] ?? 'none');
         $pdo->prepare(
             'INSERT INTO tax_profiles
                 (supplier_id, year, activity_rate, use_actual_expenses, actual_expenses, flat_tax_band,
@@ -90,10 +111,10 @@ final class TaxProfileRepository
         )->execute([
             ':sid' => $supplierId,
             ':year' => $year,
-            ':activity_rate' => in_array((string) ($data['activity_rate'] ?? '60'), ['30', '40', '60', '80'], true) ? (string) $data['activity_rate'] : '60',
+            ':activity_rate' => in_array($activityRate, ['30', '40', '60', '80'], true) ? $activityRate : '60',
             ':use_actual_expenses' => !empty($data['use_actual_expenses']) ? 1 : 0,
             ':actual_expenses' => max(0.0, (float) ($data['actual_expenses'] ?? 0)),
-            ':flat_tax_band' => in_array((string) ($data['flat_tax_band'] ?? 'none'), ['none', 'band1', 'band2', 'band3'], true) ? (string) $data['flat_tax_band'] : 'none',
+            ':flat_tax_band' => in_array($flatTaxBand, ['none', 'band1', 'band2', 'band3'], true) ? $flatTaxBand : 'none',
             ':is_secondary' => !empty($data['is_secondary']) ? 1 : 0,
             ':spouse_credit' => !empty($data['spouse_credit']) ? 1 : 0,
             ':children_count' => max(0, (int) ($data['children_count'] ?? 0)),

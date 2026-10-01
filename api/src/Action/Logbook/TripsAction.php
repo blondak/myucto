@@ -26,6 +26,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class TripsAction
 {
+    private const UPDATABLE = ['car_id', 'trip_date', 'time_start', 'time_end', 'odometer_start', 'odometer_end',
+        'distance_km', 'category_id', 'purpose', 'origin', 'destination', 'note'];
+
     public function __construct(
         private readonly TripRepository $repo,
         private readonly CarRepository $cars,
@@ -90,17 +93,34 @@ final class TripsAction
     {
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->repo->find($id, $supplierId) === null) {
+        $current = $this->repo->find($id, $supplierId);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'Jízda nenalezena.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
-        $err = $this->prepare($supplierId, $body);
+        // Vynechaný klíč = ponechat uloženou hodnotu; poslaný null / "" = vymazat.
+        $merged = $body + array_intersect_key($current, array_flip(self::UPDATABLE));
+        // distance_km uložené jako rozdíl tachometru se přepočte, jen když klient mění stav
+        // a km nepošle a výsledný pár stavů je úplný; jinak zůstává uložená hodnota.
+        if (!array_key_exists('distance_km', $body)
+            && (array_key_exists('odometer_start', $body) || array_key_exists('odometer_end', $body))) {
+            $oldStart = $this->intOrNull($current['odometer_start'] ?? null);
+            $oldEnd   = $this->intOrNull($current['odometer_end'] ?? null);
+            $newStart = $this->intOrNull($merged['odometer_start'] ?? null);
+            $newEnd   = $this->intOrNull($merged['odometer_end'] ?? null);
+            $wasDerived = $oldStart !== null && $oldEnd !== null
+                && abs((float) ($current['distance_km'] ?? 0) - ($oldEnd - $oldStart)) < 0.005;
+            if ($wasDerived && $newStart !== null && $newEnd !== null) {
+                unset($merged['distance_km']);
+            }
+        }
+        $err = $this->prepare($supplierId, $merged);
         if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         if ($ref = $this->tenantRefError($supplierId, $body)) {
             return Json::error($response, 'invalid_reference', $ref, 400);
         }
 
-        $this->repo->update($id, $supplierId, $body);
+        $this->repo->update($id, $supplierId, $merged);
         $this->log($request, 'trip.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));
     }

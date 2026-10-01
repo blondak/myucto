@@ -126,9 +126,23 @@ final class CashDocumentService
         if ($existing['status'] !== 'draft') {
             throw new CashException('doc_not_draft', 'Upravovat lze jen rozpracovaný (draft) doklad.');
         }
-        $doc = $this->normalize($data);
+        $linesInherited = !array_key_exists('vat_lines', $data);
+        $doc = $this->normalize($this->mergeDraftInput($supplierId, $id, $existing, $data));
+        if ($linesInherited && $doc['vat_lines'] !== []) {
+            // Nezměněný rozpad si drží i klasifikaci řádků, kterou normalize() nenese.
+            $stored = $this->documents->vatLinesFor($id);
+            if (count($stored) === count($doc['vat_lines'])) {
+                foreach ($stored as $i => $line) {
+                    $doc['vat_lines'][$i]['vat_classification_code'] = $line['vat_classification_code'];
+                }
+            }
+        }
         $register = $this->requireActiveRegister($supplierId, $doc['register_id']);
         $doc = $this->resolveCurrency($doc, $register);
+        if ($linesInherited && $doc['vat_lines'] !== [] && $doc['currency_code'] !== 'CZK') {
+            $doc['vat_lines'] = $this->documents->vatLinesFor($id);
+            $doc['total_amount'] = round((float) $existing['total_amount'], 2);
+        }
         $this->validateDoc($supplierId, $doc, $doc['vat_lines'], $register);
 
         $pdo = $this->db->pdo();
@@ -148,6 +162,77 @@ final class CashDocumentService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Částečná úprava draftu (issue #113): chybějící klíč = uložená hodnota, explicitní
+     * null/'' = smazat. Uložené částky a rozpad DPH jsou v CZK, vstup v měně pokladny —
+     * u valutové pokladny se proto dědí amount_foreign, kurz jen beze změny data a měny
+     * (jinak nový kurz ČNB) a rozpad DPH jen beze změny částky, kurzu, data a směru. Vazby na faktury a protiúčet
+     * patří k účelu dokladu, při změně účelu se nedědí.
+     *
+     * @param array<string,mixed> $existing
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    private function mergeDraftInput(int $supplierId, int $id, array $existing, array $data): array
+    {
+        $purposeChanged = array_key_exists('purpose', $data) && (string) $data['purpose'] !== (string) $existing['purpose'];
+        foreach (['register_id', 'doc_type', 'purpose', 'issue_date', 'description', 'partner_name',
+            'partner_ic', 'partner_dic', 'vat_mode', 'project_id'] as $key) {
+            if (!array_key_exists($key, $data)) {
+                $data[$key] = $existing[$key];
+            }
+        }
+        if (!$purposeChanged) {
+            foreach (['invoice_id', 'purchase_invoice_id'] as $key) {
+                if (!array_key_exists($key, $data)) {
+                    $data[$key] = $existing[$key];
+                }
+            }
+            // Pravidlo a ruční protiúčet se vylučují: pošle-li klient jedno, druhé se nedědí.
+            if (!array_key_exists('rule_key', $data) && !array_key_exists('counter_account_code', $data)) {
+                $data['rule_key'] = $existing['rule_key'];
+                $data['counter_account_code'] = $existing['counter_account_code'];
+            }
+        }
+
+        $register = $this->requireActiveRegister($supplierId, (int) $data['register_id']);
+        $currency = strtoupper(trim((string) ($register['currency_code'] ?? 'CZK')));
+        $sameCurrency = $currency === strtoupper((string) ($existing['currency_code'] ?? 'CZK'));
+        $czkUnchanged = $sameCurrency
+            && !array_key_exists('amount_foreign', $data) && !array_key_exists('total_amount', $data)
+            && !array_key_exists('fx_rate', $data)
+            && (string) $data['issue_date'] === (string) $existing['issue_date']
+            && (string) $data['doc_type'] === (string) $existing['doc_type'];
+        if ($currency === 'CZK') {
+            if (!array_key_exists('total_amount', $data)) {
+                $data['total_amount'] = $existing['total_amount'];
+            }
+        } else {
+            if ($sameCurrency && !array_key_exists('amount_foreign', $data) && !array_key_exists('total_amount', $data)) {
+                $data['amount_foreign'] = $existing['amount_foreign'];
+            }
+            if ($sameCurrency && !array_key_exists('fx_rate', $data)
+                && (string) $data['issue_date'] === (string) $existing['issue_date']) {
+                $data['fx_rate'] = $existing['fx_rate'];
+            }
+        }
+
+        if (($data['vat_mode'] ?? 'none') === 'vat') {
+            if (!array_key_exists('tax_date', $data) && $existing['tax_date'] !== null) {
+                $data['tax_date'] = $existing['tax_date'];
+            }
+            if (!array_key_exists('vat_lines', $data) && $existing['vat_mode'] === 'vat') {
+                // Uložený rozpad je v CZK: zdědit jde jen beze změny částky, kurzu, data a směru,
+                // updateDraft() pak převezme uložené CZK řádky i celkovou částku beze změny.
+                if ($currency !== 'CZK' && !$czkUnchanged) {
+                    throw new CashException('validation', 'U dokladu s DPH ve valutové pokladně pošlete při změně částky, kurzu, data nebo směru i rozpad vat_lines v měně pokladny.');
+                }
+                $data['vat_lines'] = $this->documents->vatLinesFor($id);
+            }
+        }
+        return $data;
     }
 
     public function deleteDraft(int $supplierId, int $id): void

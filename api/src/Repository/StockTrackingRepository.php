@@ -49,7 +49,8 @@ final class StockTrackingRepository
         }
         $stmt = $this->db->pdo()->prepare('UPDATE warehouse_locations SET code = ?, name = ?, is_active = ? WHERE supplier_id = ? AND warehouse_id = ? AND id = ?');
         $stmt->execute([$code, $name, (int) $active, $supplierId, $warehouseId, $id]);
-        return $stmt->rowCount() === 1 ? $id : 0;
+        // Beze změny vrací UPDATE rowCount 0 — existenci proto ověříme zvlášť.
+        return $stmt->rowCount() === 1 || $this->location($supplierId, $id) !== null ? $id : 0;
     }
 
     /**

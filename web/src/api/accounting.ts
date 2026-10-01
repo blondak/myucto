@@ -2375,7 +2375,7 @@ export const accountingApi = {
   // Repo sazba ČNB (úrok z prodlení, NV 351/2013)
   getRepoRates: () =>
     api.get<{ rates: RepoRate[] }>('/accounting/repo-rates').then(r => r.data.rates),
-  upsertRepoRate: (payload: { valid_from: string; rate: number; note?: string }) =>
+  upsertRepoRate: (payload: { valid_from: string; rate: number; note?: string | null }) =>
     api.put<{ rates: RepoRate[] }>('/accounting/repo-rates', payload).then(r => r.data.rates),
   deleteRepoRate: (validFrom: string) =>
     api.delete(`/accounting/repo-rates/${validFrom}`).then(r => r.data),

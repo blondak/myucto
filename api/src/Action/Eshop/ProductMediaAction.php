@@ -176,8 +176,12 @@ final class ProductMediaAction
         $body = (array) ($request->getParsedBody() ?? []);
 
         $this->media->updateMeta($supplierId, $mid, [
-            'title'         => isset($body['title']) && trim((string) $body['title']) !== '' ? trim((string) $body['title']) : null,
-            'alt_text'      => isset($body['alt_text']) && trim((string) $body['alt_text']) !== '' ? trim((string) $body['alt_text']) : null,
+            'title'         => array_key_exists('title', $body)
+                ? (trim((string) ($body['title'] ?? '')) !== '' ? trim((string) $body['title']) : null)
+                : ($existing['title'] ?? null),
+            'alt_text'      => array_key_exists('alt_text', $body)
+                ? (trim((string) ($body['alt_text'] ?? '')) !== '' ? trim((string) $body['alt_text']) : null)
+                : ($existing['alt_text'] ?? null),
             'export_eshop'  => array_key_exists('export_eshop', $body) ? (bool) $body['export_eshop'] : (bool) $existing['export_eshop'],
             'display_order' => array_key_exists('display_order', $body) ? (int) $body['display_order'] : (int) $existing['display_order'],
         ]);

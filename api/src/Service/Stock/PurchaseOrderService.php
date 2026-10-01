@@ -80,6 +80,21 @@ final class PurchaseOrderService
             if (!in_array((string) $existing['state'], self::EDITABLE_STATES, true)) {
                 throw new StockException('order_not_editable', 'Upravovat lze jen rozpracovanou objednávku.', 409);
             }
+            // Vynechaný klíč ponechá uloženou hodnotu, explicitní null/"" ji smaže.
+            // Kurz patří k měně: při změně měny bez nového kurzu se uložený nepřenáší.
+            if (array_key_exists('currency_id', $body) && !array_key_exists('exchange_rate', $body)
+                && (int) $body['currency_id'] !== (int) $existing['currency_id']) {
+                $body['exchange_rate'] = null;
+            }
+            foreach (['vendor_id', 'order_date', 'warehouse_id', 'currency_id', 'vendor_reference',
+                'expected_date', 'exchange_rate', 'note', 'internal_note'] as $key) {
+                if (!array_key_exists($key, $body)) {
+                    $body[$key] = $existing[$key];
+                }
+            }
+            if (!array_key_exists('lines', $body)) {
+                $body['lines'] = $this->orders->lines($supplierId, $id);
+            }
             [$header, $lines] = $this->validateBody($supplierId, $body);
             if (!$this->orders->updateHeader($supplierId, $id, $header)) {
                 throw new StockException('order_not_editable', 'Stav objednávky se během úpravy změnil.', 409);
@@ -266,7 +281,7 @@ final class PurchaseOrderService
                     $qtyConfirmed = StockValuation::tToDecimal($qtyT);
                 }
                 $expected = self::dateOrNull($raw['expected_date'] ?? null);
-                $this->orders->setLineConfirmed($supplierId, $lineId, $qtyConfirmed, $expected);
+                $this->orders->setLineConfirmed($supplierId, $lineId, $qtyConfirmed, $expected, array_key_exists('qty_confirmed', $raw));
             }
 
             $set = ['confirmed_at' => '__NOW__', 'confirmed_by' => $userId];

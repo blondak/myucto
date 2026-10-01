@@ -22,6 +22,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class TripCategoriesAction
 {
+    private const UPDATABLE = ['code', 'label', 'is_private', 'is_default', 'display_order', 'is_archived'];
+
     public function __construct(
         private readonly TripCategoryRepository $repo,
         private readonly ActivityLogger $logger,
@@ -58,13 +60,16 @@ final class TripCategoriesAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
-        $err = $this->validate($body);
-        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
-        if ($this->repo->find($id, $supplierId) === null) {
+        $current = $this->repo->find($id, $supplierId);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'Kategorie nenalezena.', 404);
         }
+        // Vynechaný klíč = ponechat uloženou hodnotu; poslaný null / "" = vymazat.
+        $merged = $body + array_intersect_key($current, array_flip(self::UPDATABLE));
+        $err = $this->validate($merged);
+        if ($err !== null) return Json::error($response, 'validation_failed', $err, 400);
         try {
-            $this->repo->update($id, $supplierId, $body);
+            $this->repo->update($id, $supplierId, $merged);
         } catch (\PDOException $e) {
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate_code', 'Kód „' . (string) ($body['code'] ?? '') . '" už existuje.', 409);

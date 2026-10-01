@@ -104,23 +104,29 @@ final class StockTrackingAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
         $body = (array) ($request->getParsedBody() ?? []);
-        $warehouseId = (int) ($body['warehouse_id'] ?? 0);
-        $code = trim((string) ($body['code'] ?? ''));
-        $name = trim((string) ($body['name'] ?? ''));
+        $id = isset($args['id']) ? (int) $args['id'] : null;
+        $existing = null;
+        if ($id !== null) {
+            $existing = $this->tracking->location($supplierId, $id);
+            if ($existing === null) return Json::error($response, 'not_found', 'Lokace nenalezena.', 404);
+        }
+        $warehouseId = (int) (array_key_exists('warehouse_id', $body) ? $body['warehouse_id'] : ($existing['warehouse_id'] ?? 0));
+        $code = trim((string) (array_key_exists('code', $body) ? $body['code'] : ($existing['code'] ?? '')));
+        $name = trim((string) (array_key_exists('name', $body) ? $body['name'] : ($existing['name'] ?? '')));
         if ($warehouseId <= 0 || $code === '' || $name === '' || mb_strlen($code) > 50 || mb_strlen($name) > 100) {
             return Json::error($response, 'validation_failed', 'Sklad, kód a název lokace jsou povinné.', 422);
         }
         $stmt = $this->db->pdo()->prepare('SELECT 1 FROM warehouses WHERE supplier_id = ? AND id = ?');
         $stmt->execute([$supplierId, $warehouseId]);
         if ($stmt->fetchColumn() === false) return Json::error($response, 'not_found', 'Sklad nenalezen.', 404);
-        $id = isset($args['id']) ? (int) $args['id'] : null;
-        if ($id !== null) {
-            $existing = $this->tracking->location($supplierId, $id);
-            if ($existing === null) return Json::error($response, 'not_found', 'Lokace nenalezena.', 404);
-            if ((int) $existing['warehouse_id'] !== $warehouseId) return Json::error($response, 'invalid_location', 'Lokaci nelze přesunout do jiného skladu.', 409);
+        if ($existing !== null && (int) $existing['warehouse_id'] !== $warehouseId) {
+            return Json::error($response, 'invalid_location', 'Lokaci nelze přesunout do jiného skladu.', 409);
         }
+        $isActive = array_key_exists('is_active', $body)
+            ? (bool) ($body['is_active'] ?? true)
+            : (bool) ($existing['is_active'] ?? true);
         try {
-            $saved = $this->tracking->saveLocation($supplierId, $warehouseId, $id, $code, $name, (bool) ($body['is_active'] ?? true));
+            $saved = $this->tracking->saveLocation($supplierId, $warehouseId, $id, $code, $name, $isActive);
         } catch (\PDOException $e) {
             if ((string) $e->getCode() === '23000') return Json::error($response, 'location_code_taken', 'Kód lokace už ve skladu existuje.', 409);
             throw $e;

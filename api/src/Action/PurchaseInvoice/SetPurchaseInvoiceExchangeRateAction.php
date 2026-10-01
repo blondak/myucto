@@ -58,7 +58,10 @@ final class SetPurchaseInvoiceExchangeRateAction
 
         $body = (array) ($request->getParsedBody() ?? []);
 
-        $rate = null;
+        // Vynechaný klíč = ponech uloženou hodnotu, explicitní null/'' = vymaž (issue #113).
+        $rate = array_key_exists('rate', $body) || ($existing['exchange_rate'] ?? null) === null
+            ? null
+            : (float) $existing['exchange_rate'];
         if (array_key_exists('rate', $body) && $body['rate'] !== null && $body['rate'] !== '') {
             if (!is_numeric($body['rate'])) {
                 return Json::error($response, 'validation_failed', 'rate musí být číslo', 400);
@@ -69,7 +72,12 @@ final class SetPurchaseInvoiceExchangeRateAction
             }
         }
 
-        $rateDate = null;
+        // Kurz, datum a zdroj tvoří trojici: poslaný (i smazaný) kurz nedědí datum ani
+        // zdroj starého kurzu (např. 'cnb', který by smělo přepsat přenačtení).
+        $rateSent = array_key_exists('rate', $body);
+        $rateDate = array_key_exists('rate_date', $body) || $rateSent || empty($existing['exchange_rate_date'])
+            ? null
+            : substr((string) $existing['exchange_rate_date'], 0, 10);
         if (!empty($body['rate_date'])) {
             $rateDate = (string) $body['rate_date'];
             $d = \DateTimeImmutable::createFromFormat('Y-m-d', $rateDate);
@@ -78,7 +86,11 @@ final class SetPurchaseInvoiceExchangeRateAction
             }
         }
 
-        $source = (string) ($body['source'] ?? ExchangeRateSources::DEFAULT);
+        $source = match (true) {
+            array_key_exists('source', $body) => (string) ($body['source'] ?? ExchangeRateSources::DEFAULT),
+            $rateSent => ExchangeRateSources::DEFAULT,
+            default => ExchangeRateSources::normalize($existing['exchange_rate_source'] ?? null),
+        };
         if (!ExchangeRateSources::isValid($source)) {
             return Json::error($response, 'validation_failed', 'Neplatný source', 400);
         }
