@@ -12,6 +12,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
+use MyInvoice\Service\Accounting\AdvanceSettlementSync;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
@@ -107,7 +108,47 @@ final class BankPostingService
          */
         private readonly ?CardClearingRegime $cardRegime = null,
         private readonly ?CardSettlementService $cardSettlement = null,
+        /**
+         * Zúčtování zálohy (321/314, 324/311) v zápisu konečné faktury se počítá jen při
+         * jejím zaúčtování. Úhrada zálohy zaúčtovaná nebo zrušená AŽ POTOM ho musí
+         * dorovnat, jinak 314/324 zůstane rozjeté proti saldokontu.
+         */
+        private readonly ?AdvanceSettlementSync $advanceSettlement = null,
     ) {}
+
+    /**
+     * Zálohy, jejichž úhradu pohyb nese — volající si je přečte PŘED zrušením párování,
+     * protože potom už vazba v payment_matches / invoice_payments neexistuje.
+     *
+     * @return array{purchase:list<int>, sale:list<int>}
+     */
+    public function advancesOfTransaction(int $supplierId, int $txId): array
+    {
+        return $this->advanceSettlement?->advancesOfBankTransaction($supplierId, $txId)
+            ?? ['purchase' => [], 'sale' => []];
+    }
+
+    /**
+     * Dorovná zúčtování zálohy na konečných fakturách daných záloh. Nikdy nevyhazuje.
+     *
+     * @param array{purchase?:list<int>, sale?:list<int>} $advances
+     */
+    public function syncAdvanceSettlements(int $supplierId, array $advances, ?int $userId = null): void
+    {
+        $this->advanceSettlement?->syncAdvances($supplierId, $advances, $userId);
+    }
+
+    private function afterAdvancePaymentChanged(int $supplierId, int $txId, ?int $userId): void
+    {
+        if ($this->advanceSettlement === null) {
+            return;
+        }
+        $this->advanceSettlement->syncAdvances(
+            $supplierId,
+            $this->advanceSettlement->advancesOfBankTransaction($supplierId, $txId),
+            $userId,
+        );
+    }
 
     /**
      * Pohyb má živý bankovní zápis převzatý z jiného účetního programu. Párování, alokaci
@@ -448,6 +489,7 @@ final class BankPostingService
             // nechá zápis být, dimenze nové faktury se proto dorovnají zvlášť.
             $this->posting->restampDimensions($supplierId, 'bank', $txId);
             $this->afterCardBankPosted($supplierId, $txId, $userId);
+            $this->afterAdvancePaymentChanged($supplierId, $txId, $userId);
             return ['action' => 'posted', 'reason' => 'already_posted', 'entry_id' => $liveEntryId];
         }
 
@@ -535,6 +577,7 @@ final class BankPostingService
             supplierId: $supplierId,
         );
         $this->afterCardBankPosted($supplierId, $txId, $userId);
+        $this->afterAdvancePaymentChanged($supplierId, $txId, $userId);
         return ['action' => 'posted', 'reason' => 'matched', 'entry_id' => $entryId];
     }
 
@@ -3164,6 +3207,9 @@ final class BankPostingService
                 $meta,
                 'reversed_by_user',
             );
+            // Párování tu ještě existuje, zápis už je stornovaný — zúčtování zálohy
+            // na konečné faktuře tím ztratilo krytí a musí se dorovnat.
+            $this->afterAdvancePaymentChanged($supplierId, $txId, isset($meta['user_id']) ? (int) $meta['user_id'] : null);
 
             if ($ownTx) {
                 $pdo->commit();

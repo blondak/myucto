@@ -180,6 +180,9 @@ final class BankTransactionReleaseService
         $invoiceId = $tx['matched_invoice_id'] !== null ? (int) $tx['matched_invoice_id'] : 0;
         $postedAt = (string) ($tx['posted_at'] ?? '');
 
+        // Zálohy, které pohyb hradil — po zrušení párování už vazba neexistuje.
+        $advances = $this->bankPosting->advancesOfTransaction($supplierId, $txId);
+
         $journal = $this->releaseJournal($supplierId, $txId, $mode, $userId);
 
         $purchaseStmt = $pdo->prepare(
@@ -214,6 +217,8 @@ final class BankTransactionReleaseService
             ->execute([$txId, $supplierId]);
         $this->restorePurchaseInvoices($pdo, $supplierId, $purchaseInvoiceIds, $postedAt);
         $this->restoreRefundDocuments($pdo, $supplierId, $refundInvoiceIds, $postedAt);
+        // Konečná faktura zálohy už nesmí čerpat 314/324 za úhradu, která tu není.
+        $this->bankPosting->syncAdvanceSettlements($supplierId, $advances, $userId);
 
         if (!$deletedPayment && $invoiceId > 0 && $postedAt !== '') {
             $this->releaseLegacyInvoiceMatch($pdo, $txId, $invoiceId, $postedAt);

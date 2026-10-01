@@ -665,6 +665,8 @@ final class Bootstrap
                 // Platby kartou přes mezičlen 378.x a jejich vypořádání s dokladem.
                 $c->get(\MyInvoice\Service\Accounting\Card\CardClearingRegime::class),
                 $c->get(\MyInvoice\Service\Accounting\Card\CardSettlementService::class),
+                // Dorovnání zúčtování zálohy na konečné faktuře po změně úhrady zálohy.
+                $c->get(\MyInvoice\Service\Accounting\AdvanceSettlementSync::class),
             ),
 
             // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je

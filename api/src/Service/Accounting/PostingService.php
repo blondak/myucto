@@ -2162,8 +2162,7 @@ final class PostingService
             return; // proforma nezaplacena / žádné inkaso na 324 → běžná faktura beze změny
         }
 
-        $draw = $this->ruleCode($supplierId, 'advance.received.settlement', 'debit', '324');
-        $recv = $this->ruleCode($supplierId, 'advance.received.settlement', 'credit', '311');
+        ['debit' => $draw, 'credit' => $recv] = $this->advanceSettlementAccounts($supplierId, 'sale');
         if ($draw === $recv) {
             // Záloha vedená přímo na pohledávce (předkontace 311/311): pár MD 311 / D 311
             // se vyruší, na saldo ani výsledek nemá vliv a jen zdvojí obrat zápisu.
@@ -2244,14 +2243,35 @@ final class PostingService
             return;
         }
 
-        $draw    = $this->ruleCode($supplierId, 'advance.paid.settlement', 'debit', '321');
-        $advAcc  = $this->ruleCode($supplierId, 'advance.paid.settlement', 'credit', '314');
+        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
         if ($draw === $advAcc) {
             // Zrcadlo vydané strany: záloha vedená přímo na závazku, pár se vyruší.
             return;
         }
         $lines[] = $this->line($draw, 'debit', $paid, null);
         $lines[] = $this->line($advAcc, 'credit', $paid, null);
+    }
+
+    /**
+     * Účty páru zúčtování zálohy na konečné faktuře: přijatá záloha 324 MD / 311 D
+     * (`sale`), poskytnutá záloha 321 MD / 314 D (`purchase`). Jediné místo, které je
+     * určuje: čte ho zápis konečné faktury i {@see AdvanceSettlementSync}, který pár
+     * dorovnává po pozdější změně úhrady zálohy.
+     *
+     * @param 'sale'|'purchase' $side
+     * @return array{debit:string, credit:string}
+     */
+    public function advanceSettlementAccounts(int $supplierId, string $side): array
+    {
+        return $side === 'sale'
+            ? [
+                'debit'  => $this->ruleCode($supplierId, 'advance.received.settlement', 'debit', '324'),
+                'credit' => $this->ruleCode($supplierId, 'advance.received.settlement', 'credit', '311'),
+            ]
+            : [
+                'debit'  => $this->ruleCode($supplierId, 'advance.paid.settlement', 'debit', '321'),
+                'credit' => $this->ruleCode($supplierId, 'advance.paid.settlement', 'credit', '314'),
+            ];
     }
 
     /**

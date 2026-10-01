@@ -74,6 +74,7 @@ final class CashDocumentService
         private readonly DocumentLockService $documentLocks,
         private readonly VatStatusService $vatStatus,
         private readonly InvoicePdfRenderer $invoicePdf,
+        private readonly \MyInvoice\Service\Accounting\AdvanceSettlementSync $advanceSettlement,
     ) {}
 
     /**
@@ -497,6 +498,7 @@ final class CashDocumentService
                 $this->documents->markReversedNoJournal($supplierId, $id);
             } else {
                 $this->documents->markReversed($supplierId, $id, $reversalId);
+                $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
             }
 
             $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId, $entryDate);
@@ -808,6 +810,8 @@ final class CashDocumentService
 
         $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
         $this->documents->markPosted($supplierId, $id, $docNumber, $entryId);
+        // Hotovostní úhrada zálohy po zaúčtování konečné faktury → doplnit její zúčtování.
+        $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
 
         return [
             'doc_number'       => $docNumber,
