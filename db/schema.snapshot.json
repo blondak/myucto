@@ -930,7 +930,8 @@
         "1946_bank_notice_ignore_transfer.sql",
         "1947_bank_transaction_processing_state.sql",
         "1948_payroll_dimensions_company_link_and_split.sql",
-        "1949_product_posting_defaults.sql"
+        "1949_product_posting_defaults.sql",
+        "1950_purchase_submission_dimensions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -17646,6 +17647,28 @@
                 "fk_pii_pol": "(purchase_order_line_id) -> purchase_order_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_stock_item": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_vat": "(vat_rate_id) -> vat_rates (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "purchase_invoice_submission_dimensions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "submission_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (submission_id, dimension_type_id)",
+                "idx_pisd_supplier": "BTREE (supplier_id, submission_id)",
+                "idx_pisd_value": "BTREE (dimension_type_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_pisd_submission": "(submission_id) -> purchase_invoice_submissions (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pisd_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pisd_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
