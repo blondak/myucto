@@ -637,11 +637,29 @@ function hydratePayoutRules(response: PayrollPayoutRulesResponse) {
  * Otisky pro „je co uložit". Ověření účtu a příznak ověření u pravidla se
  * zapisují samostatnou akcí hned, takže do rozepsané práce nepatří.
  */
+/*
+ * Nový řádek, do kterého uživatel nic nenapsal. Zakládá ho i odkaz z hlášky
+ * („doplňte adresu"), aby bylo kam psát — dokud zůstane prázdný, není to změna
+ * karty a neposílá se: jinak by společné Uložit jiné sekce spadlo na validaci
+ * řádku, o kterém uživatel ani neví.
+ */
+function blankNew(row: { id?: number }, values: string[]): boolean {
+  return !row.id && values.every(value => optionalValue(value) === undefined)
+}
+
+const keptAddresses = () => form.addresses.filter(row => !blankNew(row, [row.street_line, row.city, row.postal_code]))
+const keptContacts = () => form.contacts.filter(row => !blankNew(row, [row.value]))
+const keptIdentifiers = () => form.identifiers.filter(row => !blankNew(row, [row.value]))
+const keptAccounts = () => form.accounts.filter(row => !blankNew(row, [row.label, row.bank_account]))
+
 function formFingerprint(): string {
   return JSON.stringify({
     ...form,
     row_version: 0,
-    accounts: form.accounts.map(({ verification_source: _source, verified_on: _on, verified_by: _by, row_version: _version, ...rest }) => rest),
+    addresses: keptAddresses(),
+    contacts: keptContacts(),
+    identifiers: keptIdentifiers(),
+    accounts: keptAccounts().map(({ verification_source: _source, verified_on: _on, verified_by: _by, row_version: _version, ...rest }) => rest),
   })
 }
 
@@ -1084,7 +1102,7 @@ function payload(): PayrollPersonProfilePayload {
       effective_from: row.effective_from,
       effective_to: optionalValue(row.effective_to) ?? null,
     })),
-    addresses: form.addresses.map(row => {
+    addresses: keptAddresses().map(row => {
       if (row.id && row.deleted) return { id: row.id, delete: true }
       const replacesAddress = [
         row.street_line,
@@ -1107,7 +1125,7 @@ function payload(): PayrollPersonProfilePayload {
         effective_to: optionalValue(row.effective_to) ?? null,
       }
     }),
-    contacts: form.contacts.map(row => (row.id && row.deleted
+    contacts: keptContacts().map(row => (row.id && row.deleted
       ? { id: row.id, delete: true }
       : {
       ...(row.id ? { id: row.id } : {}),
@@ -1116,14 +1134,14 @@ function payload(): PayrollPersonProfilePayload {
       is_primary: row.is_primary,
       is_active: row.is_active,
     })),
-    identifiers: form.identifiers.map(row => (row.id && row.deleted
+    identifiers: keptIdentifiers().map(row => (row.id && row.deleted
       ? { id: row.id, identifier_type: row.identifier_type, delete: true }
       : {
       ...(row.id ? { id: row.id } : {}),
       identifier_type: row.identifier_type,
       ...(optionalValue(row.value) !== undefined ? { value: row.value.trim() } : {}),
     })),
-    accounts: form.accounts.map(row => (row.id && row.deleted
+    accounts: keptAccounts().map(row => (row.id && row.deleted
       ? { id: row.id, delete: true }
       : {
       ...(row.id ? { id: row.id } : {}),

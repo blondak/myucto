@@ -83,6 +83,71 @@ final class PayrollPersonProfileValidator
      */
     public function validate(array $input): array
     {
+        try {
+            return $this->validateInput($input);
+        } catch (\InvalidArgumentException $e) {
+            throw new \InvalidArgumentException(self::humanize($e->getMessage()), 0, $e);
+        }
+    }
+
+    private const COLLECTION_LABELS = [
+        'identity_history' => 'Jméno a identita',
+        'addresses' => 'Adresa',
+        'contacts' => 'Kontakt',
+        'identifiers' => 'Identifikátor',
+        'accounts' => 'Bankovní účet',
+        'payout_rules' => 'Pravidlo výplaty',
+    ];
+
+    private const FIELD_LABELS = [
+        'street_line' => 'ulice a číslo',
+        'city' => 'obec',
+        'postal_code' => 'PSČ',
+        'country_code' => 'stát',
+        'effective_from' => 'platí od',
+        'effective_to' => 'platí do',
+        'value' => 'hodnota',
+        'label' => 'název',
+        'bank_account' => 'číslo účtu',
+        'full_name' => 'jméno',
+        'birth_date' => 'datum narození',
+        'birth_place' => 'místo narození',
+        'birth_country_code' => 'stát narození',
+        'citizenship_country_code' => 'státní občanství',
+        'sex' => 'pohlaví',
+        'title_prefix' => 'titul před jménem',
+        'title_suffix' => 'titul za jménem',
+    ];
+
+    /**
+     * Hláška validace jde až k účetní — „addresses.0.street_line" jí nic neřekne.
+     * Cestu k poli na začátku hlášky převede na „Adresa 1: ulice a číslo".
+     */
+    public static function humanize(string $message): string
+    {
+        return (string) preg_replace_callback(
+            '/^([a-z_]+)\.(\d+)(?:\.([a-z_]+))?/',
+            static function (array $m): string {
+                $collection = self::COLLECTION_LABELS[$m[1]] ?? null;
+                if ($collection === null) {
+                    return $m[0];
+                }
+                $label = $collection . ' ' . ((int) $m[2] + 1);
+                if (($m[3] ?? '') !== '') {
+                    $label .= ': ' . (self::FIELD_LABELS[$m[3]] ?? $m[3]);
+                }
+                return $label;
+            },
+            $message,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return ProfileInput
+     */
+    private function validateInput(array $input): array
+    {
         $identityHistory = $this->identityHistory($input['identity_history'] ?? []);
         $addresses = $this->addresses($input['addresses'] ?? []);
         $contacts = $this->contacts($input['contacts'] ?? []);

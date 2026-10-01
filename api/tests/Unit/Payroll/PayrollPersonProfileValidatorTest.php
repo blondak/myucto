@@ -399,6 +399,19 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         self::fail('Neplatný profil musí být odmítnut.');
     }
 
+    public function testValidationMessageNamesFieldForHumans(): void
+    {
+        self::assertSame(
+            'Adresa 1: ulice a číslo je prázdné nebo příliš dlouhé.',
+            PayrollPersonProfileValidator::humanize('addresses.0.street_line je prázdné nebo příliš dlouhé.'),
+        );
+        self::assertSame(
+            'Bankovní účet 2 musí být objekt.',
+            PayrollPersonProfileValidator::humanize('accounts.1 musí být objekt.'),
+        );
+        self::assertSame('payout_method musí být …', PayrollPersonProfileValidator::humanize('payout_method musí být …'));
+    }
+
     public function testPartnerSettlementRequiresSettlementAccountCode(): void
     {
         $this->expectException(\InvalidArgumentException::class);
