@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS bank_notice_ignore_transfers (
     ignore_note VARCHAR(1000) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_bank_ignore_transfer_target (statement_transaction_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Při pozdějším mergi upstream migrace musí zůstat plný rozsah tenant ID MyÚčta.
 ALTER TABLE bank_notice_ignore_transfers MODIFY COLUMN supplier_id INT UNSIGNED NOT NULL;

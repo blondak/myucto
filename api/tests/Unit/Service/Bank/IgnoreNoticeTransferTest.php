@@ -182,6 +182,26 @@ final class IgnoreNoticeTransferTest extends TestCase
         self::assertSame('ignored', $this->pdo->query('SELECT match_status FROM bank_transactions WHERE statement_id = ' . $result['evidence_statement_id'])->fetchColumn());
     }
 
+    /**
+     * Ruční upload bez rozhodnutí posílá prázdné pole, takže každé PDF jde scoped
+     * cestou. Výpis za období se do měsíčního výpisu neskládá; na účtu, který už
+     * skládá (feed nebo denní PDF), musí zůstat samostatným dokladem s vlastním id.
+     */
+    public function testPeriodPdfOnAggregatedAccountKeepsOwnStatement(): void
+    {
+        $this->matcher->expects(self::atLeastOnce())->method('matchBatch')->willReturn([]);
+        $this->pdo->exec("INSERT INTO bank_statements (source, period_kind, file_hash, account_number, bank_code, currency, statement_date)
+            VALUES ('pdf', 'day', 'daily-evidence', '1000000005', '0100', 'CZK', '2099-05-31')");
+        $this->pdo->exec("UPDATE bank_transactions SET match_status = 'unmatched', ignore_origin = NULL WHERE id = 1");
+
+        $result = $this->upload([], 'period-pdf');
+
+        self::assertIsInt($result['statement_id']);
+        self::assertArrayNotHasKey('evidence_statement_id', $result);
+        $statement = $this->pdo->query('SELECT source, period_kind FROM bank_statements WHERE id = ' . $result['statement_id'])->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(['source' => 'pdf', 'period_kind' => 'period'], $statement);
+    }
+
     public function testWrongBankCurrencySignDateOrSymbolDoNotMatch(): void
     {
         $this->matcher->expects(self::never())->method('match');

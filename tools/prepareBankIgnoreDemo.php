@@ -27,7 +27,10 @@ if ($run !== 'demo') {
     $account = $prefix . '-' . $account;
 }
 $gpcAccount = str_replace('-', '', $account);
-$output = (string) ($options['output'] ?? $root . '/api/tests/Fixtures/BankIgnoreTransfer/statement.gpc');
+// Commitnutou fixture (účet 1000000005) přepisuje jen běh `demo`, jinak by test uploadu padal.
+$output = (string) ($options['output'] ?? ($run === 'demo'
+    ? $root . '/api/tests/Fixtures/BankIgnoreTransfer/statement.gpc'
+    : sys_get_temp_dir() . '/bank-ignore-demo-' . $run . '.gpc'));
 function field(string $line, int $offset, int $width, string $value): string {
     return substr_replace($line, substr(str_pad($value, $width, ' ', STR_PAD_RIGHT), 0, $width), $offset, $width);
 }
@@ -56,7 +59,12 @@ if (file_put_contents($output, $content) === false) throw new RuntimeException('
 echo "Výpis: $output\n";
 if (!isset($options['prepare'])) exit(0);
 
-$db = new Connection(Config::load($root));
+$config = Config::load($root);
+if ((string) $config->get('app.env', '') === 'production' || (bool) $config->get('app.managed', false)) {
+    throw new RuntimeException('Syntetickou firmu nelze založit v produkční ani spravované instalaci.');
+}
+echo 'Databáze: ' . (string) $config->get('db.name') . "\n";
+$db = new Connection($config);
 $pdo = $db->pdo();
 if (!$db->hasColumn('bank_transactions', 'ignore_origin')) throw new RuntimeException('Nejdřív spusťte php api/bin/migrate.php.');
 $name = 'TEST - ignorovani aviz - ' . $run;

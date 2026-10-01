@@ -136,9 +136,11 @@ final class StatementImporter
                 $affectedStatements[] = (int) $owner['id'];
             }
             $monthly = new BankApiMonthlyStatements($pdo);
+            // PDF za období se do měsíčního výpisu neskládá (BankApiMonthlyStatements::PROJECTABLE),
+            // zůstává samostatným dokladem i na účtu, který jinak skládá.
             if ($source === 'bank_api'
                 || ($parsed['header']['period_kind'] ?? 'period') === 'day'
-                || $monthly->aggregatesMonthly($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
+                || $source !== 'pdf' && $monthly->aggregatesMonthly($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
                 $months = $monthly->projectAccount(
                     $supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'], $userId,
                 );

@@ -41,6 +41,10 @@ php tools/prepareBankIgnoreDemo.php --prepare --run skip --output /tmp/ignore-sk
 ```
 
 Na Windows použijte vlastní zapisovatelnou cestu místo `/tmp/ignore-skip.gpc`.
+Bez `--output` se výpis dalšího kola uloží do dočasného adresáře systému
+(cestu skript vypíše); přiložený `statement.gpc` přepisuje jen základní kolo.
+Firmu skript odmítne založit v produkční (`app.env = production`) nebo spravované
+instalaci a před zápisem vypíše, do které databáze zapisuje.
 Odlišné `--run` vytvoří jiný syntetický vlastní účet s platným mod-11 prefixem
 i jiný hash výpisu, aby se scénáře nemíchaly. Skript existující firmu nepřepíše.
 
