@@ -103,10 +103,6 @@ defineExpose({ reload: () => load(props.docId) })
       </svg>
     </button>
     <div v-show="open" class="px-5 py-4 space-y-5">
-      <slot />
-      <!-- Podle jaké šablony kontace vznikla (a kde se opraví) — patří k zaúčtování,
-           ne mezi údaje dokladu. Sama se schová, když doklad zaúčtovaný není. -->
-      <PostingOriginRow ref="originRef" :source="source" :doc-id="docId" />
       <div v-for="entry in entries" :key="entry.id">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <span class="flex items-center gap-2 text-xs text-neutral-500">
@@ -137,6 +133,14 @@ defineExpose({ reload: () => load(props.docId) })
         <!-- Poznámky zápisu — tatáž komponenta jako v deníku (i u bankovního pohybu),
              takže poznámka k zaúčtování dokladu je vidět a jde psát i odsud. -->
         <JournalEntryNotes class="mt-3" :entry-id="entry.id" />
+      </div>
+      <!-- Údaje o dokladu a o tom, podle čeho se účtovalo, jsou až pod zápisy: účetní
+           se dívá nejdřív na kontaci, metadata ji jen vysvětlují. -->
+      <div class="space-y-4" :class="entries.length > 0 ? 'pt-5 border-t border-neutral-100' : ''">
+        <slot />
+        <!-- Podle jaké šablony kontace vznikla (a kde se opraví) — patří k zaúčtování,
+             ne mezi údaje dokladu. Sama se schová, když doklad zaúčtovaný není. -->
+        <PostingOriginRow ref="originRef" :source="source" :doc-id="docId" />
       </div>
     </div>
 

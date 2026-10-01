@@ -1261,87 +1261,92 @@ const purchaseActions = computed<ActionItem[]>(() => {
            samotná kontace se dál načítá na pozadí. -->
       <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
         :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
-        <dl class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-3 text-sm">
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.document_kind') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_classification') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <template v-if="invoice.vat_classification_code">
-                <span class="font-mono">{{ invoice.vat_classification_code }}</span>
-                <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
-              </template>
-              <span v-else class="text-neutral-400">—</span>
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.tax_deductible') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
-              {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.fields.is_fixed_asset') }}</dt>
-            <dd class="font-medium text-right" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
-              {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_category') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <template v-if="invoice.expense_category_label">
-                {{ invoice.expense_category_label }}
-                <span class="text-neutral-400">({{ invoice.expense_category_code }})</span>
-              </template>
-              <span v-else class="text-neutral-400">—</span>
-            </dd>
-          </div>
-          <!-- Podle čeho se účtovalo. Sekce dosud ukazovala jen VÝSLEDEK (druh, účet),
-               takže se nedalo poznat, jestli za ním stojí firemní pravidlo (a dá se
-               opravit), nebo jen dohad z klíčových slov. -->
-          <div class="flex justify-between gap-3 sm:col-span-2 xl:col-span-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.expense_rule') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <template v-if="expenseRule">
-                <span v-if="expenseRule.rule_exists">{{ expenseRule.rule_name }}</span>
-                <span v-else class="text-warning-700">
-                  {{ t('purchase_invoice.classification.expense_rule_deleted', { id: expenseRule.rule_id }) }}
-                </span>
-                <span v-if="expenseRule.rule_exists && expenseRule.rule_is_active === false"
-                  class="ml-1 text-xs text-warning-700">
-                  ({{ t('purchase_invoice.classification.expense_rule_inactive') }})
-                </span>
-                <button v-if="canEditExpenseRule" type="button" @click="openExpenseRuleEdit"
-                  class="ml-2 cursor-pointer text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1 text-xs whitespace-nowrap">
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                  {{ t('purchase_invoice.classification.expense_rule_edit') }}
-                </button>
-              </template>
-              <span v-else-if="invoice.expense_classification?.source"
-                class="text-neutral-500">
-                {{ t('purchase_invoice.classification.expense_rule_none') }}
-                <span class="text-neutral-400">
-                  ({{ t('purchase_invoice.classification.expense_source_' + invoice.expense_classification.source) }})
-                </span>
-              </span>
-              <span v-else class="text-neutral-400">{{ t('purchase_invoice.classification.expense_rule_manual') }}</span>
-            </dd>
-          </div>
-          <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
-          <div class="flex justify-between gap-3">
-            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
-            <dd class="font-medium text-right text-neutral-700">
-              <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
-                {{ invoice.project_name }}
-              </RouterLink>
-              <span v-else class="text-neutral-400">—</span>
-            </dd>
-          </div>
-        </dl>
+        <!-- Účetní údaje dokladu jako dvousloupcová tabulka: popisek vlevo, hodnota hned
+             vedle, ať se nemusí hledat přes celou šířku sekce. -->
+        <div class="border border-neutral-200 rounded-md overflow-hidden">
+          <table class="w-full text-sm">
+            <tbody class="divide-y divide-neutral-100">
+              <tr>
+                <th scope="row" class="w-2/5 sm:w-64 py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.fields.document_kind') }}</th>
+                <td class="py-2 px-3 font-medium text-neutral-700">{{ t('purchase_invoice.document_kind.' + (invoice.document_kind || 'invoice')) }}</td>
+              </tr>
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.classification.vat_classification') }}</th>
+                <td class="py-2 px-3 font-medium text-neutral-700">
+                  <template v-if="invoice.vat_classification_code">
+                    <span class="font-mono">{{ invoice.vat_classification_code }}</span>
+                    <span v-if="vatClassificationLabel" class="ml-2 font-normal text-neutral-500">{{ vatClassificationLabel }}</span>
+                  </template>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.classification.tax_deductible') }}</th>
+                <td class="py-2 px-3 font-medium" :class="invoice.tax_deductible === false ? 'text-danger-600' : 'text-success-600'">
+                  {{ invoice.tax_deductible === false ? t('common.no') : t('common.yes') }}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.fields.is_fixed_asset') }}</th>
+                <td class="py-2 px-3 font-medium" :class="invoice.is_fixed_asset ? 'text-warning-600' : 'text-neutral-700'">
+                  {{ invoice.is_fixed_asset ? t('common.yes') : t('common.no') }}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.classification.expense_category') }}</th>
+                <td class="py-2 px-3 font-medium text-neutral-700">
+                  <template v-if="invoice.expense_category_label">
+                    {{ invoice.expense_category_label }}
+                    <span class="font-normal text-neutral-400">({{ invoice.expense_category_code }})</span>
+                  </template>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
+              </tr>
+              <!-- Podle čeho se účtovalo. Sekce dosud ukazovala jen VÝSLEDEK (druh, účet),
+                   takže se nedalo poznat, jestli za ním stojí firemní pravidlo (a dá se
+                   opravit), nebo jen dohad z klíčových slov. -->
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.classification.expense_rule') }}</th>
+                <td class="py-2 px-3 font-medium text-neutral-700">
+                  <template v-if="expenseRule">
+                    <span v-if="expenseRule.rule_exists">{{ expenseRule.rule_name }}</span>
+                    <span v-else class="text-warning-700">
+                      {{ t('purchase_invoice.classification.expense_rule_deleted', { id: expenseRule.rule_id }) }}
+                    </span>
+                    <span v-if="expenseRule.rule_exists && expenseRule.rule_is_active === false"
+                      class="ml-1 text-xs text-warning-700">
+                      ({{ t('purchase_invoice.classification.expense_rule_inactive') }})
+                    </span>
+                    <button v-if="canEditExpenseRule" type="button" @click="openExpenseRuleEdit"
+                      class="ml-2 cursor-pointer text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1 text-xs whitespace-nowrap">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                      {{ t('purchase_invoice.classification.expense_rule_edit') }}
+                    </button>
+                  </template>
+                  <span v-else-if="invoice.expense_classification?.source"
+                    class="font-normal text-neutral-500">
+                    {{ t('purchase_invoice.classification.expense_rule_none') }}
+                    <span class="text-neutral-400">
+                      ({{ t('purchase_invoice.classification.expense_source_' + invoice.expense_classification.source) }})
+                    </span>
+                  </span>
+                  <span v-else class="font-normal text-neutral-400">{{ t('purchase_invoice.classification.expense_rule_manual') }}</span>
+                </td>
+              </tr>
+              <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
+              <tr>
+                <th scope="row" class="py-2 px-3 text-left align-top font-normal text-neutral-500 bg-neutral-50">{{ t('purchase_invoice.classification.project') }}</th>
+                <td class="py-2 px-3 font-medium text-neutral-700">
+                  <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
+                    {{ invoice.project_name }}
+                  </RouterLink>
+                  <span v-else class="text-neutral-400">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </DocumentPostingPanel>
-
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
