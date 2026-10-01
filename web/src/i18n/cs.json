@@ -15531,6 +15531,7 @@
       "unbalanced": "Návrh není vyrovnaný — součet Má dáti se nerovná součtu Dal. Takový zápis systém nezaúčtuje; ohlaste to prosím.",
       "already_posted": "Doklad už je zaúčtovaný zápisem #{id}. Znovu se neúčtuje.",
       "ai_source": "Nákladový účet {account} pochází z automatické klasifikace dokladu.",
+      "dimension_routing": "Účtotvorná dimenze přesune při zaúčtování syntetiku na analytiky:",
       "hint": "Návrh vzniká ze stejných předkontací a pravidel automatizace, jaké se použijí při zaúčtování — potvrzením se zapíše přesně to, co vidíte.",
       "edit": "Upravit návrh",
       "back_to_proposal": "Zpět na návrh systému",

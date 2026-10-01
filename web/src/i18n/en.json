@@ -15531,6 +15531,7 @@
       "unbalanced": "The proposal is not balanced — total debit does not equal total credit. The system will not post such an entry; please report it.",
       "already_posted": "The document is already posted as entry #{id}. It will not be posted again.",
       "ai_source": "Expense account {account} comes from automatic document classification.",
+      "dimension_routing": "On posting, the account-driving dimension moves the synthetic account to analytic accounts:",
       "hint": "The proposal is built from the same posting rules and automation the actual posting uses — confirming writes exactly what you see.",
       "edit": "Edit the proposal",
       "back_to_proposal": "Back to the system proposal",

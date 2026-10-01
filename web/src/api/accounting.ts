@@ -235,6 +235,13 @@ export interface PostingPreview {
   balanced: boolean
   /** Účet z AI klasifikace, pokud ji doklad má — návrh z ní vychází. */
   ai_override: string | null
+  /** Účtotvorná dimenze: kam zaúčtování přesune výsledkové syntetiky návrhu. */
+  dimension_routing?: {
+    account_code: string
+    side: 'debit' | 'credit'
+    amount: number
+    targets: { account_code: string; amount: number }[]
+  }[]
   /** Id existujícího zápisu, když je doklad už zaúčtovaný. */
   already_posted: number | null
   /**

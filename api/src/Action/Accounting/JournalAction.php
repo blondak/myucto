@@ -874,11 +874,29 @@ final class JournalAction
             'lines'         => $this->describeLines($supplierId, $lines),
             'balanced'      => self::linesBalanced($lines),
             'ai_override'   => $aiOverride,
+            // Účtotvorná dimenze: kam zaúčtování přesune výsledkové syntetiky (návrh je nese dál).
+            'dimension_routing' => $this->dimensionRouting($supplierId, $sourceType, $docId, $lines, $docDate),
             'already_posted' => $this->existingEntryId($supplierId, $sourceType, $docId),
             'rule_basis'    => $sourceType === 'purchase_invoice'
                 ? $this->ruleBasis($supplierId, $docId)
                 : null,
         ]);
+    }
+
+    /**
+     * Náhled účtotvorné dimenze k návrhu kontace. Chyba náhledu (např. chybějící účet,
+     * kterou návrh hlásí jinde) nesmí shodit celý náhled — vrátí se prázdný seznam.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function dimensionRouting(int $supplierId, string $sourceType, int $docId, array $lines, string $entryDate): array
+    {
+        try {
+            return $this->posting->dimensionRoutingPreview($supplierId, $sourceType, $docId, $lines, $entryDate);
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

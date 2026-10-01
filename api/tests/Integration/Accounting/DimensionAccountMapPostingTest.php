@@ -281,6 +281,22 @@ final class DimensionAccountMapPostingTest extends TestCase
         self::assertSame(['518' => 10_000], $this->expenseCents($this->postPurchase($purchase)), 'Mapa platná od července červnový doklad nemění.');
     }
 
+    /** Náhled kontace ukáže, kam zaúčtování syntetiku přesune — touž cestou jako zápis. */
+    public function testPostingPreviewShowsDimensionRouting(): void
+    {
+        $this->enableDriving();
+        $purchase = $this->purchase('F2-PREVIEW', [[400.00, 84.00]]);
+        $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $this->office], []);
+        $lines = $this->posting->buildFromPurchaseInvoice($this->supplierId, $purchase);
+
+        self::assertSame([[
+            'account_code' => '518',
+            'side' => 'debit',
+            'amount' => 400.0,
+            'targets' => [['account_code' => '518.200', 'amount' => 400.0]],
+        ]], $this->posting->dimensionRoutingPreview($this->supplierId, 'purchase_invoice', $purchase, $lines, self::YEAR . '-06-15'));
+    }
+
     /** Kontrola uzávěrky: výsledkový řádek, který zůstal na syntetice s mapou, je varování. */
     public function testClosingCheckWarnsAboutExpenseLeftOnMappedSynthetic(): void
     {

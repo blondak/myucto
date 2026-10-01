@@ -406,6 +406,14 @@ async function confirmPost(): Promise<void> {
           {{ t('accounting.posting_preview.unbalanced') }}
         </p>
 
+        <div v-if="preview.dimension_routing?.length" class="text-xs text-neutral-600 space-y-1" data-test="posting-preview-dimension-routing">
+          <p class="text-neutral-500">{{ t('accounting.posting_preview.dimension_routing') }}</p>
+          <p v-for="(r, i) in preview.dimension_routing" :key="i" class="font-mono">
+            {{ r.account_code }} ({{ r.side === 'debit' ? t('accounting.posting_preview.debit') : t('accounting.posting_preview.credit') }})
+            → <span v-for="(target, j) in r.targets" :key="target.account_code">{{ j > 0 ? ', ' : '' }}{{ target.account_code }} {{ formatMoney(target.amount, 'CZK') }}</span>
+          </p>
+        </div>
+
         <p v-if="!editing && preview.ai_override" class="text-xs text-neutral-500">
           {{ t('accounting.posting_preview.ai_source', { account: preview.ai_override }) }}
         </p>

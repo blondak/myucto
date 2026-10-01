@@ -37658,6 +37658,38 @@ components:
           type:
           - string
           - 'null'
+        dimension_routing:
+          type: array
+          description: Účtotvorná dimenze — výsledkové syntetiky, které zaúčtování přesune na analytiky (návrh zůstává na syntetice).
+          items:
+            type: object
+            required:
+            - account_code
+            - side
+            - amount
+            - targets
+            properties:
+              account_code:
+                type: string
+              side:
+                type: string
+                enum:
+                - debit
+                - credit
+              amount:
+                type: number
+              targets:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - account_code
+                  - amount
+                  properties:
+                    account_code:
+                      type: string
+                    amount:
+                      type: number
         already_posted:
           type:
           - number

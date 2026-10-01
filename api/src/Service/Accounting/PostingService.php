@@ -2603,6 +2603,62 @@ final class PostingService
     }
 
     /**
+     * Náhled účtotvorné dimenze pro návrh kontace: které výsledkové řádky zaúčtování
+     * přesune ze syntetiky na analytiky a s jakými částkami. Počítá se TOUŽ cestou jako
+     * {@see postDocument()} (překlad účtů, razítko dimenzí, mapa), nic se nezapisuje.
+     *
+     * Návrh sám zůstává na syntetice schválně: řádky z dialogu se posílají zpět
+     * k zaúčtování a teprve tam je dimenze dokladu rozdělí. Kdyby návrh nesl už
+     * analytiky, razítko by výsledkový řádek analytiky rozdělilo podle položek znovu.
+     *
+     * @param list<array<string,mixed>> $lines řádky z builderu (account_code, side, amount)
+     * @return list<array{account_code:string, side:string, amount:float, targets:list<array{account_code:string, amount:float}>}>
+     */
+    public function dimensionRoutingPreview(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate): array
+    {
+        $router = new DimensionAccountRouter($this->db);
+        $context = $router->context($supplierId, $entryDate);
+        if ($context === null || $lines === []) {
+            return [];
+        }
+        $codeMap = $this->accounts->codeToIdMap($supplierId);
+        $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType);
+        $resolved = $this->dimensionStamper()->stamp(
+            $supplierId,
+            $sourceType,
+            $sourceId,
+            $resolved,
+            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+            $entryDate,
+        );
+        $single = $this->singleAnalyticMap($supplierId);
+        $out = [];
+        foreach ($resolved as $line) {
+            $routed = $router->apply($supplierId, [$line], $entryDate, $single);
+            if (count($routed) === 1 && (int) $routed[0]['account_id'] === (int) $line['account_id']) {
+                continue;
+            }
+            $from = (string) $context['accounts'][(int) $line['account_id']]['code'];
+            $key = $from . '|' . $line['side'];
+            $out[$key] ??= ['account_code' => $from, 'side' => (string) $line['side'], 'amount' => 0.0, 'targets' => []];
+            $out[$key]['amount'] = round($out[$key]['amount'] + (float) $line['amount'], 2);
+            foreach ($routed as $part) {
+                $to = (string) $context['accounts'][(int) $part['account_id']]['code'];
+                $out[$key]['targets'][$to] = round(($out[$key]['targets'][$to] ?? 0.0) + (float) $part['amount'], 2);
+            }
+        }
+        return array_values(array_map(static function (array $row): array {
+            ksort($row['targets']);
+            $targets = [];
+            foreach ($row['targets'] as $code => $amount) {
+                $targets[] = ['account_code' => (string) $code, 'amount' => $amount];
+            }
+            $row['targets'] = $targets;
+            return $row;
+        }, $out));
+    }
+
+    /**
      * Celá mapa přesměru (syntetika => jediná analytika) — pro účtotvornou dimenzi,
      * která musí poznat řádek, jejž přesměr poslal ze syntetiky na analytiku.
      *
