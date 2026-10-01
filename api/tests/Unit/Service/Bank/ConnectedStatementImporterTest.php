@@ -208,13 +208,13 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame(['EUR'], $this->pdo->query('SELECT DISTINCT currency FROM bank_transactions')->fetchAll(PDO::FETCH_COLUMN));
     }
 
-    public function testMatchingFailureCanResumeIdenticalFileWithoutDuplicatingRows(): void
+    public function testRetryOfIdenticalFileAfterMatchingFailureOnlyLinksStoredRows(): void
     {
-        $attempt = 0;
-        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturnCallback(function (array $ids) use (&$attempt): array {
+        // Uložené pohyby se znovu nahraným výpisem jen propojí; dorovnání po chybě
+        // párování je „Znovu spárovat" u výpisu (StatementImportTransactions).
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturnCallback(function (array $ids): array {
             self::assertCount(2, $ids);
-            if (++$attempt === 1) throw new \RuntimeException('synthetic matching failure');
-            return [];
+            throw new \RuntimeException('synthetic matching failure');
         });
         try {
             $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
@@ -234,13 +234,11 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 20);
     }
 
-    public function testChangedFileAfterMatchingFailureResumesPreviouslyStoredMovements(): void
+    public function testChangedFileAfterMatchingFailureOnlyLinksStoredMovements(): void
     {
-        $attempt = 0;
-        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturnCallback(function (array $ids) use (&$attempt): array {
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturnCallback(function (array $ids): array {
             self::assertCount(2, $ids);
-            if (++$attempt === 1) throw new \RuntimeException('synthetic matching failure');
-            return [];
+            throw new \RuntimeException('synthetic matching failure');
         });
         try {
             $this->importer->importConnected($this->gpc(), 'synthetic.gpc', null, 1, 10);
@@ -327,13 +325,13 @@ final class ConnectedStatementImporterTest extends TestCase
         self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions bt WHERE ' . \MyInvoice\Service\Bank\StatementTransactionScope::sql($api['statement_id']))->fetchColumn());
     }
 
-    public function testApiAfterGpcPreservesTransactionAndResumesUnmatchedMovement(): void
+    public function testApiAfterGpcPreservesTransactionAndDoesNotRematchIt(): void
     {
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['header']['account_number'] = 'CZ2920100000001000000005';
         $parsed['transactions'][0]['bank_ref'] = '0001001';
-        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturnCallback(function (array $ids): array {
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturnCallback(function (array $ids): array {
             self::assertSame([1], $ids);
             return [];
         });
@@ -350,7 +348,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
-        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
         $this->importer->import($content, 'synthetic.gpc', null, 1);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
         try {
@@ -427,7 +425,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
-        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
         $this->importer->importConnectedParsed($parsed, 'synthetic-first-api', 'synthetic.json', null, 1, 10);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
         try {
@@ -451,7 +449,7 @@ final class ConnectedStatementImporterTest extends TestCase
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
-        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::exactly(2))->method('matchBatch')->willReturn([]);
         $this->importer->import($content, 'synthetic.gpc', null, 1);
         try {
             $this->importer->importConnectedParsed($parsed, 'synthetic-first', 'synthetic.json', null, 1, 10);
@@ -672,7 +670,7 @@ final class ConnectedStatementImporterTest extends TestCase
             'description' => $oldDescription, 'variable_symbol' => $oldVs,
             'counterparty_account' => $oldAccount, 'counterparty_bank' => $oldAccount === null ? null : '0100',
         ])];
-        $this->matcher->expects(self::exactly(3))->method('matchBatch')->willReturn([]);
+        $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
         $this->importer->importConnectedParsed($stored, 'synthetic-original', 'synthetic-original.txt', null, 1, 10, $source);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
         $incoming = $stored;

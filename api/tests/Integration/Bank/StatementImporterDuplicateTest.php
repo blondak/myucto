@@ -493,25 +493,25 @@ final class StatementImporterDuplicateTest extends TestCase
      */
     public function testDuplicateCheckDoesNotQueryPerLine(): void
     {
-        $account = '9990562359';
-        $currencyId = $this->registerCurrency($account, '2010');
-        $docs = array_map(static fn (int $i): string => (string) (27000 + $i), range(1, 40));
+        $queries = [];
+        foreach (['9990562359' => 40, '9990562358' => 10] as $account => $lines) {
+            $currencyId = $this->registerCurrency((string) $account, '2010');
+            $docs = array_map(static fn (int $i): string => (string) (27000 + $i), range(1, $lines));
+            $first = $this->import($this->gpc((string) $account, $docs, stmtNo: '051'), $currencyId);
+            self::assertSame($lines, $first['transactions']);
 
-        $before = $this->selects();
-        $first = $this->import($this->gpc($account, $docs, stmtNo: '051'), $currencyId);
-        $firstSelects = $this->selects() - $before;
-        self::assertSame(40, $first['transactions']);
+            $before = $this->selects();
+            $again = $this->import($this->gpc((string) $account, $docs, stmtNo: '052'), $currencyId);
+            $queries[$lines] = $this->selects() - $before;
+            self::assertSame(0, $again['transactions']);
+            self::assertSame($lines, $again['skipped_duplicates']);
+        }
 
-        $before = $this->selects();
-        $again = $this->import($this->gpc($account, $docs, stmtNo: '052'), $currencyId);
-        $againSelects = $this->selects() - $before;
-        self::assertSame(0, $again['transactions']);
-        self::assertSame(40, $again['skipped_duplicates']);
-
-        // Nové řádky stojí proti opakovanému importu (párování a zpracování je u obou
-        // stejné) jen svůj INSERT. Před opravou 1030 proti 868 dotazům: každý nový řádek
-        // se ptal zvlášť na všechny čtyři otisky-kandidáty.
-        self::assertLessThanOrEqual($againSelects + 40, $firstSelects, "první import {$firstSelects}, opakovaný {$againSelects}");
+        // Překrývající se výpis (vše duplicitní) stojí na řádek jen propojení s evidovaným
+        // pohybem a jeho promítnutí do měsíčního výpisu (4 dotazy). Dotaz na každý ze čtyř
+        // otisků-kandidátů by přidal další čtyři na řádek.
+        $perLine = ($queries[40] - $queries[10]) / 30;
+        self::assertLessThanOrEqual(5, $perLine, "opakovaný import 40 řádků {$queries[40]}, 10 řádků {$queries[10]}");
     }
 
     private function selects(): int

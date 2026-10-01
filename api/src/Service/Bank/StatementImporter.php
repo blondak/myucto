@@ -139,8 +139,8 @@ final class StatementImporter
             if ($source === 'bank_api' && trim((string) $account['account_number']) !== '') {
                 $parsed['header']['account_number'] = trim((string) $account['account_number']);
             }
-            $processingIds = [];
-            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds, $reconciliationConfirmations, $supplierId, $ignoreDecision);
+            $touched = new StatementImportTransactions();
+            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $touched, $reconciliationConfirmations, $supplierId, $ignoreDecision);
             $scope = $pdo->prepare("SELECT id FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = ? AND currency = ? AND COALESCE(bank_code, '') = ?");
             $scope->execute([$result['statement_id'], $supplierId, $source, $account['code'], $account['bank_code'] ?? '']);
             if ($scope->fetchColumn() === false) {
@@ -148,7 +148,7 @@ final class StatementImporter
             }
             $affectedStatements = [$result['statement_id']];
             $transactionScope = $pdo->prepare('SELECT bs.id, bs.supplier_id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?');
-            foreach ($processingIds as $txId) {
+            foreach ($touched->all() as $txId) {
                 $transactionScope->execute([$txId]);
                 $owner = $transactionScope->fetch(PDO::FETCH_ASSOC);
                 if (!$owner || (int) $owner['supplier_id'] !== $supplierId) {
@@ -179,7 +179,7 @@ final class StatementImporter
 
         $pendingIds = [];
         $state = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?');
-        foreach (array_unique($processingIds) as $txId) {
+        foreach ($touched->toProcess() as $txId) {
             $state->execute([$txId]);
             $matchStatus = $state->fetchColumn();
             if ($matchStatus === 'unmatched') {
@@ -229,8 +229,7 @@ final class StatementImporter
                 return $this->importScoped($parsed, $pdfBytes, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'pdf', false, [], $ignoreDecision);
             }
         }
-        $processingIds = null;
-        return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf', false, $processingIds, [], $supplierId);
+        return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf', false, null, [], $supplierId);
     }
 
     /**
@@ -238,8 +237,9 @@ final class StatementImporter
      * @param string $rawBytes Originální bajty souboru — hashují se pro dedup a ukládají
      *   se buď do file_content (source='gpc') nebo pdf_content (source='pdf').
      */
-    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = [], ?int $supplierId = null, ?array $ignoreDecision = null): array
+    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?StatementImportTransactions $touched = null, array $reconciliationConfirmations = [], ?int $supplierId = null, ?array $ignoreDecision = null): array
     {
+        $touched ??= new StatementImportTransactions();
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
 
@@ -269,7 +269,9 @@ final class StatementImporter
             if ($deferProcessing) {
                 $query = $pdo->prepare('SELECT bt.id FROM bank_transactions bt WHERE ' . StatementTransactionScope::sql((int) $existingId) . ' ORDER BY bt.id');
                 $query->execute();
-                $processingIds = array_map('intval', $query->fetchAll(PDO::FETCH_COLUMN));
+                foreach ($query->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                    $touched->linked((int) $id);
+                }
             }
             return [
                 'statement_id' => (int) $existingId,
@@ -398,7 +400,7 @@ final class StatementImporter
         $matched = 0;
         $inserted = 0;
         $skipped = 0;
-        $matchIds = [];
+        $ignoredIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
             ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $portableFingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
@@ -414,7 +416,7 @@ final class StatementImporter
                 if ($aliasIds !== []) $duplicateId = (int) array_key_first($aliasIds);
             }
             if ($duplicateId !== false) {
-                $processingIds[] = (int) $duplicateId;
+                $touched->linked((int) $duplicateId);
                 $this->linkImport($linkImport, $aliasMap, $statementId, (int) $duplicateId, $fingerprint);
                 $skipped++;
                 continue;
@@ -422,7 +424,7 @@ final class StatementImporter
             foreach ($candidates as $candidate) {
                 $duplicateId = $storedIds[$candidate] ?? false;
                 if ($duplicateId !== false) {
-                    if ($deferProcessing) $processingIds[] = (int) $duplicateId;
+                    $touched->linked((int) $duplicateId);
                     $alreadyStored = true;
                     break;
                 }
@@ -447,9 +449,7 @@ final class StatementImporter
                     $concurrentId = $findDuplicateTx->fetchColumn();
                     if ($concurrentId === false) throw $e;
                     $storedIds[$fingerprint] = (int) $concurrentId;
-                    if ($deferProcessing) {
-                        $processingIds[] = (int) $concurrentId;
-                    }
+                    $touched->linked((int) $concurrentId);
                     $skipped++;
                     continue;
                 }
@@ -457,20 +457,22 @@ final class StatementImporter
             }
             $txId = (int) $pdo->lastInsertId();
             $storedIds[$fingerprint] = $txId;
-            if ($deferProcessing) $processingIds[] = $txId;
+            $touched->inserted($txId);
             $inserted++;
 
             if (isset($selectedIgnores[$index])) {
                 $transfer->apply($txId, $selectedIgnores[$index], $statementSupplierId, $userId);
                 $ignoredTransferred++;
-            } else {
-                $matchIds[] = $txId;
+                $ignoredIds[$txId] = true;
             }
         }
 
         $processed = $deferProcessing
             ? ['matched' => 0, 'superseded' => 0]
-            : $this->processTransactions($matchIds, $userId);
+            : $this->processTransactions(array_values(array_filter(
+                $touched->toProcess(),
+                static fn (int $id): bool => !isset($ignoredIds[$id]),
+            )), $userId);
         $matched = $processed['matched'];
 
         $pdo->prepare('UPDATE bank_statements SET matched_count = ?, transaction_count = ? WHERE id = ?')
