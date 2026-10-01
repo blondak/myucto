@@ -7,6 +7,8 @@ const m = vi.hoisted(() => ({
   routerPush: vi.fn(),
   routerReplace: vi.fn(),
   listAccounts: vi.fn(),
+  dimsSave: vi.fn(),
+  dimsLoad: vi.fn(),
   supplier: { accounting_mode: 'tax_evidence' },
 }))
 
@@ -34,6 +36,16 @@ vi.mock('vue-router', () => ({
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
+
+vi.mock('@/composables/useDocumentDimensions', async () => {
+  const { ref } = await import('vue')
+  return {
+    useDocumentDimensions: () => ({
+      enabled: ref(false), canEdit: ref(false), header: ref({}), hasAutoFilled: ref(false),
+      load: m.dimsLoad, save: m.dimsSave, watchDefaults: vi.fn(),
+    }),
+  }
+})
 
 import OtherItemEditor from '../OtherItemEditor.vue'
 
@@ -76,6 +88,17 @@ describe('OtherItemEditor partner', () => {
       partner_name: 'Syntetický dodavatel',
       title: 'Upravený nájem',
     }))
+  })
+
+  it('načte a po uložení dokladu uloží dimenze hlavičky', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(m.dimsLoad).toHaveBeenCalledWith(42)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.dimsSave).toHaveBeenCalledWith(42)
+    expect(m.update.mock.invocationCallOrder[0]).toBeLessThan(m.dimsSave.mock.invocationCallOrder[0])
   })
 
   it('při výslovném vymazání protistrany odstraní i vazbu', async () => {

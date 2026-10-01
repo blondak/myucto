@@ -470,14 +470,17 @@
       "other_items"
     ],
     "other-item-new": [
+      "dimensions",
       "other_items"
     ],
     "other-item-detail": [
+      "dimensions",
       "documents",
       "linked_documents",
       "other_items"
     ],
     "other-item-edit": [
+      "dimensions",
       "other_items"
     ],
     "document-requests": [
@@ -650,6 +653,15 @@
     ],
     "accounting-assets": [
       "codebookTransfer"
+    ],
+    "accounting-asset-new": [
+      "dimensions"
+    ],
+    "accounting-asset-detail": [
+      "dimensions"
+    ],
+    "accounting-asset-edit": [
+      "dimensions"
     ],
     "accounting-period-closing": [
       "checks"

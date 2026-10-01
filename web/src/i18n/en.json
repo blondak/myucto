@@ -16458,6 +16458,7 @@
         "section_accounting_dep": "Accounting depreciation",
         "section_historical": "Historical asset (recorded before onboarding)",
         "historical_hint": "The card is created directly in use with depreciation already claimed; the put-into-use entry is not posted (balances came in via opening balances).",
+        "dimensions_hint": "Put into use, accounting depreciation and disposal take the card dimensions. A split between several values (e.g. 60/40) is set on the card detail. Left empty, the dimensions of the acquisition purchase invoice are used.",
         "accumulated_hint": "Derived from the asset account; empty = non-depreciated asset (§27).",
         "no_depreciation": "Not depreciated",
         "acc_prospective_hint": "Changes to accounting parameters apply prospectively from the following month (CAS 013).",

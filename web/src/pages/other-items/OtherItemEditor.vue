@@ -13,6 +13,8 @@ import DateInput from '@/components/ui/DateInput.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -22,6 +24,8 @@ const toast = useToast()
 const editId = computed(() => Number(route.params.id || 0))
 const isEdit = computed(() => editId.value > 0)
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
+const docDims = useDocumentDimensions('other-items')
+const dimsReady = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const splitPosting = ref(false)
@@ -103,13 +107,22 @@ async function load() {
       if (!splitPosting.value && lines.length === 1) form.counter_account_code = lines[0].account_code
       form.note = item.note || ''
     }))
+    if (isEdit.value) requests.push(docDims.load(editId.value))
     await Promise.all(requests)
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
     loading.value = false
+    dimsReady.value = true
   }
 }
+
+// Výchozí dimenze protistrany doplní prázdné typy hlavičky.
+docDims.watchDefaults(
+  () => ({ client_id: form.partner_id }),
+  () => dimsReady.value,
+  () => !isEdit.value,
+)
 
 async function save() {
   if (saving.value) return
@@ -144,6 +157,7 @@ async function save() {
   saving.value = true
   try {
     const result = isEdit.value ? await otherItemsApi.update(editId.value, payload) : await otherItemsApi.create(payload)
+    await docDims.save(isEdit.value ? editId.value : Number(result.id))
     toast.success(t('common.saved'))
     await router.push({ name: 'other-item-detail', params: { id: result.source_id || result.id } })
   } catch (error: any) {
@@ -205,6 +219,11 @@ onMounted(load)
           <label class="text-sm font-medium">{{ t('other_items.variable_symbol') }}
             <input v-model="form.variable_symbol" maxlength="20" inputmode="numeric" pattern="[0-9]*" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
           </label>
+          <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="other-item-dimensions">
+            <p class="mb-1 block text-sm font-medium text-neutral-700">{{ t('dimensions.header_title') }}</p>
+            <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+            <p v-if="docDims.hasAutoFilled.value" class="mt-1 text-xs text-neutral-500" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
+          </div>
         </div>
       </section>
       <section v-if="isDoubleEntry" class="rounded-lg border border-neutral-200 bg-surface p-4">

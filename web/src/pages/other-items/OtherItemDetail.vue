@@ -16,6 +16,7 @@ import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 
@@ -345,6 +346,8 @@ onMounted(load)
           </dl>
         </section>
       </div>
+      <DocumentDimensionsPanel class="mt-4" doc-type="other-items" :doc-id="id" :readonly="item.status === 'cancelled'"
+                               :prefill="{ client_id: item.partner_id ?? null }" />
       <section v-if="isDoubleEntry && item.journal_entry_id" class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>

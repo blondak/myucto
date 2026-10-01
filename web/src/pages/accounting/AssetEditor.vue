@@ -9,6 +9,8 @@ import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -20,6 +22,8 @@ const isEdit = computed(() => assetId.value !== null)
 
 const loading = ref(false)
 const saving = ref(false)
+const docDims = useDocumentDimensions('assets')
+const dimsReady = ref(false)
 
 const form = reactive({
   inventory_number: '',
@@ -167,6 +171,7 @@ onMounted(async () => {
       locks.tax_params = a.locked?.tax_params ?? false
       locks.acquisition = a.locked?.acquisition ?? a.locked?.in_use ?? afterPutIntoUse
       locks.input_price = locks.acquisition || locks.tax_params
+      await docDims.load(assetId.value!)
     } else if (route.query.invoice_id) {
       await prefillFromInvoice(Number(route.query.invoice_id))
     }
@@ -174,8 +179,16 @@ onMounted(async () => {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
     loading.value = false
+    dimsReady.value = true
   }
 })
+
+// Výchozí dimenze karty z přijaté faktury pořízení (doplní jen prázdné typy).
+docDims.watchDefaults(
+  () => ({ purchase_invoice_id: form.purchase_invoice_id }),
+  () => dimsReady.value,
+  () => !isEdit.value,
+)
 
 /** Předvyplnění z PF kandidáta — VC dle R25 (bez nároku na odpočet z ceny s DPH). */
 async function prefillFromInvoice(invoiceId: number) {
@@ -250,6 +263,7 @@ async function save() {
     const result = isEdit.value
       ? await assetsApi.update(assetId.value!, payload)
       : await assetsApi.create(payload)
+    await docDims.save(result.asset?.id ?? assetId.value ?? 0)
     for (const w of result.warnings || []) toast.warning(w.message)
     toast.success(t('common.saved'))
     router.push({ name: 'accounting-asset-detail', params: { id: result.asset?.id ?? assetId.value } })
@@ -437,6 +451,14 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         <p class="mt-2 text-xs text-neutral-400">
           {{ isAccByTax ? t('accounting.assets.editor.acc_by_tax_hint') : t('accounting.assets.editor.acc_prospective_hint') }}
         </p>
+      </section>
+
+      <!-- Dimenze karty (zařazení, odpisy, vyřazení) -->
+      <section v-if="docDims.enabled.value" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4" data-test="asset-dimensions">
+        <h2 class="text-sm font-semibold mb-1">{{ t('dimensions.header_title') }}</h2>
+        <p class="text-xs text-neutral-400 mb-3">{{ t('accounting.assets.editor.dimensions_hint') }}</p>
+        <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+        <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
       </section>
 
       <!-- Historický majetek (R23) -->

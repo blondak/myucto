@@ -16458,6 +16458,7 @@
         "section_accounting_dep": "Účetní odpisy",
         "section_historical": "Historický majetek (evidovaný před nasazením)",
         "historical_hint": "Karta se založí rovnou v užívání s již uplatněnými odpisy; zařazení se nezaúčtuje (zůstatky přišly počátečními stavy).",
+        "dimensions_hint": "Zařazení, účetní odpisy i vyřazení dostanou dimenze karty. Rozpad mezi více hodnot (např. 60/40) nastavíte na detailu karty. Bez vyplnění se použijí dimenze přijaté faktury pořízení.",
         "accumulated_hint": "Odvozuje se z majetkového účtu; prázdné = neodpisovaný majetek (§27).",
         "no_depreciation": "Neodpisuje se",
         "acc_prospective_hint": "Změny účetních parametrů působí prospektivně od dalšího měsíce (ČÚS 013).",

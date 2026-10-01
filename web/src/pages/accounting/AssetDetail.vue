@@ -19,6 +19,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -558,6 +559,10 @@ const yearOptions = computed(() => {
           </RouterLink>
         </div>
       </div>
+
+      <!-- Dimenze karty: zařazení, odpisy i vyřazení je dostanou (F4). -->
+      <DocumentDimensionsPanel class="mb-4" doc-type="assets" :doc-id="asset.id"
+                               :prefill="{ purchase_invoice_id: asset.purchase_invoice_id ?? null }" />
 
       <!-- Technická zhodnocení -->
       <div v-if="improvements.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 overflow-hidden">
