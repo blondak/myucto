@@ -20,7 +20,7 @@ const auth = useAuthStore()
 // proxy), takže se tím reaktivita neztrácí a šablona je navíc auto-unwrapne
 // (a správně zúží v v-if větvích), stejně jako běžné top-level refy v <script setup>.
 const {
-  matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
+  matchBusy, matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
   gopayCandidate, loadingGoPayCandidate, matchingGoPay,
   splitSuggestions, loadingSplit, splitWindow,
   anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,
@@ -228,7 +228,7 @@ const {
         {{ matchError }}
       </div>
       <div class="flex justify-end">
-        <button @click="closeMatch" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+        <button @click="closeMatch" :disabled="matchBusy" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
       </div>
     </div>
   </div>

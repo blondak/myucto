@@ -2,16 +2,34 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { BTN_BASE, FILLED, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
-import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
+import type { BankTransactionActions, BankDetailAction } from '@/composables/useBankTransactionActions'
 import type { BankTransaction } from '@/api/bank'
 const props = defineProps<{ actions: BankTransactionActions; fallbackCurrency?: string | null; ownAccount?: string | null; ownBankCode?: string | null }>()
 const { t } = useI18n()
 const { textDetail, ignoreTarget, ignoreNote, ignoring, ignoreError, closeIgnore, confirmIgnore,
   unmatchTarget, unmatching, unmatchError, closeUnmatch, confirmUnmatch } = props.actions
+const detailActions = computed<ActionItem[]>(() => {
+  const tx = textDetail.value
+  if (!tx) return []
+  const action = (key: BankDetailAction, label: string, icon: ActionItem['icon'], tier: ActionItem['tier'], variant: ActionItem['variant']): ActionItem => ({
+    key, label: t(label), icon, tier, variant,
+    show: props.actions.canRunDetailAction(tx, key),
+    run: () => { void props.actions.runDetailAction(key) },
+  })
+  return [
+    action('match', 'bank.match', 'link', 'primary', 'primary'),
+    action('create', 'bank.create_purchase', 'plus', 'secondary', 'primary'),
+    action('request', 'bank.document_request.action', 'doc', 'secondary', 'warning'),
+    action('ignore', 'bank.ignore', 'x', 'overflow', 'neutral'),
+    action('unmatch', tx.match_status === 'ignored' ? 'bank.unignore' : 'bank.unmatch', 'uturn', 'overflow', 'neutral'),
+  ]
+})
+
 function statusLabel(status: string) { return t(`bank.match_status.${status}`) }
 function statusBadge(status: string) {
   return status === 'unmatched' || status === 'ignored' ? 'bg-neutral-100 text-neutral-600' : 'bg-success-50 text-success-600'
@@ -92,7 +110,8 @@ const transactionDetailFields = computed(() => {
         </div>
       </dl>
       <template #footer>
-        <div class="flex flex-wrap justify-end gap-2">
+        <div class="flex flex-wrap justify-end gap-2 w-full">
+        <ActionBar :actions="detailActions" />
         <button type="button" @click="textDetail = null"
           :class="[BTN_BASE, OUTLINE.neutral]">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ t('common.close') }}</button>

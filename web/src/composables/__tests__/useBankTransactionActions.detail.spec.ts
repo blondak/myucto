@@ -1,0 +1,176 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, reactive } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { useBankTransactionActions, type BankDetailAction, type BankTransactionActions } from '../useBankTransactionActions'
+import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
+import type { BankTransaction } from '@/api/bank'
+
+const mocks = vi.hoisted(() => ({
+  bank: { matchCandidates: vi.fn(), splitSuggestions: vi.fn(), matchManual: vi.fn(), matchMultiple: vi.fn(),
+    matchMultiplePurchases: vi.fn(), ignore: vi.fn(), unmatch: vi.fn(), createPurchaseInvoice: vi.fn(),
+    acceptMatchSuggestion: vi.fn(), rejectMatchSuggestion: vi.fn() },
+  request: vi.fn(), toast: vi.fn(), push: vi.fn(), canWrite: vi.fn(),
+  escape: null as null | (() => void),
+}))
+const supplier = reactive({ currentSupplierId: 1 })
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: mocks.canWrite }) }))
+vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
+vi.mock('@/api/invoices', () => ({ invoicesApi: {} }))
+vi.mock('@/api/purchaseInvoices', () => ({ purchaseInvoicesApi: {} }))
+vi.mock('@/api/documentRequests', () => ({ documentRequestsApi: { createFromBankTransaction: mocks.request } }))
+vi.mock('@/api/gopay', () => ({ gopayApi: {} }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }), RouterLink: { template: '<a><slot /></a>' } }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toast, error: mocks.toast, info: mocks.toast }) }))
+vi.mock('@/composables/useHotkey', () => ({ useHotkey: (_key: string, callback: () => void) => { mocks.escape = callback } }))
+vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message }))
+
+const wrappers: ReturnType<typeof mount>[] = []
+function setup() {
+  let actions!: BankTransactionActions
+  wrappers.push(mount(defineComponent({ setup() { actions = useBankTransactionActions({ reload: vi.fn() }); return () => null } })))
+  return actions
+}
+function row(status: BankTransaction['match_status'] = 'unmatched') {
+  return reactive({ id: 7, amount: -25, posted_at: '2099-01-01', currency: 'CZK', match_status: status } as BankTransaction)
+}
+function close(actions: BankTransactionActions, action: BankDetailAction) {
+  const handlers = { match: actions.closeMatch, create: actions.closeCreate, request: actions.closeRequestDoc, ignore: actions.closeIgnore, unmatch: actions.closeUnmatch }
+  handlers[action]()
+}
+beforeEach(() => {
+  vi.resetAllMocks()
+  supplier.currentSupplierId = 1
+  mocks.canWrite.mockReturnValue(true)
+  mocks.bank.matchCandidates.mockResolvedValue({ candidates: [], fallback: false })
+  mocks.bank.splitSuggestions.mockResolvedValue({ suggestions: [], window: 7 })
+})
+afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount() })
+
+describe('actions opened from bank transaction detail', () => {
+  it.each<BankDetailAction>(['match', 'create', 'request', 'ignore', 'unmatch'])('returns to the same detail after cancelling %s', async action => {
+    const actions = setup(), tx = row(action === 'unmatch' ? 'ignored' : 'unmatched')
+    actions.textDetail.value = tx
+    await actions.runDetailAction(action)
+    expect(actions.textDetail.value).toBeNull()
+    close(actions, action)
+    await flushPromises()
+    expect(actions.textDetail.value).toBe(tx)
+  })
+
+  it('does not open a detail when cancelling an action started from a row', async () => {
+    const actions = setup()
+    actions.startMatch(row())
+    actions.closeMatch()
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+  })
+
+  it.each<BankDetailAction>(['match', 'create'])('returns on Escape from %s', async action => {
+    const actions = setup(), tx = row()
+    actions.textDetail.value = tx
+    await actions.runDetailAction(action)
+    mocks.escape?.()
+    await flushPromises()
+    expect(actions.textDetail.value).toBe(tx)
+  })
+
+  it('guards permissions, transaction state and payroll matching', async () => {
+    const actions = setup(), tx = row()
+    mocks.canWrite.mockReturnValue(false)
+    actions.textDetail.value = tx
+    await actions.runDetailAction('match')
+    expect(actions.matchingTx.value).toBeNull()
+    mocks.canWrite.mockImplementation(permission => permission === 'purchase_invoices.create')
+    expect(actions.canRunDetailAction(tx, 'create')).toBe(true)
+    expect(actions.canRunDetailAction(tx, 'match')).toBe(false)
+    tx.amount = 25
+    expect(actions.canRunDetailAction(tx, 'create')).toBe(false)
+    mocks.canWrite.mockReturnValue(true)
+    tx.match_status = 'manual'
+    expect(actions.canRunDetailAction(tx, 'ignore')).toBe(false)
+    expect(actions.canRunDetailAction(tx, 'unmatch')).toBe(true)
+    tx.posting = { payroll_matched: true } as BankTransaction['posting']
+    for (const action of ['match', 'create', 'request', 'ignore', 'unmatch'] as BankDetailAction[]) {
+      expect(actions.canRunDetailAction(tx, action)).toBe(false)
+    }
+  })
+
+  it('renders the detail action bar and dispatches its match action', async () => {
+    const actions = setup(), tx = row()
+    actions.textDetail.value = tx
+    const wrapper = mount(BankTransactionDialogs, { props: { actions }, global: { stubs: {
+      Modal: { template: '<section><slot /><slot name="footer" /></section>' },
+      ActionBar: { props: ['actions'], template: '<div><template v-for="a in actions" :key="a.key"><button v-if="a.show" :data-action="a.key" @click="a.run">{{ a.label }}</button></template></div>' },
+    } } })
+    wrappers.push(wrapper)
+    expect(wrapper.find('[data-action="create"]').exists()).toBe(true)
+    expect(wrapper.find('[data-action="unmatch"]').exists()).toBe(false)
+    await wrapper.get('[data-action="match"]').trigger('click')
+    await flushPromises()
+    expect(actions.matchingTx.value).toBe(tx.id)
+    expect(actions.textDetail.value).toBeNull()
+  })
+
+  it('blocks cancellation during matching, then consumes the return target on success', async () => {
+    const actions = setup(), tx = row()
+    let resolve!: (value: object) => void
+    mocks.bank.matchManual.mockImplementation(() => new Promise(done => { resolve = done }))
+    actions.textDetail.value = tx
+    await actions.runDetailAction('match')
+    actions.matchVarsymbol.value = '123'
+    const pending = actions.confirmMatch()
+    actions.closeMatch()
+    expect(actions.matchingTx.value).toBe(tx.id)
+    resolve({})
+    await pending
+    actions.startMatch(tx)
+    actions.closeMatch()
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+  })
+
+  it.each<BankDetailAction>(['create', 'request', 'ignore', 'unmatch'])('does not restore detail after successful %s', async action => {
+    const actions = setup(), tx = row(action === 'unmatch' ? 'ignored' : 'unmatched')
+    mocks.bank.createPurchaseInvoice.mockResolvedValue({ purchase_invoice_id: 12 })
+    mocks.bank.ignore.mockResolvedValue({ ignore_note: null })
+    actions.textDetail.value = tx
+    await actions.runDetailAction(action)
+    actions.createVendorId.value = 3
+    const confirm = { create: actions.submitCreatePurchase, request: actions.submitRequestDoc, ignore: actions.confirmIgnore, unmatch: actions.confirmUnmatch, match: actions.confirmMatch }
+    await confirm[action]()
+    close(actions, action)
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+    actions.ignoreTx(row())
+    actions.closeIgnore()
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+  })
+
+  it('keeps the return target after failure and returns when the user cancels', async () => {
+    const actions = setup(), tx = row()
+    mocks.bank.ignore.mockRejectedValue(new Error('Test failure'))
+    actions.textDetail.value = tx
+    await actions.runDetailAction('ignore')
+    await actions.confirmIgnore()
+    expect(actions.ignoreTarget.value).toBe(tx)
+    actions.closeIgnore()
+    await flushPromises()
+    expect(actions.textDetail.value).toBe(tx)
+  })
+
+  it('does not restore another supplier’s detail after a supplier change', async () => {
+    const actions = setup()
+    actions.textDetail.value = row()
+    await actions.runDetailAction('match')
+    supplier.currentSupplierId = 2
+    await flushPromises()
+    actions.closeMatch()
+    await flushPromises()
+    expect(actions.textDetail.value).toBeNull()
+    expect(actions.matchingTx.value).toBeNull()
+  })
+})

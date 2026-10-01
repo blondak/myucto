@@ -36,7 +36,7 @@ function handleVendorCreated(client: Client) {
       <VendorPicker ref="vendorPickerRef" v-model="createVendorId" :on-create-new="() => { vendorModalOpen = true }" />
       <p class="text-xs text-neutral-500 mt-2 mb-4">{{ t('bank.create_purchase_hint') }}</p>
       <div class="flex justify-end gap-2">
-        <button @click="closeCreate" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+        <button @click="closeCreate" :disabled="creatingPi" class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
         <button @click="submitCreatePurchase" :disabled="!createVendorId || creatingPi"
           class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ creatingPi ? '…' : t('bank.create_purchase_submit') }}

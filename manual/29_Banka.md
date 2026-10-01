@@ -455,6 +455,17 @@ v detailu výpisu i mezi všemi pohyby, v tabulce a na mobilu. Po ignorování n
 zrušení spárování se seznam obnoví na pozadí se zachováním filtrů; v detailu
 výpisu zůstávají načtené i další stránky pohybů.
 
+### Akce v detailu pohybu
+
+Přímo v detailu otevřeném ikonou oka lze podle stavu pohybu a oprávnění
+spustit párování, vytvořit přijatou fakturu z nespárované odchozí platby
+nebo vyžádat doklad. V nabídce dalších akcí je ignorování a zrušení párování
+či ignorování. U pohybů spárovaných se mzdami se tyto akce nenabízejí.
+
+Zrušení akce otevřené z detailu vrátí původní detail transakce; u párování
+a vytvoření faktury funguje i Escape. Po úspěšném dokončení se detail
+znovu neotevírá. Během ukládání nelze dialog zrušit.
+
 ### 29.4.4 Ignorovat transakci
 
 Pro transakce, které nejsou platby faktur (poplatky, převody mezi vlastními
