@@ -1212,10 +1212,12 @@ final class PayrollSubmissionTransportAttemptRepository
         // Terminální stav hlídá i trigger, ale ten vrátí SQLSTATE. Sem se ta
         // situace dostane běžně (souběh automatiky a tlačítka), takže si
         // zaslouží větu, ne pád MariaDB.
+        // Uživatel vidí pořadí pokusu („Pokus č. 1"), ne interní id řádku.
         if (in_array($current['status'], ['completed', 'expired'], true)) {
             throw new \DomainException(
-                'Pokus o odeslání #' . $attemptId . ' je už uzavřený ('
-                . (string) $current['status'] . ') a znovu otevřít se nedá.',
+                'Pokus o odeslání č. ' . (int) $current['attempt_no'] . ' je už uzavřený ('
+                . ($current['status'] === 'completed' ? 'protokol dotažen' : 'propadlo')
+                . ') a znovu otevřít se nedá.',
             );
         }
 

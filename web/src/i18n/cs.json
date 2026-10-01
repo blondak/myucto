@@ -10826,6 +10826,7 @@
         "jmhz_delivered_protocol_period_mismatch": "Doručený protokol patří jinému rozhodnému období, než je toto podání.",
         "jmhz_delivered_protocol_submission_mismatch": "Doručený protokol neuvádí GUID tohoto podání.",
         "jmhz_delivered_protocol_variable_symbol_mismatch": "Doručený protokol patří jinému variabilnímu symbolu, než je toto podání.",
+        "jmhz_dispatch_attempt_closed": "Pokus o odeslání je už uzavřený, stav se u něj znovu nezjišťuje.",
         "jmhz_dispatch_attempt_unknown": "Pokus o odeslání podání s uvedeným identifikátorem neexistuje.",
         "jmhz_dispatch_class_unsupported": "Transport nepodporuje tento druh podání ČSSZ.",
         "jmhz_dispatch_close_premature": "Transakci lze uzavřít až po dotažení protokolu; nejdřív se musí zjistit výsledek zpracování u ČSSZ.",

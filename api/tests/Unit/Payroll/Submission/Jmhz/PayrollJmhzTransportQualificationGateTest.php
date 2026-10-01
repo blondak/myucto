@@ -60,7 +60,6 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             // dřív, než se na ně vůbec dojde. Skutečná instance nad atrapami,
             // aby kvůli testu nemusela služba do seznamu bypass-finals.
             new PayrollSubmissionAttemptDeletionService(
-                $this->createStub(Connection::class),
                 $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             ),
             $this->createStub(ActivityLogger::class),
@@ -107,7 +106,6 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             $access,
             new PayrollProductionGate($states),
             new PayrollSubmissionAttemptDeletionService(
-                $this->createStub(Connection::class),
                 $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             ),
             $this->createStub(ActivityLogger::class),

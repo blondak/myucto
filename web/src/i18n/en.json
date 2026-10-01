@@ -10826,6 +10826,7 @@
         "jmhz_delivered_protocol_period_mismatch": "The delivered protocol belongs to a different reporting period than this submission.",
         "jmhz_delivered_protocol_submission_mismatch": "The delivered protocol does not state the GUID of this submission.",
         "jmhz_delivered_protocol_variable_symbol_mismatch": "The delivered protocol belongs to a different variable symbol than this submission.",
+        "jmhz_dispatch_attempt_closed": "The submission attempt is already closed, its status is not queried again.",
         "jmhz_dispatch_attempt_unknown": "There is no submission attempt with the given identifier.",
         "jmhz_dispatch_class_unsupported": "The transport does not support this kind of submission to the social security administration.",
         "jmhz_dispatch_close_premature": "The transaction can only be closed after the protocol has been retrieved; the processing result from the social security administration must be obtained first.",

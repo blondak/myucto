@@ -1028,8 +1028,13 @@ Jsou na to dvě cesty a liší se tím, co po nich zůstane:
 Zahození je běžná cesta — historie pokusů je záměrně úplná, aby šlo dohledat,
 co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá** a jen
 mate: typicky první nepovedený pokus u podání, které nakonec odešlo jinou
-cestou. Aplikace proto smazat nedovolí pokus, ke kterému úřad vydal protokol
-nebo dodejku, ani pokus, jehož identifikátorem je podání u úřadu vedené.
+cestou. Tlačítko **Smazat pokus** se proto nabízí jen u pokusu, který úřad
+nikdy nepřevzal: pokus připravený a neodeslaný nebo pokus, který selhal dřív,
+než ho úřad převzal. Pokus odeslaný na úřad (s časem odeslání nebo
+identifikátorem CorrelationID, čekající na protokol, s dotaženým protokolem
+nebo „Možná doručeno") je doklad o ostrém podání a smazat ho nejde. **Zjistit
+stav** se u uzavřeného pokusu (protokol dotažen nebo propadlo) nenabízí,
+výsledek už je známý.
 
 ### 85.11.4 Test měsíčního hlášení a nálezy
 

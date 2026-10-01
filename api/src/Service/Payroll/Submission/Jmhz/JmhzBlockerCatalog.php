@@ -228,6 +228,7 @@ final class JmhzBlockerCatalog
         'jmhz_delivered_protocol_period_mismatch' => 'submission',
         'jmhz_delivered_protocol_submission_mismatch' => 'submission',
         'jmhz_delivered_protocol_variable_symbol_mismatch' => 'submission',
+        'jmhz_dispatch_attempt_closed' => 'submission',
         'jmhz_dispatch_attempt_unknown' => 'submission',
         'jmhz_dispatch_class_unsupported' => 'submission',
         'jmhz_dispatch_close_premature' => 'submission',

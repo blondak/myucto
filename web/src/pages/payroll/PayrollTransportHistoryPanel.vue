@@ -500,8 +500,24 @@ function protocolTone(status: string): string {
 }
 
 /** Doptat se jde jen tam, kde brána přidělila CorrelationID. */
-function canPoll(attempt: PayrollJmhzTransportAttempt): boolean {
+function hasCorrelation(attempt: PayrollJmhzTransportAttempt): boolean {
   return (attempt.correlation_reference ?? '') !== ''
+}
+
+/**
+ * Uzavřený pokus (protokol dotažen, nebo ho automatika vzdala) výsledek už
+ * má a ledger ho znovu neotevře; dotaz by skončil jen chybou.
+ */
+function canPoll(attempt: PayrollJmhzTransportAttempt): boolean {
+  return hasCorrelation(attempt) && !['completed', 'expired'].includes(attempt.status)
+}
+
+/**
+ * Smazat jde jen pokus, který úřad nikdy nepřevzal. Rozhoduje server stejným
+ * pravidlem, jakým smazání sám hlídá; bez jeho odpovědi se nenabízí.
+ */
+function canDelete(attempt: PayrollJmhzTransportAttempt): boolean {
+  return canWrite.value && attempt.can_delete === true
 }
 
 /**
@@ -512,7 +528,7 @@ function canPoll(attempt: PayrollJmhzTransportAttempt): boolean {
  * druhé uzavření by u ČSSZ byl dotaz na transakci, která už neexistuje.
  */
 function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
-  return attempt.status === 'completed' && canPoll(attempt) && !attempt.closed_at
+  return attempt.status === 'completed' && hasCorrelation(attempt) && !attempt.closed_at
 }
 
 /**
@@ -2142,12 +2158,8 @@ onMounted(loadVariableSymbols)
                       ? t('payroll.submissions.transport.reverify.running')
                       : t('payroll.submissions.transport.reverify.action') }}
                   </button>
-                  <!--
-                    Pokus „možná doručeno" je jediná stopa, že požadavek odešel;
-                    server jeho smazání odmítne, tlačítko se proto nenabízí.
-                  -->
                   <button
-                    v-if="canWrite && attempt.status !== 'possibly_delivered'"
+                    v-if="canDelete(attempt)"
                     type="button"
                     :data-test="`transport-delete-${attempt.id}`"
                     :class="btnOutlineSm('danger')"

@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAttemptDeletionService;
-use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -20,17 +19,12 @@ use PHPUnit\Framework\TestCase;
  */
 final class PayrollSubmissionAttemptDeletionRulesTest extends TestCase
 {
-    private const SUPPLIER = 11;
-    private const ENVIRONMENT = 'production';
-
     /** Pokus s protokolem od úřadu je doklad o odeslání. */
     public function testCompletedAttemptCannotBeDeleted(): void
     {
-        $service = $this->service($this->pdoThatMustNotBeQueried());
-
-        $reason = $service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
+        $reason = $this->service()->blockedReason([
             'status' => 'completed',
-            'submission_id' => 5,
+            'sent_at' => '2026-10-01 08:00:00',
             'correlation_reference' => 'ABC123',
         ]);
 
@@ -39,31 +33,14 @@ final class PayrollSubmissionAttemptDeletionRulesTest extends TestCase
     }
 
     /**
-     * Uvízlý pokus bez identifikátoru u úřadu nemá co doložit — a zrovna ten
-     * v přehledu straší nejvíc, protože vypadá jako otevřená transakce.
-     */
-    public function testAttemptWithoutCorrelationIsDeletable(): void
-    {
-        $service = $this->service($this->pdoThatMustNotBeQueried());
-
-        self::assertNull($service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
-            'status' => 'awaiting_protocol',
-            'submission_id' => 5,
-            'correlation_reference' => null,
-        ]));
-    }
-
-    /**
      * Pokus „možná doručeno" je jediná stopa, že požadavek odešel. Jeho
      * smazání by obešlo potvrzení opakování a pustilo druhé odeslání.
      */
     public function testPossiblyDeliveredAttemptCannotBeDeleted(): void
     {
-        $service = $this->service($this->pdoThatMustNotBeQueried());
-
-        $reason = $service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
+        $reason = $this->service()->blockedReason([
             'status' => 'possibly_delivered',
-            'submission_id' => 5,
+            'sent_at' => null,
             'correlation_reference' => null,
         ]);
 
@@ -71,88 +48,107 @@ final class PayrollSubmissionAttemptDeletionRulesTest extends TestCase
         self::assertStringContainsString('Dohledejte protokol', $reason);
     }
 
-    /** Připnutá dodejka nebo protokol smazání zakazuje. */
-    public function testAttemptWithReceiptCannotBeDeleted(): void
+    /**
+     * Úřad pokus převzal (CorrelationID, čas odeslání), protokol jen ještě
+     * nebyl dotažený nebo podání odmítl. Dřív šel takový pokus smazat, protože
+     * k němu nebyla připnutá dodejka — tedy ostré podání.
+     *
+     * @param array<string,mixed> $attempt
+     */
+    #[DataProvider('dispatchedAttempts')]
+    public function testAttemptTakenOverByAuthorityCannotBeDeleted(array $attempt): void
     {
-        $service = $this->service($this->pdoAnswering([1, false]));
-
-        $reason = $service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
-            'status' => 'awaiting_protocol',
-            'submission_id' => 5,
-            'correlation_reference' => 'ABC123',
-        ]);
+        $reason = $this->service()->blockedReason($attempt);
 
         self::assertNotNull($reason);
-        self::assertStringContainsString('dodejka', $reason);
+        self::assertStringContainsString('odešel na úřad', $reason);
     }
 
-    /** Identifikátor, pod kterým podání u úřadu běží, je jediná stopa čím se odeslalo. */
-    public function testAttemptIdentifyingTheSubmissionCannotBeDeleted(): void
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function dispatchedAttempts(): iterable
     {
-        $service = $this->service($this->pdoAnswering([false, 1]));
-
-        $reason = $service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
+        yield 'čeká na protokol' => [[
             'status' => 'awaiting_protocol',
-            'submission_id' => 5,
+            'sent_at' => '2026-10-01 08:00:00',
             'correlation_reference' => 'ABC123',
-        ]);
-
-        self::assertNotNull($reason);
-        self::assertStringContainsString('identifikátorem', $reason);
+        ]];
+        yield 'čeká na protokol bez času' => [[
+            'status' => 'awaiting_protocol',
+            'sent_at' => null,
+            'correlation_reference' => null,
+        ]];
+        yield 'odesláno' => [[
+            'status' => 'sent',
+            'sent_at' => null,
+            'correlation_reference' => null,
+        ]];
+        yield 'odmítnuto protokolem' => [[
+            'status' => 'failed',
+            'sent_at' => '2026-10-01 08:00:00',
+            'correlation_reference' => 'ABC123',
+        ]];
+        yield 'propadlo po převzetí' => [[
+            'status' => 'expired',
+            'sent_at' => null,
+            'correlation_reference' => 'ABC123',
+        ]];
     }
 
     /**
-     * Uvízlý VREP pokus, ke kterému úřad nic nevydal a podání se odeslalo jinou
-     * cestou — přesně ten případ, kvůli kterému mazání vzniklo.
+     * Pokus, který nikdy neodešel nebo selhal dřív, než ho úřad převzal, nic
+     * nedokládá — přesně ten případ, kvůli kterému mazání vzniklo.
+     *
+     * @param array<string,mixed> $attempt
      */
-    public function testStuckAttemptWithNoEvidenceIsDeletable(): void
+    #[DataProvider('neverTakenOverAttempts')]
+    public function testAttemptNeverTakenOverIsDeletable(array $attempt): void
     {
-        $service = $this->service($this->pdoAnswering([false, false]));
-
-        self::assertNull($service->blockedReason(self::SUPPLIER, self::ENVIRONMENT, [
-            'status' => 'awaiting_protocol',
-            'submission_id' => 5,
-            'correlation_reference' => 'ABC123',
-        ]));
+        self::assertNull($this->service()->blockedReason($attempt));
     }
 
-    private function service(PDO $pdo): PayrollSubmissionAttemptDeletionService
+    /** @return iterable<string,array{array<string,mixed>}> */
+    public static function neverTakenOverAttempts(): iterable
     {
-        $db = $this->createStub(Connection::class);
-        $db->method('pdo')->willReturn($pdo);
+        yield 'připraveno' => [[
+            'status' => 'prepared',
+            'sent_at' => null,
+            'correlation_reference' => null,
+        ]];
+        yield 'selhalo před převzetím' => [[
+            'status' => 'failed',
+            'sent_at' => null,
+            'correlation_reference' => null,
+        ]];
+        yield 'zahozeno před převzetím' => [[
+            'status' => 'expired',
+            'sent_at' => null,
+            'correlation_reference' => '',
+        ]];
+    }
 
+    /** Smazání převzatého pokusu se do repozitáře vůbec nedostane. */
+    public function testDeleteRefusesAttemptTakenOverByAuthority(): void
+    {
+        $attempts = $this->createMock(PayrollSubmissionTransportAttemptRepository::class);
+        $attempts->method('find')->willReturn([
+            'id' => 2,
+            'submission_id' => 4,
+            'attempt_no' => 1,
+            'channel' => 'vrep',
+            'status' => 'completed',
+            'sent_at' => '2026-10-01 08:00:00',
+            'correlation_reference' => 'ABC123',
+        ]);
+        $attempts->expects(self::never())->method('delete');
+
+        $this->expectException(\DomainException::class);
+        (new PayrollSubmissionAttemptDeletionService($attempts))->delete(11, 'production', 2, 3);
+    }
+
+    private function service(): PayrollSubmissionAttemptDeletionService
+    {
         return new PayrollSubmissionAttemptDeletionService(
-            $db,
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
         );
-    }
-
-    /**
-     * PDO, jehož `fetchColumn()` vrací postupně zadané odpovědi — první dotaz
-     * je na dodejku, druhý na identifikátor podání.
-     *
-     * @param list<int|false> $answers
-     */
-    private function pdoAnswering(array $answers): PDO
-    {
-        $statement = $this->createStub(\PDOStatement::class);
-        $statement->method('fetchColumn')->willReturn(...$answers);
-        $pdo = $this->createStub(PDO::class);
-        $pdo->method('prepare')->willReturn($statement);
-
-        return $pdo;
-    }
-
-    /**
-     * PDO, které se nesmí zeptat vůbec. Hlídá, že se na databázi nesahá tam,
-     * kde rozhodnutí padne už ze stavu pokusu — jinak by se guard dal obejít
-     * prázdnou odpovědí databáze.
-     */
-    private function pdoThatMustNotBeQueried(): PDO
-    {
-        $pdo = $this->createMock(PDO::class);
-        $pdo->expects(self::never())->method('prepare');
-
-        return $pdo;
     }
 }

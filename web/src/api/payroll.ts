@@ -7002,6 +7002,11 @@ export interface PayrollJmhzTransportAttempt {
   channel: string
   attempt_no: number
   status: PayrollJmhzTransportStatus
+  /**
+   * Smí se pokus trvale smazat? Jen v historii pokusů; server ho odvodí
+   * stejným pravidlem, jakým smazání hlídá (pokus, který úřad nepřevzal).
+   */
+  can_delete?: boolean
   /** Období hlášení z povinnosti; `null` u pokusu, jehož podání už v evidenci není. */
   period_start: string | null
   period_end: string | null

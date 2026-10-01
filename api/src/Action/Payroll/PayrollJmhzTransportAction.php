@@ -180,9 +180,18 @@ final class PayrollJmhzTransportAction
             $period,
         );
 
+        // Tlačítko smazání rozhoduje server stejným pravidlem jako samotné
+        // smazání, aby UI nenabízelo smazat ostré podání.
+        $attempts = array_map(
+            fn (array $attempt): array => $attempt + [
+                'can_delete' => $this->deletion->blockedReason($attempt) === null,
+            ],
+            $page['items'],
+        );
+
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
-            'attempts' => $page['items'],
+            'attempts' => $attempts,
             'ready_submissions' => $readySubmissions,
             'dispatched_submissions' => $dispatchedSubmissions,
             'total' => $page['total'],

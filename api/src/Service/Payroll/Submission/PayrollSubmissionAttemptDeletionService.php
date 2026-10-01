@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission;
 
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 
 /**
@@ -15,27 +14,41 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
  * Ledger pokusů je záměrně append-only a běžná cesta ven je zahození
  * ({@see PayrollSubmissionAbandonService}) — pokus dostane terminální stav
  * a v historii zůstane i s tím, co úřad odpověděl. Jenže po nepovedeném
- * prvním odeslání (třeba certifikátem, který ČSSZ nemá v registru podávajících)
- * zůstane v přehledu viset záznam, který nic nedokládá a jen mate: účetní u něj
- * vidí otevřenou transakci, přestože povinnost je dávno podaná jinou cestou.
- * Tohle je páka, jak takový záznam odklidit úplně.
+ * odeslání (třeba certifikátem, který ČSSZ nemá v registru podávajících, nebo
+ * chybou spojení) zůstane v přehledu viset záznam, který nic nedokládá a jen
+ * mate. Tohle je páka, jak takový záznam odklidit úplně.
  *
- * CO SE SMAZAT NESMÍ
+ * CO SE SMAZAT NESMÍ: všechno, co odešlo na úřad
  * ------------------------------------------------------------------------------
- * Cokoli, co je DŮKAZ o odeslání. Konkrétně:
+ * Pokus, který úřad převzal, je doklad o ostrém podání, ať dopadl jakkoli.
+ * Za převzatý se považuje pokus, u kterého platí cokoli z tohoto:
  *
- *   - pokus ve stavu `completed` — ten protokol od úřadu dostal,
- *   - pokus, na jehož `correlation_reference` visí dodejka nebo protokol,
- *   - pokus, jehož `correlation_reference` nese samo podání — tím je podání
- *     u úřadu identifikované a bez něj by nešlo dohledat, co se odeslalo.
+ *   - stav `sent`, `awaiting_protocol`, `completed` nebo `possibly_delivered`
+ *     — každý z nich vzniká až po tom, co požadavek odešel
+ *     ({@see PayrollSubmissionTransportAttemptRepository::markSent()},
+ *     `markCompleted()`, `markPossiblyDelivered()`),
+ *   - vyplněné `sent_at` — čas, kdy úřad odeslání potvrdil,
+ *   - vyplněné `correlation_reference` — identifikátor, pod kterým úřad
+ *     zprávu převzal; podle něj se dohledá protokol i dodejka a bez něj by
+ *     nešlo zjistit, co se odeslalo. Pokus, který úřad převzal a pak odmítl
+ *     protokolem (`failed` s CorrelationID), je proto taky doklad.
  *
- * Zbývá tedy přesně to, co úřad nikdy nepřijal. Smazání se zapisuje do
- * auditního logu (volající), protože po řádku samotném nezůstane nic.
+ * Dřív stačilo, že k CorrelationID ještě nebyla připnutá dodejka. Tím šlo
+ * smazat pokus, který úřad převzal a protokol k němu jen ještě nebyl
+ * dotažený — tedy ostré podání. Ta skulina je zavřená.
+ *
+ * Smazat jde jen pokus, který nikdy neodešel (`prepared`) nebo selhal dřív, než
+ * ho úřad převzal (`failed` nebo `expired` bez `sent_at` i bez CorrelationID).
+ * Rozhoduje se jen z řádku pokusu, takže stejné pravidlo může UI použít
+ * k rozhodnutí, jestli tlačítko vůbec ukázat. Smazání se zapisuje do auditního
+ * logu (volající), protože po řádku samotném nezůstane nic.
  */
 final readonly class PayrollSubmissionAttemptDeletionService
 {
+    /** Stavy, do kterých se pokus dostane až po odeslání na úřad. */
+    private const DISPATCHED_STATUSES = ['sent', 'awaiting_protocol', 'completed'];
+
     public function __construct(
-        private Connection $db,
         private PayrollSubmissionTransportAttemptRepository $attempts,
     ) {}
 
@@ -47,33 +60,28 @@ final readonly class PayrollSubmissionAttemptDeletionService
      *
      * @param array<string,mixed> $attempt
      */
-    public function blockedReason(int $supplierId, string $environment, array $attempt): ?string
+    public function blockedReason(array $attempt): ?string
     {
-        if ((string) ($attempt['status'] ?? '') === 'completed') {
+        $status = (string) ($attempt['status'] ?? '');
+        if ($status === 'completed') {
             return 'Pokus dostal od úřadu protokol o zpracování — je to doklad o odeslání'
-                . ' a z historie se nemaže. Použijte zahození pokusu.';
+                . ' a z historie se nemaže.';
         }
         // Smazáním by zmizela jediná stopa, že požadavek odešel, a podání by
         // šlo odeslat znovu bez potvrzení. Tudy se obejít nedá.
-        if ((string) ($attempt['status'] ?? '') === PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS) {
+        if ($status === PayrollDispatchGate::POSSIBLY_DELIVERED_STATUS) {
             return 'Požadavek možná došel k ČSSZ. Pokus je jediný doklad, že odešel,'
                 . ' a z historie se nemaže. Dohledejte protokol, případně potvrďte'
                 . ' opakování odeslání.';
         }
-
-        $correlation = trim((string) ($attempt['correlation_reference'] ?? ''));
-        if ($correlation === '') {
-            return null;
-        }
-
-        $submissionId = (int) ($attempt['submission_id'] ?? 0);
-        if ($this->receiptExists($supplierId, $environment, $submissionId, $correlation)) {
-            return 'K pokusu je připnutá dodejka nebo protokol — je to doklad o odeslání'
-                . ' a z historie se nemaže. Použijte zahození pokusu.';
-        }
-        if ($this->submissionIdentifiedBy($supplierId, $environment, $submissionId, $correlation)) {
-            return 'Podání je u úřadu vedené právě pod identifikátorem tohoto pokusu.'
-                . ' Smazáním by se ztratila jediná stopa, čím se odeslalo.';
+        if (
+            in_array($status, self::DISPATCHED_STATUSES, true)
+            || trim((string) ($attempt['sent_at'] ?? '')) !== ''
+            || trim((string) ($attempt['correlation_reference'] ?? '')) !== ''
+        ) {
+            return 'Pokus odešel na úřad a úřad ho převzal — je to doklad o ostrém podání'
+                . ' a z historie se nemaže. Pokud podání nemá platit, použijte zahození'
+                . ' pokusu nebo storno hlášení.';
         }
 
         return null;
@@ -92,7 +100,7 @@ final readonly class PayrollSubmissionAttemptDeletionService
         if ($attempt === null) {
             throw new \DomainException('Pokus o odeslání nebyl nalezen.');
         }
-        $blocked = $this->blockedReason($supplierId, $environment, $attempt);
+        $blocked = $this->blockedReason($attempt);
         if ($blocked !== null) {
             throw new \DomainException($blocked);
         }
@@ -114,39 +122,5 @@ final readonly class PayrollSubmissionAttemptDeletionService
         $this->attempts->delete($attemptId, $expectedRowVersion);
 
         return $snapshot;
-    }
-
-    private function receiptExists(
-        int $supplierId,
-        string $environment,
-        int $submissionId,
-        string $correlation,
-    ): bool {
-        $statement = $this->db->pdo()->prepare(
-            'SELECT 1 FROM payroll_submission_receipts
-              WHERE supplier_id = ? AND environment = ? AND submission_id = ?
-                AND correlation_reference = ?
-              LIMIT 1',
-        );
-        $statement->execute([$supplierId, $environment, $submissionId, $correlation]);
-
-        return $statement->fetchColumn() !== false;
-    }
-
-    private function submissionIdentifiedBy(
-        int $supplierId,
-        string $environment,
-        int $submissionId,
-        string $correlation,
-    ): bool {
-        $statement = $this->db->pdo()->prepare(
-            'SELECT 1 FROM payroll_submissions
-              WHERE supplier_id = ? AND environment = ? AND id = ?
-                AND correlation_reference = ?
-              LIMIT 1',
-        );
-        $statement->execute([$supplierId, $environment, $submissionId, $correlation]);
-
-        return $statement->fetchColumn() !== false;
     }
 }

@@ -712,6 +712,17 @@ readonly class JmhzDispatchService
         string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzDispatchOutcome {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
+        // Uzavřený pokus výsledek už má (nebo ho automatika vzdala) a ledger ho
+        // znovu neotevře. Dotaz na ČSSZ by jen spálil volání a skončil chybou
+        // zápisu, proto se odmítne hned a srozumitelně.
+        if (in_array((string) ($attempt['status'] ?? ''), ['completed', 'expired'], true)) {
+            throw new JmhzTransportException(
+                'jmhz_dispatch_attempt_closed',
+                'Pokus č. ' . (int) ($attempt['attempt_no'] ?? 0) . ' je už uzavřený'
+                    . (($attempt['status'] ?? '') === 'completed' ? ' s dotaženým protokolem' : '')
+                    . ', stav se u něj znovu nezjišťuje.',
+            );
+        }
         $correlation = (string) ($attempt['correlation_reference'] ?? '');
         if ($correlation === '') {
             throw new JmhzTransportException(

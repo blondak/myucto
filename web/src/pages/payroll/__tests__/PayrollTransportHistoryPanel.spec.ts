@@ -675,14 +675,58 @@ describe('PayrollTransportHistoryPanel', () => {
     m.canWrite.mockReturnValue(false)
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
-      attempts: [attempt({ id: 8, status: 'completed' })],
+      attempts: [
+        attempt({ id: 8, status: 'completed' }),
+        attempt({ id: 9, status: 'awaiting_protocol' }),
+      ],
     })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
     expect(wrapper.find('[data-test="transport-close-8"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="transport-poll-8"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-poll-9"]').exists()).toBe(true)
+  })
+
+  /**
+   * Odeslaný a uzavřený pokus je doklad o ostrém podání: smazat ho nejde a na
+   * stav uzavřené transakce se znovu neptá (ledger ji znovu neotevře).
+   */
+  it('u odeslaného uzavřeného pokusu nenabídne smazání ani doptání', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        id: 2,
+        attempt_no: 1,
+        status: 'completed',
+        closed_at: '2026-10-01 10:05:00',
+        can_delete: false,
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-delete-2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-poll-2"]').exists()).toBe(false)
+  })
+
+  it('smazání nabídne jen u pokusu, který server označí jako smazatelný', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [
+        attempt({ id: 3, status: 'failed', correlation_reference: null, sent_at: null, can_delete: true }),
+        attempt({ id: 4, status: 'awaiting_protocol', can_delete: false }),
+        attempt({ id: 5, status: 'failed', correlation_reference: null, sent_at: null }),
+      ],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-delete-3"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-delete-4"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-delete-5"]').exists()).toBe(false)
   })
 
   it('bez přiděleného CorrelationID doptání nenabízí', async () => {
