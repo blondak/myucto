@@ -103,10 +103,10 @@ final class IgnoreNoticeUploadTest extends TestCase
             $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
             try {
                 $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$currencyId]);
-                $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$sid]);
             } finally {
                 $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
             }
+            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM activity_log WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
         }
