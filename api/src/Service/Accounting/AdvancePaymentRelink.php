@@ -169,8 +169,13 @@ final class AdvancePaymentRelink
         $final = $this->journal->findBySource($sid, 'purchase_invoice', (int) $c['final_id']);
         if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
             $dates['zápis konečné faktury'] = (string) $final['entry_date'];
-            if (substr((string) $final['entry_date'], 0, 4) !== substr((string) $bank['entry_date'], 0, 4)) {
-                return ['status' => 'payment_in_other_year', 'message' => 'platba a konečná faktura v různých letech, zúčtuj ručně k datu úhrady'];
+            // Úhrada v POZDĚJŠÍM účetním období (hospodářském roce) než zápis faktury se do
+            // něj zpětně nedopisuje ({@see AdvanceSettlementSync}); dřívější úhrada je běžná.
+            $bankPeriod = $this->periods->findById($sid, (int) $bank['period_id']);
+            $finalPeriod = $this->periods->findById($sid, (int) $final['period_id']);
+            if ($bankPeriod !== null && $finalPeriod !== null
+                && (string) $bankPeriod['starts_on'] > (string) $finalPeriod['starts_on']) {
+                return ['status' => 'payment_in_later_period', 'message' => 'platba je v pozdějším účetním období než konečná faktura, zúčtuj ručně k datu úhrady'];
             }
         }
         $lockedUntil = $this->lockedUntil($sid);

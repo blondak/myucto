@@ -51,7 +51,7 @@ $labels = [
     'not_fully_covered'     => 'beze změny',
     'foreign_currency'      => 'beze změny',
     'card_clearing'         => 'beze změny',
-    'payment_in_other_year' => 'jen report',
+    'payment_in_later_period' => 'jen report',
 ];
 foreach ($result['rows'] as $row) {
     printf(

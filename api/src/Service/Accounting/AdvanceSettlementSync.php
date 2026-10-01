@@ -126,35 +126,42 @@ final class AdvanceSettlementSync
     }
 
     /**
-     * Má záloha živou úhradu (banka, pokladna) zaúčtovanou v jiném roce než zápis konečné faktury?
+     * Má záloha živou úhradu (banka, pokladna) zaúčtovanou v POZDĚJŠÍM účetním období
+     * (hospodářském roce) než zápis konečné faktury? Porovnává se účetní období zápisů
+     * (accounting_periods.starts_on), ne kalendářní rok — firma s hospodářským rokem má
+     * hranici jinde. Úhrada v DŘÍVĚJŠÍM období je běžný případ (záloha zaplacená v prosinci,
+     * faktura v lednu) a zúčtování se k datu faktury doplní normálně.
      *
      * @param 'purchase'|'sale' $side
      */
-    private function paymentInOtherYear(int $supplierId, string $side, int $advanceId, string $finalYear): bool
+    private function paymentInLaterPeriod(int $supplierId, string $side, int $advanceId, int $finalPeriodId): bool
     {
-        $sql = $side === 'sale'
-            ? "SELECT je.entry_date FROM invoice_payments ip
-                 JOIN journal_entries je ON je.supplier_id = ip.supplier_id AND je.source_type = 'bank'
-                  AND je.source_id = ip.bank_transaction_id AND je.reversed_by IS NULL
-                WHERE ip.supplier_id = :sid AND ip.invoice_id = :aid
-               UNION ALL
-               SELECT je.entry_date FROM cash_documents cd
-                 JOIN journal_entries je ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
-                  AND je.source_id = cd.id AND je.reversed_by IS NULL
-                WHERE cd.supplier_id = :sid2 AND cd.invoice_id = :aid2"
-            : "SELECT je.entry_date FROM payment_matches pm
-                 JOIN journal_entries je ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
-                  AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
-                WHERE pm.supplier_id = :sid AND pm.purchase_invoice_id = :aid
-               UNION ALL
-               SELECT je.entry_date FROM cash_documents cd
-                 JOIN journal_entries je ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
-                  AND je.source_id = cd.id AND je.reversed_by IS NULL
-                WHERE cd.supplier_id = :sid2 AND cd.purchase_invoice_id = :aid2";
-        $stmt = $this->db->pdo()->prepare($sql);
+        $start = $this->db->pdo()->prepare('SELECT starts_on FROM accounting_periods WHERE id = ? AND supplier_id = ?');
+        $start->execute([$finalPeriodId, $supplierId]);
+        $finalStart = $start->fetchColumn();
+        if ($finalStart === false) {
+            return false;
+        }
+        [$link, $docColumn] = $side === 'sale'
+            ? ['invoice_payments x', 'x.invoice_id']
+            : ['payment_matches x', 'x.purchase_invoice_id'];
+        $cashColumn = $side === 'sale' ? 'cd.invoice_id' : 'cd.purchase_invoice_id';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT ap.starts_on FROM {$link}
+               JOIN journal_entries je ON je.supplier_id = x.supplier_id AND je.source_type = 'bank'
+                AND je.source_id = x.bank_transaction_id AND je.reversed_by IS NULL
+               JOIN accounting_periods ap ON ap.id = je.period_id
+              WHERE x.supplier_id = :sid AND {$docColumn} = :aid
+             UNION ALL
+             SELECT ap.starts_on FROM cash_documents cd
+               JOIN journal_entries je ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
+                AND je.source_id = cd.id AND je.reversed_by IS NULL
+               JOIN accounting_periods ap ON ap.id = je.period_id
+              WHERE cd.supplier_id = :sid2 AND {$cashColumn} = :aid2"
+        );
         $stmt->execute([':sid' => $supplierId, ':aid' => $advanceId, ':sid2' => $supplierId, ':aid2' => $advanceId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $date) {
-            if (substr((string) $date, 0, 4) !== $finalYear) {
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $paymentStart) {
+            if ((string) $paymentStart > (string) $finalStart) {
                 return true;
             }
         }
@@ -232,17 +239,18 @@ final class AdvanceSettlementSync
             return ['action' => 'in_sync', 'entry_id' => $entryId, 'before' => $before, 'after' => $after];
         }
 
-        // Zúčtování se zapisuje k datu KONEČNÉ faktury. Úhrada zálohy z jiného účetního
+        // Zúčtování se zapisuje k datu KONEČNÉ faktury. Úhrada zálohy z POZDĚJŠÍHO účetního
         // období (faktura 12/2026, záloha zaplacená 1/2027) by tak zpětně čerpala 314 v roce,
-        // kdy záloha ještě zaplacená nebyla — rozvaha uzavíraného roku by lhala. Samostatný
+        // kdy záloha ještě zaplacená nebyla — rozvaha uzavíraného roku by lhala. Opačný směr
+        // (záloha 12/2026, faktura 1/2027) je běžný a dorovná se normálně. Samostatný
         // zápis zúčtování k datu úhrady by potřeboval nový zdroj zápisu a builder konečné
         // faktury, který by ho při přeúčtování odečítal; to je mimo rozsah téhle opravy.
         // Proto se takový případ jen zaloguje a vyřeší ručním zápisem zúčtování k datu úhrady.
         // Uvnitř téhož roku se zúčtování k datu faktury nechává (321 i 314 jsou saldokonta
         // bez vlivu na DPH; podané DPH chrání zámek k datu v replaceEntryLines).
         if (self::cents($after) > self::cents($before)
-            && $this->paymentInOtherYear($supplierId, $side, $advanceId, substr((string) $entry['entry_date'], 0, 4))) {
-            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'payment_in_other_year', $userId);
+            && $this->paymentInLaterPeriod($supplierId, $side, $advanceId, (int) $entry['period_id'])) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'payment_in_later_period', $userId);
         }
 
         try {

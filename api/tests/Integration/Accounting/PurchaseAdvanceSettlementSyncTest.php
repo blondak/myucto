@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\PostingException;
@@ -189,7 +190,70 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
               WHERE action = 'accounting.advance_settlement_stale' AND entity_type = 'purchase_invoice'
                 AND entity_id = {$final} ORDER BY id DESC LIMIT 1"
         )->fetchColumn();
-        self::assertSame('payment_in_other_year', $reason);
+        self::assertSame('payment_in_later_period', $reason);
+    }
+
+    /** Opačný směr — záloha zaplacená v prosinci, faktura v lednu — je běžný a dorovná se. */
+    public function testPaymentInEarlierPeriodIsSettledNormally(): void
+    {
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $vendor  = $this->client('Dodavatel záloha v prosinci');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-9', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-9', $vendor, 1000.00, 210.00, $advance);
+        $this->datePurchase($final, (self::YEAR + 1) . '-01-10');
+        $entry = $this->postFinal($final);
+
+        $this->payAdvanceByCard($advance, 1210.00, self::YEAR . '-12-20');
+
+        self::assertSame(121000, self::cents($this->linesByAccountCode($entry)['314']['credit'] ?? 0),
+            'Lednová faktura zúčtuje prosincovou zálohu.');
+    }
+
+    /**
+     * Hospodářský rok (červenec–červen): faktura v březnu a úhrada v srpnu téhož
+     * kalendářního roku jsou v RŮZNÝCH účetních obdobích — rozhoduje období, ne rok z data.
+     */
+    public function testFiscalYearBoundaryIsDecidedByAccountingPeriod(): void
+    {
+        $y = self::YEAR + 2;
+        $this->periods->create($this->supplierId, $y, $y . '-07-01', ($y + 1) . '-06-30');
+        $this->periods->create($this->supplierId, $y + 1, ($y + 1) . '-07-01', ($y + 2) . '-06-30');
+        $vendor  = $this->client('Dodavatel hospodářský rok');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-10', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-10', $vendor, 1000.00, 210.00, $advance);
+        $this->datePurchase($final, ($y + 1) . '-03-10');
+        $entry = $this->postFinal($final);
+
+        $this->payAdvanceByCard($advance, 1210.00, ($y + 1) . '-08-05');
+
+        self::assertSame(0, self::cents($this->linesByAccountCode($entry)['314']['credit'] ?? 0),
+            'Srpnová úhrada je v dalším hospodářském roce než březnová faktura.');
+    }
+
+    /** Vynucená dimenze na 314 (pravidla dimenzí) platí i pro výměnu řádků, ne jen pro postDocument. */
+    public function testReplaceEntryLinesEnforcesDimensionRules(): void
+    {
+        $dimensions = $this->container->get(DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $types = $dimensions->ensureDefaultTypes($this->supplierId, ['projekt']);
+        $vendor  = $this->client('Dodavatel pravidlo dimenze');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-11', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-11', $vendor, 1000.00, 210.00, $advance);
+        $entry   = $this->postFinal($final);
+        $this->container->get(DimensionRuleService::class)->create($this->supplierId, [
+            'dimension_type_id' => $types['project'], 'account_mask' => '314', 'enforcement' => 'error',
+        ], $this->userId);
+        $version = (int) $this->db->pdo()->query("SELECT row_version FROM journal_entries WHERE id = {$entry}")->fetchColumn();
+
+        try {
+            $this->posting->replaceEntryLines($this->supplierId, 'purchase_invoice', $final, $version, [], [
+                ['account_code' => '321', 'side' => 'debit', 'amount' => 10.00],
+                ['account_code' => '314', 'side' => 'credit', 'amount' => 10.00],
+            ]);
+            self::fail('Řádek 314 bez povinného projektu musí výměnu odmítnout.');
+        } catch (PostingException $e) {
+            self::assertSame('dimension_required', $e->errorCode);
+        }
     }
 
     /** Souběžná změna zápisu mezi čtením a zápisem → version_conflict, nic se nepřepíše. */
@@ -322,6 +386,12 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
             )->execute([$id, $itemBase, $this->vatRateId, $itemBase, $itemVat, $itemBase + $itemVat, $i]);
         }
         return $id;
+    }
+
+    private function datePurchase(int $id, string $date): void
+    {
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET issue_date = ?, tax_date = ?, received_at = ?, due_date = ? WHERE id = ?')
+            ->execute([$date, $date, $date, $date, $id]);
     }
 
     private function postFinal(int $finalId): int

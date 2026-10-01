@@ -574,6 +574,9 @@ final class PostingService
                     $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
                     $entryDate,
                 );
+                // Pravidla dimenzí podle účtu stejně jako postDocument: vynucená dimenze
+                // (`error`) na 321/314 výměnu odmítne, `warning` se vrátí přes dimensionWarnings().
+                $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
             }
             $addedCents = 0;
             foreach ($resolved as $line) {
