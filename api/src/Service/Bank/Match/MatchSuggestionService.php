@@ -20,6 +20,8 @@ final class MatchSuggestionService
         'amount_date_requires_review', 'already_paid_verify',
         // Párování plateb kartou (koncovka + částka + datum).
         'no_card_match', 'ambiguous_card_match', 'card_match_requires_review',
+        // VS konečné faktury, ale platba je neuhrazená záloha — návrh nabídne zálohu.
+        'advance_payment_for_final',
     ];
 
     public function __construct(
@@ -55,6 +57,11 @@ final class MatchSuggestionService
         $decision = $this->scorer->decide($candidates);
         if ($decision === 'none') return $matchResult;
         $top = $candidates[0];
+        // Přesměrování platby z konečné faktury na zálohu (i na zálohu uhrazenou jen
+        // evidenčně) potvrzuje člověk — automaticky se neaplikuje.
+        if ($decision === 'auto' && in_array('advance_of_final', (array) ($top['flags'] ?? []), true)) {
+            $decision = 'suggest';
+        }
         $margin = count($candidates) > 1 ? round((float) $top['score'] - (float) $candidates[1]['score'], 3) : null;
         $kind = $this->kind($top);
         if ($decision === 'auto') {

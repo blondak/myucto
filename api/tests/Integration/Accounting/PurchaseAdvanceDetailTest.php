@@ -161,6 +161,52 @@ final class PurchaseAdvanceDetailTest extends BankPostingTestCase
         self::assertSame('invoice', $res['body']['error']['advance_type'] ?? null);
     }
 
+    /**
+     * Automat: platba pod VS konečné faktury ve výši zálohy „uhrazené evidenčně" se na
+     * fakturu nespáruje, ale nevisí bez návrhu — návrh nabídne zálohu (bez auto-aplikace).
+     */
+    public function testMatcherSuggestsEvidenceOnlyPaidAdvanceForPaymentUnderFinalVs(): void
+    {
+        [$advance, $final] = $this->pair('DET-7');
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")
+            ->execute([self::YEAR . '-06-21', $advance]);
+        $vs = (string) random_int(800000000, 899999999);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET vendor_invoice_number = ?, varsymbol = ? WHERE id = ?')
+            ->execute([$vs, $vs, $final]);
+        $tx = $this->transaction($this->statement(), -1210.00, ['variable_symbol' => $vs, 'posted_at' => self::YEAR . '-06-24']);
+
+        $result = $this->container->get(\MyInvoice\Service\Bank\StatementMatcher::class)->matchBatch([$tx])[$tx] ?? [];
+
+        self::assertSame('unmatched', $result['status'] ?? null, json_encode($result));
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = {$tx}")->fetchColumn(),
+            'Na konečnou fakturu se nic nespárovalo.');
+        $candidates = $this->db->pdo()->query(
+            "SELECT candidates_json FROM bank_match_suggestions WHERE bank_transaction_id = {$tx} AND status = 'pending'"
+        )->fetchColumn();
+        self::assertIsString($candidates, 'Pohyb má návrh párování.');
+        $top = json_decode($candidates, true)[0] ?? [];
+        self::assertSame($advance, $top['purchase_invoice_id'] ?? null, 'Návrh míří na zálohu.');
+    }
+
+    /** Vydaná strana automatu: platba neuhrazené proformy pod VS vyúčtovací faktury jde na proformu. */
+    public function testMatcherRedirectsIssuedProformaPaymentFromFinalToProforma(): void
+    {
+        $client = $this->client('Odběratel automat');
+        $vs = (string) random_int(700000000, 799999999);
+        $proforma = $this->saleInvoice('Z' . $vs, $client, 1210.00, 'proforma');
+        $final = $this->saleInvoice($vs, $client, 3000.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ?, advance_paid_amount = 1210.00 WHERE id = ?')
+            ->execute([$proforma, $final]);
+        $tx = $this->transaction($this->statement(), 1210.00, ['variable_symbol' => $vs, 'posted_at' => self::YEAR . '-06-24']);
+
+        $this->container->get(\MyInvoice\Service\Bank\StatementMatcher::class)->matchBatch([$tx]);
+
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$final}")->fetchColumn(),
+            'Platba zálohy nesmí skončit na vyúčtovací faktuře.');
+        self::assertSame(1, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$proforma} AND bank_transaction_id = {$tx}")->fetchColumn(),
+            'Platba je na proformě.');
+    }
+
     /** @return array{0:int,1:int} záloha, konečná faktura (zaúčtovaná) */
     private function pair(string $suffix, float $base = 1000.00, float $vat = 210.00): array
     {

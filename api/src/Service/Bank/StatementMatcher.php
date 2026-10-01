@@ -690,7 +690,8 @@ final class StatementMatcher
         if (($inv['invoice_type'] ?? '') === 'proforma') {
             $proformaPaid = ($inv['status'] === 'paid');
             $fin = $pdo->prepare(
-                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type, cur.code AS currency
+                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
+                        i.parent_invoice_id, cur.code AS currency
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.parent_invoice_id = ? AND i.invoice_type = 'invoice'
@@ -712,6 +713,25 @@ final class StatementMatcher
                 if (!($proformaPaid && $finSettled)) {
                     $inv = $finRow;
                 }
+            }
+        }
+
+        // Zrcadlo přijaté strany ({@see AdvanceFinalMatchGuard}): platba, která odpovídá
+        // neuhrazené proformě a ne zbytku vyúčtovací faktury, patří na PROFORMU — i když
+        // VS (nebo přesměrování výš) míří na vyúčtovací fakturu.
+        if (($inv['invoice_type'] ?? '') === 'invoice' && !empty($inv['parent_invoice_id'])
+            && $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount) !== null) {
+            $proforma = $pdo->prepare(
+                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
+                        i.parent_invoice_id, cur.code AS currency
+                   FROM invoices i
+                   JOIN currencies cur ON cur.id = i.currency_id
+                  WHERE i.id = ? AND i.supplier_id = ? AND i.invoice_type = 'proforma'"
+            );
+            $proforma->execute([(int) $inv['parent_invoice_id'], $supplierId]);
+            $proformaRow = $proforma->fetch(PDO::FETCH_ASSOC);
+            if ($proformaRow !== false) {
+                $inv = $proformaRow;
             }
         }
 
@@ -998,8 +1018,17 @@ final class StatementMatcher
         if ($pi === null) {
             return ['status' => 'unmatched', 'reason' => 'no_purchase_with_vs', 'tx_currency' => $txCurrency];
         }
-        if ($this->isAdvancePaymentForFinal($supplierId, (int) $pi['id'], $absAmount)) {
-            return ['status' => 'unmatched', 'reason' => 'advance_payment_for_final', 'purchase_invoice_id' => (int) $pi['id']];
+        // VS míří na konečnou fakturu, ale platba je záloha: nepárovat na fakturu, návrh
+        // ({@see \MyInvoice\Service\Bank\Match\MatchSuggestionService}) nabídne zálohu.
+        $advanceViolation = $this->advanceGuard()->purchaseViolation($supplierId, (int) $pi['id'], $absAmount);
+        if ($advanceViolation !== null) {
+            return [
+                'status' => 'unmatched',
+                'reason' => 'advance_payment_for_final',
+                'requires_review' => true,
+                'purchase_invoice_id' => (int) $pi['id'],
+                'advance_purchase_invoice_id' => $advanceViolation['advance_id'],
+            ];
         }
 
         $alreadyPaid = ($pi['status'] === 'paid');
@@ -1223,8 +1252,12 @@ final class StatementMatcher
      */
     private function isAdvancePaymentForFinal(int $supplierId, int $purchaseInvoiceId, float $absAmount): bool
     {
-        $this->advanceGuardInstance ??= new AdvanceFinalMatchGuard($this->db);
-        return $this->advanceGuardInstance->purchaseViolation($supplierId, $purchaseInvoiceId, $absAmount) !== null;
+        return $this->advanceGuard()->purchaseViolation($supplierId, $purchaseInvoiceId, $absAmount) !== null;
+    }
+
+    private function advanceGuard(): AdvanceFinalMatchGuard
+    {
+        return $this->advanceGuardInstance ??= new AdvanceFinalMatchGuard($this->db);
     }
 
     /**

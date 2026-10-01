@@ -61,6 +61,12 @@ final class MatchCandidateProvider
                     ->purchaseViolation($supplierId, (int) $row['id'], $amount) !== null) {
                 continue;
             }
+            // Zrcadlo vydané strany: platba neuhrazené proformy se nenavrhuje na vyúčtovací fakturu.
+            if ($incoming && (string) ($row['invoice_type'] ?? '') === 'invoice' && !empty($row['parent_invoice_id'])
+                && (new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db))
+                    ->issuedViolation($supplierId, (int) $row['id'], $amount) !== null) {
+                continue;
+            }
             $candidate = $this->singleCandidate($tx, $row, $amount, $currency, $posted, $accountMap, $incoming);
             if ($candidate !== null) $base[] = $candidate;
         }
@@ -91,7 +97,7 @@ final class MatchCandidateProvider
             "SELECT 'invoice' AS candidate_type, i.id, i.client_id, i.varsymbol AS ref, i.payment_variable_symbol AS payment_vs,
                     i.amount_to_pay, i.paid_total, i.invoice_type, i.status,
                     i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
-                    c.company_name AS party
+                    c.company_name AS party, i.parent_invoice_id
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
                JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
@@ -115,16 +121,30 @@ final class MatchCandidateProvider
                     (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
                     p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4,
-                    p.advance_purchase_invoice_id
+                    p.advance_purchase_invoice_id,
+                    fin.final_ref
                FROM purchase_invoices p
                JOIN currencies cur ON cur.id = p.currency_id
                JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
-              WHERE p.supplier_id = ? AND p.status IN ('received','booked')
+               -- Konečná faktura, která zálohu vyúčtovává: platba pod JEJÍM VS je u neuhrazené
+               -- zálohy platbou zálohy (AdvanceFinalMatchGuard ji na fakturu nepustí).
+               LEFT JOIN (SELECT f.advance_purchase_invoice_id AS advance_id,
+                                 MIN(COALESCE(NULLIF(f.vendor_invoice_number, ''), f.varsymbol)) AS final_ref
+                            FROM purchase_invoices f
+                           WHERE f.supplier_id = ? AND f.advance_purchase_invoice_id IS NOT NULL
+                             AND f.status <> 'cancelled'
+                           GROUP BY f.advance_purchase_invoice_id) fin ON fin.advance_id = p.id
+              WHERE p.supplier_id = ?
+                AND (p.status IN ('received','booked')
+                     -- Záloha uhrazená jen evidenčně (stav paid bez jakékoli úhrady), kterou
+                     -- vyúčtovává konečná faktura: platba k ní pořád patří.
+                     OR (p.document_kind = 'advance' AND p.status = 'paid' AND fin.advance_id IS NOT NULL
+                         AND ABS(" . PurchaseSettledExpr::settled('p') . ") < 0.005))
                 AND p.document_kind IN ('invoice','advance')
                 AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)
               ORDER BY ABS(DATEDIFF(p.due_date, ?)), p.id DESC LIMIT 300"
         );
-        $stmt->execute([$supplierId, $posted, self::FALLBACK_DAY_WINDOW, $posted, self::FALLBACK_DAY_WINDOW, $posted]);
+        $stmt->execute([$supplierId, $supplierId, $posted, self::FALLBACK_DAY_WINDOW, $posted, self::FALLBACK_DAY_WINDOW, $posted]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
@@ -149,6 +169,13 @@ final class MatchCandidateProvider
         // silná jako shoda s číslem dokladu.
         $paymentVsDigits = VariableSymbolNormalizer::forMatching((string) ($row['payment_vs'] ?? ''));
         $vsExact = $vs !== '' && (($refDigits !== '' && $vs === $refDigits) || ($paymentVsDigits !== '' && $vs === $paymentVsDigits));
+        // VS konečné faktury, která zálohu vyúčtovává: dokud záloha uhrazená není, je to
+        // platba zálohy — návrh míří na zálohu (konečnou fakturu vyřadil strážce výš).
+        $finalRefDigits = VariableSymbolNormalizer::forMatching((string) ($row['final_ref'] ?? ''));
+        if (!$vsExact && $vs !== '' && $finalRefDigits !== '' && $vs === $finalRefDigits) {
+            $vsExact = true;
+            $flags[] = 'advance_of_final';
+        }
         if ($vsExact) $signals['vs_exact'] = MatchScorer::W_VS_EXACT;
         $amountExact = abs($amount - $converted) <= $tol;
         if ($amountExact) $signals['amount_remaining'] = MatchScorer::W_AMOUNT_REMAINING;
