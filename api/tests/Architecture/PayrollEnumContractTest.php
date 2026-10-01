@@ -104,6 +104,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunKind',
         'payrollTakeoverRuns.ts::PayrollTakeoverEvidenceKind'
             => 'db:payroll_takeover_payment_evidence.evidence_kind',
+        // Kam dávka odešla před zahozením; podle toho se žádá potvrzení zrušení v bance.
+        'payrollPayments.ts::PayrollPaymentBatchHandoverState'
+            => 'db:payroll_payment_batch_discards.handover_state',
         // `reported` = zdroj sám doložil platbu, `derived` = jen součet složek
         // převzaté mzdy. Smazat ten rozdíl v klientovi znamená vydávat dopočet
         // za doklad.

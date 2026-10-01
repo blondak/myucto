@@ -934,7 +934,8 @@
         "1950_purchase_submission_dimensions.sql",
         "1951_dimensions_other_items_assets.sql",
         "1952_dimension_account_map.sql",
-        "1953_payroll_external_jmhz_manual_attestation.sql"
+        "1953_payroll_external_jmhz_manual_attestation.sql",
+        "1954_payroll_payment_batch_discards.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -13114,6 +13115,30 @@
                 "chk_payroll_payment_allocation_amount": "`amount_minor` > 0"
             }
         },
+        "payroll_payment_batch_discards": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "bank_cancellation_confirmed": "tinyint(1) NOT NULL DEFAULT 0",
+                "batch_id": "bigint(20) unsigned NOT NULL",
+                "discarded_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "discarded_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "handover_state": "enum('none','downloaded','submitted') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, batch_id)",
+                "fk_payroll_payment_batch_discard_user": "BTREE (discarded_by)"
+            },
+            "foreign_keys": {
+                "fk_payroll_payment_batch_discard_batch": "(supplier_id, batch_id) -> payroll_payment_batches (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_payment_batch_discard_user": "(discarded_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_payment_batch_discard_confirmation": "`handover_state` = 'none' or `bank_cancellation_confirmed` = 1"
+            }
+        },
         "payroll_payment_batches": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -23061,9 +23086,13 @@
         "trg_payroll_office_registration_no_backdate": "BEFORE INSERT ON payroll_office_registration_versions #bf99d9cf68a6f033920730907066575ec0cfa597",
         "trg_payroll_payment_allocation_immutable_delete": "BEFORE DELETE ON payroll_payment_allocations #b2771d9e03d54e6fb9facd9ebb3e1901a289b71c",
         "trg_payroll_payment_allocation_immutable_update": "BEFORE UPDATE ON payroll_payment_allocations #c6f10e6e291fa1d85029ca198a20d40aee07ef4f",
-        "trg_payroll_payment_allocation_validate_insert": "BEFORE INSERT ON payroll_payment_allocations #ec2d0e68a99d61d680aca5dbc40eadbb3c577276",
+        "trg_payroll_payment_allocation_validate_insert": "BEFORE INSERT ON payroll_payment_allocations #fc8a8bc4a4f3828a514527897376d9e5d85b746f",
+        "trg_payroll_payment_batch_discard_immutable_delete": "BEFORE DELETE ON payroll_payment_batch_discards #44ea0b3cf61af0d83fff08165f5e7d53f44b91f9",
+        "trg_payroll_payment_batch_discard_immutable_update": "BEFORE UPDATE ON payroll_payment_batch_discards #4d2c3177c7b4ecea6ffc9b79657a8b328ed2125b",
+        "trg_payroll_payment_batch_discard_validate_insert": "BEFORE INSERT ON payroll_payment_batch_discards #77dcffd69f5b1b6988773666c48d5c7964891b80",
         "trg_payroll_payment_batch_immutable_delete": "BEFORE DELETE ON payroll_payment_batches #a164412bec531e80f0610129a77bcddae3e6a61f",
         "trg_payroll_payment_batch_immutable_update": "BEFORE UPDATE ON payroll_payment_batches #ccae10e99630aec0c8f0ccfc77b6e9dcafbb6ec5",
+        "trg_payroll_payment_export_discard_guard": "BEFORE INSERT ON payroll_payment_exports #2638e7847500e5c0d49ff94f33dadbcb0b9b3483",
         "trg_payroll_payment_export_grant_consume_update": "BEFORE UPDATE ON payroll_payment_export_download_grants #febf59c015eed9afaa0747de54c8ca69757d4dfd",
         "trg_payroll_payment_export_grant_validate_insert": "BEFORE INSERT ON payroll_payment_export_download_grants #00ce7cc12078e0f647bb15092fe9353ec9a8d06b",
         "trg_payroll_payment_export_immutable_delete": "BEFORE DELETE ON payroll_payment_exports #0808da0d603b0fed845f98268cc17d72bbebc605",
@@ -23076,6 +23105,7 @@
         "trg_payroll_payment_liability_immutable_delete": "BEFORE DELETE ON payroll_payment_liabilities #3ce12f5b0e9bd58383e7843a24e82a8647dd2686",
         "trg_payroll_payment_liability_immutable_update": "BEFORE UPDATE ON payroll_payment_liabilities #7a575d8226c126ed74b94159803384ad4cdb0590",
         "trg_payroll_payment_liability_validate_insert": "BEFORE INSERT ON payroll_payment_liabilities #f5b6b7a391de7f1396f831ef8cc617fe11df3c00",
+        "trg_payroll_payment_match_discard_guard": "BEFORE INSERT ON payroll_payment_matches #43acaf3892b162205c68354d66dd8bf561ca021d",
         "trg_payroll_payment_match_immutable_delete": "BEFORE DELETE ON payroll_payment_matches #fa1b9824a3a86e770d4a625dddd2b5f9963a362f",
         "trg_payroll_payment_match_immutable_update": "BEFORE UPDATE ON payroll_payment_matches #9dbe1c31ecb63ce88cd304cebbab5ddbcddc0d1b",
         "trg_payroll_payment_match_validate_insert": "BEFORE INSERT ON payroll_payment_matches #581f916223ef46ac66de1b9e6424be418f9699a0",
