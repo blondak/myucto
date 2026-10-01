@@ -97,6 +97,32 @@ final class PayrollEmploymentDimensionAction
         return Json::ok($response, ['dimension' => $assignment]);
     }
 
+    /** @param array<string,string> $args */
+    public function split(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $employmentId = (int) ($args['id'] ?? 0);
+        try {
+            $assignments = $this->service->split(
+                $supplierId,
+                $employmentId,
+                $this->input($request),
+                $this->userId($request),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        foreach ($assignments as $assignment) {
+            $this->audit($request, 'payroll.employment_dimension.split', $assignment);
+        }
+
+        return Json::ok($response, ['dimensions' => $assignments], 201);
+    }
+
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
         if (!RequestAuthorization::isSessionAuth($request)) {
@@ -180,6 +206,7 @@ final class PayrollEmploymentDimensionAction
             [
                 'employment_id' => $this->int($assignment, 'employment_id'),
                 'dimension_id' => $this->int($assignment, 'dimension_id'),
+                'share_percent' => $assignment['share_percent'] ?? 100,
             ],
             $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
             $request->getHeaderLine('User-Agent'),

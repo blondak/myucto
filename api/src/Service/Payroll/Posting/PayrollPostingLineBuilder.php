@@ -26,6 +26,9 @@ final class PayrollPostingLineBuilder
     /** Druh složky, který se účtuje jako cestovné, ne jako mzda. */
     private const TRAVEL_COMPONENT_KIND = 'travel_reimbursement';
 
+    /** Pořadí typů mzdových dimenzí — shodné s {@see PayrollDimensionCostAccountResolver}. */
+    private const DIMENSION_PRIORITY = ['cost_center', 'project', 'activity'];
+
     public function __construct(
         private readonly PayrollEmploymentAccountingClassifier $classifier =
             new PayrollEmploymentAccountingClassifier(),
@@ -77,8 +80,8 @@ final class PayrollPostingLineBuilder
         $cashByEmployee = [];
         /** @var array<int,list<string>> $relationTypesByEmployee */
         $relationTypesByEmployee = [];
-        /** @var array<int,?string> $costCenterByEmployment */
-        $costCenterByEmployment = [];
+        /** @var array<int,list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>> $partsByEmployment */
+        $partsByEmployment = [];
         /** @var array<int,list<int>> $employmentsByEmployee */
         $employmentsByEmployee = [];
         /** @var array<int,string> $liabilityAccountByEmployee */
@@ -113,9 +116,8 @@ final class PayrollPostingLineBuilder
                 // žádný peněžní příjem — viz addEmployeeCharge().
                 $liabilityAccountByEmployee[$employeeId] ??=
                     $relationAccounts['gross_credit'];
-                $dimensionDebit = $this->dimensionAccounts->resolve($employmentSnapshot);
-                $costCenter = $this->dimensionCostCenter($employmentSnapshot);
-                $costCenterByEmployment[$employmentId] = $costCenter;
+                $parts = $this->employmentParts($employmentSnapshot);
+                $partsByEmployment[$employmentId] = $parts;
                 $employmentsByEmployee[$employeeId][] = $employmentId;
                 $inputResults = $this->resultInputs($employmentResult);
                 if (array_keys($employmentSnapshot['inputs'])
@@ -188,14 +190,15 @@ final class PayrollPostingLineBuilder
                     $baseKey = "gross:employment:{$employmentId}:input:{$inputId}";
                     $description = $this->grossDescription($relationType);
                     if ($debit !== null && $credit !== null) {
+                        $explicitDebit = $debit;
                         $this->addGross(
                             $allocations,
                             $baseKey,
-                            $debit,
+                            static fn (array $part): string => $explicitDebit,
                             $credit,
                             $sourceMinor,
                             $description,
-                            $costCenter,
+                            $parts,
                             $inputSnapshot,
                             $accounts,
                             $configuredAccounts,
@@ -252,21 +255,22 @@ final class PayrollPostingLineBuilder
                                 'Odpočet zálohy na pracovní cestu',
                             );
                         } else {
-                            $debit = $this->travelExpenseAccount(
+                            $travelDebit = $this->travelExpenseAccount(
                                 $component,
                                 $accounts,
                                 $configuredAccounts,
-                            )
-                                ?? $dimensionDebit
-                                ?? $relationAccounts['gross_debit'];
+                            );
+                            $relationDebit = $relationAccounts['gross_debit'];
                             $this->addGross(
                                 $allocations,
                                 $baseKey,
-                                $debit,
+                                static fn (array $part): string => $travelDebit
+                                    ?? $part['account']
+                                    ?? $relationDebit,
                                 $credit,
                                 $cashMinor,
                                 $description,
-                                $costCenter,
+                                $parts,
                                 $inputSnapshot,
                                 $accounts,
                                 $configuredAccounts,
@@ -326,9 +330,12 @@ final class PayrollPostingLineBuilder
             $sets['health_insurance']['root'],
             'employer_contribution_minor_units',
         );
+        // Rozpad 524 na vztahy má smysl jen tam, kde aspoň jeden vztah nese
+        // středisko, firemní dimenzi nebo procentní rozpad. Bez toho zůstává
+        // jedna firemní dvojice přesně jako dřív.
         $splitEmployerInsurance = array_filter(
-            $costCenterByEmployment,
-            static fn (?string $code): bool => $code !== null,
+            $partsByEmployment,
+            fn (array $parts): bool => !$this->isPlainParts($parts),
         ) !== [];
         $this->addEmployerInsurance(
             $allocations,
@@ -346,7 +353,7 @@ final class PayrollPostingLineBuilder
                     $socialEmployer,
                 )
                 : null,
-            $costCenterByEmployment,
+            $partsByEmployment,
         );
         $this->addEmployerInsurance(
             $allocations,
@@ -362,7 +369,7 @@ final class PayrollPostingLineBuilder
                     $healthEmployer,
                 )
                 : null,
-            $costCenterByEmployment,
+            $partsByEmployment,
         );
 
         $this->addRiskySavings(
@@ -370,7 +377,7 @@ final class PayrollPostingLineBuilder
             $result,
             $accounts,
             $configuredAccounts,
-            $costCenterByEmployment,
+            $partsByEmployment,
         );
 
         foreach ($resultPeople as $employeeId => $personResult) {
@@ -691,6 +698,9 @@ final class PayrollPostingLineBuilder
      *   signed_minor:int,
      *   description:string
      * }> $allocations
+     * @param \Closure(array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}):string $debitFor
+     *        nákladový účet části vztahu
+     * @param list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}> $parts
      * @param array<string,mixed> $inputSnapshot zmrazený mzdový vstup
      * @param array<string,string> $accounts doplněná sada předkontací
      * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
@@ -698,11 +708,11 @@ final class PayrollPostingLineBuilder
     private function addGross(
         array &$allocations,
         string $baseKey,
-        string $debit,
+        \Closure $debitFor,
         string $credit,
         int $amount,
         string $description,
-        ?string $costCenter,
+        array $parts,
         array $inputSnapshot,
         array $accounts,
         array $configuredAccounts,
@@ -713,36 +723,103 @@ final class PayrollPostingLineBuilder
             $configuredAccounts,
         );
         if ($nonDeductible === null) {
-            $this->addPair(
+            $this->addCostPair(
                 $allocations,
                 $baseKey,
-                $debit,
+                $debitFor,
                 $credit,
                 $amount,
                 $description,
-                $costCenter,
+                $parts,
             );
 
             return;
         }
 
-        $this->addPair(
+        $nonDeductibleDebit = $accounts['non_deductible_benefit_debit'];
+        $this->addCostPair(
             $allocations,
             "{$baseKey}:non-deductible",
-            $accounts['non_deductible_benefit_debit'],
+            static fn (array $part): string => $nonDeductibleDebit,
             $credit,
             $nonDeductible,
             $description . ' — osvobozená část (§ 25 odst. 1 písm. h) ZDP)',
-            $costCenter,
+            $parts,
         );
-        $this->addPair(
+        $this->addCostPair(
             $allocations,
             "{$baseKey}:taxable",
-            $debit,
+            $debitFor,
             $credit,
             $this->subtract($amount, $nonDeductible),
             $description . ' — nadlimitní zdanitelná část',
-            $costCenter,
+            $parts,
+        );
+    }
+
+    /**
+     * Nákladová dvojice rozdělená podle podílů pracovního vztahu.
+     *
+     * Vztah bez procentního rozpadu má jedinou část a zapíše se přesně jako
+     * dosud jednou dvojicí ({@see addPair()}), jen s firemními dimenzemi, jsou-li
+     * nastavené. S rozpadem se dělí jen NÁKLAD (strana MD) metodou největšího
+     * zbytku, takže součet částí sedí na haléř. Protiúčet zůstává jednou
+     * částkou — závazek vůči zaměstnanci ani instituci se na střediska nedělí.
+     *
+     * @param list<array{
+     *   allocation_key:string,
+     *   account_code:string,
+     *   signed_minor:int,
+     *   description:string
+     * }> $allocations
+     * @param \Closure(array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}):string $debitFor
+     * @param list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}> $parts
+     */
+    private function addCostPair(
+        array &$allocations,
+        string $baseKey,
+        \Closure $debitFor,
+        string $credit,
+        int $amount,
+        string $description,
+        array $parts,
+    ): void {
+        if ($amount === 0) {
+            return;
+        }
+        if (count($parts) === 1) {
+            $part = $parts[0];
+            $this->addPair(
+                $allocations,
+                $baseKey,
+                $debitFor($part),
+                $credit,
+                $amount,
+                $description,
+                $part['cost_center'],
+                $part['dimensions'],
+            );
+
+            return;
+        }
+        foreach ($this->splitByParts($amount, $parts) as $index => $share) {
+            $part = $parts[$index];
+            $this->addAllocation(
+                $allocations,
+                "{$baseKey}:part:{$index}:debit",
+                $debitFor($part),
+                $share,
+                $description,
+                $part['cost_center'],
+                $part['dimensions'],
+            );
+        }
+        $this->addAllocation(
+            $allocations,
+            "{$baseKey}:credit",
+            $credit,
+            -$amount,
+            $description,
         );
     }
 
@@ -970,6 +1047,7 @@ final class PayrollPostingLineBuilder
         int $amount,
         string $description,
         ?string $costCenter = null,
+        array $dimensions = [],
     ): void {
         if ($amount === 0) {
             return;
@@ -981,6 +1059,7 @@ final class PayrollPostingLineBuilder
             $amount,
             $description,
             $costCenter,
+            $dimensions,
         );
         $this->addAllocation(
             $allocations,
@@ -1006,6 +1085,7 @@ final class PayrollPostingLineBuilder
         int $signedMinor,
         string $description,
         ?string $costCenter = null,
+        array $dimensions = [],
     ): void {
         if ($signedMinor === 0) {
             return;
@@ -1021,6 +1101,12 @@ final class PayrollPostingLineBuilder
         // zaúčtované revize nezačnou hlásit jiným cílovým otiskem.
         if ($costCenter !== null) {
             $allocation['cost_center'] = $costCenter;
+        }
+        // Totéž platí pro firemní dimenze (typ → hodnota): bez vazby mzdové
+        // dimenze na firemní číselník klíč v alokaci vůbec není.
+        if ($dimensions !== []) {
+            ksort($dimensions, SORT_NUMERIC);
+            $allocation['dimensions'] = $dimensions;
         }
         $allocations[] = $allocation;
     }
@@ -1195,7 +1281,8 @@ final class PayrollPostingLineBuilder
      *   side:'debit'|'credit',
      *   amount_minor:int,
      *   description:string,
-     *   cost_center?:string
+     *   cost_center?:string,
+     *   dimensions?:array<int,int>
      * }>
      */
     private function deltaLines(array $target, array $previous): array
@@ -1207,7 +1294,7 @@ final class PayrollPostingLineBuilder
             ...array_keys($before),
         ]));
         sort($keys, SORT_STRING);
-        /** @var array<string,array{account_code:string,side:'debit'|'credit',amount_minor:int,description:string,cost_center?:string}> $grouped */
+        /** @var array<string,array{account_code:string,side:'debit'|'credit',amount_minor:int,description:string,cost_center?:string,dimensions?:array<int,int>}> $grouped */
         $grouped = [];
         foreach ($keys as $key) {
             $new = $current[$key]['signed_minor'] ?? 0;
@@ -1220,9 +1307,14 @@ final class PayrollPostingLineBuilder
             $side = $delta > 0 ? 'debit' : 'credit';
             $costCenter = $source['cost_center']
                 ?? $this->deductionDimension($source['allocation_key']);
+            $dimensions = $source['dimensions'];
+            // Klíč seskupení = účet + strana + středisko + vektor firemních
+            // dimenzí. Bez dimenzí se klíč nemění, takže se řádky seskupí
+            // i seřadí přesně jako dřív.
             $group = $source['account_code']
                 . "\0" . $side
-                . "\0" . ($costCenter ?? '');
+                . "\0" . ($costCenter ?? '')
+                . ($dimensions === [] ? '' : "\0" . self::dimensionsKey($dimensions));
             if (!isset($grouped[$group])) {
                 $grouped[$group] = [
                     'account_code' => $source['account_code'],
@@ -1232,6 +1324,9 @@ final class PayrollPostingLineBuilder
                 ];
                 if ($costCenter !== null) {
                     $grouped[$group]['cost_center'] = $costCenter;
+                }
+                if ($dimensions !== []) {
+                    $grouped[$group]['dimensions'] = $dimensions;
                 }
             }
             $grouped[$group]['amount_minor'] = $this->add(
@@ -1251,7 +1346,8 @@ final class PayrollPostingLineBuilder
      *   signed_minor:int,
      *   description:string,
      *   allocation_key:string,
-     *   cost_center:?string
+     *   cost_center:?string,
+     *   dimensions:array<int,int>
      * }>
      */
     private function allocationVector(array $allocations, string $context): array
@@ -1290,6 +1386,10 @@ final class PayrollPostingLineBuilder
                     "{$context} nemají platný formát.",
                 );
             }
+            $dimensions = $this->allocationDimensions(
+                $allocation['dimensions'] ?? null,
+                $context,
+            );
             $seenKeys[$key] = true;
             // Do vektoru patří i STŘEDISKO. Opravná revize, která zaměstnance
             // jen přeřadí na jiné středisko, mění `cost_center`, ne částku ani
@@ -1299,17 +1399,57 @@ final class PayrollPostingLineBuilder
             //
             // `target_hash` se tím NEMĚNÍ: počítá se ze samotných alokací, ne
             // z tohohle vektoru, takže zaúčtované revize dál hlásí týž otisk.
-            $vectorKey = $key . "\0" . $account . "\0" . ($costCenter ?? '');
+            //
+            // Firemní dimenze ze stejného důvodu: přeřazení na jinou hodnotu
+            // odúčtuje starou a zaúčtuje novou dvojici.
+            $vectorKey = $key . "\0" . $account . "\0" . ($costCenter ?? '')
+                . ($dimensions === [] ? '' : "\0" . self::dimensionsKey($dimensions));
             $result[$vectorKey] = [
                 'account_code' => $this->account($account, $key),
                 'signed_minor' => $signed,
                 'description' => $description,
                 'allocation_key' => $key,
                 'cost_center' => $costCenter,
+                'dimensions' => $dimensions,
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * @return array<int,int> typ firemní dimenze → hodnota
+     */
+    private function allocationDimensions(mixed $value, string $context): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        if (!is_array($value) || $value === []) {
+            throw new \InvalidArgumentException("{$context} nemají platný formát.");
+        }
+        $result = [];
+        foreach ($value as $typeId => $valueId) {
+            if (!is_int($typeId) || $typeId <= 0 || !is_int($valueId) || $valueId <= 0) {
+                throw new \InvalidArgumentException("{$context} nemají platný formát.");
+            }
+            $result[$typeId] = $valueId;
+        }
+        ksort($result, SORT_NUMERIC);
+
+        return $result;
+    }
+
+    /** @param array<int,int> $dimensions */
+    private static function dimensionsKey(array $dimensions): string
+    {
+        ksort($dimensions, SORT_NUMERIC);
+        $pairs = [];
+        foreach ($dimensions as $typeId => $valueId) {
+            $pairs[] = $typeId . ':' . $valueId;
+        }
+
+        return implode(',', $pairs);
     }
 
     private function deductionDimension(string $allocationKey): ?string
@@ -1716,8 +1856,12 @@ final class PayrollPostingLineBuilder
      *   signed_minor:int,
      *   description:string
      * }> $allocations
+     * Má-li vztah procentní rozpad na střediska (dimenze), podíl vztahu se
+     * dál rozdělí mezi jeho části stejnou metodou největšího zbytku jako hrubá
+     * mzda — součet zůstává na haléř a závazek se nedělí.
+     *
      * @param array<int,int>|null $shares employment_id → částka
-     * @param array<int,?string> $costCenters employment_id → středisko
+     * @param array<int,list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>> $partsByEmployment
      */
     private function addEmployerInsurance(
         array &$allocations,
@@ -1727,7 +1871,7 @@ final class PayrollPostingLineBuilder
         int $amount,
         string $description,
         ?array $shares,
-        array $costCenters,
+        array $partsByEmployment,
     ): void {
         if ($amount === 0) {
             return;
@@ -1744,14 +1888,30 @@ final class PayrollPostingLineBuilder
             return;
         }
         foreach ($shares as $employmentId => $share) {
-            $this->addAllocation(
-                $allocations,
-                "{$baseKey}:employment:{$employmentId}:debit",
-                $debitAccount,
-                $share,
-                $description,
-                $costCenters[$employmentId] ?? null,
-            );
+            $parts = $partsByEmployment[$employmentId] ?? [self::plainPart()];
+            if (count($parts) === 1) {
+                $this->addAllocation(
+                    $allocations,
+                    "{$baseKey}:employment:{$employmentId}:debit",
+                    $debitAccount,
+                    $share,
+                    $description,
+                    $parts[0]['cost_center'],
+                    $parts[0]['dimensions'],
+                );
+                continue;
+            }
+            foreach ($this->splitByParts($share, $parts) as $index => $partShare) {
+                $this->addAllocation(
+                    $allocations,
+                    "{$baseKey}:employment:{$employmentId}:part:{$index}:debit",
+                    $debitAccount,
+                    $partShare,
+                    $description,
+                    $parts[$index]['cost_center'],
+                    $parts[$index]['dimensions'],
+                );
+            }
         }
         $this->addAllocation(
             $allocations,
@@ -1793,14 +1953,14 @@ final class PayrollPostingLineBuilder
      * @param array<string,mixed> $result
      * @param array<string,string> $accounts
      * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
-     * @param array<int,?string> $costCenters employment_id → středisko
+     * @param array<int,list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>> $partsByEmployment
      */
     private function addRiskySavings(
         array &$allocations,
         array $result,
         array $accounts,
         array $configuredAccounts,
-        array $costCenters,
+        array $partsByEmployment,
     ): void {
         $statutory = $this->object($result['statutory'] ?? null, 'result.statutory');
         $rows = $statutory['risky_savings'] ?? null;
@@ -1809,7 +1969,7 @@ final class PayrollPostingLineBuilder
         }
         foreach ($this->rows($rows, 'result.statutory.risky_savings') as $row) {
             $employmentId = $this->positiveInt($row, 'employment_id');
-            if (!array_key_exists($employmentId, $costCenters)) {
+            if (!array_key_exists($employmentId, $partsByEmployment)) {
                 throw new \DomainException(
                     "Povinné spoření employment:{$employmentId} nepatří do revize.",
                 );
@@ -1822,14 +1982,15 @@ final class PayrollPostingLineBuilder
                 continue;
             }
             $contribution = $this->nonNegativeInt($row, 'contribution_minor');
-            $this->addPair(
+            $riskyDebit = $accounts['risky_savings_debit'];
+            $this->addCostPair(
                 $allocations,
                 "risky-savings:employment:{$employmentId}",
-                $accounts['risky_savings_debit'],
+                static fn (array $part): string => $riskyDebit,
                 $this->riskySavingsAccount($accounts, $configuredAccounts),
                 $contribution,
                 'Povinný příspěvek na spoření u rizikové práce',
-                $costCenters[$employmentId] ?? null,
+                $partsByEmployment[$employmentId],
             );
         }
     }
@@ -1887,30 +2048,231 @@ final class PayrollPostingLineBuilder
      * nepatří: sloupec je jeden a nacpat do něj podle nálady jednou zakázku
      * a jindy středisko by z něj udělal nečitelnou směs.
      *
-     * @param array<string,mixed> $employmentSnapshot zmrazený pracovní vztah
+     * @param array<string,mixed> $dimension zmrazená dimenze vztahu
      */
-    private function dimensionCostCenter(array $employmentSnapshot): ?string
+    private function dimensionCostCenter(array $dimension, int $index): ?string
     {
-        $dimensions = $employmentSnapshot['dimensions'] ?? null;
-        if (!is_array($dimensions) || !array_is_list($dimensions)) {
+        if (($dimension['type'] ?? null) !== 'cost_center') {
             return null;
         }
-        foreach ($dimensions as $index => $dimension) {
-            $dimension = $this->object($dimension, "employment.dimensions.{$index}");
-            if (($dimension['type'] ?? null) !== 'cost_center') {
-                continue;
-            }
-            $code = $dimension['code'] ?? null;
-            if (!is_string($code) || $code === '' || strlen($code) > 50) {
-                throw new \DomainException(
-                    "Kód střediska employment.dimensions.{$index} není platný.",
-                );
-            }
-
-            return $code;
+        $code = $dimension['code'] ?? null;
+        if (!is_string($code) || $code === '' || strlen($code) > 50) {
+            throw new \DomainException(
+                "Kód střediska employment.dimensions.{$index} není platný.",
+            );
         }
 
-        return null;
+        return $code;
+    }
+
+    /**
+     * Části pracovního vztahu, na které se rozpadá jeho náklad.
+     *
+     * Každá část nese středisko pro textový `cost_center`, firemní dimenze
+     * (typ → hodnota) pro `journal_entry_line_dimensions`, výchozí nákladový
+     * účet dimenze a celočíselnou váhu.
+     *
+     * Vztah bez procentního rozpadu má JEDNU část s tím, co dosud četly
+     * {@see PayrollDimensionCostAccountResolver} a {@see dimensionCostCenter()}:
+     * první středisko a účet podle priority typů. Zaúčtuje se tedy beze změny.
+     *
+     * Rozpad víc hodnot jednoho typu (`share_bp`, součet 10 000) se kombinuje
+     * s ostatními typy kartézským součinem — 70/30 na střediska a 50/50 na
+     * zakázky dá čtyři části s váhami 35/15/35/15. Podíly, které nedají 100 %,
+     * zaúčtování zastaví: rozpad by jinak část nákladu tiše ztratil.
+     *
+     * @param array<string,mixed> $employmentSnapshot zmrazený pracovní vztah
+     * @return list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>
+     */
+    private function employmentParts(array $employmentSnapshot): array
+    {
+        $employmentAccount = $this->dimensionAccounts->resolve($employmentSnapshot);
+        $dimensions = $employmentSnapshot['dimensions'] ?? null;
+        if (!is_array($dimensions) || !array_is_list($dimensions)) {
+            return [self::plainPart()];
+        }
+
+        /** @var array<string,list<array{dimension:array<string,mixed>,index:int,share:int}>> $byType */
+        $byType = [];
+        foreach ($dimensions as $index => $dimension) {
+            $dimension = $this->object($dimension, "employment.dimensions.{$index}");
+            $this->dimensionCostCenter($dimension, $index);
+            $share = $dimension['share_bp'] ?? 10_000;
+            if (!is_int($share) || $share <= 0 || $share > 10_000) {
+                throw new \DomainException(
+                    "Podíl employment.dimensions.{$index}.share_bp není platný.",
+                );
+            }
+            $this->companyDimension($dimension, $index);
+            $type = $dimension['type'] ?? null;
+            $byType[is_string($type) ? $type : ''][] = [
+                'dimension' => $dimension,
+                'index' => $index,
+                'share' => $share,
+            ];
+        }
+
+        /** @var list<array{entries:list<array{dimension:array<string,mixed>,index:int,share:int}>,weight:int}> $combinations */
+        $combinations = [['entries' => [], 'weight' => 1]];
+        foreach ($byType as $type => $entries) {
+            if (count($entries) === 1 && $entries[0]['share'] === 10_000) {
+                foreach ($combinations as $i => $combination) {
+                    $combinations[$i]['entries'][] = $entries[0];
+                }
+                continue;
+            }
+            $total = 0;
+            foreach ($entries as $entry) {
+                $total = $this->add($total, $entry['share']);
+            }
+            if ($total !== 10_000) {
+                throw new \DomainException(
+                    "Podíly mzdových dimenzí typu {$type} nedávají dohromady 100 %.",
+                );
+            }
+            $next = [];
+            foreach ($combinations as $combination) {
+                foreach ($entries as $entry) {
+                    $next[] = [
+                        'entries' => [...$combination['entries'], $entry],
+                        'weight' => $this->multiply($combination['weight'], $entry['share']),
+                    ];
+                }
+            }
+            $combinations = $next;
+        }
+
+        $divisor = 0;
+        foreach ($combinations as $combination) {
+            $divisor = self::gcd($divisor, $combination['weight']);
+        }
+
+        $parts = [];
+        foreach ($combinations as $combination) {
+            $costCenter = null;
+            $companyDimensions = [];
+            foreach ($combination['entries'] as $entry) {
+                $costCenter ??= $this->dimensionCostCenter($entry['dimension'], $entry['index']);
+            }
+            // Dvě mzdové dimenze navázané na týž firemní typ: vyhrává ta podle
+            // priority účtu (středisko, zakázka, činnost), stejně jako u účtu.
+            foreach (self::DIMENSION_PRIORITY as $priorityType) {
+                foreach ($combination['entries'] as $entry) {
+                    if (($entry['dimension']['type'] ?? null) !== $priorityType) {
+                        continue;
+                    }
+                    $link = $this->companyDimension($entry['dimension'], $entry['index']);
+                    if ($link !== null) {
+                        $companyDimensions[$link[0]] ??= $link[1];
+                    }
+                }
+            }
+            ksort($companyDimensions, SORT_NUMERIC);
+            $parts[] = [
+                'cost_center' => $costCenter,
+                'dimensions' => $companyDimensions,
+                'account' => count($combinations) === 1
+                    ? $employmentAccount
+                    : $this->dimensionAccounts->resolve([
+                        'dimensions' => array_map(
+                            static fn (array $entry): array => $entry['dimension'],
+                            $combination['entries'],
+                        ),
+                    ]),
+                'weight' => intdiv($combination['weight'], max(1, $divisor)),
+            ];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Vazba zmrazené mzdové dimenze na firemní dimenzi, nebo `null`.
+     *
+     * @param array<string,mixed> $dimension
+     * @return array{int,int}|null [typ, hodnota]
+     */
+    private function companyDimension(array $dimension, int $index): ?array
+    {
+        $typeId = $dimension['dimension_type_id'] ?? null;
+        $valueId = $dimension['dimension_value_id'] ?? null;
+        if ($typeId === null && $valueId === null) {
+            return null;
+        }
+        if (!is_int($typeId) || $typeId <= 0 || !is_int($valueId) || $valueId <= 0) {
+            throw new \DomainException(
+                "Firemní dimenze employment.dimensions.{$index} není platná.",
+            );
+        }
+
+        return [$typeId, $valueId];
+    }
+
+    /** @return array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int} */
+    private static function plainPart(): array
+    {
+        return ['cost_center' => null, 'dimensions' => [], 'account' => null, 'weight' => 1];
+    }
+
+    /**
+     * @param list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}> $parts
+     */
+    private function isPlainParts(array $parts): bool
+    {
+        return count($parts) === 1
+            && $parts[0]['cost_center'] === null
+            && $parts[0]['dimensions'] === [];
+    }
+
+    /**
+     * Rozdělí částku mezi části vztahu metodou největšího zbytku.
+     *
+     * Součet je vždy přesně `$amount`; haléř navíc dostane část s největším
+     * zbytkem, při shodě ta dřívější. Záporná částka (oprava) se dělí stejně
+     * jako kladná, jen se znaménkem.
+     *
+     * @param list<array{weight:int}> $parts
+     * @return array<int,int> index části → částka
+     */
+    private function splitByParts(int $amount, array $parts): array
+    {
+        $negative = $amount < 0;
+        $absolute = $this->absolute($amount);
+        $totalWeight = 0;
+        foreach ($parts as $part) {
+            if ($part['weight'] <= 0) {
+                throw new \DomainException('Část pracovního vztahu nemá kladnou váhu.');
+            }
+            $totalWeight = $this->add($totalWeight, $part['weight']);
+        }
+        $shares = [];
+        $remainders = [];
+        $allocated = 0;
+        foreach ($parts as $index => $part) {
+            $product = $this->multiply($absolute, $part['weight']);
+            $shares[$index] = intdiv($product, $totalWeight);
+            $remainders[$index] = $product % $totalWeight;
+            $allocated = $this->add($allocated, $shares[$index]);
+        }
+        $order = array_keys($parts);
+        usort($order, static fn (int $left, int $right): int =>
+            ($remainders[$right] <=> $remainders[$left]) ?: ($left <=> $right));
+        for ($i = 0, $rest = $absolute - $allocated; $i < $rest; $i++) {
+            $shares[$order[$i]]++;
+        }
+
+        return $negative
+            ? array_map(static fn (int $share): int => -$share, $shares)
+            : $shares;
+    }
+
+    private static function gcd(int $left, int $right): int
+    {
+        while ($right !== 0) {
+            [$left, $right] = [$right, $left % $right];
+        }
+
+        return abs($left);
     }
 
     /**

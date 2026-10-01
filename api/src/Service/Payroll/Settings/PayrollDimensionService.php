@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Settings;
 
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\Payroll\PayrollDimensionRepository;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingAccountPolicy;
 
@@ -13,7 +14,39 @@ final class PayrollDimensionService
 
     public function __construct(
         private readonly PayrollDimensionRepository $repository,
+        private readonly DimensionRepository $companyDimensions,
     ) {}
+
+    /**
+     * Hodnoty firemních dimenzí (Firma → Dimenze), na které lze mzdovou
+     * dimenzi navázat: aktivní hodnoty aktivních typů firmy a její skupiny.
+     *
+     * @return list<array{id:int,type_id:int,type_name:string,type_kind:string,code:string,name:string}>
+     */
+    public function companyValues(int $supplierId): array
+    {
+        $types = [];
+        foreach ($this->companyDimensions->listTypes($supplierId, false) as $type) {
+            $types[(int) $type['id']] = $type;
+        }
+        $result = [];
+        foreach ($this->companyDimensions->listValues($supplierId, null, false) as $value) {
+            $type = $types[(int) $value['type_id']] ?? null;
+            if ($type === null) {
+                continue;
+            }
+            $result[] = [
+                'id' => (int) $value['id'],
+                'type_id' => (int) $value['type_id'],
+                'type_name' => (string) $type['name'],
+                'type_kind' => (string) $type['kind'],
+                'code' => (string) $value['code'],
+                'name' => (string) $value['name'],
+            ];
+        }
+
+        return $result;
+    }
 
     /**
      * @param array<string,mixed> $input
@@ -33,6 +66,11 @@ final class PayrollDimensionService
             throw new \InvalidArgumentException('row_version nesmí být záporné.');
         }
         $data = $this->normalize($input);
+        // Klient, který o vazbě neví (starší frontend, import), ji úpravou
+        // nesmaže — chybějící klíč znamená „beze změny".
+        $data['dimension_value_id'] = !array_key_exists('dimension_value_id', $input) && $id !== null
+            ? ($this->repository->find($supplierId, $id)['dimension_value_id'] ?? null)
+            : $this->companyValueId($supplierId, $input);
 
         if ($id === null) {
             if ($expectedVersion !== 0) {
@@ -142,6 +180,32 @@ final class PayrollDimensionService
             'is_active' => $isActive,
             'default_account_code' => $account,
         ];
+    }
+
+    /**
+     * Vazba na hodnotu firemní dimenze. Smí jít jen o hodnotu, kterou firma
+     * vidí (vlastní, nebo ze skupiny firem) — deník by cizí hodnotu uložil,
+     * FK hlídá jen to, že hodnota patří ke svému typu.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function companyValueId(int $supplierId, array $input): ?int
+    {
+        $raw = $input['dimension_value_id'] ?? null;
+        if ($raw === null || $raw === '' || $raw === 0) {
+            return null;
+        }
+        $valueId = filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($valueId === false) {
+            throw new \InvalidArgumentException('Firemní dimenze musí být určena kladným ID.');
+        }
+        if ($this->companyDimensions->findValue($supplierId, $valueId) === null) {
+            throw new \InvalidArgumentException(
+                'Zvolená hodnota firemní dimenze neexistuje nebo nepatří firmě ani její skupině.',
+            );
+        }
+
+        return $valueId;
     }
 
     private function nullableDate(mixed $value, string $field): ?string

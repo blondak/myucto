@@ -252,6 +252,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/close$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/reports/dimension-costs/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
         // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
         // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
         ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
@@ -553,6 +554,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/settings/institution-accounts(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/institution-accounts(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/dimensions(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
+        ['GET', '#^/api/payroll/settings/dimensions/company-values$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/dimensions$#', 'payroll.settings', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/settings/dimensions/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/settings/dimensions/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
@@ -566,6 +568,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/employments/[0-9]+/surcharge-policies/[0-9]+/close$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/dimensions$#', 'payroll.employment.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/dimensions$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/employments/[0-9]+/dimension-splits$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/employments/[0-9]+/dimensions/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time(/|$)#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time(/|$)#', 'payroll.time.write', AccessLevel::WRITE],

@@ -53,6 +53,18 @@ final class PayrollDimensionAction
         ]);
     }
 
+    /** Hodnoty firemních dimenzí, na které lze mzdovou dimenzi navázat. */
+    public function companyValues(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+
+        return Json::ok($response, [
+            'values' => $this->service->companyValues($this->currentSupplierId($request)),
+        ]);
+    }
+
     /** @param array<string,string> $args */
     public function detail(Request $request, Response $response, array $args): Response
     {

@@ -363,13 +363,26 @@ final class PayrollRunSnapshotBatchLoader
         array $employmentIds,
         string $periodStart,
     ): array {
+        // Firemní hodnota se bere jen tehdy, když ji firma vidí (vlastní, nebo
+        // ze skupiny firem) — vazbu cizí hodnoty by deník uložil bez námitek,
+        // FK hlídá jen dvojici typ–hodnota.
         return $this->grouped($this->fetch(
             'SELECT d.dimension_type, d.code, d.name, d.default_account_code,
+                    ed.share_percent,
+                    dv.type_id AS company_dimension_type_id,
+                    dv.id AS company_dimension_value_id,
                     ed.employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_employment_dimensions ed
                JOIN payroll_dimensions d
                  ON d.supplier_id = ed.supplier_id
                 AND d.id = ed.dimension_id
+               JOIN supplier s
+                 ON s.id = ed.supplier_id
+          LEFT JOIN dimension_values dv
+                 ON dv.id = d.dimension_value_id
+                AND (dv.supplier_id = s.id
+                     OR (dv.supplier_group_id IS NOT NULL
+                         AND dv.supplier_group_id = s.supplier_group_id))
               WHERE ed.supplier_id = ?
                 AND ed.employment_id IN (%s)
                 AND ed.valid_from <= ?

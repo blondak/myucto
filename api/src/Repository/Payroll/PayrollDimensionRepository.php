@@ -11,7 +11,8 @@ final class PayrollDimensionRepository
 {
     private const COLUMNS = <<<'SQL'
         id, supplier_id, dimension_type, code, name, valid_from, valid_to,
-        is_active, default_account_code, created_by, updated_by, row_version,
+        is_active, default_account_code, dimension_value_id, created_by,
+        updated_by, row_version,
         created_at, updated_at
         SQL;
 
@@ -112,9 +113,9 @@ final class PayrollDimensionRepository
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_dimensions
                     (supplier_id, dimension_type, code, name, valid_from,
-                     valid_to, is_active, default_account_code, created_by,
-                     updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                     valid_to, is_active, default_account_code,
+                     dimension_value_id, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             );
             $stmt->execute($this->writeValues($supplierId, $data, $actorUserId, true));
             $id = (int) $pdo->lastInsertId();
@@ -203,6 +204,7 @@ final class PayrollDimensionRepository
                         valid_to = ?,
                         is_active = ?,
                         default_account_code = ?,
+                        dimension_value_id = ?,
                         updated_by = ?,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND id = ? AND row_version = ?',
@@ -370,6 +372,7 @@ final class PayrollDimensionRepository
             self::nullableString($data, 'valid_to'),
             (int) self::requiredBool($data, 'is_active'),
             self::nullableString($data, 'default_account_code'),
+            self::nullableInt($data, 'dimension_value_id'),
         ];
         if ($includeCreatedBy) {
             $values[] = $actorUserId;
@@ -387,7 +390,7 @@ final class PayrollDimensionRepository
         $row['supplier_id'] = self::requiredInt($row, 'supplier_id');
         $row['is_active'] = self::requiredBool($row, 'is_active');
         $row['row_version'] = self::requiredInt($row, 'row_version');
-        foreach (['created_by', 'updated_by'] as $field) {
+        foreach (['created_by', 'updated_by', 'dimension_value_id'] as $field) {
             $row[$field] = self::nullableInt($row, $field);
         }
 

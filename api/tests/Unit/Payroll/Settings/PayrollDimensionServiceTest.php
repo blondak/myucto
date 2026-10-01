@@ -93,8 +93,10 @@ final class PayrollDimensionServiceTest extends TestCase
     {
         $repository = (new \ReflectionClass(PayrollDimensionRepository::class))
             ->newInstanceWithoutConstructor();
+        $companyDimensions = (new \ReflectionClass(\MyInvoice\Repository\DimensionRepository::class))
+            ->newInstanceWithoutConstructor();
 
-        return new PayrollDimensionService($repository);
+        return new PayrollDimensionService($repository, $companyDimensions);
     }
 
     /**

@@ -2099,14 +2099,46 @@ final class PayrollRunSnapshotBuilder
         $result = [];
         foreach ($rows as $row) {
             $account = $row['default_account_code'];
-            $result[] = [
+            $dimension = [
                 'type' => (string) $row['dimension_type'],
                 'code' => (string) $row['code'],
                 'name' => (string) $row['name'],
                 'default_account_code' => $account === null ? null : (string) $account,
             ];
+            // Podíl a vazba na firemní dimenzi vstupují jen tam, kde jsou
+            // nastavené. Vztah se 100 % a bez vazby tak má otisk shodný
+            // s dosavadním snapshotem a zaúčtuje se bajtově stejně.
+            $shareBp = self::shareBasisPoints($row['share_percent'] ?? null);
+            if ($shareBp !== 10_000) {
+                $dimension['share_bp'] = $shareBp;
+            }
+            $typeId = $row['company_dimension_type_id'] ?? null;
+            $valueId = $row['company_dimension_value_id'] ?? null;
+            if ($typeId !== null && $valueId !== null) {
+                $dimension['dimension_type_id'] = (int) $typeId;
+                $dimension['dimension_value_id'] = (int) $valueId;
+            }
+            $result[] = $dimension;
         }
         return $result;
+    }
+
+    /** Podíl v setinách procenta (10 000 = 100 %); chybějící sloupec = 100 %. */
+    private static function shareBasisPoints(mixed $share): int
+    {
+        if ($share === null) {
+            return 10_000;
+        }
+        $text = is_string($share) ? $share : (string) $share;
+        if (preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) !== 1) {
+            throw new \UnexpectedValueException("Podíl dimenze {$text} není platné procento.");
+        }
+        $bp = (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0');
+        if ($bp <= 0 || $bp > 10_000) {
+            throw new \UnexpectedValueException("Podíl dimenze {$text} je mimo rozsah 0–100 %.");
+        }
+
+        return $bp;
     }
 
     /**

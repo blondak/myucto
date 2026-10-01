@@ -176,6 +176,12 @@ final class PayrollPostingAdapter
                     if (isset($line['cost_center'])) {
                         $mapped['cost_center'] = $line['cost_center'];
                     }
+                    // Firemní dimenze řádku (typ → hodnota) jdou do deníku
+                    // stejnou cestou jako u ručního zápisu: PostingService je
+                    // předá DimensionStamperu jako výslovné dimenze řádku.
+                    if (isset($line['dimensions']) && $line['dimensions'] !== []) {
+                        $mapped['dimensions'] = $line['dimensions'];
+                    }
                     return $mapped;
                 }, $preview->lines),
                 [

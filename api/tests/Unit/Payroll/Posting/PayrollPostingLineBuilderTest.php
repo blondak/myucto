@@ -1860,6 +1860,263 @@ final class PayrollPostingLineBuilderTest extends TestCase
     }
 
     /**
+     * F3 (mzdy na firemní dimenze) je opt-in: bez vazby na firemní dimenzi
+     * a bez procentního rozpadu musí vyjít alokace i řádky BAJTOVĚ stejně
+     * jako před ní. Otisky jsou spočtené kódem před zavedením F3 — jakákoli
+     * změna tvaru alokací (nový klíč, jiné pořadí, jiný klíč seskupení) by
+     * zaúčtovanou revizi při opakovaném zaúčtování odmítla jiným otiskem.
+     */
+    public function testPostingWithoutCompanyDimensionsIsByteIdenticalToBeforeF3(): void
+    {
+        $plain = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $withCostCentres = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            [
+                self::PRE_F3_PLAIN_TARGET_HASH,
+                self::PRE_F3_PLAIN_DELTA_HASH,
+                self::PRE_F3_COST_CENTRE_TARGET_HASH,
+                self::PRE_F3_COST_CENTRE_DELTA_HASH,
+            ],
+            [
+                $plain->targetHash,
+                $plain->deltaHash,
+                $withCostCentres->targetHash,
+                $withCostCentres->deltaHash,
+            ],
+        );
+    }
+
+    private const PRE_F3_PLAIN_TARGET_HASH = '83f9879b7d1982ffa5879edad388eb311cdf07cec6963a5601557080395d4440';
+    private const PRE_F3_PLAIN_DELTA_HASH = 'a85dc49650d9ab963b062fe9b74c6ec86685e7a2fffc4d6da68276a65ba96b89';
+    private const PRE_F3_COST_CENTRE_TARGET_HASH = '974b145d7ba5e1fd38ce504670cf1593f261fba60a38376a109c2b5674bc3b4f';
+    private const PRE_F3_COST_CENTRE_DELTA_HASH = 'ced8875b9c68a894b59b94241d0194f98aceccabd2fa8d190e8dc11b212eec81';
+
+    /**
+     * Vazba mzdového střediska na firemní dimenzi jen přidá řádkům dimenzi,
+     * částky ani účty nemění. Závazky (331, 336) dimenzi nenesou.
+     */
+    public function testLinkedCompanyDimensionTagsOnlyCostLines(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $snapshot['people'][0]['employments'][0]['dimensions'][0] += [
+            'dimension_type_id' => 7,
+            'dimension_value_id' => 71,
+        ];
+        $snapshot['people'][0]['employments'][1]['dimensions'][0] += [
+            'dimension_type_id' => 7,
+            'dimension_value_id' => 72,
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['7:71' => 100_000],
+            $this->dimensionMap($preview->lines, '521', 'debit'),
+        );
+        self::assertSame(
+            ['' => 101_400, '7:71' => 33_800, '7:72' => 67_600],
+            $this->dimensionMap($preview->lines, '524', 'debit'),
+        );
+        self::assertSame(['' => 100_000], $this->dimensionMap($preview->lines, '331', 'credit'));
+        self::assertSame(['' => 190_800], $this->dimensionMap($preview->lines, '336.100', 'credit'));
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /**
+     * 70 / 30 na dvě střediska: hrubá mzda i pojistné zaměstnavatele (524)
+     * se rozpadnou podle podílů, součty sedí na haléř a každá část nese
+     * středisko i firemní dimenzi svého podílu. Závazek se nedělí.
+     */
+    public function testSeventyThirtySplitDividesWagesAndEmployerInsurance(): void
+    {
+        $snapshot = $this->snapshotWithSplit(7_000, 3_000);
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['STR-A' => 70_000, 'STR-B' => 30_000],
+            $this->costCentreMap($preview->lines, '521', 'debit'),
+        );
+        self::assertSame(
+            ['7:71' => 70_000, '7:72' => 30_000],
+            $this->dimensionMap($preview->lines, '521', 'debit'),
+        );
+        // Vztah 101 nese 33 800 pojistného; 70 % = 23 660, 30 % = 10 140.
+        self::assertSame(
+            ['' => 169_000, '7:71' => 23_660, '7:72' => 10_140],
+            $this->dimensionMap($preview->lines, '524', 'debit'),
+        );
+        self::assertSame(202_800, array_sum($this->dimensionMap($preview->lines, '524', 'debit')));
+        self::assertSame(['' => 100_000], $this->dimensionMap($preview->lines, '331', 'credit'));
+        self::assertSame(['' => 190_800], $this->dimensionMap($preview->lines, '336.100', 'credit'));
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /** Haléř, který po dělení zbude, dostane podíl s největším zbytkem. */
+    public function testSplitKeepsTheOddHallerOnTheLargestRemainder(): void
+    {
+        $snapshot = $this->snapshotWithSplit(3_333, 6_667);
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['7:71' => 33_330, '7:72' => 66_670],
+            $this->dimensionMap($preview->lines, '521', 'debit'),
+        );
+        // 33 800 × 33,33 % = 11 265,54 a × 66,67 % = 22 534,46 — haléř navíc
+        // dostane první podíl (zbytek 0,54 > 0,46), součet zůstává 33 800.
+        self::assertSame(
+            ['' => 169_000, '7:71' => 11_266, '7:72' => 22_534],
+            $this->dimensionMap($preview->lines, '524', 'debit'),
+        );
+    }
+
+    /** Podíly, které nedají 100 %, by část nákladu tiše ztratily. */
+    public function testSplitThatDoesNotSumToHundredPercentFailsClosed(): void
+    {
+        $snapshot = $this->snapshotWithSplit(7_000, 2_000);
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nedávají dohromady 100 %');
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    /**
+     * Opravná revize, která jen změní podíly, odúčtuje staré části a zaúčtuje
+     * nové — rozdíl je čistě přeúčtování mezi středisky, celkový náklad stojí.
+     */
+    public function testChangedSplitInCorrectionReclassifiesOnlyTheShares(): void
+    {
+        $before = $this->snapshotWithSplit(7_000, 3_000);
+        $beforeResult = $this->calculatedResult();
+        $beforeResult['source_snapshot_hash'] = $this->snapshotHash($before);
+        $previous = $this->builder->build(
+            $before,
+            $beforeResult,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        $after = $this->snapshotWithSplit(5_000, 5_000);
+        $afterResult = $this->calculatedResult();
+        $afterResult['source_snapshot_hash'] = $this->snapshotHash($after);
+        $correction = $this->builder->build(
+            $after,
+            $afterResult,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+            $previous->targetAllocations,
+        );
+
+        $net = [];
+        foreach ($correction->lines as $line) {
+            $key = $line['account_code'] . '|' . self::dimensionsKey($line['dimensions'] ?? []);
+            $net[$key] = ($net[$key] ?? 0)
+                + ($line['side'] === 'debit' ? $line['amount_minor'] : -$line['amount_minor']);
+        }
+        ksort($net);
+        self::assertSame([
+            '521|7:71' => -20_000,
+            '521|7:72' => 20_000,
+            '524|7:71' => -6_760,
+            '524|7:72' => 6_760,
+        ], $net);
+    }
+
+    /** @return array<string,mixed> */
+    private function snapshotWithSplit(int $firstShareBp, int $secondShareBp): array
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'STR-A', null) + [
+                'share_bp' => $firstShareBp,
+                'dimension_type_id' => 7,
+                'dimension_value_id' => 71,
+            ],
+            $this->dimension('cost_center', 'STR-B', null) + [
+                'share_bp' => $secondShareBp,
+                'dimension_type_id' => 7,
+                'dimension_value_id' => 72,
+            ],
+        ];
+        $snapshot['people'][0]['employments'][1]['dimensions'] = [];
+
+        return $snapshot;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<string,int> vektor firemních dimenzí („typ:hodnota") → částka
+     */
+    private function dimensionMap(array $lines, string $account, string $side): array
+    {
+        $result = [];
+        foreach ($lines as $line) {
+            if ($line['account_code'] !== $account || $line['side'] !== $side) {
+                continue;
+            }
+            $key = self::dimensionsKey($line['dimensions'] ?? []);
+            $result[$key] = ($result[$key] ?? 0) + $line['amount_minor'];
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /** @param array<int,int> $dimensions */
+    private static function dimensionsKey(array $dimensions): string
+    {
+        $pairs = [];
+        foreach ($dimensions as $typeId => $valueId) {
+            $pairs[] = "{$typeId}:{$valueId}";
+        }
+
+        return implode(',', $pairs);
+    }
+
+    /**
      * @param list<array<string,mixed>> $lines
      * @return array<string,int>
      */

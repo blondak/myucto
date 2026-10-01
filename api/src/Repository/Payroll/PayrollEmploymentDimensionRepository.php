@@ -11,16 +11,19 @@ final class PayrollEmploymentDimensionRepository
 {
     private const COLUMNS = <<<'SQL'
         ed.id, ed.supplier_id, ed.employment_id, ed.dimension_id,
-        ed.valid_from, ed.valid_to, ed.created_by, ed.updated_by,
-        ed.row_version, ed.created_at, ed.updated_at
+        ed.share_percent, ed.valid_from, ed.valid_to, ed.created_by,
+        ed.updated_by, ed.row_version, ed.created_at, ed.updated_at
         SQL;
 
     private const JOINED_COLUMNS = <<<'SQL'
         ed.id, ed.supplier_id, ed.employment_id, ed.dimension_id,
-        ed.valid_from, ed.valid_to, ed.created_by, ed.updated_by,
-        ed.row_version, ed.created_at, ed.updated_at,
+        ed.share_percent, ed.valid_from, ed.valid_to, ed.created_by,
+        ed.updated_by, ed.row_version, ed.created_at, ed.updated_at,
         d.dimension_type, d.code AS dimension_code, d.name AS dimension_name
         SQL;
+
+    /** Celý podíl v setinách procenta. */
+    private const FULL_SHARE_BP = 10_000;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -98,6 +101,8 @@ final class PayrollEmploymentDimensionRepository
                 $validFrom,
                 $validTo,
                 null,
+                $dimensionId,
+                self::FULL_SHARE_BP,
             );
 
             $stmt = $pdo->prepare(
@@ -150,7 +155,7 @@ final class PayrollEmploymentDimensionRepository
         try {
             $this->lockTenant($supplierId);
             $lock = $pdo->prepare(
-                'SELECT row_version, employment_id
+                'SELECT row_version, employment_id, share_percent
                    FROM payroll_employment_dimensions
                   WHERE supplier_id = ? AND id = ?
                   FOR UPDATE',
@@ -173,6 +178,7 @@ final class PayrollEmploymentDimensionRepository
 
             $dimension = $this->lockDimension($supplierId, $dimensionId);
             $this->assertDimensionEffective($dimension, $validFrom, $validTo);
+            $shareBp = self::shareBasisPoints($current['share_percent']);
             $this->assertNoOverlap(
                 $supplierId,
                 $employmentId,
@@ -180,6 +186,8 @@ final class PayrollEmploymentDimensionRepository
                 $validFrom,
                 $validTo,
                 $id,
+                $dimensionId,
+                $shareBp,
             );
 
             $stmt = $pdo->prepare(
@@ -197,6 +205,9 @@ final class PayrollEmploymentDimensionRepository
             ]);
             if ($stmt->rowCount() !== 1) {
                 throw new PayrollEmploymentDimensionConflictException($currentVersion);
+            }
+            if ($shareBp !== self::FULL_SHARE_BP) {
+                $this->assertSharesComplete($supplierId, $employmentId);
             }
             $row = $this->find($supplierId, $id)
                 ?? throw new \RuntimeException('Upravené přiřazení dimenze se nepodařilo načíst.');
@@ -267,6 +278,197 @@ final class PayrollEmploymentDimensionRepository
         }
     }
 
+    /**
+     * Procentní rozpad vztahu mezi víc hodnot jednoho typu dimenze.
+     *
+     * Celý rozpad se ukládá najednou: součet 100 % musí platit v každém dni,
+     * takže jednotlivé řádky po jednom uložit nejde. Dosavadní přiřazení
+     * téhož typu, které začalo dřív a trvá do `valid_from`, se ukončí den
+     * před ním — rozpad tak jde nastavit i změnit „od data". Přiřazení, které
+     * začíná až v novém období, se nepřepisuje a uložení odmítne.
+     *
+     * Jediná hodnota se 100 % je platný „rozpad" — vrací vztah k jednomu
+     * středisku.
+     *
+     * @param list<array{dimension_id:int,share_bp:int}> $shares
+     * @return list<array<string,mixed>> uložené řádky rozpadu
+     */
+    public function saveSplit(
+        int $supplierId,
+        int $employmentId,
+        string $dimensionType,
+        string $validFrom,
+        ?string $validTo,
+        array $shares,
+        ?int $actorUserId,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $this->lockTenant($supplierId);
+            if (!$this->employmentExists($supplierId, $employmentId)) {
+                throw new \RuntimeException('Pracovní vztah pro přiřazení dimenze nebyl nalezen.');
+            }
+            $total = 0;
+            $seen = [];
+            foreach ($shares as $share) {
+                if (isset($seen[$share['dimension_id']])) {
+                    throw new \InvalidArgumentException('Rozpad obsahuje stejnou dimenzi vícekrát.');
+                }
+                $seen[$share['dimension_id']] = true;
+                $dimension = $this->lockDimension($supplierId, $share['dimension_id']);
+                if ((string) $dimension['dimension_type'] !== $dimensionType) {
+                    throw new \InvalidArgumentException('Všechny dimenze rozpadu musí být stejného typu.');
+                }
+                $this->assertDimensionEffective($dimension, $validFrom, $validTo);
+                $total += $share['share_bp'];
+            }
+            if ($shares === [] || $total !== self::FULL_SHARE_BP) {
+                throw new \InvalidArgumentException('Podíly rozpadu musí dát dohromady přesně 100 %.');
+            }
+
+            $existing = $pdo->prepare(
+                'SELECT ed.id, ed.valid_from, ed.valid_to
+                   FROM payroll_employment_dimensions ed
+                   JOIN payroll_dimensions d
+                     ON d.supplier_id = ed.supplier_id AND d.id = ed.dimension_id
+                  WHERE ed.supplier_id = ?
+                    AND ed.employment_id = ?
+                    AND d.dimension_type = ?
+                    AND ed.valid_from <= COALESCE(?, "9999-12-31")
+                    AND COALESCE(ed.valid_to, "9999-12-31") >= ?
+                  FOR UPDATE',
+            );
+            $existing->execute([$supplierId, $employmentId, $dimensionType, $validTo, $validFrom]);
+            $closeOn = (new \DateTimeImmutable($validFrom))->modify('-1 day')->format('Y-m-d');
+            $close = $pdo->prepare(
+                'UPDATE payroll_employment_dimensions
+                    SET valid_to = ?, updated_by = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ?',
+            );
+            foreach ($existing->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $endsAfterSplit = $validTo !== null
+                    && ($row['valid_to'] === null || (string) $row['valid_to'] > $validTo);
+                if ((string) $row['valid_from'] >= $validFrom || $endsAfterSplit) {
+                    throw new PayrollEmploymentDimensionOverlapException(
+                        'V období rozpadu už pracovní vztah má jiné přiřazení tohoto typu, '
+                        . 'které nejde jen ukončit. Upravte nejdřív jeho platnost.',
+                    );
+                }
+                $close->execute([$closeOn, $actorUserId, $supplierId, (int) $row['id']]);
+            }
+
+            $insert = $pdo->prepare(
+                'INSERT INTO payroll_employment_dimensions
+                    (supplier_id, employment_id, dimension_id, share_percent,
+                     valid_from, valid_to, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            );
+            $ids = [];
+            foreach ($shares as $share) {
+                $insert->execute([
+                    $supplierId,
+                    $employmentId,
+                    $share['dimension_id'],
+                    self::sharePercent($share['share_bp']),
+                    $validFrom,
+                    $validTo,
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+                $ids[] = (int) $pdo->lastInsertId();
+            }
+            $this->assertSharesComplete($supplierId, $employmentId);
+
+            $rows = [];
+            foreach ($ids as $id) {
+                $rows[] = $this->find($supplierId, $id)
+                    ?? throw new \RuntimeException('Uložený rozpad dimenze se nepodařilo načíst.');
+            }
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Součet podílů každého typu dimenze je v každém dni buď 0 (bez
+     * přiřazení), nebo přesně 100 %.
+     *
+     * Kontroluje se po uložení, uvnitř transakce: trigger vidí jen jeden
+     * řádek a rozpad vzniká víc řádky najednou.
+     */
+    private function assertSharesComplete(int $supplierId, int $employmentId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT d.dimension_type, ed.share_percent, ed.valid_from, ed.valid_to
+               FROM payroll_employment_dimensions ed
+               JOIN payroll_dimensions d
+                 ON d.supplier_id = ed.supplier_id AND d.id = ed.dimension_id
+              WHERE ed.supplier_id = ? AND ed.employment_id = ?',
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $byType = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $byType[(string) $row['dimension_type']][] = [
+                'share' => self::shareBasisPoints($row['share_percent']),
+                'from' => (string) $row['valid_from'],
+                'to' => $row['valid_to'] === null ? '9999-12-31' : (string) $row['valid_to'],
+            ];
+        }
+        foreach ($byType as $rows) {
+            // Součet se mění jen na začátku přiřazení a den po jeho konci.
+            $points = [];
+            foreach ($rows as $row) {
+                $points[] = $row['from'];
+                if ($row['to'] !== '9999-12-31') {
+                    $points[] = (new \DateTimeImmutable($row['to']))->modify('+1 day')->format('Y-m-d');
+                }
+            }
+            foreach (array_unique($points) as $day) {
+                $sum = 0;
+                foreach ($rows as $row) {
+                    if ($row['from'] <= $day && $row['to'] >= $day) {
+                        $sum += $row['share'];
+                    }
+                }
+                if ($sum !== 0 && $sum !== self::FULL_SHARE_BP) {
+                    throw new \InvalidArgumentException(
+                        "Podíly dimenzí pracovního vztahu nedávají ke dni {$day} dohromady 100 %.",
+                    );
+                }
+            }
+        }
+    }
+
+    /** Podíl ze sloupce DECIMAL(5,2) v setinách procenta. */
+    private static function shareBasisPoints(mixed $value): int
+    {
+        $text = is_string($value) ? $value : (string) $value;
+        if (preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) !== 1) {
+            throw new \UnexpectedValueException("Podíl dimenze {$text} není platné procento.");
+        }
+
+        return (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0');
+    }
+
+    private static function sharePercent(int $basisPoints): string
+    {
+        return intdiv($basisPoints, 100) . '.' . str_pad((string) ($basisPoints % 100), 2, '0', STR_PAD_LEFT);
+    }
+
     private function assertNoOverlap(
         int $supplierId,
         int $employmentId,
@@ -274,7 +476,11 @@ final class PayrollEmploymentDimensionRepository
         string $validFrom,
         ?string $validTo,
         ?int $exceptId,
+        int $dimensionId,
+        int $shareBp,
     ): void {
+        // Překrývat se smí jen části rozpadu: obě s podílem pod 100 %
+        // a s různou dimenzí. Shodně s triggerem z migrace 1948.
         $sql = 'SELECT ed.id
                   FROM payroll_employment_dimensions ed
                   JOIN payroll_dimensions d
@@ -283,8 +489,14 @@ final class PayrollEmploymentDimensionRepository
                    AND ed.employment_id = ?
                    AND d.dimension_type = ?
                    AND ed.valid_from <= COALESCE(?, "9999-12-31")
-                   AND COALESCE(ed.valid_to, "9999-12-31") >= ?';
-        $params = [$supplierId, $employmentId, $dimensionType, $validTo, $validFrom];
+                   AND COALESCE(ed.valid_to, "9999-12-31") >= ?
+                   AND (? >= ' . self::FULL_SHARE_BP . '
+                        OR ed.share_percent >= 100
+                        OR ed.dimension_id = ?)';
+        $params = [
+            $supplierId, $employmentId, $dimensionType, $validTo, $validFrom,
+            $shareBp, $dimensionId,
+        ];
         if ($exceptId !== null) {
             $sql .= ' AND ed.id <> ?';
             $params[] = $exceptId;
@@ -307,6 +519,7 @@ final class PayrollEmploymentDimensionRepository
         $row['supplier_id'] = self::requiredInt($row, 'supplier_id');
         $row['employment_id'] = self::requiredInt($row, 'employment_id');
         $row['dimension_id'] = self::requiredInt($row, 'dimension_id');
+        $row['share_percent'] = self::shareBasisPoints($row['share_percent'] ?? '100.00') / 100;
         $row['row_version'] = self::requiredInt($row, 'row_version');
         foreach (['created_by', 'updated_by'] as $field) {
             $row[$field] = self::nullableInt($row, $field);

@@ -88,6 +88,7 @@ use MyInvoice\Action\Payroll\PayrollCzIscoAction;
 use MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
+use MyInvoice\Action\Payroll\PayrollDimensionCostReportAction;
 use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentDeliveryAction;
@@ -1119,6 +1120,12 @@ final class Routes
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
+            // Náklady na zaměstnance po dimenzi — nad cílovými alokacemi
+            // účetního můstku, ne nad deníkem (ten se po zaměstnanci neúčtuje).
+            $g->get(
+                '/reports/dimension-costs/{year:[0-9]{4}}',
+                [PayrollDimensionCostReportAction::class, 'show'],
+            );
             // Kontrola přepočtu převzatého měsíce proti číslům původního systému.
             // Bez ní je přepočet historického měsíce hazard: původní systém ta čísla
             // už podal do JMHZ, na pojišťovny a na finanční úřad.
@@ -2189,6 +2196,7 @@ final class Routes
             $g->delete('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'delete']);
             $g->get('/settings/dimensions', [PayrollDimensionAction::class, 'list']);
             $g->post('/settings/dimensions', [PayrollDimensionAction::class, 'create']);
+            $g->get('/settings/dimensions/company-values', [PayrollDimensionAction::class, 'companyValues']);
             $g->get('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'detail']);
             $g->put('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'update']);
             $g->delete('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'delete']);
@@ -2234,6 +2242,9 @@ final class Routes
             );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
+            // Procentní rozpad vztahu na víc hodnot jednoho typu (70 / 30) — celý
+            // najednou, protože součet 100 % musí platit i uprostřed uložení.
+            $g->post('/employments/{id:[0-9]+}/dimension-splits', [PayrollEmploymentDimensionAction::class, 'split']);
             $g->put(
                 '/employments/{id:[0-9]+}/dimensions/{assignmentId:[0-9]+}',
                 [PayrollEmploymentDimensionAction::class, 'update'],

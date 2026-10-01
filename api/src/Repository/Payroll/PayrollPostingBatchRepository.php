@@ -461,10 +461,11 @@ final class PayrollPostingBatchRepository
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_posting_allocations
                 (supplier_id, batch_id, allocation_key, account_code,
-                 signed_minor, description, cost_center)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                 signed_minor, description, cost_center, dimensions)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($allocations as $allocation) {
+            $dimensions = $allocation['dimensions'] ?? [];
             $statement->execute([
                 $supplierId,
                 $batchId,
@@ -473,6 +474,9 @@ final class PayrollPostingBatchRepository
                 $allocation['signed_minor'],
                 $allocation['description'],
                 $allocation['cost_center'] ?? null,
+                $dimensions === []
+                    ? null
+                    : json_encode((object) $dimensions, JSON_THROW_ON_ERROR),
             ]);
         }
     }
@@ -519,7 +523,7 @@ final class PayrollPostingBatchRepository
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT allocation_key, account_code, signed_minor, description,
-                    cost_center
+                    cost_center, dimensions
                FROM payroll_posting_allocations
               WHERE supplier_id = ? AND batch_id = ?
               ORDER BY allocation_key'
@@ -560,8 +564,30 @@ final class PayrollPostingBatchRepository
                     'cost_center',
                 );
             }
+            if (($row['dimensions'] ?? null) !== null) {
+                $allocation['dimensions'] = self::databaseDimensions($row['dimensions']);
+            }
             $result[] = $allocation;
         }
+
+        return $result;
+    }
+
+    /** @return array<int,int> typ firemní dimenze → hodnota */
+    private static function databaseDimensions(mixed $value): array
+    {
+        $decoded = is_string($value) ? json_decode($value, true) : null;
+        if (!is_array($decoded) || $decoded === []) {
+            throw new \UnexpectedValueException('Databáze vrátila neplatné dimenze alokace.');
+        }
+        $result = [];
+        foreach ($decoded as $typeId => $valueId) {
+            if (!is_int($typeId) || !is_int($valueId)) {
+                throw new \UnexpectedValueException('Databáze vrátila neplatné dimenze alokace.');
+            }
+            $result[$typeId] = $valueId;
+        }
+        ksort($result, SORT_NUMERIC);
 
         return $result;
     }
