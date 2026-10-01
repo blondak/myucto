@@ -107,6 +107,10 @@ hned, i v uzavřeném období, protože mění jen analytické členění.
 - Storno přebírá dimenze stornovaného řádku.
 - Kopie faktury, dobropis a vyúčtovací faktura ze zálohové faktury přebírají
   dimenze hlavičky i položek původního dokladu.
+- Šablona pravidelné fakturace má vlastní dimenze hlavičky i položek (v editoru
+  šablony nad položkami a ikonou u položky). Každá vygenerovaná faktura je dostane.
+- Sleva v procentech z hlavičky faktury nese dimenze položek, které zlevňuje
+  (položky téže sazby DPH, v poměru jejich základu).
 - Změna dimenzí už zaúčtovaného dokladu se promítne do jeho řádků deníku. Řádky
   se přitom nedělí: když by rozdělení bylo potřeba (položky nově nesou různé
   hodnoty), aplikace upozorní, že doklad je potřeba **přeúčtovat**.
@@ -182,23 +186,32 @@ třídy 6, účet nákladů ze třídy 5. Jiný účet aplikace při uložení o
 
 ### Výnosový účet položky
 
-Vydaná faktura má u položek volitelný **výnosový účet**. Pole se v editoru zapne
-odkazem **Účty položek** nad položkami (samo se zapne, když už některá položka
-účet má). Prázdné pole znamená účet produktu, jeho kategorie, jinak předkontaci
-dokladu. Výběr skladové karty v položce předvyplní prázdný účet i prázdné
-dimenze položky z produktu. Předvyplněné hodnoty jde přepsat.
+Vydaná faktura i šablona pravidelné fakturace mají u položek volitelný
+**výnosový účet**. Pole se v editoru zapne odkazem **Účty položek** nad položkami
+(samo se zapne, když už některá položka účet má). Prázdné pole znamená účet
+produktu, jeho kategorie, jinak předkontaci dokladu. Výběr skladové karty
+v položce předvyplní prázdný účet i prázdné dimenze položky z produktu.
+Předvyplněné hodnoty jde přepsat. Když na řádku vyberete jinou kartu, nahradí se
+jen hodnoty předvyplněné z předchozí karty, ruční volba zůstává.
 
-Kopie faktury, dobropis, vyúčtovací faktura ze zálohové faktury i pravidelná
-fakturace účet položky přenášejí. Sleva v procentech z hlavičky dokladu dostane
-účet položek, jen když mají všechny položky týž účet. Jinak jde sleva na
-předkontaci dokladu.
+Kopie faktury, vyúčtovací faktura ze zálohové faktury i pravidelná fakturace
+účet položky přenášejí. Dobropis zapíše na své položky účet, na který šla
+původní položka, i když ho určil produkt nebo kategorie, takže pozdější změna
+karty vratku jinam nepřesměruje.
+
+Sleva v procentech z hlavičky faktury se při zaúčtování rozdělí mezi položky téže
+sazby DPH v poměru jejich základu a sníží výnos na jejich účtech (zboží na 604,
+služba na předkontaci).
+
+V sekci **Zaúčtování** u faktury ukazuje řádek **Podle čeho se účtovalo** i účet
+položky, produktu nebo kategorie, s odkazem na kartu produktu.
 
 ### Pořadí při zaúčtování
 
 | Co | Pořadí přednosti |
 |---|---|
 | Účet výnosů vydané faktury | prodej majetku > účet položky > produkt > kategorie > předkontace dokladu |
-| Účet nákladů přijaté faktury | účet položky > druh výdaje > produkt > kategorie > předkontace dokladu |
+| Účet nákladů přijaté faktury | účet položky > druh výdaje > produkt > kategorie > předkontace dokladu; u pořízení dlouhodobého majetku se účet produktu ani kategorie nepoužije |
 | Dimenze | položka > produkt > kategorie > hlavička > zakázka > klient > pravidlo dimenzí |
 
 Dimenze produktu a kategorie mají přednost před hlavičkou jen na výsledkových
