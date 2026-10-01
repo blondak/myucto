@@ -9,6 +9,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Bank\PurchasePaymentMatchWriter;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -26,8 +28,12 @@ use PDO;
  *   2. bankovní zápis se přeúčtuje na místě 321/221 → 314/221 (BankPostingService),
  *   3. zápis konečné faktury dostane zúčtování 321/314 (AdvanceSettlementSync),
  *   4. záloha zůstane uhrazená — teď platbou, datum úhrady = datum pohybu.
- * Jen v otevřeném a nezamčeném období (bankovní zápis i zápis konečné faktury);
- * jinak se dvojice jen vypíše. Idempotentní: opravená dvojice už kritéria nesplní.
+ * Jen v otevřeném a nezamčeném období (bankovní zápis i zápis konečné faktury, oba v témž
+ * roce) a jen když je jisté, že platba je záloha: záloha bez jakékoli úhrady (SSOT
+ * PurchaseSettledExpr — banka, pokladna, zápočty), nepřevzatá, v Kč, platba = částka zálohy
+ * a konečná faktura zálohou krytá CELÁ (jinak může jít o doplatek), pohyb hradí jediný
+ * doklad a není to platba kartou přes mezičlen 378. Ostatní se jen vypíše.
+ * Idempotentní: opravená dvojice už kritéria nesplní.
  */
 final class AdvancePaymentRelink
 {
@@ -78,6 +84,8 @@ final class AdvancePaymentRelink
                        COALESCE(NULLIF(a.vendor_invoice_number, ''), a.varsymbol) AS advance_no,
                        a.status AS advance_status, a.paid_at AS advance_paid_at,
                        ROUND(a.total_with_vat, 2) AS advance_total,
+                       ROUND(f.total_with_vat, 2) AS final_total, ROUND(f.amount_to_pay, 2) AS final_to_pay,
+                       ac.code AS currency,
                        pm.id AS match_id, pm.bank_transaction_id AS tx_id, ROUND(pm.amount, 2) AS amount,
                        bt.posted_at AS tx_date,
                        (SELECT COUNT(*) FROM payment_matches o WHERE o.bank_transaction_id = pm.bank_transaction_id) AS tx_matches
@@ -85,18 +93,14 @@ final class AdvancePaymentRelink
                   JOIN purchase_invoices a
                     ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
                    AND a.document_kind = 'advance' AND a.status <> 'cancelled'
+                  JOIN currencies ac ON ac.id = a.currency_id
                   JOIN payment_matches pm
                     ON pm.supplier_id = f.supplier_id AND pm.purchase_invoice_id = f.id
                    AND pm.bank_transaction_id IS NOT NULL
                   JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
                  WHERE f.document_kind = 'invoice' AND f.status NOT IN ('draft', 'cancelled')
-                   AND NOT EXISTS (SELECT 1 FROM payment_matches x WHERE x.purchase_invoice_id = a.id)
-                   AND NOT EXISTS (SELECT 1 FROM cash_documents cd
-                                    WHERE cd.supplier_id = a.supplier_id AND cd.purchase_invoice_id = a.id
-                                      AND cd.status = 'posted')
-                   AND NOT EXISTS (SELECT 1 FROM invoice_settlements s
-                                    WHERE s.supplier_id = a.supplier_id AND s.doc_type = 'purchase_invoice'
-                                      AND s.doc_id = a.id AND s.status = 'confirmed')"
+                   -- Záloha bez JAKÉKOLI úhrady (banka, pokladna, vzájemný i účetní zápočet) — SSOT.
+                   AND ABS(" . PurchaseSettledExpr::settled('a') . ") < 0.005"
             . ($supplierId !== null ? ' AND f.supplier_id = ?' : '')
             . ' ORDER BY f.supplier_id, f.id, pm.id';
         $stmt = $this->db->pdo()->prepare($sql);
@@ -111,6 +115,9 @@ final class AdvancePaymentRelink
             'advance_status'  => (string) $r['advance_status'],
             'advance_paid_at' => $r['advance_paid_at'] !== null ? (string) $r['advance_paid_at'] : null,
             'advance_total'   => (float) $r['advance_total'],
+            'final_total'     => (float) $r['final_total'],
+            'final_to_pay'    => (float) $r['final_to_pay'],
+            'currency'        => (string) $r['currency'],
             'match_id'        => (int) $r['match_id'],
             'tx_id'           => (int) $r['tx_id'],
             'tx_date'         => substr((string) $r['tx_date'], 0, 10),
@@ -131,8 +138,20 @@ final class AdvancePaymentRelink
         if ((int) $c['tx_matches'] !== 1) {
             return ['status' => 'split_payment', 'message' => 'pohyb hradí víc dokladů, oprav ručně'];
         }
+        if (strtoupper((string) $c['currency']) !== 'CZK') {
+            return ['status' => 'foreign_currency', 'message' => 'cizoměnová záloha, oprav ručně'];
+        }
         if (abs((int) round(((float) $c['amount'] - (float) $c['advance_total']) * 100)) > self::AMOUNT_TOLERANCE_CENTS) {
             return ['status' => 'amount_mismatch', 'message' => 'platba neodpovídá částce zálohy (doplatek faktury?)'];
+        }
+        // Jen faktura, kterou záloha kryje CELOU: jinak může platba na faktuře být legitimní
+        // doplatek a přesun na zálohu by ho z faktury vzal.
+        if (abs((int) round(((float) $c['final_total'] - (float) $c['advance_total']) * 100)) > self::AMOUNT_TOLERANCE_CENTS
+            || (float) $c['final_to_pay'] > 0.005) {
+            return ['status' => 'not_fully_covered', 'message' => 'faktura není zálohou plně krytá (doplatek?), oprav ručně'];
+        }
+        if ((new TakenOverRecord($this->db))->isDocument($sid, 'purchase_invoice', (int) $c['advance_id'])) {
+            return ['status' => 'taken_over', 'message' => 'záloha je převzatá z jiného programu (úhrada v počátečním stavu 314)'];
         }
         $bank = $this->journal->findBySource($sid, 'bank', (int) $c['tx_id']);
         if ($bank === null || ($bank['reversed_by'] ?? null) !== null || ($bank['posted_at'] ?? null) === null) {
@@ -141,10 +160,18 @@ final class AdvancePaymentRelink
         if ((new TakenOverRecord($this->db))->hasLiveBankEntry($sid, (int) $c['tx_id'])) {
             return ['status' => 'taken_over', 'message' => 'bankovní zápis je převzatý z jiného programu'];
         }
+        // Platba kartou zaúčtovaná přes mezičlen 378 (do 24. 9. 2026): bankovní zápis je
+        // 378/221 a úhradu nese zápis vypořádání — přepárování by ho muselo přestavět taky.
+        if ($this->bankPosting->liveCardClearingLine($sid, (int) $c['tx_id']) !== null) {
+            return ['status' => 'card_clearing', 'message' => 'platba kartou přes mezičlen 378, přepáruj ručně (vypořádání 321/378)'];
+        }
         $dates = ['bankovní zápis' => (string) $bank['entry_date']];
         $final = $this->journal->findBySource($sid, 'purchase_invoice', (int) $c['final_id']);
         if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
             $dates['zápis konečné faktury'] = (string) $final['entry_date'];
+            if (substr((string) $final['entry_date'], 0, 4) !== substr((string) $bank['entry_date'], 0, 4)) {
+                return ['status' => 'payment_in_other_year', 'message' => 'platba a konečná faktura v různých letech, zúčtuj ručně k datu úhrady'];
+            }
         }
         $lockedUntil = $this->lockedUntil($sid);
         foreach ($dates as $label => $date) {
@@ -175,8 +202,13 @@ final class AdvancePaymentRelink
             $pdo->exec('SAVEPOINT ' . $savepoint);
         }
         try {
-            $pdo->prepare('UPDATE payment_matches SET purchase_invoice_id = ? WHERE id = ? AND supplier_id = ?')
-                ->execute([(int) $c['advance_id'], (int) $c['match_id'], $sid]);
+            // Párování přes jedinou bránu zápisu (bez strážce: párování míří NA zálohu),
+            // původní řádek na konečné faktuře odpadá.
+            PurchasePaymentMatchWriter::record(
+                $pdo, $sid, (int) $c['tx_id'], (int) $c['advance_id'], (float) $c['amount'], 'manual', null, $userId,
+            );
+            $pdo->prepare('DELETE FROM payment_matches WHERE id = ? AND supplier_id = ?')
+                ->execute([(int) $c['match_id'], $sid]);
 
             // Přeúčtování banky na 314/221; po něm BankPostingService sám dorovná
             // zúčtování v konečné faktuře (AdvanceSettlementSync).

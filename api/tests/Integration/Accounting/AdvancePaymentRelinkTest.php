@@ -63,6 +63,32 @@ final class AdvancePaymentRelinkTest extends BankPostingTestCase
             'Opravená dvojice už není kandidát (idempotence).');
     }
 
+    /** Faktura zálohou krytá jen zčásti: platba může být legitimní doplatek — jen report. */
+    public function testPartiallyCoveredFinalIsReportOnly(): void
+    {
+        [, $final, $tx] = $this->brokenPair('REL-3');
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET total_with_vat = 3000.00 WHERE id = ?')->execute([$final]);
+
+        $row = $this->rowFor($this->container->get(AdvancePaymentRelink::class)->run($this->supplierId, true, $this->userId), $final);
+        self::assertSame('not_fully_covered', $row['status']);
+        self::assertSame(121000, self::cents($this->linesByAccountCode($this->liveEntry('bank', $tx))['321']['debit'] ?? 0));
+    }
+
+    /** Záloha uhrazená zápočtem není „bez úhrady" — CLI ji nesmí brát jako kandidáta. */
+    public function testAdvanceSettledByOffsetIsNotCandidate(): void
+    {
+        [$advance, $final] = $this->brokenPair('REL-4');
+        $account = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '365' LIMIT 1"
+        )->fetchColumn();
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status)
+             VALUES (?, 'purchase_invoice', ?, ?, 1210.00, ?, 'confirmed')"
+        )->execute([$this->supplierId, $advance, self::YEAR . '-06-21', $account]);
+
+        self::assertNull($this->rowFor($this->container->get(AdvancePaymentRelink::class)->run($this->supplierId, false), $final, false));
+    }
+
     public function testLockedPeriodIsReportOnly(): void
     {
         [, $final, $tx] = $this->brokenPair('REL-2');

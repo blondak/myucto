@@ -48,6 +48,10 @@ $labels = [
     'taken_over'      => 'beze změny',
     'period_not_open' => 'jen report',
     'date_locked'     => 'jen report',
+    'not_fully_covered'     => 'beze změny',
+    'foreign_currency'      => 'beze změny',
+    'card_clearing'         => 'beze změny',
+    'payment_in_other_year' => 'jen report',
 ];
 foreach ($result['rows'] as $row) {
     printf(
