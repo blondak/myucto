@@ -37,6 +37,7 @@ final class BearerScopeOpenApiContractTest extends TestCase
         self::assertNotEmpty($allowed, 'BEARER_ALLOWED se nepodařilo přečíst.');
         self::assertNotEmpty($readOnly, 'BEARER_READ_ONLY se nepodařilo přečíst.');
 
+        $exceptions = $this->writeExceptions();
         $operations = $this->operations();
         // Pojistka proti tiše zelenému testu: kdyby řádkový parser přestal spec číst
         // (změna odsazení, přeformátování), prošlo by tvrzení níže na prázdném seznamu.
@@ -61,7 +62,9 @@ final class BearerScopeOpenApiContractTest extends TestCase
             if (in_array($method, self::READ_METHODS, true)) {
                 continue;
             }
-            if ($this->pathMatches($runtimePath, $readOnly) && !in_array('403', $codes, true)) {
+            if ($this->pathMatches($runtimePath, $readOnly)
+                && !$this->isWriteException($method, $runtimePath, $exceptions)
+                && !in_array('403', $codes, true)) {
                 $missingWrite[] = strtoupper($method) . ' ' . $path;
             }
         }
@@ -90,6 +93,59 @@ final class BearerScopeOpenApiContractTest extends TestCase
             preg_match('#^/api/tax(/|$)#', '/api/tax-return/dppo/2026'),
             'Vzor pro /api/tax nesmí zastupovat /api/tax-return — proto má přiznání vlastní.',
         );
+    }
+
+    /**
+     * Zápisová výjimka z read-only vrstvy musí mířit na zdokumentovanou zápisovou
+     * operaci uvnitř BEARER_READ_ONLY. Výjimka mimo ni je mrtvý kód, který by
+     * příští úprava allowlistu mohla nečekaně oživit; výjimka bez operace ve spec
+     * znamená, že integrátor neví, co smí.
+     */
+    public function testWriteExceptionsTargetDocumentedReadOnlyOperations(): void
+    {
+        $readOnly = $this->patterns('BEARER_READ_ONLY');
+        $exceptions = $this->writeExceptions();
+        self::assertNotEmpty($exceptions, 'BEARER_WRITE_EXCEPTIONS se nepodařilo přečíst.');
+
+        $documented = [];
+        foreach ($this->operations() as [$path, $method]) {
+            $documented[] = [strtoupper($method), '/api' . substr($path, strlen('/api/v1'))];
+        }
+
+        foreach ($exceptions as [$method, $pattern]) {
+            self::assertNotContains($method, ['GET', 'HEAD', 'OPTIONS'], "$method $pattern");
+            $hits = array_filter($documented, static fn (array $op): bool =>
+                $op[0] === $method && preg_match($pattern, preg_replace('/\{[^}]+\}/', '1', $op[1])) === 1);
+            self::assertNotEmpty($hits, "Výjimka $method $pattern nemá operaci v openapi.yaml.");
+            foreach ($hits as [, $path]) {
+                self::assertTrue(
+                    $this->pathMatches(preg_replace('/\{[^}]+\}/', '1', $path), $readOnly),
+                    "Výjimka $method $path leží mimo BEARER_READ_ONLY.",
+                );
+            }
+        }
+    }
+
+    /** @return list<array{0:string,1:string}> */
+    private function writeExceptions(): array
+    {
+        $php = $this->read('api/src/Middleware/ApiScopeMiddleware.php');
+        $block = explode('];', explode('private const BEARER_WRITE_EXCEPTIONS = [', $php)[1] ?? '')[0] ?? '';
+        preg_match_all("/\['([A-Z]+)', '(#.+?#)'\]/", $block, $m, PREG_SET_ORDER);
+
+        return array_map(static fn (array $row): array => [$row[1], $row[2]], $m);
+    }
+
+    /** @param list<array{0:string,1:string}> $exceptions */
+    private function isWriteException(string $method, string $path, array $exceptions): bool
+    {
+        foreach ($exceptions as [$allowedMethod, $pattern]) {
+            if (strtoupper($method) === $allowedMethod
+                && preg_match($pattern, preg_replace('/\{[^}]+\}/', '1', $path)) === 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @return list<string> */

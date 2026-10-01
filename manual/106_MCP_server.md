@@ -42,7 +42,8 @@ Podstatné vlastnosti:
 | Kniha jízd | **čtení i zápis** — vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
-| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník — **jen čtení** |
+| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník: **jen čtení**; výjimkou jsou koncepty ostatních pohledávek a závazků |
+| Ostatní pohledávky a závazky | čtení dokladů, úhrad, opakování a splátek; **zápis jen konceptů**: založení, úprava, smazání, splátkový kalendář (i vyčtený ze smlouvy) a opakování bez automatického účtování. Nic se nezaúčtuje ([§ 106.8.5](#10685-ostatni-pohledavky-a-zavazky)) |
 | Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel — **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | Všechny firmy | manažerské součty přístupných firem za přesné období, měsíční vývoj, roční predikce, cashflow, zůstatky a rizika přes `group_dashboard`; původní měny i samostatný přepočet CZK |
@@ -89,6 +90,10 @@ peněžní pohyb konkrétního projektu.
 > agenda s daňovou odpovědností, kde chyba znamená opravné podání — dělá ji člověk
 > v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
 > na takovou operaci `403 token_write_forbidden` (viz [kapitola 78.6](104_API.md#1047-scopes)).
+>
+> Jedinou výjimkou jsou **koncepty ostatních pohledávek a závazků**
+> ([§ 106.8.5](#10685-ostatni-pohledavky-a-zavazky)). Koncept nemá zápis v deníku,
+> potvrdí a zaúčtuje ho účetní v aplikaci.
 >
 > **U mezd asistent pracuje jen s personálními údaji a připravovanými vstupy.**
 > Může změnit sjednanou mzdu od zadaného data, zadat přesčas, absenci nebo odměnu.
@@ -415,6 +420,16 @@ Podrobnosti v [§ 106.8](#1068-zakazky-dokumenty-a-kniha-jizd).
 - „Jak se zaúčtovala faktura číslo 2026001?“
 - „Co visí v saldu — komu jsme nespárovali platby?“
 
+**Ostatní pohledávky a závazky** *(zápis jen s tokenem čtení a zápis)*
+
+- „Jaké máme otevřené závazky z úvěrů a nájmů a kdy jsou splatné?“
+- „Založ koncept závazku: nájem kanceláře na říjen, 15 000 Kč, splatnost 15. 10., protiúčet 518.“
+- „Z přiložené úvěrové smlouvy založ koncept závazku na jistinu a nastav splátkový kalendář.“
+- „Opakuj ten nájem každý měsíc do konce roku.“
+- „Pozastav opakování pojistného.“
+
+Podrobnosti v [§ 106.8.5](#10685-ostatni-pohledavky-a-zavazky).
+
 **Statistika**
 
 - „Ukaž trend obratu a zisku po měsících za poslední rok.“
@@ -700,6 +715,51 @@ Platí přitom:
 V režimu jen pro čtení se zápisové nástroje nenabízejí; vyžadují token
 s oprávněním čtení a zápis.
 
+### 106.8.5 Ostatní pohledávky a závazky
+
+Nájem, půjčka nebo úvěr, leasing, kauce, pojistné a poplatky se evidují jako
+ostatní pohledávky a závazky (viz [kapitola 52](52_Ucetni_denik.md)). Asistent
+je umí číst i připravit, ale **jen jako koncept**. Koncept nemá zápis v deníku;
+potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuje.
+
+| Co | Nástroje |
+|---|---|
+| Čtení | `list_other_items`, `get_other_item`, `list_other_item_allocations`, `other_item_payment_candidates`, `list_other_item_schedules`, `get_other_item_schedule`, `get_other_item_installments` |
+| Koncept | `create_other_item`, `update_other_item`, `delete_other_item` |
+| Splátkový kalendář | `set_other_item_installments`, `clear_other_item_installments` |
+| Opakování | `create_other_item_schedule`, `set_other_item_schedule_status` |
+
+**Koncept.** Kontaci zadáš buď jedním protiúčtem, nebo několika protiřádky,
+jejichž součet musí přesně odpovídat částce dokladu. Agenda je jen v Kč. Při
+úpravě asistent načte současný stav a pošle celý doklad, takže nezadaná pole se
+nezmění. Jediný protiřádek se při změně částky přepočte, u více protiřádků se
+asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept.
+
+**Splátkový kalendář** může asistent vyčíst z dokumentu, třeba z úvěrové nebo
+leasingové smlouvy či splátkového kalendáře banky, a poslat ho jako data. Před
+zápisem zkontroluje, že:
+
+- splátek je 2 až 120 a termíny jdou vzestupně, nejdříve od data vzniku dokladu,
+- částky jsou kladné a na haléře,
+- součet splátek přesně odpovídá částce dokladu,
+- doklad zatím nemá spárovanou úhradu.
+
+U úvěru a leasingu patří do kalendáře jen jistina; úroky a poplatky nejsou
+součástí částky dokladu. Uložení **nahradí celý dosavadní kalendář**, proto
+asistent posílá vždy všechny splátky. Zrušení celého kalendáře vyžaduje
+potvrzení. Splátky slouží k plánu cashflow a do deníku nic nezapisují.
+
+**Opakování** vytvoří z dokladu pravidelnou řadu (měsíčně, čtvrtletně, ročně).
+Aplikace další doklady zakládá dopředu jako koncepty. Automatické účtování
+přes asistenta zapnout nejde: opakování vzniká vždy bez něj a asistent smí
+opakování pozastavit nebo obnovit jen tehdy, když automatiku nemá. Koncept
+z automaticky účtovaného opakování asistent neupraví, protože by ho aplikace
+zaúčtovala bez další kontroly.
+
+Přes asistenta **nejde**: potvrdit nebo zaúčtovat doklad, stornovat ho,
+přeúčtovat, spárovat nebo odpojit úhradu ani ručně vygenerovat doklady
+z opakování. Tyto kroky dělá účetní v aplikaci.
+
 ## 106.9 E-shop a sklad
 
 Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** — asistent
@@ -784,16 +844,16 @@ jen čte.
 
 ### 106.9.4 Potvrzování nevratných kroků
 
-Mazání, storno dokladu, uzavření inventury a odebrání položky z konceptu
-faktury vyžadují **výslovné potvrzení**. U vydaných faktur a pravidelné fakturace
-jde o smazání konceptu, storno a dobropis, zrušení storna, smazání úhrady, vrácení
-stavu zaplaceno, hromadné upomínky, smazání šablony pravidelné fakturace
-a ruční vygenerování faktury ze šablony.
-U přijatých faktur navíc přijetí
-dokladu (může ho rovnou zaúčtovat), storno, smazání konceptu, odebrání
-položky, zrušení vazby na zálohu, změna účtu dodavatele a smazání příkazu
-k úhradě. Potvrzovací výpis u přijaté faktury vždy uvádí dodavatele, číslo
-dokladu dodavatele a částku.
+Mazání, storno dokladu, uzavření inventury, odebrání položky z konceptu
+faktury, smazání konceptu ostatní pohledávky nebo závazku a zrušení celého
+splátkového kalendáře vyžadují **výslovné potvrzení**. U vydaných faktur
+a pravidelné fakturace jde o smazání konceptu, storno a dobropis, zrušení storna,
+smazání úhrady, vrácení stavu zaplaceno, hromadné upomínky, smazání šablony
+pravidelné fakturace a ruční vygenerování faktury ze šablony. U přijatých faktur
+navíc přijetí dokladu (může ho rovnou zaúčtovat), storno, smazání konceptu,
+odebrání položky, zrušení vazby na zálohu, změna účtu dodavatele a smazání
+příkazu k úhradě. Potvrzovací výpis u přijaté faktury vždy uvádí dodavatele,
+číslo dokladu dodavatele a částku.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
 změna týkala:
 
@@ -928,7 +988,8 @@ Online připojení používá přihlášení a souhlas popsané v [§ 106.3.5](#
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
-| `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz [§ 104.6](104_API.md#1047-scopes). |
+| `403 token_write_forbidden` | Zápis do účetnictví nebo daní přes API nejde, viz [§ 104.6](104_API.md#1047-scopes). Výjimkou jsou jen koncepty ostatních pohledávek a závazků ([§ 106.8.5](#10685-ostatni-pohledavky-a-zavazky)). |
+| `403 other_items.error.auto_post_session_only` | Automatické účtování opakování nebo koncept, který by se automaticky zaúčtoval. Řeší se ve webovém rozhraní. |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý. |
 | `409` u mazání zboží, výrobce, kategorie, skladu… | Záznam je někde použitý — server ho nepustí. Archivuj ho (`archived`), případně zboží či sklad jen deaktivuj. |
 | „NEPROVEDENO — chybí potvrzení“ | Není chyba: takhle vypadá náhled nevratné operace. Zkontroluj výpis a řekni asistentovi, ať to potvrdí. |

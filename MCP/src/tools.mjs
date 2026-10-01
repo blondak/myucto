@@ -14,6 +14,13 @@
  * Vynucuje to i server ({@see \MyInvoice\Middleware\ApiScopeMiddleware}), takže
  * i kdyby sem někdo zápisový nástroj přidal, dostane 403.
  *
+ * Jediná výjimka jsou KONCEPTY OSTATNÍCH POHLEDÁVEK A ZÁVAZKŮ
+ * (other-item-tools.mjs): založení, úprava a smazání konceptu, splátkový
+ * kalendář a opakování bez automatického účtování. Do deníku se tím nic
+ * nezapisuje. Potvrzení a zaúčtování, storno, přeúčtování, párování úhrad,
+ * generování opakování ani zapnutí automatického účtování v katalogu nejsou
+ * a server je tokenu odmítne (`BEARER_WRITE_EXCEPTIONS` je výčet metoda + cesta).
+ *
  * E-SHOP A SKLAD JSOU NAOPAK OBOUSMĚRNÉ — katalog zboží, číselníky, ceny,
  * dodavatelé, média, sklady, skladové doklady i inventury se dají přes API
  * i zapisovat. Zápis do skladu není daňový úkon: pohyb jde vždy dohledat ve
@@ -34,6 +41,7 @@ import {
   INVOICE_TOOLS, PAYMENT_SCHEDULE_INPUT, withPaymentSchedule, checkCreatedSchedule,
 } from './invoice-tools.mjs';
 import { PURCHASE_TOOLS } from './purchase-tools.mjs';
+import { OTHER_ITEM_TOOLS } from './other-item-tools.mjs';
 import { CONFIRM, changed, confirmed, merged, requireConfirm } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -63,6 +71,9 @@ const WINDOW = {
 // ────────────────────────────────────────────────────────────────────────────
 // Pojistka nevratných operací
 // ────────────────────────────────────────────────────────────────────────────
+
+// CONFIRM, requireConfirm, confirmed, changed a merged žijí v tool-shared.mjs,
+// aby je mohly sdílet i doménové katalogy bez cyklického importu.
 
 /** Popisek záznamu do potvrzovací hlášky — kód a název tak, jak je vidí uživatel. */
 const nameOf = (row, fallbackId) => {
@@ -597,6 +608,7 @@ export const TOOLS = [
   ...AUDIT_TOOLS,
   ...INVOICE_TOOLS,
   ...PURCHASE_TOOLS,
+  ...OTHER_ITEM_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────

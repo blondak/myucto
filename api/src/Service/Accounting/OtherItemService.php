@@ -608,6 +608,15 @@ final class OtherItemService
         return (float) $stmt->fetchColumn();
     }
 
+    public function belongsToAutoPostSchedule(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM other_item_schedule_occurrences o
+            JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+            WHERE o.supplier_id = ? AND o.item_id = ? AND s.auto_post = 1 LIMIT 1');
+        $stmt->execute([$supplierId, $id]);
+        return (bool) $stmt->fetchColumn();
+    }
+
     public function isDoubleEntry(int $supplierId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');

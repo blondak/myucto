@@ -19,6 +19,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
+| Ostatní pohledávky a závazky | čtení; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
 | Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | Všechny firmy | **jen čtení**: manažerské součty za přesné období, vývoj, roční predikce, prognóza toků, zůstatky a rizika přístupných firem přes `group_dashboard`; původní měny i samostatný přepočet CZK |
@@ -41,7 +42,9 @@ nejsou a nesmí být: jsou to úkony s daňovou odpovědností, kde chyba znamen
 opravné podání, a model nemá jak doložit jejich správnost. Vynucuje to i server
 (`ApiScopeMiddleware::BEARER_READ_ONLY` → `403 token_write_forbidden`), takže
 i kdyby sem někdo takový nástroj přidal, dostane odmítnutí. Zdůvodnění je
-v hlavičce `src/tools.mjs` — při rozšiřování katalogu ho neobcházej.
+v hlavičce `src/tools.mjs`, při rozšiřování katalogu ho neobcházej. Jedinou
+výjimkou jsou koncepty ostatních pohledávek a závazků, které server povoluje
+výčtem metoda a cesta (`BEARER_WRITE_EXCEPTIONS`); do deníku nic nezapisují.
 
 ## Instalace
 

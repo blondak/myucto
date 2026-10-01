@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Action\Accounting\OtherItemAction;
 use MyInvoice\Action\Accounting\OtherItemScheduleAction;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -29,6 +31,7 @@ final class OtherItemScheduleServiceTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
+    private \Psr\Container\ContainerInterface $container;
     private Connection $db;
     private PDO $pdo;
     private OtherItemService $items;
@@ -46,6 +49,7 @@ final class OtherItemScheduleServiceTest extends TestCase
             ->execute([$this->supplierId]);
         $action = new OtherItemScheduleAction($this->schedules, $this->items);
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, ['other_items' => 2], 'custom'))
             ->withParsedBody(['frequency' => 'monthly', 'auto_post' => true]);
@@ -69,9 +73,75 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame(200, $action->status($request->withParsedBody(['status' => 'active', 'auto_post' => false]), new Response(), ['id' => $schedule['id']])->getStatusCode());
     }
 
+    /**
+     * API token má k ostatním položkám zápisovou výjimku jen pro koncepty
+     * (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS). Automatické účtování
+     * opakování nesmí zapnout ani obnovit ani s plným oprávněním účtovat, a koncept
+     * z automaticky účtovaného opakování nesmí upravit: cron by ho zaúčtoval.
+     */
+    public function testBearerCannotEnableAutoPostOrEditAutoPostedDraft(): void
+    {
+        $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $this->items->post($this->supplierId, (int) $source['id'], null);
+        $action = new OtherItemScheduleAction($this->schedules, $this->items);
+        $itemAction = $this->container->get(OtherItemAction::class);
+        $bearer = (new ServerRequestFactory())->createServerRequest('POST', '/')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true,
+                ['other_items' => 2, 'accounting.journal.post' => 2], 'custom'));
+        $code = static fn ($response): ?string => json_decode((string) $response->getBody(), true)['error']['code'] ?? null;
+
+        $response = $action->create($bearer->withParsedBody(['frequency' => 'monthly', 'auto_post' => true]),
+            new Response(), ['item_id' => $source['id']]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('other_items.error.auto_post_session_only', $code($response));
+        self::assertSame([], $this->schedules->list($this->supplierId));
+
+        $response = $action->create($bearer->withParsedBody(['frequency' => 'monthly', 'auto_post' => false]),
+            new Response(), ['item_id' => $source['id']]);
+        self::assertSame(201, $response->getStatusCode());
+        $scheduleId = (int) json_decode((string) $response->getBody(), true)['id'];
+
+        $response = $action->status($bearer->withParsedBody(['status' => 'active', 'auto_post' => true]),
+            new Response(), ['id' => $scheduleId]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertFalse($this->schedules->get($this->supplierId, $scheduleId)['auto_post']);
+
+        $generated = $this->schedules->generate($this->supplierId, $scheduleId, '2099-02-28', null);
+        $draftId = $generated['created_ids'][0];
+        $this->schedules->setStatus($this->supplierId, $scheduleId, 'paused', true);
+
+        $response = $action->status($bearer->withParsedBody(['status' => 'active']), new Response(), ['id' => $scheduleId]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('paused', $this->schedules->get($this->supplierId, $scheduleId)['status']);
+        $response = $action->generate($bearer->withParsedBody(['through' => '2099-03-31']), new Response(), ['id' => $scheduleId]);
+        self::assertSame(403, $response->getStatusCode());
+
+        $update = $this->input(['due_on' => '2099-03-10', 'issued_on' => '2099-02-28']);
+        $response = $itemAction->update($bearer->withParsedBody($update), new Response(), ['id' => (string) $draftId]);
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('other_items.error.auto_post_session_only', $code($response));
+        self::assertSame('2099-03-05', $this->items->get($this->supplierId, $draftId)['due_on']);
+
+        $plain = $this->items->create($this->supplierId, $this->input(), null);
+        $response = $itemAction->update($bearer->withParsedBody($this->input(['title' => 'Upravený koncept'])),
+            new Response(), ['id' => (string) $plain['id']]);
+        self::assertSame(200, $response->getStatusCode());
+
+        $response = $action->status($bearer->withParsedBody(['status' => 'active', 'auto_post' => false]),
+            new Response(), ['id' => $scheduleId]);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertFalse($this->schedules->get($this->supplierId, $scheduleId)['auto_post']);
+        self::assertSame('active', $this->schedules->get($this->supplierId, $scheduleId)['status']);
+    }
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
+        $this->container = $container;
         $this->db = $container->get(Connection::class);
         $this->items = $container->get(OtherItemService::class);
         $this->schedules = $container->get(OtherItemScheduleService::class);

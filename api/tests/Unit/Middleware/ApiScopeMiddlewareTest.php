@@ -122,6 +122,60 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
+    /**
+     * Jediná zápisová výjimka v účetní vrstvě: koncepty ostatních pohledávek
+     * a závazků, jejich splátkový kalendář a opakování. Nic z toho nezapisuje
+     * do deníku; automatické účtování hlídá samotná akce.
+     */
+    public function testBearerReadWriteCanWriteOtherItemDrafts(): void
+    {
+        foreach ([
+            ['POST', '/api/accounting/other-items'],
+            ['PUT', '/api/accounting/other-items/12'],
+            ['DELETE', '/api/accounting/other-items/12'],
+            ['PUT', '/api/accounting/other-items/12/installments'],
+            ['POST', '/api/accounting/other-items/12/schedule'],
+            ['PUT', '/api/accounting/other-items/schedules/3/status'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
+
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read'), $this->okHandler());
+            self::assertSame(403, $r->getStatusCode(), "bearer read $method $path");
+            self::assertSame('insufficient_scope', $this->errorCode($r), "bearer read $method $path");
+        }
+    }
+
+    /** Zaúčtování, storno, přeúčtování, úhrady a generování opakování zůstávají zavřené. */
+    public function testBearerCannotPostOrSettleOtherItems(): void
+    {
+        foreach ([
+            ['POST', '/api/accounting/other-items/12/post'],
+            ['POST', '/api/accounting/other-items/12/reverse'],
+            ['POST', '/api/accounting/other-items/12/repost'],
+            ['POST', '/api/accounting/other-items/12/allocations'],
+            ['DELETE', '/api/accounting/other-items/12/allocations/5'],
+            ['POST', '/api/accounting/other-items/schedules/3/generate'],
+            ['PUT', '/api/accounting/other-items'],
+            ['DELETE', '/api/accounting/other-items'],
+            ['POST', '/api/accounting/other-items/12'],
+            ['PATCH', '/api/accounting/other-items/12'],
+            ['DELETE', '/api/accounting/other-items/12/installments'],
+            ['POST', '/api/accounting/other-items/12/installments'],
+            ['PUT', '/api/accounting/other-items/12/schedule'],
+            ['POST', '/api/accounting/other-items/schedules'],
+            ['POST', '/api/accounting/other-items/schedules/3/status'],
+            ['PUT', '/api/accounting/other-items/schedules/3'],
+            ['POST', '/api/accounting/other-items-extra'],
+            ['PUT', '/api/accounting/other-items/12/installments/extra'],
+            ['POST', '/api/accounting/journal'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $r->getStatusCode(), "bearer $method $path musí být odmítnuto");
+            self::assertSame('token_write_forbidden', $this->errorCode($r), "bearer $method $path");
+        }
+    }
+
     public function testBearerCanReadAccountingAndTaxReports(): void
     {
         $reads = [

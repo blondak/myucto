@@ -38,6 +38,18 @@ info:
     `403 token_write_forbidden` — i tokenu se scope `read_write`. Mzdová část má
     vlastní omezený kontrakt popsaný níže.
 
+    Jedinou zápisovou výjimkou jsou **koncepty ostatních pohledávek a závazků**.
+    Token se scope `read_write` smí založit koncept (`POST /accounting/other-items`),
+    upravit a smazat koncept (`PUT`/`DELETE /accounting/other-items/{id}`), nastavit
+    splátkový kalendář (`PUT …/{item_id}/installments`), založit opakování
+    (`POST …/{item_id}/schedule`) a opakování pozastavit nebo obnovit
+    (`PUT …/schedules/{id}/status`). Nic z toho nezapisuje do deníku. Automatické
+    účtování opakování token nezapne ani neobnoví a koncept z automaticky
+    účtovaného opakování neupraví (`403 other_items.error.auto_post_session_only`).
+    Potvrzení a zaúčtování (`post`), storno (`reverse`), přeúčtování (`repost`),
+    párování úhrad (`allocations`) i generování opakování (`generate`) zůstávají
+    jen ve webovém rozhraní. Oprávnění uživatele `other_items` (zápis) platí dál.
+
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
     § 46 / § 74b, podání přiznání i odeslání podání na EPO jsou úkony s daňovou
     odpovědností, kde chyba znamená opravné podání. Provádějí se výhradně
@@ -13831,6 +13843,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Vytvoří koncept ostatní pohledávky nebo závazku
+      description: Dostupné i API tokenu se scope read_write. Vzniká vždy koncept bez zápisu do deníku; potvrzení a zaúčtování dělá účetní ve webovém rozhraní.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
       requestBody:
@@ -13854,6 +13867,7 @@ paths:
     put:
       tags: [Accounting]
       summary: Změní pouze koncept
+      description: Úplná náhrada konceptu, chybějící volitelná pole se vynulují a posting_lines se nahradí. Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write, kromě konceptu z opakování s automatickým účtováním (403 other_items.error.auto_post_session_only).
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
@@ -13863,6 +13877,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Měkce smaže pouze koncept
+      description: Koncept z opakování se zruší, zdrojový doklad opakování smazat nelze. Nekoncept vrátí 409 not_draft. Dostupné i API tokenu se scope read_write.
       responses:
         '200': { description: Smazáno }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -13871,6 +13886,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Potvrdí doklad; v podvojném účetnictví jej zaúčtuje
+      description: Přes API token nedostupné (403 token_write_forbidden), zaúčtování dělá účetní ve webovém rozhraní.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13882,6 +13898,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Stornuje zaúčtovaný nebo zruší potvrzený doklad
+      description: Přes API token nedostupné (403 token_write_forbidden).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13896,6 +13913,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Přeúčtuje potvrzený doklad stornem původního a novým zápisem
+      description: Přes API token nedostupné (403 token_write_forbidden).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13932,6 +13950,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Spáruje část bankovní nebo pokladní platby
+      description: Přes API token nedostupné (403 token_write_forbidden).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13946,6 +13965,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Odpojí spárovanou úhradu
+      description: Přes API token nedostupné (403 token_write_forbidden).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -13990,7 +14010,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Idempotentně vytvoří položky do zadaného data
-      description: Při auto_post potvrdí nebo zaúčtuje také již vytvořené aktivní koncepty, nejdříve v den jejich vzniku a nejvýše do through. Budoucí termíny zůstávají koncepty; uzavřené období nebo zamčené datum se neobchází. Při chybě se běh rozvrhu vrátí. Automatický rozvrh v podvojném účetnictví vyžaduje accounting.journal.post write.
+      description: Při auto_post potvrdí nebo zaúčtuje také již vytvořené aktivní koncepty, nejdříve v den jejich vzniku a nejvýše do through. Budoucí termíny zůstávají koncepty; uzavřené období nebo zamčené datum se neobchází. Při chybě se běh rozvrhu vrátí. Automatický rozvrh v podvojném účetnictví vyžaduje accounting.journal.post write. Přes API token nedostupné (403 token_write_forbidden), protože u automatického rozvrhu zaúčtuje.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -14006,7 +14026,7 @@ paths:
     put:
       tags: [Accounting]
       summary: Aktivuje nebo pozastaví opakování a nastaví automatické účtování
-      description: Zapnutí automatického účtování nebo obnovení automatického rozvrhu v podvojném účetnictví vyžaduje accounting.journal.post write. Pozastavení a vypnutí automatiky nevyžaduje právo účtování.
+      description: Zapnutí automatického účtování nebo obnovení automatického rozvrhu v podvojném účetnictví vyžaduje accounting.journal.post write. Pozastavení a vypnutí automatiky nevyžaduje právo účtování. API token se scope read_write smí rozvrh pozastavit, obnovit rozvrh bez automatiky a automatiku vypnout; zapnout automatiku nebo obnovit automatický rozvrh nesmí (403 other_items.error.auto_post_session_only).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -14021,7 +14041,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Založí opakování z existujícího dokladu
-      description: Zapnutí auto_post v podvojném účetnictví vyžaduje accounting.journal.post write.
+      description: Zapnutí auto_post v podvojném účetnictví vyžaduje accounting.journal.post write. API token se scope read_write smí založit jen rozvrh bez automatiky; auto_post true vrátí 403 other_items.error.auto_post_session_only.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: item_id, required: true, schema: { type: integer } }
@@ -14045,6 +14065,7 @@ paths:
     put:
       tags: [Accounting]
       summary: Nastaví termíny splátek; prázdné pole kalendář zruší
+      description: Nahrazuje celý kalendář. Jinak 2 až 120 splátek se vzestupnými termíny ne dříve než datum vzniku, kladnými částkami na haléře a součtem přesně rovným částce dokladu. Jen na konceptu, potvrzeném nebo zaúčtovaném dokladu bez úhrady. Splátky slouží k plánu cashflow a do deníku nic nezapisují. Dostupné i API tokenu se scope read_write.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: item_id, required: true, schema: { type: integer } }
