@@ -239,6 +239,9 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
         self::assertSame(0, $payment['incoming_remaining_minor']);
         self::assertTrue($payment['closing_blocked']);
         self::assertSame(['bank_unsettled'], $payment['blockers']);
+        // Splatnost nezaplacené části — bez ní klient nepozná „čeká na
+        // úhradu" od „po splatnosti" a hlásil „uzávěrka blokována".
+        self::assertSame('2026-07-20', $payment['due_on']);
     }
 
     public function testCorrectionRefundUsesDirectIncomingEvidence(): void
@@ -283,6 +286,7 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
         self::assertSame(0, $payment['incoming_remaining_minor']);
         self::assertFalse($payment['closing_blocked']);
         self::assertSame([], $payment['blockers']);
+        self::assertNull($payment['due_on'], 'Uhrazené pojistné už nemá otevřenou splatnost.');
     }
 
     public function testDownloadReturnsValidatedXmlForXmlInsurer(): void

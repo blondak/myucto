@@ -41,6 +41,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { healthPaymentStatus, localToday } from './healthPaymentStatus'
 
 /*
  * `mode` je zároveň `agenda_group` pro server. Skupina `other` je záchytná:
@@ -345,6 +346,26 @@ function formatCzk(value: number): string {
 function healthOverviewKey(overview: PayrollHealthPaymentOverview): string {
   return `${overview.revision_id}:${overview.insurer.code}`
 }
+
+/**
+ * Povinnost PPZ ke kartě pojišťovny (stejný předmět jako u přípravy:
+ * `payroll_run:{běh}:{pojišťovna}`). Když už je podaná, karta nenabízí
+ * „Podat datovkou" znovu — druhé podání by u pojišťovny založilo duplicitu.
+ */
+function healthFiling(overview: PayrollHealthPaymentOverview): { fulfilled: boolean; submittedAt: string | null } | null {
+  const subject = `payroll_run:${overview.run_id}:${overview.insurer.code}`
+  const item = items.value.find(candidate =>
+    candidate.agenda_code === 'PPZ_2026' && candidate.subject_reference === subject,
+  )
+  if (!item) return null
+  const latest = item.latest_submission
+  const sent = latest !== null
+    && ['submitted', 'processing', 'accepted', 'partially_accepted'].includes(latest.status)
+  if (item.status !== 'fulfilled' && !sent) return null
+  return { fulfilled: item.status === 'fulfilled', submittedAt: latest?.submitted_at ?? null }
+}
+
+const today = localToday()
 
 function readableBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -798,6 +819,221 @@ onMounted(load)
     </div>
 
     <template v-else>
+      <!-- Karty pojišťoven (co odeslat) stojí nahoře: jsou to akce měsíce. -->
+      <section
+        v-if="mode === 'health'"
+        class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        data-test="health-payment-overviews"
+      >
+        <div class="border-b border-neutral-200 p-4 sm:p-6">
+          <h2 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.submissions.overview.health_title') }}
+          </h2>
+          <p class="mt-1 text-sm text-neutral-500">
+            {{ t('payroll.submissions.overview.health_description') }}
+          </p>
+        </div>
+
+        <p
+          v-if="healthError"
+          class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-overview-error"
+        >
+          {{ healthError }}
+        </p>
+
+        <div v-if="healthOverviews.length === 0 && !healthError" class="p-6 text-sm text-neutral-500">
+          {{ t('payroll.submissions.overview.health_empty') }}
+        </div>
+
+        <div
+          v-if="healthOverviews.length > 1"
+          class="flex flex-wrap items-center gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3"
+          data-test="health-batch-toolbar"
+        >
+          <span class="text-sm text-neutral-600">
+            {{ t('payroll.submissions.overview.mobile_key_batch.selected', { count: selectedHealthKeys.size }) }}
+          </span>
+          <button
+            type="button"
+            :class="btnFilledSm('primary')"
+            :disabled="selectedHealthKeys.size === 0 || healthBatchBusy"
+            data-test="health-batch-send"
+            @click="sendSelectedHealthViaDataBox"
+          >
+            {{ t('payroll.submissions.overview.mobile_key_batch.action', { count: selectedHealthKeys.size }) }}
+          </button>
+        </div>
+        <p
+          v-if="healthBatchError"
+          class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-batch-error"
+        >
+          {{ healthBatchError }}
+        </p>
+        <div
+          v-if="healthBatchQueuedIds.length"
+          class="m-4 rounded-lg border border-primary-200 bg-primary-50/40 p-3"
+          data-test="health-batch-mobile-key"
+        >
+          <MobileKeyBatchSendButton
+            :outbox-ids="healthBatchQueuedIds"
+            environment="production"
+            @sent="healthBatchSent"
+          />
+        </div>
+        <p
+          v-if="healthBatchSentResults"
+          class="m-4 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+          data-test="health-batch-sent-result"
+        >
+          {{ t('payroll.submissions.overview.mobile_key_batch.sent_summary', {
+            dispatched: healthBatchSentResults.filter(item => item.dispatched).length,
+            total: healthBatchSentResults.length,
+          }) }}
+        </p>
+
+        <div v-if="healthOverviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
+          <article
+            v-for="overview in healthOverviews"
+            :key="healthOverviewKey(overview)"
+            class="rounded-lg border border-neutral-200 p-4"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="flex items-start gap-2">
+                <input
+                  v-if="healthOverviews.length > 1 && !healthFiling(overview)"
+                  type="checkbox"
+                  class="mt-1"
+                  :checked="selectedHealthKeys.has(healthOverviewKey(overview))"
+                  :aria-label="t('payroll.submissions.overview.mobile_key_batch.select')"
+                  data-test="health-overview-select"
+                  @change="toggleHealthSelection(overview)"
+                >
+                <div>
+                  <h3 class="font-semibold text-neutral-900">
+                    {{ healthInsurerTitle(overview.insurer.code) }}
+                  </h3>
+                  <p class="mt-1 text-xs text-neutral-500">
+                    {{ t('payroll.submissions.overview.health_insurer_code', { code: overview.insurer.code }) }} ·
+                    {{ formatPeriod(overview.period) }} ·
+                    {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
+                    {{ t('payroll.submissions.overview.health_run_revision', {
+                      run: overview.run_id,
+                      revision: overview.revision_no,
+                    }) }}
+                  </p>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="downloadingHealthKey === healthOverviewKey(overview) || sendingHealthKey === healthOverviewKey(overview)"
+                  data-test="health-overview-download"
+                  @click="downloadHealth(overview)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.download" />
+                  </svg>
+                  {{ t('payroll.submissions.overview.health_download_official') }}
+                </button>
+                <span
+                  v-if="healthFiling(overview)"
+                  class="inline-flex items-center gap-1 rounded-full bg-success-50 px-2.5 py-1 text-xs font-medium text-success-700"
+                  data-test="health-overview-filed"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.check" />
+                  </svg>
+                  {{ healthFiling(overview)!.submittedAt
+                    ? t('payroll.submissions.overview.health_filed_on', { date: formatDate(healthFiling(overview)!.submittedAt!) })
+                    : t('payroll.submissions.overview.health_filed') }}
+                </span>
+                <button
+                  v-else-if="!healthQueuedByKey[healthOverviewKey(overview)] && healthMobileKeySentKey !== healthOverviewKey(overview)"
+                  type="button"
+                  :class="btnFilledSm('primary')"
+                  :disabled="sendingHealthKey === healthOverviewKey(overview) || downloadingHealthKey === healthOverviewKey(overview)"
+                  data-test="health-overview-send-isds"
+                  @click="sendHealthViaDataBox(overview)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.send" />
+                  </svg>
+                  {{ t('payroll.submissions.overview.health_send_isds') }}
+                </button>
+              </div>
+            </div>
+            <p
+              v-if="healthMobileKeySentKey === healthOverviewKey(overview)"
+              class="mt-3 text-sm font-medium text-success-800"
+              data-test="health-overview-mobile-key-sent"
+            >
+              {{ t('databox.outbox.mobileKey.sent') }}
+            </p>
+            <MobileKeySendButton
+              v-else-if="healthQueuedByKey[healthOverviewKey(overview)]"
+              class="mt-3"
+              :outbox-id="healthQueuedByKey[healthOverviewKey(overview)]!.outbox_id"
+              environment="production"
+              @sent="healthMobileKeySent(overview)"
+            />
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_base') }}</dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatMinor(overview.totals.assessment_base_minor_units) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_total') }}</dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatMinor(overview.totals.total_contribution_minor_units) }}
+                </dd>
+              </div>
+              <div
+                v-if="healthPaymentStatus(overview.payment_reconciliation, today)"
+                class="col-span-2"
+                data-test="health-payment-status"
+              >
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_payment_state') }}</dt>
+                <template v-for="status in [healthPaymentStatus(overview.payment_reconciliation, today)!]" :key="status.kind">
+                  <dd v-if="status.kind === 'awaiting'" class="mt-0.5 font-medium text-neutral-800">
+                    {{ t('payroll.submissions.overview.health_payment_awaiting', {
+                      date: formatDate(status.dueOn),
+                      amount: formatMinor(status.amountMinor),
+                    }) }}
+                  </dd>
+                  <dd v-else-if="status.kind === 'overdue'" class="mt-0.5 font-medium text-warning-700">
+                    {{ t('payroll.submissions.overview.health_payment_overdue', {
+                      date: formatDate(status.dueOn),
+                      amount: formatMinor(status.amountMinor),
+                    }) }}
+                  </dd>
+                  <dd v-else-if="status.kind === 'mismatch'" class="mt-0.5 font-medium text-danger-700">
+                    {{ t('payroll.submissions.overview.health_payment_mismatch', {
+                      settled: formatMinor(status.settledMinor),
+                      expected: formatMinor(status.expectedMinor),
+                    }) }}
+                    <span class="mt-0.5 block text-xs font-normal text-neutral-600">
+                      {{ status.liabilityDiffers
+                        ? t('payroll.submissions.overview.health_payment_mismatch_liability')
+                        : t('payroll.submissions.overview.health_payment_mismatch_bank') }}
+                    </span>
+                  </dd>
+                  <dd v-else class="mt-0.5 font-medium text-success-700">
+                    {{ t('payroll.submissions.overview.health_payment_settled') }}
+                  </dd>
+                </template>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
       <dl class="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div
           v-for="entry in (['total', 'open', 'submitted', 'fulfilled', 'attention'] as const)"
@@ -1408,189 +1644,6 @@ onMounted(load)
         @refresh="load"
       />
 
-      <section
-        v-if="mode === 'health'"
-        class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
-        data-test="health-payment-overviews"
-      >
-        <div class="border-b border-neutral-200 p-4 sm:p-6">
-          <h2 class="text-lg font-semibold text-neutral-900">
-            {{ t('payroll.submissions.overview.health_title') }}
-          </h2>
-          <p class="mt-1 text-sm text-neutral-500">
-            {{ t('payroll.submissions.overview.health_description') }}
-          </p>
-        </div>
-
-        <p
-          v-if="healthError"
-          class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-overview-error"
-        >
-          {{ healthError }}
-        </p>
-
-        <div v-if="healthOverviews.length === 0 && !healthError" class="p-6 text-sm text-neutral-500">
-          {{ t('payroll.submissions.overview.health_empty') }}
-        </div>
-
-        <div
-          v-if="healthOverviews.length > 1"
-          class="flex flex-wrap items-center gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3"
-          data-test="health-batch-toolbar"
-        >
-          <span class="text-sm text-neutral-600">
-            {{ t('payroll.submissions.overview.mobile_key_batch.selected', { count: selectedHealthKeys.size }) }}
-          </span>
-          <button
-            type="button"
-            :class="btnFilledSm('primary')"
-            :disabled="selectedHealthKeys.size === 0 || healthBatchBusy"
-            data-test="health-batch-send"
-            @click="sendSelectedHealthViaDataBox"
-          >
-            {{ t('payroll.submissions.overview.mobile_key_batch.action', { count: selectedHealthKeys.size }) }}
-          </button>
-        </div>
-        <p
-          v-if="healthBatchError"
-          class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-batch-error"
-        >
-          {{ healthBatchError }}
-        </p>
-        <div
-          v-if="healthBatchQueuedIds.length"
-          class="m-4 rounded-lg border border-primary-200 bg-primary-50/40 p-3"
-          data-test="health-batch-mobile-key"
-        >
-          <MobileKeyBatchSendButton
-            :outbox-ids="healthBatchQueuedIds"
-            environment="production"
-            @sent="healthBatchSent"
-          />
-        </div>
-        <p
-          v-if="healthBatchSentResults"
-          class="m-4 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
-          data-test="health-batch-sent-result"
-        >
-          {{ t('payroll.submissions.overview.mobile_key_batch.sent_summary', {
-            dispatched: healthBatchSentResults.filter(item => item.dispatched).length,
-            total: healthBatchSentResults.length,
-          }) }}
-        </p>
-
-        <div v-if="healthOverviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
-          <article
-            v-for="overview in healthOverviews"
-            :key="healthOverviewKey(overview)"
-            class="rounded-lg border border-neutral-200 p-4"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div class="flex items-start gap-2">
-                <input
-                  v-if="healthOverviews.length > 1"
-                  type="checkbox"
-                  class="mt-1"
-                  :checked="selectedHealthKeys.has(healthOverviewKey(overview))"
-                  :aria-label="t('payroll.submissions.overview.mobile_key_batch.select')"
-                  data-test="health-overview-select"
-                  @change="toggleHealthSelection(overview)"
-                >
-                <div>
-                  <h3 class="font-semibold text-neutral-900">
-                    {{ healthInsurerTitle(overview.insurer.code) }}
-                  </h3>
-                  <p class="mt-1 text-xs text-neutral-500">
-                    {{ t('payroll.submissions.overview.health_insurer_code', { code: overview.insurer.code }) }} ·
-                    {{ formatPeriod(overview.period) }} ·
-                    {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
-                    {{ t('payroll.submissions.overview.health_run_revision', {
-                      run: overview.run_id,
-                      revision: overview.revision_no,
-                    }) }}
-                  </p>
-                </div>
-              </div>
-              <div class="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  :class="btnOutlineSm('neutral')"
-                  :disabled="downloadingHealthKey === healthOverviewKey(overview) || sendingHealthKey === healthOverviewKey(overview)"
-                  data-test="health-overview-download"
-                  @click="downloadHealth(overview)"
-                >
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path :d="ICONS.download" />
-                  </svg>
-                  {{ t('payroll.submissions.overview.health_download_official') }}
-                </button>
-                <button
-                  v-if="!healthQueuedByKey[healthOverviewKey(overview)] && healthMobileKeySentKey !== healthOverviewKey(overview)"
-                  type="button"
-                  :class="btnFilledSm('primary')"
-                  :disabled="sendingHealthKey === healthOverviewKey(overview) || downloadingHealthKey === healthOverviewKey(overview)"
-                  data-test="health-overview-send-isds"
-                  @click="sendHealthViaDataBox(overview)"
-                >
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path :d="ICONS.send" />
-                  </svg>
-                  {{ t('payroll.submissions.overview.health_send_isds') }}
-                </button>
-              </div>
-            </div>
-            <p
-              v-if="healthMobileKeySentKey === healthOverviewKey(overview)"
-              class="mt-3 text-sm font-medium text-success-800"
-              data-test="health-overview-mobile-key-sent"
-            >
-              {{ t('databox.outbox.mobileKey.sent') }}
-            </p>
-            <MobileKeySendButton
-              v-else-if="healthQueuedByKey[healthOverviewKey(overview)]"
-              class="mt-3"
-              :outbox-id="healthQueuedByKey[healthOverviewKey(overview)]!.outbox_id"
-              environment="production"
-              @sent="healthMobileKeySent(overview)"
-            />
-            <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_base') }}</dt>
-                <dd class="mt-0.5 font-medium text-neutral-900">
-                  {{ formatMinor(overview.totals.assessment_base_minor_units) }}
-                </dd>
-              </div>
-              <div>
-                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_total') }}</dt>
-                <dd class="mt-0.5 font-medium text-neutral-900">
-                  {{ formatMinor(overview.totals.total_contribution_minor_units) }}
-                </dd>
-              </div>
-              <div>
-                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_bank_settled') }}</dt>
-                <dd class="mt-0.5 font-medium text-neutral-900">
-                  {{ formatMinor(overview.payment_reconciliation?.bank_settled_minor ?? 0) }}
-                </dd>
-              </div>
-              <div>
-                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_payment_state') }}</dt>
-                <dd
-                  class="mt-0.5 font-medium"
-                  :class="(overview.payment_reconciliation?.closing_blocked ?? true) ? 'text-danger-700' : 'text-success-700'"
-                >
-                  {{ (overview.payment_reconciliation?.closing_blocked ?? true)
-                    ? t('payroll.submissions.overview.health_payment_blocked')
-                    : t('payroll.submissions.overview.health_payment_settled') }}
-                </dd>
-              </div>
-            </dl>
-          </article>
-        </div>
-      </section>
     </template>
   </section>
 

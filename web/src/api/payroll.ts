@@ -3851,6 +3851,8 @@ export interface PayrollHealthPaymentOverview {
     state: 'missing' | 'mismatch' | 'open' | 'partially_settled' | 'settled'
     closing_blocked: boolean
     blockers: Array<'liability_missing' | 'liability_difference' | 'bank_unsettled'>
+    /** Splatnost nejbližší nezaplacené úhrady pojistného (`RRRR-MM-DD`). */
+    due_on?: string | null
   }
   sha256: string
   filename: string

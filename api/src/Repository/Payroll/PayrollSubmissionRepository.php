@@ -1856,6 +1856,47 @@ final class PayrollSubmissionRepository
      *   xsd_version:?string,catalog_version:?string,channel:string
      * }|null
      */
+    /**
+     * Údaje pro název souboru artefaktu ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionFilename}).
+     *
+     * @return array{agenda_code:string,period_start:string,subject_reference:string,submission_kind:string,part_id:?int,business_id:?string,mime_type:string}|null
+     */
+    public function artifactFilenameFacts(int $supplierId, int $artifactId): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.agenda_code, obligation.period_start,
+                    obligation.subject_reference, submission.submission_kind,
+                    artifact.part_id, artifact.mime_type, supplier.ic
+               FROM payroll_submission_artifacts artifact
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = artifact.supplier_id
+                AND submission.environment = artifact.environment
+                AND submission.id = artifact.submission_id
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               JOIN supplier
+                 ON supplier.id = artifact.supplier_id
+              WHERE artifact.supplier_id = ? AND artifact.id = ?',
+        );
+        $statement->execute([$supplierId, $artifactId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || !is_array($row)) {
+            return null;
+        }
+
+        return [
+            'agenda_code' => (string) $row['agenda_code'],
+            'period_start' => (string) $row['period_start'],
+            'subject_reference' => (string) $row['subject_reference'],
+            'submission_kind' => (string) $row['submission_kind'],
+            'part_id' => $row['part_id'] === null ? null : (int) $row['part_id'],
+            'business_id' => $row['ic'] === null ? null : (string) $row['ic'],
+            'mime_type' => (string) $row['mime_type'],
+        ];
+    }
+
     public function findArtifact(int $supplierId, int $artifactId): ?array
     {
         $statement = $this->db->pdo()->prepare(

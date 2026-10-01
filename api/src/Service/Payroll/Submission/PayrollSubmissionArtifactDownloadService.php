@@ -196,7 +196,10 @@ final class PayrollSubmissionArtifactDownloadService
                 'bytes' => $bytes,
                 'byte_size' => $grant['byte_size'],
                 'mime_type' => $mimeType,
-                'suggested_filename' => self::suggestedFilename(
+                'suggested_filename' => $this->submissions->artifactFilename(
+                    $supplierId,
+                    $artifactId,
+                ) ?? self::suggestedFilename(
                     $grant['agenda_code'],
                     $grant['period_start'],
                     $artifactId,

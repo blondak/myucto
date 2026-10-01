@@ -650,6 +650,29 @@ final class PayrollSubmissionService
         });
     }
 
+    /**
+     * Název souboru artefaktu pro přílohu datové zprávy i stažení —
+     * jediný tvar {@see PayrollSubmissionFilename}. `null` = artefakt
+     * ve firmě neexistuje.
+     */
+    public function artifactFilename(int $supplierId, int $artifactId): ?string
+    {
+        $facts = $this->repository->artifactFilenameFacts($supplierId, $artifactId);
+        if ($facts === null) {
+            return null;
+        }
+
+        return PayrollSubmissionFilename::build(
+            $facts['agenda_code'],
+            $facts['period_start'],
+            $facts['subject_reference'],
+            $facts['business_id'],
+            $facts['submission_kind'],
+            PayrollSubmissionFilename::extensionFor($facts['mime_type']),
+            $facts['part_id'],
+        );
+    }
+
     public function artifactBytes(int $supplierId, int $artifactId): string
     {
         $artifact = $this->repository->findArtifact(

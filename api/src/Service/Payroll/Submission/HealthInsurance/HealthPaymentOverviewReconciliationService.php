@@ -17,7 +17,7 @@ final class HealthPaymentOverviewReconciliationService
      *   liability_difference_minor:int,bank_settled_minor:int,
      *   outgoing_remaining_minor:int,incoming_remaining_minor:int,
      *   bank_remaining_minor:int,state:string,closing_blocked:bool,
-     *   blockers:list<string>
+     *   blockers:list<string>,due_on:?string
      * }
      */
     public function forOverview(HealthPaymentOverview $overview): array
@@ -35,7 +35,7 @@ final class HealthPaymentOverviewReconciliationService
      *   liability_difference_minor:int,bank_settled_minor:int,
      *   outgoing_remaining_minor:int,incoming_remaining_minor:int,
      *   bank_remaining_minor:int,state:string,closing_blocked:bool,
-     *   blockers:list<string>
+     *   blockers:list<string>,due_on:?string
      * }>
      */
     public function forOverviews(array $overviews): array
@@ -87,7 +87,7 @@ final class HealthPaymentOverviewReconciliationService
         $placeholders = implode(', ', array_fill(0, count($references), '?'));
         $statement = $this->db->pdo()->prepare(
             'SELECT liability.liability_reference, liability.id,
-                    liability.direction, liability.amount_minor,
+                    liability.direction, liability.amount_minor, liability.due_on,
                     COALESCE((
                       SELECT SUM(payment_match.amount_minor)
                         FROM payroll_payment_matches payment_match
@@ -147,7 +147,7 @@ final class HealthPaymentOverviewReconciliationService
      *   liability_difference_minor:int,bank_settled_minor:int,
      *   outgoing_remaining_minor:int,incoming_remaining_minor:int,
      *   bank_remaining_minor:int,state:string,closing_blocked:bool,
-     *   blockers:list<string>
+     *   blockers:list<string>,due_on:?string
      * }
      */
     private function reconcileRows(
@@ -161,6 +161,7 @@ final class HealthPaymentOverviewReconciliationService
         $outgoingSettled = 0;
         $incomingRequired = 0;
         $incomingSettled = 0;
+        $dueOn = null;
         foreach ($rows as $row) {
             $id = (int) ($row['id'] ?? 0);
             $amount = (int) ($row['amount_minor'] ?? 0);
@@ -182,6 +183,11 @@ final class HealthPaymentOverviewReconciliationService
             if ($direction === 'outgoing') {
                 $outgoingRequired += $amount;
                 $outgoingSettled += $settled;
+                // Splatnost úhrady pojistného: nejbližší nezaplacená část.
+                $rowDue = isset($row['due_on']) ? substr((string) $row['due_on'], 0, 10) : null;
+                if ($rowDue !== null && $settled < $amount && ($dueOn === null || $rowDue < $dueOn)) {
+                    $dueOn = $rowDue;
+                }
             } else {
                 $incomingRequired += $amount;
                 $incomingSettled += $settled;
@@ -228,6 +234,8 @@ final class HealthPaymentOverviewReconciliationService
             'state' => $state,
             'closing_blocked' => $blockers !== [],
             'blockers' => $blockers,
+            // Bez splatnosti klient nepozná „čeká na úhradu" od „po splatnosti".
+            'due_on' => $dueOn,
         ];
     }
 }

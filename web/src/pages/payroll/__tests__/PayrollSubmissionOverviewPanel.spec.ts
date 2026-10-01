@@ -317,6 +317,71 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
   })
 
   /**
+   * Podaná pojišťovna už nenabízí „Podat datovkou" (druhé podání = duplicita)
+   * a nezaplacené pojistné před splatností jen čeká, nesvítí jako chyba.
+   */
+  it('u podané pojišťovny ukáže Podáno a stav úhrady podle splatnosti', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 9, 1, 9, 0, 0))
+    m.runs.mockResolvedValue([{ revision_status: 'approved', revision_id: 12 }])
+    m.submissionOverview.mockResolvedValue({
+      items: [{
+        id: 5,
+        environment: 'production',
+        agenda_code: 'PPZ_2026',
+        agenda_group: 'health',
+        subject_type: 'payroll_run',
+        subject_reference: 'payroll_run:1:111',
+        subject_label: 'VZP (111)',
+        period_start: '2026-09-01',
+        period_end: '2026-09-30',
+        obligation_kind: 'regular',
+        preferred_channel: 'health_portal',
+        status: 'fulfilled',
+        row_version: 2,
+        earliest_submission_on: '2026-10-01',
+        due_on: '2026-10-20',
+        calendar_basis: 'calendar_days',
+        deadline: { phase: 'fulfilled', days_to_due: 19, is_overdue: false },
+        settlement: null,
+        latest_submission: { id: 9, status: 'submitted', submitted_at: '2026-09-15 10:00:00' },
+      }],
+      total: 1,
+      deadline_summary: {
+        not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 0,
+        awaiting_result: 0, fulfilled: 1, action_required: 0, cancelled: 0,
+      },
+    })
+    m.healthPaymentOverviews.mockResolvedValue({
+      items: [{
+        run_id: 1,
+        revision_id: 12,
+        revision_no: 3,
+        period: '2026-09',
+        insurer: { code: '111' },
+        totals: { person_count: 2, assessment_base_minor_units: 1, total_contribution_minor_units: 302400 },
+        payment_reconciliation: {
+          liability_ids: [1], expected_minor: 302400, liability_minor: 302400,
+          liability_difference_minor: 0, bank_settled_minor: 0,
+          outgoing_remaining_minor: 302400, incoming_remaining_minor: 0,
+          bank_remaining_minor: 302400, state: 'open', closing_blocked: true,
+          blockers: ['bank_unsettled'], due_on: '2026-10-20',
+        },
+      }],
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="health-overview-send-isds"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="health-overview-filed"]').text()).toContain('health_filed_on')
+    expect(wrapper.find('[data-test="health-overview-download"]').exists()).toBe(true)
+    const payment = wrapper.get('[data-test="health-payment-status"]')
+    expect(payment.text()).toContain('health_payment_awaiting')
+    expect(payment.text()).not.toContain('health_payment_blocked')
+  })
+
+  /**
    * Jedno potvrzení v mobilu pro víc vybraných přehledů — bez toho by účetní
    * musela potvrzovat zvlášť pro každou pojišťovnu.
    */

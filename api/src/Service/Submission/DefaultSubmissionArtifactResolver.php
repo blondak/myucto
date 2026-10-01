@@ -133,7 +133,8 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         };
 
         return [
-            'filename' => 'mzdove-podani-' . (int) $row['submission_id'] . '-' . $id . '.' . $extension,
+            'filename' => $this->payroll->artifactFilename($supplierId, $id)
+                ?? 'mzdove-podani-' . (int) $row['submission_id'] . '-' . $id . '.' . $extension,
             'mime' => $mime !== '' ? $mime : 'application/xml',
             'bytes' => $bytes,
             'authority' => [

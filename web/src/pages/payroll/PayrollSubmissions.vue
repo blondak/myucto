@@ -347,6 +347,22 @@ onMounted(() => {
 })
 onMounted(load)
 onMounted(loadInboxBadge)
+
+/*
+ * Tři hlavní záložky pokryjí měsíční práci: Měsíc (co podat a odeslat),
+ * Odesláno (stav odeslání) a Mimořádná podání (nemocenské a další zákonné
+ * povinnosti mimo měsíční cyklus). Ostatní obrazovky jsou pod „Další" —
+ * dál mají vlastní adresu, takže staré odkazy fungují.
+ */
+const primaryTabs: SubmissionTab[] = ['monthly', 'transport', 'statutory']
+const moreTabs = computed(() => tabs.filter(tab => !primaryTabs.includes(tab)))
+const moreActive = computed(() => !primaryTabs.includes(activeTab.value))
+const moreOpen = ref(false)
+
+function selectTab(tab: SubmissionTab) {
+  activeTab.value = tab
+  moreOpen.value = false
+}
 </script>
 
 <template>
@@ -374,7 +390,7 @@ onMounted(loadInboxBadge)
       :aria-label="t('payroll.submissions.tabs_label')"
     >
       <button
-        v-for="tab in tabs"
+        v-for="tab in primaryTabs"
         :key="tab"
         type="button"
         role="tab"
@@ -383,17 +399,61 @@ onMounted(loadInboxBadge)
         :class="activeTab === tab
           ? 'border-payroll-600 text-payroll-600'
           : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
-        @click="activeTab = tab"
+        @click="selectTab(tab)"
       >
         {{ t(`payroll.submissions.tabs.${tab}`) }}
-        <span
-          v-if="tab === 'inbox' && inboxOpenCount !== null && inboxOpenCount > 0"
-          class="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
-          data-test="submissions-inbox-badge"
-        >
-          {{ inboxOpenCount }}
-        </span>
       </button>
+      <div class="relative" @keydown.escape="moreOpen = false">
+        <button
+          type="button"
+          class="-mb-px inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+          :class="moreActive
+            ? 'border-payroll-600 text-payroll-600'
+            : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
+          :aria-expanded="moreOpen"
+          aria-haspopup="true"
+          data-test="submissions-more-tabs"
+          @click="moreOpen = !moreOpen"
+        >
+          {{ moreActive ? t(`payroll.submissions.tabs.${activeTab}`) : t('payroll.submissions.tabs_more') }}
+          <span
+            v-if="inboxOpenCount !== null && inboxOpenCount > 0"
+            class="ml-0.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+          >
+            {{ inboxOpenCount }}
+          </span>
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.chevron" />
+          </svg>
+        </button>
+        <div
+          v-show="moreOpen"
+          class="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-neutral-200 bg-surface py-1 shadow-lg"
+          data-test="submissions-more-menu"
+        >
+          <button
+            v-for="tab in moreTabs"
+            :key="tab"
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === tab"
+            class="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-sm"
+            :class="activeTab === tab
+              ? 'bg-payroll-50 font-medium text-payroll-700'
+              : 'text-neutral-700 hover:bg-neutral-50'"
+            @click="selectTab(tab)"
+          >
+            {{ t(`payroll.submissions.tabs.${tab}`) }}
+            <span
+              v-if="tab === 'inbox' && inboxOpenCount !== null && inboxOpenCount > 0"
+              class="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
+              data-test="submissions-inbox-badge"
+            >
+              {{ inboxOpenCount }}
+            </span>
+          </button>
+        </div>
+      </div>
     </nav>
 
     <!--
@@ -405,7 +465,7 @@ onMounted(loadInboxBadge)
     <PayrollMonthlyChecklistPanel
       v-if="activeTab === 'monthly'"
       v-model:environment="environment"
-      :initial-period="overviewPeriod"
+      :initial-period="routedPeriod ?? undefined"
     />
 
     <!--
@@ -460,14 +520,14 @@ onMounted(loadInboxBadge)
       nezávisí, proto stojí mimo společný skeleton.
     -->
     <template v-else-if="activeTab === 'health'">
-      <PayrollHealthNotificationPanel
-        v-model:period="healthPeriod"
-        v-model:environment="environment"
-      />
       <PayrollSubmissionOverviewPanel
         v-model:environment="environment"
         v-model:period="healthPeriod"
         mode="health"
+      />
+      <PayrollHealthNotificationPanel
+        v-model:period="healthPeriod"
+        v-model:environment="environment"
       />
     </template>
 

@@ -326,6 +326,14 @@ async function loadRuns() {
   } catch {
     runs.value = []
   }
+  // Ruční sestavení se otevírá s NEJNOVĚJŠÍ schválenou revizí období —
+  // dřív se musela vybírat ze seznamu, i když jiná přicházela v úvahu zřídka.
+  if (prepareRevisionId.value === null) {
+    const newest = runs.value
+      .filter(run => run.revision_status === 'approved' && run.revision_id !== null)
+      .sort((a, b) => (b.revision_no ?? 0) - (a.revision_no ?? 0))[0]
+    prepareRevisionId.value = newest?.revision_id ?? null
+  }
 }
 
 function goToPage(nextPage: number) {
@@ -660,6 +668,13 @@ watch(period, () => {
  * tři sekce. Sestavení nic neodesílá; odeslání zůstává na tlačítku.
  */
 const bulkSection = ref<HTMLElement | null>(null)
+/*
+ * Možnosti elektronického podání a ruční sestavení jsou sbalené pod
+ * „Podrobnosti a ruční sestavení": měsíční přehled o platbě se odesílá
+ * z karet pojišťoven výš, sem se chodí výjimečně. Rozbalí se samo, když
+ * na ně vede odkaz z karty zaměstnance.
+ */
+const detailsOpen = ref(typeof route?.query?.insurer === 'string')
 
 async function prepareFromRoute() {
   const insurer = route?.query?.insurer
@@ -690,7 +705,7 @@ onMounted(() => {
             {{ t('payroll.health_notifications.title') }}
           </h2>
           <p class="mt-2 text-sm text-neutral-600">
-            {{ t('payroll.health_notifications.subtitle') }}
+            {{ t('payroll.health_notifications.subtitle_short') }}
           </p>
         </div>
         <ActionBar :actions="actions" />
@@ -724,86 +739,6 @@ onMounted(() => {
       >
         {{ obligationSyncError }}
       </p>
-    </section>
-
-    <!--
-      Omezení stojí NAD seznamem, ne pod ním: uživatel musí vědět, že modul
-      neodesílá, dřív než začne skládat podání.
-    -->
-    <section
-      class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
-      data-test="health-notifications-limits"
-    >
-      <h3 class="flex items-center gap-2 text-sm font-semibold text-warning-800">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path :d="ICONS.bell" />
-        </svg>
-        {{ t('payroll.health_notifications.limits.title') }}
-      </h3>
-      <ul class="mt-3 space-y-2 text-sm text-warning-800">
-        <li class="flex gap-2">
-          <span aria-hidden="true">•</span>
-          <span>{{ t('payroll.health_notifications.limits.no_transport') }}</span>
-        </li>
-        <li class="flex gap-2">
-          <span aria-hidden="true">•</span>
-          <span>{{ t('payroll.health_notifications.limits.manual_delivery') }}</span>
-        </li>
-        <li v-if="undocumentedKinds.length" class="flex gap-2">
-          <span aria-hidden="true">•</span>
-          <span>
-            {{ t('payroll.health_notifications.limits.undocumented_codes', {
-              kinds: undocumentedKinds
-                .map(kind => t(`payroll.health_notifications.kind.${kind}`))
-                .join(', '),
-            }) }}
-          </span>
-        </li>
-        <li v-if="capabilityFailed" class="flex gap-2" data-test="health-capability-failed">
-          <span aria-hidden="true">•</span>
-          <span>{{ t('payroll.health_notifications.limits.capability_failed') }}</span>
-        </li>
-      </ul>
-
-      <div v-if="capability" class="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
-        <p
-          v-for="channel in Object.values(capability.channels)"
-          :key="channel.insurer_code"
-          class="rounded-lg border border-warning-500/30 bg-surface/60 p-3 text-xs text-neutral-700"
-        >
-          <span class="font-semibold text-neutral-900">
-            {{ channel.insurer_code }} — {{ channel.insurer_name }}
-          </span>
-          <span
-            class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
-            :class="channel.isds_attachment_format !== 'none'
-              ? 'bg-success-100 text-success-800'
-              : 'bg-neutral-100 text-neutral-700'"
-          >
-            {{ t(channel.isds_attachment_format === 'xml'
-              ? 'payroll.health_notifications.isds_xml_supported'
-              : channel.isds_attachment_format === 'text_pdf'
-                ? 'payroll.health_notifications.isds_pdf_supported'
-                : 'payroll.health_notifications.alternative_route') }}
-          </span>
-          <span class="mt-1 block text-neutral-500">
-            {{ channel.note }}
-          </span>
-          <span
-            v-if="channel.data_box_id"
-            class="mt-1 block"
-          >
-            {{ t('payroll.health_notifications.data_box', { id: channel.data_box_id }) }}
-          </span>
-          <a
-            v-if="channel.portal_url"
-            :href="channel.portal_url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-1 block text-payroll-600 underline"
-          >{{ channel.portal_url }}</a>
-        </p>
-      </div>
     </section>
 
     <!--
@@ -1155,463 +1090,554 @@ onMounted(() => {
       </template>
     </section>
 
-    <section
-      class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
-      data-test="health-notifications-prepare"
+    <details
+      class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+      :open="detailsOpen"
+      data-test="health-details"
+      @toggle="detailsOpen = ($event.target as HTMLDetailsElement).open"
     >
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <h3 class="text-lg font-semibold text-neutral-900">
-          {{ t('payroll.health_notifications.prepare.title') }}
-        </h3>
-        <EnvironmentSwitch
-          v-model="environment"
-          data-test="health-prepare-environment"
-          :aria-label="t('payroll.regzel.environment.label')"
-        />
-      </div>
-      <p class="mt-1 max-w-3xl text-sm text-neutral-500">
-        {{ t('payroll.health_notifications.prepare.description') }}
-      </p>
-
-      <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <label class="block text-sm font-medium text-neutral-700">
-          {{ t('payroll.health_notifications.prepare.revision') }}
-          <SearchableSelect
-            v-model="prepareRevisionId"
-            class="mt-1"
-            data-test="health-prepare-revision"
-            :options="approvedRunOptions"
-            :placeholder="t('payroll.health_notifications.prepare.revision_placeholder')"
-            :no-results-label="t('payroll.health_notifications.prepare.revision_empty')"
-            accent="payroll"
-          />
-        </label>
-        <label class="block text-sm font-medium text-neutral-700">
-          {{ t('payroll.health_notifications.prepare.insurer') }}
-          <SearchableSelect
-            v-model="prepareInsurer"
-            class="mt-1"
-            data-test="health-prepare-insurer"
-            :options="insurerOptions"
-            :placeholder="t('payroll.health_notifications.prepare.insurer_placeholder')"
-            accent="payroll"
-          />
-        </label>
-      </div>
-
-      <p v-if="!canWrite" class="mt-4 text-sm text-neutral-500">
-        {{ t('payroll.health_notifications.read_only') }}
-      </p>
-
-      <p
-        v-if="prepareError"
-        class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
-        role="alert"
-        data-test="health-prepare-error"
+      <summary class="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-neutral-800 sm:px-6">
+        {{ t('payroll.health_notifications.details_title') }}
+      </summary>
+      <div class="space-y-4 border-t border-neutral-200 p-4 sm:p-6">
+        <p class="text-sm text-neutral-600">
+          {{ t('payroll.health_notifications.subtitle') }}
+        </p>
+      <section
+        class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
+        data-test="health-notifications-limits"
       >
-        {{ prepareError }}
-      </p>
-
-      <div
-        v-if="prepared"
-        class="mt-4 rounded-lg border p-4"
-        :class="prepared.schema_validated
-          ? 'border-success-500/30 bg-success-50'
-          : 'border-warning-500/40 bg-warning-50'"
-        data-test="health-prepare-result"
-      >
-        <h4
-          class="text-sm font-semibold"
-          :class="prepared.schema_validated ? 'text-success-800' : 'text-warning-800'"
-        >
-          {{ prepared.schema_validated
-            ? t('payroll.health_notifications.prepare.valid')
-            : t('payroll.health_notifications.prepare.blocked') }}
-        </h4>
-        <p class="mt-1 text-sm" :class="prepared.schema_validated ? 'text-success-700' : 'text-warning-800'">
-          {{ prepared.schema_validated
-            ? t('payroll.health_notifications.prepare.valid_hint', {
-              insurer: prepared.insurer_code,
-              due: formatDate(prepared.deadline.due_on),
-            })
-            : t('payroll.health_notifications.prepare.blocked_hint') }}
-        </p>
-        <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.status') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(prepared.status) }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.period') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ formatPeriod(prepared.period) }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.due_on') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">
-              {{ formatDate(prepared.deadline.due_on) }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.fingerprint') }}</dt>
-            <dd class="mt-0.5 break-all font-mono text-[0.7rem] text-neutral-700">
-              {{ prepared.artifact_sha256.slice(0, 16) }}…
-            </dd>
-          </div>
-        </dl>
-        <p class="mt-3 text-xs text-neutral-600">
-          {{ reasonText(prepared.dispatch.reason_code, prepared.dispatch.reason) }}
-        </p>
-        <p
-          v-if="downloadError"
-          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-prepare-download-error"
-        >
-          {{ downloadError }}
-        </p>
-        <p
-          v-if="isdsError"
-          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-prepare-isds-error"
-        >
-          {{ isdsError }}
-        </p>
-        <div
-          v-if="isdsResult"
-          class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
-          data-test="health-prepare-isds-result"
-        >
-          <p class="font-semibold">
-            {{ isdsResult.created
-              ? t('payroll.health_notifications.prepare.isds_ready')
-              : t('payroll.health_notifications.prepare.isds_already_ready') }}
-          </p>
-          <p class="mt-1">
-            {{ t('payroll.health_notifications.prepare.isds_recipient', {
-              name: isdsResult.recipient.name,
-              id: isdsResult.recipient.box_id,
-            }) }}
-          </p>
-          <p v-if="isdsMobileKeySent" class="mt-2 font-semibold">
-            {{ t('databox.outbox.mobileKey.sent') }}
-          </p>
-          <MobileKeySendButton
-            v-else-if="!isdsResult.transport.automatic && isdsResult.transport.channel === 'mobile_key'"
-            class="mt-2"
-            :outbox-id="isdsResult.outbox_id"
-            :environment="environment"
-            @sent="mobileKeySent"
-          />
-          <a
-            v-else-if="!isdsResult.transport.automatic"
-            :href="isdsResult.outbox_url"
-            class="mt-2 inline-flex font-semibold underline"
-          >
-            {{ t('payroll.health_notifications.prepare.open_outbox') }}
-          </a>
-        </div>
-        <div
-          v-if="isdsGateway"
-          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
-          data-test="health-prepare-isds-gateway"
-        >
-          <p class="font-semibold">
-            {{ t('payroll.health_notifications.prepare.gateway_title') }}
-          </p>
-          <p class="mt-1">{{ isdsGateway.login_guidance }}</p>
-          <p class="mt-2 text-xs">
-            {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
-          </p>
-          <button
-            type="button"
-            :class="[btnFilledSm('primary'), 'mt-3']"
-            data-test="health-prepare-isds-continue"
-            @click="continueIsdsGateway"
-          >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.send" />
-            </svg>
-            {{ t('payroll.health_notifications.prepare.gateway_continue') }}
-          </button>
-        </div>
-        <p
-          v-if="prepared.schema_validated && !canQueueIsds && !isdsBusy && !isdsResult"
-          class="mt-3 text-xs text-neutral-600"
-          data-test="health-prepare-isds-unavailable"
-        >
-          {{ preparedChannel?.data_box_id && preparedChannel?.isds_attachment_format !== 'none'
-            ? t('payroll.health_notifications.read_only')
-            : t('payroll.health_notifications.prepare.isds_unavailable') }}
-        </p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            :class="btnOutlineSm('neutral')"
-            :disabled="downloading"
-            data-test="health-prepare-download"
-            @click="downloadArtifact"
-          >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.download" />
-            </svg>
-            {{ downloading
-              ? t('payroll.health_notifications.prepare.downloading')
-              : t('payroll.health_notifications.prepare.download') }}
-          </button>
-          <button
-            type="button"
-            :class="btnFilledSm('primary')"
-            :disabled="!canQueueIsds"
-            data-test="health-prepare-isds"
-            @click="enqueueIsds"
-          >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.send" />
-            </svg>
-            {{ isdsBusy
-              ? t('payroll.health_notifications.prepare.isds_preparing')
-              : t('payroll.health_notifications.prepare.isds_action') }}
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section
-      ref="bulkSection"
-      class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
-      data-test="health-notifications-prepare-bulk"
-    >
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <h3 class="text-lg font-semibold text-neutral-900">
-          {{ t('payroll.health_notifications.prepare_bulk.title') }}
-        </h3>
-        <EnvironmentSwitch
-          v-model="environment"
-          data-test="health-prepare-bulk-environment"
-          :aria-label="t('payroll.regzel.environment.label')"
-        />
-      </div>
-      <p class="mt-1 max-w-3xl text-sm text-neutral-500">
-        {{ t('payroll.health_notifications.prepare_bulk.description') }}
-      </p>
-
-      <div class="mt-5 max-w-sm">
-        <label class="block text-sm font-medium text-neutral-700">
-          {{ t('payroll.health_notifications.prepare_bulk.insurer') }}
-          <SearchableSelect
-            v-model="prepareBulkInsurer"
-            class="mt-1"
-            data-test="health-prepare-bulk-insurer"
-            :options="insurerOptions"
-            :placeholder="t('payroll.health_notifications.prepare_bulk.insurer_placeholder')"
-            accent="payroll"
-          />
-        </label>
-        <button
-          type="button"
-          :class="[btnFilledSm('primary'), 'mt-3']"
-          :disabled="!canPrepareBulk"
-          data-test="health-prepare-bulk-action"
-          @click="prepareBulk"
-        >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.doc" />
+        <h3 class="flex items-center gap-2 text-sm font-semibold text-warning-800">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
           </svg>
-          {{ preparingBulk
-            ? t('payroll.health_notifications.prepare.isds_preparing')
-            : t('payroll.health_notifications.prepare_bulk.action') }}
-        </button>
-      </div>
+          {{ t('payroll.health_notifications.limits.title') }}
+        </h3>
+        <ul class="mt-3 space-y-2 text-sm text-warning-800">
+          <li class="flex gap-2">
+            <span aria-hidden="true">•</span>
+            <span>{{ t('payroll.health_notifications.limits.no_transport') }}</span>
+          </li>
+          <li class="flex gap-2">
+            <span aria-hidden="true">•</span>
+            <span>{{ t('payroll.health_notifications.limits.manual_delivery') }}</span>
+          </li>
+          <li v-if="undocumentedKinds.length" class="flex gap-2">
+            <span aria-hidden="true">•</span>
+            <span>
+              {{ t('payroll.health_notifications.limits.undocumented_codes', {
+                kinds: undocumentedKinds
+                  .map(kind => t(`payroll.health_notifications.kind.${kind}`))
+                  .join(', '),
+              }) }}
+            </span>
+          </li>
+          <li v-if="capabilityFailed" class="flex gap-2" data-test="health-capability-failed">
+            <span aria-hidden="true">•</span>
+            <span>{{ t('payroll.health_notifications.limits.capability_failed') }}</span>
+          </li>
+        </ul>
 
-      <p v-if="!canWrite" class="mt-4 text-sm text-neutral-500">
-        {{ t('payroll.health_notifications.read_only') }}
-      </p>
-
-      <p
-        v-if="prepareBulkError"
-        class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
-        role="alert"
-        data-test="health-prepare-bulk-error"
-      >
-        {{ prepareBulkError }}
-      </p>
-
-      <div
-        v-if="preparedBulk"
-        class="mt-4 rounded-lg border p-4"
-        :class="preparedBulk.schema_validated
-          ? 'border-success-500/30 bg-success-50'
-          : 'border-warning-500/40 bg-warning-50'"
-        data-test="health-prepare-bulk-result"
-      >
-        <h4
-          class="text-sm font-semibold"
-          :class="preparedBulk.schema_validated ? 'text-success-800' : 'text-warning-800'"
-        >
-          {{ preparedBulk.schema_validated
-            ? t('payroll.health_notifications.prepare_bulk.valid')
-            : t('payroll.health_notifications.prepare_bulk.blocked') }}
-        </h4>
-        <p class="mt-1 text-sm" :class="preparedBulk.schema_validated ? 'text-success-700' : 'text-warning-800'">
-          {{ preparedBulk.schema_validated
-            ? t('payroll.health_notifications.prepare_bulk.valid_hint', {
-              insurer: preparedBulk.insurer_code,
-              count: preparedBulk.changes_count,
-              due: formatDate(preparedBulk.deadline.due_on),
-            })
-            : t('payroll.health_notifications.prepare_bulk.blocked_hint') }}
-        </p>
-        <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.status') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(preparedBulk.status) }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.changes_count') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ preparedBulk.changes_count }}</dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.due_on') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">
-              {{ formatDate(preparedBulk.deadline.due_on) }}
-            </dd>
-          </div>
-          <div>
-            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.fingerprint') }}</dt>
-            <dd class="mt-0.5 break-all font-mono text-[0.7rem] text-neutral-700">
-              {{ preparedBulk.artifact_sha256.slice(0, 16) }}…
-            </dd>
-          </div>
-        </dl>
-        <p
-          v-if="preparedBulk.official_form"
-          class="mt-3 rounded-lg border border-neutral-300 bg-white p-3 text-sm text-neutral-700"
-          data-test="health-prepare-bulk-official-form"
-        >
-          <span class="font-medium text-neutral-900">
-            {{ preparedBulk.official_form.used
-              ? t('payroll.health_notifications.prepare_bulk.official_form_used')
-              : t('payroll.health_notifications.prepare_bulk.official_form_own') }}
-          </span>
-          —
-          {{ preparedBulk.official_form.used
-            ? t('payroll.health_notifications.prepare_bulk.official_form_used_hint')
-            : preparedBulk.official_form.reason }}
-        </p>
-        <p
-          v-if="downloadBulkError"
-          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-prepare-bulk-download-error"
-        >
-          {{ downloadBulkError }}
-        </p>
-        <p
-          v-if="isdsBulkError"
-          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-          role="alert"
-          data-test="health-prepare-bulk-isds-error"
-        >
-          {{ isdsBulkError }}
-        </p>
-        <div
-          v-if="isdsBulkResult"
-          class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
-          data-test="health-prepare-bulk-isds-result"
-        >
-          <p class="font-semibold">
-            {{ isdsBulkResult.created
-              ? t('payroll.health_notifications.prepare.isds_ready')
-              : t('payroll.health_notifications.prepare.isds_already_ready') }}
-          </p>
-          <p class="mt-1">
-            {{ t('payroll.health_notifications.prepare.isds_recipient', {
-              name: isdsBulkResult.recipient.name,
-              id: isdsBulkResult.recipient.box_id,
-            }) }}
-          </p>
-          <p v-if="isdsBulkMobileKeySent" class="mt-2 font-semibold">
-            {{ t('databox.outbox.mobileKey.sent') }}
-          </p>
-          <MobileKeySendButton
-            v-else-if="!isdsBulkResult.transport.automatic && isdsBulkResult.transport.channel === 'mobile_key'"
-            class="mt-2"
-            :outbox-id="isdsBulkResult.outbox_id"
-            :environment="environment"
-            @sent="bulkMobileKeySent"
-          />
-          <a
-            v-else-if="!isdsBulkResult.transport.automatic"
-            :href="isdsBulkResult.outbox_url"
-            class="mt-2 inline-flex font-semibold underline"
+        <div v-if="capability" class="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <p
+            v-for="channel in Object.values(capability.channels)"
+            :key="channel.insurer_code"
+            class="rounded-lg border border-warning-500/30 bg-surface/60 p-3 text-xs text-neutral-700"
           >
-            {{ t('payroll.health_notifications.prepare.open_outbox') }}
-          </a>
+            <span class="font-semibold text-neutral-900">
+              {{ channel.insurer_code }} — {{ channel.insurer_name }}
+            </span>
+            <span
+              class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
+              :class="channel.isds_attachment_format !== 'none'
+                ? 'bg-success-100 text-success-800'
+                : 'bg-neutral-100 text-neutral-700'"
+            >
+              {{ t(channel.isds_attachment_format === 'xml'
+                ? 'payroll.health_notifications.isds_xml_supported'
+                : channel.isds_attachment_format === 'text_pdf'
+                  ? 'payroll.health_notifications.isds_pdf_supported'
+                  : 'payroll.health_notifications.alternative_route') }}
+            </span>
+            <span class="mt-1 block text-neutral-500">
+              {{ channel.note }}
+            </span>
+            <span
+              v-if="channel.data_box_id"
+              class="mt-1 block"
+            >
+              {{ t('payroll.health_notifications.data_box', { id: channel.data_box_id }) }}
+            </span>
+            <a
+              v-if="channel.portal_url"
+              :href="channel.portal_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-1 block text-payroll-600 underline"
+            >{{ channel.portal_url }}</a>
+          </p>
         </div>
-        <div
-          v-if="isdsBulkGateway"
-          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
-          data-test="health-prepare-bulk-isds-gateway"
+      </section>
+
+      <section
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+        data-test="health-notifications-prepare"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <h3 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.health_notifications.prepare.title') }}
+          </h3>
+          <EnvironmentSwitch
+            v-model="environment"
+            data-test="health-prepare-environment"
+            :aria-label="t('payroll.regzel.environment.label')"
+          />
+        </div>
+        <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+          {{ t('payroll.health_notifications.prepare.description') }}
+        </p>
+
+        <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.health_notifications.prepare.revision') }}
+            <SearchableSelect
+              v-model="prepareRevisionId"
+              class="mt-1"
+              data-test="health-prepare-revision"
+              :options="approvedRunOptions"
+              :placeholder="t('payroll.health_notifications.prepare.revision_placeholder')"
+              :no-results-label="t('payroll.health_notifications.prepare.revision_empty')"
+              accent="payroll"
+            />
+          </label>
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.health_notifications.prepare.insurer') }}
+            <SearchableSelect
+              v-model="prepareInsurer"
+              class="mt-1"
+              data-test="health-prepare-insurer"
+              :options="insurerOptions"
+              :placeholder="t('payroll.health_notifications.prepare.insurer_placeholder')"
+              accent="payroll"
+            />
+          </label>
+        </div>
+
+        <p v-if="!canWrite" class="mt-4 text-sm text-neutral-500">
+          {{ t('payroll.health_notifications.read_only') }}
+        </p>
+
+        <p
+          v-if="prepareError"
+          class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+          role="alert"
+          data-test="health-prepare-error"
         >
-          <p class="font-semibold">
-            {{ t('payroll.health_notifications.prepare.gateway_title') }}
+          {{ prepareError }}
+        </p>
+
+        <div
+          v-if="prepared"
+          class="mt-4 rounded-lg border p-4"
+          :class="prepared.schema_validated
+            ? 'border-success-500/30 bg-success-50'
+            : 'border-warning-500/40 bg-warning-50'"
+          data-test="health-prepare-result"
+        >
+          <h4
+            class="text-sm font-semibold"
+            :class="prepared.schema_validated ? 'text-success-800' : 'text-warning-800'"
+          >
+            {{ prepared.schema_validated
+              ? t('payroll.health_notifications.prepare.valid')
+              : t('payroll.health_notifications.prepare.blocked') }}
+          </h4>
+          <p class="mt-1 text-sm" :class="prepared.schema_validated ? 'text-success-700' : 'text-warning-800'">
+            {{ prepared.schema_validated
+              ? t('payroll.health_notifications.prepare.valid_hint', {
+                insurer: prepared.insurer_code,
+                due: formatDate(prepared.deadline.due_on),
+              })
+              : t('payroll.health_notifications.prepare.blocked_hint') }}
           </p>
-          <p class="mt-1">{{ isdsBulkGateway.login_guidance }}</p>
-          <p class="mt-2 text-xs">
-            {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
+          <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.status') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(prepared.status) }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.period') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">{{ formatPeriod(prepared.period) }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.due_on') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">
+                {{ formatDate(prepared.deadline.due_on) }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.fingerprint') }}</dt>
+              <dd class="mt-0.5 break-all font-mono text-[0.7rem] text-neutral-700">
+                {{ prepared.artifact_sha256.slice(0, 16) }}…
+              </dd>
+            </div>
+          </dl>
+          <p class="mt-3 text-xs text-neutral-600">
+            {{ reasonText(prepared.dispatch.reason_code, prepared.dispatch.reason) }}
           </p>
+          <p
+            v-if="downloadError"
+            class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+            data-test="health-prepare-download-error"
+          >
+            {{ downloadError }}
+          </p>
+          <p
+            v-if="isdsError"
+            class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+            data-test="health-prepare-isds-error"
+          >
+            {{ isdsError }}
+          </p>
+          <div
+            v-if="isdsResult"
+            class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+            data-test="health-prepare-isds-result"
+          >
+            <p class="font-semibold">
+              {{ isdsResult.created
+                ? t('payroll.health_notifications.prepare.isds_ready')
+                : t('payroll.health_notifications.prepare.isds_already_ready') }}
+            </p>
+            <p class="mt-1">
+              {{ t('payroll.health_notifications.prepare.isds_recipient', {
+                name: isdsResult.recipient.name,
+                id: isdsResult.recipient.box_id,
+              }) }}
+            </p>
+            <p v-if="isdsMobileKeySent" class="mt-2 font-semibold">
+              {{ t('databox.outbox.mobileKey.sent') }}
+            </p>
+            <MobileKeySendButton
+              v-else-if="!isdsResult.transport.automatic && isdsResult.transport.channel === 'mobile_key'"
+              class="mt-2"
+              :outbox-id="isdsResult.outbox_id"
+              :environment="environment"
+              @sent="mobileKeySent"
+            />
+            <a
+              v-else-if="!isdsResult.transport.automatic"
+              :href="isdsResult.outbox_url"
+              class="mt-2 inline-flex font-semibold underline"
+            >
+              {{ t('payroll.health_notifications.prepare.open_outbox') }}
+            </a>
+          </div>
+          <div
+            v-if="isdsGateway"
+            class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
+            data-test="health-prepare-isds-gateway"
+          >
+            <p class="font-semibold">
+              {{ t('payroll.health_notifications.prepare.gateway_title') }}
+            </p>
+            <p class="mt-1">{{ isdsGateway.login_guidance }}</p>
+            <p class="mt-2 text-xs">
+              {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
+            </p>
+            <button
+              type="button"
+              :class="[btnFilledSm('primary'), 'mt-3']"
+              data-test="health-prepare-isds-continue"
+              @click="continueIsdsGateway"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.send" />
+              </svg>
+              {{ t('payroll.health_notifications.prepare.gateway_continue') }}
+            </button>
+          </div>
+          <p
+            v-if="prepared.schema_validated && !canQueueIsds && !isdsBusy && !isdsResult"
+            class="mt-3 text-xs text-neutral-600"
+            data-test="health-prepare-isds-unavailable"
+          >
+            {{ preparedChannel?.data_box_id && preparedChannel?.isds_attachment_format !== 'none'
+              ? t('payroll.health_notifications.read_only')
+              : t('payroll.health_notifications.prepare.isds_unavailable') }}
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="downloading"
+              data-test="health-prepare-download"
+              @click="downloadArtifact"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.download" />
+              </svg>
+              {{ downloading
+                ? t('payroll.health_notifications.prepare.downloading')
+                : t('payroll.health_notifications.prepare.download') }}
+            </button>
+            <button
+              type="button"
+              :class="btnFilledSm('primary')"
+              :disabled="!canQueueIsds"
+              data-test="health-prepare-isds"
+              @click="enqueueIsds"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.send" />
+              </svg>
+              {{ isdsBusy
+                ? t('payroll.health_notifications.prepare.isds_preparing')
+                : t('payroll.health_notifications.prepare.isds_action') }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section
+        ref="bulkSection"
+        class="scroll-mt-24 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+        data-test="health-notifications-prepare-bulk"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <h3 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.health_notifications.prepare_bulk.title') }}
+          </h3>
+          <EnvironmentSwitch
+            v-model="environment"
+            data-test="health-prepare-bulk-environment"
+            :aria-label="t('payroll.regzel.environment.label')"
+          />
+        </div>
+        <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+          {{ t('payroll.health_notifications.prepare_bulk.description') }}
+        </p>
+
+        <div class="mt-5 max-w-sm">
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.health_notifications.prepare_bulk.insurer') }}
+            <SearchableSelect
+              v-model="prepareBulkInsurer"
+              class="mt-1"
+              data-test="health-prepare-bulk-insurer"
+              :options="insurerOptions"
+              :placeholder="t('payroll.health_notifications.prepare_bulk.insurer_placeholder')"
+              accent="payroll"
+            />
+          </label>
           <button
             type="button"
             :class="[btnFilledSm('primary'), 'mt-3']"
-            data-test="health-prepare-bulk-isds-continue"
-            @click="continueIsdsBulkGateway"
+            :disabled="!canPrepareBulk"
+            data-test="health-prepare-bulk-action"
+            @click="prepareBulk"
           >
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.send" />
+              <path :d="ICONS.doc" />
             </svg>
-            {{ t('payroll.health_notifications.prepare.gateway_continue') }}
-          </button>
-        </div>
-        <p
-          v-if="preparedBulk.schema_validated && !canQueueBulkIsds && !isdsBulkBusy && !isdsBulkResult"
-          class="mt-3 text-xs text-neutral-600"
-          data-test="health-prepare-bulk-isds-unavailable"
-        >
-          {{ t('payroll.health_notifications.prepare.isds_unavailable') }}
-        </p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            :class="btnOutlineSm('neutral')"
-            :disabled="downloadingBulk"
-            data-test="health-prepare-bulk-download"
-            @click="downloadBulk"
-          >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.download" />
-            </svg>
-            {{ downloadingBulk
-              ? t('payroll.health_notifications.prepare_bulk.downloading')
-              : t('payroll.health_notifications.prepare_bulk.download') }}
-          </button>
-          <button
-            type="button"
-            :class="btnFilledSm('primary')"
-            :disabled="!canQueueBulkIsds"
-            data-test="health-prepare-bulk-isds"
-            @click="enqueueBulkIsds"
-          >
-            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.send" />
-            </svg>
-            {{ isdsBulkBusy
+            {{ preparingBulk
               ? t('payroll.health_notifications.prepare.isds_preparing')
-              : t('payroll.health_notifications.prepare.isds_action') }}
+              : t('payroll.health_notifications.prepare_bulk.action') }}
           </button>
         </div>
+
+        <p v-if="!canWrite" class="mt-4 text-sm text-neutral-500">
+          {{ t('payroll.health_notifications.read_only') }}
+        </p>
+
+        <p
+          v-if="prepareBulkError"
+          class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+          role="alert"
+          data-test="health-prepare-bulk-error"
+        >
+          {{ prepareBulkError }}
+        </p>
+
+        <div
+          v-if="preparedBulk"
+          class="mt-4 rounded-lg border p-4"
+          :class="preparedBulk.schema_validated
+            ? 'border-success-500/30 bg-success-50'
+            : 'border-warning-500/40 bg-warning-50'"
+          data-test="health-prepare-bulk-result"
+        >
+          <h4
+            class="text-sm font-semibold"
+            :class="preparedBulk.schema_validated ? 'text-success-800' : 'text-warning-800'"
+          >
+            {{ preparedBulk.schema_validated
+              ? t('payroll.health_notifications.prepare_bulk.valid')
+              : t('payroll.health_notifications.prepare_bulk.blocked') }}
+          </h4>
+          <p class="mt-1 text-sm" :class="preparedBulk.schema_validated ? 'text-success-700' : 'text-warning-800'">
+            {{ preparedBulk.schema_validated
+              ? t('payroll.health_notifications.prepare_bulk.valid_hint', {
+                insurer: preparedBulk.insurer_code,
+                count: preparedBulk.changes_count,
+                due: formatDate(preparedBulk.deadline.due_on),
+              })
+              : t('payroll.health_notifications.prepare_bulk.blocked_hint') }}
+          </p>
+          <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.status') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(preparedBulk.status) }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.changes_count') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">{{ preparedBulk.changes_count }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.due_on') }}</dt>
+              <dd class="mt-0.5 font-medium text-neutral-900">
+                {{ formatDate(preparedBulk.deadline.due_on) }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.fingerprint') }}</dt>
+              <dd class="mt-0.5 break-all font-mono text-[0.7rem] text-neutral-700">
+                {{ preparedBulk.artifact_sha256.slice(0, 16) }}…
+              </dd>
+            </div>
+          </dl>
+          <p
+            v-if="preparedBulk.official_form"
+            class="mt-3 rounded-lg border border-neutral-300 bg-white p-3 text-sm text-neutral-700"
+            data-test="health-prepare-bulk-official-form"
+          >
+            <span class="font-medium text-neutral-900">
+              {{ preparedBulk.official_form.used
+                ? t('payroll.health_notifications.prepare_bulk.official_form_used')
+                : t('payroll.health_notifications.prepare_bulk.official_form_own') }}
+            </span>
+            —
+            {{ preparedBulk.official_form.used
+              ? t('payroll.health_notifications.prepare_bulk.official_form_used_hint')
+              : preparedBulk.official_form.reason }}
+          </p>
+          <p
+            v-if="downloadBulkError"
+            class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+            data-test="health-prepare-bulk-download-error"
+          >
+            {{ downloadBulkError }}
+          </p>
+          <p
+            v-if="isdsBulkError"
+            class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+            data-test="health-prepare-bulk-isds-error"
+          >
+            {{ isdsBulkError }}
+          </p>
+          <div
+            v-if="isdsBulkResult"
+            class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+            data-test="health-prepare-bulk-isds-result"
+          >
+            <p class="font-semibold">
+              {{ isdsBulkResult.created
+                ? t('payroll.health_notifications.prepare.isds_ready')
+                : t('payroll.health_notifications.prepare.isds_already_ready') }}
+            </p>
+            <p class="mt-1">
+              {{ t('payroll.health_notifications.prepare.isds_recipient', {
+                name: isdsBulkResult.recipient.name,
+                id: isdsBulkResult.recipient.box_id,
+              }) }}
+            </p>
+            <p v-if="isdsBulkMobileKeySent" class="mt-2 font-semibold">
+              {{ t('databox.outbox.mobileKey.sent') }}
+            </p>
+            <MobileKeySendButton
+              v-else-if="!isdsBulkResult.transport.automatic && isdsBulkResult.transport.channel === 'mobile_key'"
+              class="mt-2"
+              :outbox-id="isdsBulkResult.outbox_id"
+              :environment="environment"
+              @sent="bulkMobileKeySent"
+            />
+            <a
+              v-else-if="!isdsBulkResult.transport.automatic"
+              :href="isdsBulkResult.outbox_url"
+              class="mt-2 inline-flex font-semibold underline"
+            >
+              {{ t('payroll.health_notifications.prepare.open_outbox') }}
+            </a>
+          </div>
+          <div
+            v-if="isdsBulkGateway"
+            class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
+            data-test="health-prepare-bulk-isds-gateway"
+          >
+            <p class="font-semibold">
+              {{ t('payroll.health_notifications.prepare.gateway_title') }}
+            </p>
+            <p class="mt-1">{{ isdsBulkGateway.login_guidance }}</p>
+            <p class="mt-2 text-xs">
+              {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
+            </p>
+            <button
+              type="button"
+              :class="[btnFilledSm('primary'), 'mt-3']"
+              data-test="health-prepare-bulk-isds-continue"
+              @click="continueIsdsBulkGateway"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.send" />
+              </svg>
+              {{ t('payroll.health_notifications.prepare.gateway_continue') }}
+            </button>
+          </div>
+          <p
+            v-if="preparedBulk.schema_validated && !canQueueBulkIsds && !isdsBulkBusy && !isdsBulkResult"
+            class="mt-3 text-xs text-neutral-600"
+            data-test="health-prepare-bulk-isds-unavailable"
+          >
+            {{ t('payroll.health_notifications.prepare.isds_unavailable') }}
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="downloadingBulk"
+              data-test="health-prepare-bulk-download"
+              @click="downloadBulk"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.download" />
+              </svg>
+              {{ downloadingBulk
+                ? t('payroll.health_notifications.prepare_bulk.downloading')
+                : t('payroll.health_notifications.prepare_bulk.download') }}
+            </button>
+            <button
+              type="button"
+              :class="btnFilledSm('primary')"
+              :disabled="!canQueueBulkIsds"
+              data-test="health-prepare-bulk-isds"
+              @click="enqueueBulkIsds"
+            >
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.send" />
+              </svg>
+              {{ isdsBulkBusy
+                ? t('payroll.health_notifications.prepare.isds_preparing')
+                : t('payroll.health_notifications.prepare.isds_action') }}
+            </button>
+          </div>
+        </div>
+      </section>
       </div>
-    </section>
+    </details>
     <ProductionSendConfirmDialog
       v-if="sendConfirmRequest"
       :message="sendConfirmRequest.message"

@@ -243,7 +243,7 @@ final class PayrollSubmissionArtifactDownloadActionTest extends TestCase
             $download->getHeaderLine('Content-Type'),
         );
         self::assertStringStartsWith(
-            'attachment; filename="mzdove-podani-jmhz-2026-08-',
+            'attachment; filename="JMHZ_2026-08_CSSZ',
             $download->getHeaderLine('Content-Disposition'),
         );
         self::assertSame(
