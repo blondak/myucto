@@ -99,10 +99,14 @@ hned, i v uzavřeném období, protože mění jen analytické členění.
 
 - Dimenze hlavičky dokladu se při zaúčtování zapíšou na všechny řádky zápisu.
 - Dimenze položky má přednost před hlavičkou (typ po typu) na výsledkových řádcích,
-  tedy na nákladu a výnosu. Mají-li položky jednoho nákladového řádku různé
+  tedy na nákladu a výnosu. Položka, která hodnotu typu nemá, dostane výchozí
+  dimenzi svého produktu, jinak jeho kategorie (viz [Produkt a
+  kategorie](#produkt-a-kategorie)). Mají-li položky jednoho nákladového řádku různé
   dimenze, rozdělí se řádek při zaúčtování v poměru základu položek. Účet, strana
   a součet se nemění a zápis zůstává vyvážený na haléř.
 - Storno přebírá dimenze stornovaného řádku.
+- Kopie faktury, dobropis a vyúčtovací faktura ze zálohové faktury přebírají
+  dimenze hlavičky i položek původního dokladu.
 - Změna dimenzí už zaúčtovaného dokladu se promítne do jeho řádků deníku. Řádky
   se přitom nedělí: když by rozdělení bylo potřeba (položky nově nesou různé
   hodnoty), aplikace upozorní, že doklad je potřeba **přeúčtovat**.
@@ -157,6 +161,58 @@ dimenze placené faktury, u bankovního pohybu dimenze spárované faktury.
 Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u dokladů
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.
 Smazáním klienta, zakázky nebo hodnoty dimenze se výchozí nastavení odstraní.
+
+## Produkt a kategorie
+
+Skladová karta (produkt) a kategorie produktů mohou nést výchozí **účet výnosů**,
+**účet nákladů** a **výchozí dimenze**. Položka dokladu s kartou se pak zaúčtuje
+na účet produktu a dostane jeho dimenze, aniž by je kdokoli vyplňoval ručně.
+Účty se používají jen v podvojném účetnictví.
+
+Kde se nastavují:
+
+- **Karta produktu**: tab **Účtování**. Prázdný účet zdědí účet kategorie, pole
+  to ukazuje nápovědou („Prázdné = zdědí 601 z kategorie").
+- **Kategorie produktů** (E-shop → Kategorie): v úpravě kategorie odkaz
+  **Účtování produktů kategorie**. Platí pro produkty, které mají kategorii jako
+  primární. Nemá-li účet nebo dimenzi kategorie, použije se nadřízená kategorie.
+
+Účet musí být v účtovém rozvrhu firmy, aktivní a výsledkový: účet výnosů ze
+třídy 6, účet nákladů ze třídy 5. Jiný účet aplikace při uložení odmítne.
+
+### Výnosový účet položky
+
+Vydaná faktura má u položek volitelný **výnosový účet**. Pole se v editoru zapne
+odkazem **Účty položek** nad položkami (samo se zapne, když už některá položka
+účet má). Prázdné pole znamená účet produktu, jeho kategorie, jinak předkontaci
+dokladu. Výběr skladové karty v položce předvyplní prázdný účet i prázdné
+dimenze položky z produktu. Předvyplněné hodnoty jde přepsat.
+
+Kopie faktury, dobropis, vyúčtovací faktura ze zálohové faktury i pravidelná
+fakturace účet položky přenášejí. Sleva v procentech z hlavičky dokladu dostane
+účet položek, jen když mají všechny položky týž účet. Jinak jde sleva na
+předkontaci dokladu.
+
+### Pořadí při zaúčtování
+
+| Co | Pořadí přednosti |
+|---|---|
+| Účet výnosů vydané faktury | prodej majetku > účet položky > produkt > kategorie > předkontace dokladu |
+| Účet nákladů přijaté faktury | účet položky > druh výdaje > produkt > kategorie > předkontace dokladu |
+| Dimenze | položka > produkt > kategorie > hlavička > zakázka > klient > pravidlo dimenzí |
+
+Dimenze produktu a kategorie mají přednost před hlavičkou jen na výsledkových
+řádcích (náklad, výnos), stejně jako dimenze položky. Řádky pohledávky,
+závazku a DPH nesou dimenze hlavičky.
+
+Položky s různými účty se na faktuře zaúčtují na samostatné výnosové
+(nákladové) řádky, které dohromady dají přesně základ dokladu. DPH ani
+pohledávka se tím nemění. Bez nastavení produktu, kategorie a položky se
+účtuje stejně jako dosud.
+
+Zmizí-li účet produktu z rozvrhu nebo se deaktivuje, zaúčtování dokladu skončí
+chybou s názvem účtu. Účet je potřeba na kartě opravit nebo znovu aktivovat.
+Změna účtu nebo dimenzí produktu už zaúčtované doklady nemění.
 
 ## Pravidla dimenzí podle účtu
 
