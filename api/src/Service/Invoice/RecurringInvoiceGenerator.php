@@ -576,6 +576,9 @@ final class RecurringInvoiceGenerator
                     // stock_item_id/warehouse_id ze šablony, aby auto-výdejka fungovala.
                     'stock_item_id'          => $item['stock_item_id'] ?? null,
                     'warehouse_id'           => $item['warehouse_id'] ?? null,
+                    // Výnosový účet položky (F1). Účet, který mezitím z rozvrhu zmizel,
+                    // fakturaci nezastaví: položka spadne na produkt / předkontaci dokladu.
+                    'revenue_account_code'   => $this->recurringRevenueAccount((int) $template['supplier_id'], $item),
                 ] + $ossColumns;
             }
             $this->invoices->replaceItems($newId, $items);
@@ -617,6 +620,20 @@ final class RecurringInvoiceGenerator
      * @return array{oss_applicable:int, oss_consumer_country:?string, oss_rate_type:?string,
      *               oss_supply_type:?string, oss_needs_manual_review:int}
      */
+    /** @param array<string,mixed> $item */
+    private function recurringRevenueAccount(int $supplierId, array $item): ?string
+    {
+        try {
+            return (new \MyInvoice\Service\Accounting\Product\ProductPostingDefaults($this->db))->validateAccount(
+                $supplierId,
+                $item['revenue_account_code'] ?? null,
+                \MyInvoice\Service\Accounting\Product\ProductPostingDefaults::KIND_REVENUE,
+            );
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+    }
+
     private function ossColumnsFor(
         array $item,
         int $supplierId,

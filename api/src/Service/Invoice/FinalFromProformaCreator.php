@@ -236,9 +236,9 @@ final class FinalFromProformaCreator
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
-                    stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to'
+                    stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?'
                 . $this->ossCarry->placeholders()
                 . ')'
             );
@@ -266,6 +266,8 @@ final class FinalFromProformaCreator
                     // Období výnosu (časové rozlišení 384) je vlastností plnění, ne dokladu —
                     // účtuje se až z finálu, takže z proformy musí přejít.
                     ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($item),
+                    // Výnosový účet položky (F1): účtuje se až finál, proto přechází z proformy.
+                    $item['revenue_account_code'] ?? null,
                     // Místo plnění se vyúčtováním nemění — přenáší se z proformy, protože
                     // ta už derivací i případnou ruční opravou prošla (viz OssItemCarryOver).
                     ...$this->ossCarry->values($item),
@@ -327,6 +329,7 @@ final class FinalFromProformaCreator
                     null,
                     null,
                     null,
+                    null,
                     // Zato OSS profil nese: odpočet ruší přesně tu daň, kterou přiznal
                     // daňový doklad k platbě, takže musí jít do TÉŽE evidence. Jinak by
                     // kladná polovina zůstala v OSS podání a záporná spadla na ř. 1
@@ -335,6 +338,11 @@ final class FinalFromProformaCreator
                     ...$this->ossCarry->values($r),
                 ]);
             }
+
+            // Dimenze proformy (hlavička i položky) přechází na vyúčtování — položky proformy
+            // leží na jeho začátku ve stejném pořadí, doplněné řádky až za nimi.
+            (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
+                ->copyDocument((int) $proforma['supplier_id'], 'invoice', (int) $proforma['id'], $finalId);
 
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -430,6 +438,8 @@ final class FinalFromProformaCreator
             null,
             null,
             ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($dominant),
+            // Výnosový účet (F1) dědí po dominantním řádku — zbytek téže zakázky je týž výnos.
+            $dominant['revenue_account_code'] ?? null,
             // OSS profil dědí po dominantním řádku: zbytek téže zakázky patří do téže
             // evidence jako to, co už bylo fakturováno zálohou.
             ...$this->ossCarry->values($dominant),

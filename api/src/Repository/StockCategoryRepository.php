@@ -16,7 +16,7 @@ final class StockCategoryRepository
 {
     private const COLUMNS =
         'id, supplier_id, parent_id, code, name, path, depth, display_order,
-         export_eshop, archived, created_at, updated_at';
+         export_eshop, archived, revenue_account_code, expense_account_code, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -185,6 +185,28 @@ final class StockCategoryRepository
     }
 
     /** @return array<string,mixed> */
+    /**
+     * Výchozí účet výnosů a nákladů kategorie (F1, migrace 1948). Mění jen poslané sloupce.
+     *
+     * @param array{revenue_account_code?:?string, expense_account_code?:?string} $accounts už ověřené
+     */
+    public function updatePostingAccounts(int $supplierId, int $id, array $accounts): void
+    {
+        $sets = [];
+        $params = [];
+        foreach (['revenue_account_code', 'expense_account_code'] as $column) {
+            if (array_key_exists($column, $accounts)) {
+                $sets[] = "{$column} = ?";
+                $params[] = $accounts[$column];
+            }
+        }
+        if ($sets === []) {
+            return;
+        }
+        $this->db->pdo()->prepare('UPDATE stock_categories SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?')
+            ->execute([...$params, $id, $supplierId]);
+    }
+
     private static function cast(array $r): array
     {
         $r['id'] = (int) $r['id'];

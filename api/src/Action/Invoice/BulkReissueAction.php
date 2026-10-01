@@ -267,9 +267,9 @@ final class BulkReissueAction
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                    stock_item_id, warehouse_id'
+                    stock_item_id, warehouse_id, revenue_account_code'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
@@ -303,6 +303,8 @@ final class BulkReissueAction
                     // Klon přenáší vazbu na skladovou kartu (Epic SKLAD A15).
                     $item['stock_item_id'] ?? null,
                     $item['warehouse_id'] ?? null,
+                    // Výnosový účet položky (F1) je vlastností plnění, kopie ho nese dál.
+                    $item['revenue_account_code'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);
@@ -326,6 +328,9 @@ final class BulkReissueAction
                 }
                 $itemStmt->execute($params);
             }
+            // Dimenze dokladu i položek jdou s kopií — položky leží ve stejném pořadí.
+            (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
+                ->copyDocument((int) $source['supplier_id'], 'invoice', $sourceId, $newId);
 
             $pdo->commit();
         } catch (\Throwable $e) {

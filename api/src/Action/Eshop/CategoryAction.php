@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockCategoryI18nRepository;
 use MyInvoice\Repository\StockCategoryRepository;
 use MyInvoice\Repository\StockLocaleRepository;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\CategoryTreeService;
 use MyInvoice\Service\Eshop\EshopException;
@@ -73,9 +74,18 @@ final class CategoryAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $accounts = (new ProductPostingDefaults($this->db))->accountsFromPayload($supplierId, $body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'invalid_account', $e->getMessage(), 400);
+        }
+        try {
             $row = $this->tree->create($supplierId, $body);
         } catch (EshopException $e) {
             return $this->fail($response, $e);
+        }
+        if ($accounts !== []) {
+            $this->categories->updatePostingAccounts($supplierId, (int) $row['id'], $accounts);
+            $row = $this->categories->find($supplierId, (int) $row['id']) ?? $row;
         }
         $this->log($request, 'eshop.category_created', (int) $row['id'], ['code' => $row['code'] ?? null]);
         return Json::ok($response, $row, 201);
@@ -92,11 +102,20 @@ final class CategoryAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $accounts = (new ProductPostingDefaults($this->db))->accountsFromPayload($supplierId, $body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'invalid_account', $e->getMessage(), 400);
+        }
+        try {
             $row = $this->tree->update($supplierId, (int) $args['id'], $body);
         } catch (EshopException $e) {
             return $this->fail($response, $e);
         }
-        $this->log($request, 'eshop.category_updated', (int) $args['id'], []);
+        if ($accounts !== []) {
+            $this->categories->updatePostingAccounts($supplierId, (int) $args['id'], $accounts);
+            $row = $this->categories->find($supplierId, (int) $args['id']) ?? $row;
+        }
+        $this->log($request, 'eshop.category_updated', (int) $args['id'], $accounts);
         return Json::ok($response, $row);
     }
 

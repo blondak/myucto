@@ -3648,6 +3648,11 @@ final class Routes
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);
             $g->get   ('/items/{id:[0-9]+}/tracking',   [\MyInvoice\Action\Stock\StockTrackingAction::class, 'item']);
+            // Výchozí účet a dimenze produktu (Účtování podle dimenzí, F1).
+            $g->get   ('/items/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getProduct']);
+            $g->put   ('/items/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveProduct']);
+            $g->get   ('/items/{id:[0-9]+}/posting-defaults', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'productPostingDefaults']);
+            $g->put   ('/items/{id:[0-9]+}/posting-defaults', [\MyInvoice\Action\Stock\StockItemAction::class, 'updateAccounts']);
             $g->put   ('/items/{id:[0-9]+}/units',      [\MyInvoice\Action\Stock\StockTrackingAction::class, 'replaceUnits']);
             // Balení karty a individuální ceny zákazníků (issue #17).
             $g->get   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'get']);
@@ -3916,6 +3921,8 @@ final class Routes
             $g->get   ('/categories/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CategoryAction::class, 'get']);
             $g->put   ('/categories/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CategoryAction::class, 'update']);
             $g->delete('/categories/{id:[0-9]+}',        [\MyInvoice\Action\Eshop\CategoryAction::class, 'delete']);
+            $g->get   ('/categories/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getCategory']);
+            $g->put   ('/categories/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveCategory']);
 
             // Import zboží (XLS/CSV) — literální cesta PŘED generickými /products/{id}.
             $g->post  ('/products/import',                     [\MyInvoice\Action\Eshop\ProductImportAction::class, 'import']);

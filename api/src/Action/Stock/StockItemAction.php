@@ -15,6 +15,7 @@ use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Service\Stock\StockItemPackagingService;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\CatalogFilter;
@@ -216,7 +217,12 @@ final class StockItemAction
         if ($this->items->findBySku($supplierId, $data['sku']) !== null) {
             return Json::error($response, 'sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
         }
+        [$accounts, $accountErr] = $this->postingAccounts($response, $supplierId, $body);
+        if ($accountErr !== null) {
+            return $accountErr;
+        }
         $id = $this->items->insert($supplierId, $data);
+        $this->items->updatePostingAccounts($supplierId, $id, $accounts);
         $this->log($request, 'stock.item_created', $id, ['sku' => $data['sku']]);
         return Json::ok($response, $this->items->find($supplierId, $id), 201);
     }
@@ -256,9 +262,42 @@ final class StockItemAction
                 return Json::error($response, 'tracking_mode_stock_exists', 'Režim sledování lze zapnout jen při nulovém stavu karty.', 409);
             }
         }
+        [$accounts, $accountErr] = $this->postingAccounts($response, $supplierId, $body);
+        if ($accountErr !== null) {
+            return $accountErr;
+        }
         $this->items->update($supplierId, $id, $data);
-        $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']]);
+        $this->items->updatePostingAccounts($supplierId, $id, $accounts);
+        $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']] + $accounts);
         return Json::ok($response, $this->items->find($supplierId, $id));
+    }
+
+    /**
+     * PUT /api/stock/items/{id}/posting-defaults — jen výchozí účet výnosů / nákladů karty
+     * (F1). Samostatně od úpravy karty, aby nesahal na `row_version` editoru produktu.
+     */
+    public function updateAccounts(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) {
+            return $err;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) $args['id'];
+        if ($this->items->find($supplierId, $id) === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        [$accounts, $accountErr] = $this->postingAccounts($response, $supplierId, $body);
+        if ($accountErr !== null) {
+            return $accountErr;
+        }
+        $this->items->updatePostingAccounts($supplierId, $id, $accounts);
+        $this->log($request, 'stock.item_accounts_updated', $id, $accounts);
+        $item = $this->items->find($supplierId, $id);
+        return Json::ok($response, [
+            'revenue_account_code' => $item['revenue_account_code'] ?? null,
+            'expense_account_code' => $item['expense_account_code'] ?? null,
+        ]);
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -597,6 +636,22 @@ final class StockItemAction
                 : ($existing['note'] ?? null),
         ];
         return [$data, null];
+    }
+
+    /**
+     * Výchozí účet výnosů / nákladů karty (F1). Jen klíče přítomné v těle — úprava bez nich
+     * účty nemění. Účet musí být v rozvrhu firmy, aktivní a výsledkový (6xx / 5xx).
+     *
+     * @param array<string,mixed> $body
+     * @return array{0:array<string,?string>, 1:?Response}
+     */
+    private function postingAccounts(Response $response, int $supplierId, array $body): array
+    {
+        try {
+            return [(new ProductPostingDefaults($this->db))->accountsFromPayload($supplierId, $body), null];
+        } catch (\InvalidArgumentException $e) {
+            return [[], Json::error($response, 'invalid_account', $e->getMessage(), 400)];
+        }
     }
 
     private function nullable(mixed $v): ?string

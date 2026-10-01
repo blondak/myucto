@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -131,6 +132,8 @@ final class PostingService
     private array $itemAccountTrace = [];
 
     private ?DimensionStamper $dimensionStamper = null;
+
+    private ?ProductPostingDefaults $productDefaults = null;
 
     private ?BankDocumentNumber $bankDocumentNumber = null;
 
@@ -1497,7 +1500,7 @@ final class PostingService
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
-                    expense_classification_source, total_without_vat, total_vat
+                    expense_classification_source, total_without_vat, total_vat, stock_item_id
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1506,6 +1509,11 @@ final class PostingService
         if ($items === []) {
             return null;
         }
+        // Výchozí nákladový účet produktu > kategorie (F1) — až za účtem položky a druhem výdaje.
+        $productAccounts = $this->productDefaults()->accountsFor(
+            $supplierId,
+            array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $items),
+        );
 
         // Slevový řádek nemá vlastní účet: jde na účty zlevněných položek (SSOT
         // PurchaseDiscountAllocation, tentýž rozpad používá evidence drobného majetku).
@@ -1552,14 +1560,19 @@ final class PostingService
             // `expense_account_code` = KAM to jde. Pojistné je druhem SLUŽBA, ale vyhláška
             // 500/2002 ho řadí na 548 (F.5. Jiné provozní náklady), ne na 518 (A.3. Služby).
             // Účet na řádku proto přebíjí odvození z druhu.
-            if ($override !== null) {
-                $anyClassified = true;   // adresný účet je klasifikace sám o sobě
-            } elseif ($kind !== null) {
-                $anyClassified = true;
+            $productAccount = $productAccounts[(int) ($row['stock_item_id'] ?? 0)]['expense']['code'] ?? null;
+            if ($override !== null || $kind !== null || $productAccount !== null) {
+                $anyClassified = true;   // adresný účet (i z produktu) je klasifikace sám o sobě
             }
-            $account = $override !== null
-                ? $this->validatePurchaseDebitOverride($supplierId, $override)
-                : ($kind !== null ? $this->accountForExpenseKind($supplierId, $kind) : $defaultAccount);
+            $account = match (true) {
+                $override !== null => $this->validatePurchaseDebitOverride($supplierId, $override),
+                $kind !== null => $this->accountForExpenseKind($supplierId, $kind),
+                $productAccount !== null => $this->validatePurchaseDebitOverride(
+                    $supplierId,
+                    $this->validateItemAccount($supplierId, $productAccount, ProductPostingDefaults::KIND_EXPENSE),
+                ),
+                default => $defaultAccount,
+            };
             if (!$taxDeductible) {
                 $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
             }
@@ -1627,6 +1640,7 @@ final class PostingService
      *   asset_id       → 641 (tržba z prodeje dlouhodobého majetku, rule asset.sale.revenue)
      *   small_asset_id → 642 (tržba z prodeje materiálu — drobný majetek se pořízením
      *                    zaúčtoval na 501, nikdy nebyl na 02x, takže 641 mu nepatří)
+     *   účet položky / produktu / kategorie (F1, migrace 1948) → ten účet
      *   bez vazby      → $defaultAccount (hlavičkový revenue_rule_key, default 602)
      *
      * Vrací NULL (tedy dosavadní jedna noha) když doklad nemá položky, žádná položka není
@@ -1644,13 +1658,7 @@ final class PostingService
      */
     private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount, array $excludeItemIds = []): ?array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id, small_asset_id, asset_id, total_without_vat
-               FROM invoice_items
-              WHERE invoice_id = ?'
-        );
-        $stmt->execute([$invoiceId]);
-        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $items = $this->issuedItemRows($supplierId, $invoiceId);
         if ($items === []) {
             return null;
         }
@@ -1661,7 +1669,8 @@ final class PostingService
             if (in_array((int) $row['id'], $excludeItemIds, true)) {
                 continue;
             }
-            $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null;
+            $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null
+                || $row['item_revenue_account'] !== null;
             $account = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount);
             $this->itemAccountTrace['invoice|' . $invoiceId][(int) $row['id']] = $account;
 
@@ -1693,11 +1702,12 @@ final class PostingService
     }
 
     /**
-     * Výnosový účet řádku vydané faktury: asset_id → 641, small_asset_id → 642, jinak
-     * $defaultAccount. asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant
-     * to zakazuje, CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
+     * Výnosový účet řádku vydané faktury: asset_id → 641, small_asset_id → 642, účet
+     * položky > produktu > kategorie ({@see issuedItemRows()}), jinak $defaultAccount.
+     * asset_id má přednost — kdyby řádek nesl obojí (aplikační invariant to zakazuje,
+     * CHECK ho kvůli FK ON DELETE SET NULL vynutit nejde), rozhodne dražší majetek.
      *
-     * @param array{asset_id:mixed,small_asset_id:mixed} $item
+     * @param array{asset_id:mixed,small_asset_id:mixed,item_revenue_account:?string} $item
      */
     private function issuedItemRevenueAccount(int $supplierId, array $item, string $defaultAccount): string
     {
@@ -1707,7 +1717,57 @@ final class PostingService
         if ($item['small_asset_id'] !== null) {
             return $this->ruleCode($supplierId, 'small_asset.sale.revenue', 'credit', '642');
         }
+        if ($item['item_revenue_account'] !== null) {
+            return $this->validateItemAccount($supplierId, (string) $item['item_revenue_account'], ProductPostingDefaults::KIND_REVENUE);
+        }
         return $defaultAccount;
+    }
+
+    /**
+     * Položky vydané faktury s výnosovým účtem z položky, jinak z produktu a jeho
+     * kategorie (`item_revenue_account`, NULL = předkontace dokladu).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function issuedItemRows(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, small_asset_id, asset_id, total_without_vat, revenue_account_code, stock_item_id
+               FROM invoice_items
+              WHERE invoice_id = ?'
+        );
+        $stmt->execute([$invoiceId]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $products = $this->productDefaults()->accountsFor(
+            $supplierId,
+            array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $items),
+        );
+        foreach ($items as $i => $row) {
+            $items[$i]['item_revenue_account'] = ProductPostingDefaults::code($row['revenue_account_code'] ?? null)
+                ?? ($products[(int) ($row['stock_item_id'] ?? 0)]['revenue']['code'] ?? null);
+        }
+        return $items;
+    }
+
+    /**
+     * Účet z položky, produktu nebo kategorie se ověří i při zaúčtování: od uložení
+     * karty mohl z rozvrhu zmizet nebo být deaktivován. Chyba je hlasitá, ne tichý
+     * návrat na předkontaci.
+     *
+     * @param ProductPostingDefaults::KIND_* $kind
+     */
+    private function validateItemAccount(int $supplierId, string $code, string $kind): string
+    {
+        try {
+            return (string) $this->productDefaults()->validateAccount($supplierId, $code, $kind);
+        } catch (\InvalidArgumentException $e) {
+            throw new PostingException('invalid_item_account', $e->getMessage(), 422);
+        }
+    }
+
+    private function productDefaults(): ProductPostingDefaults
+    {
+        return $this->productDefaults ??= new ProductPostingDefaults($this->db);
     }
 
     /**
@@ -1725,10 +1785,8 @@ final class PostingService
         }
         $rule = $this->rules->resolve($supplierId, self::issuedHeaderRuleKey($inv));
         $default = (string) ($rule['credit_account_code'] ?? '602');
-        $stmt = $this->db->pdo()->prepare('SELECT id, small_asset_id, asset_id FROM invoice_items WHERE invoice_id = ?');
-        $stmt->execute([$invoiceId]);
         $accounts = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($this->issuedItemRows($supplierId, $invoiceId) as $row) {
             $accounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $default);
         }
         return ['rate' => $this->fxRate($inv), 'accounts' => $accounts];

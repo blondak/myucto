@@ -24,6 +24,9 @@ use PDO;
  *     (náklad, výnos). Nesou-li položky jednoho výsledkového řádku různé dimenze,
  *     řádek se při zaúčtování rozdělí v poměru základu položek — účet, strana
  *     a součet zůstávají, zápis zůstává vyvážený na haléř.
+ *   • Položka bez vlastní hodnoty typu dostane výchozí dimenzi svého produktu
+ *     (produkt > kategorie, {@see DimensionDefaults::forProducts()}); pořadí je tedy
+ *     položka > produkt > kategorie > hlavička > zakázka > klient > pravidlo.
  *   • Dimenze, kterou řádek přinesl sám (ruční zápis), má přednost.
  *   • Hodnota Střediska navázaná na číselník středisek doplní textový
  *     `cost_center`, hodnota Projektu navázaná na zakázku doplní `project_id` —
@@ -439,24 +442,37 @@ final class DimensionStamper
         }
         ksort($dims['header']);
         $items = [];
-        if ($itemTable !== null && $dims['items'] !== []) {
+        $defaults = new DimensionDefaults($this->db);
+        if ($itemTable !== null) {
             // Pořadí položky = pořadí v editoru (order_index), číslováno od 1 — stejně
             // jako ho ukládá DimensionService::saveDocument().
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id, total_without_vat FROM {$itemTable} WHERE {$itemColumn} = ? ORDER BY order_index, id"
+                "SELECT id, total_without_vat, stock_item_id FROM {$itemTable} WHERE {$itemColumn} = ? ORDER BY order_index, id"
             );
             $stmt->execute([$sourceId]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $i => $row) {
-                $items[] = [
-                    'dims' => $dims['items'][$i + 1] ?? [],
-                    'weight' => round((float) $row['total_without_vat'], 2),
-                    'account_id' => $itemAccounts[(int) $row['id']] ?? null,
-                ];
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            // Položka bez vlastní hodnoty typu dostane výchozí dimenzi svého produktu
+            // (produkt > kategorie): položka > produkt > hlavička > zakázka > klient.
+            $productDims = $defaults->forProducts(
+                $supplierId,
+                array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $rows),
+            );
+            if ($dims['items'] !== [] || $productDims !== []) {
+                foreach ($rows as $i => $row) {
+                    $items[] = [
+                        'dims' => DimensionDefaults::fill(
+                            $dims['items'][$i + 1] ?? [],
+                            $productDims[(int) ($row['stock_item_id'] ?? 0)]['header'] ?? [],
+                        ),
+                        'weight' => round((float) $row['total_without_vat'], 2),
+                        'account_id' => $itemAccounts[(int) $row['id']] ?? null,
+                    ];
+                }
             }
         }
         $header = DimensionDefaults::fill(
             $dims['header'],
-            (new DimensionDefaults($this->db))->forSource($supplierId, $sourceType, $sourceId),
+            $defaults->forSource($supplierId, $sourceType, $sourceId),
         );
         return [$header, $items, $splits];
     }

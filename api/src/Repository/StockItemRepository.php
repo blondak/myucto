@@ -41,7 +41,8 @@ final class StockItemRepository
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
          is_stocked, weight_g, intrastat_cn8_code, intrastat_country_of_origin, intrastat_net_mass_kg,
          intrastat_supplementary_unit, intrastat_supplementary_unit_coefficient,
-         pricing_base, is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
+         pricing_base, revenue_account_code, expense_account_code,
+         is_active, lifecycle_status, retired_at, note, row_version, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -649,6 +650,29 @@ final class StockItemRepository
             $supplierId,
         ]);
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Výchozí účet výnosů a nákladů karty (F1, migrace 1948). Mění jen sloupce,
+     * které volající poslal — úprava karty bez nich účty nemaže.
+     *
+     * @param array{revenue_account_code?:?string, expense_account_code?:?string} $accounts už ověřené
+     */
+    public function updatePostingAccounts(int $supplierId, int $id, array $accounts): void
+    {
+        $sets = [];
+        $params = [];
+        foreach (['revenue_account_code', 'expense_account_code'] as $column) {
+            if (array_key_exists($column, $accounts)) {
+                $sets[] = "{$column} = ?";
+                $params[] = $accounts[$column];
+            }
+        }
+        if ($sets === []) {
+            return;
+        }
+        $this->db->pdo()->prepare('UPDATE stock_items SET ' . implode(', ', $sets) . ' WHERE id = ? AND supplier_id = ?')
+            ->execute([...$params, $id, $supplierId]);
     }
 
     /** @param array<string,mixed> $data */

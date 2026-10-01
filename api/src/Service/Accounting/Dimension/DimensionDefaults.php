@@ -9,6 +9,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
 /**
@@ -40,6 +41,45 @@ final class DimensionDefaults
             $layers['client'] = $repo->forEntity($supplierId, 'client', $clientId);
         }
         return $this->merge($supplierId, $layers);
+    }
+
+    /**
+     * Výchozí dimenze položek z produktu: produkt > jeho kategorie > nadřízené kategorie,
+     * typ po typu (Účtování podle dimenzí, F1). Volá je předvyplnění položky v editoru
+     * i {@see DimensionStamper}, takže položka bez vlastních dimenzí dostane při
+     * zaúčtování totéž, co by jí nabídl editor.
+     *
+     * @param list<int> $productIds
+     * @return array<int,array{header:array<int,int>, sources:array<int,string>}> produkt => typ => hodnota, typ => 'product'|'product_category'
+     */
+    public function forProducts(int $supplierId, array $productIds): array
+    {
+        $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn (int $id): bool => $id > 0)));
+        if ($productIds === []) {
+            return [];
+        }
+        $repo = new DimensionDefaultRepository($this->db);
+        $own = $repo->forEntities($supplierId, 'product', $productIds);
+        $chains = (new ProductPostingDefaults($this->db))->categoryChains($supplierId, $productIds);
+        $categoryIds = $chains === [] ? [] : array_merge(...array_values($chains));
+        $categories = $repo->forEntities($supplierId, 'product_category', $categoryIds);
+        if ($own === [] && $categories === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($productIds as $productId) {
+            $layers = ['product' => $own[$productId] ?? []];
+            foreach ($chains[$productId] ?? [] as $categoryId) {
+                $layers['product_category:' . $categoryId] = $categories[$categoryId] ?? [];
+            }
+            $merged = $this->merge($supplierId, $layers);
+            if ($merged['header'] === []) {
+                continue;
+            }
+            $merged['sources'] = array_map(static fn (string $s): string => explode(':', $s)[0], $merged['sources']);
+            $out[$productId] = $merged;
+        }
+        return $out;
     }
 
     /**

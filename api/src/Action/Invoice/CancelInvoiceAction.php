@@ -390,9 +390,9 @@ final class CancelInvoiceAction
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code,
-                    stock_item_id, warehouse_id'
+                    stock_item_id, warehouse_id, revenue_account_code'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?'
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
@@ -420,6 +420,8 @@ final class CancelInvoiceAction
                     // bez ní by vratka při vystavení dobropisu neuměla napárovat výdej.
                     $item['stock_item_id'] ?? null,
                     $item['warehouse_id'] ?? null,
+                    // Dobropis vrací výnos z TÉHOŽ účtu, na který šla původní položka (F1).
+                    $item['revenue_account_code'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);
@@ -456,6 +458,10 @@ final class CancelInvoiceAction
                 }
                 $itemStmt->execute($params);
             }
+            // Dobropis nese dimenze původní faktury, jinak by vratka výnosu skončila mimo
+            // středisko, ze kterého výnos odešel. Položky leží ve stejném pořadí.
+            (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
+                ->copyDocument((int) $invoice['supplier_id'], 'invoice', (int) $invoice['id'], $creditNoteId);
 
             $pdo->commit();
         } catch (\Throwable $e) {

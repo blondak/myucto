@@ -8907,6 +8907,145 @@ paths:
         '422':
           description: Uzavřená hodnota dimenze (`dimension_closed`)
 
+  /api/v1/stock/items/{id}/dimensions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Stock]
+      summary: Výchozí dimenze produktu (skladové karty)
+      description: |
+        Hodnoty dimenzí, které dostane položka dokladu s touto kartou, pokud je sama nemá.
+        Pořadí: položka > produkt > kategorie > hlavička dokladu > zakázka > klient.
+        Před hlavičkou mají přednost jen na výsledkových řádcích (náklad, výnos).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Stock]
+      summary: Uložit výchozí dimenze produktu
+      description: Nahradí celou mapu. Vyžaduje zapnuté dimenze firmy; už zaúčtované doklady se nemění.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DimensionDefaults' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '400':
+          description: Neplatná hodnota dimenze (`invalid_dimension`)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`)
+        '422':
+          description: Uzavřená hodnota dimenze (`dimension_closed`)
+
+  /api/v1/stock/items/{id}/posting-defaults:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Stock]
+      summary: Výchozí účet a dimenze položky z produktu
+      description: |
+        Účet výnosů / nákladů a dimenze, které editor dokladu předvyplní při výběru karty
+        a které zaúčtování použije u položky bez vlastního účtu či dimenze. Platí přednost
+        produkt > primární kategorie > nadřízené kategorie; `*_source` říká, odkud hodnota je.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductPostingDefaults' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Stock]
+      summary: Uložit výchozí účet výnosů a nákladů produktu
+      description: Mění jen poslané klíče, `row_version` karty se nemění. Účet musí být aktivní v rozvrhu firmy a výsledkový (výnos třída 6, náklad třída 5).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revenue_account_code: { $ref: '#/components/schemas/ProductRevenueAccountCode' }
+                expense_account_code: { $ref: '#/components/schemas/ProductExpenseAccountCode' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revenue_account_code: { type: [string, "null"] }
+                  expense_account_code: { type: [string, "null"] }
+        '400':
+          description: Účet mimo rozvrh, neaktivní nebo nevýsledkový (`invalid_account`)
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/eshop/categories/{id}/dimensions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Výchozí dimenze kategorie produktů
+      description: Platí pro produkty, jejichž primární kategorie (nebo nadřízená kategorie) je nese a produkt sám hodnotu typu nemá.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Eshop]
+      summary: Uložit výchozí dimenze kategorie produktů
+      description: Nahradí celou mapu. Vyžaduje zapnuté dimenze firmy; už zaúčtované doklady se nemění.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DimensionDefaults' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '400':
+          description: Neplatná hodnota dimenze (`invalid_dimension`)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`)
+        '422':
+          description: Uzavřená hodnota dimenze (`dimension_closed`)
+
   /api/v1/clients/lookup-bank:
     post:
       tags: [Lookup]
@@ -15234,9 +15373,11 @@ paths:
                 display_order: { type: integer }
                 export_eshop: { type: boolean, default: true }
                 archived: { type: boolean, default: false }
+                revenue_account_code: { $ref: '#/components/schemas/ProductRevenueAccountCode' }
+                expense_account_code: { $ref: '#/components/schemas/ProductExpenseAccountCode' }
       responses:
         '201': { description: Vytvořeno }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '400': { description: 'Neplatná data (`validation_failed`) nebo účet mimo rozvrh / nevýsledkový (`invalid_account`)' }
         '409': { description: Kategorie s tímto kódem už existuje }
   /api/v1/eshop/categories/{id}/i18n:
     parameters:
@@ -15337,9 +15478,11 @@ paths:
                 display_order: { type: integer }
                 export_eshop: { type: boolean }
                 archived: { type: boolean }
+                revenue_account_code: { $ref: '#/components/schemas/ProductRevenueAccountCode' }
+                expense_account_code: { $ref: '#/components/schemas/ProductExpenseAccountCode' }
       responses:
         '200': { description: OK }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '400': { description: 'Neplatná data (`validation_failed`) nebo účet mimo rozvrh / nevýsledkový (`invalid_account`)' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Kategorie s tímto kódem už existuje }
     delete:
@@ -16742,11 +16885,15 @@ paths:
                   type:
                   - string
                   - 'null'
+                revenue_account_code:
+                  $ref: '#/components/schemas/ProductRevenueAccountCode'
+                expense_account_code:
+                  $ref: '#/components/schemas/ProductExpenseAccountCode'
       responses:
         '201':
           description: Vytvořeno
         '400':
-          $ref: '#/components/responses/ValidationFailed'
+          description: Neplatná data (`validation_failed`) nebo účet mimo rozvrh / nevýsledkový (`invalid_account`)
         '409':
           description: Skladová karta s tímto SKU už existuje.
   /api/v1/stock/items/{id}:
@@ -16793,9 +16940,11 @@ paths:
                 intrastat_supplementary_unit_coefficient: { type: [string, number, "null"], exclusiveMinimum: 0 }
                 is_active: { type: boolean }
                 note: { type: [string, "null"] }
+                revenue_account_code: { $ref: '#/components/schemas/ProductRevenueAccountCode' }
+                expense_account_code: { $ref: '#/components/schemas/ProductExpenseAccountCode' }
       responses:
         '200': { description: OK }
-        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '400': { description: 'Neplatná data (`validation_failed`) nebo účet mimo rozvrh / nevýsledkový (`invalid_account`)' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Skladová karta s tímto SKU už existuje.' }
     delete:
@@ -32675,6 +32824,34 @@ components:
         pdf_logo_show_name: { type: boolean }
         is_default: { type: boolean, readOnly: true, description: "Výchozí profil dodavatele použitý bez explicitní volby." }
 
+    ProductRevenueAccountCode:
+      type: [string, "null"]
+      maxLength: 10
+      example: "604"
+      description: "Výchozí účet výnosů (třída 6, aktivní účet rozvrhu firmy). Položka vydané faktury s tímto produktem se na něj zaúčtuje, nemá-li vlastní účet; u produktu bez účtu platí kategorie, pak předkontace dokladu. Pole vynechané v PUT se nemění, null účet zruší."
+    ProductExpenseAccountCode:
+      type: [string, "null"]
+      maxLength: 10
+      example: "504"
+      description: "Výchozí účet nákladů (třída 5, aktivní účet rozvrhu firmy). Položka přijaté faktury se na něj zaúčtuje, nemá-li vlastní účet ani druh výdaje; u produktu bez účtu platí kategorie, pak předkontace dokladu. Pole vynechané v PUT se nemění, null účet zruší."
+    ProductPostingDefaults:
+      type: object
+      required: [own_revenue_account_code, own_expense_account_code, revenue_account_code, revenue_account_source, expense_account_code, expense_account_source, dimensions, dimension_sources]
+      properties:
+        own_revenue_account_code: { type: [string, "null"], description: "Účet uložený přímo na kartě (bez dědění z kategorie)." }
+        own_expense_account_code: { type: [string, "null"], description: "Účet uložený přímo na kartě (bez dědění z kategorie)." }
+        revenue_account_code: { type: [string, "null"] }
+        revenue_account_source: { type: [string, "null"], enum: [product, product_category, null] }
+        expense_account_code: { type: [string, "null"] }
+        expense_account_source: { type: [string, "null"], enum: [product, product_category, null] }
+        dimensions:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          description: "id typu dimenze → id hodnoty (produkt > kategorie > nadřízená kategorie)."
+        dimension_sources:
+          type: object
+          additionalProperties: { type: string, enum: [product, product_category] }
+
     DimensionDefaults:
       type: object
       required: [dimensions]
@@ -35158,6 +35335,7 @@ components:
           description: "FK na kartu dlouhodobého majetku (/accounting/assets). Výnos řádku jde na 641 (asset.sale.revenue) a po vystavení faktury se karta vyřadí (type=sold) včetně doúčtování zůstatkové ceny 541/08x."
         accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého výnos řádku patří (časové rozlišení výnosů 384). NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu řádku. Část výnosu za koncem účetního období odloží uzávěrka na 384 (MD výnos / D 384) a v dalším roce ji rozpustí." }
+        revenue_account_code: { type: [string, "null"], maxLength: 10, example: "604", description: "Výnosový účet položky (třída 6). NULL = účet produktu (stock_item_id) > jeho kategorie > předkontace dokladu. Prodej majetku (asset_id / small_asset_id) má přednost." }
         small_asset_name: { type: [string, "null"], description: "Název navázané karty drobného majetku (read-only, z JOINu)." }
         asset_name: { type: [string, "null"], description: "Název navázané karty dlouhodobého majetku (read-only, z JOINu)." }
         oss_applicable: { type: boolean }
@@ -35205,6 +35383,10 @@ components:
           type: [string, "null"]
           format: date
           description: "Konec období výnosu řádku (včetně). Nesmí předcházet `accrual_from`."
+        revenue_account_code:
+          type: [string, "null"]
+          maxLength: 10
+          description: "Výnosový účet položky (třída 6, aktivní účet rozvrhu firmy), jinak 400 validation_failed. Vynecháno/NULL = účet produktu > kategorie > předkontace dokladu při zaúčtování. Kopie, dobropis, vyúčtování proformy i pravidelná fakturace ho přenášejí. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li ho zpět, zanikne."
         oss_applicable: { type: boolean, default: false }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }

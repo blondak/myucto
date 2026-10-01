@@ -83,6 +83,37 @@ final class DimensionAssignmentRepository
         return $stmt->rowCount() > 0;
     }
 
+    /**
+     * Zkopíruje dimenze dokladu (hlavička, položky i rozpady) na nový doklad téhož typu —
+     * kopie, dobropis, vyúčtování proformy (F1). Položky se párují podle pořadí, takže
+     * cílový doklad musí mít položky zdroje ve stejném pořadí a na začátku. Cíl, který už
+     * nějaké dimenze má, se nemění.
+     */
+    public function copyDocument(int $supplierId, string $docType, int $fromId, int $toId): void
+    {
+        $pdo = $this->db->pdo();
+        $exists = $pdo->prepare(
+            'SELECT 1 FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?
+             UNION ALL
+             SELECT 1 FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?
+             LIMIT 1'
+        );
+        $exists->execute([$supplierId, $docType, $toId, $supplierId, $docType, $toId]);
+        if ($exists->fetchColumn() !== false) {
+            return;
+        }
+        $pdo->prepare(
+            'INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
+             SELECT supplier_id, doc_type, ?, item_no, dimension_type_id, dimension_value_id
+               FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?'
+        )->execute([$toId, $supplierId, $docType, $fromId]);
+        $pdo->prepare(
+            'INSERT INTO document_dimension_splits (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id, share)
+             SELECT supplier_id, doc_type, ?, item_no, dimension_type_id, dimension_value_id, share
+               FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?'
+        )->execute([$toId, $supplierId, $docType, $fromId]);
+    }
+
     public function deleteDocument(int $supplierId, string $docType, int $docId): void
     {
         $this->db->pdo()->prepare('DELETE FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')

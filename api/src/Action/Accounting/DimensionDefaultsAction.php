@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -18,6 +19,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  *   GET|PUT /api/clients/{id}/dimensions        — výchozí dimenze klienta (odběratel i dodavatel)
  *   GET|PUT /api/projects/{id}/dimensions       — výchozí dimenze zakázky
+ *   GET|PUT /api/stock/items/{id}/dimensions    — výchozí dimenze produktu (skladové karty)
+ *   GET|PUT /api/eshop/categories/{id}/dimensions — výchozí dimenze kategorie produktů
+ *   GET     /api/stock/items/{id}/posting-defaults — účet a dimenze položky z produktu (produkt > kategorie)
  *   GET     /api/accounting/dimensions/prefill  — předvyplnění hlavičky dokladu v editoru
  *            ?client_id=&project_id=&invoice_id=|purchase_invoice_id=
  *
@@ -33,6 +37,7 @@ final class DimensionDefaultsAction
         private readonly DimensionService $dimensions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly ProductPostingDefaults $productDefaults,
     ) {}
 
     public function getClient(Request $request, Response $response, array $args): Response
@@ -53,6 +58,56 @@ final class DimensionDefaultsAction
     public function saveProject(Request $request, Response $response, array $args): Response
     {
         return $this->save($request, $response, 'project', (int) ($args['id'] ?? 0));
+    }
+
+    public function getProduct(Request $request, Response $response, array $args): Response
+    {
+        return $this->read($request, $response, 'product', (int) ($args['id'] ?? 0));
+    }
+
+    public function saveProduct(Request $request, Response $response, array $args): Response
+    {
+        return $this->save($request, $response, 'product', (int) ($args['id'] ?? 0));
+    }
+
+    public function getCategory(Request $request, Response $response, array $args): Response
+    {
+        return $this->read($request, $response, 'product_category', (int) ($args['id'] ?? 0));
+    }
+
+    public function saveCategory(Request $request, Response $response, array $args): Response
+    {
+        return $this->save($request, $response, 'product_category', (int) ($args['id'] ?? 0));
+    }
+
+    /**
+     * Výchozí účet a dimenze položky dokladu z produktu (produkt > kategorie) — editor
+     * je předvyplní při výběru karty. Stejné hodnoty použije zaúčtování u položky,
+     * která je nemá vyplněné.
+     */
+    public function productPostingDefaults(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock', AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        $productId = (int) ($args['id'] ?? 0);
+        $accounts = $this->productDefaults->accountsFor($supplierId, [$productId]);
+        if (!isset($accounts[$productId])) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        $dims = $this->dimensions->productPrefill($supplierId, $productId);
+        $own = static fn (string $kind): ?string => ($accounts[$productId][$kind]['source'] ?? null) === 'product'
+            ? $accounts[$productId][$kind]['code']
+            : null;
+        return Json::ok($response, [
+            'own_revenue_account_code' => $own('revenue'),
+            'own_expense_account_code' => $own('expense'),
+            'revenue_account_code' => $accounts[$productId]['revenue']['code'] ?? null,
+            'revenue_account_source' => $accounts[$productId]['revenue']['source'] ?? null,
+            'expense_account_code' => $accounts[$productId]['expense']['code'] ?? null,
+            'expense_account_source' => $accounts[$productId]['expense']['source'] ?? null,
+            'dimensions' => (object) $dims['header'],
+            'dimension_sources' => (object) $dims['sources'],
+        ]);
     }
 
     public function prefill(Request $request, Response $response): Response
@@ -91,7 +146,7 @@ final class DimensionDefaultsAction
 
     private function save(Request $request, Response $response, string $entity, int $id): Response
     {
-        if (!$this->requirePermission($request, $response, self::permission($entity), AccessLevel::WRITE, $err)) return $err;
+        if (!$this->requirePermission($request, $response, self::permission($entity, AccessLevel::WRITE), AccessLevel::WRITE, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -112,8 +167,13 @@ final class DimensionDefaultsAction
         return Json::ok($response, ['dimensions' => (object) $saved]);
     }
 
-    private static function permission(string $entity): string
+    private static function permission(string $entity, AccessLevel $level = AccessLevel::READ): string
     {
-        return $entity === 'project' ? 'projects' : 'clients';
+        return match ($entity) {
+            'project' => 'projects',
+            'product' => $level === AccessLevel::WRITE ? 'stock.items.write' : 'stock',
+            'product_category' => $level === AccessLevel::WRITE ? 'eshop.write' : 'eshop',
+            default => 'clients',
+        };
     }
 }

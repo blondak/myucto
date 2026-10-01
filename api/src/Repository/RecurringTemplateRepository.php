@@ -116,7 +116,7 @@ final class RecurringTemplateRepository
                     i.catalog_exchange_rate, i.catalog_exchange_rate_date,
                     i.description, i.quantity, i.duration_minutes, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
-                    i.order_index, i.stock_item_id, i.warehouse_id,
+                    i.order_index, i.stock_item_id, i.warehouse_id, i.revenue_account_code,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent,
                     pli.code AS price_list_item_code, pli.name AS price_list_item_name,
                     pli.archived AS price_list_item_archived'
@@ -476,7 +476,7 @@ final class RecurringTemplateRepository
         $itemsStmt = $this->db->pdo()->prepare(
              'SELECT i.id, i.template_id, i.description, i.quantity, i.duration_minutes, i.unit,
                     i.unit_price_without_vat, i.vat_rate_id, i.vat_classification_code,
-                    i.order_index, i.stock_item_id, i.warehouse_id,
+                    i.order_index, i.stock_item_id, i.warehouse_id, i.revenue_account_code,
                     vr.code AS vat_code, vr.rate_percent AS vat_rate_percent'
             . $this->ossItemSelect('i') . '
                FROM recurring_invoice_template_items i
@@ -747,11 +747,26 @@ final class RecurringTemplateRepository
         );
         $owner = $pdo->prepare('SELECT supplier_id FROM recurring_invoice_templates WHERE id = ?');
         $owner->execute([$templateId]);
+        $ownerId = (int) $owner->fetchColumn();
         $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
-            (int) $owner->fetchColumn(), $items, ['price_list_item_id'],
+            $ownerId, $items, ['price_list_item_id'],
         );
         if ($bad !== []) {
             throw new \MyInvoice\Service\Invoice\PriceListResolutionException('invalid_reference', \MyInvoice\Http\TenantReferenceGuard::message($bad));
+        }
+        // Výnosový účet položky (F1, migrace 1948) — stejné pravidlo jako u položky faktury.
+        $revenueAccounts = [];
+        $productDefaults = new \MyInvoice\Service\Accounting\Product\ProductPostingDefaults($this->db);
+        foreach ($items as $i => $item) {
+            try {
+                $revenueAccounts[$i] = $productDefaults->validateAccount(
+                    $ownerId,
+                    $item['revenue_account_code'] ?? null,
+                    \MyInvoice\Service\Accounting\Product\ProductPostingDefaults::KIND_REVENUE,
+                );
+            } catch (\InvalidArgumentException $e) {
+                throw new \MyInvoice\Service\Invoice\PriceListResolutionException('validation_failed', 'Položka ' . ($i + 1) . ': ' . $e->getMessage());
+            }
         }
         $pdo->prepare('DELETE FROM recurring_invoice_template_items WHERE template_id = ?')
             ->execute([$templateId]);
@@ -767,8 +782,8 @@ final class RecurringTemplateRepository
                  catalog_source_unit_price, catalog_exchange_rate,
                   catalog_exchange_rate_date, description, quantity, duration_minutes, unit,
                  unit_price_without_vat, vat_rate_id, vat_classification_code,
-                 order_index' . $ossColumns . ')
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
+                 order_index, revenue_account_code' . $ossColumns . ')
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?' . $ossPlaceholders . ')'
         );
         foreach (array_values($items) as $i => $item) {
             $params = [
@@ -793,6 +808,7 @@ final class RecurringTemplateRepository
                     ? (string) $item['vat_classification_code']
                     : null,
                 (int) ($item['order_index'] ?? $i),
+                $revenueAccounts[$i] ?? null,
             ];
             if ($supportsOss) {
                 // Pravidlo „co je platný OSS řádek šablony" je sdílené s generátorem

@@ -794,7 +794,7 @@ final class DimensionService
     // ── výchozí dimenze klienta a zakázky ─────────────────────────────────────
 
     /**
-     * @param 'client'|'project' $entity
+     * @param 'client'|'project'|'product'|'product_category' $entity
      * @return array<int,int> typ => hodnota
      */
     public function entityDefaults(int $supplierId, string $entity, int $entityId): array
@@ -804,10 +804,10 @@ final class DimensionService
     }
 
     /**
-     * Uloží výchozí dimenze klienta nebo zakázky. Už zaúčtované doklady se nemění —
+     * Uloží výchozí dimenze klienta, zakázky, produktu nebo kategorie. Zaúčtované doklady se nemění —
      * výchozí hodnoty se uplatní až u dokladů, které se budou účtovat.
      *
-     * @param 'client'|'project' $entity
+     * @param 'client'|'project'|'product'|'product_category' $entity
      * @param array<int|string,mixed> $raw typ => hodnota
      * @return array<int,int>
      */
@@ -845,6 +845,20 @@ final class DimensionService
             ksort($result['sources']);
         }
         return $result;
+    }
+
+    /**
+     * Předvyplnění dimenzí položky z produktu (produkt > kategorie). Totéž doplní
+     * zaúčtování položce, která vlastní hodnotu typu nemá ({@see DimensionStamper}).
+     *
+     * @return array{header:array<int,int>, sources:array<int,string>}
+     */
+    public function productPrefill(int $supplierId, int $productId): array
+    {
+        if (!$this->repo->enabled($supplierId)) {
+            return ['header' => [], 'sources' => []];
+        }
+        return $this->defaultsResolver->forProducts($supplierId, [$productId])[$productId] ?? ['header' => [], 'sources' => []];
     }
 
     /**
@@ -966,7 +980,12 @@ final class DimensionService
     {
         if (!in_array($entity, DimensionDefaultRepository::ENTITIES, true)
             || !$this->defaults->ownsEntity($supplierId, $entity, $entityId)) {
-            throw new DimensionException('not_found', $entity === 'project' ? 'Zakázka nenalezena.' : 'Klient nenalezen.', 404);
+            throw new DimensionException('not_found', match ($entity) {
+                'project' => 'Zakázka nenalezena.',
+                'product' => 'Skladová karta nenalezena.',
+                'product_category' => 'Kategorie nenalezena.',
+                default => 'Klient nenalezen.',
+            }, 404);
         }
     }
 

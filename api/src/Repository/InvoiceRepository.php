@@ -608,7 +608,7 @@ final class InvoiceRepository
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
                     ii.order_index, ii.item_kind, ii.linked_work_report_id,
                     ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id,
-                    ii.small_asset_id, ii.asset_id, ii.accrual_from, ii.accrual_to,
+                    ii.small_asset_id, ii.asset_id, ii.accrual_from, ii.accrual_to, ii.revenue_account_code,
                     sa.name AS small_asset_name, a.name AS asset_name' . $ossSelect . ',
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
                FROM invoice_items ii
@@ -1574,11 +1574,30 @@ final class InvoiceRepository
         $this->assertItemAssetLinks($invoiceId, $items);
         $owner = $pdo->prepare('SELECT supplier_id FROM invoices WHERE id = ?');
         $owner->execute([$invoiceId]);
+        $ownerId = (int) $owner->fetchColumn();
         $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->itemViolations(
-            (int) $owner->fetchColumn(), $items, ['stock_item_id', 'warehouse_id'],
+            $ownerId, $items, ['stock_item_id', 'warehouse_id'],
         );
         if ($bad !== []) {
             throw new \InvalidArgumentException(\MyInvoice\Http\TenantReferenceGuard::message($bad));
+        }
+        // Výnosový účet položky (F1, migrace 1948): v rozvrhu firmy, aktivní, třída 6.
+        // Ověří se PŘED smazáním starých řádků, chyba nechá fakturu netknutou.
+        $revenueAccounts = [];
+        $productDefaults = new \MyInvoice\Service\Accounting\Product\ProductPostingDefaults($this->db);
+        foreach ($items as $i => $item) {
+            if (($item['item_kind'] ?? 'standard') === 'discount') {
+                continue;   // slevový řádek se generuje níž, účet dědí
+            }
+            try {
+                $revenueAccounts[$i] = $productDefaults->validateAccount(
+                    $ownerId,
+                    $item['revenue_account_code'] ?? null,
+                    \MyInvoice\Service\Accounting\Product\ProductPostingDefaults::KIND_REVENUE,
+                );
+            } catch (\InvalidArgumentException $e) {
+                throw new \InvalidArgumentException('Položka ' . ($i + 1) . ': ' . $e->getMessage(), 0, $e);
+            }
         }
 
         $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$invoiceId]);
@@ -1606,9 +1625,9 @@ final class InvoiceRepository
                 (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                 stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to'
+                 stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code'
             . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'
             . str_repeat(', ?', count($ossColumns))
             . ')'
         );
@@ -1703,6 +1722,7 @@ final class InvoiceRepository
                 self::positiveIdOrNull($item['small_asset_id'] ?? null),
                 $assetId,
                 ...self::accrualPeriod($item),
+                $revenueAccounts[$i] ?? null,
             ];
             $accrualPeriods[implode('|', self::accrualPeriod($item))] = self::accrualPeriod($item);
             if ($supportsOss) {
@@ -1753,6 +1773,7 @@ final class InvoiceRepository
                 $language,
                 $supportsOss,
                 count($accrualPeriods) === 1 ? reset($accrualPeriods) : [null, null],
+                count(array_unique(array_map('strval', $revenueAccounts))) === 1 ? reset($revenueAccounts) : null,
             );
         }
     }
@@ -1774,6 +1795,7 @@ final class InvoiceRepository
         string $language,
         bool $supportsOss,
         array $accrualPeriod = [null, null],
+        ?string $revenueAccount = null,
     ): void {
         $label = self::discountLabel($discountPercent, $language);
         $order = $startOrder;
@@ -1803,6 +1825,9 @@ final class InvoiceRepository
                 // Období časového rozlišení: sleva z hlavičky snižuje výnos všech řádků,
                 // takže jejich společné období zdědí; při různých obdobích zůstane bez něj.
                 ...$accrualPeriod,
+                // Výnosový účet (F1): mají-li všechny položky týž účet, sleva ho snižuje;
+                // u různých účtů zůstane bez účtu a jde na předkontaci dokladu.
+                $revenueAccount,
             ];
             if ($supportsOss && isset($g['oss']) && is_array($g['oss'])) {
                 $oss = $g['oss'];

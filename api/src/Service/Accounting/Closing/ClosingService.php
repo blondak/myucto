@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Closing;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
@@ -1403,6 +1404,7 @@ final class ClosingService
                 $supplierId,
                 $row['expense_account_code'] !== null ? (string) $row['expense_account_code'] : null,
                 $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
+                $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null,
             );
 
             $total = round($total + $deferred, 2);
@@ -1539,7 +1541,7 @@ final class ClosingService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id AS item_id, pii.purchase_invoice_id, pii.description,
-                    pii.total_without_vat, pii.expense_kind, pii.expense_account_code,
+                    pii.total_without_vat, pii.expense_kind, pii.expense_account_code, pii.stock_item_id,
                     pii.accrual_from, pii.accrual_to,
                     pi.vendor_invoice_number, pi.exchange_rate, cur.code AS currency_code
                FROM purchase_invoice_items pii
@@ -1569,7 +1571,7 @@ final class ClosingService
     private function prepaidExpenseReleaseRows(int $supplierId, string $originEndsOn, string $targetEnd): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.total_without_vat, pii.expense_kind, pii.expense_account_code,
+            'SELECT pii.total_without_vat, pii.expense_kind, pii.expense_account_code, pii.stock_item_id,
                     pii.accrual_from, pii.accrual_to, pii.purchase_invoice_id,
                     pi.exchange_rate, cur.code AS currency_code
                FROM purchase_invoice_items pii
@@ -1619,6 +1621,7 @@ final class ClosingService
                 $supplierId,
                 $row['expense_account_code'] !== null ? (string) $row['expense_account_code'] : null,
                 $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null,
+                $row['stock_item_id'] !== null ? (int) $row['stock_item_id'] : null,
             );
             $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $release, 2);
             $total = round($total + $release, 2);
@@ -1645,10 +1648,11 @@ final class ClosingService
 
     /**
      * Nákladový účet (5xx) pro odloženou stranu řádku: expense_account_code (adresný účet) přebíjí
-     * odvození z expense_kind (přes posting_rules, tenant si ho může přesměrovat); bez obojího
+     * odvození z expense_kind (přes posting_rules, tenant si ho může přesměrovat); pak výchozí
+     * nákladový účet produktu > kategorie (stejné pořadí jako PostingService); bez toho všeho
      * default 518 (dosavadní chování PostingService pro neklasifikovaný náklad).
      */
-    private function prepaidExpenseCreditAccount(int $supplierId, ?string $override, ?string $kind): string
+    private function prepaidExpenseCreditAccount(int $supplierId, ?string $override, ?string $kind, ?int $productId = null): string
     {
         $override = $override !== null ? trim($override) : '';
         if ($override !== '') {
@@ -1658,6 +1662,13 @@ final class ClosingService
         if ($ek !== null) {
             $rule = $this->rules->resolve($supplierId, $ek->ruleKey());
             return (string) ($rule['debit_account_code'] ?? $ek->fallbackAccount());
+        }
+        if ($productId !== null && $productId > 0) {
+            $product = (new ProductPostingDefaults($this->db))->accountsFor($supplierId, [$productId]);
+            $code = $product[$productId]['expense']['code'] ?? null;
+            if ($code !== null) {
+                return $code;
+            }
         }
         return '518';
     }
