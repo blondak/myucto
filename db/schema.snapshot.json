@@ -935,7 +935,9 @@
         "1951_dimensions_other_items_assets.sql",
         "1952_dimension_account_map.sql",
         "1953_payroll_external_jmhz_manual_attestation.sql",
-        "1954_payroll_payment_batch_discards.sql"
+        "1954_payroll_payment_batch_discards.sql",
+        "1955_payroll_health_delivery_fulfils_obligation.sql",
+        "1956_isds_mobile_key_session_follow_up.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -20808,7 +20810,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "environment": "enum('production','test') NOT NULL",
                 "expires_at": "datetime NOT NULL",
-                "flow_type": "enum('mobile_key','sms') NOT NULL",
+                "flow_type": "enum('mobile_key','sms','mobile_key_session') NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "max_attempts": "smallint(5) unsigned NOT NULL",
                 "payload_ciphertext": "text NULL DEFAULT NULL",
