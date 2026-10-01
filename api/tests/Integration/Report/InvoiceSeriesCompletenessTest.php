@@ -280,6 +280,32 @@ final class InvoiceSeriesCompletenessTest extends TestCase
         self::assertSame(5, $bucket['used_count']);
     }
 
+    /**
+     * Daňový doklad k přijaté platbě, penalizační faktura a platební kalendář nemají
+     * vlastní řadu: generátor jim přiděluje čísla z řady faktur
+     * ({@see \MyInvoice\Service\Invoice\VarsymbolGenerator::documentTypesInSeries()}).
+     * Jejich čísla proto v řadě faktur nesmí vypadat jako chybějící doklady.
+     */
+    public function testInvoiceSeriesAliasesFillTheirNumbers(): void
+    {
+        $this->setTemplates('{YYYY}{CCCCCC}', 'D{YYYY}{CCCCCC}');
+
+        $y = self::YEAR;
+        $this->insertInvoice("{$y}000001", 'invoice');
+        $this->insertInvoice("{$y}000002", 'tax_document');
+        $this->insertInvoice("{$y}000003", 'invoice');
+        $this->insertInvoice("{$y}000004", 'penalty');
+        // 000005 chybí OPRAVDU.
+        $this->insertInvoice("{$y}000006", 'invoice');
+
+        $series = $this->service->build($this->supplierId, self::YEAR);
+
+        $group = self::groupFor($series, 0, 0);
+        $bucket = $group['buckets'][0];
+        self::assertSame([5], $bucket['missing'], 'Čísla daňového dokladu k platbě a penalizace nejsou mezery.');
+        self::assertSame(5, $bucket['used_count']);
+    }
+
     public function testDistinctSeriesAreReportedIndependently(): void
     {
         // Odlišné šablony (jiný skeleton) → faktury a dobropisy NESMÍ se míchat.

@@ -67,6 +67,19 @@ final class VarsymbolGenerator
         return in_array($invoiceType, self::INVOICE_SERIES_ALIASES, true) ? 'invoice' : $invoiceType;
     }
 
+    /**
+     * Všechny typy dokladů, které dostávají čísla z řady daného typu. Kdo řadu čte
+     * (kontrola úplnosti), musí počítat i s nimi, jinak číslo daňového dokladu
+     * k platbě nebo penalizace vypadá jako chybějící doklad.
+     *
+     * @return list<string>
+     */
+    public static function documentTypesInSeries(string $invoiceType): array
+    {
+        $series = self::normalizeType($invoiceType);
+        return $series === 'invoice' ? ['invoice', ...self::INVOICE_SERIES_ALIASES] : [$series];
+    }
+
     public function __construct(
         private readonly Config $config,
         private readonly Connection $db,

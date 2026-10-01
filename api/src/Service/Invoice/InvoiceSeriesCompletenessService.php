@@ -594,14 +594,18 @@ final class InvoiceSeriesCompletenessService
             return $this->documentCache[$cacheKey];
         }
 
+        // Řada faktur nese i doklady bez vlastní řady (daňový doklad k platbě, penalizace,
+        // platební kalendář); jejich čísla jsou v řadě obsazená stejně jako faktury.
+        $types = VarsymbolGenerator::documentTypesInSeries($invoiceType);
+        $in = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT varsymbol, client_id, revenue_category_id, issue_date
                  FROM invoices
-                WHERE supplier_id = ? AND invoice_type = ?
+                WHERE supplier_id = ? AND invoice_type IN ($in)
                   AND varsymbol IS NOT NULL AND varsymbol <> ''
                   AND issue_date >= ? AND issue_date <= ?"
         );
-        $stmt->execute([$supplierId, $invoiceType, $from, $to]);
+        $stmt->execute([$supplierId, ...$types, $from, $to]);
 
         return $this->documentCache[$cacheKey] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
