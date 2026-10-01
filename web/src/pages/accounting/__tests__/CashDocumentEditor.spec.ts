@@ -124,7 +124,7 @@ describe('CashDocumentEditor.vue', () => {
     expect(payload.fx_rate).toBe(25.5)
   })
 
-  it('prázdný kurz se neposílá — backend si vezme denní kurz ČNB', async () => {
+  it('prázdný kurz jde jako null — backend si vezme denní kurz ČNB', async () => {
     m.listRegisters.mockResolvedValue([register({ currency_code: 'EUR', account_code: '211.500' })])
     const wrapper = await mountEditor()
     const vm = wrapper.vm as any
@@ -134,7 +134,7 @@ describe('CashDocumentEditor.vue', () => {
 
     const payload = m.createDocument.mock.calls[0][0]
     expect(payload.amount_foreign).toBe(100)
-    expect('fx_rate' in payload).toBe(false)
+    expect(payload.fx_rate).toBeNull()
   })
 
   it('korunová pokladna pole pro kurz nemá', async () => {
