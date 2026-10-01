@@ -417,6 +417,22 @@ final readonly class SubmissionOutboxService
                     'error_code' => 'submission_conflict',
                     'error_message' => $e->getMessage(),
                 ];
+            } catch (\Throwable $e) {
+                // Neočekávaná chyba JEDNÉ zprávy nesmí zastavit zbytek dávky:
+                // ostatní pojišťovny dostanou svou zprávu a tahle se ukáže
+                // u svého řádku. Stav nejisté dopravy si řeší confirmAndSend.
+                $this->logger->error('Batch dispatch item failed', [
+                    'supplier_id' => $supplierId,
+                    'outbox_id' => $id,
+                    'error' => $e->getMessage(),
+                ]);
+                $results[] = [
+                    'id' => $id,
+                    'dispatched' => false,
+                    'row' => null,
+                    'error_code' => 'dispatch_failed',
+                    'error_message' => 'Zprávu se nepodařilo odeslat. Ostatní zprávy dávky to neovlivnilo.',
+                ];
             }
         }
 

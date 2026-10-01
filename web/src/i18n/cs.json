@@ -6924,6 +6924,28 @@
           "not_supported": "Nepodporováno appkou",
           "unknown": "Neznámý stav"
         },
+        "send": {
+          "prepare_and_send": "Připravit a odeslat",
+          "prepare_only": "Jen připravit",
+          "send": "Odeslat",
+          "open": "Otevřít",
+          "all": "Připravit a odeslat vše ({count})",
+          "working": "Připravuji a odesílám…",
+          "bar_hint": "Za tento měsíc čeká na odeslání {count} podání. Nepřipravená se připraví ze schválené revize mzdového běhu, pak jedním potvrzením odejdou: JMHZ přes VREP ČSSZ, přehledy pojišťovnám do datových schránek.",
+          "bar_nothing": "Všechno připravené už odešlo.",
+          "confirm": "Odeslat {count} podání do ostrého prostředí úřadů?",
+          "channel_vrep": "VREP ČSSZ (certifikát)",
+          "channel_isds": "datová schránka",
+          "summary": "Předáno úřadům: {sent}. Do datových schránek připraveno: {databox}. Nepovedlo se: {failed}.",
+          "mobile_key_hint": "Zprávy do datových schránek ({count}) odešlete jedním potvrzením Mobilního klíče — každá jde do schránky své pojišťovny nebo úřadu.",
+          "gateway_hint": "Odesílací brána schvaluje každý koncept v datové schránce zvlášť ({count}). Jedním potvrzením pro všechny zprávy odešlete jen Mobilním klíčem — nastavíte ho v Datové schránce.",
+          "gateway_action": "Schválit koncept v datovce {current}/{total}",
+          "manual_hint": "Zprávy ({count}) čekají v odchozí frontě datové schránky k ručnímu odeslání.",
+          "open_databox": "Otevřít datovou schránku",
+          "databox_sent": "Odesláno do datových schránek: {sent}. Nepovedlo se: {failed}.",
+          "receipts_following": "Doručenky se v téže relaci Mobilního klíče dotahují samy (několik minut). Přehled pojišťovně je podaný doručením do její schránky.",
+          "load_receipts": "Načíst doručenky"
+        },
         "summary": {
           "total": "Celkem",
           "send": "Jde odeslat",

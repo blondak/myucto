@@ -491,6 +491,7 @@
       "payroll_absence"
     ],
     "payroll-runs": [
+      "databox",
       "payroll"
     ],
     "payroll-payments": [

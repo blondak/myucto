@@ -6924,6 +6924,28 @@
           "not_supported": "Not supported by the app",
           "unknown": "Unknown status"
         },
+        "send": {
+          "prepare_and_send": "Prepare and send",
+          "prepare_only": "Prepare only",
+          "send": "Send",
+          "open": "Open",
+          "all": "Prepare and send all ({count})",
+          "working": "Preparing and sending…",
+          "bar_hint": "{count} submissions are waiting to be sent for this month. Unprepared ones are prepared from the approved payroll run revision, then sent with one confirmation: JMHZ via the CSSA VREP, insurer overviews to data boxes.",
+          "bar_nothing": "Everything prepared has been sent.",
+          "confirm": "Send {count} submissions to the authorities' production environment?",
+          "channel_vrep": "CSSA VREP (certificate)",
+          "channel_isds": "data box",
+          "summary": "Handed over to authorities: {sent}. Queued for data boxes: {databox}. Failed: {failed}.",
+          "mobile_key_hint": "Send the data box messages ({count}) with a single Mobile Key confirmation — each goes to the data box of its insurer or authority.",
+          "gateway_hint": "The sending gateway approves every draft in the data box separately ({count}). Only the Mobile Key sends all messages with one confirmation — set it up under Data box.",
+          "gateway_action": "Approve draft in data box {current}/{total}",
+          "manual_hint": "Messages ({count}) are waiting in the data box outbox to be sent manually.",
+          "open_databox": "Open data box",
+          "databox_sent": "Sent to data boxes: {sent}. Failed: {failed}.",
+          "receipts_following": "Delivery receipts are being fetched in the same Mobile Key session (a few minutes). An insurer overview is filed by delivery to the insurer's data box.",
+          "load_receipts": "Load delivery receipts"
+        },
         "summary": {
           "total": "Total",
           "send": "Can send",

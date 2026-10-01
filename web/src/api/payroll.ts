@@ -3178,6 +3178,14 @@ export interface PayrollSubmissionQueueBatchItemResult {
   mode?: PayrollSubmissionDispatchMode
   correlation_reference?: string | null
   error_code?: string
+  /** Odchozí zpráva datové schránky, když podání šlo do fronty ISDS. */
+  outbox?: {
+    id: number
+    created: boolean
+    recipient: { box_id: string; name: string } | null
+    subject: string
+    transport: { automatic: boolean; channel: string; reason: string | null }
+  } | null
 }
 
 export interface PayrollSubmissionQueueBatchResult {
@@ -3332,6 +3340,10 @@ export interface PayrollMonthlyChecklistItem {
   done: boolean
   /** Poslední podání povinnosti (jen řádky evidence podání). */
   submission_id: number | null
+  /** Připravené podání, které jde odeslat frontou přímo z přehledu. */
+  dispatchable: boolean
+  /** Kudy podání odejde frontou; `null` u řádků bez podání. */
+  dispatch_mode: PayrollSubmissionDispatchMode | null
   dispatch: PayrollMonthlyChecklistDispatch | null
   /** Splněno doručením do schránky úřadu, který výsledek neposílá (PPZ, HOZ). */
   fulfilled_by_delivery: boolean
@@ -3352,6 +3364,8 @@ export interface PayrollMonthlyChecklistPreparationResult {
 export interface PayrollMonthlyChecklistResponse {
   environment: PayrollRegzelEnvironment
   period: string
+  /** Nejstarší měsíc s nesplněným měsíčním hlášením, jinak předchozí měsíc. */
+  suggested_period?: string
   window: { from: string; to: string }
   summary: { total: number; send: number; generate: number; manual: number; await: number; done: number }
   items: PayrollMonthlyChecklistItem[]

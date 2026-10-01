@@ -33,6 +33,8 @@ final class FakeIsdsTransport implements IsdsTransport
     public array $callLog = [];
 
     public string $nextMessageId = 'DM-1000';
+    /** Dávka víc zpráv: každá odeslaná dostane vlastní ID (DM-1000, DM-1001, …). */
+    public bool $incrementMessageIds = false;
 
     /** Co udělá další volání createMessage(): 'ok'|'timeout'|'refuse'|'fatal'|'timeout_but_delivered' */
     public string $sendBehaviour = 'ok';
@@ -126,12 +128,16 @@ final class FakeIsdsTransport implements IsdsTransport
                 throw new \Error('Typed property DataMessageResponse::$dmStatus must not be accessed before initialization');
 
             default:
+                $messageId = $this->nextMessageId;
                 $this->sentMessages[] = [
                     'sender_ident' => $senderIdent,
-                    'message_id' => $this->nextMessageId,
+                    'message_id' => $messageId,
                     'recipient' => $recipientBoxId,
                 ];
-                return IsdsSendReceipt::accepted($this->nextMessageId, IsdsSendReceipt::STATUS_ACCEPTED);
+                if ($this->incrementMessageIds) {
+                    $this->nextMessageId = 'DM-' . ((int) substr($messageId, 3) + 1);
+                }
+                return IsdsSendReceipt::accepted($messageId, IsdsSendReceipt::STATUS_ACCEPTED);
         }
     }
 

@@ -555,6 +555,48 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertSame(1, $service->checklist(11, 'production', self::PERIOD)['summary']['await']);
     }
 
+    /**
+     * Připravené podání odesílatelné frontou nese `dispatchable`, aby šlo
+     * odeslat přímo z přehledu; odeslané ani ELDP (aplikace ho neodesílá) ne.
+     */
+    public function testPreparedDispatchableSubmissionIsMarkedForSending(): void
+    {
+        $ready = $this->onlyItem($this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                latestSubmissionStatus: 'ready',
+            )],
+        ), 'submission');
+        self::assertTrue($ready['dispatchable']);
+
+        $sent = $this->onlyItem($this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                latestSubmissionStatus: 'submitted',
+            )],
+        ), 'submission');
+        self::assertFalse($sent['dispatchable']);
+
+        $eldp = $this->onlyItem($this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: EldpStatementService::AGENDA_CODE,
+                latestSubmissionStatus: 'ready',
+            )],
+        ), 'submission');
+        self::assertFalse($eldp['dispatchable']);
+    }
+
+    /** Bez nesplněného měsíce přehled navrhne předchozí měsíc. */
+    public function testSuggestedPeriodFallsBackToPreviousMonth(): void
+    {
+        $result = $this->service()->checklist(11, 'production', self::PERIOD);
+
+        self::assertSame(
+            (new \DateTimeImmutable('first day of previous month'))->format('Y-m'),
+            $result['suggested_period'],
+        );
+    }
+
     /** Doručený přehled se splněnou povinností nese, že ho splnilo doručení. */
     public function testDeliveredOverviewIsMarkedAsFulfilledByDelivery(): void
     {

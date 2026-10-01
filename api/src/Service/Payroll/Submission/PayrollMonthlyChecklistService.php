@@ -173,6 +173,8 @@ final readonly class PayrollMonthlyChecklistService
         $items = array_map(
             static fn (array $item): array => $item + [
                 'submission_id' => null,
+                'dispatchable' => false,
+                'dispatch_mode' => null,
                 'dispatch' => null,
                 'fulfilled_by_delivery' => false,
             ],
@@ -197,10 +199,34 @@ final readonly class PayrollMonthlyChecklistService
         return [
             'environment' => $environment,
             'period' => $period,
+            'suggested_period' => $this->suggestedPeriod($supplierId, $environment),
             'window' => ['from' => $periodStart, 'to' => $periodEnd],
             'summary' => $summary,
             'items' => $items,
         ];
+    }
+
+    /**
+     * Měsíc, na kterém má přehled otevřít: nejstarší s nesplněným měsíčním
+     * hlášením (JMHZ, přehled o platbě, hromadné oznámení) za posledních
+     * dvanáct měsíců, jinak předchozí měsíc — mzdy se podávají zpětně.
+     */
+    private function suggestedPeriod(int $supplierId, string $environment): string
+    {
+        $previous = new \DateTimeImmutable('first day of previous month');
+        $oldest = $this->submissions->oldestOpenRegularPeriod(
+            $supplierId,
+            $environment,
+            [
+                JmhzSubmissionBridgeService::AGENDA_CODE,
+                HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            ],
+            $previous->modify('-11 months')->format('Y-m-01'),
+            $previous->format('Y-m-01'),
+        );
+
+        return $oldest ?? $previous->format('Y-m');
     }
 
     /**
@@ -297,6 +323,21 @@ final readonly class PayrollMonthlyChecklistService
             $rows[] = [
                 'key' => 'submission:' . $row['id'],
                 'submission_id' => $latestId,
+                // Připravené podání, které jde odeslat frontou podání
+                // (VREP u JMHZ, datová schránka u PPZ/HOZ) — klient podle toho
+                // nabízí „Odeslat" přímo v přehledu.
+                'dispatchable' => !$done
+                    && !$cancelled
+                    && is_string($latestStatus)
+                    && in_array($latestStatus, ['validated', 'prepared', 'ready'], true)
+                    && (new PayrollDispatchCapabilityCatalog())
+                        ->forAgenda((string) $row['agenda_code'])
+                        ->isDispatchable(),
+                // Kudy podání odejde frontou (VREP u JMHZ, datová schránka
+                // u PPZ/HOZ) — pro potvrzení „co → komu → jakou cestou".
+                'dispatch_mode' => (new PayrollDispatchCapabilityCatalog())
+                    ->forAgenda((string) $row['agenda_code'])
+                    ->mode,
                 'dispatch' => self::dispatchSummary($outbox),
                 'fulfilled_by_delivery' => $done
                     && in_array($deliveryProof, ['delivered', 'receipt'], true)

@@ -1,34 +1,42 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
+  PAYROLL_QUEUE_BATCH_SIZE,
   payrollApi,
   type PayrollMonthlyChecklistItem,
   type PayrollMonthlyChecklistResponse,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
+import { dataBoxApi, type MobileKeyBatchItemResult, type MobileKeyReceiptSession } from '@/api/dataBox'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
+import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
+import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { useReceiptFollowUp } from '@/composables/useReceiptFollowUp'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 
 /*
- * Tenhle panel NEODESÍLÁ ani negeneruje sám — je to skladač nad existujícími
- * záložkami (viz `PayrollMonthlyChecklistService` na backendu). Tlačítko
- * u položky proto vždy vede na místo, kde se úkon reálně udělá; duplikovat
- * tam JMHZ náhledy, zdravotní karty nebo Mobilní klíč by znamenalo druhou
- * kopii pěti set řádků logiky, která se dřív nebo později rozejde s první.
+ * Měsíční přehled říká, CO se za měsíc podává, a umí to rovnou připravit
+ * a odeslat — bez přecházení po záložkách agend.
  *
- * Jediná výjimka je `action.prepare`: povinnost, která ještě nemá založené
- * podání, nemá kam odkázat — odkaz na obrazovku agendy by po uživateli chtěl,
- * ať si sám najde běh, revizi a účtárnu. Panel proto zavolá přípravu pro tu
- * konkrétní agendu a období a TEPRVE PAK otevře `path` s hotovým podáním.
- * I tady ale všechnu práci dělá backend nad existujícími službami agend.
+ * Neodesílá ale vlastní logikou: příprava volá `prepareMonthlyChecklistItem`
+ * (zmrazí podání ze schválené revize), odeslání jde přes frontu podání
+ * (`dispatchSubmissionBatch`), která zvolí kanál sama — JMHZ VREP hned,
+ * přehledy pojišťovnám do odchozí fronty datové schránky. Zprávy datové
+ * schránky se pak odešlou JEDNÍM potvrzením Mobilního klíče
+ * (`MobileKeyBatchSendButton`) a doručenky se v téže relaci dotáhnou samy
+ * (`useReceiptFollowUp`).
+ *
+ * Odeslání vždy potvrzuje uživatel: v ostrém prostředí dialog s přehledem
+ * co → komu → jakou cestou, u datové schránky navíc Mobilní klíč nebo
+ * schválení konceptu v datovce.
  */
 const props = defineProps<{
   environment: PayrollRegzelEnvironment
@@ -47,17 +55,25 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
-const router = useRouter()
 const { submissionAgendaLabel, submissionStatusLabel } = usePayrollLabels()
 const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
 const ownPeriod = ref(props.initialPeriod ?? payrollWorkingPeriod())
+/*
+ * Výchozí měsíc samostatného panelu: nejstarší s nesplněným hlášením, jinak
+ * předchozí (`suggested_period` ze serveru). Přepne se JEN jednou po prvním
+ * načtení a jen tehdy, když si měsíc nikdo nevybral (adresa, ruční volba).
+ */
+let periodChosen = props.initialPeriod !== undefined
 const embedded = computed(() => props.period !== undefined)
 const period = computed({
   get: () => props.period ?? ownPeriod.value,
-  set: (value: string) => { ownPeriod.value = value },
+  set: (value: string) => {
+    periodChosen = true
+    ownPeriod.value = value
+  },
 })
 const loading = ref(true)
 const error = ref('')
@@ -70,10 +86,48 @@ const lateDiscount = ref<Record<string, string>>({})
 /** Proklik k chybě přípravy (měsíc podaný předchozím programem → přehled převzatých podání). */
 const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubmissionTarget>>>({})
 
+/** Běží příprava nebo odeslání (řádek i „vše") — jedna operace naráz. */
+const flowBusy = ref(false)
+/** Chyba odeslání u konkrétního řádku (klíčováno klíčem položky). */
+const sendError = ref<Record<string, string>>({})
+/** Shrnutí posledního odeslání pod hlavičkou. */
+const sendSummary = ref('')
+/** Zprávy datové schránky čekající na jedno potvrzení Mobilním klíčem. */
+const mobileKeyOutboxIds = ref<number[]>([])
+/** Koncepty pro odesílací bránu — každý se schvaluje v datovce zvlášť. */
+const gatewayOutboxIds = ref<number[]>([])
+/** Zprávy, které je nutné odeslat ze své datové schránky ručně. */
+const manualOutboxCount = ref(0)
+/** Kterému řádku patří odchozí zpráva — kvůli chybě u správného řádku. */
+const outboxItemKey = new Map<number, string>()
+const receiptsBusy = ref('')
+
+const {
+  request: productionSendRequest,
+  confirmProductionSend,
+  settle: settleProductionSend,
+} = useProductionSendConfirm()
+const receiptFollowUp = useReceiptFollowUp(
+  () => props.environment,
+  async () => { await load(true) },
+)
+const followUpActive = receiptFollowUp.active
+
 const items = computed(() => response.value?.items ?? [])
 const summary = computed(() => response.value?.summary ?? {
   total: 0, send: 0, generate: 0, manual: 0, await: 0, done: 0,
 })
+
+function isPreparable(item: PayrollMonthlyChecklistItem): boolean {
+  return !item.done && item.action.prepare !== null && item.action.prepare !== undefined
+}
+
+function isDispatchable(item: PayrollMonthlyChecklistItem): boolean {
+  return !item.done && item.dispatchable === true && item.submission_id !== null
+}
+
+/** Řádky, které „Připravit a odeslat vše" pokryje. */
+const bulkItems = computed(() => items.value.filter(item => isPreparable(item) || isDispatchable(item)))
 
 function phaseClass(phase: string): string {
   if (phase === 'fulfilled') return 'bg-success-50 text-success-700'
@@ -167,15 +221,42 @@ function actionIcon(item: PayrollMonthlyChecklistItem): string {
   return ICONS.x
 }
 
+/** Zpráva odešla datovkou a dodání ještě není doložené — má smysl hledat doručenku. */
+function awaitsReceipt(item: PayrollMonthlyChecklistItem): boolean {
+  return !item.done
+    && item.dispatch !== null
+    && item.dispatch !== undefined
+    && item.dispatch.delivery_proof === null
+    && item.dispatch.dispatch_state === 'sent'
+}
+
+function channelLabel(item: PayrollMonthlyChecklistItem): string {
+  if (item.dispatch_mode === 'vrep_jmhz' || item.dispatch_mode === 'vrep_registration') {
+    return t('payroll.submissions.monthly_checklist.send.channel_vrep')
+  }
+  if (item.dispatch_mode === 'isds_health' || item.dispatch_mode === 'isds_payroll') {
+    return t('payroll.submissions.monthly_checklist.send.channel_isds')
+  }
+  return item.channel.label ?? t('payroll.submissions.monthly_checklist.unknown')
+}
+
 /**
- * Založí podání pro jednu povinnost a otevře ho. Když příprava selže (chybí
- * variabilní symbol účtárny, revize se mezitím změnila), zůstane hláška
- * U TÉ POLOŽKY — nesmí spadnout do společného pruhu nahoře, kde by vypadala
- * jako výpadek celého přehledu.
+ * Založí podání pro jednu povinnost a ZŮSTANE na místě — řádek se po
+ * načtení změní na „Odeslat". Dřív příprava přesměrovala na záložku agendy
+ * a účetní tam hledala, co dál.
+ *
+ * Když příprava selže (chybí variabilní symbol účtárny, revize se mezitím
+ * změnila), zůstane hláška U TÉ POLOŽKY — nesmí spadnout do společného pruhu
+ * nahoře, kde by vypadala jako výpadek celého přehledu.
+ *
+ * @returns ID vzniklých podání, `null` při chybě nebo čekajícím potvrzení
  */
-async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false) {
+async function prepareOne(
+  item: PayrollMonthlyChecklistItem,
+  confirmLateDiscount = false,
+): Promise<number[] | null> {
   const request = item.action.prepare
-  if (!request || preparing.value) return
+  if (!request) return null
   preparing.value = item.key
   prepareError.value = { ...prepareError.value, [item.key]: '' }
   lateDiscount.value = { ...lateDiscount.value, [item.key]: '' }
@@ -185,8 +266,7 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
       props.environment,
       confirmLateDiscount ? { ...request, confirm_late_discount: true } : request,
     )
-    await load()
-    await router.push(result.path)
+    return result.submission_ids ?? []
   } catch (exception) {
     // Kontrola 290: hlášení po splatnosti se slevou. Nezakazuje, ale chce
     // vědomé potvrzení účetní, a to přímo u položky.
@@ -195,7 +275,7 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
         ...lateDiscount.value,
         [item.key]: apiErrorMessage(exception, t('payroll.transport_delivery.late_discount_title')),
       }
-      return
+      return null
     }
     prepareErrorTarget.value = { ...prepareErrorTarget.value, [item.key]: externalJmhzSubmissionTarget(exception) }
     prepareError.value = {
@@ -205,16 +285,198 @@ async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = 
         t('payroll.submissions.monthly_checklist.prepare_failed'),
       ),
     }
+    return null
   } finally {
     preparing.value = ''
   }
 }
 
-async function load() {
-  loading.value = true
+/** „Jen připravit" a potvrzení kontroly 290: připraví a zůstane na místě. */
+async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false) {
+  if (flowBusy.value) return
+  flowBusy.value = true
+  try {
+    await prepareOne(item, confirmLateDiscount)
+    await load(true)
+  } finally {
+    flowBusy.value = false
+  }
+}
+
+/**
+ * „Připravit a odeslat" (řádek i „vše"): nejdřív na pozadí připraví, co
+ * připravené není, pak JEDNO potvrzení se seznamem co → komu → jakou
+ * cestou a odeslání frontou podání.
+ */
+async function prepareAndSend(targets: PayrollMonthlyChecklistItem[]) {
+  if (flowBusy.value || targets.length === 0) return
+  flowBusy.value = true
+  sendSummary.value = ''
+  try {
+    const submissionIds = new Set<number>()
+    for (const item of targets) {
+      if (isDispatchable(item)) submissionIds.add(item.submission_id as number)
+    }
+    let prepared = false
+    for (const item of targets.filter(isPreparable)) {
+      const ids = await prepareOne(item)
+      ids?.forEach(id => submissionIds.add(id))
+      prepared = true
+    }
+    if (prepared) await load(true)
+    const sendable = items.value.filter(item =>
+      isDispatchable(item) && submissionIds.has(item.submission_id as number),
+    )
+    if (sendable.length > 0) await sendItems(sendable)
+  } finally {
+    flowBusy.value = false
+  }
+}
+
+async function sendItems(rows: PayrollMonthlyChecklistItem[]) {
+  const confirmed = await confirmProductionSend(
+    props.environment,
+    t('payroll.submissions.monthly_checklist.send.confirm', { count: rows.length }),
+    rows.map(item => ({
+      what: [agendaLabel(item), item.period ? formatPeriod(item.period) : '']
+        .filter(part => part !== '').join(' · '),
+      to: item.recipient.label ?? item.subject ?? t('payroll.submissions.monthly_checklist.unknown'),
+      channel: channelLabel(item),
+    })),
+  )
+  if (!confirmed) return
+
+  const byKey = new Map(rows.map(item => [item.submission_id as number, item.key]))
+  sendError.value = {}
+  mobileKeyOutboxIds.value = []
+  gatewayOutboxIds.value = []
+  manualOutboxCount.value = 0
+  outboxItemKey.clear()
+  let delivered = 0
+  let failed = 0
+  for (let index = 0; index < rows.length; index += PAYROLL_QUEUE_BATCH_SIZE) {
+    const part = rows.slice(index, index + PAYROLL_QUEUE_BATCH_SIZE)
+    try {
+      const result = await payrollApi.dispatchSubmissionBatch(
+        props.environment,
+        part.map(item => ({
+          submission_id: item.submission_id as number,
+          // Klíč je vázaný na JEDNU položku a jedno kliknutí.
+          idempotency_key: crypto.randomUUID(),
+        })),
+      )
+      for (const entry of result.results) {
+        const key = byKey.get(entry.submission_id) ?? ''
+        if (!entry.ok) {
+          failed += 1
+          sendError.value = { ...sendError.value, [key]: entry.message }
+          continue
+        }
+        const outbox = entry.outbox ?? null
+        if (outbox === null) {
+          delivered += 1
+          continue
+        }
+        outboxItemKey.set(outbox.id, key)
+        if (outbox.transport.channel === 'mobile_key') {
+          mobileKeyOutboxIds.value = [...mobileKeyOutboxIds.value, outbox.id]
+        } else if (outbox.transport.automatic) {
+          gatewayOutboxIds.value = [...gatewayOutboxIds.value, outbox.id]
+        } else {
+          manualOutboxCount.value += 1
+        }
+      }
+    } catch (exception) {
+      // Spadlá PORCE nesmí zastavit zbytek. Její řádky dostanou hlášku.
+      const message = apiErrorMessage(exception, t('payroll.submissions.queue.send_failed'))
+      for (const item of part) {
+        failed += 1
+        sendError.value = { ...sendError.value, [item.key]: message }
+      }
+    }
+  }
+  sendSummary.value = t('payroll.submissions.monthly_checklist.send.summary', {
+    sent: delivered,
+    databox: mobileKeyOutboxIds.value.length + gatewayOutboxIds.value.length + manualOutboxCount.value,
+    failed,
+  })
+  await load(true)
+}
+
+/**
+ * Jedno potvrzení Mobilního klíče odeslalo všechny zprávy dávky. Selhání
+ * jedné zprávy se ukáže u jejího řádku, ostatní tím neutrpí. Relace
+ * zůstala otevřená a doručenky se v ní dotáhnou samy.
+ */
+async function onMobileKeySent(
+  results: MobileKeyBatchItemResult[],
+  receiptSession: MobileKeyReceiptSession | null,
+) {
+  mobileKeyOutboxIds.value = []
+  let sent = 0
+  for (const result of results) {
+    if (result.dispatched) {
+      sent += 1
+      continue
+    }
+    const key = outboxItemKey.get(result.id)
+    if (key) {
+      sendError.value = {
+        ...sendError.value,
+        [key]: result.error_message ?? t('payroll.submissions.queue.send_failed'),
+      }
+    }
+  }
+  sendSummary.value = t('payroll.submissions.monthly_checklist.send.databox_sent', {
+    sent,
+    failed: results.length - sent,
+  })
+  receiptFollowUp.start(receiptSession)
+  await load(true)
+}
+
+/**
+ * Odesílací brána schvaluje každý koncept v datové schránce zvlášť — jedna
+ * autorizace na víc zpráv tam technicky nejde. Otevře se ten první.
+ */
+async function approveGatewayConcept() {
+  const first = gatewayOutboxIds.value[0]
+  if (first === undefined) return
+  try {
+    const gateway = await dataBoxApi.gatewayStartPayroll(first)
+    window.location.assign(gateway.redirect_url)
+  } catch (exception) {
+    sendSummary.value = apiErrorMessage(exception, t('payroll.submissions.queue.send_failed'))
+  }
+}
+
+/**
+ * „Načíst doručenky" u odeslaného řádku: v otevřené relaci Mobilního klíče
+ * hned, jinak na obrazovku datové schránky (nové přihlášení se tu nespouští).
+ */
+async function loadReceipts(item: PayrollMonthlyChecklistItem): Promise<boolean> {
+  receiptsBusy.value = item.key
+  try {
+    return await receiptFollowUp.now()
+  } finally {
+    receiptsBusy.value = ''
+  }
+}
+
+async function load(silent = false) {
+  if (!silent) loading.value = true
   error.value = ''
   try {
-    response.value = await payrollApi.monthlyChecklist(props.environment, period.value)
+    const loaded = await payrollApi.monthlyChecklist(props.environment, period.value)
+    const suggested = loaded.suggested_period
+    if (!embedded.value && !periodChosen && suggested && suggested !== ownPeriod.value) {
+      // Jednou: návrh serveru přebije výchozí měsíc a načte se znovu.
+      periodChosen = true
+      ownPeriod.value = suggested
+      return
+    }
+    periodChosen = true
+    response.value = loaded
   } catch (exception) {
     response.value = null
     error.value = apiErrorMessage(
@@ -226,8 +488,8 @@ async function load() {
   }
 }
 
-watch([environmentModel, period], load)
-onMounted(load)
+watch([environmentModel, period], () => { void load() })
+onMounted(() => { void load() })
 </script>
 
 <template>
@@ -242,7 +504,7 @@ onMounted(load)
             {{ t('payroll.submissions.monthly_checklist.description') }}
           </p>
         </div>
-        <button type="button" :class="btnOutlineSm('neutral')" :disabled="loading" @click="load">
+        <button type="button" :class="btnOutlineSm('neutral')" :disabled="loading" @click="load()">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.cycle" />
           </svg>
@@ -291,7 +553,7 @@ onMounted(load)
         :class="[btnOutlineSm('danger'), 'mt-3']"
         :disabled="loading"
         data-test="monthly-checklist-retry"
-        @click="load"
+        @click="load()"
       >
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path :d="ICONS.cycle" />
@@ -305,6 +567,70 @@ onMounted(load)
     </div>
 
     <template v-else-if="response">
+      <div
+        v-if="bulkItems.length || mobileKeyOutboxIds.length || gatewayOutboxIds.length || manualOutboxCount || sendSummary || followUpActive"
+        class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm shadow-sm"
+        data-test="monthly-checklist-send-bar"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="max-w-2xl text-neutral-700">
+            {{ bulkItems.length
+              ? t('payroll.submissions.monthly_checklist.send.bar_hint', { count: bulkItems.length })
+              : t('payroll.submissions.monthly_checklist.send.bar_nothing') }}
+          </p>
+          <button
+            v-if="bulkItems.length"
+            type="button"
+            :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+            :disabled="flowBusy"
+            data-test="monthly-checklist-send-all"
+            @click="prepareAndSend(bulkItems)"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ flowBusy
+              ? t('payroll.submissions.monthly_checklist.send.working')
+              : t('payroll.submissions.monthly_checklist.send.all', { count: bulkItems.length }) }}
+          </button>
+        </div>
+        <p v-if="sendSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-send-summary">
+          {{ sendSummary }}
+        </p>
+        <div v-if="mobileKeyOutboxIds.length" class="mt-3" data-test="monthly-checklist-mobile-key">
+          <p class="text-neutral-700">
+            {{ t('payroll.submissions.monthly_checklist.send.mobile_key_hint', { count: mobileKeyOutboxIds.length }) }}
+          </p>
+          <MobileKeyBatchSendButton
+            class="mt-2"
+            :outbox-ids="mobileKeyOutboxIds"
+            :environment="environment"
+            @sent="onMobileKeySent"
+          />
+        </div>
+        <div v-if="gatewayOutboxIds.length" class="mt-3" data-test="monthly-checklist-gateway">
+          <p class="text-neutral-700">
+            {{ t('payroll.submissions.monthly_checklist.send.gateway_hint', { count: gatewayOutboxIds.length }) }}
+          </p>
+          <button
+            type="button"
+            :class="[btnFilledSm('primary'), 'mt-2 whitespace-nowrap']"
+            @click="approveGatewayConcept"
+          >
+            {{ t('payroll.submissions.monthly_checklist.send.gateway_action', { current: 1, total: gatewayOutboxIds.length }) }}
+          </button>
+        </div>
+        <p v-if="manualOutboxCount" class="mt-3 text-neutral-700" data-test="monthly-checklist-manual-outbox">
+          {{ t('payroll.submissions.monthly_checklist.send.manual_hint', { count: manualOutboxCount }) }}
+          <RouterLink :to="{ name: 'admin-databox' }" class="font-medium text-primary-700 underline">
+            {{ t('payroll.submissions.monthly_checklist.send.open_databox') }}
+          </RouterLink>
+        </p>
+        <p v-if="followUpActive" class="mt-3 text-neutral-600" data-test="monthly-checklist-receipts-following">
+          {{ t('payroll.submissions.monthly_checklist.send.receipts_following') }}
+        </p>
+      </div>
+
       <dl class="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <div
           v-for="entry in (['total', 'send', 'generate', 'manual', 'await', 'done'] as const)"
@@ -401,41 +727,101 @@ onMounted(load)
                     {{ t('payroll.submissions.monthly_checklist.done_by_delivery_hint') }}
                   </p>
                   <template v-else-if="!item.done">
-                    <button
-                      v-if="item.action.prepare"
-                      type="button"
-                      :class="[actionClass(item), 'whitespace-nowrap']"
-                      :disabled="preparing === item.key"
-                      data-test="monthly-checklist-prepare"
-                      @click="prepare(item)"
-                    >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="actionIcon(item)" />
-                      </svg>
-                      {{ preparing === item.key
-                        ? t('payroll.submissions.monthly_checklist.preparing')
-                        : item.action.label }}
-                    </button>
-                    <RouterLink
-                      v-else-if="item.action.path"
-                      :to="item.action.path"
-                      :class="actionClass(item)"
-                      data-test="monthly-checklist-action"
-                    >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="actionIcon(item)" />
-                      </svg>
-                      {{ item.action.label }}
-                    </RouterLink>
-                    <span v-else class="text-xs text-neutral-500" data-test="monthly-checklist-action">
-                      {{ item.action.label }}
-                    </span>
+                    <div class="flex flex-wrap justify-end gap-2">
+                      <button
+                        v-if="isPreparable(item)"
+                        type="button"
+                        :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                        :disabled="flowBusy"
+                        data-test="monthly-checklist-prepare-send"
+                        @click="prepareAndSend([item])"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.send" />
+                        </svg>
+                        {{ preparing === item.key
+                          ? t('payroll.submissions.monthly_checklist.preparing')
+                          : t('payroll.submissions.monthly_checklist.send.prepare_and_send') }}
+                      </button>
+                      <button
+                        v-if="isPreparable(item)"
+                        type="button"
+                        :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+                        :disabled="flowBusy"
+                        data-test="monthly-checklist-prepare"
+                        @click="prepare(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.doc" />
+                        </svg>
+                        {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
+                      </button>
+                      <button
+                        v-else-if="isDispatchable(item)"
+                        type="button"
+                        :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                        :disabled="flowBusy"
+                        data-test="monthly-checklist-send"
+                        @click="prepareAndSend([item])"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.send" />
+                        </svg>
+                        {{ t('payroll.submissions.monthly_checklist.send.send') }}
+                      </button>
+                      <RouterLink
+                        v-if="!isPreparable(item) && item.action.path"
+                        :to="item.action.path"
+                        :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
+                        data-test="monthly-checklist-action"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="isDispatchable(item) ? ICONS.eye : actionIcon(item)" />
+                        </svg>
+                        {{ isDispatchable(item) ? t('payroll.submissions.monthly_checklist.send.open') : item.action.label }}
+                      </RouterLink>
+                      <span v-else-if="!isPreparable(item)" class="text-xs text-neutral-500" data-test="monthly-checklist-action">
+                        {{ item.action.label }}
+                      </span>
+                      <button
+                        v-if="awaitsReceipt(item) && followUpActive"
+                        type="button"
+                        :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                        :disabled="receiptsBusy === item.key"
+                        data-test="monthly-checklist-receipts"
+                        @click="loadReceipts(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.download" />
+                        </svg>
+                        {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
+                      </button>
+                      <RouterLink
+                        v-else-if="awaitsReceipt(item)"
+                        :to="{ name: 'admin-databox' }"
+                        :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                        data-test="monthly-checklist-receipts"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.download" />
+                        </svg>
+                        {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
+                      </RouterLink>
+                    </div>
                     <p
                       v-if="item.action.reason"
                       class="mt-1 max-w-xs text-xs text-neutral-500"
                       data-test="monthly-checklist-reason"
                     >
                       {{ item.action.reason }}
+                    </p>
+                    <p
+                      v-if="sendError[item.key]"
+                      class="mt-1 max-w-xs text-xs text-danger-600"
+                      role="alert"
+                      data-test="monthly-checklist-send-error"
+                    >
+                      {{ sendError[item.key] }}
                     </p>
                     <p
                       v-if="prepareError[item.key]"
@@ -502,30 +888,68 @@ onMounted(load)
                 v-if="item.done"
                 class="inline-flex items-center gap-1 rounded-full bg-success-50 px-2.5 py-1 text-xs font-medium text-success-700"
               >
-                {{ t('payroll.submissions.monthly_checklist.done_label') }}
+                {{ item.fulfilled_by_delivery
+                  ? t('payroll.submissions.monthly_checklist.done_by_delivery_label')
+                  : t('payroll.submissions.monthly_checklist.done_label') }}
               </span>
               <template v-else>
-                <button
-                  v-if="item.action.prepare"
-                  type="button"
-                  :class="[actionClass(item), 'whitespace-nowrap']"
-                  :disabled="preparing === item.key"
-                  data-test="monthly-checklist-prepare"
-                  @click="prepare(item)"
-                >
-                  {{ preparing === item.key
-                    ? t('payroll.submissions.monthly_checklist.preparing')
-                    : item.action.label }}
-                </button>
-                <RouterLink
-                  v-else-if="item.action.path"
-                  :to="item.action.path"
-                  :class="actionClass(item)"
-                >
-                  {{ item.action.label }}
-                </RouterLink>
-                <span v-else class="text-xs text-neutral-500">{{ item.action.label }}</span>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-if="isPreparable(item)"
+                    type="button"
+                    :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                    :disabled="flowBusy"
+                    @click="prepareAndSend([item])"
+                  >
+                    {{ preparing === item.key
+                      ? t('payroll.submissions.monthly_checklist.preparing')
+                      : t('payroll.submissions.monthly_checklist.send.prepare_and_send') }}
+                  </button>
+                  <button
+                    v-if="isPreparable(item)"
+                    type="button"
+                    :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+                    :disabled="flowBusy"
+                    @click="prepare(item)"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
+                  </button>
+                  <button
+                    v-else-if="isDispatchable(item)"
+                    type="button"
+                    :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                    :disabled="flowBusy"
+                    @click="prepareAndSend([item])"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.send.send') }}
+                  </button>
+                  <RouterLink
+                    v-if="!isPreparable(item) && item.action.path"
+                    :to="item.action.path"
+                    :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
+                  >
+                    {{ isDispatchable(item) ? t('payroll.submissions.monthly_checklist.send.open') : item.action.label }}
+                  </RouterLink>
+                  <span v-else-if="!isPreparable(item)" class="text-xs text-neutral-500">{{ item.action.label }}</span>
+                  <button
+                    v-if="awaitsReceipt(item) && followUpActive"
+                    type="button"
+                    :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                    :disabled="receiptsBusy === item.key"
+                    @click="loadReceipts(item)"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
+                  </button>
+                  <RouterLink
+                    v-else-if="awaitsReceipt(item)"
+                    :to="{ name: 'admin-databox' }"
+                    :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                  >
+                    {{ t('payroll.submissions.monthly_checklist.send.load_receipts') }}
+                  </RouterLink>
+                </div>
                 <p v-if="item.action.reason" class="mt-1 text-xs text-neutral-500">{{ item.action.reason }}</p>
+                <p v-if="sendError[item.key]" class="mt-1 text-xs text-danger-600" role="alert">{{ sendError[item.key] }}</p>
                 <p
                   v-if="prepareError[item.key]"
                   class="mt-1 text-xs text-danger-600"
@@ -555,5 +979,12 @@ onMounted(load)
         </div>
       </section>
     </template>
+    <ProductionSendConfirmDialog
+      v-if="productionSendRequest"
+      :message="productionSendRequest.message"
+      :items="productionSendRequest.items"
+      @confirm="settleProductionSend(true)"
+      @cancel="settleProductionSend(false)"
+    />
   </section>
 </template>

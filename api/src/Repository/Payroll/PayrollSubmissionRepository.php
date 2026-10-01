@@ -287,6 +287,46 @@ final class PayrollSubmissionRepository
      *   submission_status:?string
      * }>
      */
+    /**
+     * Nejstarší období (`RRRR-MM`) s nesplněnou řádnou povinností některé
+     * z daných agend v okně `[$fromPeriodStart, $toPeriodStart]`, jinak `null`.
+     * Slouží k volbě výchozího měsíce Měsíčního přehledu.
+     *
+     * @param list<string> $agendaCodes
+     */
+    public function oldestOpenRegularPeriod(
+        int $supplierId,
+        string $environment,
+        array $agendaCodes,
+        string $fromPeriodStart,
+        string $toPeriodStart,
+    ): ?string {
+        if ($agendaCodes === []) {
+            return null;
+        }
+        $placeholders = implode(', ', array_fill(0, count($agendaCodes), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT MIN(period_start)
+               FROM payroll_obligations
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND obligation_kind = "regular"
+                AND status NOT IN ("fulfilled", "cancelled")
+                AND agenda_code IN (' . $placeholders . ')
+                AND period_start BETWEEN ? AND ?',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            ...$agendaCodes,
+            $fromPeriodStart,
+            $toPeriodStart,
+        ]);
+        $value = $statement->fetchColumn();
+
+        return is_string($value) && $value !== '' ? substr($value, 0, 7) : null;
+    }
+
     public function overviewSummaryRows(
         int $supplierId,
         string $environment,

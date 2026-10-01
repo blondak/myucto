@@ -21,7 +21,18 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelCat
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
+use MyInvoice\Service\Submission\Channel\ChannelContext;
+use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
+use MyInvoice\Service\Submission\Channel\Epo\EpoChannel;
+use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
+use MyInvoice\Service\Submission\SubmissionArtifactResolver;
+use MyInvoice\Service\Submission\SubmissionArtifactValidator;
+use MyInvoice\Service\Submission\SubmissionChannelRegistry;
+use MyInvoice\Tests\Support\FakeIsdsTransport;
+use Psr\Log\NullLogger;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -47,12 +58,14 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
     private HealthInsuranceIsdsSubmissionService $isds;
     private IsdsGatewayAction $gatewayAction;
     private MockClock $clock;
+    private \Psr\Container\ContainerInterface $container;
     private int $supplierId;
     private int $userId;
 
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
+        $this->container = $container;
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);
         $outbox = $container->get(SubmissionOutboxService::class);
@@ -221,6 +234,71 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         );
 
         self::assertSame('fulfilled', $this->obligationStatus($submissionId));
+    }
+
+    /**
+     * Firma s více pojišťovnami: JEDNA autorizace (jedna relace Mobilního
+     * klíče) pošle přehledy všem třem pojišťovnám, každou zprávu jiné
+     * schránce. Po doručení jsou splněné všechny tři povinnosti.
+     */
+    public function testOneAuthorisationSendsOverviewsToThreeInsurersAndDeliveryFulfilsAll(): void
+    {
+        $transport = new FakeIsdsTransport();
+        $transport->incrementMessageIds = true;
+        $container = $this->container;
+        $sender = new SubmissionOutboxService(
+            new SubmissionOutboxRepository($this->db),
+            new SubmissionOutboxAttemptRepository($this->db),
+            new SubmissionRecipientRepository($this->db),
+            new SubmissionChannelRegistry(
+                $container->get(EpoChannel::class),
+                new IsdsChannel($transport),
+            ),
+            $container->get(SubmissionArtifactResolver::class),
+            $container->get(SubmissionArtifactValidator::class),
+            new NullLogger(),
+            $container->get(PayrollSubmissionDispatchProjection::class),
+        );
+
+        $outboxIds = [];
+        $submissionIds = [];
+        foreach (['205', '207', '213'] as $insurer) {
+            $submissionId = $this->readySubmission('batch-' . $insurer, $insurer);
+            $queued = $this->isds->enqueue($this->supplierId, $submissionId, $insurer, $this->userId);
+            $submissionIds[] = $submissionId;
+            $outboxIds[] = (int) $queued['outbox_id'];
+        }
+
+        $results = $sender->confirmAndSendBatch(
+            $this->supplierId,
+            $outboxIds,
+            $this->userId,
+            new ChannelContext($this->supplierId, 'production', new ChannelCredentials('zzzzzzz', 'certificate')),
+        );
+
+        self::assertCount(3, $results);
+        foreach ($results as $result) {
+            self::assertTrue($result['dispatched'], (string) $result['error_message']);
+        }
+        self::assertCount(3, $transport->sentMessages, 'Každá pojišťovna dostane svou zprávu.');
+        self::assertCount(
+            3,
+            array_unique(array_map(
+                static fn (array $row): string => (string) $row['recipient_box_id'],
+                array_column($results, 'row'),
+            )),
+        );
+
+        foreach ($outboxIds as $outboxId) {
+            $sender->applyStatus(
+                $this->supplierId,
+                $outboxId,
+                ChannelStatus::deliveredOnly(new \DateTimeImmutable('+1 second')),
+            );
+        }
+        foreach ($submissionIds as $submissionId) {
+            self::assertSame('fulfilled', $this->obligationStatus($submissionId));
+        }
     }
 
     /** Odeslání bez doloženého dodání povinnost neuzavře. */

@@ -4,13 +4,23 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   monthlyChecklist: vi.fn(),
   prepareItem: vi.fn(),
+  dispatchBatch: vi.fn(),
   push: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
+  PAYROLL_QUEUE_BATCH_SIZE: 25,
   payrollApi: {
     monthlyChecklist: m.monthlyChecklist,
     prepareMonthlyChecklistItem: m.prepareItem,
+    dispatchSubmissionBatch: m.dispatchBatch,
+  },
+}))
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: {
+    downloadReceiptsInMobileKeySession: vi.fn(),
+    gatewayStartPayroll: vi.fn(),
+    mobileKeyProfile: vi.fn().mockResolvedValue({ saved: true, username: 'x', environment: 'production' }),
   },
 }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
@@ -68,6 +78,10 @@ function mountPanel() {
     props: { environment: 'production' },
     global: {
       stubs: {
+        Modal: {
+          props: ['title', 'widthClass'],
+          template: '<div data-test="modal"><slot /><slot name="footer" /></div>',
+        },
         RouterLink: { props: ['to'], template: '<a :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>' },
       },
     },
@@ -499,10 +513,11 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(wrapper.find('[data-test="monthly-checklist-action"]').exists()).toBe(false)
     const button = wrapper.get('tbody [data-test="monthly-checklist-prepare"]')
     expect(button.element.tagName).toBe('BUTTON')
-    expect(button.text()).toContain('Připravit')
+    expect(button.text()).toContain('prepare_only')
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').text()).toContain('prepare_and_send')
   })
 
-  it('kliknutí připraví právě tu agendu, období a pojišťovnu a otevře výsledek', async () => {
+  it('„Jen připravit" připraví právě tu agendu, období a pojišťovnu a zůstane v přehledu', async () => {
     m.monthlyChecklist.mockResolvedValue(baseResponse({
       summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
       items: [agendaDutyItem()],
@@ -527,9 +542,151 @@ describe('PayrollMonthlyChecklistPanel', () => {
       insurer_code: '111',
     })
     // Přehled se musí přečíst znovu, jinak by řádek zůstal „nepřipraveno"
-    // i po tom, co podání vzniklo.
+    // i po tom, co podání vzniklo. Na záložku agendy se už nepřechází.
     expect(m.monthlyChecklist).toHaveBeenCalledTimes(2)
-    expect(m.push).toHaveBeenCalledWith('/payroll/submissions/health')
+    expect(m.push).not.toHaveBeenCalled()
+    expect(m.dispatchBatch).not.toHaveBeenCalled()
+  })
+
+  it('„Připravit a odeslat" připraví, po potvrzení odešle frontou a nabídne jedno potvrzení Mobilním klíčem', async () => {
+    const prepared = {
+      ...agendaDutyItem(),
+      key: 'submission:9',
+      source: 'submission',
+      status: 'ready',
+      submission_id: 42,
+      dispatchable: true,
+      dispatch_mode: 'isds_health',
+      action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/health', reason: null, prepare: null },
+    }
+    m.monthlyChecklist
+      .mockResolvedValueOnce(baseResponse({ items: [agendaDutyItem()] }))
+      .mockResolvedValue(baseResponse({ items: [prepared] }))
+    m.prepareItem.mockResolvedValue({ submission_ids: [42], prepared: 1, path: '/payroll/submissions/health' })
+    m.dispatchBatch.mockResolvedValue({
+      environment: 'production',
+      summary: { requested: 1, sent: 1, failed: 0 },
+      results: [{
+        ok: true,
+        submission_id: 42,
+        dispatched: true,
+        message: '',
+        mode: 'isds_health',
+        outbox: {
+          id: 77,
+          created: true,
+          recipient: { box_id: 'abcdefg', name: 'VZP' },
+          subject: 'PPPZ',
+          transport: { automatic: false, channel: 'mobile_key', reason: null },
+        },
+      }],
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').trigger('click')
+    await flushPromises()
+
+    // Ostré prostředí: jedno potvrzení se seznamem co → komu → jakou cestou.
+    const dialog = wrapper.get('[data-test="production-send-confirm-items"]')
+    expect(dialog.text()).toContain('VZP (111)')
+    expect(dialog.text()).toContain('channel_isds')
+    expect(m.dispatchBatch).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="production-send-confirm-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.dispatchBatch).toHaveBeenCalledWith('production', [
+      { submission_id: 42, idempotency_key: expect.any(String) },
+    ])
+    expect(wrapper.find('[data-test="monthly-checklist-mobile-key"]').exists()).toBe(true)
+    expect(m.push).not.toHaveBeenCalled()
+  })
+
+  it('„Připravit a odeslat vše" pokryje nepřipravené i připravené řádky jedním potvrzením', async () => {
+    const ready = {
+      ...agendaDutyItem(),
+      key: 'submission:3',
+      source: 'submission',
+      status: 'ready',
+      submission_id: 30,
+      dispatchable: true,
+      dispatch_mode: 'vrep_jmhz',
+      agenda_code: 'JMHZ25',
+      action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/jmhz', reason: null, prepare: null },
+    }
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [ready] }))
+    m.dispatchBatch.mockResolvedValue({
+      environment: 'production',
+      summary: { requested: 1, sent: 1, failed: 0 },
+      results: [{ ok: true, submission_id: 30, dispatched: true, message: '', mode: 'vrep_jmhz', outbox: null }],
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="monthly-checklist-send-all"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="production-send-confirm-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareItem).not.toHaveBeenCalled()
+    expect(m.dispatchBatch).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="monthly-checklist-send-summary"]').text()).toContain('1')
+  })
+
+  it('zrušené potvrzení nic neodešle', async () => {
+    const ready = {
+      ...agendaDutyItem(),
+      key: 'submission:3',
+      source: 'submission',
+      status: 'ready',
+      submission_id: 30,
+      dispatchable: true,
+      dispatch_mode: 'vrep_jmhz',
+      action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/jmhz', reason: null, prepare: null },
+    }
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [ready] }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-send"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="production-send-confirm-no"]').trigger('click')
+    await flushPromises()
+
+    expect(m.dispatchBatch).not.toHaveBeenCalled()
+  })
+
+  it('u odeslané zprávy bez doručenky nabídne Načíst doručenky', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [{
+      ...agendaDutyItem(),
+      key: 'submission:4',
+      source: 'submission',
+      status: 'submitted',
+      submission_id: 40,
+      dispatchable: false,
+      dispatch_mode: 'isds_health',
+      dispatch: { outbox_id: 5, dispatch_state: 'sent', delivered_at: null, has_receipt: false, delivery_proof: null },
+      action: { kind: 'await', label: 'Čeká na doručení', path: '/payroll/submissions/health', reason: null, prepare: null },
+    }] }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const receipts = wrapper.get('tbody [data-test="monthly-checklist-receipts"]')
+    expect(receipts.text()).toContain('load_receipts')
+    expect(wrapper.find('tbody [data-test="monthly-checklist-send"]').exists()).toBe(false)
+  })
+
+  it('bez zvoleného měsíce otevře měsíc navržený serverem', async () => {
+    m.monthlyChecklist
+      .mockResolvedValueOnce(baseResponse({ period: '2026-07', suggested_period: '2026-05' }))
+      .mockResolvedValue(baseResponse({ period: '2026-05', suggested_period: '2026-05' }))
+
+    mountPanel()
+    await flushPromises()
+
+    expect(m.monthlyChecklist).toHaveBeenLastCalledWith('production', '2026-05')
   })
 
   /**
@@ -591,7 +748,7 @@ describe('PayrollMonthlyChecklistPanel', () => {
       insurer_code: '111',
       confirm_late_discount: true,
     })
-    expect(m.push).toHaveBeenCalledWith('/payroll/submissions/jmhz')
+    expect(m.push).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="monthly-checklist-external-link"]').exists()).toBe(false)
   })
 
