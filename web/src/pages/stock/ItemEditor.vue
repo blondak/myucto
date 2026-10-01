@@ -1441,7 +1441,7 @@ function onImgError(e: Event) {
 </script>
 
 <template>
-  <div class="max-w-4xl">
+  <div class="max-w-7xl">
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-semibold">{{ isEdit ? t('stock.items.edit_title') : t('stock.items.new_title') }}</h1>
       <RouterLink to="/stock/items" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('stock.item_detail.back_to_list') }}</RouterLink>
