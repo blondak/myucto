@@ -314,7 +314,27 @@ export interface ImportWarning {
   skipped?: number
 }
 
+export interface IgnoreNoticeCandidate {
+  index: number
+  notice_id: number
+  posted_at: string
+  notice_date: string
+  amount: number
+  currency: string
+  variable_symbol: string | null
+  counterparty: string | null
+  counterparty_account: string
+  reason: 'variable_symbol' | 'counterparty_account'
+  ignore_note: string | null
+}
+export interface IgnoreNoticePreview {
+  fingerprint: string
+  candidates: IgnoreNoticeCandidate[]
+}
+export type IgnoreNoticeDecision = { skip: true } | { fingerprint: string; selected: number[] }
+
 export interface ImportResult {
+  ignored_transferred?: number
   statement_id: number
   transactions: number
   matched: number
@@ -451,9 +471,10 @@ export const bankApi = {
    * u víceměnového účtu se sdíleným číslem účtu, kdy server vrátí 409
    * `ambiguous_account_currency` se seznamem kandidátů (#167).
    */
-  upload: (file: File, accountId?: number, reconciliationConfirmations: string[] = []) => {
+  upload: (file: File, accountId?: number, reconciliationConfirmations: string[] = [], ignoreDecision?: IgnoreNoticeDecision) => {
     const fd = new FormData()
     fd.append('file', file)
+    if (ignoreDecision !== undefined) fd.append('ignore_decision', JSON.stringify(ignoreDecision))
     if (accountId !== undefined) fd.append('account_id', String(accountId))
     if (reconciliationConfirmations.length > 0) {
       fd.append('reconciliation_confirmations', JSON.stringify(reconciliationConfirmations))
@@ -466,9 +487,10 @@ export const bankApi = {
    * Nahraje a rozparsuje PDF výpis banky bez GPC/ABO exportu (Creditas jako první,
    * rozšiřitelné). Stejná 409 `ambiguous_account_currency` volba účtu jako `upload()`.
    */
-  importPdf: (file: File, accountId?: number) => {
+  importPdf: (file: File, accountId?: number, ignoreDecision?: IgnoreNoticeDecision) => {
     const fd = new FormData()
     fd.append('file', file)
+    if (ignoreDecision !== undefined) fd.append('ignore_decision', JSON.stringify(ignoreDecision))
     if (accountId !== undefined) fd.append('account_id', String(accountId))
     return api.post<ImportResult>('/bank-statements/upload-pdf', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },

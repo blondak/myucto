@@ -200,6 +200,7 @@ final class BankTransactionReleaseService
                 SET matched_invoice_id = NULL,
                     match_status       = 'unmatched',
                     ignore_note        = NULL,
+                    ignore_origin      = NULL,
                     matched_at         = NULL,
                     matched_by         = NULL
               WHERE id = ?"

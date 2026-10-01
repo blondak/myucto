@@ -46,7 +46,7 @@ final class StatementImporter
      *               parsed_transactions:int, skipped_duplicates:int, superseded_notices:int,
      *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
      */
-    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null): array
+    public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null, ?array $ignoreDecision = null): array
     {
         // Volající, který výpis už rozparsoval kvůli hlavičce, ho předá - soubor se
         // nečte podruhé.
@@ -54,7 +54,7 @@ final class StatementImporter
         $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
         $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
         if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
-            return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false, $reconciliationConfirmations);
+            return $this->importScoped($parsed, $content, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'gpc', false, $reconciliationConfirmations, $ignoreDecision);
         }
         return $this->persist($parsed, $content, $fileName, $userId, $currencyId, 'gpc');
     }
@@ -69,25 +69,25 @@ final class StatementImporter
         return $this->importScoped($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, true, $reconciliationConfirmations);
     }
 
-    private function importScoped(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = []): array
+    private function importScoped(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = [], ?array $ignoreDecision = null): array
     {
         $pdo = $this->db->pdo();
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
-            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations);
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations, $ignoreDecision);
         }
         $name = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->db, 'bank-import', (string) $supplierId);
         $lock = $pdo->prepare('SELECT GET_LOCK(?, 30)');
         $lock->execute([$name]);
         if ((int) $lock->fetchColumn() !== 1) throw new \RuntimeException('Probíhá jiný import bankovních pohybů této firmy. Opakujte načtení později.');
         try {
-            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations);
+            return $this->importScopedLocked($parsed, $content, $fileName, $userId, $currencyId, $supplierId, $source, $requireActive, $reconciliationConfirmations, $ignoreDecision);
         } finally {
             $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
             $release->execute([$name]);
         }
     }
 
-    private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = []): array
+    private function importScopedLocked(array $parsed, string $content, string $fileName, ?int $userId, int $currencyId, int $supplierId, string $source, bool $requireActive, array $reconciliationConfirmations = [], ?array $ignoreDecision = null): array
     {
         if (!in_array($source, ['gpc', 'bank_api', 'pdf'], true)) {
             throw new \InvalidArgumentException('Unsupported connected statement source.');
@@ -119,7 +119,7 @@ final class StatementImporter
                 $parsed['header']['account_number'] = trim((string) $account['account_number']);
             }
             $processingIds = [];
-            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds, $reconciliationConfirmations);
+            $result = $this->persist($parsed, $content, $fileName, $userId, $currencyId, $source, true, $processingIds, $reconciliationConfirmations, $supplierId, $ignoreDecision);
             $scope = $pdo->prepare("SELECT id FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = ? AND currency = ? AND COALESCE(bank_code, '') = ?");
             $scope->execute([$result['statement_id'], $supplierId, $source, $account['code'], $account['bank_code'] ?? '']);
             if ($scope->fetchColumn() === false) {
@@ -136,9 +136,11 @@ final class StatementImporter
                 $affectedStatements[] = (int) $owner['id'];
             }
             $monthly = new BankApiMonthlyStatements($pdo);
+            // PDF za období se do měsíčního výpisu neskládá (BankApiMonthlyStatements::PROJECTABLE),
+            // zůstává samostatným dokladem i na účtu, který jinak skládá.
             if ($source === 'bank_api'
                 || ($parsed['header']['period_kind'] ?? 'period') === 'day'
-                || $monthly->aggregatesMonthly($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
+                || $source !== 'pdf' && $monthly->aggregatesMonthly($supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'])) {
                 $months = $monthly->projectAccount(
                     $supplierId, (string) $parsed['header']['account_number'], (string) ($account['bank_code'] ?? ''), (string) $account['code'], $userId,
                 );
@@ -192,17 +194,18 @@ final class StatementImporter
      *
      * @param array{header:array,transactions:list<array>} $parsed
      */
-    public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null, ?int $supplierId = null): array
+    public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null, ?int $supplierId = null, ?array $ignoreDecision = null): array
     {
         // Denní výpis („výpis při pohybu") se v přehledu nezobrazuje samostatně —
         // skládá se do měsíčního výpisu účtu stejně jako pohyby ze strojového feedu.
         // Projekci umí jen scoped cesta (zámek + transakce), a ta potřebuje jednoznačný
         // měnový účet firmy; bez něj se výpis uloží postaru, jako samostatný doklad.
-        if (($parsed['header']['period_kind'] ?? 'period') === 'day') {
+        // Potvrzený přenos ignorování také potřebuje atomické uložení pod zámkem účtu.
+        if ($ignoreDecision !== null || ($parsed['header']['period_kind'] ?? 'period') === 'day') {
             $account = $currencyId !== null ? $this->loadCurrencyById($currencyId) : $this->lookupAccount($parsed['header']['account_number']);
             $owner = $currencyId !== null ? $account : $this->lookupRegisteredOwner($parsed['header']['account_number']);
             if (!empty($account['id']) && !empty($owner['supplier_id']) && $owner['supplier_id'] === $account['supplier_id']) {
-                return $this->importScoped($parsed, $pdfBytes, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'pdf', false);
+                return $this->importScoped($parsed, $pdfBytes, $fileName, $userId, (int) $account['id'], (int) $account['supplier_id'], 'pdf', false, [], $ignoreDecision);
             }
         }
         $processingIds = null;
@@ -214,7 +217,7 @@ final class StatementImporter
      * @param string $rawBytes Originální bajty souboru — hashují se pro dedup a ukládají
      *   se buď do file_content (source='gpc') nebo pdf_content (source='pdf').
      */
-    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = [], ?int $supplierId = null): array
+    private function persist(array $parsed, string $rawBytes, string $fileName, ?int $userId, ?int $currencyId, string $source, bool $deferProcessing = false, ?array &$processingIds = null, array $reconciliationConfirmations = [], ?int $supplierId = null, ?array $ignoreDecision = null): array
     {
         $hash = hash('sha256', $rawBytes);
         $pdo = $this->db->pdo();
@@ -252,6 +255,7 @@ final class StatementImporter
                 'transactions' => 0,
                 'matched' => 0,
                 'duplicate' => true,
+                'ignored_transferred' => 0,
                 'parsed_transactions' => count($parsed['transactions']),
                 'skipped_duplicates' => 0,
                 'warnings' => [],
@@ -289,6 +293,33 @@ final class StatementImporter
                 $reconciliationConfirmations, array_column($identities, 'fingerprint'),
                 array_column($identities, 'candidates'),
             ) : [];
+
+        // Evidované pohyby a převzaté otisky pro všechny kandidáty souboru se načtou
+        // předem po dávkách, ne dotazem na každý řádek a kandidáta. Co tahle smyčka sama
+        // založí nebo propojí, se do map doplňuje, takže pozdější řádky souboru to vidí
+        // stejně, jako by se ptaly databáze.
+        $allCandidates = array_values(array_unique(array_merge(...array_map(
+            static fn (array $identity): array => $identity['candidates'],
+            array_values($identities),
+        ) ?: [[]])));
+        $storedIds = $this->storedFingerprints($pdo, $allCandidates, $statementSupplierId);
+        $aliasMap = $deferProcessing ? $this->aliasFingerprints($pdo, $allCandidates, $statementSupplierId) : [];
+
+        $transfer = new IgnoreNoticeTransfer($this->db);
+        $selectedIgnores = [];
+        if ($ignoreDecision !== null && $account !== null && $statementSupplierId !== null) {
+            $excluded = array_keys($crossSource);
+            foreach ($identities as $index => $identity) {
+                foreach ($identity['candidates'] as $candidate) {
+                    if (isset($storedIds[$candidate]) || !empty($aliasMap[$candidate])) {
+                        $excluded[] = $index;
+                        break;
+                    }
+                }
+            }
+            $selectedIgnores = $transfer->select($parsed['transactions'], $account, $hash, $ignoreDecision, $excluded);
+        }
+        $ignoredTransferred = 0;
 
         if ($statementSupplierId !== null) {
             $this->ownAccounts?->registerSeen(
@@ -342,17 +373,6 @@ final class StatementImporter
             'INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id)
              SELECT ?, ?, ?, bs.supplier_id, bs.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?'
         ) : null;
-
-        // Evidované pohyby a převzaté otisky pro všechny kandidáty souboru se načtou
-        // předem po dávkách, ne dotazem na každý řádek a kandidáta. Co tahle smyčka sama
-        // založí nebo propojí, se do map doplňuje, takže pozdější řádky souboru to vidí
-        // stejně, jako by se ptaly databáze.
-        $allCandidates = array_values(array_unique(array_merge(...array_map(
-            static fn (array $identity): array => $identity['candidates'],
-            array_values($identities),
-        ) ?: [[]])));
-        $storedIds = $this->storedFingerprints($pdo, $allCandidates, $statementSupplierId);
-        $aliasMap = $deferProcessing ? $this->aliasFingerprints($pdo, $allCandidates, $statementSupplierId) : [];
 
         $matched = 0;
         $inserted = 0;
@@ -419,7 +439,12 @@ final class StatementImporter
             if ($deferProcessing) $processingIds[] = $txId;
             $inserted++;
 
-            $matchIds[] = $txId;
+            if (isset($selectedIgnores[$index])) {
+                $transfer->apply($txId, $selectedIgnores[$index], $statementSupplierId, $userId);
+                $ignoredTransferred++;
+            } else {
+                $matchIds[] = $txId;
+            }
         }
 
         $processed = $deferProcessing
@@ -463,6 +488,7 @@ final class StatementImporter
             'transactions'        => $inserted,
             'matched'             => $matched,
             'duplicate'           => false,
+            'ignored_transferred'  => $ignoredTransferred,
             'parsed_transactions' => $parsedCount,
             'skipped_duplicates'  => $skipped,
             'superseded_notices'  => $processed['superseded'],
@@ -802,12 +828,14 @@ final class StatementImporter
      */
     private function loadCurrencyById(int $currencyId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, supplier_id, code, bank_code FROM currencies WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT id, supplier_id, account_number, iban, code, bank_code FROM currencies WHERE id = ?');
         $stmt->execute([$currencyId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
         return [
             'id'        => (int) $row['id'],
+            'account_number' => $row['account_number'],
+            'iban' => $row['iban'],
             'supplier_id' => (int) $row['supplier_id'],
             'code'      => (string) $row['code'],
             'bank_code' => isset($row['bank_code']) && (string) $row['bank_code'] !== '' ? (string) $row['bank_code'] : null,

@@ -278,7 +278,10 @@ final class BankStatementAction
                 $resolved['currency_id'],
                 $reconciliationConfirmations,
                 $parsed,
+                $this->ignoreDecision($request),
             );
+        } catch (\MyInvoice\Service\Bank\IgnoreNoticeConfirmationRequired $e) {
+            return Json::error($response, 'ignored_notices_confirmation', $e->getMessage(), 409, $e->preview);
         } catch (StatementReconciliationException $e) {
             return Json::error(
                 $response,
@@ -410,7 +413,9 @@ final class BankStatementAction
         }
 
         try {
-            $r = $this->importer->importParsedPdf($parsed, $pdfBytes, $name, (int) ($user['id'] ?? 0), $resolved['currency_id']);
+            $r = $this->importer->importParsedPdf($parsed, $pdfBytes, $name, (int) ($user['id'] ?? 0), $resolved['currency_id'], SupplierGuard::currentId($request), $this->ignoreDecision($request));
+        } catch (\MyInvoice\Service\Bank\IgnoreNoticeConfirmationRequired $e) {
+            return Json::error($response, 'ignored_notices_confirmation', $e->getMessage(), 409, $e->preview);
         } catch (\Throwable $e) {
             return Json::error($response, 'parse_failed', 'Nelze parsovat: ' . $e->getMessage(), 400);
         }
@@ -563,6 +568,20 @@ final class BankStatementAction
         }
 
         return $covered / count($transactions) >= self::PDF_ATTACH_MIN_COVERAGE;
+    }
+
+    private function ignoreDecision(Request $request): array
+    {
+        $raw = ((array) $request->getParsedBody())['ignore_decision'] ?? null;
+        if ($raw === null) return [];
+        if (!is_string($raw)) throw new \InvalidArgumentException('Neplatné potvrzení ignorování.');
+        $decision = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
+        if (!is_array($decision)) throw new \InvalidArgumentException('Neplatné potvrzení ignorování.');
+        if (($decision['skip'] ?? false) === true) return ['skip' => true];
+        if (!is_string($decision['fingerprint'] ?? null) || !is_array($decision['selected'] ?? null)) {
+            throw new \InvalidArgumentException('Neplatné potvrzení ignorování.');
+        }
+        return $decision;
     }
 
     /**
@@ -4191,7 +4210,7 @@ final class BankStatementAction
                     return Json::error($response, $pe->errorCode, $pe->getMessage(), $pe->httpStatus);
                 }
             }
-            $pdo->prepare("UPDATE bank_transactions SET match_status = 'ignored', ignore_note = ? WHERE id = ?")->execute([$note, $txId]);
+            $pdo->prepare("UPDATE bank_transactions SET match_status = 'ignored', ignore_origin = 'manual', ignore_note = ? WHERE id = ?")->execute([$note, $txId]);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {

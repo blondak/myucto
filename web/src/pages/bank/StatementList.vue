@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { bankApi, type BankStatement, type BankAccountOption, type ImportResult, type AmbiguousAccount } from '@/api/bank'
+import { bankApi, type BankStatement, type BankAccountOption, type ImportResult, type AmbiguousAccount, type IgnoreNoticePreview, type IgnoreNoticeDecision } from '@/api/bank'
 import { clientsApi, type Client } from '@/api/clients'
 import type { AxiosError } from 'axios'
 import { formatMoney, formatDate } from '@/composables/useFormat'
@@ -12,6 +12,7 @@ import { bankReconciliationCandidates } from '@/utils/bankConnectionError'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import Modal from '@/components/ui/Modal.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -458,17 +459,48 @@ async function downloadStatementFile(url: string | undefined, fallbackName: stri
 // Jeden vstup pro GPC/ABO i PDF — rozhoduje se PER SOUBOR podle přípony (uživatel
 // může naráz vybrat mix obojího), backend endpointy zůstávají oddělené (GPC parser
 // vs bank-specifický PDF parser — Creditas/ČSOB/KB/Raiffeisenbank, viz BankStatementPdfParserRegistry).
+const ignorePreview = ref<(IgnoreNoticePreview & { fileName: string }) | null>(null)
+const ignoreSelected = ref<number[]>([])
+const allIgnoreSelected = computed(() => !!ignorePreview.value?.candidates.length
+  && ignorePreview.value.candidates.every(candidate => ignoreSelected.value.includes(candidate.index)))
+
+function toggleAllIgnoreSelected() {
+  ignoreSelected.value = allIgnoreSelected.value ? [] : (ignorePreview.value?.candidates.map(candidate => candidate.index) ?? [])
+}
+
+let ignoreResolver: ((decision: IgnoreNoticeDecision | null) => void) | null = null
+let disposed = false
+
+function finishIgnorePreview(decision: IgnoreNoticeDecision | null) {
+  ignorePreview.value = null
+  ignoreResolver?.(decision)
+  ignoreResolver = null
+}
+
+function confirmIgnorePreview() {
+  if (!ignorePreview.value) return
+  finishIgnorePreview({ fingerprint: ignorePreview.value.fingerprint, selected: [...ignoreSelected.value] })
+}
+
+onBeforeUnmount(() => {
+  disposed = true
+  finishIgnorePreview(null)
+  cancelAmbiguity()
+  cancelReconciliation()
+})
+
 async function uploadStatementFile(file: File): Promise<ImportResult | null> {
   const isPdf = file.name.toLowerCase().endsWith('.pdf')
   let accountId: number | undefined
   let reconciliationConfirmations: string[] = []
   let accountPrompted = false
+  let decision: IgnoreNoticeDecision | undefined
 
-  while (true) {
+  while (!disposed) {
     try {
       return isPdf
-        ? await bankApi.importPdf(file, accountId)
-        : await bankApi.upload(file, accountId, reconciliationConfirmations)
+        ? await bankApi.importPdf(file, accountId, decision)
+        : await bankApi.upload(file, accountId, reconciliationConfirmations, decision)
     } catch (e) {
       const accounts = ambiguousCandidates(e)
       if (accounts && !accountPrompted) {
@@ -487,9 +519,17 @@ async function uploadStatementFile(file: File): Promise<ImportResult | null> {
         continue
       }
 
-      throw e
+      const data = (e as AxiosError<{ error?: IgnoreNoticePreview & { code?: string } }>).response?.data?.error
+      if (data?.code !== 'ignored_notices_confirmation' || !Array.isArray(data.candidates)) throw e
+      if (disposed) return null
+      ignoreSelected.value = []
+      ignorePreview.value = { ...data, fileName: file.name }
+      const selected = await new Promise<IgnoreNoticeDecision | null>(resolve => { ignoreResolver = resolve })
+      if (selected === null) return null
+      decision = selected
     }
   }
+  return null
 }
 
 async function onFileSelected(e: Event) {
@@ -513,6 +553,7 @@ async function onFileSelected(e: Event) {
 
   const results: ImportResult[] = []
   for (const file of files) {
+    if (disposed) break
     try {
       const result = await uploadStatementFile(file)
       if (result !== null) results.push(result)
@@ -521,6 +562,7 @@ async function onFileSelected(e: Event) {
       errors.push(`${file.name}: ${apiErrorMessage(e)}`)
     }
   }
+  if (disposed) return
   // #19: `duplicate=true` = celý soubor (file_hash) je znovunahraný — očekávaná
   // duplicita, klidně jen do `duplicateCount` v souhrnu/banneru. Naproti tomu `warnings`
   // s kódem transactions_skipped_as_duplicate znamená JINAK NOVÝ výpis, u kterého
@@ -540,6 +582,8 @@ async function onFileSelected(e: Event) {
     }
   }
 
+  const transferred = results.reduce((sum, r) => sum + (r.ignored_transferred ?? 0), 0)
+  if (transferred > 0) toast.success(t('bank.ignore_transfer.done', { count: transferred }))
   await load()
 
   // Single-file mode: zachovat původní UX (redirect na detail nové faktury)
@@ -595,7 +639,7 @@ async function onFileSelected(e: Event) {
         <label v-if="authStore.canWrite('bank.import')" :class="btnFilled('primary')" :title="t('bank.upload_hint')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ uploading ? '…' : t('bank.upload_gpc') }}
-          <input type="file" accept=".gpc,.txt,.pdf,*/*" multiple class="hidden" @change="onFileSelected" />
+          <input type="file" accept=".gpc,.txt,.pdf,*/*" multiple :disabled="uploading" class="hidden" @change="onFileSelected" />
         </label>
       </div>
     </div>
@@ -948,4 +992,29 @@ async function onFileSelected(e: Event) {
       </div>
     </div>
   </div>
+  <Modal v-if="ignorePreview" :title="t('bank.ignore_transfer.title')" width-class="max-w-2xl" @close="finishIgnorePreview(null)">
+    <p class="font-medium mb-2 break-words">{{ ignorePreview.fileName }}</p>
+    <p class="text-sm text-neutral-600 mb-4">{{ t('bank.ignore_transfer.intro') }}</p>
+    <p v-if="ignorePreview.candidates.length === 0" class="text-sm mb-4">{{ t('bank.ignore_transfer.changed') }}</p>
+    <label v-if="ignorePreview.candidates.length" class="flex items-center gap-3 mb-3 text-sm cursor-pointer">
+      <input type="checkbox" :checked="allIgnoreSelected" :indeterminate="ignoreSelected.length > 0 && !allIgnoreSelected" @change="toggleAllIgnoreSelected" />
+      <span>{{ t('common.select_all') }}</span>
+    </label>
+    <label v-for="candidate in ignorePreview.candidates" :key="candidate.index" class="flex gap-3 p-3 border border-neutral-200 rounded-md mb-2 cursor-pointer">
+      <input v-model="ignoreSelected" type="checkbox" :value="candidate.index" class="mt-1 shrink-0" />
+      <span class="min-w-0 text-sm">
+        <span class="block font-medium">{{ formatMoney(candidate.amount, candidate.currency) }} · {{ candidate.counterparty || candidate.counterparty_account }}</span>
+        <span class="block">{{ t('bank.ignore_transfer.dates', { statement: formatDate(candidate.posted_at), notice: formatDate(candidate.notice_date) }) }}</span>
+        <span class="block text-neutral-500">{{ t(candidate.reason === 'variable_symbol' ? 'bank.ignore_transfer.by_vs' : 'bank.ignore_transfer.by_account') }}: {{ candidate.variable_symbol || candidate.counterparty_account }}</span>
+        <span v-if="candidate.ignore_note" class="block whitespace-pre-wrap break-words">{{ t('bank.ignore_note_label') }}: {{ candidate.ignore_note }}</span>
+      </span>
+    </label>
+    <template #footer>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" @click="finishIgnorePreview(null)" :class="btnOutline('neutral')" class="whitespace-nowrap"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
+        <button type="button" @click="finishIgnorePreview({ skip: true })" :class="btnOutline('neutral')" class="whitespace-nowrap"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>{{ t('bank.ignore_transfer.skip') }}</button>
+        <button type="button" :disabled="ignoreSelected.length === 0" @click="confirmIgnorePreview" :class="btnFilled('primary')" class="whitespace-nowrap"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>{{ t('bank.ignore_transfer.confirm', { count: ignoreSelected.length }) }}</button>
+      </div>
+    </template>
+  </Modal>
 </template>

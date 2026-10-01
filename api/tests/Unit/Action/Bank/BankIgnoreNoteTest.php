@@ -36,8 +36,8 @@ final class BankIgnoreNoteTest extends TestCase
     {
         $sqlite = new PDO('sqlite::memory:');
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT)');
-        $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'unmatched', NULL, NULL)");
+        $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, ignore_origin TEXT)');
+        $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'unmatched', NULL, NULL, NULL)");
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
@@ -98,8 +98,8 @@ final class BankIgnoreNoteTest extends TestCase
     {
         $sqlite = new PDO('sqlite::memory:');
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER)');
-        $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL)");
+        $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER, ignore_origin TEXT)');
+        $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL, 'manual')");
         $sqlite->exec('CREATE TABLE bank_statements (id INTEGER, matched_count INTEGER)');
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
