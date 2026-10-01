@@ -23457,6 +23457,7 @@
     "freq_daily_0235": "denně v 02:35",
     "freq_daily_0240": "denně v 02:40",
     "freq_daily_0300": "denně v 03:00",
+    "freq_daily_0315": "denně v 03:15",
     "freq_daily_0400": "denně v 04:00",
     "freq_daily_0500": "denně v 05:00",
     "freq_daily_0600": "denně v 06:00",
@@ -27127,7 +27128,7 @@
       "not_configured": "chybí nastavený adresář, se kterým úloha pracuje",
       "feature_off": "funkce, kterou úloha obsluhuje, není u žádné firmy zapnutá",
       "managed_only": "patří jen ke spravovanému provozu",
-      "not_enabled": "není zapnutá v konfiguraci (volitelný hlídač cizích zdrojů)",
+      "not_enabled": "není zapnutá v konfiguraci (volitelná úloha)",
       "disabled_by_config": "vypnuto konfigurací (cron.disabled_jobs)",
       "not_in_use": "úloha nemá co obsluhovat",
       "not_in_use_by_script": {

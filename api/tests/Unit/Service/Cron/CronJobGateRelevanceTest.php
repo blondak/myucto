@@ -54,6 +54,41 @@ final class CronJobGateRelevanceTest extends TestCase
         self::assertFalse($gate->isSchedulable($this->job('cron-storage-usage')));
     }
 
+    /**
+     * Úklid záloh je ve spravovaném provozu povinný, na self-hostu opt-in:
+     * tam bývají naše zálohy jediné, co zákazník má.
+     */
+    public function testRetentionIsMandatoryWhenManagedAndOptInOnSelfHost(): void
+    {
+        $job = $this->job('cron-retention');
+
+        $selfHost = new CronJobGate(new Config([]), null);
+        self::assertSame(CronJobGate::INACTIVE_NOT_ENABLED, $selfHost->inactiveReason($job));
+        self::assertFalse($selfHost->isSchedulable($job));
+
+        $optedIn = new CronJobGate(new Config(['cron' => ['retention' => ['enabled' => true]]]), null);
+        self::assertNull($optedIn->inactiveReason($job));
+        self::assertTrue($optedIn->isSchedulable($job));
+
+        $managed = new CronJobGate(new Config([
+            'app'  => ['managed' => true],
+            'cron' => ['retention' => ['enabled' => false]],
+        ]), null);
+        self::assertNull($managed->inactiveReason($job));
+        self::assertTrue($managed->isSchedulable($job));
+    }
+
+    /** Spravovaný provoz flag přebíjí JEN u úloh, které to výslovně chtějí. */
+    public function testManagedModeDoesNotImplyOtherOptInFlags(): void
+    {
+        $gate = new CronJobGate(new Config(['app' => ['managed' => true]]), null);
+
+        self::assertSame(
+            CronJobGate::INACTIVE_NOT_ENABLED,
+            $gate->schedulableBlockReason($this->job('cron-jmhz-source-monitor')),
+        );
+    }
+
     public function testStorageUsageIsRelevantInManagedMode(): void
     {
         $gate = new CronJobGate(new Config(['app' => ['managed' => true]]), null);

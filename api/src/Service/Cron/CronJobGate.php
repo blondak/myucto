@@ -232,7 +232,12 @@ final class CronJobGate
         // Úloha, kterou si instalace musí vědomě zapnout. Na rozdíl od `requires_config`
         // tu nejde o chybějící adresář, ale o to, že výchozí odpověď je NE — typicky
         // hlídač cizích zdrojů, jehož nález umí zpracovat jen ten, kdo vydává aktualizace.
+        // `managed_implies_flag`: ve spravovaném provozu je úloha povinná, flag
+        // je jen volba self-hostu.
         $flag = $job['requires_config_flag'] ?? null;
+        if ($flag !== null && ($job['managed_implies_flag'] ?? false) === true && $this->isManagedInstallation()) {
+            $flag = null;
+        }
         if ($flag !== null) {
             try {
                 $enabled = (bool) $this->config->get((string) $flag, false);

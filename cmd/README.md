@@ -49,6 +49,7 @@ má vždy přednost před oběma.
 | Skript | Co dělá |
 |---|---|
 | `cron-cleanup.{cmd,sh}` | Čištění expirovaných session, starých logů, PDF cache, login_attempts |
+| `cron-retention.{cmd,sh}` | Úklid záloh, logů a dočasných souborů, ať úložiště neroste donekonečna. **Ve spravovaném provozu povinný**, na self-hostu volitelný (`cron.retention.enabled`). Výchozí limity v `cron.retention.*`: dumpy DB 7 dnů (posledních 48 h všechny, starší jen poslední dump dne), PDF/Dokumenty/Mzdy 3 poslední snímky, `log/` a `log/cron/` 14 dnů (nerotovaný log nad 20 MB se zkrátí), `storage/tmp`, support balíčky a mPDF temp po 48 h, Twig cache po 30 dnech, archivy kompletního exportu po jejich platnosti (`export.instance.ttl_days`, 14 dnů). Nejnovější záloha každého druhu zůstává vždy; doklady, archivy ani uzávěrkové balíčky nemaže (`--dry-run`, `--force`) |
 | `cron-backup.{cmd,sh}` | mariadb-dump celé DB do `storage/backup/YYYY-MM-DD.zip`, retention 30 dní |
 | `cron-backup-pdf.{cmd,sh}` | ZIP všech PDF (`storage/invoices/` + `storage/work-reports/`) do `storage/backup/{dbname}-pdf-YYYY-MM-DD.zip`, stejná retention jako `cron-backup` |
 | `cron-backup-documents.{cmd,sh}` | ZIP celé sekce Dokumenty (`storage/documents/`, všechny typy; vynechává `_thumbs`/`_jobs`) do `storage/backup/{dbname}-documents-YYYY-MM-DD.zip`, stejná retention; oddělené od `cron-backup-pdf` (ten Dokumenty nezahrnuje) |
@@ -137,6 +138,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | Skript | Frekvence | Příklad času |
 |---|---|---|
 | `cron-cleanup` | 1× denně | 03:00 |
+| `cron-retention` | 1× denně; SaaS povinně, self-host po zapnutí `cron.retention.enabled` | 03:15 (po zálohách a cleanupu) |
 | `cron-backup` | 4× denně | `0 2,8,14,20 * * *` (ranní běh před cleanupem) |
 | `cron-backup-pdf` | 1× denně | 02:30 (po DB backupu) |
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
@@ -229,6 +231,7 @@ crontabu/Task Scheduleru (nebo z Docker image).
 
 ```cmd
 schtasks /create /tn "MyUcto Cleanup"   /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cleanup.cmd"        /sc daily /st 03:00 /ru SYSTEM
+schtasks /create /tn "MyUcto Retention" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-retention.cmd"      /sc daily /st 03:15 /ru SYSTEM
 schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ri 360 /du 24:00 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
@@ -297,6 +300,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 ```cron
 # m  h  dom mon dow  command
   0  3  *   *   *    /var/www/myucto.cz/cmd/cron-cleanup.sh
+ 15  3  *   *   *    /var/www/myucto.cz/cmd/cron-retention.sh
   0  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-pdf.sh
  35  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-documents.sh

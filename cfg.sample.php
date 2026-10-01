@@ -632,5 +632,21 @@ return [
                                                      // Rozbalení: 7-Zip / WinRAR / `unzip -P` — Průzkumník Windows AES-256 neumí.
                                                      // Šifruje se obsah souborů; názvy souborů uvnitř ZIPu zůstávají čitelné.
         ],
+
+        // Úklid záloh, logů a dočasných souborů (cron-retention). Ve spravovaném
+        // provozu běží vždy; na self-hostu jen po zapnutí, protože naše zálohy
+        // tam bývají jediné, které zákazník má. Zpřísňuje retenci záloh výše.
+        // ⚠️ 0 = tuhle kategorii NEUKLÍZET (ne „nedrž nic").
+        'retention' => [
+            'enabled'           => false, // self-host: true = úklid zapnutý
+            'db_days'           => 7,     // dumpy databáze nejvýš N dnů zpět
+            'db_keep_all_hours' => 48,    // ... z toho posledních N hodin všechny, starší jen poslední dump dne
+            'snapshot_copies'   => 3,     // PDF, Dokumenty, Mzdy: N posledních plných snímků od každého
+            'log_days'          => 14,    // log/*.log a log/cron/*.log starší N dnů
+            'log_max_mb'        => 20,    // log nad N MB (nerotovaný) se zkrátí na poslední desetinu
+            'tmp_hours'         => 48,    // storage/tmp, support balíčky, mPDF temp, rozdělané dumpy
+            'twig_cache_days'   => 30,    // zkompilované Twig šablony PDF (po smazání se zkompilují znovu)
+            // Archivy kompletního exportu se mažou po vlastní platnosti export.instance.ttl_days.
+        ],
     ],
 ];

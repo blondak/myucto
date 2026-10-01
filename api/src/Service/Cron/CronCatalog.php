@@ -31,6 +31,7 @@ final class CronCatalog
      *   critical:bool,
      *   requires_config?:string,
      *   requires_config_flag?:string,
+     *   managed_implies_flag?:bool,
      *   requires_managed?:bool,
      *   requires_ai_opt_in?:bool,
      *   requires_feature?:string,
@@ -55,6 +56,10 @@ final class CronCatalog
      * ZAPÍNÁ; výchozí odpověď je NE. Na rozdíl od `requires_config` nejde o chybějící
      * cestu, ale o relevanci: hlídač cizích zdrojů umí nález zpracovat jen ten, kdo
      * vydává aktualizace aplikace.
+     *
+     * `managed_implies_flag` (volitelné, jen s `requires_config_flag`) = ve
+     * spravovaném provozu je úloha povinná a flag se nečte; na self-hostu
+     * zůstává opt-in.
      *
      * `requires_feature` (volitelné) = název funkce, kterou úloha obsluhuje;
      * podmínku k němu drží {@see CronJobGate}. Bez zapnuté funkce úloha nemá co
@@ -108,6 +113,22 @@ final class CronCatalog
                 'recommended' => 'daily_0300',
                 'linux_cron' => '0 3 * * *',
                 'windows_schtasks' => '/sc daily /st 03:00',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
+                // Úklid záloh, logů a dočasných souborů. Ve spravovaném provozu
+                // povinný: zálohuje hosting a naše kopie jen ujídají kvótu disku.
+                // Na self-hostu jsou naše zálohy často jediné, co zákazník má,
+                // proto tam o zkrácení retence rozhoduje provozovatel sám.
+                // 03:15 = po nočních zálohách (02:00–02:40) a po cron-cleanup.
+                'script' => 'cron-retention',
+                'requires_config_flag' => 'cron.retention.enabled',
+                'managed_implies_flag' => true,
+                'recommended' => 'daily_0315',
+                'linux_cron' => '15 3 * * *',
+                'windows_schtasks' => '/sc daily /st 03:15',
                 'max_age_hours' => 36,
                 'weekdays_only' => false,
                 'critical' => false,

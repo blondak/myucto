@@ -23457,6 +23457,7 @@
     "freq_daily_0235": "daily at 02:35",
     "freq_daily_0240": "daily at 02:40",
     "freq_daily_0300": "daily at 03:00",
+    "freq_daily_0315": "daily at 03:15",
     "freq_daily_0400": "daily at 04:00",
     "freq_daily_0500": "daily at 05:00",
     "freq_daily_0600": "daily at 06:00",
@@ -27127,7 +27128,7 @@
       "not_configured": "the directory the job works with is not configured",
       "feature_off": "the feature the job serves is not enabled for any company",
       "managed_only": "belongs to managed hosting only",
-      "not_enabled": "not enabled in the configuration (optional watchdog of external sources)",
+      "not_enabled": "not enabled in the configuration (optional job)",
       "disabled_by_config": "turned off by configuration (cron.disabled_jobs)",
       "not_in_use": "the job has nothing to serve",
       "not_in_use_by_script": {

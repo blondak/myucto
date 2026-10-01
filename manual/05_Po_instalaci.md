@@ -81,7 +81,8 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | Skript | Doporučená frekvence |
 |---|---|
 | `cron-cleanup` | 1× denně 03:00 |
-| `cron-backup` | 1× denně 02:00 |
+| `cron-retention` | 1× denně 03:15; úklid starých záloh, logů a dočasných souborů. Volitelný, zapíná se v `cfg.php` (viz níže) |
+| `cron-backup` | 4× denně (02:00, 08:00, 14:00, 20:00) |
 | `cron-backup-pdf` | 1× denně 02:30 |
 | `cron-backup-documents` | 1× denně 02:35 |
 | `cron-bank-scan` | každých 30 min |
@@ -115,6 +116,28 @@ vestavěný Průzkumník Windows šifrované AES-256 archivy neumí otevřít. �
 se obsah souborů, názvy souborů uvnitř archivu zůstávají čitelné. Pokud je
 heslo nastavené a PHP šifrování nepodporuje (libzip < 1.2), záloha se záměrně
 nevytvoří a úloha skončí chybou — nešifrovaná záloha by vznikla jen omylem.
+
+**Úklid záloh a logů:** zálohovací úlohy samy drží 30 dnů denních záloh
+a k tomu zálohu z 1. dne každého měsíce po dobu roku. Úloha `cron-retention`
+tuhle dobu zkracuje a uklízí i logy a dočasné soubory, které jinak nemaže nic.
+Na vlastním serveru je vypnutá, protože zálohy aplikace tam často bývají jedinou
+zálohou, kterou máte. Zapnete ji v `cfg.php` volbou
+`cron.retention.enabled = true`. Výchozí limity (každý lze v `cron.retention`
+změnit, hodnota 0 znamená „tuhle kategorii neuklízet"):
+
+| Co | Kolik se drží |
+|---|---|
+| Dumpy databáze | 7 dnů: z posledních 48 hodin všechny, ze starších dnů jen poslední dump dne |
+| Zálohy PDF, Dokumentů a Mezd | 3 poslední od každého druhu (každá je úplný snímek) |
+| Logy aplikace a cronů | 14 dnů; log, do kterého se pořád zapisuje, se nad 20 MB zkrátí |
+| Dočasné soubory, diagnostické balíčky | 48 hodin |
+| Zkompilované šablony PDF (Twig cache) | 30 dnů; potřebná šablona se při dalším tisku zkompiluje znovu |
+| Archivy kompletního exportu | do konce jejich platnosti (`export.instance.ttl_days`, 14 dnů) |
+
+Nejnovější záloha každého druhu zůstává vždy, i když je starší než limit.
+Doklady, dokumenty, mzdové podklady, účetní archivy ani uzávěrkové balíčky
+úloha nemaže nikdy. Co by smazala, vypíše bez mazání příkaz
+`php api/bin/cron-retention.php --dry-run`.
 
 ### 5.5.1 Stažení záloh z aplikace
 
