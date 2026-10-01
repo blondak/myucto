@@ -501,6 +501,7 @@ final class OtherItemService
                       WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
                 );
                 $reactivate->execute([(int) $prior['id'], $supplierId]);
+                $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
@@ -510,6 +511,8 @@ final class OtherItemService
                  VALUES (?,?,?,?,?,?,?)'
             );
             $stmt->execute([$supplierId, $id, $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
+            // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
+            $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -526,9 +529,18 @@ final class OtherItemService
         try {
             $this->items->find($supplierId, $id, true)
                 ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            $payment = $pdo->prepare('SELECT bank_transaction_id, cash_document_id FROM other_item_allocations
+                WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
+            $payment->execute([$allocationId, $supplierId, $id]);
+            $paymentRow = $payment->fetch(PDO::FETCH_ASSOC);
             $stmt = $pdo->prepare('DELETE FROM other_item_allocations WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $stmt->execute([$allocationId, $supplierId, $id]);
             if ($stmt->rowCount() === 0) throw new OtherItemException('payment_not_found', 'Úhrada nebyla nalezena.', 404);
+            if ($paymentRow !== false) {
+                $this->posting->restampDimensions($supplierId,
+                    $paymentRow['bank_transaction_id'] !== null ? 'bank' : 'cash',
+                    (int) ($paymentRow['bank_transaction_id'] ?? $paymentRow['cash_document_id']));
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();

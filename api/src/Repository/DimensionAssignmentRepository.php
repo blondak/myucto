@@ -18,7 +18,7 @@ use PDO;
  */
 final class DimensionAssignmentRepository
 {
-    public const DOC_TYPES = ['purchase_invoice', 'invoice', 'cash_document', 'bank_transaction', 'journal_template', 'recurring_template'];
+    public const DOC_TYPES = ['purchase_invoice', 'invoice', 'cash_document', 'bank_transaction', 'journal_template', 'recurring_template', 'other_item', 'asset'];
 
     public function __construct(private readonly Connection $db) {}
 

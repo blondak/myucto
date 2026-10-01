@@ -182,6 +182,18 @@ final class DimensionStamperTest extends TestCase
     }
 
     /** @return list<array<string,mixed>> 518 MD / 343 MD / 321 D */
+    public function testCommonDocumentDimensionsSplitsDifferingTypeByAmount(): void
+    {
+        [$dims, $splits] = DimensionStamper::commonDocumentDimensions([
+            ['amount' => 600.00, 'header' => [self::PROJECT => 100, self::CENTER => 200]],
+            ['amount' => 400.00, 'header' => [self::PROJECT => 100, self::CENTER => 201]],
+            ['amount' => 0.00, 'header' => [self::PROJECT => 100, self::CENTER => 200, 30 => 300]],
+        ]);
+        self::assertSame([self::PROJECT => 100], $dims, 'Stejná hodnota u všech dokladů = hodnota řádku.');
+        self::assertSame([self::CENTER => [200 => 0.6, 201 => 0.4]], $splits, 'Různé hodnoty = rozpad podle částek, typ chybějící jinde se vynechá.');
+        self::assertSame([[], []], DimensionStamper::commonDocumentDimensions([]));
+    }
+
     private function purchaseLines(float $base): array
     {
         return [

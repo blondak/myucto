@@ -2439,11 +2439,11 @@ final class Routes
             $g->patch ('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'updateValue']);
             $g->delete('/dimensions/values/{id:[0-9]+}',                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'deleteValue']);
             $g->get   ('/dimensions/responsible-candidates',             [\MyInvoice\Action\Accounting\DimensionAction::class, 'responsibleCandidates']);
-            $g->get   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates|recurring-templates}/{id:[0-9]+}',
+            $g->get   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates|recurring-templates|other-items|assets}/{id:[0-9]+}',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'getDocument']);
-            $g->put   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates|recurring-templates}/{id:[0-9]+}',
+            $g->put   ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|journal-templates|recurring-templates|other-items|assets}/{id:[0-9]+}',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveDocument']);
-            $g->post  ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions}/{id:[0-9]+}/preview',
+            $g->post  ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|other-items|assets}/{id:[0-9]+}/preview',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'previewDocument']);
             $g->get   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'getJournal']);
             $g->put   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveJournal']);

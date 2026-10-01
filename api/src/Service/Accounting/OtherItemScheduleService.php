@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use PDO;
 
@@ -170,6 +171,9 @@ final class OtherItemScheduleService
                     SELECT document_id, supplier_id, 'other_item', ? FROM document_links
                      WHERE supplier_id = ? AND entity_type = 'other_item' AND entity_id = ?");
                 $documents->execute([(int) $item['id'], $supplierId, $schedule['source_item_id']]);
+                // Dimenze zdrojového dokladu jdou s každým výskytem (F4), jako šablona faktury.
+                (new DimensionAssignmentRepository($this->db))
+                    ->copyDocument($supplierId, 'other_item', (int) $schedule['source_item_id'], (int) $item['id']);
                 $created[] = (int) $item['id'];
             }
             $stmt = $pdo->prepare('UPDATE other_item_schedules SET next_index = ? WHERE supplier_id = ? AND id = ?');

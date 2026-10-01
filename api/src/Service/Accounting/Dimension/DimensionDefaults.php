@@ -89,8 +89,15 @@ final class DimensionDefaults
      *   • přijatá faktura: zakázka > dodavatel (vendor_id)
      *   • pokladní doklad: zakázka dokladu > dimenze placené (přijaté) faktury,
      *     včetně jejích výchozích
-     *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých) včetně
-     *     jejich výchozích; u více faktur jen hodnoty společné všem
+     *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
+     *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
+     *     jen hodnoty společné všem
+     *   • ostatní pohledávka / závazek: protistrana
+     *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
+     *     {@see DimensionStamper})
+     *   • zápočet proti účtu: dimenze vyrovnávané faktury včetně jejích výchozích
+     *   • majetek (zařazení, odpis, vyřazení): dimenze přijaté faktury, ze které
+     *     karta vznikla
      *
      * @return array<int,int> typ => hodnota
      */
@@ -101,8 +108,89 @@ final class DimensionDefaults
             'purchase_invoice' => $this->forDocument($supplierId, 'purchase_invoice', $sourceId),
             'cash' => $this->forCash($supplierId, $sourceId),
             'bank' => $this->forBank($supplierId, $sourceId),
+            'other_item' => $this->forDocument($supplierId, 'other_item', $sourceId),
+            'offset' => $this->forOffset($supplierId, $sourceId),
+            'settlement' => $this->forSettlement($supplierId, $sourceId),
+            'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
             default => [],
         };
+    }
+
+    /**
+     * Karta majetku zápisu: zařazení a vyřazení mají za zdroj kartu, účetní odpis
+     * řádek `depreciation_entries`.
+     */
+    public function assetId(int $supplierId, string $sourceType, int $sourceId): ?int
+    {
+        if ($sourceType === 'asset' || $sourceType === 'asset_disposal') {
+            return $sourceId;
+        }
+        if ($sourceType !== 'depreciation') {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT asset_id FROM depreciation_entries WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$sourceId, $supplierId]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    /** @return array<int,int> */
+    private function forAsset(int $supplierId, ?int $assetId): array
+    {
+        if ($assetId === null) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT purchase_invoice_id FROM assets WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$assetId, $supplierId]);
+        $purchaseId = $stmt->fetchColumn();
+        return $purchaseId === false || $purchaseId === null
+            ? []
+            : $this->effectiveHeader($supplierId, 'purchase_invoice', (int) $purchaseId);
+    }
+
+    /** @return array<int,int> */
+    private function forOffset(int $supplierId, int $agreementId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT partner_id FROM offset_agreements WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$agreementId, $supplierId]);
+        $partner = $stmt->fetchColumn();
+        return $partner === false ? [] : $this->resolve($supplierId, (int) $partner, null)['header'];
+    }
+
+    /** @return array<int,int> */
+    private function forSettlement(int $supplierId, int $settlementId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT doc_type, doc_id FROM invoice_settlements WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$settlementId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? [] : $this->effectiveHeader($supplierId, (string) $row['doc_type'], (int) $row['doc_id']);
+    }
+
+    /**
+     * Doklady vzájemného zápočtu s částkou a efektivní hlavičkou. Vydané faktury snižují
+     * pohledávku (strana Dal), přijaté závazek (strana Má dáti).
+     *
+     * @return list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>
+     */
+    public function offsetDocuments(int $supplierId, int $agreementId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT doc_type, doc_id, SUM(amount) AS amount FROM offset_agreement_items
+              WHERE agreement_id = ? AND supplier_id = ?
+           GROUP BY doc_type, doc_id
+           ORDER BY MIN(id)'
+        );
+        $stmt->execute([$agreementId, $supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[] = [
+                'doc_type' => (string) $r['doc_type'],
+                'doc_id' => (int) $r['doc_id'],
+                'amount' => round(abs((float) $r['amount']), 2),
+                'header' => $this->effectiveHeader($supplierId, (string) $r['doc_type'], (int) $r['doc_id']),
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -142,9 +230,13 @@ final class DimensionDefaults
             return [];
         }
         $own = $row['project_id'] !== null ? $this->resolve($supplierId, null, (int) $row['project_id'])['header'] : [];
+        $others = $row['invoice_id'] === null && $row['purchase_invoice_id'] === null
+            ? array_keys($this->otherItemAllocations($supplierId, 'cash_document_id', $cashId))
+            : [];
         $linked = match (true) {
             $row['invoice_id'] !== null => $this->effectiveHeader($supplierId, 'invoice', (int) $row['invoice_id']),
             $row['purchase_invoice_id'] !== null => $this->effectiveHeader($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id']),
+            count($others) === 1 => $this->effectiveHeader($supplierId, 'other_item', $others[0]),
             default => [],
         };
         return self::fill($own, $linked);
@@ -227,8 +319,9 @@ final class DimensionDefaults
         if ($invoices === [] && $tx['matched_invoice_id'] !== null) {
             $invoices[(int) $tx['matched_invoice_id']] = abs((float) $tx['amount']);
         }
+        $others = $this->otherItemAllocations($supplierId, 'bank_transaction_id', $transactionId);
         $documents = [];
-        foreach (['invoice' => $invoices, 'purchase_invoice' => $purchases] as $docType => $ids) {
+        foreach (['invoice' => $invoices, 'purchase_invoice' => $purchases, 'other_item' => $others] as $docType => $ids) {
             foreach ($ids as $docId => $amount) {
                 $documents[] = [
                     'doc_type' => $docType,
@@ -239,6 +332,28 @@ final class DimensionDefaults
             }
         }
         return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
+    }
+
+    /**
+     * Ostatní pohledávky a závazky hrazené platbou (nestornované alokace).
+     *
+     * @param 'bank_transaction_id'|'cash_document_id' $column
+     * @return array<int,float> položka => částka
+     */
+    private function otherItemAllocations(int $supplierId, string $column, int $paymentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT other_item_id, SUM(amount) AS amount FROM other_item_allocations
+              WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL
+           GROUP BY other_item_id
+           ORDER BY MIN(id)"
+        );
+        $stmt->execute([$supplierId, $paymentId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['other_item_id']] = (float) $r['amount'];
+        }
+        return $out;
     }
 
     /**
@@ -258,6 +373,7 @@ final class DimensionDefaults
         $sql = match ($docType) {
             'invoice' => 'SELECT client_id, project_id FROM invoices WHERE id = ? AND supplier_id = ?',
             'purchase_invoice' => 'SELECT vendor_id AS client_id, project_id FROM purchase_invoices WHERE id = ? AND supplier_id = ?',
+            'other_item' => 'SELECT partner_id AS client_id, NULL AS project_id FROM other_items WHERE id = ? AND supplier_id = ?',
             default => null,
         };
         if ($sql === null) {

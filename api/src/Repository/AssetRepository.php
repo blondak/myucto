@@ -179,6 +179,8 @@ final class AssetRepository
     {
         $this->db->pdo()->prepare('DELETE FROM assets WHERE id = ? AND supplier_id = ?')
             ->execute([$id, $supplierId]);
+        // Dimenze karty jsou polymorfní vazba bez FK — úklid ručně (F4).
+        (new DimensionAssignmentRepository($this->db))->deleteDocument($supplierId, 'asset', $id);
     }
 
     /**

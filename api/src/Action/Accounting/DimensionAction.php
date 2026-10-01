@@ -54,6 +54,8 @@ final class DimensionAction
         'bank-transactions' => 'bank_transaction',
         'journal-templates' => 'journal_template',
         'recurring-templates' => 'recurring_template',
+        'other-items' => 'other_item',
+        'assets' => 'asset',
     ];
 
     public function __construct(

@@ -39,12 +39,24 @@ use PDO;
  */
 final class DimensionStamper
 {
-    /** Zdroj zápisu v deníku => [typ dokladu v document_dimensions, tabulka položek, sloupec dokladu]. */
+    /**
+     * Zdroj zápisu v deníku => [typ dokladu v document_dimensions, tabulka položek, sloupec dokladu].
+     * Zápisy majetku nesou dimenze karty (odpis má za zdroj řádek depreciation_entries,
+     * kartu dohledá {@see DimensionDefaults::assetId()}). Zápočty vlastní dimenze nemají:
+     * vzájemný zápočet je přebírá ze započtených dokladů po stranách, zápočet proti účtu
+     * z vyrovnávané faktury ({@see DimensionDefaults::forSource()}).
+     */
     public const SOURCES = [
         'purchase_invoice' => ['purchase_invoice', 'purchase_invoice_items', 'purchase_invoice_id'],
         'invoice' => ['invoice', 'invoice_items', 'invoice_id'],
         'cash' => ['cash_document', null, null],
         'bank' => ['bank_transaction', null, null],
+        'other_item' => ['other_item', null, null],
+        'asset' => ['asset', null, null],
+        'asset_disposal' => ['asset', null, null],
+        'depreciation' => ['asset', null, null],
+        'offset' => [null, null, null],
+        'settlement' => [null, null, null],
     ];
 
     /** @var array<int,bool> */
@@ -74,6 +86,9 @@ final class DimensionStamper
     {
         if ($sourceType === 'bank' && $sourceId !== null && $this->enabled($supplierId)) {
             $resolved = $this->allocateBankDocuments($supplierId, $sourceId, $resolved);
+        }
+        if ($sourceType === 'offset' && $sourceId !== null && $this->enabled($supplierId)) {
+            $resolved = $this->allocateOffsetDocuments($supplierId, $sourceId, $resolved);
         }
         $hasExplicit = false;
         foreach ($resolved as $line) {
@@ -201,6 +216,9 @@ final class DimensionStamper
             if ($sourceType === 'bank') {
                 $lines = $this->allocateBankDocuments($supplierId, $sourceId, $lines);
             }
+            if ($sourceType === 'offset') {
+                $lines = $this->allocateOffsetDocuments($supplierId, $sourceId, $lines);
+            }
             $result = self::assign($lines, $header, $items, $types, false);
             $needsRepost = $needsRepost || $result['needs_split'];
             $restamped = $this->rules()->applyDefaults(
@@ -312,6 +330,88 @@ final class DimensionStamper
             $ownTypes[$typeId] = 0;
         }
         return self::allocateDocuments($lines, $documents, $bank['incoming'] ? 'credit' : 'debit', $ownTypes);
+    }
+
+    /**
+     * Vzájemný zápočet: řádek na straně Dal (pohledávka) nese dimenze započtených vydaných
+     * faktur, řádek na straně Má dáti (závazek) dimenze přijatých faktur. Typ, ve kterém
+     * se doklady jedné strany liší, dostane řádek jako rozpad v poměru započtených částek.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function allocateOffsetDocuments(int $supplierId, int $agreementId, array $lines): array
+    {
+        $bySide = ['credit' => [], 'debit' => []];
+        foreach ((new DimensionDefaults($this->db))->offsetDocuments($supplierId, $agreementId) as $doc) {
+            $bySide[$doc['doc_type'] === 'invoice' ? 'credit' : 'debit'][] = $doc;
+        }
+        foreach ($lines as $i => $line) {
+            $side = (string) ($line['side'] ?? '');
+            if (!isset($bySide[$side]) || $bySide[$side] === []) {
+                continue;
+            }
+            [$dims, $splits] = self::commonDocumentDimensions($bySide[$side]);
+            $dims = self::merge($dims, array_map('intval', (array) ($line['dimensions'] ?? [])));
+            $splits = array_diff_key($splits, $dims);
+            if ($dims !== []) {
+                $lines[$i]['dimensions'] = $dims;
+            }
+            if ($splits !== []) {
+                $lines[$i]['dimension_splits'] = (array) ($line['dimension_splits'] ?? []) + $splits;
+            }
+        }
+        return $lines;
+    }
+
+    /**
+     * Dimenze společné dokladům: typ se stejnou hodnotou u všech dokladů jako hodnota,
+     * typ, který mají všechny doklady, ale s různou hodnotou, jako rozpad v poměru částek.
+     * Typ, který některému dokladu chybí, se vynechá.
+     *
+     * @param list<array{amount:float, header:array<int,int>}> $documents
+     * @return array{0:array<int,int>, 1:array<int,array<int,float>>}
+     */
+    public static function commonDocumentDimensions(array $documents): array
+    {
+        $types = [];
+        foreach ($documents as $doc) {
+            $types += $doc['header'];
+        }
+        $total = array_sum(array_column($documents, 'amount'));
+        $dims = [];
+        $splits = [];
+        foreach (array_keys($types) as $typeId) {
+            $weights = [];
+            foreach ($documents as $doc) {
+                if (!isset($doc['header'][$typeId])) {
+                    continue 2;
+                }
+                $valueId = $doc['header'][$typeId];
+                $weights[$valueId] = ($weights[$valueId] ?? 0.0) + $doc['amount'];
+            }
+            if (count($weights) === 1) {
+                $dims[$typeId] = (int) array_key_first($weights);
+                continue;
+            }
+            if ($total <= 0.0) {
+                continue;
+            }
+            $shares = [];
+            $assigned = 0.0;
+            $last = array_key_last($weights);
+            foreach ($weights as $valueId => $weight) {
+                $share = $valueId === $last ? round(1.0 - $assigned, 10) : round($weight / $total, 10);
+                $assigned += $share;
+                if ($share > 0.0) {
+                    $shares[$valueId] = $share;
+                }
+            }
+            $splits[$typeId] = $shares;
+        }
+        ksort($dims);
+        ksort($splits);
+        return [$dims, $splits];
     }
 
     /**
@@ -428,10 +528,15 @@ final class DimensionStamper
     private function documentContext(int $supplierId, string $sourceType, int $sourceId, ?array $itemAccounts): array
     {
         [$docType, $itemTable, $itemColumn] = self::SOURCES[$sourceType];
+        $defaults = new DimensionDefaults($this->db);
+        $docId = $docType === 'asset' ? $defaults->assetId($supplierId, $sourceType, $sourceId) : $sourceId;
         $assignments = new DimensionAssignmentRepository($this->db);
-        $dims = $assignments->documentDimensions($supplierId, $docType, $sourceId);
+        $dims = $docType !== null && $docId !== null
+            ? $assignments->documentDimensions($supplierId, $docType, $docId)
+            : ['header' => [], 'items' => []];
         $splits = [];
-        foreach ($assignments->documentSplits($supplierId, $docType, $sourceId) as $itemNo => $byType) {
+        $docSplits = $docType !== null && $docId !== null ? $assignments->documentSplits($supplierId, $docType, $docId) : [];
+        foreach ($docSplits as $itemNo => $byType) {
             foreach ($byType as $typeId => $shares) {
                 $splits[] = $shares;
                 if ($itemNo === 0) {
@@ -443,7 +548,6 @@ final class DimensionStamper
         }
         ksort($dims['header']);
         $items = [];
-        $defaults = new DimensionDefaults($this->db);
         if ($itemTable !== null) {
             // Pořadí položky = pořadí v editoru (order_index), číslováno od 1 — stejně
             // jako ho ukládá DimensionService::saveDocument().
