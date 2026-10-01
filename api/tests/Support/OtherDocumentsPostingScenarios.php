@@ -8,12 +8,14 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\InvoiceSettlementService;
 use MyInvoice\Service\Accounting\OffsetService;
+use MyInvoice\Service\Accounting\OtherItemScheduleService;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
@@ -46,6 +48,7 @@ final class OtherDocumentsPostingScenarios
     private int $currencyId = 0;
     private int $userId = 0;
     private int $czId = 0;
+    private int $vatRateId = 0;
 
     public function __construct(private readonly ContainerInterface $container)
     {
@@ -70,6 +73,7 @@ final class OtherDocumentsPostingScenarios
             'issued_on' => self::YEAR . '-02-01', 'due_on' => self::YEAR . '-02-28', 'currency' => 'CZK', 'amount' => 1000,
             'posting_lines' => [['account_code' => '602', 'amount' => 600], ['account_code' => '648', 'amount' => 400]],
         ], $this->userId);
+        $this->ids['other_receivable'] = (int) $receivable['id'];
         $prepare('other_receivable', (int) $receivable['id'], $this);
         $out['other_receivable'] = $this->entryLines((int) $other->post($this->supplierId, (int) $receivable['id'], $this->userId)['journal_entry_id']);
 
@@ -78,6 +82,7 @@ final class OtherDocumentsPostingScenarios
             'issued_on' => self::YEAR . '-02-01', 'due_on' => self::YEAR . '-02-20', 'currency' => 'CZK', 'amount' => 1200,
             'counter_account_code' => '518',
         ], $this->userId);
+        $this->ids['other_payable'] = (int) $payable['id'];
         $prepare('other_payable', (int) $payable['id'], $this);
         $out['other_payable'] = $this->entryLines((int) $other->post($this->supplierId, (int) $payable['id'], $this->userId)['journal_entry_id']);
 
@@ -106,6 +111,7 @@ final class OtherDocumentsPostingScenarios
             'acquisition_date' => self::YEAR . '-01-15', 'tax_method' => 'straight', 'tax_group' => 2,
             'acc_useful_life_months' => 60,
         ], ['user_id' => $this->userId])['asset']['id'];
+        $this->ids['asset'] = $asset;
         $prepare('asset', $asset, $this);
         $meta = ['user_id' => $this->userId, 'posted_by' => $this->userId];
         $assets->putIntoUse($this->supplierId, $asset, self::YEAR . '-01-15', true, $meta);
@@ -120,7 +126,94 @@ final class OtherDocumentsPostingScenarios
             "SELECT id FROM depreciation_entries WHERE asset_id = {$asset} AND kind = 'accounting' AND fiscal_year = " . (self::YEAR + 1)
         )->fetchColumn());
         $out['asset_disposal'] = $this->sourceLines('asset_disposal', $asset);
+
+        // Úhrada ostatního závazku bankou a pohledávky pokladnou (spárování po zaúčtování platby).
+        $txId = $this->bankTransaction(-1200.00, self::YEAR . '-02-20');
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            ['account_code' => '325', 'side' => 'debit', 'amount' => 1200.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 1200.00],
+        ], ['entry_date' => self::YEAR . '-02-20', 'posted' => true]);
+        $prepare('other_payable_bank', $txId, $this);
+        $other->allocate($this->supplierId, (int) $payable['id'], ['bank_transaction_id' => $txId, 'amount' => 1200.00], $this->userId);
+        $out['other_payable_bank'] = $this->sourceLines('bank', $txId);
+
+        $cashId = $this->cashDocument(1000.00, self::YEAR . '-02-25');
+        $this->posting->postDocument($this->supplierId, 'cash', $cashId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 1000.00],
+            ['account_code' => '315', 'side' => 'credit', 'amount' => 1000.00],
+        ], ['entry_date' => self::YEAR . '-02-25', 'posted' => true]);
+        $prepare('other_receivable_cash', $cashId, $this);
+        $other->allocate($this->supplierId, (int) $receivable['id'], ['cash_document_id' => $cashId, 'amount' => 1000.00], $this->userId);
+        $out['other_receivable_cash'] = $this->sourceLines('cash', $cashId);
+
+        // Rozvrh opakování: výskyt vygenerovaný ze zaúčtované pohledávky.
+        $schedules = $this->container->get(OtherItemScheduleService::class);
+        $schedule = $schedules->create($this->supplierId, (int) $receivable['id'], ['frequency' => 'monthly'], $this->userId);
+        $occurrence = (int) $schedules->generate($this->supplierId, (int) $schedule['id'], self::YEAR . '-03-15', $this->userId)['created_ids'][0];
+        $prepare('other_schedule', $occurrence, $this);
+        $out['other_schedule'] = $this->entryLines((int) $other->post($this->supplierId, $occurrence, $this->userId)['journal_entry_id']);
+
+        // Karta majetku z položky přijaté faktury.
+        $purchase = $this->purchaseInvoice($client, 90000.00, [30000.00, 60000.00]);
+        $item = (int) $this->db->pdo()->query(
+            "SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = {$purchase} ORDER BY order_index, id LIMIT 1 OFFSET 1"
+        )->fetchColumn();
+        $prepare('asset_from_purchase', $purchase, $this);
+        $fromPurchase = (int) $assets->create($this->supplierId, [
+            'inventory_number' => 'REGR-M2', 'name' => 'Regresní stroj z faktury', 'input_price' => 60000.00,
+            'acquisition_date' => self::YEAR . '-03-11', 'tax_method' => 'straight', 'tax_group' => 2,
+            'acc_useful_life_months' => 60, 'purchase_invoice_id' => $purchase, 'purchase_invoice_item_id' => $item,
+        ], ['user_id' => $this->userId])['asset']['id'];
+        $this->ids['asset_from_purchase'] = $fromPurchase;
+        $assets->putIntoUse($this->supplierId, $fromPurchase, self::YEAR . '-07-01', true, $meta);
+        $out['asset_from_purchase'] = $this->sourceLines('asset', $fromPurchase);
+
+        // Prodej majetku vystavenou fakturou (vyřazení z faktury).
+        $sold = (int) $assets->create($this->supplierId, [
+            'inventory_number' => 'REGR-M3', 'name' => 'Regresní prodaný stroj', 'input_price' => 90000.00,
+            'acquisition_date' => self::YEAR . '-01-20', 'tax_method' => 'straight', 'tax_group' => 2,
+            'acc_useful_life_months' => 60,
+        ], ['user_id' => $this->userId])['asset']['id'];
+        $prepare('asset_sale', $sold, $this);
+        $assets->putIntoUse($this->supplierId, $sold, self::YEAR . '-01-20', true, $meta);
+        $saleInvoice = $this->invoice($client, 50000.00, $sold);
+        $this->container->get(InvoiceAssetSaleService::class)->applyForIssuedInvoice($this->supplierId, $saleInvoice, ['user_id' => $this->userId]);
+        $out['asset_sale_depreciation'] = $this->sourceLines('depreciation', (int) $this->db->pdo()->query(
+            "SELECT id FROM depreciation_entries WHERE asset_id = {$sold} AND kind = 'accounting' AND fiscal_year = " . self::YEAR
+        )->fetchColumn());
+        $out['asset_sale_disposal'] = $this->sourceLines('asset_disposal', $sold);
         return $out;
+    }
+
+    /** @var array<string,int> id dokladů scénářů pro testy */
+    public array $ids = [];
+
+    private function bankTransaction(float $amount, string $date): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date, currency)
+             VALUES (?, "synteticky-vypis-regrese", ?, "1000000005/0100", ?, "CZK")'
+        )->execute([$this->supplierId, hash('sha256', uniqid('', true)), $date]);
+        $pdo->prepare(
+            'INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, match_status, counterparty_name, description)
+             VALUES (?, ?, ?, "CZK", "unmatched", "Syntetická protistrana", "Regrese")'
+        )->execute([(int) $pdo->lastInsertId(), $date, $amount]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function cashDocument(float $amount, string $date): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO cash_registers (supplier_id, name, account_code, is_default) VALUES (?, "Regresní pokladna", "211", 0)')
+            ->execute([$this->supplierId]);
+        $register = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
+                                         description, vat_mode, total_amount, status, created_by)
+             VALUES (?, ?, "in", "other", ?, ?, ?, "Úhrada pohledávky", "none", ?, "posted", ?)'
+        )->execute([$this->supplierId, $register, 'REGR-P' . random_int(1000, 9999), $date, $date, $amount, $this->userId]);
+        return (int) $pdo->lastInsertId();
     }
 
     /** @return array<string,int> kód typu => id typu */
@@ -150,6 +243,7 @@ final class OtherDocumentsPostingScenarios
         $this->currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
         $this->userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
         $this->czId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $this->vatRateId = (int) $pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
         $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry', supplier_group_id = NULL WHERE id = ?")
             ->execute([$this->supplierId]);
         $this->container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
@@ -173,7 +267,7 @@ final class OtherDocumentsPostingScenarios
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function invoice(int $client, float $total): int
+    private function invoice(int $client, float $total, ?int $assetId = null): int
     {
         $pdo = $this->db->pdo();
         $date = self::YEAR . '-03-10';
@@ -186,6 +280,14 @@ final class OtherDocumentsPostingScenarios
         )->execute([$this->supplierId, (string) random_int(1000000000, 1999999999), $client, $date, $date, $date,
             $this->currencyId, $total, $total, $this->userId]);
         $id = (int) $pdo->lastInsertId();
+        if ($assetId !== null) {
+            $pdo->prepare(
+                'INSERT INTO invoice_items
+                    (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                     total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code, asset_id)
+                 VALUES (?, "Prodej majetku", 1, "ks", ?, ?, 0, ?, 0, ?, 0, "1", ?)'
+            )->execute([$id, $total, $this->vatRateId, $total, $total, $assetId]);
+        }
         $this->posting->postDocument($this->supplierId, 'invoice', $id, [
             ['account_code' => '311', 'side' => 'debit', 'amount' => $total],
             ['account_code' => '602', 'side' => 'credit', 'amount' => $total],
@@ -193,7 +295,8 @@ final class OtherDocumentsPostingScenarios
         return $id;
     }
 
-    private function purchaseInvoice(int $vendor, float $total): int
+    /** @param list<float> $items základy položek (prázdné = bez položek) */
+    private function purchaseInvoice(int $vendor, float $total, array $items = []): int
     {
         $pdo = $this->db->pdo();
         $date = self::YEAR . '-03-11';
@@ -205,6 +308,14 @@ final class OtherDocumentsPostingScenarios
              VALUES (?, ?, ?, ?, "invoice", ?, ?, ?, ?, "{}", ?, "received", ?)'
         )->execute([$this->supplierId, $vs, $vendor, $vs, $date, $date, $date, $this->currencyId, $total, $this->userId]);
         $id = (int) $pdo->lastInsertId();
+        foreach ($items as $i => $net) {
+            $pdo->prepare(
+                'INSERT INTO purchase_invoice_items
+                    (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                     total_without_vat, total_vat, total_with_vat, order_index)
+                 VALUES (?, "Regresní nákup", 1, "ks", ?, ?, 0, ?, 0, ?, ?)'
+            )->execute([$id, $net, $this->vatRateId, $net, $net, $i]);
+        }
         $this->posting->postDocument($this->supplierId, 'purchase_invoice', $id, [
             ['account_code' => '518', 'side' => 'debit', 'amount' => $total],
             ['account_code' => '321', 'side' => 'credit', 'amount' => $total],

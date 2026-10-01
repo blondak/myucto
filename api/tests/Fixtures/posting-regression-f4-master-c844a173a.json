@@ -147,5 +147,122 @@
             "dims": [],
             "splits": []
         }
+    ],
+    "other_payable_bank": [
+        {
+            "account": "325",
+            "side": "debit",
+            "amount": "1200.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "221",
+            "side": "credit",
+            "amount": "1200.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "other_receivable_cash": [
+        {
+            "account": "211",
+            "side": "debit",
+            "amount": "1000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "315",
+            "side": "credit",
+            "amount": "1000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "other_schedule": [
+        {
+            "account": "315",
+            "side": "debit",
+            "amount": "1000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "602",
+            "side": "credit",
+            "amount": "600.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "648",
+            "side": "credit",
+            "amount": "400.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "asset_from_purchase": [
+        {
+            "account": "022",
+            "side": "debit",
+            "amount": "60000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "042",
+            "side": "credit",
+            "amount": "60000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "asset_sale_depreciation": [
+        {
+            "account": "551",
+            "side": "debit",
+            "amount": "3000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "credit",
+            "amount": "3000.00",
+            "dims": [],
+            "splits": []
+        }
+    ],
+    "asset_sale_disposal": [
+        {
+            "account": "541",
+            "side": "debit",
+            "amount": "87000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "credit",
+            "amount": "87000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "082",
+            "side": "debit",
+            "amount": "90000.00",
+            "dims": [],
+            "splits": []
+        },
+        {
+            "account": "022",
+            "side": "credit",
+            "amount": "90000.00",
+            "dims": [],
+            "splits": []
+        }
     ]
 }
