@@ -8891,7 +8891,7 @@
         "open_payments": "Open payments and levies"
       },
       "month": {
-        "title": "This month",
+        "title": "Payroll month in progress",
         "description": "Frequent tasks for payroll period {period}.",
         "run_status": "Run: {status}",
         "run_missing": "No run created yet",

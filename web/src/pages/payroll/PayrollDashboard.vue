@@ -14,7 +14,7 @@ import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatPeriod } from '@/composables/useFormat'
-import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import { localPayrollPeriod, payrollWorkingPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
 import PayrollSetupGuide from '@/pages/payroll/PayrollSetupGuide.vue'
@@ -40,8 +40,8 @@ const loadFailed = ref(false)
 const licenseRequired = ref<{ message: string; buyUrl: string } | null>(null)
 const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
-const currentPeriod = localPayrollPeriod()
-const startPeriod = ref(currentPeriod)
+const currentPeriod = payrollWorkingPeriod()
+const startPeriod = ref(localPayrollPeriod())
 const currentRun = ref<PayrollRun | null>(null)
 const setupCheck = ref<PayrollSetupCheck | null>(null)
 const guide = ref<InstanceType<typeof PayrollGuide> | null>(null)

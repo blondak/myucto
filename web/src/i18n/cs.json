@@ -8891,7 +8891,7 @@
         "open_payments": "Otevřít platby a odvody"
       },
       "month": {
-        "title": "Tento měsíc",
+        "title": "Zpracovávaný měsíc",
         "description": "Nejčastější kroky pro mzdové období {period}.",
         "run_status": "Běh: {status}",
         "run_missing": "Běh zatím nezaložen",

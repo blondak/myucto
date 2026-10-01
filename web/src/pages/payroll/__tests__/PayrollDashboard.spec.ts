@@ -187,6 +187,36 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(cards.attributes('data-period')).toMatch(/^\d{4}-\d{2}$/)
   })
 
+  // Mzdy se zpracovávají zpětně: 1. října se dělá září, ne říjen bez běhu.
+  it('pracuje se zpracovávaným (předchozím) měsícem, ne s dneškem', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 1, 9, 0))
+    try {
+      const wrapper = mountDashboard()
+      await flushPromises()
+
+      expect(m.runs).toHaveBeenCalledWith('2026-09')
+      expect(m.payrollSetupCheck).toHaveBeenCalledWith('2026-09-01')
+      expect(wrapper.get('[data-test="employee-cards-stub"]').attributes('data-period')).toBe('2026-09')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('v lednu nabídne roční panely za uplynulý rok', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2027, 0, 10, 9, 0))
+    try {
+      const wrapper = mountDashboard()
+      await flushPromises()
+
+      expect(m.runs).toHaveBeenCalledWith('2026-12')
+      expect(wrapper.get('[data-test="annual-report-panel-stub"]').attributes('data-year')).toBe('2026')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   /**
    * Průvodce prvním nastavením mezd patří na přehled jen do prvního schváleného
    * běhu. Rozhoduje `capabilities.onboarding` — chybějící klíč znamená
