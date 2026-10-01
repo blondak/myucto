@@ -5084,10 +5084,13 @@ export interface PayrollDimensionCostReportRow {
   insurance_minor: number
   other_minor: number
   total_minor: number
+  unallocated_reason?: 'employer_insurance_not_allocatable' | 'firm_level_cost' | null
 }
 
 export interface PayrollDimensionCostReport {
   year: number
+  /** false = firma dimenze nepoužívá, report se nezobrazuje */
+  enabled: boolean
   rows: PayrollDimensionCostReportRow[]
   by_dimension: {
     type_id: number | null

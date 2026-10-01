@@ -2000,6 +2000,10 @@
       "other": "Ostatní",
       "total": "Celkem",
       "unassigned": "Nerozděleno na zaměstnance",
+      "unassigned_reason": {
+        "employer_insurance_not_allocatable": "Pojistné zaměstnavatele se počítá ze součtu vyměřovacích základů celé firmy. Report ho jinak dělí na zaměstnance poměrem jejich základů, tato mzdová revize si ale základy jednotlivých vztahů neuložila, takže podíl osoby nejde doložit.",
+        "firm_level_cost": "Náklad zaúčtovaný za celou firmu bez vazby na pracovní vztah, takže ho nejde přiřadit konkrétnímu zaměstnanci."
+      },
       "no_dimension": "Bez dimenze",
       "empty": "Za vybraný rok zatím nejsou zaúčtované mzdové běhy.",
       "source_hint": "Report čte účetní můstek mezd, ne deník — v deníku je mzdový předpis za firmu. Součet sedí na nákladové řádky mzdového předpisu.",

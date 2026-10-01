@@ -29,6 +29,7 @@ final class PayrollDimensionCostReportRepository
     /**
      * @return list<array{
      *   period_start:string,
+     *   revision_id:int,
      *   allocation_key:string,
      *   account_code:string,
      *   signed_minor:int,
@@ -41,6 +42,7 @@ final class PayrollDimensionCostReportRepository
         $statement = $this->db->pdo()->prepare(
             'WITH effective AS (
                 SELECT batch.id AS batch_id,
+                       batch.revision_id,
                        run.period_start,
                        ROW_NUMBER() OVER (
                            PARTITION BY batch.run_id
@@ -57,7 +59,7 @@ final class PayrollDimensionCostReportRepository
                    AND batch.status IN ("posted", "no_change")
                    AND run.period_start BETWEEN ? AND ?
              )
-             SELECT effective.period_start, allocation.allocation_key,
+             SELECT effective.period_start, effective.revision_id, allocation.allocation_key,
                     allocation.account_code, allocation.signed_minor,
                     allocation.cost_center, allocation.dimensions
                FROM effective
@@ -80,6 +82,7 @@ final class PayrollDimensionCostReportRepository
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[] = [
                 'period_start' => (string) $row['period_start'],
+                'revision_id' => (int) $row['revision_id'],
                 'allocation_key' => (string) $row['allocation_key'],
                 'account_code' => (string) $row['account_code'],
                 'signed_minor' => (int) $row['signed_minor'],
@@ -89,6 +92,42 @@ final class PayrollDimensionCostReportRepository
         }
 
         return $result;
+    }
+
+    /**
+     * Má report smysl? Firma má zapnuté firemní dimenze, nebo vede aspoň jednu
+     * mzdovou dimenzi (středisko, zakázku, činnost).
+     */
+    public function dimensionsInUse(int $supplierId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT firm.dimensions_enabled = 1
+                    OR EXISTS (SELECT 1 FROM payroll_dimensions dimension
+                                WHERE dimension.supplier_id = firm.id)
+               FROM supplier firm
+              WHERE firm.id = ?'
+        );
+        $statement->execute([$supplierId]);
+
+        return (int) $statement->fetchColumn() === 1;
+    }
+
+    /** @return array<string,mixed>|null vstupní snapshot revize */
+    public function revisionInputSnapshot(int $supplierId, int $revisionId): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT input_snapshot_json
+               FROM payroll_run_revisions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $json = $statement->fetchColumn();
+        if (!is_string($json)) {
+            return null;
+        }
+        $decoded = json_decode($json, true);
+
+        return is_array($decoded) && !array_is_list($decoded) ? $decoded : null;
     }
 
     /**

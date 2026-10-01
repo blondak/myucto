@@ -22,6 +22,8 @@ const data = ref<PayrollDimensionCostReport | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 const canRead = computed(() => auth.canRead('payroll.reports'))
+// Firma bez dimenzí report nevidí vůbec — rozhoduje API (`enabled`), ne šablona.
+const visible = computed(() => canRead.value && (loadError.value !== '' || data.value?.enabled === true))
 
 const formatter = computed(() => new Intl.NumberFormat(locale.value, {
   style: 'currency', currency: 'CZK', minimumFractionDigits: 2,
@@ -35,6 +37,17 @@ function employeeLabel(row: PayrollDimensionCostReportRow): string {
   if (row.employment_id === null) return t('payroll.dimension_cost_report.unassigned')
   const name = row.employee_name ?? `#${row.employment_id}`
   return row.employment_code ? `${name} (${row.employment_code})` : name
+}
+
+function unallocatedHint(row: PayrollDimensionCostReportRow): string | undefined {
+  if (row.employment_id !== null) return undefined
+  if (row.unallocated_reason === 'employer_insurance_not_allocatable') {
+    return t('payroll.dimension_cost_report.unassigned_reason.employer_insurance_not_allocatable')
+  }
+  if (row.unallocated_reason === 'firm_level_cost') {
+    return t('payroll.dimension_cost_report.unassigned_reason.firm_level_cost')
+  }
+  return undefined
 }
 
 function dimensionLabel(row: PayrollDimensionCostReportRow): string {
@@ -63,7 +76,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-if="canRead" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-test="payroll-dimension-cost-report">
+  <section v-if="visible" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-test="payroll-dimension-cost-report">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.dimension_cost_report.title') }}</h2>
@@ -113,6 +126,7 @@ onMounted(load)
             class="rounded-lg border border-neutral-200 bg-surface p-3"
           >
             <h3 class="font-semibold text-neutral-900">{{ employeeLabel(row) }}</h3>
+            <p v-if="unallocatedHint(row)" class="mt-1 text-xs text-neutral-500" data-test="dimension-cost-report-unassigned-hint">{{ unallocatedHint(row) }}</p>
             <p class="text-xs text-neutral-500">{{ dimensionLabel(row) }}</p>
             <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
               <div>
@@ -144,7 +158,15 @@ onMounted(load)
             </thead>
             <tbody>
               <tr v-for="(row, index) in data.rows" :key="index" class="border-b border-neutral-100">
-                <td class="px-2 py-2 text-neutral-700">{{ employeeLabel(row) }}</td>
+                <td class="px-2 py-2 text-neutral-700">
+                  <span
+                    v-if="unallocatedHint(row)"
+                    class="cursor-help underline decoration-dotted underline-offset-2"
+                    :title="unallocatedHint(row)"
+                    data-test="dimension-cost-report-unassigned"
+                  >{{ employeeLabel(row) }}</span>
+                  <template v-else>{{ employeeLabel(row) }}</template>
+                </td>
                 <td class="px-2 py-2 text-neutral-700">{{ dimensionLabel(row) }}</td>
                 <td class="px-2 py-2 text-right text-neutral-700">{{ money(row.wages_minor) }}</td>
                 <td class="px-2 py-2 text-right text-neutral-700">{{ money(row.insurance_minor) }}</td>

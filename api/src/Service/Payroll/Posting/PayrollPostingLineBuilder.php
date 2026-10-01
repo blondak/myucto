@@ -345,13 +345,7 @@ final class PayrollPostingLineBuilder
             $socialEmployer,
             'Sociální pojištění hrazené zaměstnavatelem',
             $splitEmployerInsurance
-                ? PayrollEmployerInsuranceCostAllocation::social(
-                    $sets['social_insurance']['root'],
-                    $this->flattenRelationships(
-                        $sets['social_insurance']['relationships'],
-                    ),
-                    $socialEmployer,
-                )
+                ? $this->socialEmployerShares($sets, $socialEmployer)
                 : null,
             $partsByEmployment,
         );
@@ -363,11 +357,7 @@ final class PayrollPostingLineBuilder
             $healthEmployer,
             'Zdravotní pojištění hrazené zaměstnavatelem',
             $splitEmployerInsurance
-                ? PayrollEmployerInsuranceCostAllocation::health(
-                    $this->healthEmployerPersonTotals($sets['health_insurance']),
-                    $this->healthEmployerWeights($sets['health_insurance']),
-                    $healthEmployer,
-                )
+                ? $this->healthEmployerShares($sets, $healthEmployer)
                 : null,
             $partsByEmployment,
         );
@@ -1887,31 +1877,16 @@ final class PayrollPostingLineBuilder
             );
             return;
         }
-        foreach ($shares as $employmentId => $share) {
-            $parts = $partsByEmployment[$employmentId] ?? [self::plainPart()];
-            if (count($parts) === 1) {
-                $this->addAllocation(
-                    $allocations,
-                    "{$baseKey}:employment:{$employmentId}:debit",
-                    $debitAccount,
-                    $share,
-                    $description,
-                    $parts[0]['cost_center'],
-                    $parts[0]['dimensions'],
-                );
-                continue;
-            }
-            foreach ($this->splitByParts($share, $parts) as $index => $partShare) {
-                $this->addAllocation(
-                    $allocations,
-                    "{$baseKey}:employment:{$employmentId}:part:{$index}:debit",
-                    $debitAccount,
-                    $partShare,
-                    $description,
-                    $parts[$index]['cost_center'],
-                    $parts[$index]['dimensions'],
-                );
-            }
+        foreach ($this->employerInsuranceDebits($baseKey, $shares, $partsByEmployment) as $debit) {
+            $this->addAllocation(
+                $allocations,
+                $debit['allocation_key'],
+                $debitAccount,
+                $debit['signed_minor'],
+                $description,
+                $debit['cost_center'],
+                $debit['dimensions'],
+            );
         }
         $this->addAllocation(
             $allocations,
@@ -1920,6 +1895,114 @@ final class PayrollPostingLineBuilder
             -$amount,
             $description,
         );
+    }
+
+    /**
+     * Nákladový rozpad zaměstnavatelského pojistného na pracovní vztahy a jejich
+     * části. Je to tentýž rozpad, který {@see build()} zaúčtuje na 524, když aspoň jeden vztah
+     * nese středisko nebo firemní dimenzi.
+     *
+     * Bez dimenzí se pojistné účtuje jednou firemní částkou a v alokacích po
+     * zaměstnancích chybí. Report nákladů na zaměstnance ho proto rozkládá
+     * tímhle, aby rozdělení po osobách nevzniklo podruhé jinou cestou.
+     *
+     * @param array<string,mixed> $snapshot      vstupní snapshot revize
+     * @param array<string,mixed> $statutorySets zákonné výsledky revize
+     * @return array{
+     *   social:?list<array{allocation_key:string,employment_id:int,cost_center:?string,dimensions:array<int,int>,signed_minor:int}>,
+     *   health:?list<array{allocation_key:string,employment_id:int,cost_center:?string,dimensions:array<int,int>,signed_minor:int}>
+     * } null = rozpad nelze doložit (revize bez výsledků vztahů)
+     */
+    public function employerInsuranceCostShares(array $snapshot, array $statutorySets): array
+    {
+        $snapshotPeople = $this->snapshotPeople($snapshot);
+        $partsByEmployment = [];
+        foreach ($snapshotPeople as $person) {
+            foreach ($person['employments'] as $employmentId => $employmentSnapshot) {
+                $partsByEmployment[$employmentId] = $this->employmentParts($employmentSnapshot);
+            }
+        }
+        $sets = $this->sets($statutorySets, array_keys($snapshotPeople));
+        $social = $this->socialEmployerShares(
+            $sets,
+            $this->nonNegativeInt($sets['social_insurance']['root'], 'employer_contribution_minor_units'),
+        );
+        $health = $this->healthEmployerShares(
+            $sets,
+            $this->nonNegativeInt($sets['health_insurance']['root'], 'employer_contribution_minor_units'),
+        );
+
+        return [
+            'social' => $social === null
+                ? null
+                : $this->employerInsuranceDebits('employer-insurance:social', $social, $partsByEmployment),
+            'health' => $health === null
+                ? null
+                : $this->employerInsuranceDebits('employer-insurance:health', $health, $partsByEmployment),
+        ];
+    }
+
+    /**
+     * @param array<string,array{root:array<string,mixed>,people:array<int,array<string,mixed>>,relationships:array<int,array<int,array<string,mixed>>>}> $sets
+     * @return array<int,int>|null employment_id → částka
+     */
+    private function socialEmployerShares(array $sets, int $total): ?array
+    {
+        return PayrollEmployerInsuranceCostAllocation::social(
+            $sets['social_insurance']['root'],
+            $this->flattenRelationships($sets['social_insurance']['relationships']),
+            $total,
+        );
+    }
+
+    /**
+     * @param array<string,array{root:array<string,mixed>,people:array<int,array<string,mixed>>,relationships:array<int,array<int,array<string,mixed>>>}> $sets
+     * @return array<int,int>|null employment_id → částka
+     */
+    private function healthEmployerShares(array $sets, int $total): ?array
+    {
+        return PayrollEmployerInsuranceCostAllocation::health(
+            $this->healthEmployerPersonTotals($sets['health_insurance']),
+            $this->healthEmployerWeights($sets['health_insurance']),
+            $total,
+        );
+    }
+
+    /**
+     * Nákladové alokace podílů vztahů; vztah s procentním rozpadem se dál dělí
+     * mezi své části (F3).
+     *
+     * @param array<int,int> $shares employment_id → částka
+     * @param array<int,list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>> $partsByEmployment
+     * @return list<array{allocation_key:string,employment_id:int,cost_center:?string,dimensions:array<int,int>,signed_minor:int}>
+     */
+    private function employerInsuranceDebits(string $baseKey, array $shares, array $partsByEmployment): array
+    {
+        $debits = [];
+        foreach ($shares as $employmentId => $share) {
+            $parts = $partsByEmployment[$employmentId] ?? [self::plainPart()];
+            if (count($parts) === 1) {
+                $debits[] = [
+                    'allocation_key' => "{$baseKey}:employment:{$employmentId}:debit",
+                    'employment_id' => $employmentId,
+                    'cost_center' => $parts[0]['cost_center'],
+                    'dimensions' => $parts[0]['dimensions'],
+                    'signed_minor' => $share,
+                ];
+                continue;
+            }
+            foreach ($this->splitByParts($share, $parts) as $index => $partShare) {
+                $debits[] = [
+                    'allocation_key' => "{$baseKey}:employment:{$employmentId}:part:{$index}:debit",
+                    'employment_id' => $employmentId,
+                    'cost_center' => $parts[$index]['cost_center'],
+                    'dimensions' => $parts[$index]['dimensions'],
+                    'signed_minor' => $partShare,
+                ];
+            }
+        }
+
+        return $debits;
     }
 
     /**

@@ -470,8 +470,16 @@ rok ukáže mzdové náklady každého zaměstnance rozdělené po střediscích
 firemních dimenzích (mzdy, pojistné zaměstnavatele, ostatní) a souhrn po
 hodnotách. Sestava čte účetní můstek mezd, ne deník, a započítává jen zaúčtované
 běhy (u opravených běhů poslední zaúčtovanou revizi). Součet sedí na nákladové
-řádky mzdového předpisu v deníku. Pojistné revize, kterou nešlo rozdělit na
-pracovní vztahy, se ukáže v řádku **Nerozděleno na zaměstnance**.
+řádky mzdového předpisu v deníku. Sestava se zobrazí jen firmě, která má zapnuté
+firemní dimenze nebo eviduje aspoň jednu mzdovou dimenzi.
+
+Pojistné zaměstnavatele se počítá ze součtu vyměřovacích základů celé firmy, a
+pokud vztahy nenesou dimenzi, zaúčtuje se jednou částkou. Sestava ho přesto
+rozdělí na zaměstnance poměrem jejich vyměřovacích základů, stejně jako podíl
+osoby v rozkladu pojištění mzdového běhu, a podíl vztahu promítne do jeho
+dimenzí. Součet podílů sedí na firemní částku na haléř. V řádku **Nerozděleno na
+zaměstnance** zůstane jen pojistné revize, která si základy jednotlivých vztahů
+neuložila; vysvětlení ukáže tooltip u řádku.
 
 ## Sestavy
 

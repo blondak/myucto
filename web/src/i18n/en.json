@@ -2000,6 +2000,10 @@
       "other": "Other",
       "total": "Total",
       "unassigned": "Not assigned to an employee",
+      "unassigned_reason": {
+        "employer_insurance_not_allocatable": "Employer insurance is calculated from the sum of all employees' assessment bases. The report otherwise splits it by the ratio of those bases, but this payroll revision did not store the bases of individual employments, so a person's share cannot be supported.",
+        "firm_level_cost": "A cost posted for the whole company without a link to an employment, so it cannot be assigned to a specific employee."
+      },
       "no_dimension": "No dimension",
       "empty": "There are no posted payroll runs for the selected year yet.",
       "source_hint": "The report reads the payroll posting bridge, not the journal — the journal holds one payroll entry per company. The total matches the cost lines of that entry.",

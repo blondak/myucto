@@ -37,7 +37,7 @@ final class PayrollCompanyDimensionPostingFlowTest extends TestCase
     {
         $this->bootEnforcementRun();
         $pdo = $this->db->pdo();
-        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry', dimensions_enabled = 1 WHERE id = ?")
             ->execute([$this->supplierId]);
         $pdo->prepare('DELETE FROM supplier_accounting_modes WHERE supplier_id = ?')
             ->execute([$this->supplierId]);
