@@ -19,7 +19,8 @@ import {
 } from '@/api/payrollTakeoverRuns'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { formatDate, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor as money, formatPeriod, formatPeriodRange } from '@/composables/useFormat'
+import { usePerUserFlag } from '@/composables/usePerUserFlag'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -42,7 +43,30 @@ const discardReason = ref('')
 const periods = computed<PayrollTakeoverOverviewPeriod[]>(
   () => overview.value?.periods.filter(row => row.historical) ?? [],
 )
-const visible = computed(() => periods.value.length > 0)
+
+/*
+ * Převzaté měsíce jsou hotová historie, se kterou se běžně nic nedělá; panel
+ * proto drží jen jeden řádek. Rozbalí se sám, jen když některý měsíc čeká na
+ * převzetí. Mimo rok přechodu se neukazuje vůbec, pokud tam zrovna něco
+ * nečeká (firma začínající v lednu převezme loňský rok právě tam).
+ */
+const transitionYear = computed(() => overview.value?.payroll_start_period?.slice(0, 4) ?? null)
+const visible = computed(() =>
+  periods.value.length > 0
+  && (transitionYear.value === String(props.year) || buildable.value.length > 0),
+)
+const rangeLabel = computed(() => {
+  const list = periods.value.map(row => row.period).sort()
+  return list.length === 0 ? '' : formatPeriodRange(list[0], list[list.length - 1])
+})
+
+const expandedFlag = usePerUserFlag('payroll.takeover-panel.expanded')
+const expanded = ref(expandedFlag.read() ?? false)
+
+function toggleExpanded() {
+  expanded.value = !expanded.value
+  expandedFlag.write(expanded.value)
+}
 
 /** Id převzatého běhu měsíce; `null`, dokud běh neexistuje. */
 function runIdFor(period: string): number | null {
@@ -53,6 +77,7 @@ async function load() {
   loading.value = true
   try {
     overview.value = await payrollTakeoverRunsApi.overview(props.year)
+    if (buildable.value.length > 0) expanded.value = true
   } catch {
     // Tichý neúspěch: panel je pomůcka roku přechodu, ne závora. Seznam běhů
     // nad ním musí zůstat použitelný i tehdy, když se přehled nenačte.
@@ -174,29 +199,19 @@ async function discard() {
     class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-5"
     data-testid="payroll-takeover-panel"
   >
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-semibold text-neutral-900">
-          {{ t('payroll.runs.takeover.title') }}
-        </h2>
-        <p class="mt-1 text-sm text-neutral-500">
-          {{ t('payroll.runs.takeover.subtitle') }}
-        </p>
-        <p class="mt-1 text-sm text-neutral-500" data-testid="payroll-takeover-jmhz-note">
-          {{ t('payroll.runs.takeover.jmhz_note') }}
-        </p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <span
-          v-if="overview?.payroll_start_period"
-          class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600"
-        >
-          {{ t('payroll.runs.takeover.boundary', {
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <p class="min-w-0 text-sm text-neutral-700" data-testid="payroll-takeover-summary">
+        <span class="font-semibold text-neutral-900">{{ t('payroll.runs.takeover.title') }}:</span>
+        {{ t('payroll.runs.takeover.summary', { range: rangeLabel, count: periods.length }) }}
+        <template v-if="overview?.payroll_start_period">
+          · {{ t('payroll.runs.takeover.boundary', {
             period: formatPeriod(overview.payroll_start_period),
           }) }}
-        </span>
+        </template>
+      </p>
+      <div class="flex flex-wrap items-center gap-2">
         <button
-          v-if="canWrite && buildable.length > 1"
+          v-if="expanded && canWrite && buildable.length > 1"
           :class="btnFilled('primary')"
           :disabled="busy !== '' || buildingAll"
           data-testid="payroll-takeover-build-all"
@@ -208,14 +223,35 @@ async function discard() {
           </svg>
           {{ t('payroll.runs.takeover.build_all', { count: buildable.length }) }}
         </button>
+        <button
+          type="button"
+          :class="btnOutlineSm('neutral')"
+          class="whitespace-nowrap"
+          :aria-expanded="expanded"
+          data-testid="payroll-takeover-toggle"
+          @click="toggleExpanded"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="expanded ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'" />
+          </svg>
+          {{ expanded ? t('payroll.runs.takeover.collapse') : t('payroll.runs.takeover.expand') }}
+        </button>
       </div>
     </div>
+
+    <template v-if="expanded">
+    <p class="mt-2 text-sm text-neutral-500">
+      {{ t('payroll.runs.takeover.subtitle') }}
+    </p>
+    <p class="mt-1 text-sm text-neutral-500" data-testid="payroll-takeover-jmhz-note">
+      {{ t('payroll.runs.takeover.jmhz_note') }}
+    </p>
 
     <p v-if="loading" class="mt-3 text-sm text-neutral-500">
       {{ t('payroll.runs.takeover.loading') }}
     </p>
 
-    <ul v-else class="mt-4 space-y-2">
+    <ul v-else class="mt-4 space-y-2" data-testid="payroll-takeover-list">
       <li
         v-for="row in periods"
         :key="row.period"
@@ -344,5 +380,6 @@ async function discard() {
         </div>
       </li>
     </ul>
+    </template>
   </section>
 </template>

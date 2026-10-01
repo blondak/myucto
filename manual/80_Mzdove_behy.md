@@ -288,11 +288,16 @@ počítá MyÚčto. Hranicí je první mzdový měsíc nastavený u mzdového mo
 Za měsíc pod touto hranicí mzdový běh založit nejde a ani nemá — MyÚčto ten
 měsíc nepočítalo.
 
-Na stránce **Mzdy → Mzdové běhy** proto svítí panel **Převzaté měsíce roku
-přechodu**. Vypíše historické měsíce, ke kterým jsou v aplikaci převzaté
-mzdy (z převodu z PAMICA, POHODY, PREMIER nebo z importu CSV/XLSX), a u
-každého nabídne **Převzít měsíc**. Panel se u firmy bez převzatých
-historických měsíců nezobrazí. Převod z Money S3 převzaté mzdy jednotlivých
+Na stránce **Mzdy → Mzdové běhy** je proto panel **Převzaté měsíce roku
+přechodu**. Ve výchozím stavu zabírá jeden řádek s rozsahem převzatých měsíců
+a hranicí, od které počítá MyÚčto; tlačítkem **Zobrazit** se rozbalí seznam
+historických měsíců, ke kterým jsou v aplikaci převzaté mzdy (z převodu
+z PAMICA, POHODY, PREMIER nebo z importu CSV/XLSX). U měsíce, který ještě
+převzatý není, nabídne **Převzít měsíc**; dokud takový měsíc existuje, panel
+se rozbalí sám. Rozbalení nebo sbalení si aplikace pamatuje pro každého
+uživatele v jeho prohlížeči. Panel se ukazuje jen při výběru období v roce
+přechodu (jiný rok jen tehdy, když v něm nějaký měsíc čeká na převzetí)
+a u firmy bez převzatých historických měsíců se nezobrazí vůbec. Převod z Money S3 převzaté mzdy jednotlivých
 zaměstnanců nemá (Money je vede v šifrované databázi agendy); protokol převodu
 ukáže jen kontrolní úhrny celé firmy po měsících, viz
 [§ 103.2.2](103_Prechod_z_Money_S3.md#10322-mzdy).

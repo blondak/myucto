@@ -138,6 +138,20 @@ export function formatPeriod(period: string | null | undefined): string {
   return `${months[m - 1]} ${y}`
 }
 
+/**
+ * Rozsah měsíců `RRRR-MM` jako „leden–červenec 2026", přes přelom roku
+ * „prosinec 2025–únor 2026", jeden měsíc jako „leden 2026".
+ */
+export function formatPeriodRange(from: string, to: string): string {
+  if (from === to) return formatPeriod(from)
+  const fromLabel = formatPeriod(from)
+  const toLabel = formatPeriod(to)
+  if (from.slice(0, 4) === to.slice(0, 4)) {
+    return `${fromLabel.replace(/\s+\d{4}$/, '')}–${toLabel}`
+  }
+  return `${fromLabel}–${toLabel}`
+}
+
 /** Historický název `formatPeriod`; drží se kvůli volajícím mimo mzdy. */
 export function formatMonth(yyyymm: string): string {
   return yyyymm ? formatPeriod(yyyymm) : yyyymm

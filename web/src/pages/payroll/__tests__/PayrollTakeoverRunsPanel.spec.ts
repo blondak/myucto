@@ -21,6 +21,9 @@ vi.mock('@/api/payrollTakeoverRuns', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user: { id: 7 } }),
+}))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
@@ -47,6 +50,53 @@ function overview(built: string[]): PayrollTakeoverOverview {
 describe('PayrollTakeoverRunsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  it('převzaté hotové měsíce drží sbalené v jednom řádku a rozbalení si pamatuje', async () => {
+    m.overview.mockImplementation(async () => overview(['2026-06', '2026-07', '2026-08']))
+
+    const wrapper = mount(PayrollTakeoverRunsPanel, { props: { year: 2026, canWrite: true } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-takeover-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="payroll-takeover-summary"]').text())
+      .toContain('payroll.runs.takeover.summary')
+    expect(wrapper.find('[data-testid="payroll-takeover-list"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-takeover-discard-2026-06"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-takeover-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="payroll-takeover-list"]').exists()).toBe(true)
+    wrapper.unmount()
+
+    const again = mount(PayrollTakeoverRunsPanel, { props: { year: 2026, canWrite: true } })
+    await flushPromises()
+    expect(again.find('[data-testid="payroll-takeover-list"]').exists()).toBe(true)
+
+    await again.get('[data-testid="payroll-takeover-toggle"]').trigger('click')
+    expect(again.find('[data-testid="payroll-takeover-list"]').exists()).toBe(false)
+  })
+
+  it('rozbalí se sám, když některý měsíc čeká na převzetí', async () => {
+    m.overview.mockImplementation(async () => overview(['2026-06']))
+
+    const wrapper = mount(PayrollTakeoverRunsPanel, { props: { year: 2026, canWrite: true } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-takeover-list"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-takeover-build-2026-07"]').exists()).toBe(true)
+  })
+
+  it('mimo rok přechodu se neukáže, pokud nic nečeká na převzetí', async () => {
+    m.overview.mockImplementation(async () => ({
+      ...overview(['2026-06', '2026-07', '2026-08']),
+      payroll_start_period: '2027-01',
+    }))
+
+    const wrapper = mount(PayrollTakeoverRunsPanel, { props: { year: 2026, canWrite: true } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-takeover-panel"]').exists()).toBe(false)
   })
 
   it('převezme všechny zpracované měsíce jedním tlačítkem, po jednom v pořadí', async () => {
