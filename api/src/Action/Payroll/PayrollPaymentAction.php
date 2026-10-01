@@ -1812,6 +1812,7 @@ final class PayrollPaymentAction
         $liabilityIds = [];
         $createdCount = 0;
         $issues = [];
+        $warnings = [];
         foreach ([
             'net_wage' => fn (): array => $this->netWages->materialize(
                 $supplierId,
@@ -1894,6 +1895,16 @@ final class PayrollPaymentAction
                     ...$result['liability_ids'],
                 ];
                 $createdCount += $result['created_count'];
+                foreach ($result['warnings'] ?? [] as $warning) {
+                    $warnings[] = [
+                        'liability_kind' => $liabilityKind,
+                        'reason' => 'takeover_base_missing',
+                        'message' => $warning,
+                        'remediation_path' => '/payroll/imports?tab=takeover',
+                        'remediation_action' => 'open_takeover_wages',
+                        'technical_detail' => null,
+                    ];
+                }
             } catch (\InvalidArgumentException|\DomainException $exception) {
                 $issues[] = \MyInvoice\Service\Payroll\Payment\PayrollPaymentPreparationException::issue(
                     $liabilityKind,
@@ -1906,6 +1917,7 @@ final class PayrollPaymentAction
             'liability_ids' => $liabilityIds,
             'created_count' => $createdCount,
             'preparation_issues' => $issues,
+            'preparation_warnings' => $warnings,
         ], $createdCount > 0 ? 201 : 200);
     }
 

@@ -9,6 +9,10 @@ use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -24,7 +28,13 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
  * (březen/červen/září/prosinec). V ostatních měsících je to no-op. Kdyby
  * některý z předchozích dvou měsíců čtvrtletí ještě neměl schválenou revizi
  * s vypočteným výsledkem sociálního pojištění, materializace založí chybu —
- * NIKDY neodhaduje vyměřovací základ z neúplných dat. Volající (lenient
+ * NIKDY neodhaduje vyměřovací základ z neúplných dat. Výjimkou je měsíc před
+ * `start_period`: ten MyÚčto nepočítalo a jeho základ nesou převzaté mzdy
+ * (viz {@see self::takeoverMonthAssessmentBase()}).
+ *
+ * Pojištění platí jen zaměstnavatel, který měl ve čtvrtletí aspoň jeden
+ * pracovněprávní vztah (pracovní poměr, DPP, DPČ). Firma, která vyplácí jen
+ * jednatele nebo společníka, závazek nedostane vůbec. Volající (lenient
  * endpoint `POST /payroll/revisions/{id}/payments/liabilities`) chybu ukáže
  * jako `preparation_issue`, ne jako tvrdé selhání zbytku přípravy plateb —
  * proto se tenhle materializer záměrně NEZAPOJUJE do fail-closed
@@ -69,15 +79,21 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         private readonly PayrollLevyDeadlinePolicy $deadlines,
         private readonly PayrollAccidentInsuranceCalculator $calculator,
         private readonly PayrollAccidentInsurancePosting $posting,
+        private readonly PayrollHistoricalPeriodService $historical,
+        private readonly PayrollTakeoverReader $takeovers,
     ) {}
 
     /**
      * `posting` nese výsledek předpisu do deníku ({@see PayrollAccidentInsurancePosting}):
      * `null`, když žádný řádek závazku nevznikl ani nepřehrál.
      *
+     * `warnings` jsou upozornění k závazku, které přípravu nezastavují
+     * (typicky chybějící základ za převzatý měsíc).
+     *
      * @return array{
      *   liability_ids:list<int>,
      *   created_count:int,
+     *   warnings?:list<string>,
      *   posting?:array{status:string,journal_entry_id:?int,reason:?string}|null
      * }
      */
@@ -121,14 +137,72 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             }
             $year = (int) substr($periodStart, 0, 4);
             $quarterMonths = [$month - 2, $month - 1, $month];
+            $startPeriod = $this->historical->startPeriod($supplierId);
+            $takeoverYear = null;
             $liabilityBaseMinor = 0;
+            $hasEmployees = false;
+            $takeoverPeriods = [];
+            $missingTakeoverPeriods = [];
             foreach ($quarterMonths as $quarterMonth) {
-                $liabilityBaseMinor += $this->monthLiabilityAssessmentBase(
-                    $supplierId,
-                    sprintf('%04d-%02d-01', $year, $quarterMonth),
-                );
+                $monthStart = sprintf('%04d-%02d-01', $year, $quarterMonth);
+                $calculated = $this->monthLiabilityAssessmentBase($supplierId, $monthStart);
+                if ($calculated === null) {
+                    if (!PayrollHistoricalPeriodService::precedesStart($startPeriod, $monthStart)) {
+                        throw new \DomainException(sprintf(
+                            'Čtvrtletí není kompletní: měsíc %s nemá schválenou mzdovou revizi.',
+                            $monthStart,
+                        ));
+                    }
+                    $takeoverYear ??= $this->takeovers->forSupplier($supplierId, $year);
+                    $calculated = $this->takeoverMonthAssessmentBase(
+                        $supplierId,
+                        $takeoverYear,
+                        $monthStart,
+                    );
+                    $takeoverPeriods[] = substr($monthStart, 0, 7);
+                    if ($calculated['missing_base']) {
+                        $missingTakeoverPeriods[] = substr($monthStart, 0, 7);
+                    }
+                }
+                $liabilityBaseMinor += $calculated['base'];
+                $hasEmployees = $hasEmployees || $calculated['has_employees'];
             }
             $quarterStart = sprintf('%04d-%02d-01', $year, $quarterMonths[0]);
+            $reference = sprintf(
+                'accident-insurance:quarter:%04d-%02d',
+                $year,
+                $quarterMonths[0],
+            );
+            $warnings = array_map(
+                static fn (string $period): string => sprintf(
+                    'Chybí vyměřovací základ za převzatý měsíc %d/%s. Doplňte ho '
+                        . 'v převzatých mzdách; do té doby je čtvrtletní pojistné '
+                        . 'spočtené bez tohoto měsíce.',
+                    (int) substr($period, 5, 2),
+                    substr($period, 0, 4),
+                ),
+                $missingTakeoverPeriods,
+            );
+
+            // Bez jediného pracovněprávního vztahu (pracovní poměr, DPP, DPČ)
+            // firma zákonné pojištění odpovědnosti neplatí vůbec: jednatel ani
+            // společník zaměstnancem podle § 205d zák. č. 65/1965 Sb. není.
+            // Sazba ani účet pojistitele se pak nehledají, protože je taková
+            // firma nemá mít vyplněné. Jedinou výjimkou je dřívější závazek
+            // téhož čtvrtletí, který musí opravná revize umět vynulovat.
+            if (!$hasEmployees
+                && $this->priorState(
+                    $this->liabilities->lockEarlierInstitutionalLiabilities(
+                        $supplierId,
+                        $revision['run_id'],
+                        $revision['revision_no'],
+                        self::LIABILITY_KIND,
+                    ),
+                    $reference,
+                ) === null
+            ) {
+                return ['liability_ids' => [], 'created_count' => 0, 'warnings' => []];
+            }
 
             $rate = $this->rates->effectiveOn($supplierId, $quarterStart);
             if ($rate === null) {
@@ -146,11 +220,6 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 $periodStart,
             );
 
-            $reference = sprintf(
-                'accident-insurance:quarter:%04d-%02d',
-                $year,
-                $quarterMonths[0],
-            );
             $target = $this->target(
                 $supplierId,
                 $rate['institution_code'],
@@ -175,6 +244,12 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 ...$target['target_snapshot'],
                 'target_amount_minor' => $premiumMinor,
             ];
+            // Klíče jen u čtvrtletí s převzatým měsícem, aby otisk čtvrtletí
+            // spočtených celých v MyÚčtu zůstal bajtově stejný jako dřív.
+            if ($takeoverPeriods !== []) {
+                $source['takeover_periods'] = $takeoverPeriods;
+                $source['takeover_periods_missing_base'] = $missingTakeoverPeriods;
+            }
 
             $prior = $this->priorState(
                 $this->liabilities->lockEarlierInstitutionalLiabilities(
@@ -209,7 +284,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             $priorSigned = $prior['signed_minor'] ?? 0;
             $delta = $premiumMinor - $priorSigned;
             if ($delta === 0) {
-                return ['liability_ids' => [], 'created_count' => 0];
+                return ['liability_ids' => [], 'created_count' => 0, 'warnings' => $warnings];
             }
             $direction = $delta > 0 ? 'outgoing' : 'incoming';
             $amount = abs($delta);
@@ -243,17 +318,22 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                     || !is_string($existing['idempotency_key_hash'] ?? null)
                     || !hash_equals($existing['idempotency_key_hash'], $idempotencyHash)
                 ) {
-                    throw new \DomainException(
-                        $this->wasBuiltOnCappedBase($existing)
-                            ? 'Toto čtvrtletí bylo předepsáno ze zastropovaného '
+                    throw new \DomainException(match (true) {
+                        $this->wasBuiltOnCappedBase($existing) =>
+                            'Toto čtvrtletí bylo předepsáno ze zastropovaného '
                                 . 'vyměřovacího základu (roční maximum podle § 15a). '
                                 . 'Zákonné pojištění odpovědnosti se počítá ze základu '
                                 . 'bez ročního maxima, takže je předepsaná částka nižší, '
                                 . 'než má být. Rozdíl doplňte opravnou revizí — přepsat '
                                 . 'už předepsaný závazek na místě by smazalo stopu, '
-                                . 'podle které se dohledá, co se pojišťovně poslalo.'
-                            : 'Idempotentní replay zákonného pojištění odpovědnosti nesouhlasí.',
-                    );
+                                . 'podle které se dohledá, co se pojišťovně poslalo.',
+                        $this->wasBuiltWithoutTakeoverBase($existing) =>
+                            'Toto čtvrtletí bylo předepsáno bez vyměřovacího základu '
+                                . 'za některý převzatý měsíc. Po doplnění převzatých mezd '
+                                . 'předepište rozdíl opravnou revizí posledního měsíce '
+                                . 'čtvrtletí; už předepsaný závazek se na místě nepřepisuje.',
+                        default => 'Idempotentní replay zákonného pojištění odpovědnosti nesouhlasí.',
+                    });
                 }
 
                 // Závazek vzniklý dřív, než se pojistné předepisovalo do deníku
@@ -262,6 +342,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 return [
                     'liability_ids' => [$existing['id']],
                     'created_count' => 0,
+                    'warnings' => $warnings,
                     'posting' => $this->posting->post(
                         $supplierId,
                         $existing['id'],
@@ -292,6 +373,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             return [
                 'liability_ids' => [$id],
                 'created_count' => 1,
+                'warnings' => $warnings,
                 'posting' => $this->posting->post(
                     $supplierId,
                     $id,
@@ -352,8 +434,14 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      * pojištění se počítají celý rok dál. Čtení `capped_…` proto předepisovalo
      * nižší pojistné, než má být, a u nedoplatku § 12 odst. 9 přidává 10 % za
      * každý započatý měsíc prodlení.
+     *
+     * `null` = měsíc nemá aktuální schválenou revizi. Jestli je to chyba,
+     * rozhoduje volající podle hranice `start_period`: převzatý měsíc revizi
+     * mít nemůže a jeho základ nese převzatá mzda.
+     *
+     * @return array{base:int,has_employees:bool,missing_base:bool}|null
      */
-    private function monthLiabilityAssessmentBase(int $supplierId, string $monthStart): int
+    private function monthLiabilityAssessmentBase(int $supplierId, string $monthStart): ?array
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT revision.id
@@ -369,10 +457,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         $statement->execute([$supplierId, $monthStart]);
         $revisionId = $statement->fetchColumn();
         if ($revisionId === false) {
-            throw new \DomainException(sprintf(
-                'Čtvrtletí není kompletní: měsíc %s nemá schválenou mzdovou revizi.',
-                $monthStart,
-            ));
+            return null;
         }
 
         $result = $this->statutoryResults->find(
@@ -416,9 +501,14 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      * se sociálního pojištění neúčastní, se nepočítají stejně jako u
      * celofiremního součtu.
      *
+     * `has_employees` hlásí, že měsíc měl aspoň jeden pracovněprávní vztah
+     * (pracovní poměr, DPP, DPČ), i když se sociálního pojištění neúčastnil:
+     * povinnost pojištění odpovědnosti vzniká zaměstnáváním, ne výší základu.
+     *
      * @param array<string,mixed> $root
+     * @return array{base:int,has_employees:bool,missing_base:bool}
      */
-    private function sumLiabilityRelationships(array $root, string $monthStart): int
+    private function sumLiabilityRelationships(array $root, string $monthStart): array
     {
         $people = $root['people'] ?? null;
         if (!is_array($people)) {
@@ -429,6 +519,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         }
 
         $base = 0;
+        $hasEmployees = false;
         foreach ($people as $person) {
             $relationships = is_array($person) ? ($person['relationships'] ?? null) : null;
             if (!is_array($relationships)) {
@@ -441,6 +532,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 if (($relationship['kind'] ?? null) === self::EXCLUDED_RELATIONSHIP_KIND) {
                     continue;
                 }
+                $hasEmployees = true;
                 $participation = $relationship['participation'] ?? null;
                 if (!is_array($participation)
                     || ($participation['status'] ?? null) !== 'participates'
@@ -458,7 +550,129 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             }
         }
 
-        return $base;
+        return ['base' => $base, 'has_employees' => $hasEmployees, 'missing_base' => false];
+    }
+
+    /**
+     * Základ za měsíc před `start_period`, který vedl předchozí mzdový program.
+     *
+     * Čte se výhradně přes {@see PayrollTakeoverReader} (převzaté mzdy roku
+     * přechodu), stejně jako ELDP a průměrný výdělek. Bere se
+     * `social_base_minor`, tedy vyměřovací základ sociálního pojištění, který
+     * vydal předchozí program. Jestli ho tam zastropoval ročním maximem, se
+     * z převzatého řádku poznat nedá; na rok přechodu to dopadá jen
+     * u zaměstnance nad maximem.
+     *
+     * Vyloučení je stejné jako u počítaných měsíců: vztah člena orgánu nebo
+     * společníka ({@see PayrollRelationType::isCompanyBody()}) se nepočítá.
+     * Druh vztahu nese převzatý řádek; když chybí, doplní se z převedeného
+     * vztahu, a když není ani ten, řádek se započte. Neznámý vztah je spíš
+     * zaměstnanec než jednatel a vynechaný základ by znamenal nedoplatek.
+     *
+     * Měsíc bez převzatého řádku pracovněprávního vztahu:
+     *  - firma v něm žádný pracovněprávní vztah neměla → nulový základ, žádná
+     *    povinnost (firma začala zaměstnávat později),
+     *  - měla, ale převzatá mzda chybí → nulový základ s příznakem
+     *    `missing_base`; závazek přesto vznikne a hláška řekne, co doplnit.
+     *
+     * @return array{base:int,has_employees:bool,missing_base:bool}
+     */
+    private function takeoverMonthAssessmentBase(
+        int $supplierId,
+        PayrollTakeoverYear $takeoverYear,
+        string $monthStart,
+    ): array {
+        $base = 0;
+        $hasRows = false;
+        foreach ($takeoverYear->forPeriod(substr($monthStart, 0, 7)) as $row) {
+            $relationType = PayrollRelationType::tryFrom((string) $row->relationType)
+                ?? ($row->employmentId !== null
+                    ? $this->employmentRelationType($supplierId, $row->employmentId)
+                    : null);
+            if ($relationType !== null && $relationType->isCompanyBody()) {
+                continue;
+            }
+            if ($row->socialBaseMinor < 0) {
+                throw new \DomainException(sprintf(
+                    'Převzatý vyměřovací základ za %s je záporný.',
+                    substr($monthStart, 0, 7),
+                ));
+            }
+            $hasRows = true;
+            $base += $row->socialBaseMinor;
+        }
+        if ($hasRows) {
+            return ['base' => $base, 'has_employees' => true, 'missing_base' => false];
+        }
+        $employed = $this->hasEmploymentRelationshipIn($supplierId, $monthStart);
+
+        return ['base' => 0, 'has_employees' => $employed, 'missing_base' => $employed];
+    }
+
+    private function employmentRelationType(int $supplierId, int $employmentId): ?PayrollRelationType
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT relation_type FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$supplierId, $employmentId]);
+        $value = $statement->fetchColumn();
+
+        return is_string($value) ? PayrollRelationType::tryFrom($value) : null;
+    }
+
+    /**
+     * Trval v měsíci aspoň jeden převedený pracovněprávní vztah?
+     *
+     * Rozhoduje jen o tom, jestli je chybějící převzatý měsíc mezera v datech,
+     * nebo měsíc, kdy firma ještě nikoho nezaměstnávala. Vztah bez data
+     * nástupu se nepočítá, protože jeho trvání nejde doložit.
+     */
+    private function hasEmploymentRelationshipIn(int $supplierId, string $monthStart): bool
+    {
+        $companyBody = array_values(array_map(
+            static fn (PayrollRelationType $type): string => $type->value,
+            array_filter(
+                PayrollRelationType::cases(),
+                static fn (PayrollRelationType $type): bool => $type->isCompanyBody(),
+            ),
+        ));
+        $placeholders = implode(',', array_fill(0, count($companyBody), '?'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_employments
+              WHERE supplier_id = ?
+                AND status NOT IN ('draft', 'cancelled')
+                AND relation_type NOT IN ({$placeholders})
+                AND start_date IS NOT NULL
+                AND start_date <= LAST_DAY(?)
+                AND (end_date IS NULL OR end_date >= ?)
+              LIMIT 1",
+        );
+        $statement->execute([$supplierId, ...$companyBody, $monthStart, $monthStart]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
+     * Vznikl existující závazek bez základu za některý převzatý měsíc?
+     *
+     * @param array<string,mixed> $existing
+     */
+    private function wasBuiltWithoutTakeoverBase(array $existing): bool
+    {
+        $json = $existing['source_snapshot_json'] ?? null;
+        if (!is_string($json)) {
+            return false;
+        }
+        try {
+            $source = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return false;
+        }
+
+        return is_array($source)
+            && is_array($source['takeover_periods_missing_base'] ?? null)
+            && $source['takeover_periods_missing_base'] !== [];
     }
 
     /**

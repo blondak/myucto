@@ -2225,6 +2225,7 @@
       "materialize_failed": "Platební závazky se nepodařilo připravit.",
       "materialize_partial_failed": "{count} mzdových běhů se nepodařilo připravit, ostatní byly zpracovány. Důvody jsou vypsané nad seznamem.",
       "materialize_failures": "Nepodařilo se připravit závazky: {count}. Opravte uvedené důvody a spusťte přípravu znovu.",
+      "materialize_warnings": "Závazky jsou připravené, ale mají upozornění: {count}. Zkontrolujte podklady níže.",
       "load_failed": "Platby mezd se nepodařilo načíst.",
       "readonly_hint": "Máte oprávnění pouze pro čtení — příprava závazků, platebních dávek, exportů a párování je vypnutá.",
       "tabs_label": "Části plateb mezd",
@@ -2486,6 +2487,7 @@
       "preparation": {
         "unknown_kind": "Druh platby nebyl určen",
         "open_runs": "Otevřít mzdové běhy",
+        "open_takeover_wages": "Otevřít převzaté mzdy",
         "contact_support": "Požádat správce o kontrolu",
         "technical_details": "Technické podrobnosti pro správce",
         "support_required": "Přípravu platby se nepodařilo dokončit. Obnovte přehled a zkuste ji znovu. Pokud se problém opakuje, předejte správci druh platby, revizi a technické podrobnosti níže. Schválenou mzdu kvůli této hlášce neměňte.",

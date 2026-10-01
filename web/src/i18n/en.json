@@ -2225,6 +2225,7 @@
       "materialize_failed": "Payment liabilities could not be prepared.",
       "materialize_partial_failed": "{count} payroll runs could not be prepared; the remaining runs were processed. The reasons are listed above the list.",
       "materialize_failures": "Liabilities that could not be prepared: {count}. Fix the reasons below and run the preparation again.",
+      "materialize_warnings": "Liabilities were prepared but have warnings: {count}. Check the source data below.",
       "load_failed": "Payroll payments could not be loaded.",
       "readonly_hint": "You have read-only access — liability preparation, payment batches, exports and matching are disabled.",
       "tabs_label": "Payroll payment sections",
@@ -2486,6 +2487,7 @@
       "preparation": {
         "unknown_kind": "Payment type not specified",
         "open_runs": "Open payroll runs",
+        "open_takeover_wages": "Open taken-over payroll",
         "contact_support": "Ask your administrator to investigate",
         "technical_details": "Technical details for your administrator",
         "support_required": "The payment could not be prepared. Refresh the overview and try again. If the problem persists, share the payment type, revision and technical details below with your administrator. Do not change approved payroll because of this message.",

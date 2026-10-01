@@ -100,6 +100,7 @@ interface MaterializeFailure {
   technicalDetail: string | null
 }
 const materializeFailures = ref<MaterializeFailure[]>([])
+const materializeWarnings = ref<MaterializeFailure[]>([])
 const creatingBatch = ref(false)
 const generatingBatchId = ref<number | null>(null)
 /*
@@ -1341,9 +1342,11 @@ async function materialize(): Promise<void> {
   if (!canMaterialize.value || materializing.value) return
   materializing.value = true
   materializeFailures.value = []
+  materializeWarnings.value = []
   let created = 0
   let succeeded = 0
   const failures: MaterializeFailure[] = []
+  const warnings: MaterializeFailure[] = []
   for (const run of materializableRevisions.value) {
     if (run.revision_id === null) continue
     try {
@@ -1364,6 +1367,16 @@ async function materialize(): Promise<void> {
         remediationAction: issue.remediation_action ?? 'contact_support',
         technicalDetail: issue.technical_detail ?? (issue.remediation_action ? null : issue.message),
       })))
+      warnings.push(...(result.preparation_warnings ?? []).map((issue, index) => ({
+        key: `${run.revision_id}-warning-${index}`,
+        revisionNo: run.revision_no,
+        liabilityKind: issue.liability_kind ?? null,
+        reason: issue.reason,
+        message: issue.message,
+        remediationPath: issue.remediation_path ?? null,
+        remediationAction: issue.remediation_action ?? 'contact_support',
+        technicalDetail: null,
+      })))
     } catch (error) {
       failures.push({
         key: `${run.revision_id}-error`,
@@ -1379,6 +1392,7 @@ async function materialize(): Promise<void> {
   }
   try {
     materializeFailures.value = failures
+    materializeWarnings.value = warnings
     if (succeeded > 0) {
       toast.success(t(
         created > 0
@@ -1781,6 +1795,45 @@ onMounted(load)
             <p class="mt-1 break-words">{{ failure.technicalDetail }}</p>
             <p class="mt-1 font-mono text-xs">{{ failure.liabilityKind }} · {{ failure.reason }}</p>
           </details>
+        </li>
+      </ul>
+    </section>
+
+    <section
+      v-if="materializeWarnings.length"
+      class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 text-sm text-warning-800"
+      data-test="materialize-warning"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <p class="font-semibold">
+          {{ t('payroll.payments.materialize_warnings', { count: materializeWarnings.length }) }}
+        </p>
+        <button :class="btnOutline('neutral')" class="whitespace-nowrap" @click="materializeWarnings = []">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.close') }}
+        </button>
+      </div>
+      <ul class="mt-2 space-y-2">
+        <li
+          v-for="warning in materializeWarnings"
+          :key="warning.key"
+          data-test="materialize-warning-row"
+          class="border-t border-warning-500/20 pt-2 first:border-t-0 first:pt-0"
+        >
+          <p v-if="warning.revisionNo !== null" class="font-medium">
+            {{ t('payroll.payments.batch.revision', { revision: warning.revisionNo }) }}
+          </p>
+          <p class="font-medium">{{ kindLabel(warning.liabilityKind ?? '') }}</p>
+          <p class="mt-0.5 max-w-prose leading-snug">{{ warning.message }}</p>
+          <RouterLink
+            v-if="warning.remediationPath"
+            :to="warning.remediationPath"
+            :class="[btnOutline('warning'), 'mt-2 whitespace-nowrap']"
+            data-test="materialize-warning-remediation"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t(`payroll.payments.preparation.${warning.remediationAction}`) }}
+          </RouterLink>
         </li>
       </ul>
     </section>

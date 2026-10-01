@@ -18,7 +18,9 @@ use MyInvoice\Service\Payroll\Payment\PayrollInstitutionPaymentTargetResolver;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceCalculator;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsurancePosting;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -112,6 +114,8 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             new PayrollLevyDeadlinePolicy(),
             new PayrollAccidentInsuranceCalculator(),
             $container->get(PayrollAccidentInsurancePosting::class),
+            $container->get(PayrollHistoricalPeriodService::class),
+            $container->get(PayrollTakeoverReader::class),
         );
     }
 
@@ -480,6 +484,128 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         );
     }
 
+    /**
+     * Rok přechodu: červenec vedl předchozí program, srpen a září MyÚčto.
+     * Převzatý červenec nemá revizi a mít nemůže; jeho základ nese převzatá
+     * mzda. Dřív tu příprava padala na „čtvrtletí není kompletní".
+     */
+    public function testTakeoverMonthBeforeStartPeriodContributesTakeoverBase(): void
+    {
+        $this->setStartPeriod('2026-08-01');
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->insertTakeoverRow('2026-07-01', 'employment', 40_000_00);
+        // Jednatel v převzatém měsíci do základu nepatří stejně jako v počítaném.
+        $this->insertTakeoverRow('2026-07-01', 'statutory_body', 90_000_00);
+        $this->createMonth('2026-08-01', 30_000_00);
+        $septemberRevisionId = $this->createMonth('2026-09-01', 50_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $septemberRevisionId,
+            $this->actorId,
+        );
+
+        self::assertSame(1, $result['created_count']);
+        self::assertSame([], $result['warnings'] ?? []);
+        $row = $this->liability($result['liability_ids'][0]);
+        // (40 000 + 30 000 + 50 000) Kč × 4,20 ‰ = 504 Kč.
+        self::assertSame(50_400, (int) $row['amount_minor']);
+        // 31. 10. 2026 je sobota, lhůta se posouvá na pondělí.
+        self::assertSame('2026-11-02', $row['due_on']);
+        $source = json_decode((string) $row['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(['2026-07'], $source['takeover_periods']);
+        self::assertSame([], $source['takeover_periods_missing_base']);
+    }
+
+    /**
+     * Převzatý měsíc, ve kterém zaměstnanec pracoval, ale převzatá mzda chybí:
+     * závazek vznikne ze zbytku čtvrtletí a nese upozornění, co doplnit.
+     */
+    public function testTakeoverMonthWithoutBaseCreatesLiabilityWithWarning(): void
+    {
+        $this->setStartPeriod('2026-08-01');
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createEmployment('employment', '2026-01-01');
+        $this->createMonth('2026-08-01', 30_000_00);
+        $septemberRevisionId = $this->createMonth('2026-09-01', 50_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $septemberRevisionId,
+            $this->actorId,
+        );
+
+        self::assertSame(1, $result['created_count']);
+        // (30 000 + 50 000) Kč × 4,20 ‰ = 336 Kč.
+        $row = $this->liability($result['liability_ids'][0]);
+        self::assertSame(33_600, (int) $row['amount_minor']);
+        self::assertCount(1, $result['warnings'] ?? []);
+        self::assertStringContainsString('7/2026', $result['warnings'][0]);
+        self::assertStringContainsString('převzatých mzdách', $result['warnings'][0]);
+        $source = json_decode((string) $row['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(['2026-07'], $source['takeover_periods_missing_base']);
+    }
+
+    /** Před `start_period` firma ještě nikoho nezaměstnávala: nulový základ, bez hlášky. */
+    public function testMonthBeforeStartPeriodWithoutEmploymentCountsAsZero(): void
+    {
+        $this->setStartPeriod('2026-08-01');
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createEmployment('employment', '2026-08-01');
+        $this->createMonth('2026-08-01', 30_000_00);
+        $septemberRevisionId = $this->createMonth('2026-09-01', 50_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $septemberRevisionId,
+            $this->actorId,
+        );
+
+        self::assertSame(33_600, (int) $this->liability($result['liability_ids'][0])['amount_minor']);
+        self::assertSame([], $result['warnings'] ?? []);
+    }
+
+    /**
+     * Firma, která vyplácí jen jednatele: zákonné pojištění odpovědnosti
+     * neplatí vůbec. Nesmí vzniknout závazek, chyba ani dotaz na sazbu, kterou
+     * taková firma nastavenou nemá.
+     */
+    public function testCompanyBodyOnlyFirmGetsNoLiabilityAndNoError(): void
+    {
+        $this->setStartPeriod('2026-08-01');
+        $this->createEmployment('statutory_body', '2020-01-01');
+        $this->insertTakeoverRow('2026-07-01', 'statutory_body', 90_000_00);
+        $this->createMonth('2026-08-01', 0, null, 90_000_00, false);
+        $septemberRevisionId = $this->createMonth('2026-09-01', 0, null, 90_000_00, false);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $septemberRevisionId,
+            $this->actorId,
+        );
+
+        self::assertSame(0, $result['created_count']);
+        self::assertSame([], $result['liability_ids']);
+        self::assertSame([], $result['warnings'] ?? []);
+    }
+
+    /** Měsíc od `start_period` bez schválené revize zůstává chybou. */
+    public function testFailsClosedWhenCalculatedMonthAfterStartPeriodIsMissing(): void
+    {
+        $this->setStartPeriod('2026-07-01');
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->insertTakeoverRow('2026-07-01', 'employment', 40_000_00);
+        $septemberRevisionId = $this->createMonth('2026-09-01', 50_000_00);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessageMatches('/2026-07-01/');
+        $this->materializer->materialize(
+            $this->supplierId,
+            $septemberRevisionId,
+            $this->actorId,
+        );
+    }
+
     public function testFailsClosedWhenRateIsNotConfigured(): void
     {
         $this->createMonth('2026-01-01', 20_000_00);
@@ -657,6 +783,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         int $participatingAssessmentBaseMinor,
         ?int $cappedAssessmentBaseMinor = null,
         int $corporateBodyAssessmentBaseMinor = 0,
+        bool $withEmployment = true,
     ): int {
         $cappedAssessmentBaseMinor ??= $participatingAssessmentBaseMinor;
         $pdo = $this->db->pdo();
@@ -719,13 +846,13 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             'people' => [[
                 'person_id' => 'p1',
                 'relationships' => [
-                    [
+                    ...($withEmployment ? [[
                         'relationship_id' => 'r-employment',
                         'kind' => 'employment',
                         'participation' => ['status' => 'participates'],
                         'assessment_base_minor_units' => $participatingAssessmentBaseMinor,
                         'capped_assessment_base_minor_units' => $cappedAssessmentBaseMinor,
-                    ],
+                    ]] : []),
                     ...($corporateBodyAssessmentBaseMinor > 0 ? [[
                         'relationship_id' => 'r-corporate-body',
                         'kind' => 'corporate_body',
@@ -754,6 +881,54 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         );
 
         return $revisionId;
+    }
+
+    private function setStartPeriod(string $startPeriod): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state SET start_period = ? WHERE supplier_id = ?',
+        )->execute([$startPeriod, $this->supplierId]);
+    }
+
+    /** Převzatý měsíc jednoho vztahu, jak ho zapisuje import převzatých mezd. */
+    private function insertTakeoverRow(string $periodStart, string $relationType, int $socialBaseMinor): void
+    {
+        $reference = 'synthetic-' . $relationType;
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_migration_reference_totals
+                (supplier_id, source, period_start, external_person_ref,
+                 external_relationship_ref, relation_type, gross_minor,
+                 social_base_minor, health_base_minor)
+             VALUES (?, "other", ?, ?, ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $periodStart,
+            $reference,
+            $reference,
+            $relationType,
+            $socialBaseMinor,
+            $socialBaseMinor,
+            $socialBaseMinor,
+        ]);
+    }
+
+    private function createEmployment(string $relationType, string $startDate): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Syntetická úrazová osoba", "employee", "hpp",
+                     1, 1, 0, 10000, 0, 1)',
+        )->execute([$this->supplierId]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status, start_date)
+             VALUES (?, ?, ?, ?, "active", ?)',
+        )->execute([$this->supplierId, $employeeId, 'accident-' . $relationType, $relationType, $startDate]);
     }
 
     private function makeDoubleEntry(): void

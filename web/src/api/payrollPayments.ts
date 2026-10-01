@@ -73,7 +73,7 @@ export interface PayrollPaymentPreparationIssue {
   reason: string
   message: string
   remediation_path?: string | null
-  remediation_action?: 'open_institution_accounts' | 'open_person_accounts' | 'open_runs' | 'contact_support'
+  remediation_action?: 'open_institution_accounts' | 'open_person_accounts' | 'open_runs' | 'open_takeover_wages' | 'contact_support'
   technical_detail?: string | null
 }
 
@@ -81,6 +81,8 @@ export interface PayrollPaymentPreparationResult {
   liability_ids: number[]
   created_count: number
   preparation_issues: PayrollPaymentPreparationIssue[]
+  /** Upozornění k závazku, který přesto vznikl (např. chybí základ převzatého měsíce). */
+  preparation_warnings?: PayrollPaymentPreparationIssue[]
 }
 
 export interface PayrollPayerOption {
