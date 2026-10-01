@@ -928,7 +928,8 @@
         "1944_other_item_schedule_auto_post.sql",
         "1945_activity_log_user_without_fk.sql",
         "1946_bank_notice_ignore_transfer.sql",
-        "1947_bank_transaction_processing_state.sql"
+        "1947_bank_transaction_processing_state.sql",
+        "1948_payroll_dimensions_company_link_and_split.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -8683,6 +8684,7 @@
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",
                 "default_account_code": "varchar(16) NULL DEFAULT NULL",
                 "dimension_type": "enum('cost_center','project','activity') NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "name": "varchar(190) NOT NULL",
@@ -8696,10 +8698,12 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_payroll_dimension_effective": "BTREE (supplier_id, dimension_type, code, valid_from, valid_to)",
+                "idx_payroll_dimension_value": "BTREE (dimension_value_id)",
                 "uq_payroll_dimension_supplier_id": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "fk_payroll_dimension_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "fk_payroll_dimension_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_payroll_dimension_value": "(dimension_value_id) -> dimension_values (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
                 "chk_payroll_dimension_account": "`default_account_code` is null or `default_account_code` regexp '^[0-9]{3}[.A-Z0-9]{0,13}$'",
@@ -9560,6 +9564,7 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "share_percent": "decimal(5,2) NOT NULL DEFAULT 100.00",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "updated_by": "int(10) unsigned NULL DEFAULT NULL",
@@ -9578,7 +9583,8 @@
             },
             "checks": {
                 "chk_payroll_employment_dimension_dates": "`valid_to` is null or `valid_to` >= `valid_from`",
-                "chk_payroll_employment_dimension_row_version": "`row_version` > 0"
+                "chk_payroll_employment_dimension_row_version": "`row_version` > 0",
+                "chk_payroll_employment_dimension_share": "`share_percent` > 0 and `share_percent` <= 100"
             }
         },
         "payroll_employment_events": {
@@ -14402,6 +14408,7 @@
                 "batch_id": "bigint(20) unsigned NOT NULL",
                 "cost_center": "varchar(50) NULL DEFAULT NULL",
                 "description": "varchar(255) NOT NULL",
+                "dimensions": "varchar(500) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "signed_minor": "bigint(20) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -14416,7 +14423,8 @@
             },
             "checks": {
                 "chk_payroll_posting_allocation_account": "`account_code` regexp '^[0-9]{3}[.A-Z0-9]{0,13}$'",
-                "chk_payroll_posting_allocation_amount": "`signed_minor` <> 0"
+                "chk_payroll_posting_allocation_amount": "`signed_minor` <> 0",
+                "chk_payroll_posting_allocation_dimensions": "`dimensions` is null or json_valid(`dimensions`)"
             }
         },
         "payroll_posting_batches": {
@@ -22880,8 +22888,8 @@
         "trg_payroll_employer_policy_delete": "BEFORE DELETE ON payroll_employer_policies #38d999f00b1e7b81cacb3702a0db6a5aa6e0b47a",
         "trg_payroll_employer_policy_overlap_insert": "BEFORE INSERT ON payroll_employer_policies #dfb2c5d32756210ade2a52b0b76fe4364311a9e9",
         "trg_payroll_employer_policy_overlap_update": "BEFORE UPDATE ON payroll_employer_policies #cbd06ab010cbcaf48ba5211276c7f549ac9f54ff",
-        "trg_payroll_employment_dimension_overlap_insert": "BEFORE INSERT ON payroll_employment_dimensions #dbae99b1d572a31f9f87fadc5fc06820c8d56685",
-        "trg_payroll_employment_dimension_overlap_update": "BEFORE UPDATE ON payroll_employment_dimensions #341b7e09183a217d6a60bab0133e9549771fa692",
+        "trg_payroll_employment_dimension_overlap_insert": "BEFORE INSERT ON payroll_employment_dimensions #04f9e6e83306352140e3beb4029118ef479f7fa7",
+        "trg_payroll_employment_dimension_overlap_update": "BEFORE UPDATE ON payroll_employment_dimensions #baee1535013fe591ca1831c62ca18fb8671a10e3",
         "trg_payroll_employment_exit_revision_immutable_delete": "BEFORE DELETE ON payroll_employment_exit_revisions #a7eaca0803b1fb70774badfc2965619ec05309c8",
         "trg_payroll_employment_exit_revision_immutable_update": "BEFORE UPDATE ON payroll_employment_exit_revisions #e7e2cbca9a624ec1fc27e19f6f9f3520ea7938e4",
         "trg_payroll_employment_exit_revision_validate_insert": "BEFORE INSERT ON payroll_employment_exit_revisions #ffea48981e4a3a064eb8b084de43b71f964c0368",
