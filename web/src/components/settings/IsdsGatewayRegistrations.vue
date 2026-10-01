@@ -32,11 +32,13 @@ import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
 const { t } = useI18n()
 const toast = useToast()
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment()
 
 type Environment = 'production' | 'test'
 type LoginPolicy = IsdsGatewayRegistration['user_login_policy']
@@ -288,7 +290,9 @@ onMounted(load)
         <div class="min-w-0">
           <div class="font-medium">{{ row.label }}</div>
           <div class="text-sm text-neutral-500">
-            {{ t(`databox.env.${row.environment}`) }} ·
+            <template v-if="submissionTestAllowed || row.environment === 'test'">
+              {{ t(`databox.env.${row.environment}`) }} ·
+            </template>
             {{ t('databox.gateway.registrations.atsId') }}: <code>{{ row.ats_id }}</code>
           </div>
           <div class="mt-1 text-xs text-neutral-500">
@@ -408,7 +412,7 @@ onMounted(load)
         </p>
 
         <div class="grid gap-3 sm:grid-cols-2">
-          <div class="block">
+          <div v-if="submissionTestAllowed" class="block">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.environment') }}</span>
             <div class="mt-1">
               <EnvironmentSwitch
@@ -536,7 +540,7 @@ onMounted(load)
             : t('databox.gateway.registrations.deactivateTitle') }}
         </h3>
         <p class="mb-1 text-sm text-neutral-600">
-          {{ pendingActivate.row.label }} — {{ t(`databox.env.${pendingActivate.row.environment}`) }}
+          {{ pendingActivate.row.label }}<template v-if="submissionTestAllowed || pendingActivate.row.environment === 'test'"> — {{ t(`databox.env.${pendingActivate.row.environment}`) }}</template>
         </p>
         <p class="mb-4 text-sm text-neutral-500">
           {{ pendingActivate.active
@@ -573,7 +577,7 @@ onMounted(load)
       <div class="w-full max-w-md rounded-xl bg-surface p-5 shadow-lg">
         <h3 class="mb-1 text-lg font-semibold">{{ t('databox.gateway.registrations.deleteTitle') }}</h3>
         <p class="mb-1 text-sm text-neutral-600">
-          {{ pendingDelete.label }} — {{ t(`databox.env.${pendingDelete.environment}`) }}
+          {{ pendingDelete.label }}<template v-if="submissionTestAllowed || pendingDelete.environment === 'test'"> — {{ t(`databox.env.${pendingDelete.environment}`) }}</template>
         </p>
         <p class="mb-4 text-sm text-neutral-500">{{ t('databox.gateway.registrations.deleteHint') }}</p>
         <div class="flex flex-wrap justify-end gap-2">

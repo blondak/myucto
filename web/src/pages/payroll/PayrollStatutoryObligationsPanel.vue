@@ -284,7 +284,7 @@ watch(period, load)
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <div class="block min-w-44">
+          <div v-if="auth.submissionTestEnvironmentAllowed" class="block min-w-44">
             <span class="mb-1 block text-xs font-medium text-neutral-600">
               {{ t('payroll.submissions.statutory.environment') }}
             </span>

@@ -22,12 +22,13 @@ describe('EnvironmentSwitch mimo vývojovou instalaci', () => {
     setActivePinia(createPinia())
   })
 
-  it('výběr prostředí nenabídne a ukáže jen ostrý provoz', () => {
+  it('nevykreslí přepínač ani štítek ostrého provozu', () => {
     const wrapper = mountSwitch()
 
     expect(wrapper.find('[role="radiogroup"]').exists()).toBe(false)
     expect(wrapper.find(test).exists()).toBe(false)
-    expect(wrapper.get('[data-test="environment-switch-production-only"]').text()).toBe('common.environmentSwitch.production')
+    expect(wrapper.find('[data-environment]').exists()).toBe(false)
+    expect(wrapper.text()).toBe('')
   })
 
   it('uložený test přepne zpět na produkci', () => {

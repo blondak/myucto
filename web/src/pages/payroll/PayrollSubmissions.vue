@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
@@ -114,20 +115,27 @@ const snapshotsPage = computed(() =>
 //
 // Volba přežije načtení stránky (Q8-49): na vývojové instalaci se přepínač
 // po každém obnovení vracel na ostrý provoz. Pamatuje si ji jen tahle
-// záložka prohlížeče; výchozí zůstává produkce a mimo vývoj ji
-// `useSubmissionEnvironment` na produkci vrátí vždy.
+// záložka prohlížeče; výchozí zůstává produkce. Mimo vývoj se uložený `test`
+// vůbec nepoužije a z úložiště se smaže: kdyby se jím otevřela první záložka,
+// odešel by dotaz na test, server ho odmítne a seznam podání zůstane prázdný.
 const ENVIRONMENT_STORAGE_KEY = 'myinvoice.payroll.submissionEnvironment'
 function storedEnvironment(): PayrollRegzelEnvironment {
   try {
+    if (!auth.submissionTestEnvironmentAllowed) {
+      sessionStorage.removeItem(ENVIRONMENT_STORAGE_KEY)
+      return 'production'
+    }
     return sessionStorage.getItem(ENVIRONMENT_STORAGE_KEY) === 'test' ? 'test' : 'production'
   } catch {
     return 'production'
   }
 }
 const environment = ref<PayrollRegzelEnvironment>(storedEnvironment())
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 watch(environment, value => {
   try {
-    sessionStorage.setItem(ENVIRONMENT_STORAGE_KEY, value)
+    if (submissionTestAllowed.value) sessionStorage.setItem(ENVIRONMENT_STORAGE_KEY, value)
+    else sessionStorage.removeItem(ENVIRONMENT_STORAGE_KEY)
   } catch {
     // Bez úložiště (soukromé okno) platí volba jen do obnovení stránky.
   }
@@ -412,7 +420,9 @@ function rememberDetails(tab: string, event: Event) {
           {{ t('payroll.submissions.title') }}
         </h1>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">
-          {{ t('payroll.submissions.subtitle') }}
+          {{ submissionTestAllowed
+            ? t('payroll.submissions.subtitle')
+            : t('payroll.submissions.subtitle_production_only') }}
         </p>
       </div>
       <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
@@ -433,7 +443,7 @@ function rememberDetails(tab: string, event: Event) {
           data-test="submissions-period"
         >
       </label>
-      <div class="block text-sm font-medium text-neutral-700">
+      <div v-if="submissionTestAllowed" class="block text-sm font-medium text-neutral-700">
         {{ t('payroll.submissions.overview.environment') }}
         <div class="mt-1">
           <EnvironmentSwitch
@@ -684,6 +694,7 @@ function rememberDetails(tab: string, event: Event) {
             </p>
           </div>
           <span
+            v-if="submissionTestAllowed"
             class="rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wide"
             :class="environment === 'production'
               ? 'bg-warning-100 text-warning-800'
@@ -740,7 +751,7 @@ function rememberDetails(tab: string, event: Event) {
         </div>
 
         <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <div class="block">
+          <div v-if="submissionTestAllowed" class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">
               {{ t('payroll.regzel.environment.label') }}
             </span>

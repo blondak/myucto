@@ -6926,6 +6926,7 @@
     "submissions": {
       "title": "Payroll submissions",
       "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
+      "subtitle_production_only": "Prepare, verify, send and track statutory reports.",
       "tabs_label": "Payroll submission types",
       "details_health": "Details: HOZ notifications, manual preparation and history",
       "details_sickness": "Sickness cases and reports",
@@ -7630,6 +7631,7 @@
         "jmhz_dispatch_confirm_send": "Yes, send it",
         "jmhz_dispatch_obligation_missing": "No JMHZ obligation is recorded for this registration. Refresh the overview or check obligation creation for the payroll run.",
         "jmhz_dispatch_not_open": "Production filing opens on {date}. The test environment remains available for rehearsal.",
+        "jmhz_dispatch_not_open_production_only": "Filing opens on {date}.",
         "jmhz_dispatch_already_started": "The filing is already in status {status}. Another copy cannot be created; follow it in the submissions overview.",
         "jmhz_abandon": "Discard and file again",
         "jmhz_abandoning": "Discarding…",
@@ -19396,8 +19398,7 @@
       "production": "Production",
       "test": "Test environment",
       "productionHint": "You are working with live data and live credentials.",
-      "testHint": "Careful: test environment. Neither the data nor the credentials are live.",
-      "productionOnlyHint": "Submissions always go to the authority's live service. The test environment is available only in a development installation."
+      "testHint": "Careful: test environment. Neither the data nor the credentials are live."
     },
     "storage_quota": {
       "warning": "The storage allowance for this installation is running out ({percent} %).",

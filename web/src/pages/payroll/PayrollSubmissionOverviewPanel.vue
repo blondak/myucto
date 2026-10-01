@@ -25,6 +25,7 @@ import {
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollSubmissionSubject from '@/components/payroll/PayrollSubmissionSubject.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
@@ -91,6 +92,7 @@ const period = defineModel<string>('period', { default: () => payrollWorkingPeri
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 // Server filtruje podle `agenda_group`, takže `items` je rovnou to, co panel
 // ukazuje — žádné doufiltrovávání na klientovi.
 const items = ref<PayrollSubmissionOverviewItem[]>([])
@@ -792,7 +794,7 @@ onMounted(load)
             data-test="submission-overview-period"
           >
         </label>
-        <div class="block text-sm font-medium text-neutral-700">
+        <div v-if="submissionTestAllowed" class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.overview.environment') }}
           <div class="mt-1">
             <EnvironmentSwitch

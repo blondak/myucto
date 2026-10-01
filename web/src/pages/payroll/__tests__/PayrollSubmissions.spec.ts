@@ -29,6 +29,7 @@ const m = vi.hoisted(() => ({
   closeJmhzTransportAttempt: vi.fn(),
   jmhzExternalSubmissions: vi.fn(() => Promise.resolve({ environment: 'production', items: [] })),
   routeParams: {} as Record<string, string>,
+  testAllowed: true,
   routerReplace: vi.fn(),
 }))
 
@@ -122,7 +123,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: (permission: string) => permission === 'payroll.submissions',
-    submissionTestEnvironmentAllowed: true,
+    get submissionTestEnvironmentAllowed() { return m.testAllowed },
   }),
 }))
 
@@ -510,7 +511,31 @@ describe('PayrollSubmissions', () => {
     // předat dalšímu testu.
     sessionStorage.clear()
     m.routeParams = {}
+    m.testAllowed = true
     setup()
+  })
+
+  /*
+   * Produkce 6.28.0: mimo vývojovou instalaci byla v hlavičce volba „Prostředí
+   * evidence" se štítkem Ostrý provoz a uložený `test` poslal první dotaz do
+   * testu, který server odmítne. Jediné prostředí není volba.
+   */
+  it('mimo vývoj nevykreslí volbu prostředí a uložený test nahradí produkcí', async () => {
+    m.testAllowed = false
+    sessionStorage.setItem('myinvoice.payroll.submissionEnvironment', 'test')
+    const wrapper = mount(PayrollSubmissions, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+
+    expect(m.monthlyChecklist.mock.calls.length).toBeGreaterThan(0)
+    for (const call of m.monthlyChecklist.mock.calls) expect(call[0]).toBe('production')
+    expect(sessionStorage.getItem('myinvoice.payroll.submissionEnvironment')).toBeNull()
+    expect(wrapper.find('[data-test="submissions-environment"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="monthly-checklist-environment"]').exists()).toBe(false)
+    expect(wrapper.find('[data-environment]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('payroll.submissions.overview.environment')
+    expect(wrapper.text()).not.toContain('common.environmentSwitch')
+    expect(wrapper.text()).toContain('payroll.submissions.subtitle_production_only')
+    wrapper.unmount()
   })
 
   it('má tři hlavní záložky a ostatní pod „Další"', async () => {

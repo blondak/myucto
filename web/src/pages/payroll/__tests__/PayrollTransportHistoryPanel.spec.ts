@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   enqueueJmhzIsds: vi.fn(),
   gatewayStartPayroll: vi.fn(),
   canWrite: vi.fn(() => true),
+  testAllowed: true,
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -50,7 +51,10 @@ vi.mock('@/api/dataBox', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite }),
+  useAuthStore: () => ({
+    canWrite: m.canWrite,
+    get submissionTestEnvironmentAllowed() { return m.testAllowed },
+  }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -159,6 +163,7 @@ describe('PayrollTransportHistoryPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
+    m.testAllowed = true
     m.jmhzImportedProtocols.mockResolvedValue({
       environment: 'production',
       protocols: [],
@@ -757,6 +762,81 @@ describe('PayrollTransportHistoryPanel', () => {
     )
     expect(wrapper.get('[data-test="transport-environment-note"]').text())
       .toContain('payroll.submissions.transport.environment.test_note')
+  })
+
+  describe('mimo vývojovou instalaci', () => {
+    beforeEach(() => {
+      m.testAllowed = false
+    })
+
+    it('nevykreslí přepínač prostředí ani poznámku o ostrém provozu', async () => {
+      const wrapper = mount(PayrollTransportHistoryPanel)
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="transport-environment"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="transport-environment-test"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="transport-environment-production"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="transport-environment-note"]').exists()).toBe(false)
+    })
+
+    // Produkce 6.28.0: volba `test` (z přepínače nebo uloženého stavu) poslala
+    // dotaz do testu, server ho odmítl a podání se neukázala vůbec.
+    it('s předanou volbou test načte produkci a podání ukáže', async () => {
+      const wrapper = mount(PayrollTransportHistoryPanel, { props: { environment: 'test' } })
+      await flushPromises()
+
+      expect(m.jmhzTransportHistory).toHaveBeenCalled()
+      for (const call of m.jmhzTransportHistory.mock.calls) expect(call[0]).toBe('production')
+      for (const call of m.jmhzImportedProtocols.mock.calls) expect(call[0]).toBe('production')
+      expect(wrapper.emitted('update:environment')).toEqual([['production']])
+      expect(wrapper.find('[data-test="transport-load-error"]').exists()).toBe(false)
+      expect(wrapper.text()).toContain('ABC-123-XYZ')
+    })
+  })
+
+  it('odmítnutí testu serverem nezobrazí jako selhání načtení a načte produkci', async () => {
+    m.jmhzTransportHistory.mockImplementation(async (environment: string) => {
+      if (environment === 'test') {
+        throw {
+          response: {
+            status: 403,
+            data: { error: {
+              code: 'submission_test_environment_disabled',
+              message: 'Testovací prostředí úřadů je dostupné jen ve vývojové instalaci.',
+            } },
+          },
+        }
+      }
+      return { environment: 'production', attempts: [attempt()] }
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel, { props: { environment: 'test' } })
+    await flushPromises()
+
+    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith(
+      'production',
+      { limit: 25, offset: 0 },
+      { year: null, month: null },
+    )
+    expect(wrapper.find('[data-test="transport-load-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ABC-123-XYZ')
+  })
+
+  it('pozdě došlou odpověď opuštěného prostředí zahodí', async () => {
+    let rejectTest: (reason: unknown) => void = () => {}
+    m.jmhzTransportHistory.mockImplementation((environment: string) => environment === 'test'
+      ? new Promise((_, reject) => { rejectTest = reject })
+      : Promise.resolve({ environment: 'production', attempts: [attempt()] }))
+
+    const wrapper = mount(PayrollTransportHistoryPanel, { props: { environment: 'test' } })
+    await flushPromises()
+    await wrapper.setProps({ environment: 'production' })
+    await flushPromises()
+    rejectTest({ response: { data: { error: { message: 'Pozdní chyba testu.' } } } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-load-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ABC-123-XYZ')
   })
 
   it('N-2: v testu s ostrým VS varuje, ale nezablokuje odeslání', async () => {

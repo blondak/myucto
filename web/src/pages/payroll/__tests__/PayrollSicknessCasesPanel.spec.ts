@@ -207,7 +207,7 @@ describe('PayrollSicknessCasesPanel', () => {
     m.list.mockResolvedValue(listResponse([sicknessCase({ probable_income_suggestion_minor: 3_800_000 })]))
     m.update.mockResolvedValue(sicknessCase())
     const wrapper = await mountPanel()
-    expect(wrapper.find('[data-test="sickness-case-environment"], [data-test="environment-switch-production-only"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-environment"]').exists()).toBe(false)
 
     const openEditor = async () => {
       await wrapper.findAll('button')

@@ -33,6 +33,7 @@ import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
@@ -49,6 +50,7 @@ const employments = ref<PayrollEmployment[]>([])
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
 const intentFrom = ref('')
@@ -452,7 +454,7 @@ onMounted(async () => {
             {{ t('payroll.discountIntents.employeeInformedHint') }}
           </span>
         </label>
-        <div class="block text-sm">
+        <div v-if="submissionTestAllowed" class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.regzel.environment.label') }}
           </span>

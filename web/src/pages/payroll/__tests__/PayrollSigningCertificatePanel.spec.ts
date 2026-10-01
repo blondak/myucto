@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   saveSigningProfile: vi.fn(),
   deleteSigningProfile: vi.fn(),
   canWrite: vi.fn(() => true),
+  testAllowed: true,
   user: { totp_enabled: false, mfa_methods: [] as string[], passkey_count: 0 },
 }))
 
@@ -31,7 +32,11 @@ vi.mock('@/security/webauthn', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite, user: m.user }),
+  useAuthStore: () => ({
+    canWrite: m.canWrite,
+    user: m.user,
+    get submissionTestEnvironmentAllowed() { return m.testAllowed },
+  }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -102,7 +107,21 @@ describe('PayrollSigningCertificatePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
+    m.testAllowed = true
     m.user.totp_enabled = false
+  })
+
+  it('mimo vývojovou instalaci nevykreslí přepínač ani poznámku o prostředí', async () => {
+    m.testAllowed = false
+    m.signingProfile.mockResolvedValue(view())
+
+    const wrapper = mount(PayrollSigningCertificatePanel, { props: { environment: 'test' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="signing-environment"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="signing-environment-test"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="signing-environment-note"]').exists()).toBe(false)
+    expect(m.signingProfile).not.toHaveBeenCalledWith('test')
   })
 
   it('ukáže zvolený certifikát včetně obou zápisů sériového čísla', async () => {

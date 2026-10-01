@@ -9,6 +9,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { todayIso } from './employmentLifecycleUi'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -33,6 +34,7 @@ const initialDate = computed(() => {
 })
 
 const environment = ref<PayrollRegzelEnvironment>('production')
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const onDate = ref(initialDate.value)
 const validFrom = ref(props.startDate ?? initialDate.value)
 const personIdentifier = ref('')
@@ -328,7 +330,7 @@ watch(() => [props.startDate, props.endDate], () => {
       </p>
 
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div class="text-xs text-neutral-600">
+        <div v-if="submissionTestAllowed" class="text-xs text-neutral-600">
           {{ t('payroll.people.jmhz_identity.environment') }}
           <div class="mt-1">
             <EnvironmentSwitch

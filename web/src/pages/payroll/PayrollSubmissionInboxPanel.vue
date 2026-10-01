@@ -331,7 +331,7 @@ defineExpose({ reload: load })
         </button>
       </div>
 
-      <div class="mt-5 block max-w-xs text-sm font-medium text-neutral-700">
+      <div v-if="auth.submissionTestEnvironmentAllowed" class="mt-5 block max-w-xs text-sm font-medium text-neutral-700">
         {{ t('payroll.submissions.overview.environment') }}
         <div class="mt-1">
           <EnvironmentSwitch

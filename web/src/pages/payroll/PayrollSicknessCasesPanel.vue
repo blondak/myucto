@@ -863,7 +863,7 @@ onMounted(() => void load())
         <!--
           Případy dávek se vedou zvlášť pro ostrý a testovací provoz. Přepínač
           je tu stejně jako u registrací: ve vývojové instalaci jde zvolit Test,
-          jinde se ukáže jen štítek Produkce.
+          jinde se nevykreslí nic.
         -->
         <EnvironmentSwitch
           v-model="environment"

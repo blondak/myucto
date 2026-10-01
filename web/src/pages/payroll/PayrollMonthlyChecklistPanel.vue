@@ -17,6 +17,7 @@ import {
   type ReceiptBatchResult,
 } from '@/api/dataBox'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
 import MobileKeyReceiptsButton from '@/components/submission/MobileKeyReceiptsButton.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
@@ -73,6 +74,7 @@ const environmentModel = computed({
   get: () => props.environment,
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment()
 const ownPeriod = ref(props.initialPeriod ?? payrollWorkingPeriod())
 /*
  * Výchozí měsíc samostatného panelu: nejstarší s nesplněným hlášením, jinak
@@ -564,7 +566,7 @@ onMounted(() => { void load() })
             data-test="monthly-checklist-period"
           >
         </label>
-        <div class="block text-sm font-medium text-neutral-700">
+        <div v-if="submissionTestAllowed" class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.overview.environment') }}
           <div class="mt-1">
             <EnvironmentSwitch

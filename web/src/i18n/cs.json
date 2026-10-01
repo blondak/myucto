@@ -6926,6 +6926,7 @@
     "submissions": {
       "title": "Mzdová podání",
       "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
+      "subtitle_production_only": "Příprava, kontrola, odeslání a stav zákonných hlášení.",
       "tabs_label": "Druhy mzdových podání",
       "details_health": "Podrobnosti: oznámení HOZ, ruční sestavení a historie",
       "details_sickness": "Nemocenské případy a hlášení",
@@ -7630,6 +7631,7 @@
         "jmhz_dispatch_confirm_send": "Ano, odeslat",
         "jmhz_dispatch_obligation_missing": "Pro tuto registraci chybí evidovaná povinnost JMHZ. Obnovte přehled nebo zkontrolujte založení povinností běhu.",
         "jmhz_dispatch_not_open": "Ostré podání lze odeslat nejdříve {date}. Testovací prostředí zůstává dostupné pro ověření celého toku.",
+        "jmhz_dispatch_not_open_production_only": "Podání lze odeslat nejdříve {date}.",
         "jmhz_dispatch_already_started": "Podání už pokračuje ve stavu {status}. Další kopii nelze vytvořit; průběh sledujte v přehledu podání.",
         "jmhz_abandon": "Zahodit a podat znovu",
         "jmhz_abandoning": "Zahazuji…",
@@ -19396,8 +19398,7 @@
       "production": "Ostrý provoz",
       "test": "Testovací prostředí",
       "productionHint": "Pracujete s ostrými daty a ostrými přihlašovacími údaji.",
-      "testHint": "Pozor: testovací prostředí. Data ani přihlašovací údaje nejsou ostré.",
-      "productionOnlyHint": "Podání jde vždy do ostrého provozu úřadu. Testovací prostředí je dostupné jen ve vývojové instalaci."
+      "testHint": "Pozor: testovací prostředí. Data ani přihlašovací údaje nejsou ostré."
     },
     "storage_quota": {
       "warning": "Přidělený prostor instalace se blíží ke konci ({percent} %).",

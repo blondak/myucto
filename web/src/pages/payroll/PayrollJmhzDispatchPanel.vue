@@ -200,7 +200,9 @@ function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
   const item = obligation(preview)
   if (!item) return null
   if (props.environment === 'production' && item.deadline.phase === 'not_open') {
-    return t('payroll.submissions.overview.jmhz_dispatch_not_open', {
+    return t(auth.submissionTestEnvironmentAllowed
+      ? 'payroll.submissions.overview.jmhz_dispatch_not_open'
+      : 'payroll.submissions.overview.jmhz_dispatch_not_open_production_only', {
       date: item.earliest_submission_on,
     })
   }

@@ -35,6 +35,7 @@ import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -61,6 +62,7 @@ const year = ref<number>(
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const excludedDaysConfirmed = ref(false)
 const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)
@@ -632,7 +634,7 @@ watch(requestedByAuthority, value => {
           </span>
           <SearchableSelect v-model="year" :options="yearOptions" />
         </label>
-        <div class="block text-sm">
+        <div v-if="submissionTestAllowed" class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.regzel.environment.label') }}
           </span>

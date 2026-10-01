@@ -61,6 +61,7 @@ import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/c
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { isTestEnvironmentRejection, useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { jmhzBlockerLabel } from './jmhzBlockerRemediation'
 
 const { t, te } = useI18n()
@@ -76,6 +77,15 @@ const ENVIRONMENTS: PayrollJmhzTransportEnvironment[] = ['production', 'test']
 const environment = defineModel<PayrollJmhzTransportEnvironment>('environment', {
   default: 'production',
 })
+/*
+ * Mimo vývojovou instalaci existuje jen produkce. Vlastní přepínač panelu tu
+ * dřív nebyl na politice závislý: klik na Test poslal dotaz do testu, server ho
+ * odmítl a obrazovka ukázala prázdný seznam s chybou načtení, přestože podání
+ * v produkci byla.
+ */
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
+const requestEnvironment = computed<PayrollJmhzTransportEnvironment>(() =>
+  submissionTestAllowed.value ? environment.value : 'production')
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
 const readySubmissions = ref<PayrollJmhzReadySubmission[]>([])
@@ -212,7 +222,7 @@ async function toggleProtocolErrors(protocol: PayrollJmhzImportedProtocol) {
   protocolErrorsLoading.value = { ...protocolErrorsLoading.value, [id]: true }
   protocolErrorsFailed.value = { ...protocolErrorsFailed.value, [id]: false }
   try {
-    const detail = await payrollApi.jmhzImportedProtocolErrors(id, environment.value)
+    const detail = await payrollApi.jmhzImportedProtocolErrors(id, requestEnvironment.value)
     protocolErrors.value = { ...protocolErrors.value, [id]: detail.errors }
     protocolDetailAvailable.value = {
       ...protocolDetailAvailable.value,
@@ -246,7 +256,7 @@ const knownTestVariableSymbols = ref<Set<string>>(new Set())
  * jiný.
  */
 const testEnvironmentVariableSymbolWarning = computed(() => {
-  if (environment.value !== 'test') return false
+  if (requestEnvironment.value !== 'test') return false
   const value = variableSymbol.value.trim()
   if (!variableSymbolValid.value) return false
   if (knownProductionVariableSymbols.value.has(value)) return true
@@ -671,7 +681,7 @@ async function loadVariableSymbols() {
     }
     knownProductionVariableSymbols.value = new Set(production.keys())
     knownTestVariableSymbols.value = new Set(test.keys())
-    const relevant = environment.value === 'test' ? test : production
+    const relevant = requestEnvironment.value === 'test' ? test : production
     variableSymbolOptions.value = [...relevant].map(([value, label]) => ({ value, label }))
     // Předvyplní se jen jednoznačný případ. Víc různých symbolů znamená volbu,
     // a hádat ji za uživatele by znamenalo ptát se ČSSZ pod cizím symbolem.
@@ -693,7 +703,16 @@ function useVariableSymbol(value: string) {
   variableSymbolTouched.value = true
 }
 
+/*
+ * Pořadové číslo posledního načtení. Odpověď na starší dotaz (typicky za
+ * prostředí, ze kterého se mezitím odešlo) se zahodí: jinak by pozdě došlá
+ * chyba přepsala už načtený seznam a obrazovka by tvrdila, že stav neznáme.
+ */
+let loadSequence = 0
+
 async function load() {
+  const sequence = ++loadSequence
+  const requestedEnvironment = requestEnvironment.value
   loading.value = true
   loadError.value = ''
   actionError.value = ''
@@ -708,16 +727,17 @@ async function load() {
     // uživatel dívá.
     const [history, protocols] = await Promise.all([
       payrollApi.jmhzTransportHistory(
-        environment.value,
+        requestedEnvironment,
         { limit: attemptsPageSize, offset: attemptsOffset.value },
         { year: filterYear.value, month: filterMonth.value },
       ),
       payrollApi.jmhzImportedProtocols(
-        environment.value,
+        requestedEnvironment,
         { limit: importedPageSize, offset: importedOffset.value },
         { year: filterYear.value, month: filterMonth.value },
       ),
     ])
+    if (sequence !== loadSequence) return
     attempts.value = history.attempts ?? []
     readySubmissions.value = history.ready_submissions ?? []
     dispatchedSubmissions.value = history.dispatched_submissions ?? []
@@ -726,6 +746,15 @@ async function load() {
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
   } catch (exception: unknown) {
+    if (sequence !== loadSequence) return
+    // Odmítnutý test (server je mimo vývoj, i když klient měl starý stav) není
+    // selhání načtení, jen dotaz do prostředí, které tu neexistuje. Platí
+    // produkce, takže se načte ta.
+    // Seznam načte znovu sledování prostředí níže.
+    if (requestedEnvironment === 'test' && isTestEnvironmentRejection(exception)) {
+      environment.value = 'production'
+      return
+    }
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
@@ -739,8 +768,9 @@ async function load() {
       t('payroll.submissions.transport.load_failed'),
     )
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
+  if (sequence !== loadSequence) return
   // Roky zná až odpověď serveru, takže předvolba přijde po prvním načtení
   // a seznam se pro ni musí načíst znovu. Vlajka uvnitř hlídá, že se to
   // stane právě jednou — jinak by to bylo nekonečné kolo.
@@ -769,7 +799,7 @@ async function importProtocol(event: Event) {
   actionError.value = ''
   success.value = ''
   try {
-    const result = await payrollApi.importJmhzProtocol(file, environment.value)
+    const result = await payrollApi.importJmhzProtocol(file, requestEnvironment.value)
     await load()
     success.value = result.created
       ? t('payroll.submissions.transport.imported.added', {
@@ -833,7 +863,7 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
     const result = await payrollApi.pollJmhzTransportAttempt(
       attempt.id,
       variableSymbol.value.trim(),
-      environment.value,
+      requestEnvironment.value,
     )
     polls.value = { ...polls.value, [attempt.id]: result }
     if (result.attempt) replaceAttempt(result.attempt)
@@ -870,7 +900,7 @@ async function deleteAttempt(attempt: PayrollJmhzTransportAttempt) {
     await payrollApi.deleteJmhzTransportAttempt(
       attempt.id,
       attempt.row_version,
-      environment.value,
+      requestEnvironment.value,
     )
     success.value = t('payroll.submissions.transport.delete_done', { no: attempt.attempt_no })
     await load()
@@ -905,7 +935,7 @@ async function chooseCancelMode(submissionId: number, mode: 'whole' | 'component
   if (mode !== 'components' || cancelComponents.value.length > 0) return
   cancelComponentsLoading.value = true
   try {
-    const result = await payrollApi.jmhzCorrectableComponents(submissionId, environment.value)
+    const result = await payrollApi.jmhzCorrectableComponents(submissionId, requestEnvironment.value)
     if (cancellingId.value !== submissionId) return
     cancelComponents.value = result.components
   } catch (exception: unknown) {
@@ -928,7 +958,7 @@ async function confirmCancelComponents(submissionId: number) {
   try {
     const result = await payrollApi.cancelJmhzSubmissionComponents(
       submissionId,
-      environment.value,
+      requestEnvironment.value,
       [...new Set(selectedCancelGuids.value)],
     )
     cancellingId.value = null
@@ -977,7 +1007,7 @@ async function askToCorrect(submissionId: number) {
   try {
     const result = await payrollApi.jmhzContentCorrectionPreparations(
       submissionId,
-      environment.value,
+      requestEnvironment.value,
     )
     if (correctingId.value !== submissionId) return
     correctionPreparations.value = result.preparations
@@ -1006,7 +1036,7 @@ async function loadContentCorrectionCandidates(submissionId: number) {
     const result = await payrollApi.jmhzContentCorrectionCandidates(
       submissionId,
       preparationId,
-      environment.value,
+      requestEnvironment.value,
     )
     correctableComponents.value = result.forms
     correctionBlocked.value = result.blocked_forms ?? []
@@ -1057,7 +1087,7 @@ async function confirmCorrection(submissionId: number) {
     const result = await payrollApi.freezeJmhzContentCorrection(
       submissionId,
       preparationId,
-      environment.value,
+      requestEnvironment.value,
       employmentIdentifiers,
     )
     closeCorrection()
@@ -1086,7 +1116,7 @@ async function confirmCancel(submissionId: number) {
   actionError.value = ''
   success.value = ''
   try {
-    const result = await payrollApi.cancelJmhzSubmission(submissionId, environment.value)
+    const result = await payrollApi.cancelJmhzSubmission(submissionId, requestEnvironment.value)
     cancellingId.value = null
     await load()
     success.value = result.created
@@ -1124,7 +1154,7 @@ async function dispatchReady(
     || (channel === 'vrep' && !variableSymbolValid.value)
   ) return
   const confirmed = await confirmProductionSend(
-    environment.value,
+    requestEnvironment.value,
     t(
       channel === 'vrep'
         ? 'payroll.production_send.jmhz_vrep'
@@ -1142,7 +1172,7 @@ async function dispatchReady(
       await payrollApi.sendJmhzTransport(
         submission.submission_id,
         variableSymbol.value.trim(),
-        environment.value,
+        requestEnvironment.value,
         crypto.randomUUID(),
       )
       await load()
@@ -1154,7 +1184,7 @@ async function dispatchReady(
 
     const queued = await payrollApi.enqueueJmhzIsds(
       submission.submission_id,
-      environment.value,
+      requestEnvironment.value,
     )
     readyIsdsResults.value = {
       ...readyIsdsResults.value,
@@ -1205,7 +1235,7 @@ async function close(attempt: PayrollJmhzTransportAttempt) {
     const result = await payrollApi.closeJmhzTransportAttempt(
       attempt.id,
       variableSymbol.value.trim(),
-      environment.value,
+      requestEnvironment.value,
     )
     // Potvrzení až po znovunačtení: `load()` hlášky čistí, takže nastavené
     // dřív by zmizelo dřív, než by ho někdo stihl přečíst.
@@ -1233,7 +1263,7 @@ async function reverify(attempt: PayrollJmhzTransportAttempt) {
     const result = await payrollApi.reverifyJmhzProtocol(
       attempt.submission_id,
       receiptId,
-      environment.value,
+      requestEnvironment.value,
     )
     // Po úspěchu se stav podání změnil, takže přehled musí přijít znovu.
     // Výsledek se zapisuje až potom: `load()` hlášky čistí.
@@ -1322,7 +1352,7 @@ onMounted(loadVariableSymbols)
         {{ t('payroll.submissions.transport.imported.hint') }}
       </p>
 
-      <div class="mt-5">
+      <div v-if="submissionTestAllowed" class="mt-5" data-test="transport-environment">
         <span class="mb-1 block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.transport.environment.label') }}
         </span>

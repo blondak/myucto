@@ -1,7 +1,15 @@
 import { computed, watch, type Ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { apiErrorCode } from '@/api/errors'
 
 export type SubmissionEnvironment = 'production' | 'test'
+
+/** Kód odmítnutí testu mimo vývoj (`SubmissionEnvironmentPolicy::ERROR_CODE`). */
+export const TEST_ENVIRONMENT_DISABLED_CODE = 'submission_test_environment_disabled'
+
+export function isTestEnvironmentRejection(error: unknown): boolean {
+  return apiErrorCode(error) === TEST_ENVIRONMENT_DISABLED_CODE
+}
 
 function authStoreOrNull(): { submissionTestEnvironmentAllowed?: boolean } | null {
   try {

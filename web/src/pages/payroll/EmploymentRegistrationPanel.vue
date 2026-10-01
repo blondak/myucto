@@ -2212,7 +2212,7 @@ async function copyXml(): Promise<void> {
     </p>
 
     <p
-      v-if="nothingSentYet"
+      v-if="nothingSentYet && submissionTestAllowed"
       class="mt-3 rounded-md border px-3 py-2 text-xs"
       :class="environment === 'production'
         ? 'border-warning-300 bg-warning-50 text-warning-800'

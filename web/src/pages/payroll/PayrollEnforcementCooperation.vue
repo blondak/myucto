@@ -11,7 +11,7 @@ import {
 } from '@/api/payrollEnforcement'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
-import type { SubmissionEnvironment as EnvironmentValue } from '@/composables/useSubmissionEnvironment'
+import { useSubmissionEnvironment, type SubmissionEnvironment as EnvironmentValue } from '@/composables/useSubmissionEnvironment'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -20,6 +20,7 @@ const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const environment = ref<EnvironmentValue>('production')
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const candidates = ref<XmlzamCandidate[]>([])
 const requestDetail = ref<XmlzamRequestDetail | null>(null)
 const cases = ref<EnforcementCaseSummary[]>([])
@@ -226,7 +227,7 @@ watch(selectedCaseId, resetResponse)
           <h2 class="font-semibold text-neutral-900">1. {{ t('payroll.enforcement_cooperation.source_title') }}</h2>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement_cooperation.source_hint') }}</p>
         </div>
-        <div class="text-xs font-medium text-neutral-600">
+        <div v-if="submissionTestAllowed" class="text-xs font-medium text-neutral-600">
           {{ t('payroll.enforcement_cooperation.environment') }}
           <div class="mt-1">
             <EnvironmentSwitch

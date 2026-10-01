@@ -23,6 +23,7 @@ import {
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
+import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 // Platnost certifikátu čte účetní vedle termínů podání — stejný tvar data.
@@ -38,6 +39,9 @@ const EXPIRY_NOTICE_DAYS = 60
 const environment = defineModel<PayrollSigningEnvironment>('environment', {
   default: 'production',
 })
+// Mimo vývojovou instalaci je jediné prostředí produkce: přepínač ani
+// vysvětlující box o prostředí se nevykreslí a model se drží produkce.
+const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const loading = ref(false)
 const saving = ref(false)
 const removing = ref(false)
@@ -359,7 +363,7 @@ onMounted(load)
         </button>
       </div>
 
-      <div class="mt-5">
+      <div v-if="submissionTestAllowed" class="mt-5" data-test="signing-environment">
         <span class="mb-1 block text-sm font-medium text-neutral-700">
           {{ t('payroll.submissions.signing.environment.label') }}
         </span>
