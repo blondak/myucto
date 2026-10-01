@@ -43,6 +43,10 @@ export interface RecurringTemplateItem extends RecurringTemplateItemOss {
   order_index: number
   price_list_item_id?: number | null
   price_list_item_name?: string | null
+  /** Skladová karta a výnosový účet položky (F1) — generátor je přenese na fakturu. */
+  stock_item_id?: number | null
+  warehouse_id?: number | null
+  revenue_account_code?: string | null
   price_list_item_code?: string | null
   price_list_item_archived?: boolean
   catalog_policy?: CatalogPolicy

@@ -15491,6 +15491,10 @@
       "hint": "The entry must balance (Σ debit = Σ credit). Double entry, period status and the date lock are enforced by the server — re-posting does not change VAT, that is corrected by editing the document."
     },
     "posting_origin": {
+      "item_account_item": "Line account",
+      "item_account_product": "Product account",
+      "item_account_category": "Product category account",
+      "edit_product": "Edit product",
       "label": "What the posting came from",
       "preset": "Posting preset",
       "bank_rule": "Bank posting rule",

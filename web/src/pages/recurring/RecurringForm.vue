@@ -24,6 +24,11 @@ import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import { useResultAccounts } from '@/composables/useResultAccounts'
 import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 
 const { t, tm, rt } = useI18n()
@@ -157,7 +162,18 @@ type FormItem = {
   oss_consumer_country: string | null
   oss_rate_type: OssRateType | null
   oss_supply_type: OssSupplyType | null
+  // Skladová karta a výnosový účet položky (F1) — round-trip, jinak by je uložení
+  // šablony (DELETE + INSERT položek) smazalo.
+  stock_item_id: number | null
+  warehouse_id: number | null
+  revenue_account_code: string | null
 }
+
+// Dimenze šablony (hlavička i položky) a volitelný výnosový účet položky (F1) —
+// generátor je přenese na každou vygenerovanou fakturu.
+const docDims = useDocumentDimensions('recurring-templates')
+const resultAccounts = useResultAccounts()
+const showItemAccounts = ref(false)
 
 const form = ref<{
   client_id: number | null
@@ -325,6 +341,9 @@ function blankItem(): FormItem {
     oss_consumer_country: null,
     oss_rate_type: null,
     oss_supply_type: null,
+    stock_item_id: null,
+    warehouse_id: null,
+    revenue_account_code: null,
   }
 }
 
@@ -662,6 +681,7 @@ watch(
 
 onMounted(async () => {
   loading.value = true
+  void resultAccounts.load()
   try {
     // Klienti se hledají server-side (onClientSearch); cache se plní výsledky + vybraným.
     const [cur, vat, un, rcat, profiles, vatCls] = await Promise.all([
@@ -756,6 +776,9 @@ onMounted(async () => {
           oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
           oss_rate_type: it.oss_applicable ? ((it.oss_rate_type as OssRateType | null) || null) : null,
           oss_supply_type: it.oss_applicable ? (it.oss_supply_type ?? null) : null,
+          stock_item_id: it.stock_item_id ?? null,
+          warehouse_id: it.warehouse_id ?? null,
+          revenue_account_code: it.revenue_account_code ?? null,
         }))
         if (inv.client_id) await loadProjectsForClient(inv.client_id)
       } catch {
@@ -818,9 +841,14 @@ onMounted(async () => {
           oss_consumer_country: it.oss_consumer_country ?? null,
           oss_rate_type: (it.oss_rate_type as OssRateType | null) ?? null,
           oss_supply_type: it.oss_supply_type ?? null,
+          stock_item_id: it.stock_item_id ?? null,
+          warehouse_id: it.warehouse_id ?? null,
+          revenue_account_code: it.revenue_account_code ?? null,
         })),
       })
       loadedCategoryLabel.value = tpl.revenue_category_label ?? null
+      showItemAccounts.value = form.value.items.some(it => it.revenue_account_code)
+      await docDims.load(tpl.id, form.value.items)
       if (tpl.client_id) await loadProjectsForClient(tpl.client_id)
     }
   } finally {
@@ -929,13 +957,16 @@ async function submit() {
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || '').trim().toUpperCase() || null : null,
         oss_rate_type: it.oss_applicable ? it.oss_rate_type : null,
         oss_supply_type: it.oss_applicable ? it.oss_supply_type : null,
+        stock_item_id: it.stock_item_id,
+        warehouse_id: it.warehouse_id,
+        revenue_account_code: (it.revenue_account_code ?? '').trim() || null,
       })),
     }
-    if (isEdit.value && tplId.value) {
-      await recurringApi.update(tplId.value, payload)
-    } else {
-      await recurringApi.create(payload)
-    }
+    const itemDimsSnapshot = docDims.snapshot(form.value.items)
+    const saved = isEdit.value && tplId.value
+      ? await recurringApi.update(tplId.value, payload)
+      : await recurringApi.create(payload)
+    await docDims.save(saved.id, itemDimsSnapshot)
     toast.success(t('recurring.saved'))
     router.push({ name: 'recurring' })
   } catch (e: any) {
@@ -1174,12 +1205,23 @@ async function submit() {
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('recurring.items') }}</h3>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+          <button v-if="resultAccounts.available.value" type="button" class="cursor-pointer text-xs hover:underline whitespace-nowrap mr-1"
+            :class="showItemAccounts ? 'text-danger-600' : 'text-primary-700'"
+            :title="t('invoice.item_account.hint')" @click="showItemAccounts = !showItemAccounts">
+            {{ showItemAccounts ? t('invoice.item_account.hide') : t('invoice.item_account.show') }}
+          </button>
           <button type="button" @click="addItem"
             class="cursor-pointer px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md font-medium">
             {{ t('invoice.add_item') }}
           </button>
+          </div>
         </div>
         <p class="mb-1 text-xs text-neutral-500">{{ t('invoice.negative_item_hint') }}</p>
+        <div v-if="docDims.enabled.value" class="mb-3" data-test="recurring-header-dimensions">
+          <p class="text-xs text-neutral-500 mb-1">{{ t('dimensions.header_title') }}</p>
+          <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
+        </div>
 
         <!-- Placeholdery období (#108) — defaultně zabalená nápověda -->
         <div class="mb-3">
@@ -1252,7 +1294,17 @@ async function submit() {
                     <option value="template">{{ t('recurring.catalog_description_template') }}</option>
                   </select>
                 </div>
+                <div class="flex items-start gap-1">
                 <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="priceListEnabled && !!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100" />
+                <ItemDimensionsToggle v-if="docDims.enabled.value" class="mt-1"
+                  :open="docDims.isItemOpen(it)" :filled="docDims.itemHasDims(it)" :disabled="!docDims.canEdit.value"
+                  @toggle="docDims.toggleItem(it)" />
+                </div>
+                <label v-if="showItemAccounts && resultAccounts.available.value" class="mt-1.5 flex items-start gap-2 text-xs text-neutral-500">
+                  <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
+                  <ChartAccountSelect v-model="it.revenue_account_code" :accounts="resultAccounts.revenueAccounts.value"
+                    class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
+                </label>
                 <p v-if="priceListEnabled && it.price_list_item_id" class="mt-1 text-xs text-neutral-500">
                   {{ catalogResolving === idx ? t('common.loading') : t('recurring.catalog_snapshot', { currency: it.catalog_source_currency_code ?? '—', price: it.catalog_source_unit_price ?? '—' }) }}
                   <button v-if="it.catalog_policy === 'review_required'" type="button" class="ml-2 text-primary-700 hover:underline" @click="applyCatalogItem(it, idx, true)">
@@ -1305,6 +1357,16 @@ async function submit() {
             </tr>
             <!-- OSS pod-řádek — stejná pole jako na řádku faktury; „oprava období" tu není,
                  protože to je vlastnost konkrétního dokladu, ne předpisu. -->
+            <tr v-if="docDims.enabled.value && docDims.isItemOpen(it)" :class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
+              <td :colspan="supplierIsVatPayer ? 6 : 5" class="pb-2">
+                <div class="flex items-center gap-2">
+                  <span class="shrink-0 text-xs text-neutral-500">{{ t('dimensions.items_title') }}</span>
+                  <DimensionFields class="flex-1 flex-nowrap!" compact teleport
+                    :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
+                    @update:model-value="docDims.setItemDims(it, $event)" />
+                </div>
+              </td>
+            </tr>
             <tr v-if="it.oss_applicable" :class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
               <td :colspan="supplierIsVatPayer ? 6 : 5" class="pb-2">
                 <div class="flex flex-wrap items-center gap-1.5 text-xs">
@@ -1378,6 +1440,17 @@ async function submit() {
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.description') }}</label>
               <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="priceListEnabled && !!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-10 px-3 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100" />
+              <label v-if="showItemAccounts && resultAccounts.available.value" class="mt-1.5 block text-xs font-medium text-neutral-600">
+                <span class="mb-1 block">{{ t('invoice.item_account.label') }}</span>
+                <ChartAccountSelect v-model="it.revenue_account_code" :accounts="resultAccounts.revenueAccounts.value"
+                  compact :placeholder="t('invoice.item_account.placeholder')" />
+              </label>
+              <div v-if="docDims.enabled.value" class="mt-1.5">
+                <ItemDimensionsToggle :open="docDims.isItemOpen(it)" :filled="docDims.itemHasDims(it)" :disabled="!docDims.canEdit.value"
+                  @toggle="docDims.toggleItem(it)" />
+                <DimensionFields v-if="docDims.isItemOpen(it)" class="mt-1" compact :model-value="docDims.itemDimsOf(it)" :disabled="!docDims.canEdit.value"
+                  @update:model-value="docDims.setItemDims(it, $event)" />
+              </div>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>

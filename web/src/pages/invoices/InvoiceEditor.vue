@@ -54,7 +54,7 @@ import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
-import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey } from './invoiceStockAvailability'
 import {
@@ -426,6 +426,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
   onItemUnitChange(item)
   if (itemId === null) {
     stockQuoteStates.delete(item)
+    void prefillFromProduct(item, null)
     return
   }
   const si = stockItemsCache.get(itemId)
@@ -817,26 +818,36 @@ onMounted(() => { void resultAccounts.load() })
  * Výběr karty předvyplní prázdný účet a prázdné dimenze položky z produktu (produkt >
  * kategorie). Volba uživatele se nepřepisuje; selhání dotazu řádek nijak neblokuje.
  */
-async function prefillFromProduct(item: InvoiceItem, productId: number) {
+// Co položce předvyplnil produkt (a uživatel to nezměnil) — při změně karty se to
+// nahradí hodnotami nové karty, ruční volba uživatele zůstává.
+const productPrefilledAccount = new WeakMap<object, string>()
+const productPrefilledDims = new WeakMap<object, Record<number, number>>()
+
+function applyProductDefaults(item: InvoiceItem, account: string | null, dims: Record<number, number>) {
+  const previous = productPrefilledAccount.get(item)
+  productPrefilledAccount.delete(item)
+  if (previous !== undefined && item.revenue_account_code === previous) item.revenue_account_code = null
+  if (!item.revenue_account_code && account && itemAccountsAvailable.value) {
+    item.revenue_account_code = account
+    productPrefilledAccount.set(item, account)
+    showItemAccounts.value = true
+  }
+  if (docDims.enabled.value && docDims.canEdit.value) {
+    const result = applyPrefill(docDims.itemDimsOf(item), productPrefilledDims.get(item) ?? {}, dims)
+    docDims.setItemDims(item, result.header)
+    productPrefilledDims.set(item, result.autoFilled)
+  }
+}
+
+async function prefillFromProduct(item: InvoiceItem, productId: number | null) {
+  if (productId === null) {
+    applyProductDefaults(item, null, {})
+    return
+  }
   try {
     const d = await stockApi.getPostingDefaults(productId)
     if (item.stock_item_id !== productId) return
-    if (!item.revenue_account_code && d.revenue_account_code && itemAccountsAvailable.value) {
-      item.revenue_account_code = d.revenue_account_code
-      showItemAccounts.value = true
-    }
-    if (docDims.enabled.value && docDims.canEdit.value) {
-      const current = docDims.itemDimsOf(item)
-      const next = { ...current }
-      let changed = false
-      for (const [typeId, valueId] of Object.entries(d.dimensions)) {
-        if (!next[Number(typeId)] && valueId) {
-          next[Number(typeId)] = valueId
-          changed = true
-        }
-      }
-      if (changed) docDims.setItemDims(item, next)
-    }
+    applyProductDefaults(item, d.revenue_account_code, d.dimensions)
   } catch {
     // bez práva na sklad nebo bez nastavení — položka zůstane jak je
   }

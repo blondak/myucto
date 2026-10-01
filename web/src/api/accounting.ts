@@ -1955,12 +1955,22 @@ export interface PostingOrigin {
   source_type: 'invoice' | 'purchase_invoice' | 'bank'
   entry_id: number | null
   posted: boolean
-  origin: 'preset' | 'expense_rule' | 'rule' | 'detector' | 'learned' | 'matched'
+  origin: 'preset' | 'expense_rule' | 'item_account' | 'rule' | 'detector' | 'learned' | 'matched'
     | 'schedule' | 'ai' | 'manual' | 'manual_repost' | 'unknown'
   manual_repost: { at: string; by: string | null } | null
   presets: PostingOriginPreset[]
   rules: PostingOriginRule[]
   detector: string | null
+  /** Účty z položky, produktu nebo kategorie (F1) — přebíjejí předkontaci u svých řádků. */
+  item_accounts?: PostingOriginItemAccount[]
+}
+
+export interface PostingOriginItemAccount {
+  account_code: string
+  source: 'item' | 'product' | 'product_category'
+  product_id: number | null
+  product_name: string | null
+  used: boolean
 }
 
 export const accountingApi = {

@@ -32,13 +32,13 @@ const saved = ref('{}')
 
 const visible = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
 /** Právo k úpravě karty, ke které výchozí dimenze patří (stejné jako úprava karty). */
-const WRITE_PERMISSION: Record<DimensionDefaultsEntity, PermissionKey> = {
-  clients: 'clients',
-  projects: 'projects',
-  'stock/items': 'stock.items.write',
-  'eshop/categories': 'eshop.write',
+const WRITE_PERMISSION: Record<DimensionDefaultsEntity, PermissionKey[]> = {
+  clients: ['clients'],
+  projects: ['projects'],
+  'stock/items': ['stock.items.write', 'accounting'],
+  'eshop/categories': ['eshop.write', 'accounting'],
 }
-const canEdit = computed(() => dims.enabled.value && auth.canWrite(WRITE_PERMISSION[props.entity]))
+const canEdit = computed(() => dims.enabled.value && WRITE_PERMISSION[props.entity].every(p => auth.canWrite(p)))
 const hint = computed(() => ({
   clients: t('dimensions.defaults.hint_client'),
   projects: t('dimensions.defaults.hint_project'),

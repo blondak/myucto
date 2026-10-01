@@ -27,7 +27,7 @@ const expense = ref('')
 const saved = ref('')
 const dimensionDefaults = ref<InstanceType<typeof EntityDimensionDefaults> | null>(null)
 
-const canEdit = computed(() => auth.canWrite('stock.items.write'))
+const canEdit = computed(() => auth.canWrite('stock.items.write') && auth.canWrite('accounting'))
 const snapshot = () => JSON.stringify([revenue.value.trim(), expense.value.trim()])
 const accountsDirty = computed(() => saved.value !== '' && snapshot() !== saved.value)
 const dirty = computed(() => accountsDirty.value || !!dimensionDefaults.value?.dirty)

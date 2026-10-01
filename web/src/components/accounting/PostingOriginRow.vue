@@ -49,6 +49,13 @@ watch(() => props.docId, id => { void load(id) }, { immediate: true })
 defineExpose({ reload: () => load(props.docId) })
 
 const bankRules = computed(() => origin.value?.rules.filter(r => r.type === 'bank') ?? [])
+const itemAccounts = computed(() => origin.value?.item_accounts ?? [])
+const canEditProducts = computed(() => auth.canWrite('stock.items.write'))
+function itemAccountLabel(source: 'item' | 'product' | 'product_category'): string {
+  if (source === 'item') return t('accounting.posting_origin.item_account_item')
+  if (source === 'product') return t('accounting.posting_origin.item_account_product')
+  return t('accounting.posting_origin.item_account_category')
+}
 
 /** Předkontace se ukazují jen u zaúčtovaného dokladu — jinak není o čem tvrdit, že „vznikl podle". */
 const presets = computed(() => (origin.value?.posted ? origin.value.presets : []))
@@ -102,6 +109,19 @@ const editLinkClass =
           :to="{ path: '/utilities', query: { section: 'posting-rules', rule_key: p.rule_key } }"
           :class="editLinkClass">
           {{ t('accounting.posting_origin.edit_preset') }}
+        </RouterLink>
+      </div>
+
+      <div v-for="a in itemAccounts" :key="`${a.source}-${a.account_code}-${a.product_id ?? 0}`" class="flex flex-wrap items-center gap-x-2 gap-y-1" data-test="posting-origin-item-account">
+        <span class="text-neutral-700">
+          {{ itemAccountLabel(a.source) }}:
+          <span class="font-mono font-medium">{{ a.account_code }}</span>
+          <span v-if="a.product_name" class="ml-1 text-xs text-neutral-500">{{ a.product_name }}</span>
+        </span>
+        <span v-if="!a.used" class="text-xs text-warning-700">{{ t('accounting.posting_origin.preset_unused') }}</span>
+        <RouterLink v-if="canEditProducts && a.product_id"
+          :to="{ path: `/stock/items/${a.product_id}/edit`, query: { tab: 'accounting' } }" :class="editLinkClass">
+          {{ t('accounting.posting_origin.edit_product') }}
         </RouterLink>
       </div>
 

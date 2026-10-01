@@ -15491,6 +15491,10 @@
       "hint": "Zápis musí být vyrovnaný (Σ MD = Σ Dal). Kontrolu podvojnosti, otevřenosti období i zámku k datu dělá server — DPH se přeúčtováním nemění, ta se opravuje editací dokladu."
     },
     "posting_origin": {
+      "item_account_item": "Účet položky",
+      "item_account_product": "Účet produktu",
+      "item_account_category": "Účet z kategorie produktu",
+      "edit_product": "Upravit produkt",
       "label": "Podle čeho se účtovalo",
       "preset": "Předkontace",
       "bank_rule": "Pravidlo účtování banky",
