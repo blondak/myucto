@@ -6,7 +6,10 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
+use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\Group;
@@ -108,6 +111,108 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
         $this->assertAdvanceCycleClosed();
     }
 
+    /**
+     * Dorovnání mění JEN řádky páru zúčtování. Dřív se přepsal celý zápis: ruční dimenze
+     * řádků zmizely (vazby odešly kaskádou s řádky) a řádky rozdělené podle položek se
+     * při dalším průchodu dělily znovu. Ostatní řádky musí zůstat bajtově stejné i s id.
+     */
+    public function testSyncKeepsLineDimensionsSplitsAndPostedAt(): void
+    {
+        $dimensions = $this->container->get(DimensionService::class);
+        $assignments = $this->container->get(DimensionAssignmentRepository::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $types = $dimensions->ensureDefaultTypes($this->supplierId, ['projekt', 'stredisko']);
+        $value = fn (int $type, string $code): int => (int) $dimensions->createValue(
+            $this->supplierId, $type, ['code' => $code, 'name' => 'Hodnota ' . $code, 'parent_id' => null],
+        )['id'];
+        $projectA = $value($types['project'], 'ZAL-A');
+        $projectB = $value($types['project'], 'ZAL-B');
+        $center = $value($types['cost_center'], 'ZAL-S');
+
+        $vendor  = $this->client('Dodavatel dimenze');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-6', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-6', $vendor, 1000.00, 210.00, $advance, [[600.00, 126.00], [400.00, 84.00]]);
+        $dimensions->saveDocument($this->supplierId, 'purchase_invoice', $final, [], [
+            1 => [$types['project'] => $projectA],
+            2 => [$types['project'] => $projectB],
+        ]);
+        $entry = $this->postFinal($final);
+        // Ruční dimenze jednoho řádku (účetní ji doplnila v deníku).
+        $vatLine = (int) $this->db->pdo()->query(
+            "SELECT l.id FROM journal_entry_lines l JOIN chart_of_accounts c ON c.id = l.account_id
+              WHERE l.entry_id = {$entry} AND c.account_code LIKE '343%' LIMIT 1"
+        )->fetchColumn();
+        $this->db->pdo()->prepare('DELETE FROM journal_entry_line_dimensions WHERE line_id = ?')->execute([$vatLine]);
+        $assignments->insertLineDimensions($this->supplierId, $vatLine, [$types['cost_center'] => $center]);
+
+        $before = $assignments->entryLineDimensions($this->supplierId, $entry);
+        $linesBefore = $this->journal->linesForEntry($entry, $this->supplierId);
+        $header = $this->db->pdo()->query("SELECT posted_at, posted_by FROM journal_entries WHERE id = {$entry}")->fetch(\PDO::FETCH_ASSOC);
+
+        $this->payAdvanceByCard($advance, 1210.00);
+
+        $after = $assignments->entryLineDimensions($this->supplierId, $entry);
+        $linesAfter = $this->journal->linesForEntry($entry, $this->supplierId);
+        foreach ($linesBefore as $line) {
+            $id = (int) $line['id'];
+            self::assertArrayHasKey($id, array_column($linesAfter, null, 'id'), "Řádek #{$id} zůstal.");
+            self::assertSame($before[$id] ?? [], $after[$id] ?? [], "Dimenze řádku #{$id} beze změny.");
+        }
+        self::assertSame([$types['cost_center'] => $center], $after[$vatLine] ?? [], 'Ruční dimenze řádku přežila.');
+        self::assertCount(count($linesBefore) + 2, $linesAfter, 'Přibyl jen pár 321/314, nákladové řádky se nedělily znovu.');
+        self::assertSame(121000, self::cents($this->linesByAccountCode($entry)['314']['credit'] ?? 0));
+        self::assertSame($header, $this->db->pdo()->query("SELECT posted_at, posted_by FROM journal_entries WHERE id = {$entry}")->fetch(\PDO::FETCH_ASSOC),
+            'posted_at / posted_by zápisu konečné faktury zůstávají.');
+        $this->assertAdvanceCycleClosed();
+    }
+
+    /**
+     * Úhrada zálohy z jiného roku než konečná faktura se do jejího zápisu zpětně nedopíše
+     * (rozvaha roku faktury by čerpala zálohu, která tehdy zaplacená nebyla) — zaloguje se.
+     */
+    public function testPaymentInLaterYearIsNotBackdatedIntoFinal(): void
+    {
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $vendor  = $this->client('Dodavatel přelom roku');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-7', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-7', $vendor, 1000.00, 210.00, $advance);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET issue_date = ?, tax_date = ?, received_at = ? WHERE id = ?')
+            ->execute([self::YEAR . '-12-20', self::YEAR . '-12-20', self::YEAR . '-12-20', $final]);
+        $entry = $this->postFinal($final);
+
+        $this->payAdvanceByCard($advance, 1210.00, (self::YEAR + 1) . '-01-05');
+
+        self::assertSame(0, self::cents($this->linesByAccountCode($entry)['314']['credit'] ?? 0),
+            'Zápis prosincové faktury nesmí čerpat lednovou úhradu.');
+        $reason = $this->db->pdo()->query(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.reason')) FROM activity_log
+              WHERE action = 'accounting.advance_settlement_stale' AND entity_type = 'purchase_invoice'
+                AND entity_id = {$final} ORDER BY id DESC LIMIT 1"
+        )->fetchColumn();
+        self::assertSame('payment_in_other_year', $reason);
+    }
+
+    /** Souběžná změna zápisu mezi čtením a zápisem → version_conflict, nic se nepřepíše. */
+    public function testReplaceEntryLinesRejectsStaleRowVersion(): void
+    {
+        $vendor  = $this->client('Dodavatel souběh');
+        $advance = $this->purchaseInvoice('ZPF-SYNC-8', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-SYNC-8', $vendor, 1000.00, 210.00, $advance);
+        $entry   = $this->postFinal($final);
+        $version = (int) $this->db->pdo()->query("SELECT row_version FROM journal_entries WHERE id = {$entry}")->fetchColumn();
+
+        try {
+            $this->posting->replaceEntryLines($this->supplierId, 'purchase_invoice', $final, $version - 1, [], [
+                ['account_code' => '321', 'side' => 'debit', 'amount' => 10.00],
+                ['account_code' => '314', 'side' => 'credit', 'amount' => 10.00],
+            ]);
+            self::fail('Zastaralá row_version musí skončit version_conflict.');
+        } catch (PostingException $e) {
+            self::assertSame('version_conflict', $e->errorCode);
+        }
+        self::assertArrayNotHasKey('314', $this->linesByAccountCode($entry));
+    }
+
     /** Totéž pro hotovostní úhradu zálohy a její storno (zrcadlo bankovní větve). */
     public function testCashPaymentOfAdvanceAndItsReversalKeepFinalSettlementInSync(): void
     {
@@ -194,7 +299,8 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
         return $id;
     }
 
-    private function finalPurchase(string $number, int $vendorId, float $base, float $vat, int $advanceId): int
+    /** @param list<array{0:float,1:float}>|null $items základ a DPH položek (default jedna položka) */
+    private function finalPurchase(string $number, int $vendorId, float $base, float $vat, int $advanceId, ?array $items = null): int
     {
         $with  = $base + $vat;
         $issue = self::YEAR . '-06-20';
@@ -207,12 +313,14 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
         )->execute([$this->supplierId, $vendorId, $number, $advanceId, $with, $issue, $issue, $issue, $issue,
             $this->currencyId, $base, $vat, $with, $this->userId]);
         $id = (int) $this->db->pdo()->lastInsertId();
-        $this->db->pdo()->prepare(
-            "INSERT INTO purchase_invoice_items
-                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
-                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
-             VALUES (?, 'Služba', 1, 'ks', ?, ?, 21.00, ?, ?, ?, 0)"
-        )->execute([$id, $base, $this->vatRateId, $base, $vat, $with]);
+        foreach ($items ?? [[$base, $vat]] as $i => [$itemBase, $itemVat]) {
+            $this->db->pdo()->prepare(
+                "INSERT INTO purchase_invoice_items
+                    (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                     vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+                 VALUES (?, 'Služba', 1, 'ks', ?, ?, 21.00, ?, ?, ?, ?)"
+            )->execute([$id, $itemBase, $this->vatRateId, $itemBase, $itemVat, $itemBase + $itemVat, $i]);
+        }
         return $id;
     }
 
@@ -227,11 +335,11 @@ final class PurchaseAdvanceSettlementSyncTest extends BankPostingTestCase
         );
     }
 
-    private function payAdvanceByCard(int $advanceId, float $amount): int
+    private function payAdvanceByCard(int $advanceId, float $amount, ?string $date = null): int
     {
         $tx = $this->transaction($this->statement(), -$amount, [
             'match_status' => 'manual',
-            'posted_at'    => self::YEAR . '-06-24',
+            'posted_at'    => $date ?? self::YEAR . '-06-24',
             'description'  => 'Platba kartou',
         ]);
         $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '4242' WHERE id = ?")->execute([$tx]);

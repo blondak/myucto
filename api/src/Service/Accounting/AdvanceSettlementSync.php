@@ -24,9 +24,11 @@ use PDO;
  *
  * Mění se VÝHRADNĚ pár zúčtování; ostatní řádky zápisu zůstávají, jak jsou (i ruční
  * přeúčtování nákladového účtu). Očekávaný pár se bere z téhož builderu jako při
- * zaúčtování, takže pravidlo (strop, DDKP, cizí měna) žije na jednom místě. Zápis se
- * přepíše na místě k jeho datu přes {@see PostingService::postDocument()}; uzavřené
- * nebo zamčené období se nepřepisuje — jen se zaloguje `accounting.advance_settlement_stale`.
+ * zaúčtování, takže pravidlo (strop, DDKP, cizí měna) žije na jednom místě. V zápisu se
+ * vymění jen řádky páru ({@see PostingService::replaceEntryLines()}) s optimistickým
+ * zámkem row_version — dimenze a rozpady ostatních řádků i posted_at zůstávají. Uzavřené
+ * nebo zamčené období, souběžná změna zápisu a úhrada z jiného roku než konečná faktura
+ * se nepřepisují — jen se zaloguje `accounting.advance_settlement_stale`.
  *
  * Volá se best-effort (nikdy nevyhazuje) z cest, které mění zaúčtovanou úhradu zálohy:
  * bankovní párování a jeho zrušení, pokladní úhrada a její storno.
@@ -120,14 +122,55 @@ final class AdvanceSettlementSync
         if ($finalId === null) {
             return ['action' => 'none', 'reason' => 'no_final_invoice'];
         }
-        return ['final_id' => $finalId] + $this->syncFinal($supplierId, $side, $finalId, $userId);
+        return ['final_id' => $finalId] + $this->syncFinal($supplierId, $side, $finalId, $advanceId, $userId);
+    }
+
+    /**
+     * Má záloha živou úhradu (banka, pokladna) zaúčtovanou v jiném roce než zápis konečné faktury?
+     *
+     * @param 'purchase'|'sale' $side
+     */
+    private function paymentInOtherYear(int $supplierId, string $side, int $advanceId, string $finalYear): bool
+    {
+        $sql = $side === 'sale'
+            ? "SELECT je.entry_date FROM invoice_payments ip
+                 JOIN journal_entries je ON je.supplier_id = ip.supplier_id AND je.source_type = 'bank'
+                  AND je.source_id = ip.bank_transaction_id AND je.reversed_by IS NULL
+                WHERE ip.supplier_id = :sid AND ip.invoice_id = :aid
+               UNION ALL
+               SELECT je.entry_date FROM cash_documents cd
+                 JOIN journal_entries je ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
+                  AND je.source_id = cd.id AND je.reversed_by IS NULL
+                WHERE cd.supplier_id = :sid2 AND cd.invoice_id = :aid2"
+            : "SELECT je.entry_date FROM payment_matches pm
+                 JOIN journal_entries je ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
+                  AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
+                WHERE pm.supplier_id = :sid AND pm.purchase_invoice_id = :aid
+               UNION ALL
+               SELECT je.entry_date FROM cash_documents cd
+                 JOIN journal_entries je ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
+                  AND je.source_id = cd.id AND je.reversed_by IS NULL
+                WHERE cd.supplier_id = :sid2 AND cd.purchase_invoice_id = :aid2";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([':sid' => $supplierId, ':aid' => $advanceId, ':sid2' => $supplierId, ':aid2' => $advanceId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $date) {
+            if (substr((string) $date, 0, 4) !== $finalYear) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function cents(float $amount): int
+    {
+        return (int) round($amount * 100.0);
     }
 
     /**
      * @param 'purchase'|'sale' $side
      * @return array{action:string, reason?:string, entry_id?:int, before?:float, after?:float}
      */
-    private function syncFinal(int $supplierId, string $side, int $finalId, ?int $userId): array
+    private function syncFinal(int $supplierId, string $side, int $finalId, int $advanceId, ?int $userId): array
     {
         $sourceType = $side === 'sale' ? 'invoice' : 'purchase_invoice';
         $entry = $this->journal->findBySource($supplierId, $sourceType, $finalId);
@@ -174,29 +217,12 @@ final class AdvanceSettlementSync
 
         $accountMap = $this->accounts->idToAccountMap($supplierId);
         $current = [];
-        $kept = [];
+        $currentIds = [];
         foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
             $code = (string) ($accountMap[(int) $line['account_id']]['code'] ?? '');
-            if ($code === '') {
-                return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'unknown_account', $userId);
-            }
-            $input = [
-                'account_code'  => $code,
-                'side'          => (string) $line['side'],
-                'amount'        => (float) $line['amount'],
-                'is_red_storno' => (bool) $line['is_red_storno'],
-                'cost_center'   => $line['cost_center'] ?? null,
-                'project_id'    => $line['project_id'] ?? null,
-            ];
-            if (($line['currency_code'] ?? null) !== null) {
-                $input['currency_code']  = (string) $line['currency_code'];
-                $input['fx_rate']        = $line['fx_rate'];
-                $input['amount_foreign'] = $line['amount_foreign'];
-            }
             if ($isPair($code, (string) $line['side'])) {
-                $current[] = $input;
-            } else {
-                $kept[] = $input;
+                $current[] = ['account_code' => $code, 'side' => (string) $line['side'], 'amount' => (float) $line['amount']];
+                $currentIds[] = (int) $line['id'];
             }
         }
 
@@ -206,25 +232,33 @@ final class AdvanceSettlementSync
             return ['action' => 'in_sync', 'entry_id' => $entryId, 'before' => $before, 'after' => $after];
         }
 
+        // Zúčtování se zapisuje k datu KONEČNÉ faktury. Úhrada zálohy z jiného účetního
+        // období (faktura 12/2026, záloha zaplacená 1/2027) by tak zpětně čerpala 314 v roce,
+        // kdy záloha ještě zaplacená nebyla — rozvaha uzavíraného roku by lhala. Samostatný
+        // zápis zúčtování k datu úhrady by potřeboval nový zdroj zápisu a builder konečné
+        // faktury, který by ho při přeúčtování odečítal; to je mimo rozsah téhle opravy.
+        // Proto se takový případ jen zaloguje a vyřeší ručním zápisem zúčtování k datu úhrady.
+        // Uvnitř téhož roku se zúčtování k datu faktury nechává (321 i 314 jsou saldokonta
+        // bez vlivu na DPH; podané DPH chrání zámek k datu v replaceEntryLines).
+        if (self::cents($after) > self::cents($before)
+            && $this->paymentInOtherYear($supplierId, $side, $advanceId, substr((string) $entry['entry_date'], 0, 4))) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'payment_in_other_year', $userId);
+        }
+
         try {
-            $this->posting->postDocument($supplierId, $sourceType, $finalId, [...$kept, ...$expected], [
-                'entry_date'    => (string) $entry['entry_date'],
-                'document_date' => $entry['document_date'] ?? null,
-                'document_no'   => $entry['document_no'] ?? null,
-                'description'   => $entry['description'] ?? null,
-                'posted'        => true,
-                'user_id'       => $userId,
-                'posted_by'     => $userId,
-            ]);
-        } catch (PostingException | UnbalancedEntryException $e) {
-            return $this->stale(
+            // Mění se JEN řádky páru zúčtování. Ostatní řádky zápisu (dimenze, rozpad podle
+            // položek, ruční přeúčtování) i posted_at/posted_by zůstávají beze změny.
+            $this->posting->replaceEntryLines(
                 $supplierId,
                 $sourceType,
                 $finalId,
-                $entryId,
-                $e instanceof PostingException ? $e->errorCode : 'unbalanced_entry',
-                $userId,
+                (int) $entry['row_version'],
+                $currentIds,
+                $expected,
+                ['user_id' => $userId],
             );
+        } catch (PostingException $e) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, $e->errorCode, $userId);
         }
 
         $this->activity->log(

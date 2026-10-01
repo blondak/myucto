@@ -131,6 +131,52 @@ final class JournalEntryRepository
     }
 
     /**
+     * Vymění v ŽIVÉM zápisu jen vybrané řádky; hlavička (datum, posted_at/posted_by) i
+     * ostatní řádky včetně jejich dimenzí a rozpadů zůstávají, jak jsou. Nové řádky dostanou
+     * pořadí za posledním stávajícím. Optimistický zámek přes row_version — souběžná změna
+     * zápisu skončí `version_conflict`. Kontroly období, zámku a podvojnosti dělá volající
+     * ({@see \MyInvoice\Service\Accounting\PostingService::replaceEntryLines()}).
+     * PŘEDPOKLAD: volající drží transakci.
+     *
+     * @param list<int> $removeLineIds
+     * @param list<array<string,mixed>> $addLines resolved řádky (account_id, side, amount, …)
+     */
+    public function replaceSomeLines(int $entryId, int $supplierId, int $expectedRowVersion, array $removeLineIds, array $addLines): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'UPDATE journal_entries SET row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL AND row_version = ?'
+        );
+        $stmt->execute([$entryId, $supplierId, $expectedRowVersion]);
+        if ($stmt->rowCount() !== 1) {
+            throw new PostingException(
+                'version_conflict',
+                'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován — načtěte aktuální stav.',
+                409,
+            );
+        }
+        if ($removeLineIds !== []) {
+            $in = implode(',', array_fill(0, count($removeLineIds), '?'));
+            $pdo->prepare("DELETE FROM journal_entry_lines WHERE entry_id = ? AND supplier_id = ? AND id IN ({$in})")
+                ->execute([$entryId, $supplierId, ...array_map('intval', $removeLineIds)]);
+        }
+        $max = $pdo->prepare('SELECT COALESCE(MAX(line_no), -1) FROM journal_entry_lines WHERE entry_id = ?');
+        $max->execute([$entryId]);
+        $next = (int) $max->fetchColumn() + 1;
+        foreach ($addLines as $i => $line) {
+            $addLines[$i]['line_no'] = $next + $i;
+        }
+        $this->insertLines($pdo, $entryId, $supplierId, array_values($addLines));
+        $this->logReleasedPairings(
+            $supplierId,
+            $entryId,
+            (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId),
+            'repost',
+        );
+    }
+
+    /**
      * @param list<array{pairing_id:int, entry_id:int, line_no:int}> $released
      */
     private function logReleasedPairings(int $supplierId, int $entryId, array $released, string $reason): void

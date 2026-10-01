@@ -498,6 +498,123 @@ final class PostingService
     }
 
     /**
+     * Vymění v ŽIVÉM zaúčtovaném zápisu dokladu jen vybrané řádky — ostatní řádky (jejich
+     * dimenze, rozpady, ruční přeúčtování) i hlavička včetně posted_at/posted_by zůstávají.
+     * Pro dorovnání jedné části kontace, kterou určuje jiný doklad (zúčtování zálohy
+     * podle její úhrady), kde by přepis celého zápisu přes {@see postDocument()} zahodil
+     * dimenze řádků a rozpady podle položek.
+     *
+     * Stejné pojistky jako přepis zápisu (§35): otevřené období zápisu, nezamčené datum,
+     * nestornovaný zápis, optimistický zámek `expectedRowVersion`, a podvojnost — vyměněné
+     * řádky musí mít stejný rozdíl MD − D jako ty odebrané. Nové řádky se razítkují
+     * dimenzemi dokladu stejně jako při zaúčtování.
+     *
+     * @param list<int> $removeLineIds řádky zápisu, které se odeberou
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $addLines
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return int id zápisu
+     *
+     * @throws PostingException entry_not_found | version_conflict | period_not_open | date_locked | unbalanced_entry
+     */
+    public function replaceEntryLines(
+        int $supplierId,
+        string $sourceType,
+        int $sourceId,
+        int $expectedRowVersion,
+        array $removeLineIds,
+        array $addLines,
+        array $meta = [],
+    ): int {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $entry = $this->journal->findActiveBySourceForUpdate($supplierId, $sourceType, $sourceId);
+            if ($entry === null || ($entry['posted_at'] ?? null) === null) {
+                throw new PostingException('entry_not_found', 'Doklad nemá živý zaúčtovaný zápis.', 404);
+            }
+            $entryId = (int) $entry['id'];
+            if ((int) ($entry['row_version'] ?? -1) !== $expectedRowVersion) {
+                throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil — načtěte aktuální stav.', 409);
+            }
+            $period = $this->periods->findById($supplierId, (int) $entry['period_id']);
+            if ($period === null || (string) $period['status'] !== 'open') {
+                throw new PostingException('period_not_open', 'Zápis #' . $entryId . ' je v období, které není otevřené (§35 ZoÚ).');
+            }
+            $entryDate = (string) $entry['entry_date'];
+            $lockedUntil = $this->lockedUntilForUpdate($supplierId);
+            if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
+                throw new PostingException('date_locked', 'Zápis #' . $entryId . ' má datum ' . $entryDate . ' v zamčeném období (zámek k ' . $lockedUntil . ').');
+            }
+
+            $existing = [];
+            foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
+                $existing[(int) $line['id']] = $line;
+            }
+            $removedCents = 0;
+            foreach ($removeLineIds as $lineId) {
+                $line = $existing[(int) $lineId] ?? null;
+                if ($line === null) {
+                    throw new PostingException('entry_not_found', 'Řádek #' . (int) $lineId . ' do zápisu #' . $entryId . ' nepatří.', 404);
+                }
+                $removedCents += JournalLineAmount::signedCents($line) * ($line['side'] === 'debit' ? 1 : -1);
+            }
+
+            $codeMap = $this->accounts->codeToIdMap($supplierId);
+            $resolved = $addLines === [] ? [] : $this->resolveLines($supplierId, $addLines, $codeMap, $sourceType);
+            if ($resolved !== []) {
+                $resolved = $this->stampProjectDimension($supplierId, $sourceType, $sourceId, $resolved);
+                $resolved = $this->dimensionStamper()->stamp(
+                    $supplierId,
+                    $sourceType,
+                    $sourceId,
+                    $resolved,
+                    $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+                    $entryDate,
+                );
+            }
+            $addedCents = 0;
+            foreach ($resolved as $line) {
+                $addedCents += self::cents((float) $line['amount']) * (!empty($line['is_red_storno']) ? -1 : 1)
+                    * ($line['side'] === 'debit' ? 1 : -1);
+            }
+            if ($addedCents !== $removedCents) {
+                throw new PostingException('unbalanced_entry', 'Výměna řádků zápisu #' . $entryId . ' by porušila podvojnost.');
+            }
+
+            $this->journal->replaceSomeLines($entryId, $supplierId, $expectedRowVersion, array_map('intval', $removeLineIds), $resolved);
+            $this->activity->log(
+                'accounting.posted',
+                $meta['user_id'] ?? null,
+                'journal_entry',
+                $entryId,
+                [
+                    'source_type' => $sourceType,
+                    'source_id'   => $sourceId,
+                    'reposted'    => true,
+                    'partial'     => true,
+                    'removed'     => array_values(array_intersect_key($existing, array_flip(array_map('intval', $removeLineIds)))),
+                    'added'       => $resolved,
+                ],
+                $meta['ip'] ?? null,
+                $meta['user_agent'] ?? null,
+                $supplierId,
+            );
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $entryId;
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Vytvoří zrcadlový (storno) zápis k existujícímu — prohodí strany řádků,
      * zaúčtuje do otevřeného období data storna a naváže original.reversed_by.
      * Neměnnost po uzávěrce (§35): původní zápis se nemaže, opravuje se protizápisem.
