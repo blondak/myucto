@@ -171,6 +171,9 @@ export function isApprovalNoApprover(err: unknown): boolean {
  */
 export function approvalNoApproverDimension(err: any): string {
   const e = err?.response?.data?.error ?? {}
+  if (Array.isArray(e.dimension_values) && e.dimension_values.length > 0) {
+    return e.dimension_values.map((v: { code?: string; name?: string }) => [v.code, v.name].filter(Boolean).join(' ')).join(', ')
+  }
   const value = e.dimension_value ?? e.dimension ?? null
   const name = (typeof value === 'object' && value ? (value.name ?? value.code) : null)
     ?? e.dimension_value_name ?? e.dimension_name ?? e.name

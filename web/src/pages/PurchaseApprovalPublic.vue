@@ -72,6 +72,10 @@ async function submit(decision: 'approve' | 'reject') {
     mode.value = 'review'
   } catch (e: any) {
     submitError.value = e?.response?.data?.error?.message || t('purchase_approval.public.action_failed')
+    // Rozhodnuto jinde nebo odkaz vypršel: načti aktuální stav, ať stránka ukáže výsledek.
+    if (e?.response?.status === 409 || e?.response?.status === 410) {
+      try { data.value = await publicPurchaseApprovalApi.get(token.value); mode.value = 'review' } catch { /* ponech chybu */ }
+    }
   } finally {
     submitting.value = false
   }
