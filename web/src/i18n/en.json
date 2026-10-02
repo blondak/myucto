@@ -24250,6 +24250,21 @@
       "missing_slevy": "Tax credits (taxpayer, spouse, children)",
       "missing_advice": "Recommendation: fill in accounting software or hand over to accountant/advisor."
     },
+    "pending_approval": {
+      "self_assessment_title": "Self-assessed documents are awaiting approval",
+      "self_assessment_note": "These received documents under the reverse charge are awaiting approval or were rejected, so they are missing from the filing. Self-assessed tax belongs to the period of the tax point and cannot be moved to a later period. Approve or cancel the documents before filing.",
+      "deduction_title": "Received documents are awaiting approval",
+      "deduction_note": "These documents are awaiting approval or were rejected, so they are missing from the filing. You can claim the deduction later.",
+      "download_gate_hint": "Downloading the XML requires an explicit confirmation until the self-assessed documents are approved or cancelled.",
+      "confirm_download_anyway": "Self-assessed received documents awaiting approval are missing from the filing (see the list). Self-assessed tax belongs to the period of the tax point. Do you really want to download the XML anyway?",
+      "duzp": "Tax point",
+      "self_assessed_vat": "self-assessed VAT",
+      "vat": "VAT",
+      "status": {
+        "pending": "awaiting approval",
+        "rejected": "rejected"
+      }
+    },
     "kh": {
       "title": "Control statement (DPHKH1)",
       "subtitle": "EPO portal MF ČR report. Version 03.01.",

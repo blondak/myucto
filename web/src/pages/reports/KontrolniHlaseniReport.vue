@@ -9,6 +9,7 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
+import PendingApprovalVatNotice from '@/components/reports/PendingApprovalVatNotice.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -84,13 +85,21 @@ async function loadPreview() {
   }
 }
 
+const crossCheck = computed(() => preview.value?.cross_check ?? [])
+const hasBlockingCrossCheck = computed(() => crossCheck.value.some(f => f.blocking))
+
 async function downloadXml() {
+  const acknowledge = hasBlockingCrossCheck.value
+    ? confirm(t('reports.pending_approval.confirm_download_anyway'))
+    : false
+  if (hasBlockingCrossCheck.value && !acknowledge) return
   try {
     await downloadApiFile(reportsApi.khDownloadUrl(
       year.value, month.value, effectivePeriod.value,
       variant.value,
       isFollowUp.value ? dZjist.value : undefined,
       needsVyzvaRef.value ? cJedVyzvy.value : undefined,
+      acknowledge,
     ))
     await router.push('/reports/submissions')
   } catch (e) {
@@ -203,6 +212,8 @@ onMounted(async () => {
           <li v-for="w in preview.warnings" :key="w">{{ w }}</li>
         </ul>
       </div>
+
+      <PendingApprovalVatNotice :findings="crossCheck" />
 
       <!-- Deadline card -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">

@@ -33,6 +33,7 @@ final class KontrolniHlaseniAction
         private readonly \MyInvoice\Service\Currency\MissingExchangeRateFiller $rateFiller,
         // Fronta „doklady změněné po podání" — podklad pro rozhodnutí o opravném hlášení.
         private readonly \MyInvoice\Service\Report\VatPostFilingChangesService $postFilingChanges,
+        private readonly \MyInvoice\Service\Report\VatCrossCheckService $crossCheck,
     ) {}
 
     /**
@@ -94,8 +95,28 @@ final class KontrolniHlaseniAction
         return Json::ok($response, [
             'summary'  => $result['summary'],
             'warnings' => $result['warnings'],
+            'cross_check' => $this->approvalCheck($supplierId, $year, $month, $period, $variant),
             'post_filing_changes' => $postFiling,
         ]);
+    }
+
+    /**
+     * Přijaté doklady ve schvalování (týž nález jako v náhledu přiznání DPH). Rychlá
+     * odpověď na výzvu oddíly A/B nemá, tam kontrola nedává smysl. Fail-open: čtecí
+     * kontrola nesmí shodit náhled ani podání.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function approvalCheck(int $supplierId, int $year, int $month, string $period, string $variant): array
+    {
+        if (in_array($variant, ['vyzva_nulove', 'vyzva_potvrzeni'], true)) {
+            return [];
+        }
+        try {
+            return $this->crossCheck->pendingApprovalCheck($supplierId, $year, $month, $period);
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     public function download(Request $request, Response $response): Response
@@ -136,6 +157,28 @@ final class KontrolniHlaseniAction
         $forma = (string) ($result['summary']['khdph_forma'] ?? 'B');
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+
+        // Stejná brána jako u přiznání DPH: blokující nález (samovyměření ve schvalování)
+        // → 409 s daty, s ?acknowledge_mismatch=1 projde a vědomé potvrzení se zaloguje.
+        $crossCheck = $this->approvalCheck($supplierId, $year, $month, $period, $variant);
+        if ($this->crossCheck->hasBlockingMismatch($crossCheck)) {
+            $acknowledged = in_array((string) ($request->getQueryParams()['acknowledge_mismatch'] ?? ''), ['1', 'true'], true);
+            if (!$acknowledged) {
+                return Json::error(
+                    $response,
+                    'vat_cross_check_mismatch',
+                    'V kontrolním hlášení chybí přijaté doklady se samovyměřením, které čekají na schválení. '
+                        . 'Zkontroluj je, nebo stáhni znovu s potvrzením (acknowledge_mismatch=1).',
+                    409,
+                    ['cross_check' => $crossCheck],
+                );
+            }
+            $this->logger->log('report.dphkh1_mismatch_acknowledged', $userId, null, null, [
+                'period'      => sprintf('%04d-%02d', $year, $month),
+                'cross_check' => $crossCheck,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+
         $isQuarterly = $period === 'quarterly';
         $quarter = $isQuarterly ? (int) ceil($month / 3) : null;
         $archived = $this->archiver->archive(

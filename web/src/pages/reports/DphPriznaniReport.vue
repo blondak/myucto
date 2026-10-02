@@ -13,6 +13,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
+import PendingApprovalVatNotice from '@/components/reports/PendingApprovalVatNotice.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -154,7 +155,12 @@ function setCrossCheckPage(finding: DphCrossCheckFinding, page: number) {
 }
 
 const blockingCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(f => f.blocking))
-const infoCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(f => !f.blocking))
+// Doklady ve schvalování má vlastní výpis s odkazy na doklad (PendingApprovalVatNotice);
+// do brány stažení (blockingCrossCheck) ale patří dál.
+const isPendingApproval = (f: DphCrossCheckFinding) => f.check.startsWith('pending_approval_')
+const pendingApprovalCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(isPendingApproval))
+const blockingCrossCheckShown = computed(() => blockingCrossCheck.value.filter(f => !isPendingApproval(f)))
+const infoCrossCheck = computed(() => (preview.value?.cross_check ?? []).filter(f => !f.blocking && !isPendingApproval(f)))
 
 // Kontrola 343 — lidská věta ke kódu reason (01-UX P2: vždy věta, nikdy jen kód).
 // Exhaustivní Record: nová hodnota enumu bez věty = chyba vue-tsc.
@@ -204,7 +210,9 @@ function formatCrossAmount(value: number | null): string {
 async function downloadXml() {
   if (!preview.value) return
   const acknowledge = blockingCrossCheck.value.length > 0
-    ? confirm(t('reports.dph.cross_check.confirm_download_anyway'))
+    ? confirm(blockingCrossCheckShown.value.length > 0
+      ? t('reports.dph.cross_check.confirm_download_anyway')
+      : t('reports.pending_approval.confirm_download_anyway'))
     : false
   if (blockingCrossCheck.value.length > 0 && !acknowledge) return
   try {
@@ -475,9 +483,10 @@ onMounted(() => {
       </div>
 
       <!-- Křížová kontrola DPHDP3↔KH↔SH↔343 (C8') -->
-      <div v-if="blockingCrossCheck.length > 0" class="bg-danger-50 border border-danger-500/40 rounded-md p-3 text-sm text-danger-700 space-y-3">
+      <PendingApprovalVatNotice :findings="pendingApprovalCrossCheck" />
+      <div v-if="blockingCrossCheckShown.length > 0" class="bg-danger-50 border border-danger-500/40 rounded-md p-3 text-sm text-danger-700 space-y-3">
         <strong>{{ t('reports.dph.cross_check.title') }}</strong>
-        <div v-for="f in blockingCrossCheck" :key="f.check" class="border-t border-danger-500/20 pt-2 first:border-0 first:pt-0">
+        <div v-for="f in blockingCrossCheckShown" :key="f.check" class="border-t border-danger-500/20 pt-2 first:border-0 first:pt-0">
           <div class="font-medium">{{ f.label }}</div>
           <div class="mt-0.5">{{ f.note }}</div>
           <div class="mt-1 font-mono text-xs">

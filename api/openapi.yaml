@@ -6801,7 +6801,10 @@ paths:
         ⚠️ XML vygenerovaný buildem je POUZE POMŮCKA. Před odesláním na EPO portál
         MFČR vždy ověř s účetní.
         Summary obsahuje také `document_refs` (snapshot dokladů zahrnutých do podání)
-        a `cross_check`, včetně neblokujícího upozornění na nevystavené koncepty DDKP/finálu.
+        a `cross_check`, včetně neblokujícího upozornění na nevystavené koncepty DDKP/finálu
+        a přijatých dokladů čekajících na schválení (`pending_approval_self_assessment` je
+        blokující, protože samovyměření patří do období DUZP; `pending_approval_deduction`
+        je informativní, odpočet lze uplatnit později).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year,   required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
@@ -6905,9 +6908,20 @@ paths:
       responses:
         '200':
           description: |
-            Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3, varování k volbě typu podání
-            a fronta `post_filing_changes` (doklady změněné po posledním podání za období —
-            podklad pro rozhodnutí o opravném či následném hlášení).
+            Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3, varování k volbě typu podání,
+            `cross_check` (přijaté doklady čekající na schválení, týž tvar nálezů jako
+            u DPHDP3; samovyměření je blokující) a fronta `post_filing_changes` (doklady
+            změněné po posledním podání za období — podklad pro rozhodnutí o opravném či
+            následném hlášení).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary: { type: object, additionalProperties: true }
+                  warnings: { type: array, items: { type: string } }
+                  cross_check: { type: array, items: { $ref: '#/components/schemas/DphCrossCheckFinding' } }
+                  post_filing_changes: { type: object, additionalProperties: true }
         '400': { description: "Neplatný typ podání, nebo parametr, který k němu nepatří" }
         '403': { description: Pouze admin/accountant }
 
@@ -6915,15 +6929,28 @@ paths:
     get:
       tags: [Reports]
       summary: Stáhne XML Kontrolního hlášení (DPHKH1 verzePis 03.01)
+      description: |
+        Chybí-li v hlášení přijaté doklady se samovyměřením, které čekají na schválení,
+        vrátí **`409 vat_cross_check_mismatch`** s nálezy v `cross_check`. Stažení
+        s `acknowledge_mismatch=1` projde a potvrzení se zaloguje.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year,  required: true, schema: { type: integer } }
         - { in: query, name: month, required: true, schema: { type: integer } }
+        - in: query
+          name: acknowledge_mismatch
+          schema: { type: string, enum: ['1', 'true'] }
+          description: 'Potvrzení, že o dokladech se samovyměřením ve schvalování víte — obejde blokující 409.'
       responses:
         '200':
           description: XML download
           content:
             application/xml: {}
+        '409':
+          description: Přijaté doklady se samovyměřením čekají na schválení (`vat_cross_check_mismatch`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/reports/dphshv/preview:
     get:
@@ -32235,6 +32262,12 @@ components:
         claim_period: { type: [string, "null"], pattern: '^\d{4}-\d{2}$' }
         entry_date: { type: [string, "null"], format: date }
         received_at: { type: [string, "null"], format: date }
+        vendor_invoice_number: { type: [string, "null"], description: 'Jen u dokladů ve schvalování.' }
+        tax_date: { type: [string, "null"], format: date, description: 'DUZP — jen u dokladů ve schvalování.' }
+        claim_date: { type: [string, "null"], format: date, description: 'Datum zařazení do přiznání — jen u dokladů ve schvalování.' }
+        partner_name: { type: [string, "null"] }
+        approval_status: { type: string, enum: [pending, rejected], description: 'Jen u dokladů ve schvalování.' }
+        self_assessment: { type: boolean, description: 'Doklad v režimu samovyměření — jen u dokladů ve schvalování.' }
 
     DphCrossCheckFinding:
       type: object

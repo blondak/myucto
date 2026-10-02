@@ -211,6 +211,78 @@ final class VatLedgerService
     }
 
     /**
+     * Přijaté doklady, které stojí ve schvalování (`approval_status` pending/rejected),
+     * a proto jako koncept chybí v přiznání i KH za období, kam by po schválení patřily.
+     *
+     * Období i režim určuje TÁŽ projekce jako přiznání ({@see fetchPurchases} s koncepty
+     * + {@see normalize}): zahraniční samovyměření jde podle DUZP, ostatní podle období
+     * odpočtu § 73. Doklad je tedy vyjmenovaný přesně v tom období, do kterého by ho
+     * přiznání po schválení zařadilo. `self_assessment` = aspoň jeden řádek v režimu
+     * přenesení daňové povinnosti (samovyměření § 108 se nedá přesunout do pozdějšího
+     * období, odpočet ano).
+     *
+     * Bez schvalování (žádný doklad ve stavu pending/rejected) vrací prázdné pole bez
+     * dalšího dotazu do evidence.
+     *
+     * @return list<array{invoice_id:int, doc_number:?string, vendor_invoice_number:?string,
+     *                    counterparty_name:string, approval_status:string, tax_date:?string,
+     *                    claim_date:?string, self_assessment:bool, base_czk:float,
+     *                    self_assessed_vat_czk:float, vat_czk:float}>
+     */
+    public function pendingApprovalPurchases(int $supplierId, string $start, string $end): array
+    {
+        if (!$this->db->hasColumn('purchase_invoices', 'approval_status')) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, approval_status FROM purchase_invoices
+              WHERE supplier_id = ? AND status = 'draft'
+                AND approval_status IN ('pending', 'rejected')"
+        );
+        $stmt->execute([$supplierId]);
+        $pending = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $pending[(int) $r['id']] = (string) $r['approval_status'];
+        }
+        if ($pending === []) {
+            return [];
+        }
+
+        $map = $this->classificationMap($supplierId);
+        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        $docs = [];
+        foreach ($this->fetchPurchases($supplierId, $start, $end, true) as $raw) {
+            $id = (int) $raw['invoice_id'];
+            if (!isset($pending[$id])) {
+                continue;
+            }
+            $row = $this->normalize($raw, 'purchase', $map, $bucket);
+            $doc = $docs[$id] ?? [
+                'invoice_id'            => $id,
+                'doc_number'            => $row['doc_number'],
+                'vendor_invoice_number' => $row['vendor_invoice_number'],
+                'counterparty_name'     => $row['counterparty_name'],
+                'approval_status'       => $pending[$id],
+                'tax_date'              => self::dateOnly($row['tax_date']),
+                'claim_date'            => $row['claim_date'],
+                'self_assessment'       => false,
+                'base_czk'              => 0.0,
+                'self_assessed_vat_czk' => 0.0,
+                'vat_czk'               => 0.0,
+            ];
+            $doc['base_czk'] = round($doc['base_czk'] + (float) $row['base_czk'], 2);
+            $doc['vat_czk'] = round($doc['vat_czk'] + (float) $row['vat_czk'], 2);
+            if (!empty($row['is_reverse_charge'])) {
+                $doc['self_assessment'] = true;
+                $doc['self_assessed_vat_czk'] = round($doc['self_assessed_vat_czk'] + (float) $row['vat_czk'], 2);
+            }
+            $docs[$id] = $doc;
+        }
+
+        return array_values($docs);
+    }
+
+    /**
      * SQL výraz DIČ odběratele u VYDANÉHO dokladu (EPIC VH-04): preferuje snapshot
      * z dokladu (`client_snapshot.dic` = stav v okamžiku vystavení) s fallbackem na
      * živé `dic` klienta — pozdější změna DIČ na kartě klienta se nesmí zpětně

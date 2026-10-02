@@ -323,6 +323,16 @@ Křížová kontrola současně neblokujícím upozorněním vyjmenuje koncepty 
 dokladů z proformy i přijaté platby proformy, ke kterým daňový doklad ještě nevznikl.
 Před podáním je dokonči nebo účetně ověř — daňová povinnost vzniká přijetím úplaty.
 
+Přijatý doklad, který čeká na schválení nebo byl zamítnut, zůstává konceptem, a proto
+v přiznání ani v kontrolním hlášení není. Náhled přiznání i kontrolního hlášení takové
+doklady vyjmenuje s odkazem na detail, pokud by po schválení patřily do zvoleného období:
+
+- **Doklady se samovyměřením** (přenesení daňové povinnosti, pořízení z EU, přijetí služby
+  ze zahraničí, dovoz) jsou v červeném rámečku. Daň ze samovyměření patří do období DUZP
+  a nedá se přesunout do pozdějšího období, proto stažení XML vyžaduje potvrzení stejně
+  jako ostatní blokující rozdíly. Doklady před podáním schvalte, nebo stornujte.
+- **Ostatní doklady** jsou jen informace: odpočet z nich můžete uplatnit později.
+
 > [!TIP]
 > Tahle fronta je jen **podklad pro rozhodnutí** — nic sama o sobě nevynucuje. Pokud
 > se v ní doklad objeví, zvaž, jestli je rozdíl významný natolik, že je potřeba podat
@@ -757,6 +767,11 @@ měsíčně nebo čtvrtletně. Identifikovaná osoba KH nepodává. KH obsahuje 
 - **B.3** — Přijatá tuzemská plnění do 10 000 Kč (sumace)
 
 UI ukazuje **count řádků per sekce** + deadline countdown.
+
+Přijaté doklady čekající na schválení nebo zamítnuté náhled vyjmenuje stejně jako náhled
+přiznání k DPH (viz výše): doklady se samovyměřením (sekce A.2 a B.1) jsou blokující
+a stažení XML vyžaduje potvrzení, ostatní jsou jen informace. Rychlá odpověď na výzvu
+oddíly A a B nemá, proto se u ní nekontrolují.
 
 ### 41.5.2 Typ podání — řádné, opravné, následné
 

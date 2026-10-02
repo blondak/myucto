@@ -20,6 +20,13 @@ export interface DphCrossCheckDocument {
   claim_period?: string | null
   entry_date?: string | null
   received_at?: string | null
+  // Jen u přijatých dokladů čekajících na schválení (pending_approval_*).
+  vendor_invoice_number?: string | null
+  tax_date?: string | null
+  claim_date?: string | null
+  partner_name?: string | null
+  approval_status?: 'pending' | 'rejected'
+  self_assessment?: boolean
 }
 
 export interface DphCrossCheckFinding {
@@ -201,6 +208,7 @@ export interface KhPreview {
     c_jed_vyzvy: string | null
   }
   warnings: string[]
+  cross_check?: DphCrossCheckFinding[]
 }
 
 export interface OssPreview {
@@ -728,7 +736,7 @@ export const reportsApi = {
 
   khDownloadUrl: (
     year: number, month: number, period?: 'monthly' | 'quarterly',
-    variant: KhVariant = 'radne', dZjist?: string, cJedVyzvy?: string,
+    variant: KhVariant = 'radne', dZjist?: string, cJedVyzvy?: string, acknowledgeMismatch?: boolean,
   ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
@@ -737,6 +745,7 @@ export const reportsApi = {
     if (variant !== 'radne') params.set('variant', variant)
     if (dZjist) params.set('d_zjist', dZjist)
     if (cJedVyzvy) params.set('c_jed_vyzvy', cJedVyzvy)
+    if (acknowledgeMismatch) params.set('acknowledge_mismatch', '1')
     return `/api/reports/dphkh1?${params.toString()}`
   },
 

@@ -76,11 +76,103 @@ final class VatCrossCheckService
 
         $findings = [];
 
+        $findings = array_merge($findings, $this->pendingApprovalFindings($supplierId, $start, $end));
         $findings = array_merge($findings, $this->checkDraftAdvanceTaxDocuments($supplierId, $start, $end));
         $findings = array_merge($findings, $this->checkDomesticVsKh($supplierId, $year, $month, $period, $rows));
         $findings = array_merge($findings, $this->checkReverseChargeVsKh($supplierId, $year, $month, $period, $rows));
         $findings = array_merge($findings, $this->checkEuSuppliesVsSh($supplierId, $year, $month, $period, $rows));
         $findings = array_merge($findings, $this->checkAccount343($supplierId, $year, $month, $period, $start, $end, $rows));
+
+        return $findings;
+    }
+
+    /**
+     * Jen kontrola přijatých dokladů ve schvalování — pro kontrolní hlášení, které zbytek
+     * smíru (DPHDP3 ↔ KH ↔ SH ↔ 343) nepotřebuje. Tytéž nálezy vrací i {@see check()}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function pendingApprovalCheck(int $supplierId, int $year, int $month, ?string $period = null): array
+    {
+        $period = $this->resolvePeriod($supplierId, $period);
+        [$start, $end] = self::periodBounds($year, $month, $period);
+        return $this->pendingApprovalFindings($supplierId, $start, $end);
+    }
+
+    /**
+     * Přijatý doklad čekající na schválení (nebo zamítnutý) je koncept, takže v přiznání
+     * ani v KH není. Odpočet lze uplatnit později (§ 73), samovyměření ale patří do
+     * období DUZP a dodatečně by šlo jen opravou přiznání. Proto dvě úrovně: doklady se
+     * samovyměřením blokují stažení stejně jako ostatní tvrdé rozdíly, ostatní jsou jen
+     * informace. Doklady i jejich zařazení do období dává
+     * {@see VatLedgerService::pendingApprovalPurchases}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function pendingApprovalFindings(int $supplierId, string $start, string $end): array
+    {
+        $pending = $this->ledger->pendingApprovalPurchases($supplierId, $start, $end);
+        if ($pending === []) {
+            return [];
+        }
+
+        $selfAssessed = [];
+        $deductionOnly = [];
+        foreach ($pending as $p) {
+            $amount = $p['self_assessment'] ? $p['self_assessed_vat_czk'] : $p['vat_czk'];
+            $doc = [
+                'invoice_id'            => $p['invoice_id'],
+                'doc_number'            => $p['vendor_invoice_number'] ?? $p['doc_number'],
+                'vendor_invoice_number' => $p['vendor_invoice_number'],
+                'source'                => 'purchase',
+                'declared'              => 0.0,
+                'counter'               => $amount,
+                'difference'            => round(-$amount, 2),
+                'tax_date'              => $p['tax_date'],
+                'claim_date'            => $p['claim_date'],
+                'partner_name'          => $p['counterparty_name'],
+                'approval_status'       => $p['approval_status'],
+                'self_assessment'       => $p['self_assessment'],
+            ];
+            if ($p['self_assessment']) {
+                $selfAssessed[] = $doc;
+            } else {
+                $deductionOnly[] = $doc;
+            }
+        }
+
+        $findings = [];
+        if ($selfAssessed !== []) {
+            $total = round(array_sum(array_column($selfAssessed, 'counter')), 2);
+            $findings[] = [
+                'check'      => 'pending_approval_self_assessment',
+                'label'      => 'Přijaté doklady se samovyměřením čekají na schválení',
+                'severity'   => 'mismatch',
+                'blocking'   => true,
+                'declared'   => 0.0,
+                'counter'    => $total,
+                'difference' => round(-$total, 2),
+                'documents'  => $selfAssessed,
+                'note'       => 'Doklady v režimu přenesení daňové povinnosti (samovyměření) čekají na schválení '
+                    . 'nebo byly zamítnuty, a proto v podání chybí. Daň ze samovyměření patří do období DUZP '
+                    . 'a nelze ji přesunout do pozdějšího období. Doklady před podáním schvalte, nebo stornujte.',
+            ];
+        }
+        if ($deductionOnly !== []) {
+            $total = round(array_sum(array_column($deductionOnly, 'counter')), 2);
+            $findings[] = [
+                'check'      => 'pending_approval_deduction',
+                'label'      => 'Přijaté doklady čekají na schválení',
+                'severity'   => 'info',
+                'blocking'   => false,
+                'declared'   => 0.0,
+                'counter'    => $total,
+                'difference' => round(-$total, 2),
+                'documents'  => $deductionOnly,
+                'note'       => 'Doklady čekají na schválení nebo byly zamítnuty, a proto v podání chybí. '
+                    . 'Odpočet z nich můžete uplatnit později.',
+            ];
+        }
 
         return $findings;
     }

@@ -24250,6 +24250,21 @@
       "missing_slevy": "Slevy na dani (na poplatníka, manželku, děti)",
       "missing_advice": "Doporučujeme: vyplňte v účetnickém software nebo předejte účetní/poradci."
     },
+    "pending_approval": {
+      "self_assessment_title": "Doklady se samovyměřením čekají na schválení",
+      "self_assessment_note": "Tyto přijaté doklady v režimu přenesení daňové povinnosti čekají na schválení nebo byly zamítnuty, a proto v podání chybí. Daň ze samovyměření patří do období DUZP a nelze ji přesunout do pozdějšího období. Doklady před podáním schvalte, nebo stornujte.",
+      "deduction_title": "Přijaté doklady čekají na schválení",
+      "deduction_note": "Tyto doklady čekají na schválení nebo byly zamítnuty, a proto v podání chybí. Odpočet z nich můžete uplatnit později.",
+      "download_gate_hint": "Stažení XML vyžaduje vědomé potvrzení, dokud doklady se samovyměřením nebudou schválené nebo stornované.",
+      "confirm_download_anyway": "V podání chybí přijaté doklady se samovyměřením, které čekají na schválení (viz výpis). Daň ze samovyměření patří do období DUZP. Opravdu chcete XML přesto stáhnout?",
+      "duzp": "DUZP",
+      "self_assessed_vat": "samovyměřená daň",
+      "vat": "DPH",
+      "status": {
+        "pending": "čeká na schválení",
+        "rejected": "zamítnuto"
+      }
+    },
     "kh": {
       "title": "Kontrolní hlášení (DPHKH1)",
       "subtitle": "Výkaz pro EPO portál MF ČR. Verze 03.01.",
