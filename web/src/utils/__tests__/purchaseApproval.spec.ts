@@ -1,24 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { announceApprovalRequested } from '../purchaseApproval'
 import { approvalErrorMessage, isApprovalNoApprover } from '@/api/purchaseApprovals'
-import type { DimensionType, DimensionValue } from '@/api/dimensions'
 
 const t = (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key
-
-function type(id: number, over: Partial<DimensionType> = {}): DimensionType {
-  return {
-    id, supplier_id: 1, supplier_group_id: null, level: 'company', code: `T${id}`, name: `Typ ${id}`,
-    kind: 'cost_center', is_active: true, show_on_documents: true, sort_order: 1, ...over,
-  }
-}
-
-function value(id: number, typeId: number): DimensionValue {
-  return {
-    id, type_id: typeId, supplier_id: 1, supplier_group_id: null, level: 'company', parent_id: null,
-    code: `V${id}`, name: `Hodnota ${id}`, is_active: true, responsible_user_id: null, responsible_note: null,
-    car_id: null, project_id: null, cost_center_id: null, note: null, sort_order: 1,
-  }
-}
 
 describe('announceApprovalRequested', () => {
   it('při approval_requested ukáže toast „odesláno ke schválení" a vrátí true', () => {
