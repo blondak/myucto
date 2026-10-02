@@ -958,6 +958,11 @@ final class PurchaseInvoiceRepository
         if (!empty($filters['needs_review'])) {
             $where[] = "pi.extraction_warning IS NOT NULL";
         }
+        // Schvalování manažerem střediska (F6, migrace 1959).
+        if (in_array($filters['approval_status'] ?? null, ['none', 'pending', 'approved', 'rejected'], true)) {
+            $where[] = 'pi.approval_status = ?';
+            $params[] = (string) $filters['approval_status'];
+        }
         // „Uhrazeno s rozdílem" — doklad je `paid`, ale evidované úhrady ho nepokrývají
         // (typicky ručně spárovaná nižší platba z doby, kdy párování uzavíralo doklad bez
         // ohledu na částku). Zbytek se dá vyrovnat z detailu dokladu.
@@ -1055,7 +1060,7 @@ final class PurchaseInvoiceRepository
                        (" . PurchaseSettledExpr::remainingAmount('pi') . ") AS remaining_amount,
                        " . PurchaseSettledExpr::paidShortfallCondition('pi', 'cur.code') . " AS paid_shortfall,
                        pi.payment_ordered_at,
-                       pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
+                       pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at, pi.approval_status,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
                        ec.label AS expense_category_label, ec.code AS expense_category_code,
                        pi.project_id, prj.name AS project_name,

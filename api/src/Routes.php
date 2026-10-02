@@ -838,6 +838,21 @@ final class Routes
         $app->get    ('/api/public/approval/{token:[a-f0-9]{32,128}}/logo',     PublicApprovalLogoAction::class);
         $app->post   ('/api/public/approval/{token:[a-f0-9]{32,128}}/decide',   PublicApprovalDecideAction::class);
 
+        // Schvalování přijatých dokladů manažerem střediska (F6) — interní API
+        $app->get    ('/api/purchase-invoice-approvals',                         [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'list']);
+        $app->get    ('/api/purchase-invoice-approvals/count',                   [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'count']);
+        $app->post   ('/api/purchase-invoice-approvals/{id:[0-9]+}/decide',      [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'decide']);
+        $app->post   ('/api/purchase-invoice-approvals/{id:[0-9]+}/remind',      [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'remind']);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/approvals',            [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'forInvoice']);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/approvals/request',    [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'request']);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/approvals/cancel',     [\MyInvoice\Action\PurchaseInvoice\Approval\PurchaseInvoiceApprovalAction::class, 'cancel']);
+
+        // Schválení přijatého dokladu z e-mailu (bez auth, jen token)
+        $app->get    ('/api/public/purchase-approval/{token:[a-f0-9]{64}}',        [\MyInvoice\Action\PurchaseInvoice\Approval\PublicPurchaseApprovalAction::class, 'get']);
+        $app->get    ('/api/public/purchase-approval/{token:[a-f0-9]{64}}/pdf',    [\MyInvoice\Action\PurchaseInvoice\Approval\PublicPurchaseApprovalAction::class, 'pdf']);
+        $app->get    ('/api/public/purchase-approval/{token:[a-f0-9]{64}}/logo',   [\MyInvoice\Action\PurchaseInvoice\Approval\PublicPurchaseApprovalAction::class, 'logo']);
+        $app->post   ('/api/public/purchase-approval/{token:[a-f0-9]{64}}/decide', [\MyInvoice\Action\PurchaseInvoice\Approval\PublicPurchaseApprovalAction::class, 'decide']);
+
         // Web faktura — veřejný náhled + PDF + přílohy (bez auth, jen token)
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}',     PublicInvoiceGetAction::class);
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/pdf', PublicInvoicePdfAction::class);

@@ -88,6 +88,8 @@ final class ListPurchaseInvoicesAction
             'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
             'unmatched'     => !empty($filter['unmatched']),
             'needs_review'  => !empty($filter['needs_review']),
+            'approval_status' => is_scalar($filter['approval_status'] ?? $q['approval_status'] ?? null)
+                ? (string) ($filter['approval_status'] ?? $q['approval_status']) : null,
             'paid_shortfall' => !empty($filter['paid_shortfall']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'booked'        => $filter['booked'] ?? null,

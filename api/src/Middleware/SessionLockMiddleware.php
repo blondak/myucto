@@ -58,6 +58,8 @@ final class SessionLockMiddleware implements MiddlewareInterface
         'GET' => [
             '#^/api/public/approval/[a-f0-9]{32,128}$#D',
             '#^/api/public/approval/[a-f0-9]{32,128}/logo$#D',
+            '#^/api/public/purchase-approval/[a-f0-9]{64}$#D',
+            '#^/api/public/purchase-approval/[a-f0-9]{64}/(pdf|logo)$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}/pdf$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}/attachment/[0-9]+$#D',
@@ -68,6 +70,7 @@ final class SessionLockMiddleware implements MiddlewareInterface
         ],
         'POST' => [
             '#^/api/public/approval/[a-f0-9]{32,128}/decide$#D',
+            '#^/api/public/purchase-approval/[a-f0-9]{64}/decide$#D',
             '#^/api/public/work-report/[a-f0-9]{32,128}/request-code$#D',
             '#^/api/public/work-report/[a-f0-9]{32,128}/verify$#D',
             '#^/api/public/payroll-document/[a-f0-9]{64}/request-code$#D',

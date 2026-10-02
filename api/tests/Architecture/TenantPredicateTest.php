@@ -63,6 +63,8 @@ final class TenantPredicateTest extends TestCase
         'pdf_signature_output_settings',
         'purchase_invoices',
         'purchase_invoice_counters',
+        // Schvalování manažerem střediska (1959, F6).
+        'purchase_invoice_approvals',
         'recurring_invoice_templates',
         'revenue_categories',
         'sample_data_entries',

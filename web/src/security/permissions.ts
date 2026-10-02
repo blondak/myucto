@@ -7,6 +7,7 @@ export const PERMISSION_KEYS = [
   'invoices.delete', 'invoices.approval',
   'purchase_invoices', 'purchase_invoices.create', 'purchase_invoices.transition',
   'purchase_invoices.scan', 'purchase_invoices.payment_orders', 'purchase_invoices.delete',
+  'purchase_invoices.approve',
   'recurring', 'recurring.create', 'recurring.run', 'recurring.pause', 'recurring.delete',
   'bank', 'bank.import', 'bank.match', 'bank.post', 'bank.unpost', 'bank.rules',
   'documents', 'documents.upload', 'documents.move', 'documents.delete',

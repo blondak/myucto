@@ -23621,6 +23621,7 @@
       "work_report_link": "Odkaz na sledování výkazu práce",
       "work_report_access_code": "Ověřovací kód pro náhled výkazu práce",
       "document_request_reminder": "Připomínka chybějícího dokladu",
+      "purchase_invoice_approval": "Schválení přijatého dokladu (manažer střediska)",
       "user_invite": "Pozvánka nového uživatele",
       "payroll_document_secure_link": "Zabezpečený odkaz na mzdový dokument",
       "payroll_document_access_code": "Ověřovací kód pro mzdový dokument"
@@ -23821,6 +23822,7 @@
     "freq_hourly_15": "každou hodinu v 15. minutě",
     "freq_weekdays_0900": "Po–Pá v 09:00",
     "freq_weekdays_0915": "Po–Pá v 09:15",
+    "freq_weekdays_0920": "Po–Pá v 09:20",
     "freq_weekdays_0930": "Po–Pá v 09:30",
     "freq_monthly_day1_0400": "1. den v měsíci ve 04:00",
     "freq_monthly_day1_0430": "1. den v měsíci ve 04:30",

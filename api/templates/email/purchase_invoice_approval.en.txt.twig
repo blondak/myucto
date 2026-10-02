@@ -1,0 +1,27 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+{% if is_reminder %}REMINDER: {% endif %}DOCUMENT AWAITING APPROVAL
+==========================
+
+Hello{% if approver_name %} {{ approver_name }}{% endif %},
+
+{% if is_reminder %}this document is still waiting for your decision. The link from the previous
+e-mail is no longer valid, please use this one.
+
+{% endif %}{% if company_name %}At {{ company_name }}, a{% else %}A{% endif %} received document is waiting for your approval
+for {{ dimension_type|lower }} {{ dimension_value }}, which you are responsible for.
+
+Vendor:                  {{ vendor_name }}
+Document number:         {{ document_number }}
+{% if issue_date %}Issued:                  {{ issue_date|date('Y-m-d') }}
+{% endif %}{% if due_date %}Due:                     {{ due_date|date('Y-m-d') }}
+{% endif %}Total incl. VAT:         {{ total_with_vat|number_format(2, '.', ',') }} {{ currency }}
+You approve (excl. VAT): {{ amount_czk|number_format(2, '.', ',') }} CZK
+
+Review and decide: {{ approval_url }}
+
+The page shows the document and its PDF; you can approve it or reject it with a reason.
+{% if valid_until %}The link is valid until {{ valid_until|date('Y-m-d') }} and can be used for one decision.
+{% endif %}All documents waiting for your approval are also in the app: {{ inbox_url }}
+{% endblock %}

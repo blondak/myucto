@@ -318,6 +318,18 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:approval:ip:' . $this->ipBucket($ip), (int) ($rl['approval_per_min_per_ip'] ?? 30), 60];
         }
 
+        // Schválení přijatého dokladu z e-mailu (F6) — stejný model jako výkaz: IP
+        // bucket na čtení, přísnější na rozhodnutí. Token má 256 bitů, limit brzdí
+        // hlavně zátěž (náhled + PDF), ne hádání.
+        if (str_starts_with($path, '/api/public/purchase-approval/')) {
+            if ($method === 'POST') {
+                return ['rl:pubpa-post:ip:' . $this->ipBucket($ip),
+                        (int) ($rl['purchase_approval_post_per_min_per_ip'] ?? 10), 60];
+            }
+            return ['rl:pubpa:ip:' . $this->ipBucket($ip),
+                    (int) ($rl['purchase_approval_per_min_per_ip'] ?? 60), 60];
+        }
+
         // Veřejná web faktura (bez auth, jen token) — IP bucket proti anonymnímu
         // DoS (náhled + PDF render + přílohy). userId je tu vždy 0. Limit vyšší
         // než approval: legit návštěva = 1 GET + PDF + N příloh.

@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-09-other-items-v1';
+    public const VERSION = '2026-10-purchase-approvals-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -52,6 +52,7 @@ final class PermissionCatalog
             ['purchase_invoices.scan', 'purchase_invoices', 'Skenovat schránku', $staffOnly],
             ['purchase_invoices.payment_orders', 'purchase_invoices', 'Platební příkazy', $staffOnly],
             ['purchase_invoices.delete', 'purchase_invoices', 'Smazat přijatou fakturu', $both],
+            ['purchase_invoices.approve', 'purchase_invoices', 'Schvalovat přijaté doklady', $staffOnly],
             ['recurring', 'recurring', 'Pravidelná fakturace', $both],
             ['recurring.create', 'recurring', 'Vytvořit šablonu', $both],
             ['recurring.run', 'recurring', 'Spustit fakturaci', $both],
@@ -219,7 +220,7 @@ final class PermissionCatalog
         $keys = match ($systemKey) {
             'readonly' => [
                 'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
-                'purchase_invoices', 'recurring', 'bank', 'documents', 'documents.requests', 'documents.inbox',
+                'purchase_invoices', 'purchase_invoices.approve', 'recurring', 'bank', 'documents', 'documents.requests', 'documents.inbox',
                 'accounting', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',

@@ -224,6 +224,10 @@ $sessionActions = [
     'MyInvoice\\Action\\Eshop\\ShoptetAction::rotateFeed',
     'MyInvoice\\Action\\Eshop\\ShoptetAction::disableFeed',
     'MyInvoice\\Action\\PurchaseInvoice\\PaymentOrderAction::archive',
+    // Schvalování manažerem střediska (F6) — interní, session-only v akci.
+    'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::forInvoice',
+    'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::request',
+    'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::cancel',
 ];
 $isSessionAction = static fn (array $route): bool => in_array($route['action'], $sessionActions, true);
 

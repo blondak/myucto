@@ -106,6 +106,13 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/transition$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        // Schvalování manažerem střediska (F6). Odeslání a zrušení kola je změna stavu
+        // dokladu; připomínku posílá účetní. Schránka a rozhodnutí stačí na úrovni
+        // ČTENÍ, aby šlo oprávnění přidělit i roli jen pro čtení — rozhodnout jde jen
+        // vlastní schválení (hlídá PurchaseInvoiceApprovalService).
+        ['POST', '#^/api/purchase-invoices/[0-9]+/approvals/(request|cancel)$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoice-approvals/[0-9]+/remind$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['*', '#^/api/purchase-invoice-approvals(/|$)#', 'purchase_invoices.approve', AccessLevel::READ],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+/(link-advance|advance-suggestion|pdf)$#', 'purchase_invoices', AccessLevel::WRITE],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+(/|$)#', 'purchase_invoices.delete', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices$#', 'purchase_invoices.create', AccessLevel::WRITE],

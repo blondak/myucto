@@ -90,6 +90,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po–Pá |
 | `cron-send-approval-reminders` | 1× denně 09:15, Po–Pá |
+| `cron-purchase-approval-reminders` | 1× denně 09:20, Po–Pá |
 | `cron-document-request-reminders` | 1× denně 09:30, Po–Pá |
 | `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní odstup |
 | `cron-generate-recurring-invoices` | 1× denně 06:30 |

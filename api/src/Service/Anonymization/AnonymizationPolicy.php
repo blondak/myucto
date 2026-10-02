@@ -506,6 +506,7 @@ final class AnonymizationPolicy
         'project_billing_emails' => ['email' => 'email', 'label' => 'text', 'usages' => 'keep'],
         'projects' => ['contract_number' => 'keep', 'name' => 'text', 'note' => 'text', 'project_number' => 'keep'],
         'public_holidays' => ['code' => 'keep', 'month_day' => 'keep', 'name' => 'keep', 'note' => 'keep'],
+        'purchase_invoice_approvals' => ['comment' => 'text', 'token_hash' => 'token'],
         'purchase_invoice_counters' => ['period' => 'keep'],
         'purchase_invoice_items' => ['description' => 'text', 'expense_account_code' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
         'purchase_invoice_submissions' => ['document_sha256' => 'keep', 'extraction_error' => 'text', 'extraction_source' => 'keep', 'note' => 'text', 'status_reason' => 'text'],

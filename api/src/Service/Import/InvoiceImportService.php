@@ -928,6 +928,12 @@ final class InvoiceImportService
         string $purchaseStatus = 'draft',
     ): array {
         try {
+            // Schvalování manažerem střediska (F6) se tu vědomě NEuplatňuje: dávkový
+            // import ISDOC / Pohoda XML je převzetí hotových dokladů z jiného systému
+            // (výchozí `received` volí účetní s právem importu), doklad při založení
+            // nenese dimenze dokladu a přijetí tu ani nespouští háčky přijetí. Kdo chce
+            // doklady schvalovat, importuje je jako koncepty (`purchase_status=draft`)
+            // a ke schválení je pošle jejich přijetí.
             $r = $this->purchaseMapper->map($inv, $supplierId, $userId, $purchaseStatus);
             $duplicate = !empty($r['duplicate']);
             // Čitelné PDF (z ISDOCX balíčku nebo nahraného PDF/A-3 s embedded ISDOC)

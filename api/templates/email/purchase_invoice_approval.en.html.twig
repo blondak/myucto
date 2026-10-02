@@ -1,0 +1,80 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  {% if is_reminder %}<span style="color:#E8A547;">Reminder</span>: {% endif %}Document awaiting approval
+</h1>
+
+<p style="margin:0 0 12px;">Hello{% if approver_name %} {{ approver_name }}{% endif %},</p>
+
+{% if is_reminder %}
+<p style="margin:0 0 16px;padding:10px 14px;background:#FDF6E9;border-left:3px solid #E8A547;border-radius:4px;">
+  This document is still waiting for your decision. The link from the previous e-mail is no longer valid, please use this one.
+</p>
+{% endif %}
+
+<p style="margin:0 0 16px;">
+  {% if company_name %}At <strong>{{ company_name }}</strong>, a{% else %}A{% endif %} received document is waiting for your approval
+  for {{ dimension_type|lower }} <strong>{{ dimension_value }}</strong>, which you are responsible for.
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:{{ accent_soft }};border-radius:8px;margin:16px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#403B52;">
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;width:42%;">Vendor</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ vendor_name }}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Document number</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ document_number }}</td>
+        </tr>
+        {% if issue_date %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Issued</td>
+          <td style="padding:4px 0;">{{ issue_date|date('Y-m-d') }}</td>
+        </tr>
+        {% endif %}
+        {% if due_date %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Due</td>
+          <td style="padding:4px 0;">{{ due_date|date('Y-m-d') }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Total incl. VAT</td>
+          <td style="padding:4px 0;font-family:monospace;">{{ total_with_vat|number_format(2, '.', ',') }} {{ currency }}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">You approve (excl. VAT)</td>
+          <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{{ accent }};font-family:monospace;">
+            {{ amount_czk|number_format(2, '.', ',') }} CZK
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:28px auto;">
+  <tr>
+    <td align="center" bgcolor="#15803D" style="background:#15803D;border-radius:10px;mso-padding-alt:20px 48px;">
+      <a href="{{ approval_url }}"
+         style="display:inline-block;padding:20px 48px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:10px;">Review and decide</a>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:24px 0 8px;font-size:13px;color:#7A748C;text-align:center;">
+  Or copy the link into your browser:<br>
+  <a href="{{ approval_url }}" style="color:{{ accent }};word-break:break-all;font-family:monospace;font-size:12px;">{{ approval_url }}</a>
+</p>
+
+<p style="margin:16px 0;font-size:13px;color:#5A5470;">
+  The page shows the document and its PDF; you can approve it or reject it with a reason.
+  {% if valid_until %}The link is valid until {{ valid_until|date('Y-m-d') }} and can be used for one decision.{% endif %}
+  All documents waiting for your approval are also in the app:
+  <a href="{{ inbox_url }}" style="color:{{ accent }};">To approve</a>.
+</p>
+{% endblock %}

@@ -15,13 +15,14 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashSettlementService;
-use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingException;
-use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalException;
+use MyInvoice\Service\PurchaseInvoice\Approval\PurchaseInvoiceApprovalService;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceReceiver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -67,10 +68,10 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly DocumentLockService $locks,
         private readonly Connection $db,
         private readonly DocumentJournalSync $journalSync,
-        private readonly DocumentAutoPoster $autoPoster,
-        private readonly SmallAssetService $smallAssets,
         private readonly CashSettlementService $cashSettlement,
         private readonly \MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
+        private readonly PurchaseInvoiceReceiver $receiver,
+        private readonly PurchaseInvoiceApprovalService $approvals,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -159,6 +160,26 @@ final class TransitionPurchaseInvoiceStatusAction
             $d = \DateTimeImmutable::createFromFormat('Y-m-d', $paidDate);
             if ($d === false || $d->format('Y-m-d') !== $paidDate) {
                 return Json::error($response, 'validation_failed', 'Neplatné paid_date', 400);
+            }
+        }
+
+        // Schvalování manažerem střediska (F6): doklad, který schválení vyžaduje a ještě
+        // ho nemá, se nepřijme — místo toho vznikne kolo schvalování a doklad zůstane
+        // konceptem. Bez typu dimenze se schvalováním brána nic nedělá.
+        if ($currentStatus === 'draft' && $target === 'received') {
+            try {
+                $gate = $this->approvals->gateReceive(
+                    $supplierId,
+                    $id,
+                    isset($user['id']) ? (int) $user['id'] : null,
+                    $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    $request->getHeaderLine('User-Agent'),
+                );
+            } catch (PurchaseApprovalException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+            }
+            if ($gate !== null) {
+                return Json::ok($response, (array) $this->repo->find($id, $supplierId) + $gate);
             }
         }
 
@@ -274,68 +295,36 @@ final class TransitionPurchaseInvoiceStatusAction
             'to'   => $target,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        // Auto-post hook (A2): přijetí přijaté faktury (přechod na 'received') je analog
-        // vystavení FV — má-li firma zapnutý auto_post_purchases a běží v podvojném
-        // účetnictví, zaúčtuj PF hned. Chyba zaúčtování NESMÍ zablokovat přechod stavu —
-        // DocumentAutoPoster ji jen zaloguje (PF zůstane nezaúčtovaná). Idempotentní, takže
-        // opakované dosažení stavu received (un-cancel apod.) zápis neduplikuje.
+        // Háčky přijetí (auto-zaúčtování, karta, drobný majetek, hotovost) žijí v jednom
+        // místě, které sdílí i přijetí po schválení manažerem střediska — viz
+        // PurchaseInvoiceReceiver. Opakované dosažení stavu received (un-cancel) je
+        // idempotentní.
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+        $settlement = null;
         if ($target === 'received') {
-            $this->autoPoster->maybeAutoPost(
-                $supplierId,
-                'purchase_invoice',
-                $id,
-                isset($user['id']) ? (int) $user['id'] : null,
-                $ip,
-                $request->getHeaderLine('User-Agent'),
-            );
-        }
-
-        // Platba kartou: přijatý doklad s koncovkou karty se spáruje s pohybem karty
-        // a zaúčtuje se vypořádání 321/378.x (idempotentní, bez režimu karet no-op).
-        if (in_array($target, ['received', 'booked', 'paid'], true)) {
-            $this->cardAutomation->afterPurchaseReady($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
-        }
-
-        // Evidence drobného majetku (§DM): protějšek hooku v UpdatePurchaseInvoiceAction,
-        // který na draftu záměrně nic nedělá — rozpracovaný doklad ještě není pořízení.
-        // Bez tohoto volání ale klasifikace udělaná V DRAFTU nikam nedojde: ISDOC import
-        // zakládá fakturu vždy jako draft, uživatel v ní označí položky za majetek, uloží
-        // (hook nad draftem mlčí) a finalizuje — a evidence zůstane prázdná. Kartu pak
-        // vyrobilo teprve druhé uložení už přijaté faktury, které navíc chce ?force=1 a
-        // roli admin, takže klientovi nevznikla nikdy. Přijetí dokladu je právě ten
-        // okamžik, kdy se z rozpracovaného stává pořízení.
-        //
-        // Idempotentní přes přirozený klíč (název + cena), takže opakované dosažení stavu
-        // received (un-cancel) kartu neduplikuje. Chyba evidence NESMÍ shodit přechod
-        // stavu — stejně jako u auto-postu výš; jen ji zalogujeme, ať nezmizí potichu.
-        if ($target === 'received') {
-            try {
-                $this->smallAssets->syncFromPurchaseInvoice(
+            $settlement = $this->receiver->afterReceived($supplierId, $id, $userId, $ip, $request->getHeaderLine('User-Agent'));
+        } else {
+            // Platba kartou: zaúčtovaný / uhrazený doklad se spáruje s pohybem karty
+            // (idempotentní, bez režimu karet no-op).
+            if (in_array($target, ['booked', 'paid'], true)) {
+                $this->cardAutomation->afterPurchaseReady($supplierId, $id, $userId);
+            }
+            // Hotovostní vyrovnání (migrace 1327) uplatní i zaúčtování dokladu.
+            if ($target === 'booked') {
+                $settlement = $this->cashSettlement->maybeSettle(
                     $supplierId,
+                    'purchase_invoice',
                     $id,
-                    isset($user['id']) ? (int) $user['id'] : null,
+                    $userId,
+                    $ip,
+                    $request->getHeaderLine('User-Agent'),
                 );
-            } catch (\Throwable $e) {
-                $this->logger->log('purchase_invoice.small_asset_sync_failed', $user['id'] ?? null,
-                    'purchase_invoice', $id, ['error' => $e->getMessage()],
-                    $ip, $request->getHeaderLine('User-Agent'));
             }
         }
 
-        // Hotovostní vyrovnání (migrace 1327): koncept ještě není závazek, takže volbu
-        // „uhradit hotově z pokladny" uplatní až přijetí/zaúčtování dokladu. Měkká brána —
-        // chyba pokladny nesmí zablokovat přechod stavu (stejně jako auto-post výš);
-        // doklad pak jen zůstane neuhrazený a warning je v auditní stopě.
-        $settlement = null;
-        if (in_array($target, ['received', 'booked'], true)) {
-            $settlement = $this->cashSettlement->maybeSettle(
-                $supplierId,
-                'purchase_invoice',
-                $id,
-                isset($user['id']) ? (int) $user['id'] : null,
-                $ip,
-                $request->getHeaderLine('User-Agent'),
-            );
+        // Stornovaný koncept už schválení nepotřebuje (F6).
+        if ($currentStatus === 'draft' && $target === 'cancelled') {
+            $this->approvals->onInvoiceLeftDraft($supplierId, $id, $userId, 'cancelled');
         }
 
         $invoice = $this->repo->find($id, $supplierId);

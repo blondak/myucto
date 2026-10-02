@@ -6,6 +6,7 @@ namespace MyInvoice\Middleware;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
+use MyInvoice\Repository\PurchaseInvoiceApprovalRepository;
 use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RoutePermissionMap;
@@ -38,6 +39,9 @@ final class PermissionMiddleware implements MiddlewareInterface
         private readonly PermissionResolver $roles,
         private readonly PermissionChecker $checker,
         private readonly SupplierAccessResolver $supplierAccess,
+        // Nepovinné kvůli testům, které middleware staví ručně; v aplikaci ho předává
+        // Bootstrap výslovně (autowiring nepovinné parametry nedoplňuje).
+        private readonly ?PurchaseInvoiceApprovalRepository $purchaseApprovals = null,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -82,7 +86,26 @@ final class PermissionMiddleware implements MiddlewareInterface
         if ($route->key !== null && $this->checker->allows($role, $route->key, $route->minimum)) {
             return $handler->handle($this->withEffectiveRole($request, $role));
         }
+        if ($this->isApproverPdf($method, $path, $role, $access->supplierId, (int) $user['id'])) {
+            return $handler->handle($this->withEffectiveRole($request, $role));
+        }
         return $this->forbidden($request);
+    }
+
+    /**
+     * Schvalovatel přijatého dokladu (F6) potřebuje vidět jeho PDF, i když roli
+     * s modulem Přijaté faktury nemá (stačí mu `purchase_invoices.approve`). Výjimka
+     * je úzká: jen GET PDF a jen dokladu, na kterém je v aktuální firmě schvalovatelem.
+     */
+    private function isApproverPdf(string $method, string $path, \MyInvoice\Security\EffectiveRole $role, int $supplierId, int $userId): bool
+    {
+        if ($this->purchaseApprovals === null || !in_array($method, ['GET', 'HEAD'], true)
+            || preg_match('#^/api/purchase-invoices/([0-9]+)/pdf$#D', $path, $m) !== 1
+            || !$this->checker->allows($role, 'purchase_invoices.approve', \MyInvoice\Security\AccessLevel::READ)
+        ) {
+            return false;
+        }
+        return $supplierId > 0 && $this->purchaseApprovals->isApproverOf($supplierId, $userId, (int) $m[1]);
     }
 
     private function withEffectiveRole(Request $request, \MyInvoice\Security\EffectiveRole $role): Request

@@ -939,7 +939,8 @@
         "1955_payroll_health_delivery_fulfils_obligation.sql",
         "1956_isds_mobile_key_session_follow_up.sql",
         "1957_payroll_warning_suppressions.sql",
-        "1958_payroll_annual_settlement_batch.sql"
+        "1958_payroll_annual_settlement_batch.sql",
+        "1959_purchase_invoice_approvals.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4119,6 +4120,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "approval_threshold": "decimal(15,2) NULL DEFAULT NULL",
                 "code": "varchar(30) NOT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "drives_accounts": "tinyint(1) NOT NULL DEFAULT 0",
@@ -4128,6 +4130,7 @@
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "kind": "enum('cost_center','project','vehicle','location','deal','custom') NOT NULL DEFAULT 'custom'",
                 "name": "varchar(100) NOT NULL",
+                "requires_approval": "tinyint(1) NOT NULL DEFAULT 0",
                 "show_on_documents": "tinyint(1) NOT NULL DEFAULT 1",
                 "sort_order": "smallint(6) NOT NULL DEFAULT 0",
                 "supplier_group_id": "int(10) unsigned NULL DEFAULT NULL",
@@ -17685,6 +17688,49 @@
             "foreign_keys": [],
             "checks": []
         },
+        "purchase_invoice_approvals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount_czk": "decimal(15,2) NOT NULL DEFAULT 0.00",
+                "approver_user_id": "bigint(20) unsigned NOT NULL",
+                "comment": "varchar(500) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "decided_at": "datetime NULL DEFAULT NULL",
+                "decided_via": "enum('app','email') NULL DEFAULT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "last_reminder_at": "datetime NULL DEFAULT NULL",
+                "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
+                "reminders_sent": "tinyint(3) unsigned NOT NULL DEFAULT 0",
+                "requested_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "requested_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "round": "int(10) unsigned NOT NULL DEFAULT 1",
+                "status": "enum('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "token_expires_at": "datetime NULL DEFAULT NULL",
+                "token_hash": "char(64) NULL DEFAULT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_pia_requested_by": "BTREE (requested_by)",
+                "idx_pia_approver_status": "BTREE (approver_user_id, status)",
+                "idx_pia_invoice_round": "BTREE (purchase_invoice_id, round)",
+                "idx_pia_supplier_status": "BTREE (supplier_id, status)",
+                "idx_pia_value": "BTREE (dimension_value_id)",
+                "uq_pia_token_hash": "UNIQUE BTREE (token_hash)"
+            },
+            "foreign_keys": {
+                "fk_pia_approver": "(approver_user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pia_invoice": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pia_requested_by": "(requested_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_pia_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pia_value": "(dimension_value_id) -> dimension_values (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "purchase_invoice_counters": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -17867,6 +17913,7 @@
                 "advance_paid_amount": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "advance_purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "amount_to_pay": "decimal(12,2) NULL DEFAULT NULL STORED GENERATED AS (`total_with_vat` - `advance_paid_amount`)",
+                "approval_status": "enum('none','pending','approved','rejected') NOT NULL DEFAULT 'none'",
                 "booked_at": "timestamp NULL DEFAULT NULL",
                 "booked_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "cancelled_at": "timestamp NULL DEFAULT NULL",
@@ -17968,6 +18015,7 @@
                 "idx_pi_source_hash": "BTREE (supplier_id, source_hash)",
                 "idx_pi_status_due": "BTREE (supplier_id, status, due_date)",
                 "idx_pi_supplier": "BTREE (supplier_id)",
+                "idx_pi_supplier_approval": "BTREE (supplier_id, approval_status)",
                 "idx_pi_supplier_external_barcode": "BTREE (supplier_id, external_barcode)",
                 "idx_pi_supplier_issue": "BTREE (supplier_id, issue_date)",
                 "idx_pi_supplier_status_effcost": "BTREE (supplier_id, status, effective_cost_date)",

@@ -1,0 +1,80 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">
+  {% if is_reminder %}<span style="color:#E8A547;">Připomínka</span>: {% endif %}Doklad ke schválení
+</h1>
+
+<p style="margin:0 0 12px;">Dobrý den{% if approver_name %}, {{ approver_name }}{% endif %},</p>
+
+{% if is_reminder %}
+<p style="margin:0 0 16px;padding:10px 14px;background:#FDF6E9;border-left:3px solid #E8A547;border-radius:4px;">
+  Tento doklad stále čeká na vaše rozhodnutí. Odkaz z předchozího e-mailu už neplatí, použijte prosím tento.
+</p>
+{% endif %}
+
+<p style="margin:0 0 16px;">
+  {% if company_name %}ve firmě <strong>{{ company_name }}</strong> {% endif %}čeká přijatý doklad na schválení
+  za {{ dimension_type|lower }} <strong>{{ dimension_value }}</strong>, za které odpovídáte.
+</p>
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:{{ accent_soft }};border-radius:8px;margin:16px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#403B52;">
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;width:42%;">Dodavatel</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ vendor_name }}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Číslo dokladu</td>
+          <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ document_number }}</td>
+        </tr>
+        {% if issue_date %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Vystaveno</td>
+          <td style="padding:4px 0;">{{ issue_date|date('j.n.Y') }}</td>
+        </tr>
+        {% endif %}
+        {% if due_date %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Splatnost</td>
+          <td style="padding:4px 0;">{{ due_date|date('j.n.Y') }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+          <td style="padding:4px 0;color:#7A748C;">Celkem s DPH</td>
+          <td style="padding:4px 0;font-family:monospace;">{{ total_with_vat|number_format(2, ',', ' ') }} {{ currency }}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">Schvalujete (bez DPH)</td>
+          <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{{ accent }};font-family:monospace;">
+            {{ amount_czk|number_format(2, ',', ' ') }} Kč
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:28px auto;">
+  <tr>
+    <td align="center" bgcolor="#15803D" style="background:#15803D;border-radius:10px;mso-padding-alt:20px 48px;">
+      <a href="{{ approval_url }}"
+         style="display:inline-block;padding:20px 48px;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:10px;">Zobrazit a rozhodnout</a>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:24px 0 8px;font-size:13px;color:#7A748C;text-align:center;">
+  Nebo odkaz zkopírujte do prohlížeče:<br>
+  <a href="{{ approval_url }}" style="color:{{ accent }};word-break:break-all;font-family:monospace;font-size:12px;">{{ approval_url }}</a>
+</p>
+
+<p style="margin:16px 0;font-size:13px;color:#5A5470;">
+  Na stránce uvidíte doklad i jeho PDF a můžete ho schválit, nebo zamítnout s důvodem.
+  {% if valid_until %}Odkaz platí do {{ valid_until|date('j.n.Y') }} a lze ho použít pro jedno rozhodnutí.{% endif %}
+  Všechny doklady, které čekají na vaše schválení, najdete také v aplikaci:
+  <a href="{{ inbox_url }}" style="color:{{ accent }};">Ke schválení</a>.
+</p>
+{% endblock %}

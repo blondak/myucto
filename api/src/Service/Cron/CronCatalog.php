@@ -240,6 +240,17 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Schvalování přijatých dokladů manažerem střediska (F6). Bez typu
+                // dimenze se schvalováním nenajde nic a skončí hned.
+                'script' => 'cron-purchase-approval-reminders',
+                'recommended' => 'weekdays_0920',
+                'linux_cron' => '20 9 * * 1-5',
+                'windows_schtasks' => '/sc weekly /d MON,TUE,WED,THU,FRI /st 09:20',
+                'max_age_hours' => 96,
+                'weekdays_only' => true,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-document-request-reminders',
                 'recommended' => 'weekdays_0930',
                 'linux_cron' => '30 9 * * 1-5',

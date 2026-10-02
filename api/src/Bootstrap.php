@@ -168,6 +168,13 @@ final class Bootstrap
                     'messageProcessor',
                     \DI\get(\MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class),
                 ),
+            // PDF přijatého dokladu pro jeho schvalovatele (F6) — nepovinné kvůli
+            // testům, které middleware staví ručně.
+            \MyInvoice\Middleware\PermissionMiddleware::class =>
+                \DI\autowire()->constructorParameter(
+                    'purchaseApprovals',
+                    \DI\get(\MyInvoice\Repository\PurchaseInvoiceApprovalRepository::class),
+                ),
             // Historie podání předchozím programem je nepovinná kvůli testům mostu;
             // bez výslovného předání by kontrola duplicitního řádného hlášení neběžela.
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService::class =>

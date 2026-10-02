@@ -1,0 +1,27 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+{% if is_reminder %}PŘIPOMÍNKA: {% endif %}DOKLAD KE SCHVÁLENÍ
+=====================
+
+Dobrý den{% if approver_name %}, {{ approver_name }}{% endif %},
+
+{% if is_reminder %}tento doklad stále čeká na vaše rozhodnutí. Odkaz z předchozího e-mailu už
+neplatí, použijte prosím tento.
+
+{% endif %}{% if company_name %}ve firmě {{ company_name }} {% endif %}čeká přijatý doklad na schválení
+za {{ dimension_type|lower }} {{ dimension_value }}, za které odpovídáte.
+
+Dodavatel:            {{ vendor_name }}
+Číslo dokladu:        {{ document_number }}
+{% if issue_date %}Vystaveno:            {{ issue_date|date('j.n.Y') }}
+{% endif %}{% if due_date %}Splatnost:            {{ due_date|date('j.n.Y') }}
+{% endif %}Celkem s DPH:         {{ total_with_vat|number_format(2, ',', ' ') }} {{ currency }}
+Schvalujete (bez DPH): {{ amount_czk|number_format(2, ',', ' ') }} Kč
+
+Zobrazit a rozhodnout: {{ approval_url }}
+
+Na stránce uvidíte doklad i jeho PDF a můžete ho schválit, nebo zamítnout s důvodem.
+{% if valid_until %}Odkaz platí do {{ valid_until|date('j.n.Y') }} a lze ho použít pro jedno rozhodnutí.
+{% endif %}Všechny doklady ke schválení najdete také v aplikaci: {{ inbox_url }}
+{% endblock %}

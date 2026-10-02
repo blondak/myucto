@@ -18,7 +18,7 @@ final class DimensionRepository
 {
     public const KINDS = ['cost_center', 'project', 'vehicle', 'location', 'deal', 'custom'];
 
-    private const TYPE_COLUMNS = 'id, supplier_id, supplier_group_id, code, name, kind, is_active, show_on_documents, sort_order, drives_accounts, drives_accounts_mask, created_at, updated_at';
+    private const TYPE_COLUMNS = 'id, supplier_id, supplier_group_id, code, name, kind, is_active, show_on_documents, sort_order, drives_accounts, drives_accounts_mask, requires_approval, approval_threshold, created_at, updated_at';
     private const VALUE_COLUMNS = 'v.id, v.type_id, v.supplier_id, v.supplier_group_id, v.parent_id, v.code, v.name, v.is_active,
         v.responsible_user_id, v.responsible_note, v.car_id, v.project_id, v.cost_center_id, v.note, v.sort_order,
         v.created_at, v.updated_at';
@@ -153,7 +153,7 @@ final class DimensionRepository
     {
         $sets = [];
         $params = [];
-        foreach (['name' => 's', 'is_active' => 'b', 'show_on_documents' => 'b', 'sort_order' => 'i', 'drives_accounts' => 'b', 'drives_accounts_mask' => 's'] as $col => $kind) {
+        foreach (['name' => 's', 'is_active' => 'b', 'show_on_documents' => 'b', 'sort_order' => 'i', 'drives_accounts' => 'b', 'drives_accounts_mask' => 's', 'requires_approval' => 'b', 'approval_threshold' => 'd'] as $col => $kind) {
             if (!array_key_exists($col, $changes)) {
                 continue;
             }
@@ -161,6 +161,7 @@ final class DimensionRepository
             $params[] = match ($kind) {
                 'b' => $changes[$col] ? 1 : 0,
                 'i' => (int) $changes[$col],
+                'd' => $changes[$col] === null ? null : number_format((float) $changes[$col], 2, '.', ''),
                 default => (string) $changes[$col],
             };
         }
@@ -506,6 +507,8 @@ final class DimensionRepository
         $row['sort_order'] = (int) $row['sort_order'];
         $row['drives_accounts'] = (bool) $row['drives_accounts'];
         $row['drives_accounts_mask'] = (string) $row['drives_accounts_mask'];
+        $row['requires_approval'] = (bool) ($row['requires_approval'] ?? false);
+        $row['approval_threshold'] = isset($row['approval_threshold']) ? (float) $row['approval_threshold'] : null;
         return $row;
     }
 

@@ -28,7 +28,7 @@ final class EmailTemplateAction
      * Známé kódy šablon — fix list, ne dynamický.
      * Při přidání nového typu emailu rozšířit zde a v api/templates/email/.
      */
-    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
+    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
     private const LOCALES = ['cs', 'en'];
 
     public function __construct(
@@ -163,6 +163,7 @@ final class EmailTemplateAction
             'invoice_reminder'  => 'Upomínka — faktura {{ invoice.varsymbol }} ({{ days_overdue }} dní po splatnosti)',
             'proforma_reminder' => 'Připomínka — záloha {{ invoice.varsymbol }} ({{ days_overdue }} dní po splatnosti)',
             'invoice_approval'  => 'Žádost o schválení výkazu práce ({{ invoice.varsymbol_or_id }})',
+            'purchase_invoice_approval' => '{{ is_reminder ? \'Připomínka: \' : \'\' }}Doklad ke schválení: {{ vendor_name }} {{ document_number }}',
             'recurring_draft_reminder' => 'Koncept pravidelné faktury se brzy vystaví ({{ issue_date }})',
             'document_request_reminder' => 'Chybí doklad — {{ description }}',
             'password_reset'    => 'Obnova hesla',
@@ -180,6 +181,7 @@ final class EmailTemplateAction
             'invoice_reminder'  => 'Reminder — invoice {{ invoice.varsymbol }} ({{ days_overdue }} days overdue)',
             'proforma_reminder' => 'Reminder — proforma {{ invoice.varsymbol }} ({{ days_overdue }} days overdue)',
             'invoice_approval'  => 'Work report — please approve ({{ invoice.varsymbol_or_id }})',
+            'purchase_invoice_approval' => '{{ is_reminder ? \'Reminder: \' : \'\' }}Document to approve: {{ vendor_name }} {{ document_number }}',
             'recurring_draft_reminder' => 'Recurring invoice draft will be issued soon ({{ issue_date }})',
             'document_request_reminder' => 'Missing document — {{ description }}',
             'password_reset'    => 'Password reset',

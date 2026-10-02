@@ -159,6 +159,7 @@ final class DimensionService
         $changes = array_intersect_key($body, array_flip(['name', 'is_active', 'show_on_documents', 'sort_order']));
         // Účtotvorná dimenze (migrace 1952): nejvýš jeden typ na firmu, maska jen třídy 5 a 6.
         $changes += (new DimensionAccountMapService($this->db))->typeChanges($supplierId, $type, $body);
+        $changes += self::approvalChanges($body);
         if (array_key_exists('name', $changes)) {
             $changes['name'] = trim((string) $changes['name']);
             if ($changes['name'] === '' || mb_strlen($changes['name']) > 100) {
@@ -167,6 +168,32 @@ final class DimensionService
         }
         $this->repo->updateType($supplierId, $typeId, $changes);
         return (array) $this->repo->findType($supplierId, $typeId);
+    }
+
+    /**
+     * Schvalování přijatých dokladů odpovědnou osobou hodnoty (F6, migrace 1959):
+     * `requires_approval` a limit `approval_threshold` (Kč bez DPH, null/0 = vždy).
+     *
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    private static function approvalChanges(array $body): array
+    {
+        $out = [];
+        if (array_key_exists('requires_approval', $body)) {
+            $out['requires_approval'] = (bool) $body['requires_approval'];
+        }
+        if (array_key_exists('approval_threshold', $body)) {
+            $raw = $body['approval_threshold'];
+            if ($raw === null || $raw === '') {
+                $out['approval_threshold'] = null;
+            } elseif (!is_numeric($raw) || (float) $raw < 0 || (float) $raw > 9999999999999.99) {
+                throw new DimensionException('validation_failed', 'Limit schvalování musí být nezáporná částka v Kč.');
+            } else {
+                $out['approval_threshold'] = round((float) $raw, 2);
+            }
+        }
+        return $out;
     }
 
     /** @return array{deleted:bool} */
@@ -231,20 +258,25 @@ final class DimensionService
     /**
      * Uživatelé firmy, které lze vybrat jako odpovědnou osobu hodnoty.
      *
-     * @return list<array{id:int,name:string}>
+     * Odpovědná osoba je zároveň schvalovatel přijatých dokladů (F6), proto i e-mail.
+     *
+     * @return list<array{id:int,name:string,email:string}>
      */
     public function responsibleCandidates(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name
+            "SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.email
                FROM users u
                JOIN user_suppliers us ON us.user_id = u.id AND us.supplier_id = ?
               WHERE u.is_active = 1
               ORDER BY name"
         );
         $stmt->execute([$supplierId]);
-        return array_map(static fn (array $r): array => ['id' => (int) $r['id'], 'name' => (string) $r['name']],
-            $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return array_map(static fn (array $r): array => [
+            'id' => (int) $r['id'],
+            'name' => (string) $r['name'],
+            'email' => (string) ($r['email'] ?? ''),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     // ── přiřazení ────────────────────────────────────────────────────────────

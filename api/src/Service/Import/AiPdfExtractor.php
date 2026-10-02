@@ -1052,7 +1052,11 @@ final class AiPdfExtractor
         // a zaúčtuje (plná automatizace plateb kartou).
         $paidPerDocument = false;
         if (!empty($data['already_paid'])) {
-            if ($this->isCardSettledReceipt($supplierId, $data)) {
+            // Schvalování manažerem střediska (F6): s ním se účtenka hned neuhradí —
+            // skok draft → paid by schválení obešel. Zůstane konceptem a ke schválení
+            // ji pošle přijetí po kontrole vytěžení.
+            if ($this->isCardSettledReceipt($supplierId, $data)
+                && (new \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalRequirements($this->db))->approvalTypes($supplierId) === []) {
                 $this->markAlreadyPaid($id, $supplierId);
             } else {
                 $paidPerDocument = true;

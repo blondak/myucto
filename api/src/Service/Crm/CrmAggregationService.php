@@ -1266,8 +1266,10 @@ final class CrmAggregationService
 
         // 3b. Koncepty přijatých faktur — naimportované (API/AI/PDF) zůstávají ve stavu
         // draft kvůli upomínkám/kontrole; vyzvi k revizi a zaúčtování.
+        // Koncept čekající na schválení manažerem střediska (F6) účetní nevyřizuje —
+        // čeká na schvalovatele, takže do „ke kontrole" nepatří.
         $stmt = $pdo->prepare(
-            "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft'"
+            "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft' AND approval_status <> 'pending'"
         );
         $stmt->execute([$supplierId]);
         $purchaseDraftIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
@@ -1282,6 +1284,39 @@ final class CrmAggregationService
                     $purchaseDraftCount === 1 ? 'koncept' : ($purchaseDraftCount < 5 ? 'koncepty' : 'konceptů')),
                 'link'     => '/purchase-invoices?status=draft',
                 'count'    => $purchaseDraftCount,
+            ];
+        }
+
+        // 3c. Schvalování přijatých dokladů manažerem střediska (F6): přihlášenému
+        // schvalovateli jeho čekající schválení, účetní zamítnuté koncepty.
+        $approvalRepo = new \MyInvoice\Repository\PurchaseInvoiceApprovalRepository($this->db);
+        if ($userId !== null && $userId > 0) {
+            $approvalIds = $this->filterByDismissal(
+                $approvalRepo->pendingIdsForApprover($supplierId, $userId), $dismissals, 'purchase_approvals_pending');
+            if ($approvalIds !== []) {
+                $n = count($approvalIds);
+                $items[] = [
+                    'type'     => 'purchase_approvals_pending',
+                    'severity' => $n > 5 ? 'high' : 'medium',
+                    'title'    => 'Doklady ke schválení: ' . $n,
+                    'hint'     => sprintf('%d %s čeká na vaše schválení', $n,
+                        $n === 1 ? 'doklad' : ($n < 5 ? 'doklady' : 'dokladů')),
+                    'link'     => '/purchase-approvals',
+                    'count'    => $n,
+                ];
+            }
+        }
+        $rejectedIds = $this->filterByDismissal($approvalRepo->rejectedInvoiceIds($supplierId), $dismissals, 'purchase_approvals_rejected');
+        if ($rejectedIds !== []) {
+            $n = count($rejectedIds);
+            $items[] = [
+                'type'     => 'purchase_approvals_rejected',
+                'severity' => 'medium',
+                'title'    => 'Zamítnuté doklady: ' . $n,
+                'hint'     => sprintf('%d %s zamítl schvalovatel. Upravte a pošlete znovu, nebo stornujte', $n,
+                    $n === 1 ? 'doklad' : ($n < 5 ? 'doklady' : 'dokladů')),
+                'link'     => '/purchase-invoices?approval_status=rejected',
+                'count'    => $n,
             ];
         }
 
@@ -2800,7 +2835,8 @@ final class CrmAggregationService
     {
         $validTypes = ['overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
             'purchase_drafts', 'unbooked_documents', 'journal_integrity', 'tax_deadline', 'kh_deadline',
-            'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due'];
+            'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due',
+            'purchase_approvals_pending', 'purchase_approvals_rejected'];
         $validModes = ['day', 'week', 'forever', 'historical'];
         if (!in_array($itemType, $validTypes, true)) {
             throw new \InvalidArgumentException("Invalid item_type: {$itemType}");
@@ -2941,10 +2977,12 @@ final class CrmAggregationService
                 break;
             case 'purchase_drafts':
                 $stmt = $pdo->prepare(
-                    "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft'"
+                    "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND status = 'draft' AND approval_status <> 'pending'"
                 );
                 $stmt->execute([$supplierId]);
                 break;
+            case 'purchase_approvals_rejected':
+                return (new \MyInvoice\Repository\PurchaseInvoiceApprovalRepository($this->db))->rejectedInvoiceIds($supplierId);
             case 'churn_risk':
                 $stmt = $pdo->prepare(
                     "WITH last_invoice AS (
