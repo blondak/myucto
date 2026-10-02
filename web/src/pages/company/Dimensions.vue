@@ -89,6 +89,9 @@ onMounted(async () => {
   await loadAccountMap()
 })
 
+// Výběr schvalovatele přímo v řádku potřebuje seznam uživatelů hned, ne až po otevření formuláře.
+watch(() => selectedType.value?.requires_approval, on => { if (on) void loadLinks() })
+
 watch(level, () => {
   selectedTypeId.value = typesOfLevel.value[0]?.id ?? null
   closeForms()
@@ -214,6 +217,19 @@ async function saveType() {
   await load()
   selectedTypeId.value = result.id
   await loadAccountMap()
+}
+
+async function toggleTypeApproval(type: DimensionType) {
+  const result = await run(() => dimensionsApi.updateType(type.id, { requires_approval: !type.requires_approval }),
+    type.requires_approval ? t('dimensions.approval_off_toast') : t('dimensions.approval_on_toast'))
+  if (!result) return
+  await load()
+  if (!type.requires_approval) void loadLinks()
+}
+
+async function setApprover(value: DimensionValue, userId: number | null) {
+  const result = await run(() => dimensionsApi.updateValue(value.id, { responsible_user_id: userId }), t('common.saved'))
+  if (result) await load()
 }
 
 async function toggleTypeActive(type: DimensionType) {
@@ -653,6 +669,12 @@ function valueCount(typeId: number) {
                               @update:model-value="toggleTypeActive(selectedType)" />
                 {{ selectedType.is_active ? t('dimensions.type_state_active') : t('dimensions.type_state_inactive') }}
               </label>
+              <label v-if="canWrite" class="inline-flex items-center gap-2 text-sm text-neutral-700 whitespace-nowrap mr-1"
+                     :title="t('dimensions.requires_approval_hint')" data-test="dimension-type-approval-switch">
+                <ToggleSwitch :model-value="selectedType.requires_approval === true" :disabled="busy" :label="t('dimensions.requires_approval')"
+                              @update:model-value="toggleTypeApproval(selectedType)" />
+                {{ t('dimensions.approval_switch') }}
+              </label>
               <button v-if="parentIds.length > 0" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="dimension-toggle-all" @click="toggleAll">
                 <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-180': allExpanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                 {{ allExpanded ? t('dimensions.collapse_all') : t('dimensions.expand_all') }}
@@ -688,23 +710,33 @@ function valueCount(typeId: number) {
                 <span v-if="!value.is_active" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500">{{ t('dimensions.closed') }}</span>
                 <span v-if="value.car_registration" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ value.car_registration }}</span>
                 <span v-if="value.cost_center_code" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ t('dimensions.cost_center_short') }} {{ value.cost_center_code }}</span>
-                <span v-if="selectedType.requires_approval && value.responsible_user_id" class="rounded bg-success-50 px-1.5 py-0.5 text-xs text-success-600 whitespace-nowrap"
+                <span v-if="selectedType.requires_approval && value.responsible_user_id && !canWrite" class="rounded bg-success-50 px-1.5 py-0.5 text-xs text-success-600 whitespace-nowrap"
                       :data-test="`dimension-approver-${value.code}`">
                   {{ t('dimensions.approver_badge') }}: {{ value.responsible_user_name }}
                 </span>
-                <span v-else-if="value.responsible_user_name || value.responsible_note" class="text-xs text-neutral-500 truncate">
+                <span v-else-if="!selectedType.requires_approval && (value.responsible_user_name || value.responsible_note)" class="text-xs text-neutral-500 truncate">
                   · {{ value.responsible_user_name || value.responsible_note }}
-                </span>
-                <span v-if="selectedType.requires_approval && value.is_active && !value.responsible_user_id"
-                      class="rounded bg-warning-50 border border-warning-500/40 px-1.5 py-0.5 text-xs text-warning-600 whitespace-nowrap"
-                      :data-test="`dimension-approver-missing-${value.code}`">
-                  {{ t('dimensions.approver_missing') }}
                 </span>
                 <span v-for="m in (drivingSelected ? mapOf(value.id) : [])" :key="m.id"
                       class="rounded bg-primary-50 px-1.5 py-0.5 text-xs font-mono text-primary-700 whitespace-nowrap"
                       :title="m.analytic_name">{{ m.synthetic_code }} → {{ m.analytic_code }}</span>
               </div>
-              <div v-if="canWrite" class="flex flex-wrap justify-end gap-1">
+              <div v-if="canWrite" class="flex flex-wrap items-center justify-end gap-1">
+                <label v-if="selectedType.requires_approval" class="inline-flex items-center gap-1.5 text-xs text-neutral-500 mr-1">
+                  <span class="hidden sm:inline">{{ t('dimensions.approver_label') }}</span>
+                  <select :value="value.responsible_user_id ?? ''" :disabled="busy"
+                          class="h-7 max-w-44 px-1.5 border rounded text-xs bg-surface"
+                          :class="value.responsible_user_id ? 'border-primary-300 text-neutral-800' : 'border-neutral-300 text-neutral-500'"
+                          :aria-label="t('dimensions.approver_label')" :data-test="`dimension-approver-select-${value.code}`"
+                          @focus="loadLinks()"
+                          @change="setApprover(value, ($event.target as HTMLSelectElement).value === '' ? null : Number(($event.target as HTMLSelectElement).value))">
+                    <option value="">{{ t('dimensions.approver_none') }}</option>
+                    <option v-if="value.responsible_user_id && !candidates.some(u => u.id === value.responsible_user_id)" :value="value.responsible_user_id">
+                      {{ value.responsible_user_name }}
+                    </option>
+                    <option v-for="u in candidates" :key="u.id" :value="u.id">{{ u.name }}</option>
+                  </select>
+                </label>
                 <button type="button" :class="btnOutlineSm('neutral')" :title="t('dimensions.value_add_child')" @click="newValue(value.id)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
                   <span class="hidden sm:inline">{{ t('dimensions.value_add_child') }}</span>
@@ -832,16 +864,13 @@ function valueCount(typeId: number) {
             </select>
           </div>
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.responsible') }}</label>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ selectedType.requires_approval ? t('dimensions.approver_label') : t('dimensions.responsible') }}</label>
             <select v-model="valueForm.responsible_user_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
-                    :class="selectedType.requires_approval && !valueForm.responsible_user_id ? 'border-warning-500' : ''" data-test="dimension-value-responsible">
+                    data-test="dimension-value-responsible">
               <option :value="null">—</option>
               <option v-for="u in candidates" :key="u.id" :value="u.id">{{ u.name }}</option>
             </select>
-            <p v-if="selectedType.requires_approval" class="text-xs mt-1"
-               :class="valueForm.responsible_user_id ? 'text-neutral-400' : 'text-warning-600'">
-              {{ valueForm.responsible_user_id ? t('dimensions.approver_hint') : t('dimensions.approver_missing') }}
-            </p>
+            <p v-if="selectedType.requires_approval" class="text-xs mt-1 text-neutral-400">{{ t('dimensions.approver_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.responsible_note') }}</label>

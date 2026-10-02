@@ -256,7 +256,8 @@ final class DimensionService
     }
 
     /**
-     * Uživatelé firmy, které lze vybrat jako odpovědnou osobu hodnoty.
+     * Uživatelé firmy, které lze vybrat jako odpovědnou osobu hodnoty: přiřazení k firmě
+     * a superadmin, který má přístup ke všem firmám bez přiřazení.
      *
      * Odpovědná osoba je zároveň schvalovatel přijatých dokladů (F6), proto i e-mail.
      *
@@ -267,8 +268,10 @@ final class DimensionService
         $stmt = $this->db->pdo()->prepare(
             "SELECT u.id, COALESCE(NULLIF(u.name, ''), u.email) AS name, u.email
                FROM users u
-               JOIN user_suppliers us ON us.user_id = u.id AND us.supplier_id = ?
+          LEFT JOIN roles r ON r.id = u.role_id
               WHERE u.is_active = 1
+                AND (EXISTS (SELECT 1 FROM user_suppliers us WHERE us.user_id = u.id AND us.supplier_id = ?)
+                     OR (r.role_type = 'superadmin' AND r.system_key = 'superadmin'))
               ORDER BY name"
         );
         $stmt->execute([$supplierId]);

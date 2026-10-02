@@ -240,12 +240,15 @@ Náhrada originálu převezme středisko nahrazovaného podání.
 Přijaté doklady (faktury i účtenky) může před přijetím schválit manažer střediska.
 Schvalovatelem je **odpovědná osoba** hodnoty dimenze.
 
-**Nastavení.** U typu dimenze (typicky Středisko) zapněte **Vyžaduje schválení**
-a volitelně zadejte **limit** v Kč bez DPH. Doklad, na který připadá částka pod
-limitem, se neschvaluje. Bez limitu se schvaluje každý doklad. Hodnotám typu
-nastavte odpovědnou osobu, jinak doklad s touto hodnotou nejde ke schválení
-odeslat. Schvalovatel potřebuje oprávnění **Schvalovat přijaté doklady**, které
-lze přidělit i roli jen pro čtení.
+**Nastavení.** Ve **Firma → Dimenze** vyberte typ (typicky Středisko) a v jeho
+hlavičce zapněte přepínač **Schvalování dokladů**. U každé hodnoty pak v řádku
+vyberte **Schvalovatele**. Schvaluje se jen u hodnot, které schvalovatele mají;
+doklad s hodnotou bez schvalovatele se přijme rovnou. V **Upravit typ** lze
+volitelně zadat **limit** v Kč bez DPH, doklad s částkou pod limitem se
+neschvaluje. Schvalovatelem může být uživatel přiřazený k firmě nebo superadmin.
+Potřebuje oprávnění **Schvalovat přijaté doklady**, které lze přidělit i roli jen
+pro čtení. Deaktivovaný uživatel schvalovat nemůže a hodnota se pak chová jako
+bez schvalovatele.
 
 **Které středisko schvaluje.** Středisko se bere z položek i z hlavičky dokladu
 stejně jako při zaúčtování: dimenze položky, pak produkt, hlavička dokladu,

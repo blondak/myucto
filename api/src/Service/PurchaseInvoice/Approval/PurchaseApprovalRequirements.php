@@ -25,7 +25,7 @@ use PDO;
  * kurzem dokladu (Kč = 1). Doklad v cizí měně bez kurzu nejde ocenit — limit se
  * u něj neuplatní (schvaluje se vždy), ať ho neprokázaná částka nepustí bez schválení.
  *
- * Neschvaluje se: daňový doklad k přijaté platbě (záloha už prošla schválením
+ * Neschvaluje se: hodnota bez schvalovatele (odpovědné osoby), daňový doklad k přijaté platbě (záloha už prošla schválením
  * jako zálohová faktura) a hodnota s nulovým nebo záporným základem (dobropis
  * náklad nezvyšuje).
  */
@@ -66,7 +66,7 @@ final class PurchaseApprovalRequirements
 
     /**
      * @return list<array{type_id:int, type_name:string, value_id:int, value_code:string, value_name:string,
-     *                    approver_user_id:?int, approver_name:?string, approver_email:?string, amount_czk:float}>
+     *                    approver_user_id:int, approver_name:?string, approver_email:?string, amount_czk:float}>
      */
     public function forInvoice(int $supplierId, int $invoiceId): array
     {
@@ -165,7 +165,8 @@ final class PurchaseApprovalRequirements
             $threshold = $types[$typeId]['threshold'];
             foreach ($byValue as $valueId => $base) {
                 $value = $values[$valueId] ?? null;
-                if ($value === null || $value['type_id'] !== $typeId) {
+                // Schvaluje se jen hodnota, která má schvalovatele; bez něj doklad projde bez schválení.
+                if ($value === null || $value['type_id'] !== $typeId || $value['approver_user_id'] === null) {
                     continue;
                 }
                 $czk = round($base * $rate, 2);

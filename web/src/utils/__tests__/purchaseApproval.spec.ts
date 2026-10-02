@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { announceApprovalRequested, missingApprovalTypes } from '../purchaseApproval'
+import { announceApprovalRequested } from '../purchaseApproval'
 import { approvalErrorMessage, isApprovalNoApprover } from '@/api/purchaseApprovals'
 import type { DimensionType, DimensionValue } from '@/api/dimensions'
 
@@ -56,16 +56,3 @@ describe('approvalErrorMessage', () => {
   })
 })
 
-describe('missingApprovalTypes', () => {
-  const types = [type(1, { requires_approval: true }), type(2), type(3, { requires_approval: true, is_active: false })]
-
-  it('vrací jen aktivní typy se schvalováním, které v hlavičce nemají hodnotu', () => {
-    expect(missingApprovalTypes(types, {}).map(ty => ty.id)).toEqual([1])
-  })
-
-  it('vyplněná hlavička nebo hodnota na položce chybu zruší', () => {
-    expect(missingApprovalTypes(types, { 1: 10 })).toEqual([])
-    expect(missingApprovalTypes(types, {}, [11], [value(11, 1)])).toEqual([])
-    expect(missingApprovalTypes(types, {}, [12], [value(12, 2)]).map(ty => ty.id)).toEqual([1])
-  })
-})

@@ -6601,7 +6601,7 @@ paths:
         nepřijme. Odpověď je 200 s dokladem ve stavu `draft`, `approval_status:
         pending`, `approval_requested: true` a seznamem `approvals`; schvalovatelé
         dostanou e-mail a doklad se přijme sám, až schválí všichni. Hodnota
-        dimenze bez odpovědné osoby vrací 422 `approval_no_approver`.
+        dimenze bez odpovědné osoby se neschvaluje.
       parameters:
         - in: path
           name: id
@@ -6640,7 +6640,6 @@ paths:
                         items: { $ref: '#/components/schemas/PurchaseInvoiceApproval' }
         '403': { description: 'Klientský účet (`forbidden_transition`), nebo `target=booked` přes API token (`token_write_forbidden`)' }
         '409': { description: Invalid transition }
-        '422': { description: 'Mimo jiné `approval_no_approver` — hodnota dimenze vyžadující schválení nemá odpovědnou osobu' }
 
   /api/v1/purchase-invoices/{id}/pdf:
     post:

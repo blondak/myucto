@@ -17,7 +17,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { withoutExpenseKindSection } from '@/utils/extractionWarning'
 import { missingDimensions, needsReview } from '@/utils/purchaseReview'
-import { announceApprovalRequested, missingApprovalTypes } from '@/utils/purchaseApproval'
+import { announceApprovalRequested } from '@/utils/purchaseApproval'
 import { approvalErrorMessage } from '@/api/purchaseApprovals'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
@@ -339,46 +339,6 @@ async function resolveSection(section: string): Promise<void> {
   }
 }
 
-/** Dimenze, které vyžadují schválení a dokladu v hlavičce (ani rozpadem) chybí. */
-const MAX_APPROVAL_PROBES = 100
-async function approvalFlaggedIds(invs: PurchaseInvoice[]): Promise<Set<number>> {
-  const flagged = new Set<number>()
-  const drafts = invs.filter((inv) => inv.status === 'draft').slice(0, MAX_APPROVAL_PROBES)
-  if (!drafts.length || !dims.enabled.value) return flagged
-  try {
-    await dims.load()
-  } catch {
-    return flagged
-  }
-  const required = dims.types.value.filter((ty) => ty.is_active && ty.requires_approval === true)
-  if (!required.length) return flagged
-  await Promise.all(drafts.map(async (inv) => {
-    try {
-      const doc = await dimensionsApi.getDocument('purchase-invoices', inv.id)
-      const header: Record<number, number | null> = { ...doc.header }
-      for (const [typeId, shares] of Object.entries(doc.splits?.[0] ?? {})) {
-        if (shares?.length) header[Number(typeId)] = shares[0].value_id
-      }
-      const itemValueIds = Object.values(doc.items).flatMap((map) => Object.values(map).filter((v): v is number => !!v))
-      if (missingApprovalTypes(required, header, itemValueIds, dims.values.value).length) flagged.add(inv.id)
-    } catch {
-      // Bez čitelných dimenzí doklad do kontroly nepřidáváme.
-    }
-  }))
-  return flagged
-}
-
-/** Typy se schvalováním, které dokladu v okně (hlavička, rozpad ani položky) pořád chybí. */
-const missingApproval = computed(() => {
-  if (!dimsShown.value) return []
-  const header = { ...dimHeader.value }
-  for (const [typeId, shares] of Object.entries(headerSplits.value)) {
-    if (shares?.length) header[Number(typeId)] = shares[0].value_id
-  }
-  const itemValueIds = Object.values(dimItems).flatMap((map) => Object.values(map).filter((v): v is number => !!v))
-  return missingApprovalTypes(dims.documentTypes.value, header, itemValueIds, dims.values.value)
-})
-
 function next(): void {
   if (isLast.value) {
     toast.success(t('purchase_invoice.extraction_review.done'))
@@ -392,12 +352,7 @@ onMounted(async () => {
   try {
     const loaded = (await Promise.all(props.invoiceIds.map((id) => purchaseInvoicesApi.get(id).catch(() => null))))
       .filter((inv): inv is PurchaseInvoice => inv !== null)
-    // Koncept bez dimenze, kterou vyžaduje schvalování, patří do kontroly i bez hlášení vytěžení (F5).
-    const approvalFlagged = props.onlyFlagged
-      ? await approvalFlaggedIds(loaded.filter((inv) => !needsReview(inv)))
-      : new Set<number>()
-    queue.value = loaded.filter((inv) =>
-      !props.onlyFlagged || needsReview(inv) || approvalFlagged.has(inv.id))
+    queue.value = loaded.filter((inv) => !props.onlyFlagged || needsReview(inv))
   } finally {
     loading.value = false
   }
@@ -456,11 +411,6 @@ onMounted(async () => {
         <p v-for="m in missingRequired" :key="`missing-${m.type_id}`" class="text-xs text-danger-600" data-test="review-dimension-missing">
           {{ t('purchase_invoice.extraction_review.dimensions.required', { type: m.type_name, accounts: m.account_codes.join(', ') }) }}
         </p>
-        <template v-if="invoice.status === 'draft'">
-          <p v-for="ty in missingApproval" :key="`approval-${ty.id}`" class="text-xs text-warning-700" data-test="review-approval-missing">
-            {{ t('purchase_approval.review.missing_dimension', { type: ty.name }) }}
-          </p>
-        </template>
         <p v-for="s in activeSuggestions" :key="`suggest-${s.typeId}`" class="text-xs text-primary-700 flex flex-wrap items-center gap-1.5" data-test="review-dimension-suggestion">
           <span class="px-1.5 py-0.5 rounded bg-primary-50 font-medium">{{ t('purchase_invoice.extraction_review.dimensions.suggestion') }}</span>
           <span>{{ typeName(s.typeId) }}: {{ dims.valueLabel(s.value) }}</span>

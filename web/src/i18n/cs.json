@@ -31531,6 +31531,11 @@
     "type_hidden_on_documents": "jen v deníku",
     "type_code_hint": "Předvyplní se z názvu. Malá písmena, číslice, _ a -. Po založení se nemění.",
     "value_code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
+    "approval_switch": "Schvalování dokladů",
+    "approval_on_toast": "Schvalování zapnuto. Schvalovat se budou doklady jen u hodnot, které mají schvalovatele.",
+    "approval_off_toast": "Schvalování dokladů vypnuto.",
+    "approver_label": "Schvalovatel",
+    "approver_none": "Bez schvalovatele",
     "type_activated": "Typ je znovu aktivní.",
     "type_deactivated_toast": "Typ je neaktivní, na nových dokladech se nenabízí.",
     "type_state_active": "Aktivní",
@@ -31540,14 +31545,13 @@
     "drives_accounts_hint": "Hodnota dimenze určí analytický účet: náklad nebo výnos zaúčtovaný na syntetiku jde na analytiku podle mapy u hodnoty. Účtotvorná může být jen jedna dimenze firmy.",
     "drives_accounts_mask": "Účty, na které se mapa uplatní",
     "requires_approval": "Vyžaduje schválení dokladů",
-    "requires_approval_hint": "Přijaté doklady s touto dimenzí musí před přijetím schválit odpovědná osoba hodnoty. Hodí se hlavně u typu středisko.",
+    "requires_approval_hint": "Přijaté doklady s hodnotou, která má schvalovatele, musí schvalovatel před přijetím schválit. Hodnoty bez schvalovatele se neschvalují.",
     "approval_threshold": "Schvalovat od částky (Kč bez DPH)",
     "approval_threshold_hint": "Prázdné nebo 0 = schvaluje se vždy. Doklad pod limitem schválení nevyžaduje.",
     "approval_badge": "schvalování",
     "approval_badge_threshold": "schvalování od {amount} Kč",
     "approver_badge": "schvalovatel",
-    "approver_missing": "Chybí schvalovatel, doplňte odpovědnou osobu",
-    "approver_hint": "U typu se schvalováním je odpovědná osoba schvalovatelem dokladů tohoto střediska.",
+    "approver_hint": "Doklady s touto hodnotou schvaluje vybraná osoba. Bez schvalovatele se doklady této hodnoty neschvalují.",
     "drives_accounts_mask_hint": "Předpony výsledkových účtů oddělené čárkou, vyloučení začíná vykřičníkem, např. 5, 6, !59.",
     "drives_accounts_badge": "účtotvorná",
     "account_map_title": "Analytické účty",
@@ -32314,9 +32318,6 @@
       "approver_missing": "Středisko {name} nemá odpovědnou osobu, schválení nelze zahájit.",
       "requirements": "Schválit musí",
       "load_failed": "Schválení se nepodařilo načíst."
-    },
-    "review": {
-      "missing_dimension": "Doklad vyžaduje schválení střediska. Doplňte dimenzi {type}, jinak se schválení nespustí."
     },
     "public": {
       "page_title": "Schválení dokladu",

@@ -31531,6 +31531,11 @@
     "type_hidden_on_documents": "journal only",
     "type_code_hint": "Prefilled from the name. Lowercase letters, digits, _ and -. Cannot be changed later.",
     "value_code_hint": "Prefilled from the name; you can override it.",
+    "approval_switch": "Document approval",
+    "approval_on_toast": "Approval is on. Only documents with values that have an approver will need approval.",
+    "approval_off_toast": "Document approval is off.",
+    "approver_label": "Approver",
+    "approver_none": "No approver",
     "type_activated": "The type is active again.",
     "type_deactivated_toast": "The type is inactive and is no longer offered on new documents.",
     "type_state_active": "Active",
@@ -31540,14 +31545,13 @@
     "drives_accounts_hint": "The dimension value decides the analytic account: a cost or revenue posted to a synthetic account goes to the analytic account mapped on the value. Only one dimension of the company can drive accounts.",
     "drives_accounts_mask": "Accounts the mapping applies to",
     "requires_approval": "Requires document approval",
-    "requires_approval_hint": "Received documents with this dimension must be approved by the person responsible for the value before they are received. Mostly useful for the cost center type.",
+    "requires_approval_hint": "Received documents with a value that has an approver must be approved by that person before they are received. Values without an approver are not approved.",
     "approval_threshold": "Approve from amount (CZK excl. VAT)",
     "approval_threshold_hint": "Empty or 0 = always approved. A document under the limit needs no approval.",
     "approval_badge": "approval",
     "approval_badge_threshold": "approval from {amount} CZK",
     "approver_badge": "approver",
-    "approver_missing": "No approver, add a responsible person",
-    "approver_hint": "For a type with approval, the responsible person is the approver of documents of this cost center.",
+    "approver_hint": "Documents with this value are approved by the selected person. Without an approver, documents of this value are not approved.",
     "drives_accounts_mask_hint": "Comma-separated P&L account prefixes, exclusions start with an exclamation mark, e.g. 5, 6, !59.",
     "drives_accounts_badge": "drives accounts",
     "account_map_title": "Analytic accounts",
@@ -32314,9 +32318,6 @@
       "approver_missing": "Cost center {name} has no responsible person, so approval cannot start.",
       "requirements": "Must be approved by",
       "load_failed": "Could not load the approval."
-    },
-    "review": {
-      "missing_dimension": "The document requires cost center approval. Fill in the {type} dimension, otherwise approval will not start."
     },
     "public": {
       "page_title": "Document approval",

@@ -50,7 +50,6 @@ final class PurchaseInvoiceApprovalService
      *
      * @return array{approval_requested:true, approval_status:string, approvals:list<array<string,mixed>>}|null
      *         null = doklad smí být přijat (schválení nevyžaduje nebo ho už má)
-     * @throws PurchaseApprovalException approval_no_approver — hodnota bez schvalovatele
      */
     public function gateReceive(int $supplierId, int $invoiceId, ?int $userId, ?string $ip = null, ?string $userAgent = null): ?array
     {
@@ -349,19 +348,6 @@ final class PurchaseInvoiceApprovalService
                 $this->approvals->setInvoiceStatus($supplierId, $invoiceId, 'none');
             }
             return ['state' => 'clear', 'required' => []];
-        }
-
-        $missing = array_values(array_filter($required, static fn (array $r): bool => $r['approver_user_id'] === null));
-        if ($missing !== []) {
-            throw new PurchaseApprovalException(
-                'approval_no_approver',
-                'Hodnota dimenze ' . implode(', ', array_map(static fn (array $r): string => $r['value_code'] . ' ' . $r['value_name'], $missing))
-                    . ' nemá odpovědnou osobu, doklad proto nejde odeslat ke schválení. Doplňte ji ve Firma → Dimenze.',
-                422,
-                ['dimension_values' => array_map(static fn (array $r): array => [
-                    'id' => $r['value_id'], 'code' => $r['value_code'], 'name' => $r['value_name'],
-                ], $missing)],
-            );
         }
 
         $toCreate = [];

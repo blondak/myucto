@@ -267,16 +267,30 @@ final class PurchaseInvoiceApprovalTest extends TestCase
         self::assertSame('approved', $this->rowStatus($rows[$this->approverB]['id']));
     }
 
-    public function testCenterWithoutApproverCannotBeSent(): void
+    /** Středisko bez schvalovatele se neschvaluje: doklad se přijme hned, bez kola schvalování. */
+    public function testCenterWithoutApproverIsReceivedWithoutApproval(): void
     {
         $id = $this->createInvoice([1000.0], header: 'C');
 
-        [$status, $body] = $this->transition($id);
+        [$status] = $this->transition($id);
 
-        self::assertSame(422, $status);
-        self::assertSame('approval_no_approver', $body['error']['code'] ?? null);
-        self::assertSame('draft', $this->invoiceStatus($id));
+        self::assertSame(200, $status);
+        self::assertSame('received', $this->invoiceStatus($id));
+        self::assertSame('none', $this->approvalStatus($id));
         self::assertSame(0, $this->approvalRows($id));
+    }
+
+    /** Smíšený doklad: schvaluje jen středisko se schvalovatelem, středisko bez něj se přeskočí. */
+    public function testMixedCentersOnlyApproverCenterIsAsked(): void
+    {
+        $id = $this->createInvoice([1000.0, 500.0], items: [1 => 'A', 2 => 'C']);
+
+        [$status] = $this->transition($id);
+
+        self::assertSame(200, $status);
+        self::assertSame('draft', $this->invoiceStatus($id));
+        self::assertSame('pending', $this->approvalStatus($id));
+        self::assertSame(1, $this->approvalRows($id));
     }
 
     // ── odkaz z e-mailu ──────────────────────────────────────────────────────
