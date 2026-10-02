@@ -142,6 +142,8 @@ const typeForm = reactive({
   sort_order: 100,
   drives_accounts: false,
   drives_accounts_mask: '5, 6',
+  requires_approval: false,
+  approval_threshold: '' as string | number,
 })
 
 // Kód typu musí projít `^[a-z0-9_-]{1,30}$`, proto verzálkový kód z názvu převedeme na malá písmena.
@@ -154,9 +156,20 @@ const valueSlug = useAutoSlug(value => { valueForm.code = value }, {
 
 function newType() {
   closeForms()
-  Object.assign(typeForm, { id: null, code: '', name: '', kind: 'custom', level: level.value, show_on_documents: true, is_active: true, sort_order: 100 })
+  Object.assign(typeForm, {
+    id: null, code: '', name: '', kind: 'custom', level: level.value, show_on_documents: true, is_active: true, sort_order: 100,
+    requires_approval: false, approval_threshold: '',
+  })
   typeSlug.init('')
   typeFormOpen.value = true
+}
+
+/** Limit z formuláře: prázdné nebo nekladné číslo = schvaluje se vždy. */
+function thresholdPayload(): number | null {
+  const raw = typeForm.approval_threshold
+  if (raw === '' || raw === null) return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function editType(type: DimensionType) {
@@ -165,6 +178,8 @@ function editType(type: DimensionType) {
     id: type.id, code: type.code, name: type.name, kind: type.kind, level: type.level,
     show_on_documents: type.show_on_documents, is_active: type.is_active, sort_order: type.sort_order,
     drives_accounts: type.drives_accounts === true, drives_accounts_mask: type.drives_accounts_mask || '5, 6',
+    requires_approval: type.requires_approval === true,
+    approval_threshold: type.approval_threshold ?? '',
   })
   typeFormOpen.value = true
 }
@@ -176,14 +191,25 @@ async function saveType() {
     is_active: typeForm.is_active,
     sort_order: typeForm.sort_order,
   }
-  const result = typeForm.id === null
+  const approval = {
+    requires_approval: typeForm.requires_approval,
+    approval_threshold: typeForm.requires_approval ? thresholdPayload() : null,
+  }
+  let result = typeForm.id === null
     ? await run(() => dimensionsApi.createType({ ...payload, code: typeForm.code.trim(), kind: typeForm.kind, level: typeForm.level }), t('common.saved'))
     : await run(() => dimensionsApi.updateType(typeForm.id as number, {
       ...payload,
       drives_accounts: typeForm.drives_accounts,
       ...(typeForm.drives_accounts ? { drives_accounts_mask: typeForm.drives_accounts_mask.trim() } : {}),
+      ...approval,
     }), t('common.saved'))
   if (!result) return
+  // Nový typ se zakládá bez schvalování (smlouva ho přijímá až na PATCH), zapne se druhým krokem.
+  if (typeForm.id === null && approval.requires_approval) {
+    const created = result
+    const patched = await run(() => dimensionsApi.updateType(created.id, approval))
+    if (patched) result = patched
+  }
   typeFormOpen.value = false
   await load()
   selectedTypeId.value = result.id
@@ -607,7 +633,7 @@ function valueCount(typeId: number) {
               <span class="text-xs text-neutral-400">{{ valueCount(type.id) }}</span>
             </div>
             <div class="text-xs text-neutral-500">
-              {{ kindLabel(type.kind) }}<span v-if="!type.show_on_documents"> · {{ t('dimensions.type_hidden_on_documents') }}</span><span v-if="type.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }}</span>
+              {{ kindLabel(type.kind) }}<span v-if="!type.show_on_documents"> · {{ t('dimensions.type_hidden_on_documents') }}</span><span v-if="type.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }}</span><span v-if="type.requires_approval"> · {{ t('dimensions.approval_badge') }}</span>
             </div>
           </button>
         </nav>
@@ -618,7 +644,7 @@ function valueCount(typeId: number) {
             <div>
               <h2 class="text-lg font-semibold">{{ selectedType.name }}</h2>
               <p class="text-xs text-neutral-500">
-                {{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}<span v-if="selectedType.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }} ({{ selectedType.drives_accounts_mask }})</span>
+                {{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}<span v-if="selectedType.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }} ({{ selectedType.drives_accounts_mask }})</span><span v-if="selectedType.requires_approval" data-test="dimension-type-approval-badge"> · {{ selectedType.approval_threshold ? t('dimensions.approval_badge_threshold', { amount: selectedType.approval_threshold }) : t('dimensions.approval_badge') }}</span>
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -662,8 +688,17 @@ function valueCount(typeId: number) {
                 <span v-if="!value.is_active" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500">{{ t('dimensions.closed') }}</span>
                 <span v-if="value.car_registration" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ value.car_registration }}</span>
                 <span v-if="value.cost_center_code" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ t('dimensions.cost_center_short') }} {{ value.cost_center_code }}</span>
-                <span v-if="value.responsible_user_name || value.responsible_note" class="text-xs text-neutral-500 truncate">
+                <span v-if="selectedType.requires_approval && value.responsible_user_id" class="rounded bg-success-50 px-1.5 py-0.5 text-xs text-success-600 whitespace-nowrap"
+                      :data-test="`dimension-approver-${value.code}`">
+                  {{ t('dimensions.approver_badge') }}: {{ value.responsible_user_name }}
+                </span>
+                <span v-else-if="value.responsible_user_name || value.responsible_note" class="text-xs text-neutral-500 truncate">
                   · {{ value.responsible_user_name || value.responsible_note }}
+                </span>
+                <span v-if="selectedType.requires_approval && value.is_active && !value.responsible_user_id"
+                      class="rounded bg-warning-50 border border-warning-500/40 px-1.5 py-0.5 text-xs text-warning-600 whitespace-nowrap"
+                      :data-test="`dimension-approver-missing-${value.code}`">
+                  {{ t('dimensions.approver_missing') }}
                 </span>
                 <span v-for="m in (drivingSelected ? mapOf(value.id) : [])" :key="m.id"
                       class="rounded bg-primary-50 px-1.5 py-0.5 text-xs font-mono text-primary-700 whitespace-nowrap"
@@ -733,6 +768,18 @@ function valueCount(typeId: number) {
           <input v-model="typeForm.is_active" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.type_active') }}
         </label>
+        <div class="border-t border-neutral-200 pt-4 space-y-2" data-test="dimension-type-approval">
+          <label class="flex items-center gap-2 text-sm font-medium text-neutral-700">
+            <input v-model="typeForm.requires_approval" type="checkbox" class="rounded border-neutral-300" data-test="dimension-type-requires-approval" />
+            {{ t('dimensions.requires_approval') }}
+          </label>
+          <p class="text-xs text-neutral-500">{{ t('dimensions.requires_approval_hint') }}</p>
+          <div v-if="typeForm.requires_approval" class="max-w-sm">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.approval_threshold') }}</label>
+            <input v-model="typeForm.approval_threshold" type="number" min="0" step="0.01" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-type-approval-threshold" />
+            <p class="text-xs text-neutral-400 mt-1">{{ t('dimensions.approval_threshold_hint') }}</p>
+          </div>
+        </div>
         <div v-if="typeForm.id !== null" class="border-t border-neutral-200 pt-4 space-y-2">
           <label class="flex items-center gap-2 text-sm font-medium text-neutral-700">
             <input v-model="typeForm.drives_accounts" type="checkbox" class="rounded border-neutral-300" data-test="dimension-type-drives-accounts" />
@@ -786,10 +833,15 @@ function valueCount(typeId: number) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.responsible') }}</label>
-            <select v-model="valueForm.responsible_user_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <select v-model="valueForm.responsible_user_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+                    :class="selectedType.requires_approval && !valueForm.responsible_user_id ? 'border-warning-500' : ''" data-test="dimension-value-responsible">
               <option :value="null">—</option>
               <option v-for="u in candidates" :key="u.id" :value="u.id">{{ u.name }}</option>
             </select>
+            <p v-if="selectedType.requires_approval" class="text-xs mt-1"
+               :class="valueForm.responsible_user_id ? 'text-neutral-400' : 'text-warning-600'">
+              {{ valueForm.responsible_user_id ? t('dimensions.approver_hint') : t('dimensions.approver_missing') }}
+            </p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.responsible_note') }}</label>

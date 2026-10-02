@@ -18,6 +18,10 @@ export interface DimensionType {
   drives_accounts?: boolean
   /** Výsledkové účty, na které se mapa uplatní (výchozí `5, 6`). */
   drives_accounts_mask?: string
+  /** Doklady s touto dimenzí schvaluje odpovědná osoba hodnoty (F6). */
+  requires_approval?: boolean
+  /** Limit v Kč bez DPH; NULL/0 = schvaluje se vždy. */
+  approval_threshold?: number | null
 }
 
 /** Řádek mapy účtotvorné dimenze: hodnota × syntetika → analytika (per firma). */
@@ -279,6 +283,8 @@ export interface DimensionTypePayload {
   sort_order?: number
   drives_accounts?: boolean
   drives_accounts_mask?: string
+  requires_approval?: boolean
+  approval_threshold?: number | null
 }
 
 export interface DimensionValuePayload {

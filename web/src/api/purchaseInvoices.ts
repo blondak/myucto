@@ -4,6 +4,7 @@ import type { JournalSourceSummary } from './accounting'
 import type { DocItem } from './documents'
 import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
 import { appIsoDate } from '@/utils/date'
+import type { PurchaseApprovalRow, PurchaseApprovalStatus } from './purchaseApprovals'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
 export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
@@ -387,6 +388,11 @@ export interface PurchaseInvoice {
    */
   cash_register_id: number | null
   status: PurchaseInvoiceStatus
+  /** Schvalování manažerem střediska (F6). Chybí ve starší odpovědi = `none`. */
+  approval_status?: PurchaseApprovalStatus
+  /** Jen v odpovědi přechodu draft → received: doklad čeká na schválení a zůstal konceptem. */
+  approval_requested?: boolean
+  approvals?: PurchaseApprovalRow[]
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
@@ -567,6 +573,7 @@ export interface PurchaseInvoiceListItem {
   /** Uhrazeno s rozdílem: stav paid, ale zbytek po úhradách je vyšší než 1 Kč. */
   paid_shortfall?: boolean
   status: PurchaseInvoiceStatus
+  approval_status?: PurchaseApprovalStatus
   booked_at: string | null
   paid_at: string | null
   cancelled_at: string | null
@@ -724,6 +731,8 @@ export interface PurchaseListFilters {
   /** Uhrazené doklady, které evidované úhrady nepokrývají (nedoplatek). */
   paid_shortfall?: boolean
   needs_review?: boolean
+  /** Souhrnný stav schvalování (F6). */
+  approval_status?: Exclude<PurchaseApprovalStatus, 'none'>
   /** '1' = předané k úhradě, '0' = nepředané (odvozeno z payment_ordered_at). */
   payment_ordered?: '1' | '0'
   /** Zaúčtování (jen podvojné účetnictví): '1' = zaúčtováno, '0' = nezaúčtováno. */
@@ -795,6 +804,11 @@ export const purchaseInvoicesApi = {
     if (filters.unmatched)    params['filter[unmatched]']    = 1
     if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
     if (filters.needs_review) params['filter[needs_review]'] = 1
+    if (filters.approval_status) {
+      // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
+      params['filter[approval_status]'] = filters.approval_status
+      params.approval_status = filters.approval_status
+    }
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.booked)      params['filter[booked]']      = filters.booked
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
