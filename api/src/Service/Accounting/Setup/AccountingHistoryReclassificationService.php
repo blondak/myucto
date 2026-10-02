@@ -413,6 +413,7 @@ final class AccountingHistoryReclassificationService
                 $assetItems[(int) $proposal['item_id']] = $proposal;
             }
         }
+        $rules = self::rulesInPriorityOrder($rules);
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.purchase_invoice_id, pii.description, pii.unit_price_without_vat,
                     pi.vendor_id, pi.exchange_rate, YEAR(COALESCE(pi.tax_date, pi.issue_date)) acq_year,
@@ -462,6 +463,22 @@ final class AccountingHistoryReclassificationService
             ];
         }
         return $out;
+    }
+
+    /**
+     * Klasifikátor bere první shodné pravidlo, takže pořadí musí odpovídat živému běhu
+     * (ExpenseClassificationRuleRepository::activeFor: priorita vzestupně). Balík drží
+     * stávající pravidla PŘED nově schválenými, a nové pravidlo s vyšší prioritou by
+     * tu jinak prohrálo, i když při zaúčtování nového dokladu vyhraje. Řazení je
+     * stabilní, při shodné prioritě zůstává pořadí balíku.
+     *
+     * @param list<array<string,mixed>> $rules
+     * @return list<array<string,mixed>>
+     */
+    public static function rulesInPriorityOrder(array $rules): array
+    {
+        usort($rules, static fn (array $a, array $b): int => (int) ($a['priority'] ?? 100) <=> (int) ($b['priority'] ?? 100));
+        return $rules;
     }
 
     private static function scopeDate(mixed $value): ?string

@@ -80,6 +80,17 @@ final class AccountingHistoryReclassificationServiceTest extends TestCase
         self::assertNotSame($original, $method->invoke(null, $versionChanged));
     }
 
+    public function testRulesAreEvaluatedByPriorityNotBundleOrder(): void
+    {
+        $existing = ['name' => 'existing', 'priority' => 100];
+        $approved = ['name' => 'approved', 'priority' => 40];
+        $sameAsExisting = ['name' => 'later-same', 'priority' => 100];
+
+        $ordered = AccountingHistoryReclassificationService::rulesInPriorityOrder([$existing, $sameAsExisting, $approved]);
+
+        self::assertSame(['approved', 'existing', 'later-same'], array_column($ordered, 'name'));
+    }
+
     private function merge(array $before, array $calculated): array
     {
         $method = new ReflectionMethod(AccountingHistoryReclassificationService::class, 'mergeReclassifiedLines');
