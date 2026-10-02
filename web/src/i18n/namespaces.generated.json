@@ -547,12 +547,14 @@
     "payroll-submissions": [
       "databox",
       "payroll",
-      "period_filter"
+      "period_filter",
+      "reports"
     ],
     "payroll-submissions-tab": [
       "databox",
       "payroll",
-      "period_filter"
+      "period_filter",
+      "reports"
     ],
     "payroll-settings": [
       "payroll"

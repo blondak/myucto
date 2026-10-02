@@ -272,6 +272,37 @@ final class TaxSubmissionListFilterTest extends TestCase
         );
     }
 
+    /**
+     * Mzdová vyúčtování mají vlastní záložku pod Mzdami a mezi daněmi se
+     * nepletou — včetně dlaždic a nabídky výkazů, které na rozsah obrazovky
+     * musí slyšet stejně jako na licenci.
+     */
+    public function testScopeSeparatesPayrollStatementsFromTaxReturns(): void
+    {
+        $this->seed('dpzvd6', 1, 'downloaded');
+        $this->seed('dphdp3', 1, 'downloaded');
+
+        [$status, $payroll] = $this->callList(['scope' => 'payroll', 'limit' => '200']);
+        self::assertSame(200, $status);
+        self::assertNotEmpty($payroll['data']);
+        foreach ($payroll['data'] as $row) {
+            self::assertContains($row['form_code'], ['dpzvd6', 'dpsvd2']);
+        }
+        self::assertNotContains('dphdp3', $payroll['meta']['form_codes']);
+        self::assertSame($payroll['meta']['total'], $payroll['meta']['stats']['total']);
+
+        [, $tax] = $this->callList(['scope' => 'tax', 'limit' => '200']);
+        self::assertNotContains('dpzvd6', array_column($tax['data'], 'form_code'));
+        self::assertNotContains('dpzvd6', $tax['meta']['form_codes']);
+        self::assertContains('dphdp3', $tax['meta']['form_codes']);
+
+        [, $all] = $this->callList(['limit' => '200']);
+        self::assertContains('dpzvd6', $all['meta']['form_codes'], 'Bez rozsahu zůstává archiv celý.');
+
+        [$invalid] = $this->callList(['scope' => 'mzdy']);
+        self::assertSame(422, $invalid);
+    }
+
     /** Obohacení o pokusy a artefakty běží jen nad stránkou, ne nad celým archivem. */
     public function testEnrichmentIsBoundToThePage(): void
     {

@@ -366,6 +366,20 @@ final class TaxSubmissionRepository
             $params = array_merge($params, array_values($allowed));
         }
 
+        // Rozsah obrazovky: mzdová vyúčtování mají vlastní místo pod Mzdami
+        // a mezi daněmi se nepletou. Na rozdíl od `form_code` to není volba
+        // uživatele, takže platí i pro dlaždice a nabídku filtru.
+        $scopeIn = $filters['scope_form_codes'] ?? null;
+        if (is_array($scopeIn) && $scopeIn !== []) {
+            $where[] = 't.form_code IN (' . implode(',', array_fill(0, count($scopeIn), '?')) . ')';
+            $params = array_merge($params, array_values($scopeIn));
+        }
+        $scopeOut = $filters['excluded_form_codes'] ?? null;
+        if (is_array($scopeOut) && $scopeOut !== []) {
+            $where[] = 't.form_code NOT IN (' . implode(',', array_fill(0, count($scopeOut), '?')) . ')';
+            $params = array_merge($params, array_values($scopeOut));
+        }
+
         $status = trim((string) ($filters['status'] ?? ''));
         if ($status !== '') {
             $where[] = 't.status = ?';
@@ -443,15 +457,12 @@ final class TaxSubmissionRepository
      * z nich potřebuje dozvědět, co ho v archivu čeká, a teprve pak si to filtrem
      * najít; počet aktuálního výpisu říká `meta.total` u stránkování.
      *
-     * @param array<string,mixed> $filters bere v potaz jen `allowed_form_codes`
+     * @param array<string,mixed> $filters bere v potaz jen licenci a rozsah obrazovky
      * @return array{total:int,waiting:int,submitted:int,problems:int}
      */
     public function listStats(int $supplierId, array $filters = []): array
     {
-        [$whereSql, $params] = $this->listConditions(
-            $supplierId,
-            ['allowed_form_codes' => $filters['allowed_form_codes'] ?? null],
-        );
+        [$whereSql, $params] = $this->listConditions($supplierId, self::scopeOnly($filters));
         $stmt = $this->db->pdo()->prepare(
             "SELECT
                 COUNT(*) AS total,
@@ -492,21 +503,33 @@ final class TaxSubmissionRepository
      * Kódy výkazů, které archiv skutečně obsahuje — nabídka filtru se nesmí
      * odvozovat z načtené stránky, jinak by po stránkování zmizely volby.
      *
-     * @param array<string,mixed> $filters bere v potaz jen `allowed_form_codes`
+     * @param array<string,mixed> $filters bere v potaz jen licenci a rozsah obrazovky
      * @return list<string>
      */
     public function listFormCodes(int $supplierId, array $filters = []): array
     {
-        [$whereSql, $params] = $this->listConditions(
-            $supplierId,
-            ['allowed_form_codes' => $filters['allowed_form_codes'] ?? null],
-        );
+        [$whereSql, $params] = $this->listConditions($supplierId, self::scopeOnly($filters));
         $stmt = $this->db->pdo()->prepare(
             "SELECT DISTINCT t.form_code FROM tax_submissions t"
             . " WHERE t.supplier_id = ?{$whereSql} ORDER BY t.form_code"
         );
         $stmt->execute([$supplierId, ...$params]);
         return array_map(static fn ($v): string => (string) $v, $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /**
+     * Jen omezení, která nejsou uživatelským filtrem: licence a rozsah obrazovky.
+     *
+     * @param array<string,mixed> $filters
+     * @return array<string,mixed>
+     */
+    private static function scopeOnly(array $filters): array
+    {
+        return [
+            'allowed_form_codes' => $filters['allowed_form_codes'] ?? null,
+            'scope_form_codes' => $filters['scope_form_codes'] ?? null,
+            'excluded_form_codes' => $filters['excluded_form_codes'] ?? null,
+        ];
     }
 
     public function find(int $id, int $supplierId): ?array

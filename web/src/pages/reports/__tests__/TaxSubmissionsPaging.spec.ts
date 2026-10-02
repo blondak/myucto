@@ -118,6 +118,17 @@ describe('TaxSubmissions.vue — serverový filtr a stránkování', () => {
     vi.useRealTimers()
   })
 
+  it('Daně → Podání neukazují mzdová vyúčtování, záložka pod Mzdami jen je', async () => {
+    await mountPage()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'tax' }))
+
+    m.list.mockResolvedValue(respond([submission(3, 'downloaded')], 1))
+    const payroll = mount(TaxSubmissions, { props: { embedded: true, scope: 'payroll' } })
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'payroll' }))
+    payroll.unmount()
+  })
+
   it('posílá filtr stavu na server a nefiltruje si ho sám', async () => {
     const wrapper = await mountPage()
     const vm = wrapper.vm as unknown as { statusFilter: string; filtered: TaxSubmission[] }

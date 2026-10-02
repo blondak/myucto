@@ -183,7 +183,11 @@ export interface TaxSubmissionListParams {
   q?: string
   limit?: number
   offset?: number
+  /** `payroll` = jen mzdová vyúčtování (DPZVD6, DPSVD2), `tax` = vše ostatní. */
+  scope?: TaxSubmissionScope
 }
+
+export type TaxSubmissionScope = 'tax' | 'payroll'
 
 export interface TaxSubmissionListResponse {
   data: TaxSubmission[]
@@ -342,6 +346,7 @@ export const epoSubmissionsApi = {
         q: params.q?.trim() || undefined,
         limit: params.limit,
         offset: params.offset || undefined,
+        scope: params.scope,
       },
     }).then(r => r.data),
 

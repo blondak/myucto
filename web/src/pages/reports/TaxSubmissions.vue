@@ -14,6 +14,7 @@ import {
   type EpoSigningCredential,
   type SubmissionStatus,
   type TaxSubmission,
+  type TaxSubmissionScope,
   type TaxSubmissionStats,
 } from '@/api/epoSubmissions'
 import { authApi } from '@/api/auth'
@@ -39,7 +40,12 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 
-defineProps<{ embedded?: boolean }>()
+// `tax` je stránka Daně → Podání, `payroll` záložka mzdových vyúčtování pod Mzdami.
+// Archiv je jeden a odesílá se touž cestou; liší se jen tím, co obrazovka ukazuje.
+const props = withDefaults(defineProps<{ embedded?: boolean; scope?: TaxSubmissionScope }>(), {
+  embedded: false,
+  scope: 'tax',
+})
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -247,6 +253,7 @@ async function load(showLoader = true) {
       q: search.value,
       limit: perPage,
       offset: (page.value - 1) * perPage,
+      scope: props.scope,
     })
     if (seq !== loadSeq) return
     items.value = result.data
@@ -319,13 +326,14 @@ function formCodeLabel(code: string): string {
   return key ? t(`reports.submissions.${key}`) : code
 }
 
-// Přehled je společný pro daně i mzdy a z kódu formuláře to účetní nepozná.
-// Vyúčtování závislé činnosti a srážkové daně vzniká ve mzdách, jen odchází
-// touž cestou jako přiznání — proto se odlišuje štítkem, ne vlastní stránkou.
+// Vyúčtování závislé činnosti a srážkové daně vzniká ve mzdách a má vlastní
+// záložku pod Mzdami (`scope: 'payroll'`); mezi daněmi se neukazuje. Odchází
+// ale touž cestou jako přiznání. Štítek zůstává pro případ, kdy by stránka
+// běžela bez rozsahu a archiv ukázala celý.
 const PAYROLL_FORMS = new Set(['dpzvd6', 'dpsvd2'])
 
 function isPayrollForm(code: string): boolean {
-  return PAYROLL_FORMS.has(code)
+  return props.scope !== 'payroll' && PAYROLL_FORMS.has(code)
 }
 
 // Písmeno varianty je EPO kód a KAŽDÝ formulář má vlastní sadu — „N" je
@@ -337,6 +345,8 @@ const VARIANT_LABELS: Record<string, Record<string, string>> = {
   dphdp3: { B: 'variant_radne', O: 'variant_opravne', D: 'variant_dodatecne', E: 'variant_dodatecne_opravne' },
   dphkh1: { B: 'variant_radne', O: 'variant_radne_opravne', N: 'variant_nasledne', E: 'variant_nasledne_opravne' },
   dphshv: { R: 'variant_radne', N: 'variant_nasledne' },
+  dpzvd6: { B: 'variant_radne', O: 'variant_radne_opravne', D: 'variant_dodatecne', E: 'variant_dodatecne_opravne' },
+  dpsvd2: { B: 'variant_radne', O: 'variant_radne_opravne', D: 'variant_dodatecne', E: 'variant_dodatecne_opravne' },
 }
 
 function variantLabel(item: TaxSubmission): string {
@@ -1429,8 +1439,13 @@ onMounted(async () => {
   <div class="max-w-7xl space-y-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-1 max-w-3xl">{{ t('reports.submissions.subtitle') }}</p>
+        <h2 v-if="scope === 'payroll'" class="text-lg font-semibold">
+          {{ t('reports.submissions.payroll_title') }}
+        </h2>
+        <h1 v-else class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-1 max-w-3xl">
+          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : 'reports.submissions.subtitle') }}
+        </p>
         <p class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -1539,7 +1554,14 @@ onMounted(async () => {
       {{ t('common.loading') }}…
     </div>
     <div v-else-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-600 rounded-lg p-4 text-sm">{{ error }}</div>
-    <EmptyState v-else-if="filtered.length === 0" boxed accent="neutral" icon="doc" :title="t('reports.submissions.empty')" />
+    <EmptyState
+      v-else-if="filtered.length === 0"
+      boxed
+      accent="neutral"
+      icon="doc"
+      :title="t(scope === 'payroll' ? 'reports.submissions.payroll_empty' : 'reports.submissions.empty')"
+      :message="scope === 'payroll' ? t('reports.submissions.payroll_empty_hint') : undefined"
+    />
 
     <template v-else>
       <div class="hidden md:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">

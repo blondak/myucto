@@ -6937,6 +6937,13 @@ paths:
       summary: Historie všech generovaných EPO XML výkazů
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - name: scope
+          in: query
+          required: false
+          description: >-
+            `payroll` vrátí jen mzdová vyúčtování daně (DPZVD6, DPSVD2), `tax` všechno
+            ostatní. Bez parametru celý archiv. Omezuje i souhrnné počty a nabídku kódů výkazů.
+          schema: { type: string, enum: [payroll, tax] }
       responses:
         '200':
           description: List archived submissions

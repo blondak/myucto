@@ -30,6 +30,7 @@ import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
+import TaxSubmissions from '@/pages/reports/TaxSubmissions.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -38,7 +39,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 type SubmissionTab =
   'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_completion' | 'jmhz'
   | 'discount_intents' | 'sickness' | 'eldp'
-  | 'health' | 'statutory' | 'other' | 'inbox' | 'certificate'
+  | 'health' | 'tax_statements' | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -90,7 +91,7 @@ const activeTab = ref<SubmissionTab>('monthly')
 const tabs: SubmissionTab[] = [
   'monthly', 'queue', 'transport', 'regzel', 'registration_completion', 'jmhz',
   'discount_intents', 'sickness', 'eldp',
-  'health', 'statutory', 'other', 'inbox', 'certificate',
+  'health', 'tax_statements', 'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -373,7 +374,13 @@ onMounted(loadInboxBadge)
  * Každá záložka má dál vlastní adresu, takže staré odkazy fungují. Na úzkém
  * displeji se záložky zalamují, nic se automaticky nepřesouvá.
  */
-const primaryTabs: SubmissionTab[] = ['monthly', 'jmhz', 'health', 'queue', 'transport']
+// Roční vyúčtování daně sdílí archiv a odesílání do EPO s daňovými podáními,
+// takže záložka stojí na jejich oprávnění; bez něj by skončila chybou 403.
+const primaryTabs = computed<SubmissionTab[]>(() => [
+  'monthly', 'jmhz', 'health',
+  ...(auth.canRead('reports') ? ['tax_statements' as const] : []),
+  'queue', 'transport',
+])
 const tabGroups: { key: 'extraordinary' | 'more'; labelKey: string; tabs: SubmissionTab[] }[] = [
   {
     key: 'extraordinary',
@@ -937,6 +944,12 @@ function rememberDetails(tab: string, event: Event) {
     <PayrollSigningCertificatePanel
       v-else-if="activeTab === 'certificate'"
       v-model:environment="environment"
+    />
+
+    <TaxSubmissions
+      v-else-if="activeTab === 'tax_statements'"
+      embedded
+      scope="payroll"
     />
 
     <template v-else-if="activeTab === 'jmhz'">

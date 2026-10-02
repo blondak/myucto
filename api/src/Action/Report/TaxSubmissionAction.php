@@ -16,6 +16,7 @@ use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Report\TaxSubmissionFilename;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -24,7 +25,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Historie archivovaných EPO XML výkazů včetně asistovaného předání a důkazních souborů.
  *
- *   GET    /api/reports/submissions             → list
+ *   GET    /api/reports/submissions             → list (`scope=payroll|tax` odliší mzdová vyúčtování)
  *   GET    /api/reports/submissions/{id}        → detail (s XML obsahem)
  *   GET    /api/reports/submissions/{id}/xml    → XML download
  *   POST   /api/reports/submissions/{id}/submit → označit jako prokazatelně PODANÉ (§2.4)
@@ -73,6 +74,11 @@ final class TaxSubmissionAction
             return Json::error($response, 'validation_failed', 'Neplatný kód výkazu (form_code).', 422);
         }
 
+        $scope = trim((string) ($query['scope'] ?? ''));
+        if ($scope !== '' && $scope !== 'payroll' && $scope !== 'tax') {
+            return Json::error($response, 'validation_failed', 'Neplatný rozsah (scope): payroll, tax.', 422);
+        }
+
         $limit = min(200, max(1, (int) ($query['limit'] ?? 50)));
         $offset = max(0, (int) ($query['offset'] ?? 0));
 
@@ -87,6 +93,10 @@ final class TaxSubmissionAction
             'allowed_form_codes' => $this->commercial->isAvailable()
                 ? null
                 : TaxSubmissionAccess::freeFormCodes(),
+            // Mzdová vyúčtování mají vlastní záložku pod Mzdami; bez `scope`
+            // zůstává společný archiv beze změny.
+            'scope_form_codes' => $scope === 'payroll' ? TaxStatementService::FORMS : null,
+            'excluded_form_codes' => $scope === 'tax' ? TaxStatementService::FORMS : null,
         ];
 
         // Obohacení běží až nad stránkou, ne nad celým archivem.

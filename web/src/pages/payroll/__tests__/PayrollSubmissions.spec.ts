@@ -123,6 +123,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: (permission: string) => permission === 'payroll.submissions',
+    canRead: (permission: string) => permission === 'payroll.submissions' || permission === 'reports',
     get submissionTestEnvironmentAllowed() { return m.testAllowed },
   }),
 }))
@@ -554,6 +555,7 @@ describe('PayrollSubmissions', () => {
       'payroll.submissions.tabs.monthly',
       'payroll.submissions.tabs.jmhz',
       'payroll.submissions.tabs.health',
+      'payroll.submissions.tabs.tax_statements',
       'payroll.submissions.tabs.queue',
       'payroll.submissions.tabs.transport',
     ])
@@ -633,8 +635,10 @@ describe('PayrollSubmissions', () => {
     // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
     // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
     // Čtrnáctá je Dohlášení údajů (REGZEC A3) za zaměstnance přihlášené přes ONZ.
+    // Patnáctá je roční vyúčtování daně (DPZVD6/DPSVD2), které se podává do EPO
+    // a mezi daňová přiznání nepatří.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(14)
+    expect(tabs).toHaveLength(15)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_completion'))).toBe(true)
     await clickTab(wrapper, 'regzel')

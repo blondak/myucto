@@ -127,6 +127,17 @@ const actions = computed<ActionItem[]>(() => [
     loading: downloading.value === 'dpsvd2',
     run: () => void download('dpsvd2'),
   },
+  {
+    // Stažené XML se archivuje mezi podání; odeslat ho do EPO (předáním
+    // nebo podpisem certifikátem) jde ze záložky mzdových podání.
+    key: 'epo',
+    label: t('payroll.tax_statement.open_submissions'),
+    icon: 'send',
+    tier: 'secondary',
+    variant: 'primary',
+    show: auth.canRead('reports'),
+    to: { name: 'payroll-submissions-tab', params: { tab: 'tax_statements' } },
+  },
 ])
 
 async function load(): Promise<void> {
@@ -163,8 +174,11 @@ async function download(form: PayrollTaxStatementForm): Promise<void> {
      * dozvěděla až od EPO. Soubor se pořád uloží — jen se rovnou řekne, že
      * ho podatelna odmítne, a čím.
      */
+    // Archiv vrací `passed` / `failed` / `skipped` (bez nainstalovaného XSD);
+    // vadné je jen `failed`. Dřív se tu čekalo `valid`, takže i platné XML
+    // hlásilo, že ho podatelna odmítne.
     const status = (headers ?? {})['x-submission-validation'] ?? ''
-    if (status !== '' && status !== 'valid') {
+    if (status === 'failed') {
       const raw = (headers ?? {})['x-submission-validation-errors'] ?? ''
       let detail = ''
       try {
