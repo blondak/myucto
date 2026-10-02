@@ -50,7 +50,7 @@ export interface GroupDashboard {
   }
 }
 
-export interface GroupDashboardQuery { section: GroupSection; months?: number; weeks?: number; from?: string; to?: string }
+export interface GroupDashboardQuery { section: GroupSection; months?: number; weeks?: number; from?: string; to?: string; include_related?: 0 | 1 }
 
 export const groupDashboardApi = {
   get: (params: GroupDashboardQuery, signal?: AbortSignal) =>

@@ -57,6 +57,8 @@ Výchozí období zahrnuje **posledních 12 kalendářních měsíců do dneška
 
 Výchozí měnová volba je **Vše · CZK**. Jednotlivé měny lze zobrazit samostatně. Dokladové výsledky používají evidované kurzy dokladů; pokladny jejich evidovaný přepočet. Bankovní zůstatky, pohledávky, závazky a predikce se přepočítávají posledním dostupným kurzem nejpozději k datu přehledu. Chybějící kurzy se nevydávají za kurz 1 a součet je označen jako neúplný.
 
+Volba **Spojené osoby** na záložkách Přehled, Vývoj tržeb a zisku, Pohledávky a závazky a Rizika určuje, zda se započítají doklady s kontakty označenými jako spojená osoba. Volba **Nezapočítat** je vyřadí z tržeb, nákladů, pohledávek i závazků, takže převody mezi firmami skupiny nenafukují součet. Kontakt se jako spojená osoba označuje v jeho detailu. Účetní výsledek aktuálního období, cashflow a koncentrace odběratelů se volbou nemění. Volba zůstává v adrese stránky.
+
 Jde o **manažerský součet bez eliminace transakcí mezi firmami**, nikoli o konsolidovanou účetní závěrku. Účetní součty spojují pouze stejnou měnu a stejný začátek i konec období. Dokladové částky jsou u plátců bez DPH, u neplátců včetně DPH; základ je uveden u každé firmy.
 
 **Detail** u rizika přepne firmu včetně nového načtení oprávnění. U pohledávek a závazků otevře doklady po splatnosti v původní měně bez omezení na rok; seznam lze dále filtrovat. U dokladové ztráty zachová přesné období a nabídne zdrojové faktury. Koncentrace otevře odpovídající část firemního zisku v původní měně.

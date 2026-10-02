@@ -29,12 +29,15 @@ const range = ref<{ from: string; to: string } | null>(null)
 const draftFrom = ref('')
 const draftTo = ref('')
 const selectedCompany = ref('all')
+// Doklady se spojenými osobami (příznak u kontaktu) — u skupiny jde typicky o vnitroskupinové převody.
+const includeRelated = ref(route.query.related !== '0')
+const RELATED_SECTIONS: GroupSection[] = ['overview', 'trends', 'receivables', 'risks']
 const cache = ref<Record<string, GroupDashboard>>({})
 const loading = ref(false)
 const error = ref('')
 let controller: AbortController | null = null
 let requestId = 0
-const key = computed(() => `${active.value}:${months.value}:${weeks.value}:${range.value?.from ?? ''}:${range.value?.to ?? ''}`)
+const key = computed(() => `${active.value}:${months.value}:${weeks.value}:${range.value?.from ?? ''}:${range.value?.to ?? ''}:${includeRelated.value ? 1 : 0}`)
 const nativeReport = computed(() => cache.value[key.value] ?? null)
 const report = computed(() => {
   const data = nativeReport.value
@@ -87,7 +90,7 @@ async function load(force = false) {
   controller = new AbortController()
   loading.value = true
   try {
-    const data = await groupDashboardApi.get({ section: active.value, months: months.value, weeks: weeks.value, ...(range.value ?? {}) }, controller.signal)
+    const data = await groupDashboardApi.get({ section: active.value, months: months.value, weeks: weeks.value, ...(range.value ?? {}), ...(includeRelated.value ? {} : { include_related: 0 as const }) }, controller.signal)
     if (id === requestId) cache.value = { ...cache.value, [requestKey]: data }
   } catch (cause: unknown) {
     if (id !== requestId || controller?.signal.aborted) return
@@ -97,7 +100,8 @@ async function load(force = false) {
     if (id === requestId) loading.value = false
   }
 }
-watch([active, months, weeks, range], () => load(), { immediate: true })
+watch([active, months, weeks, range, includeRelated], () => load(), { immediate: true })
+watch(includeRelated, value => { void router.replace({ query: { ...route.query, related: value ? undefined : '0' } }) })
 function applyRange() {
   if (!draftFrom.value || !draftTo.value || draftFrom.value > draftTo.value) return
   range.value = { from: draftFrom.value, to: draftTo.value }
@@ -207,6 +211,13 @@ const tabIcons: Record<GroupSection, string> = { overview: ICONS.chart, trends: 
           <button type="submit" :class="btnOutline('primary')" :disabled="loading || !draftFrom || !draftTo || draftFrom > draftTo" data-test="group-apply-range"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.search" /></svg>{{ t('group_stats.apply_range') }}</button>
           <button type="button" :class="btnOutline('neutral')" :disabled="loading" data-test="group-reset-range" @click="resetRange"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.calendar" /></svg>{{ t('group_stats.last_12_months') }}</button>
         </form>
+        <label v-if="RELATED_SECTIONS.includes(active)" class="space-y-1 text-sm text-neutral-600">
+          <span class="block">{{ t('group_stats.related_parties') }}</span>
+          <select v-model="includeRelated" class="input w-48" :title="t('group_stats.related_parties_hint')" data-test="group-related">
+            <option :value="true">{{ t('group_stats.related_include') }}</option>
+            <option :value="false">{{ t('group_stats.related_exclude') }}</option>
+          </select>
+        </label>
         <label v-if="active === 'cashflow'" class="space-y-1 text-sm text-neutral-600">
           <span class="block">{{ t('group_stats.weeks') }}</span>
           <select v-model="weeks" class="input w-32" data-test="group-weeks"><option v-for="count in [4, 8, 12]" :key="count" :value="count">{{ count }}</option></select>

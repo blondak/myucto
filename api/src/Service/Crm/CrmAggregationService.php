@@ -204,16 +204,21 @@ final class CrmAggregationService
      * Net pro plátce, gross pro neplátce; stejné predikáty i datová báze jako stránky
      * Tržby (revenue) a Náklady (costs) → čísla sedí mezi sekcemi.
      *
+     * $excludeRelated vyřadí doklady se spojenou osobou (příznak `related_party`
+     * protistrany) — přehled skupiny bez vnitroskupinových převodů.
+     *
      * @return list<array<string,mixed>>
      */
-    public function documentRange(int $supplierId, string $from, string $toExclusive, ?string $period = null): array
+    public function documentRange(int $supplierId, string $from, string $toExclusive, ?string $period = null, bool $excludeRelated = false): array
     {
         $payer = $this->isVatPayer($supplierId);
-        $rows = $this->aggregateRange($supplierId, $payer, $from, $toExclusive, $period);
+        $rows = $this->aggregateRange($supplierId, $payer, $from, $toExclusive, $period, $excludeRelated);
         $conversions = [];
         foreach ([
-            ['revenue', 'invoices', 'i', self::REV_DATE, ' AND i.status IN ' . self::REV_STATUS . ' AND i.invoice_type IN ' . self::REV_TYPES],
-            ['costs', 'purchase_invoices', 'pi', self::COST_DATE, ' AND pi.status IN ' . self::COST_STATUS . $this->advanceCostExclude()],
+            ['revenue', 'invoices', 'i', self::REV_DATE, ' AND i.status IN ' . self::REV_STATUS . ' AND i.invoice_type IN ' . self::REV_TYPES
+                . self::relatedPartyExclude('i', 'client_id', $excludeRelated)],
+            ['costs', 'purchase_invoices', 'pi', self::COST_DATE, ' AND pi.status IN ' . self::COST_STATUS . $this->advanceCostExclude()
+                . self::relatedPartyExclude('pi', 'vendor_id', $excludeRelated)],
         ] as [$metric, $table, $alias, $date, $predicate]) {
             $amount = $alias . ($payer ? '.total_without_vat' : '.total_with_vat');
             $known = "(cur.code = 'CZK' OR {$alias}.exchange_rate > 0 OR COALESCE({$amount}, 0) = 0)";
@@ -243,7 +248,18 @@ final class CrmAggregationService
         return $rows;
     }
 
-    private function aggregateRange(int $supplierId, bool $payer, string $from, string $toExcl, ?string $period = null): array
+    /**
+     * Predikát vyřazující doklady, jejichž protistrana je spojená osoba. Prázdný,
+     * když se vyřazovat nemá, takže výchozí dotazy zůstávají beze změny.
+     */
+    private static function relatedPartyExclude(string $alias, string $column, bool $exclude): string
+    {
+        if (!$exclude) return '';
+        return " AND NOT EXISTS (SELECT 1 FROM clients rp WHERE rp.id = {$alias}.{$column}"
+            . " AND rp.supplier_id = {$alias}.supplier_id AND rp.related_party = 1)";
+    }
+
+    private function aggregateRange(int $supplierId, bool $payer, string $from, string $toExcl, ?string $period = null, bool $excludeRelated = false): array
     {
         $pdo = $this->db->pdo();
         $acc = [];
@@ -260,7 +276,7 @@ final class CrmAggregationService
               WHERE i.supplier_id = ?
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.status IN " . self::REV_STATUS . "
-                AND i.invoice_type IN " . self::REV_TYPES . "
+                AND i.invoice_type IN " . self::REV_TYPES . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
            GROUP BY cur.code"
         );
         $rev->execute([$supplierId, $from, $toExcl]);
@@ -283,7 +299,8 @@ final class CrmAggregationService
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND " . self::COST_DATE . " >= ? AND " . self::COST_DATE . " < ?
-                AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
+                AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude()
+                    . self::relatedPartyExclude('pi', 'vendor_id', $excludeRelated) . "
            GROUP BY cur.code"
         );
         $cost->execute([$supplierId, $from, $toExcl]);
@@ -749,7 +766,7 @@ final class CrmAggregationService
      *
      * @return list<array{bucket:string, currency:string, count:int, total:float}>
      */
-    public function agingReceivables(int $supplierId): array
+    public function agingReceivables(int $supplierId, bool $excludeRelated = false): array
     {
         $today = (new \DateTimeImmutable())->format('Y-m-d');
         $sql = "
@@ -769,7 +786,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.status IN ('issued', 'sent', 'reminded')
                AND " . $this->receivableDocTypeSql() . "
-               AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)
+               AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)" . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";
@@ -786,7 +803,7 @@ final class CrmAggregationService
     /**
      * Aging buckets pro nezaplacené přijaté faktury (závazky).
      */
-    public function agingPayables(int $supplierId): array
+    public function agingPayables(int $supplierId, bool $excludeRelated = false): array
     {
         $today = (new \DateTimeImmutable())->format('Y-m-d');
         $sql = "
@@ -805,7 +822,7 @@ final class CrmAggregationService
          LEFT JOIN currencies c ON c.id = pi.currency_id
              WHERE pi.supplier_id = ?
                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
-                . PayablePredicate::excludeFullySettled() . "
+                . PayablePredicate::excludeFullySettled() . self::relatedPartyExclude('pi', 'vendor_id', $excludeRelated) . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";

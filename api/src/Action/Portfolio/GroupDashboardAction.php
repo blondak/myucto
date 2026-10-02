@@ -31,11 +31,15 @@ final class GroupDashboardAction
         if (($from !== null && !is_string($from)) || ($to !== null && !is_string($to))) {
             return Json::error($response, 'validation_failed', 'Neplatné parametry přehledu.', 422);
         }
+        $related = $q['include_related'] ?? '1';
+        if (!in_array($related, ['0', '1'], true)) {
+            return Json::error($response, 'validation_failed', 'Neplatné parametry přehledu.', 422);
+        }
         try {
             GroupDashboardService::period($months, $from, $to);
         } catch (\InvalidArgumentException) {
             return Json::error($response, 'validation_failed', 'Neplatné parametry přehledu.', 422);
         }
-        return Json::ok($response, $this->dashboard->dashboard($request, $section, $months, $weeks, $from, $to));
+        return Json::ok($response, $this->dashboard->dashboard($request, $section, $months, $weeks, $from, $to, $related === '1'));
     }
 }

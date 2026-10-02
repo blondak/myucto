@@ -32193,6 +32193,10 @@
   },
 
   "group_stats": {
+    "related_parties": "Related parties",
+    "related_include": "Include",
+    "related_exclude": "Exclude",
+    "related_parties_hint": "Documents with contacts marked as a related party (typically transfers between group companies). Applies to revenue, costs, receivables and payables, not to accounting statements.",
     "title": "All companies",
     "subtitle": "Management view of results, money and risks across accessible companies.",
     "management_note": "Management totals without eliminating transactions between companies. This is not a consolidated financial statement.",

@@ -16,18 +16,19 @@ final class GroupDashboardService
         private readonly GroupDashboardCurrencyView $currencyView,
     ) {}
 
-    public function dashboard(Request $request, string $section, int $months, int $weeks, ?string $from = null, ?string $to = null): array
+    public function dashboard(Request $request, string $section, int $months, int $weeks, ?string $from = null, ?string $to = null, bool $includeRelated = true): array
     {
         $period = self::period($months, $from, $to);
         $companies = [];
         foreach ($this->access->companies($request) as $entry) {
-            $companies[] = $this->reader->read($entry['request'], $entry['supplier'], $section, $months, $weeks, $period);
+            $companies[] = $this->reader->read($entry['request'], $entry['supplier'], $section, $months, $weeks, $period, $includeRelated);
         }
         usort($companies, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
         return [
             'section' => $section, 'months' => $months, 'weeks' => $weeks,
             'as_of' => date('Y-m-d'), 'generated_at' => date(\DateTimeInterface::ATOM),
             'period' => $period,
+            'include_related' => $includeRelated,
             'concentration_period' => [
                 'months' => 12, 'from' => (new \DateTimeImmutable('first day of this month'))->modify('-12 months')->format('Y-m-d'),
                 'to' => null, 'basis' => 'crm_months',

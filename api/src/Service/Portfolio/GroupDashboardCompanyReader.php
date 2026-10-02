@@ -28,8 +28,9 @@ final class GroupDashboardCompanyReader
         private readonly GroupDashboardForecast $forecast,
     ) {}
 
-    public function read(Request $request, array $supplier, string $section, int $months, int $weeks, ?array $period = null): array
+    public function read(Request $request, array $supplier, string $section, int $months, int $weeks, ?array $period = null, bool $includeRelated = true): array
     {
+        $excludeRelated = !$includeRelated;
         $period ??= GroupDashboardService::period($months);
         $toExclusive = (new \DateTimeImmutable($period['to']))->modify('+1 day')->format('Y-m-d');
         $id = (int) $supplier['id'];
@@ -51,10 +52,10 @@ final class GroupDashboardCompanyReader
             'issues' => [],
         ];
         if ($section === 'overview') {
-            if ($documents) $this->part($row, 'financial', function () use ($id, $period, $toExclusive): array {
-                $current = array_column($this->crm->documentRange($id, $period['from'], $toExclusive), null, 'currency');
+            if ($documents) $this->part($row, 'financial', function () use ($id, $period, $toExclusive, $excludeRelated): array {
+                $current = array_column($this->crm->documentRange($id, $period['from'], $toExclusive, null, $excludeRelated), null, 'currency');
                 $previous = array_column($this->crm->documentRange($id, $period['previous_from'],
-                    (new \DateTimeImmutable($period['previous_to']))->modify('+1 day')->format('Y-m-d')), null, 'currency');
+                    (new \DateTimeImmutable($period['previous_to']))->modify('+1 day')->format('Y-m-d'), null, $excludeRelated), null, 'currency');
                 $currencies = array_values(array_unique([...array_keys($current), ...array_keys($previous)]));
                 sort($currencies);
                 return array_map(static fn (string $currency): array => [
@@ -86,7 +87,7 @@ final class GroupDashboardCompanyReader
                 ];
             });
         } elseif ($section === 'trends' && $documents) {
-            $this->part($row, 'monthly', function () use ($id, $period, $toExclusive): array {
+            $this->part($row, 'monthly', function () use ($id, $period, $toExclusive, $excludeRelated): array {
                 $rows = [];
                 $months = [];
                 $currencies = [];
@@ -96,7 +97,7 @@ final class GroupDashboardCompanyReader
                     $next = min($cursor->modify('first day of next month'), $end);
                     $month = $cursor->format('Y-m');
                     $months[] = $month;
-                    foreach ($this->crm->documentRange($id, $cursor->format('Y-m-d'), $next->format('Y-m-d'), $cursor->format('Y-m')) as $r) {
+                    foreach ($this->crm->documentRange($id, $cursor->format('Y-m-d'), $next->format('Y-m-d'), $cursor->format('Y-m'), $excludeRelated) as $r) {
                         $currencies[$r['currency']] = true;
                         $rows[$month][$r['currency']] = ['period' => $r['period'], 'currency' => $r['currency'],
                             'revenue' => $r['revenue'], 'costs' => $r['costs'], 'profit' => $r['profit'],
@@ -156,13 +157,13 @@ final class GroupDashboardCompanyReader
                 'date' => $r['balance_date'],
             ], $this->cash->list($id)));
         } elseif ($section === 'receivables') {
-            if ($can('invoices')) $this->part($row, 'receivables', fn (): array => $this->crm->agingReceivables($id));
-            if ($can('purchase_invoices')) $this->part($row, 'payables', fn (): array => $this->crm->agingPayables($id));
+            if ($can('invoices')) $this->part($row, 'receivables', fn (): array => $this->crm->agingReceivables($id, $excludeRelated));
+            if ($can('purchase_invoices')) $this->part($row, 'payables', fn (): array => $this->crm->agingPayables($id, $excludeRelated));
         } elseif ($section === 'risks' && ($can('invoices') || $can('purchase_invoices'))) {
-            $this->part($row, 'risks', function () use ($id, $can, $documents, $period, $toExclusive): array {
+            $this->part($row, 'risks', function () use ($id, $can, $documents, $period, $toExclusive, $excludeRelated): array {
                 $risks = [];
                 if ($can('invoices')) {
-                    foreach ($this->crm->agingReceivables($id) as $r) {
+                    foreach ($this->crm->agingReceivables($id, $excludeRelated) as $r) {
                         if ($r['bucket'] !== 'not_due' && $r['total'] > 0) $risks[] = [
                             'kind' => 'overdue_receivables', 'currency' => $r['currency'], 'amount' => $r['total'],
                             'count' => $r['count'], 'bucket' => $r['bucket'],
@@ -170,7 +171,7 @@ final class GroupDashboardCompanyReader
                     }
                 }
                 if ($can('purchase_invoices')) {
-                    foreach ($this->crm->agingPayables($id) as $r) {
+                    foreach ($this->crm->agingPayables($id, $excludeRelated) as $r) {
                         if ($r['bucket'] !== 'not_due' && $r['total'] > 0) $risks[] = [
                             'kind' => 'overdue_payables', 'currency' => $r['currency'], 'amount' => $r['total'],
                             'count' => $r['count'], 'bucket' => $r['bucket'],
@@ -178,7 +179,7 @@ final class GroupDashboardCompanyReader
                     }
                 }
                 if ($documents) {
-                    foreach ($this->crm->documentRange($id, $period['from'], $toExclusive) as $r) {
+                    foreach ($this->crm->documentRange($id, $period['from'], $toExclusive, null, $excludeRelated) as $r) {
                         if ($r['profit'] < 0) $risks[] = ['kind' => 'document_loss', 'currency' => $r['currency'], 'amount' => $r['profit'],
                             'amount_czk' => $r['profit_czk'] ?? null, 'conversion_missing' => $r['conversion_missing'] ?? 0];
                     }

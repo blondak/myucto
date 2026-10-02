@@ -3,7 +3,7 @@ import { reactive, ref } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { GroupCompany, GroupDashboard, GroupSection } from '@/api/groupDashboard'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), push: vi.fn(), switchTo: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), push: vi.fn(), replace: vi.fn(), switchTo: vi.fn() }))
 const auth = reactive({
   user: { id: 1, role: { system_key: 'admin' } }, permissions: { 'dashboard.portfolio': 1 },
   domainContext: null as null | { locked: boolean }, permissionsLoading: false,
@@ -16,7 +16,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number, currency: string) => `${value} ${currency}`, formatNumber: (value: number) => String(value) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: object) => key + (params ? JSON.stringify(params) : ''), locale: ref('cs') }) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: mocks.push }) }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: mocks.push, replace: mocks.replace }) }))
 
 import GroupStats from '../GroupStats.vue'
 
@@ -91,6 +91,14 @@ describe('All companies dashboard', () => {
     await wrapper.find('[data-test="group-currency"]').setValue('EUR')
     expect(wrapper.find('[data-test="group-financial-table"]').text()).toContain('100 EUR')
     expect(mocks.get).toHaveBeenCalledTimes(1)
+  })
+  it('can leave out related parties and remembers the choice in the URL', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="group-related"]').setValue('false')
+    await flushPromises()
+    expect(mocks.get).toHaveBeenLastCalledWith({ section: 'overview', months: 12, weeks: 8, include_related: 0 }, expect.any(AbortSignal))
+    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { related: '0' } })
   })
   it('applies an exact date range and can restore the rolling default', async () => {
     const wrapper = mountPage()

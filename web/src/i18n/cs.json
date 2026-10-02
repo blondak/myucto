@@ -32193,6 +32193,10 @@
   },
 
   "group_stats": {
+    "related_parties": "Spojené osoby",
+    "related_include": "Započítat",
+    "related_exclude": "Nezapočítat",
+    "related_parties_hint": "Doklady s kontakty označenými jako spojená osoba (typicky převody mezi firmami skupiny). Týká se tržeb, nákladů, pohledávek a závazků, ne účetních výkazů.",
     "title": "Všechny firmy",
     "subtitle": "Manažerský pohled na výsledky, peníze a rizika přístupných firem.",
     "management_note": "Manažerský součet bez eliminace transakcí mezi firmami. Nejde o konsolidovanou účetní závěrku.",
