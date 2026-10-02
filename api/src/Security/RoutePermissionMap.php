@@ -484,6 +484,8 @@ final class RoutePermissionMap
         // zadat, ten rozhoduje o penězích stejně jako ten, kdo zúčtování provede.
         ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/certificates$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/settle$#', 'payroll.approve', AccessLevel::WRITE],
+        // Hromadné zúčtování žadatelů přes frontu ročních dokumentů — týž úkon.
+        ['POST', '#^/api/payroll/documents/annual-batches/annual-settlement/[0-9]{4}$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/documents/exit$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate|average-earnings-statement)$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/batch$#', 'payroll.documents', AccessLevel::WRITE],

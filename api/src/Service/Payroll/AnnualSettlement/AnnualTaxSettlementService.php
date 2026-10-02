@@ -43,7 +43,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
  * odpověď na otázku „co s tím", ne jen „nepovedlo se". Výjimka je vyhrazená pro
  * rozbitý podklad (`AnnualSettlementUnavailableException`).
  */
-final class AnnualTaxSettlementService
+final class AnnualTaxSettlementService implements AnnualSettlementPerformer
 {
     public function __construct(
         private readonly Connection $db,

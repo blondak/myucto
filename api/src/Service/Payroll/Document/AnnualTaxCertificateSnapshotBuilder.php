@@ -118,10 +118,15 @@ class AnnualTaxCertificateSnapshotBuilder
             $kind,
             $cutoff,
         );
-        if ($months === []
-            || $lastPaymentDate === null
-            || $taxResidence === null
-        ) {
+        // Žádný měsíc s příjmem toho druhu je jiný případ než nedoložená výplata
+        // nebo rezidentství u existujícího příjmu: potvrzení se tu nevystavuje
+        // vůbec, takže hromadná dávka osobu přeskočí, místo aby selhala.
+        if ($months === []) {
+            throw new AnnualTaxCertificateNoIncomeException(
+                'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
+            );
+        }
+        if ($lastPaymentDate === null || $taxResidence === null) {
             throw new \DomainException(
                 'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
             );

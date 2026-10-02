@@ -142,6 +142,14 @@ final class Bootstrap
                 ),
             \MyInvoice\Service\Stock\SalesOrderLineExpander::class => fn (ContainerInterface $c) =>
                 $c->get(\MyInvoice\Service\Stock\ProductSetSalesOrderLineExpander::class),
+            \MyInvoice\Service\Payroll\Document\AnnualTaxCertificateGenerator::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Document\AnnualTaxCertificateService::class,
+                ),
+            \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPerformer::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxSettlementService::class,
+                ),
             \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier::class,

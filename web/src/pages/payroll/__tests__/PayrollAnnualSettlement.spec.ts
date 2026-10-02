@@ -10,6 +10,10 @@ const m = vi.hoisted(() => ({
   settleAnnualSettlement: vi.fn(),
   saveAnnualSettlementCertificates: vi.fn(),
   downloadDocument: vi.fn(),
+  enqueueAnnualDocumentBatch: vi.fn(),
+  annualDocumentBatch: vi.fn(),
+  annualDocumentBatchItems: vi.fn(),
+  retryAnnualDocumentBatchItem: vi.fn(),
   warning: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
@@ -32,6 +36,10 @@ vi.mock('@/api/payroll', () => ({
     settleAnnualSettlement: m.settleAnnualSettlement,
     saveAnnualSettlementCertificates: m.saveAnnualSettlementCertificates,
     downloadDocument: m.downloadDocument,
+    enqueueAnnualDocumentBatch: m.enqueueAnnualDocumentBatch,
+    annualDocumentBatch: m.annualDocumentBatch,
+    annualDocumentBatchItems: m.annualDocumentBatchItems,
+    retryAnnualDocumentBatchItem: m.retryAnnualDocumentBatchItem,
   },
 }))
 
@@ -874,5 +882,70 @@ describe('Roční zúčtování', () => {
       { limit: 25, offset: 0 },
       { search: 'Novak', state: 'requested' },
     )
+  })
+
+  it('hromadné zúčtování jde serverovou frontou a vypíše přeskočené s důvody', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const batch = {
+      id: 91,
+      tax_year: defaultYear,
+      document_kind: 'annual_settlement_result',
+      scope: 'all',
+      status: 'completed',
+      item_count: 3,
+      succeeded_count: 1,
+      failed_count: 0,
+      skipped_count: 2,
+      created_at: '2027-03-01 08:00:00',
+      started_at: '2027-03-01 08:00:01',
+      completed_at: '2027-03-01 08:00:05',
+      updated_at: '2027-03-01 08:00:05',
+    }
+    const item = (id: number, status: string, code: string | null, message: string | null) => ({
+      id,
+      batch_id: 91,
+      employee_id: id,
+      employee_name: `Syntetická osoba ${id}`,
+      status,
+      attempt_count: 1,
+      available_at: '2027-03-01 08:00:00',
+      document_id: status === 'succeeded' ? 500 + id : null,
+      last_error_code: code,
+      last_error_message: message,
+      completed_at: '2027-03-01 08:00:05',
+      updated_at: '2027-03-01 08:00:05',
+    })
+    m.enqueueAnnualDocumentBatch.mockResolvedValue({ ...batch, status: 'queued', succeeded_count: 0, skipped_count: 0 })
+    m.annualDocumentBatch.mockResolvedValue(batch)
+    m.annualDocumentBatchItems.mockResolvedValue({
+      items: [
+        item(1, 'succeeded', null, null),
+        item(2, 'skipped', 'annual_settlement_blocked',
+          'Roční zúčtování nelze provést, překážky: declaration_not_signed, settlement_deadline_passed'),
+        item(3, 'skipped', 'annual_settlement_exists', 'Osoba už je za rok zúčtovaná.'),
+      ],
+      total: 3,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-action="settle-all"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(m.enqueueAnnualDocumentBatch).toHaveBeenCalledWith(
+      'annual_settlement_result',
+      defaultYear,
+      'all',
+      null,
+    )
+    const blocked = wrapper.get('[data-test="annual-settlement-bulk-blocked"]').text()
+    expect(blocked).toContain('Syntetická osoba 2')
+    expect(blocked).toContain('payroll.annual_settlement.blocker.declaration_not_signed')
+    expect(blocked).toContain('payroll.annual_settlement.blocker.settlement_deadline_passed')
+    expect(wrapper.get('[data-test="annual-settlement-bulk-settled"]').text())
+      .toContain('Syntetická osoba 3')
+    expect(wrapper.find('[data-test="annual-settlement-bulk-failures"]').exists()).toBe(false)
+    confirm.mockRestore()
   })
 })

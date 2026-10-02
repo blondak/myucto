@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Document\PayrollAnnualDocumentBatchQueueService;
@@ -29,6 +30,7 @@ final class PayrollAnnualDocumentBatchAction
         'payroll-sheet' => PayrollDocumentKind::PayrollSheet,
         'advance' => PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
         'withholding' => PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        'annual-settlement' => PayrollDocumentKind::AnnualSettlementResult,
     ];
 
     public function __construct(
@@ -50,10 +52,15 @@ final class PayrollAnnualDocumentBatchAction
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
             return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
+        $kind = self::KINDS[$args['kind'] ?? ''] ?? null;
+        if ($kind === PayrollDocumentKind::AnnualSettlementResult
+            && ($denied = $this->settlementGuard($request, $response)) !== null
+        ) {
+            return $denied;
+        }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
         $year = (int) ($args['year'] ?? 0);
-        $kind = self::KINDS[$args['kind'] ?? ''] ?? null;
         $body = $request->getParsedBody();
         $body = is_array($body) ? $body : [];
         $scope = is_string($body['scope'] ?? null) ? $body['scope'] : '';
@@ -185,10 +192,20 @@ final class PayrollAnnualDocumentBatchAction
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
             return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
+        $supplierId = $this->currentSupplierId($request);
+        $batchId = (int) ($args['batchId'] ?? 0);
+        // Opakovaná položka zúčtování znovu provádí právní úkon plátce daně,
+        // takže potřebuje totéž oprávnění jako jeho první spuštění.
+        $batch = $this->batch->detail($supplierId, $batchId);
+        if (($batch['document_kind'] ?? null) === PayrollDocumentKind::AnnualSettlementResult->value
+            && ($denied = $this->settlementGuard($request, $response)) !== null
+        ) {
+            return $denied;
+        }
         try {
             $item = $this->batch->retry(
-                $this->currentSupplierId($request),
-                (int) ($args['batchId'] ?? 0),
+                $supplierId,
+                $batchId,
                 (int) ($args['itemId'] ?? 0),
             );
         } catch (\DomainException $exception) {
@@ -202,6 +219,32 @@ final class PayrollAnnualDocumentBatchAction
         return Json::ok($response, ['item' => $item], 202)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Hromadné roční zúčtování se řídí týmž oprávněním jako zúčtování jedné
+     * osoby ({@see PayrollAnnualSettlementAction::settle()}): `payroll.approve`
+     * a jen z přihlášené webové session. Je to právní úkon plátce daně, po
+     * kterém se vyplácí přeplatek, takže nestačí právo na dokumenty.
+     */
+    private function settlementGuard(Request $request, Response $response): ?Response
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired(
+                $response,
+                'Tento endpoint je dostupný pouze z přihlášené webové session.',
+            );
+        }
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.approve',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        return null;
     }
 
     private static function positiveInt(mixed $value): ?int

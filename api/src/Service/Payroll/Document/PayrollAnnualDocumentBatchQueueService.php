@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPerformer;
 
 /**
  * Roční mzdové dokumenty přes serverovou frontu.
@@ -16,10 +18,18 @@ use MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository;
  */
 final class PayrollAnnualDocumentBatchQueueService
 {
+    /**
+     * Začátek zprávy u zablokovaného ročního zúčtování. Za ním následují kódy
+     * překážek ({@see AnnualSettlementBlocker}) oddělené čárkou; frontend je
+     * přeloží stejnými texty jako v detailu osoby.
+     */
+    public const BLOCKED_MESSAGE_PREFIX = 'Roční zúčtování nelze provést, překážky: ';
+
     public function __construct(
         private readonly PayrollAnnualDocumentBatchRepository $batches,
         private readonly AnnualPayrollSheetService $payrollSheets,
-        private readonly AnnualTaxCertificateService $certificates,
+        private readonly AnnualTaxCertificateGenerator $certificates,
+        private readonly AnnualSettlementPerformer $settlements,
     ) {}
 
     /**
@@ -115,6 +125,15 @@ final class PayrollAnnualDocumentBatchQueueService
             ? null : (int) $claim['requested_by'];
         try {
             $kind = PayrollDocumentKind::from($kindValue);
+            if ($kind === PayrollDocumentKind::AnnualSettlementResult) {
+                $outcome = $this->settle($claim, $supplierId, $employeeId, $taxYear, $actorUserId);
+                return [
+                    'processed' => true,
+                    'outcome' => $outcome,
+                    'batch_id' => (int) $claim['batch_id'],
+                    'item_id' => (int) $claim['id'],
+                ];
+            }
             // Potvrzení, které osoba za rok už má, se nepřegeneruje: jeho
             // nahrazení je OPRAVA s povinným důvodem (§ opravné potvrzení),
             // a ten za účetní vymyslet nelze. Přeskočení není selhání.
@@ -156,6 +175,17 @@ final class PayrollAnnualDocumentBatchQueueService
                 );
             $this->batches->succeed($claim, (int) $document['id']);
             $outcome = 'succeeded';
+        } catch (AnnualTaxCertificateNoIncomeException) {
+            // Osoba příjem toho druhu v roce nemá (srážkové potvrzení u
+            // zaměstnance jen se zálohami), takže se jí potvrzení nevystavuje.
+            // Opakování nic nezmění a selháním to není.
+            $this->batches->skip(
+                $claim,
+                'annual_certificate_no_income',
+                'Osoba nemá za rok žádný příjem, na který se tento druh potvrzení'
+                    . ' vystavuje.',
+            );
+            $outcome = 'skipped';
         } catch (\Throwable $exception) {
             // Selhání JEDNÉ osoby nesmí zhodit dávku: uzavře se jen její
             // položka, důvod se uloží a fronta jede dál.
@@ -192,6 +222,60 @@ final class PayrollAnnualDocumentBatchQueueService
             };
         }
         return $result;
+    }
+
+    /**
+     * Roční zúčtování jedné osoby z dávky.
+     *
+     * Volá se stejná `settle()` jako z detailu osoby: posouzení, výpočet
+     * i doklad jsou tytéž, fronta jen rozhoduje o položce. `settle()` si
+     * transakci otevírá sám; pronájem položky (`claimNext()`) je v té chvíli
+     * už potvrzený, takže žádná transakce fronty neběží.
+     *
+     * Nesplněné podmínky nejsou selhání. Opakovat je nemá smysl (chybějící
+     * prohlášení ani zmeškaná lhůta se dalším pokusem nespraví) a dávku nesmí
+     * vykázat jako rozbitou, takže položka končí jako přeskočená s výčtem
+     * překážek. Stejně tak osoba, která už zúčtovaná je.
+     *
+     * @param array<string,mixed> $claim
+     * @return 'succeeded'|'skipped'
+     */
+    private function settle(
+        array $claim,
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        ?int $actorUserId,
+    ): string {
+        $settled = $this->settlements->settle($supplierId, $employeeId, $taxYear, $actorUserId);
+        $result = $settled['result'];
+        $alreadySettled = in_array(
+            AnnualSettlementBlocker::AlreadySettled,
+            $result->blockers,
+            true,
+        );
+        if ($alreadySettled || ($result->performed && !$settled['created'])) {
+            $this->batches->skip(
+                $claim,
+                'annual_settlement_exists',
+                'Osoba už je za rok zúčtovaná; roční zúčtování se provádí jen jednou.',
+            );
+            return 'skipped';
+        }
+        if (!$result->performed) {
+            $this->batches->skip(
+                $claim,
+                'annual_settlement_blocked',
+                self::BLOCKED_MESSAGE_PREFIX . implode(', ', $result->blockerCodes()),
+            );
+            return 'skipped';
+        }
+        $documentId = (int) ($settled['document']['id'] ?? 0);
+        if ($documentId <= 0) {
+            throw new \RuntimeException('Roční zúčtování nevrátilo archivovaný doklad.');
+        }
+        $this->batches->succeed($claim, $documentId);
+        return 'succeeded';
     }
 
     private static function errorCode(\Throwable $exception): string

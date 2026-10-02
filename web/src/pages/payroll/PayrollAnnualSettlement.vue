@@ -13,11 +13,13 @@
  *  - Odmítnuté zúčtování se nezobrazuje jako selhání. Vrací se z API jako
  *    normální odpověď a vypíše se seznam vět „co k tomu chybí".
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import {
   payrollApi,
+  type PayrollAnnualDocumentBatch,
+  type PayrollAnnualDocumentBatchItem,
   type PayrollAnnualSettlementAnnualClaims,
   type PayrollAnnualSettlementCertificate,
   type PayrollAnnualSettlementCaregiverStatus,
@@ -267,6 +269,23 @@ const actions = computed<ActionItem[]>(() => [
     disabledReason: settleDisabledReason.value,
     loading: settling.value,
     run: settle,
+  },
+  {
+    key: 'settle-all',
+    label: t(bulkEnqueuing.value || bulkOpen.value
+      ? 'payroll.annual_settlement.bulk.running'
+      : 'payroll.annual_settlement.bulk.action'),
+    icon: 'play',
+    tier: 'primary',
+    variant: 'success',
+    disabled: !canSettle.value || bulkEnqueuing.value || bulkOpen.value,
+    disabledReason: !canSettle.value
+      ? t('payroll.annual_settlement.settle_read_only')
+      : bulkOpen.value
+        ? t('payroll.annual_settlement.bulk.running_hint')
+        : undefined,
+    loading: bulkEnqueuing.value || bulkOpen.value,
+    run: settleAllRequesters,
   },
   {
     key: 'reload',
@@ -588,6 +607,160 @@ async function settle(): Promise<void> {
   }
 }
 
+/**
+ * Hromadné roční zúčtování všech žadatelů.
+ *
+ * Nejde po jednom z prohlížeče, ale přes serverovou frontu ročních dokumentů:
+ * firma se stovkami žadatelů by jinak klikala stokrát nebo čekala na stovky
+ * požadavků, které by zavřením záložky skončily v půlce. Prohlížeč jen sleduje
+ * průběh. Kdo podmínky nesplňuje, se přeskočí s výčtem překážek; není to
+ * selhání a opakovat se nemá smysl, dokud se podklady nedoplní.
+ */
+const bulkBatch = ref<PayrollAnnualDocumentBatch | null>(null)
+const bulkItems = ref<PayrollAnnualDocumentBatchItem[]>([])
+const bulkEnqueuing = ref(false)
+const bulkRetryingItemId = ref<number | null>(null)
+let bulkPollTimer: ReturnType<typeof setTimeout> | null = null
+
+const bulkOpen = computed(() =>
+  bulkBatch.value !== null && bulkBatch.value.status !== 'completed')
+const bulkDone = computed(() => {
+  const batch = bulkBatch.value
+  return batch === null ? 0 : batch.succeeded_count + batch.failed_count + batch.skipped_count
+})
+const bulkTotal = computed(() => bulkBatch.value?.item_count ?? 0)
+const bulkBlocked = computed(() =>
+  bulkItems.value
+    .filter(item => item.status === 'skipped' && item.last_error_code === 'annual_settlement_blocked')
+    .map(item => ({
+      id: item.id,
+      employeeId: item.employee_id,
+      name: item.employee_name,
+      reasons: bulkBlockerReasons(item.last_error_message),
+    })))
+const bulkAlreadySettled = computed(() =>
+  bulkItems.value
+    .filter(item => item.status === 'skipped' && item.last_error_code !== 'annual_settlement_blocked')
+    .map(item => item.employee_name))
+const bulkFailures = computed(() =>
+  bulkItems.value
+    .filter(item => item.status === 'failed' || item.status === 'retry_wait')
+    .map(item => ({
+      id: item.id,
+      name: item.employee_name,
+      technical: [item.last_error_code, item.last_error_message].filter(Boolean).join(': '),
+    })))
+
+/**
+ * Server posílá kódy překážek za dvojtečkou (stejné jako v detailu osoby);
+ * přeloží se týmiž větami. Nečitelnou zprávu ukážeme tak, jak přišla.
+ */
+function bulkBlockerReasons(message: string | null): string[] {
+  if (!message) return []
+  const separator = message.lastIndexOf(': ')
+  const codes = separator < 0
+    ? []
+    : message.slice(separator + 2).split(',').map(code => code.trim())
+  if (codes.length === 0 || codes.some(code => !/^[a-z_]+$/.test(code))) return [message]
+  return codes.map(code => t(`payroll.annual_settlement.blocker.${code}`))
+}
+
+function clearBulkPoll(): void {
+  if (bulkPollTimer !== null) clearTimeout(bulkPollTimer)
+  bulkPollTimer = null
+}
+
+function dismissBulk(): void {
+  clearBulkPoll()
+  bulkBatch.value = null
+  bulkItems.value = []
+}
+
+async function loadBulkItems(batchId: number): Promise<void> {
+  const loaded: PayrollAnnualDocumentBatchItem[] = []
+  let nextOffset = 0
+  let itemTotal = 1
+  while (nextOffset < itemTotal) {
+    const page = await payrollApi.annualDocumentBatchItems(batchId, {
+      limit: 100,
+      offset: nextOffset,
+    })
+    loaded.push(...page.items)
+    itemTotal = page.total
+    nextOffset += page.items.length
+    if (page.items.length === 0) break
+  }
+  if (bulkBatch.value?.id === batchId) bulkItems.value = loaded
+}
+
+async function pollBulk(loadItems = false): Promise<void> {
+  const batchId = bulkBatch.value?.id
+  if (!batchId) return
+  clearBulkPoll()
+  try {
+    const previous = bulkBatch.value
+    const current = await payrollApi.annualDocumentBatch(batchId)
+    if (bulkBatch.value?.id !== batchId) return
+    bulkBatch.value = current
+    const changed = previous === null
+      || previous.status !== current.status
+      || previous.succeeded_count !== current.succeeded_count
+      || previous.failed_count !== current.failed_count
+      || previous.skipped_count !== current.skipped_count
+    if (loadItems || changed) await loadBulkItems(batchId)
+    if (current.status === 'completed') {
+      await load()
+      if (selectedEmployeeId.value !== null) await select(selectedEmployeeId.value)
+      return
+    }
+    bulkPollTimer = setTimeout(() => void pollBulk(), 2500)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.bulk.poll_failed')))
+  }
+}
+
+async function settleAllRequesters(): Promise<void> {
+  if (bulkEnqueuing.value || bulkOpen.value) return
+  if (!window.confirm(t('payroll.annual_settlement.bulk.confirm', { year: year.value }))) return
+  clearBulkPoll()
+  bulkItems.value = []
+  bulkEnqueuing.value = true
+  try {
+    bulkBatch.value = await payrollApi.enqueueAnnualDocumentBatch(
+      'annual_settlement_result',
+      year.value,
+      'all',
+      null,
+    )
+    toast.success(t('payroll.annual_settlement.bulk.queued', {
+      count: bulkBatch.value.item_count,
+    }))
+    await pollBulk(true)
+  } catch (error) {
+    bulkBatch.value = null
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.bulk.enqueue_failed')))
+  } finally {
+    bulkEnqueuing.value = false
+  }
+}
+
+async function retryBulkItem(itemId: number): Promise<void> {
+  const batchId = bulkBatch.value?.id
+  if (!batchId || bulkRetryingItemId.value !== null) return
+  bulkRetryingItemId.value = itemId
+  try {
+    await payrollApi.retryAnnualDocumentBatchItem(batchId, itemId)
+    toast.success(t('payroll.annual_settlement.bulk.retry_queued'))
+    await pollBulk(true)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.bulk.retry_failed')))
+  } finally {
+    bulkRetryingItemId.value = null
+  }
+}
+
+onBeforeUnmount(clearBulkPoll)
+
 async function download(): Promise<void> {
   if (document.value === null) return
   try {
@@ -603,6 +776,7 @@ watch(year, () => {
   certificates.value = []
   document.value = null
   offset.value = 0
+  dismissBulk()
   void load()
 })
 
@@ -676,6 +850,109 @@ onMounted(async () => {
     </header>
 
     <ActionBar :actions="actions" />
+
+    <!--
+      Průběh hromadného zúčtování. Zdrojem je serverová fronta, takže „zavřít"
+      jen schová zprávu; dávka na serveru doběhne.
+    -->
+    <section
+      v-if="bulkBatch"
+      data-test="annual-settlement-bulk-report"
+      class="rounded-lg border p-4"
+      :class="bulkBatch.status === 'completed'
+        ? (bulkBatch.failed_count > 0
+          ? 'border-danger-500/30 bg-danger-50'
+          : 'border-success-500/30 bg-success-50')
+        : 'border-payroll-500/30 bg-payroll-50'"
+      role="status"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-neutral-900">
+            {{ t('payroll.annual_settlement.bulk.progress', { done: bulkDone, total: bulkTotal }) }}
+          </p>
+          <p class="mt-1 text-xs text-neutral-600">
+            {{ t('payroll.annual_settlement.bulk.summary', {
+              succeeded: bulkBatch.succeeded_count,
+              skipped: bulkBatch.skipped_count,
+              failed: bulkBatch.failed_count,
+            }) }}
+            <template v-if="bulkOpen">
+              · {{ t('payroll.annual_settlement.bulk.server_hint') }}
+            </template>
+          </p>
+        </div>
+        <button
+          type="button"
+          data-test="annual-settlement-bulk-dismiss"
+          :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+          @click="dismissBulk"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.x" />
+          </svg>
+          {{ t('payroll.annual_settlement.bulk.dismiss') }}
+        </button>
+      </div>
+      <div
+        class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200"
+        role="progressbar"
+        :aria-valuemin="0"
+        :aria-valuemax="bulkTotal"
+        :aria-valuenow="bulkDone"
+      >
+        <div
+          class="h-full bg-payroll-500 transition-all"
+          :style="{ width: `${bulkTotal ? Math.round(bulkDone * 100 / bulkTotal) : 0}%` }"
+        />
+      </div>
+      <div v-if="bulkBlocked.length" class="mt-3 text-sm text-neutral-700" data-test="annual-settlement-bulk-blocked">
+        <p class="font-medium">{{ t('payroll.annual_settlement.bulk.blocked_title', { count: bulkBlocked.length }) }}</p>
+        <ul class="mt-1 space-y-1">
+          <li v-for="row in bulkBlocked" :key="row.id">
+            <button
+              type="button"
+              class="font-medium text-payroll-700 hover:underline"
+              @click="select(row.employeeId)"
+            >
+              {{ row.name }}
+            </button>
+            <span class="text-neutral-600">: {{ row.reasons.join(' ') }}</span>
+          </li>
+        </ul>
+        <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.annual_settlement.bulk.blocked_hint') }}</p>
+      </div>
+      <div v-if="bulkAlreadySettled.length" class="mt-3 text-sm text-neutral-700" data-test="annual-settlement-bulk-settled">
+        <p class="font-medium">{{ t('payroll.annual_settlement.bulk.settled_title', { count: bulkAlreadySettled.length }) }}</p>
+        <p class="mt-1 leading-snug">{{ bulkAlreadySettled.join(', ') }}</p>
+      </div>
+      <div v-if="bulkFailures.length" class="mt-3 text-sm text-danger-700" data-test="annual-settlement-bulk-failures">
+        <p class="font-medium">{{ t('payroll.annual_settlement.bulk.failed_title', { count: bulkFailures.length }) }}</p>
+        <ul class="mt-1 space-y-1">
+          <li v-for="row in bulkFailures" :key="row.id" class="flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p class="font-medium">{{ row.name }}</p>
+              <details v-if="row.technical" class="mt-1 text-xs">
+                <summary class="cursor-pointer">{{ t('payroll.documents.worker_failure_technical') }}</summary>
+                <p class="mt-1 break-words font-mono">{{ row.technical }}</p>
+              </details>
+            </div>
+            <button
+              type="button"
+              data-test="annual-settlement-bulk-retry"
+              :class="[btnOutline('warning'), 'whitespace-nowrap']"
+              :disabled="bulkRetryingItemId !== null || !canSettle"
+              @click="retryBulkItem(row.id)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.cycle" />
+              </svg>
+              {{ t('payroll.annual_settlement.bulk.retry') }}
+            </button>
+          </li>
+        </ul>
+      </div>
+    </section>
 
     <p v-if="data" class="rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
       {{

@@ -6318,11 +6318,13 @@ export interface PayrollDocumentBatchItem {
  * Roční dávka dokumentů má vlastní frontu: rozsahem je zdaňovací období, ne běh
  * a revize. Navíc zná `skipped` — osoba, která potvrzení za rok už má, se
  * nepřegeneruje, protože jeho nahrazení je oprava s povinným důvodem.
+ * `annual_settlement_result` je hromadné roční zúčtování žadatelů (§ 38ch ZDP).
  */
 export type PayrollAnnualDocumentBatchKind =
   | 'payroll_sheet'
   | 'taxable_income_advance_certificate'
   | 'taxable_income_withholding_certificate'
+  | 'annual_settlement_result'
 
 export type PayrollAnnualDocumentBatchScope = 'selected' | 'all'
 
@@ -9161,7 +9163,9 @@ export const payrollApi = {
       ? 'payroll-sheet'
       : kind === 'taxable_income_advance_certificate'
         ? 'advance'
-        : 'withholding'
+        : kind === 'annual_settlement_result'
+          ? 'annual-settlement'
+          : 'withholding'
     return api.post<{ batch: PayrollAnnualDocumentBatch }>(
       `/payroll/documents/annual-batches/${routeKind}/${year}`,
       { scope, employee_id: employeeId },

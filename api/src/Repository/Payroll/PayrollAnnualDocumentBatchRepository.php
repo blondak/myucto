@@ -26,7 +26,14 @@ final class PayrollAnnualDocumentBatchRepository
         'payroll_sheet',
         'taxable_income_advance_certificate',
         'taxable_income_withholding_certificate',
+        self::ANNUAL_SETTLEMENT,
     ];
+
+    /**
+     * Hromadné roční zúčtování (§ 38ch ZDP). Hodnota je druh archivovaného
+     * dokladu o zúčtování, takže úspěšná položka ukazuje přímo na něj.
+     */
+    public const ANNUAL_SETTLEMENT = 'annual_settlement_result';
 
     public const SCOPES = ['selected', 'all'];
 
@@ -95,11 +102,13 @@ final class PayrollAnnualDocumentBatchRepository
                 ?? throw new \RuntimeException('Roční dávku dokumentů nelze načíst.');
         }
 
-        $targets = $this->targets($supplierId, $taxYear, $employeeId);
+        $settlement = $documentKind === self::ANNUAL_SETTLEMENT;
+        $targets = $this->targets($supplierId, $taxYear, $employeeId, $settlement);
         if ($targets === []) {
-            throw new \DomainException(
-                'Za zvolený rok není schválený mzdový výsledek žádné osoby.',
-            );
+            throw new \DomainException($settlement
+                ? 'Za rok nikdo o roční zúčtování nepožádal, nebo žadatelé nemají'
+                    . ' v roce schválený mzdový výsledek.'
+                : 'Za zvolený rok není schválený mzdový výsledek žádné osoby.');
         }
 
         $sequence = $this->nextSequence($supplierId, $scopeHash);
@@ -167,12 +176,17 @@ final class PayrollAnnualDocumentBatchRepository
      * roce. Kdo ho nemá, by skončil jako selhání s nesrozumitelným důvodem —
      * proto se do dávky vůbec nedostane.
      *
+     * Roční zúčtování navíc jen pro ty, kdo o něj za rok POŽÁDALI (§ 38ch
+     * odst. 1). Ostatní by skončili jako přeskočení s překážkou „nepožádal",
+     * a u firmy se stovkami lidí by se v tom šumu ztratili skuteční žadatelé.
+     *
      * @return list<int>
      */
     private function targets(
         int $supplierId,
         int $taxYear,
         ?int $employeeId,
+        bool $requestedSettlementOnly = false,
     ): array {
         $sql =
             'SELECT DISTINCT person.employee_id
@@ -201,6 +215,17 @@ final class PayrollAnnualDocumentBatchRepository
             sprintf('%04d-01-01', $taxYear),
             sprintf('%04d-01-01', $taxYear + 1),
         ];
+        if ($requestedSettlementOnly) {
+            $sql .= ' AND EXISTS (
+                    SELECT 1
+                      FROM payroll_annual_settlement_requests request
+                     WHERE request.supplier_id = person.supplier_id
+                       AND request.employee_id = person.employee_id
+                       AND request.tax_year = ?
+                       AND request.request_status = "requested"
+                )';
+            $parameters[] = $taxYear;
+        }
         if ($employeeId !== null) {
             $sql .= ' AND person.employee_id = ?';
             $parameters[] = $employeeId;

@@ -107,6 +107,15 @@ platí „nevíme", zúčtování se neprovádí.
 Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
 tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
 
+Tlačítko **Provést zúčtování všem žadatelům** provede zúčtování za zvolený rok
+najednou všem, kdo o ně požádali a mají v roce schválenou mzdu. Zúčtování běží
+na serveru, takže stránku můžete zavřít a průběh se ukáže i po návratu. Výpočet
+i doklad jsou přesně tytéž jako u jednotlivé osoby. Kdo podmínky nesplňuje, se
+přeskočí a ve zprávě uvidíte jeho jméno se seznamem toho, co chybí; po doplnění
+podkladů ho zúčtujete v detailu nebo spustíte hromadné zúčtování znovu. Kdo už
+zúčtovaný je, se přeskočí také. Spustit ho smí stejně jako jednotlivé zúčtování
+jen uživatel s právem schvalovat mzdy.
+
 ### 84.8.1 Potvrzení od jiného plátce daně
 
 Měl-li zaměstnanec v roce ještě jiného zaměstnavatele, zapiš jeho potvrzení

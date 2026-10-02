@@ -237,8 +237,10 @@ const annualBatch = ref<PayrollAnnualDocumentBatch | null>(null)
 const annualBatchItems = ref<PayrollAnnualDocumentBatchItem[]>([])
 const retryingAnnualItemId = ref<number | null>(null)
 
-const annualBatchKind = computed<AnnualGenerationKind | null>(() =>
-  annualBatch.value?.document_kind ?? null)
+const annualBatchKind = computed<AnnualGenerationKind | null>(() => {
+  const kind = annualBatch.value?.document_kind ?? null
+  return kind === 'annual_settlement_result' ? null : kind
+})
 const annualBatchOpen = computed(() =>
   annualBatch.value !== null && annualBatch.value.status !== 'completed')
 /** Tlačítka blokuje jen NEDOKONČENÁ dávka; hotová zpráva zůstává vidět. */
@@ -254,8 +256,13 @@ const batchDone = computed(() => {
 })
 const batchSkipped = computed(() =>
   annualBatchItems.value
-    .filter(item => item.status === 'skipped')
+    .filter(item => item.status === 'skipped' && item.last_error_code !== 'annual_certificate_no_income')
     .map(item => ({ id: item.id, name: item.employee_name })))
+/** Bez příjmu daného druhu se potvrzení nevystavuje; není to ani oprava, ani chyba. */
+const batchNoIncome = computed(() =>
+  annualBatchItems.value
+    .filter(item => item.status === 'skipped' && item.last_error_code === 'annual_certificate_no_income')
+    .map(item => item.employee_name))
 /**
  * Chyba se hlásí za KAŽDÉHO ČLOVĚKA jménem i důvodem, ne jako počet — to byla
  * jediná věc, kterou klientská smyčka uměla dobře, a nesmí se ztratit.
@@ -1559,6 +1566,11 @@ onBeforeUnmount(() => {
           <p class="font-medium">{{ t('payroll.documents.batch_annual.skipped_title', { count: batchSkipped.length }) }}</p>
           <p class="mt-1 leading-snug">{{ batchSkipped.map(row => row.name).join(', ') }}</p>
           <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.documents.batch_annual.skipped_hint') }}</p>
+        </div>
+        <div v-if="batchNoIncome.length" class="mt-3 text-sm text-neutral-700" data-test="annual-batch-no-income">
+          <p class="font-medium">{{ t('payroll.documents.batch_annual.no_income_title', { count: batchNoIncome.length }) }}</p>
+          <p class="mt-1 leading-snug">{{ batchNoIncome.join(', ') }}</p>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.documents.batch_annual.no_income_hint') }}</p>
         </div>
         <div v-if="batchFailures.length" class="mt-3 text-sm text-danger-700" data-test="annual-batch-failures">
           <p class="font-medium">{{ t('payroll.documents.batch_annual.failed_title', { count: batchFailures.length }) }}</p>

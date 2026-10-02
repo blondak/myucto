@@ -7,6 +7,10 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPerformer;
+use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
+use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateGenerator;
+use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateNoIncomeException;
 use MyInvoice\Service\Payroll\Document\PayrollAnnualDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -262,6 +266,69 @@ final class PayrollAnnualDocumentBatchQueueServiceTest extends TestCase
         self::assertSame(0, $detail['failed_count']);
         self::assertSame('completed', $detail['status']);
         self::assertNotNull($detail['completed_at']);
+    }
+
+    /**
+     * Srážkové potvrzení za celou firmu: kdo měl celý rok jen zálohy, nemá
+     * příjem, na který se vystavuje. Takovou osobu fronta přeskočí. Dřív
+     * skončila jako selhání se třemi pokusy, takže u firmy se stovkami lidí
+     * vypadala dávka jako rozbitá u skoro všech.
+     */
+    public function testPersonWithoutIncomeOfTheKindIsSkippedNotFailedOrRetried(): void
+    {
+        [$employeeId] = $this->approvedYear(2026, 1);
+        $container = Bootstrap::buildContainer();
+        $generator = new class implements AnnualTaxCertificateGenerator {
+            public int $calls = 0;
+
+            public function generate(
+                int $supplierId,
+                int $employeeId,
+                int $taxYear,
+                PayrollDocumentKind $kind,
+                ?int $actorUserId,
+                ?callable $beforeCommit = null,
+                ?int $supersedesDocumentId = null,
+                ?string $correctionReason = null,
+            ): array {
+                $this->calls++;
+                throw new AnnualTaxCertificateNoIncomeException(
+                    'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
+                );
+            }
+        };
+        $queue = new PayrollAnnualDocumentBatchQueueService(
+            $this->batches,
+            $container->get(AnnualPayrollSheetService::class),
+            $generator,
+            $container->get(AnnualSettlementPerformer::class),
+        );
+
+        $batch = $queue->enqueue(
+            $this->supplierId,
+            2026,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+            'all',
+            null,
+            null,
+        );
+        $result = $queue->processAvailable(10);
+
+        self::assertSame(
+            ['processed' => 1, 'succeeded' => 0, 'failed' => 0, 'skipped' => 1],
+            $result,
+        );
+        $item = $queue->items($this->supplierId, (int) $batch['id'], 10, 0)['items'][0];
+        self::assertSame($employeeId, $item['employee_id']);
+        self::assertSame('skipped', $item['status']);
+        self::assertSame('annual_certificate_no_income', $item['last_error_code']);
+        $detail = $queue->detail($this->supplierId, (int) $batch['id']);
+        self::assertSame('completed', $detail['status']);
+        self::assertSame(0, $detail['failed_count']);
+        self::assertSame(1, $detail['skipped_count']);
+
+        self::assertSame(0, $queue->processAvailable(10)['processed']);
+        self::assertSame(1, $generator->calls);
     }
 
     /**

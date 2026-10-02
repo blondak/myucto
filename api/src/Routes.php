@@ -1379,7 +1379,7 @@ final class Routes
             // za celou firmu. Rozsahem je zdaňovací období, ne běh a revize —
             // proto vlastní fronta i vlastní routy.
             $g->post(
-                '/documents/annual-batches/{kind:payroll-sheet|advance|withholding}/{year:[0-9]{4}}',
+                '/documents/annual-batches/{kind:payroll-sheet|advance|withholding|annual-settlement}/{year:[0-9]{4}}',
                 [PayrollAnnualDocumentBatchAction::class, 'enqueue'],
             );
             $g->get(

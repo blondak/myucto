@@ -8,7 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\NamedLockName;
 use PDO;
 
-final class AnnualTaxCertificateService
+final class AnnualTaxCertificateService implements AnnualTaxCertificateGenerator
 {
     public function __construct(
         private readonly Connection $db,

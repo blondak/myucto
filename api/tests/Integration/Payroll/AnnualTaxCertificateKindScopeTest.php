@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateNoIncomeException;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -80,6 +81,29 @@ final class AnnualTaxCertificateKindScopeTest extends TestCase
             $this->expectExceptionMessage(
                 'neexistuje doložený zdanitelný příjem',
             );
+
+            $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+                null,
+            );
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    /**
+     * Chybějící příjem daného druhu má vlastní typ: hromadná dávka podle něj
+     * osobu přeskočí. Obecný DomainException by skončil jako selhání se třemi
+     * pokusy, u srážkového potvrzení za celou firmu u každého, kdo měl jen zálohy.
+     */
+    public function testMissingIncomeOfTheKindIsTypedSoTheBatchCanSkipIt(): void
+    {
+        [$connection, $builder, $supplierId, $employeeId] = $this->fixture([1]);
+        try {
+            $this->expectException(AnnualTaxCertificateNoIncomeException::class);
 
             $builder->build(
                 $supplierId,
