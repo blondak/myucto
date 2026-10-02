@@ -206,7 +206,7 @@ final class AzureOpenAiClient implements LlmGatewayInterface
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
-            return ['ok' => false, 'error' => 'Azure OpenAI credentials nenastaveny pro tohoto suppliera.'];
+            return ['ok' => false, 'error' => 'AI vytěžování není nastavené: firma nemá uložené přihlašovací údaje pro Azure OpenAI. Vložte je v Firma → AI nastavení.', 'code' => 'provider_not_configured'];
         }
         if (strlen($pdfBytes) > self::MAX_PDF_BYTES) {
             return ['ok' => false, 'error' => 'PDF přesahuje limit ' . self::MAX_PDF_BYTES . ' B.'];

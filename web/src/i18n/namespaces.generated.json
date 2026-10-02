@@ -320,12 +320,14 @@
       "time_billing"
     ],
     "invoices-export": [
+      "aiGateway",
       "dimensions",
       "export",
       "imports",
       "purchase_invoice"
     ],
     "invoices-import": [
+      "aiGateway",
       "dimensions",
       "export",
       "imports",
@@ -346,12 +348,14 @@
       "purchase_submissions"
     ],
     "purchase-invoices-export": [
+      "aiGateway",
       "dimensions",
       "export",
       "imports",
       "purchase_invoice"
     ],
     "purchase-invoices-import": [
+      "aiGateway",
       "dimensions",
       "export",
       "imports",

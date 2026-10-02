@@ -196,7 +196,12 @@ final class AiPdfExtractor
         // AI extraction fallback
         $extracted = $this->anthropic->extractInvoice($supplierId, $pdfBytes, $modelOverride);
         if (!$extracted['ok']) {
-            return ['ok' => false, 'error' => $extracted['error'] ?? 'AI extrakce selhala', 'source' => 'ai_failed'];
+            $notConfigured = ($extracted['code'] ?? $extracted['error'] ?? null) === 'provider_not_configured';
+            return [
+                'ok'     => false,
+                'error'  => $extracted['error'] ?? 'AI extrakce selhala',
+                'source' => $notConfigured ? 'ai_not_configured' : 'ai_failed',
+            ];
         }
 
         // Auto-upgrade na silnější model když Haiku vrátil slabý výsledek (vendor=tenant

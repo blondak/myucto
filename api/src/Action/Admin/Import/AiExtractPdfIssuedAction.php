@@ -87,6 +87,13 @@ final class AiExtractPdfIssuedAction
             $ip, $request->getHeaderLine('User-Agent'),
         );
 
+        if (!$result['ok'] && ($result['source'] ?? null) === 'ai_not_configured') {
+            return Json::error($response, 'ai_not_configured',
+                'AI poskytovatel nemá nastavený API klíč. Nastavte ho v Firma → AI nastavení.',
+                422,
+                ['source' => 'ai_not_configured'],
+            );
+        }
         if (!$result['ok']) {
             return Json::error($response, 'extraction_failed',
                 $result['error'] ?? 'Extrakce selhala',

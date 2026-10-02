@@ -3,15 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { integrationsApi, type AiIssuedExtractResult, type AiCredentialsResponse, type AiProvider } from '@/api/integrations'
-import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
 import { ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
 const router = useRouter()
-const auth = useAuthStore()
 
 // ── AI import VYDANÉ faktury — prodejní zrcadlo /purchase-invoices/ai-import.
 // Nastavení AI brány (provideři, klíče, DPA) zůstává v adminu; tady je jen denní
@@ -128,6 +127,11 @@ async function runAiExtract() {
       await loadAiCreds()
     }
   } catch (e: any) {
+    if (apiErrorCode(e) === 'ai_not_configured') {
+      toast.error(apiErrorMessage(e))
+      await loadAiCreds()
+      return
+    }
     const respData = e?.response?.data
     if (respData?.error?.details) {
       aiResult.value = { ok: false, ...respData.error.details, error: respData.error.message, source: respData.error.details?.source ?? 'ai_failed' }
@@ -156,13 +160,7 @@ onMounted(() => {
     </div>
 
     <!-- Aktivní provider není nakonfigurován — odkaz na admin nastavení (jen kdo smí) -->
-    <div v-if="credsLoaded && !aiConfigured" class="rounded-md bg-warning-50 border border-warning-500/40 px-4 py-3 text-sm text-warning-700">
-      <p>{{ t('integrations.ai.not_configured') }}</p>
-      <RouterLink v-if="auth.canWrite('settings.company.write')" to="/admin/integrations?tab=ai"
-                  class="mt-2 inline-block font-medium underline hover:no-underline">
-        {{ t('integrations.ai.open_settings') }}
-      </RouterLink>
-    </div>
+    <AiNotConfiguredNotice v-if="credsLoaded && !aiConfigured" />
 
     <!-- AI PDF extract (primární akce — jen když je aktivní provider nakonfigurován) -->
     <div v-if="aiConfigured" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

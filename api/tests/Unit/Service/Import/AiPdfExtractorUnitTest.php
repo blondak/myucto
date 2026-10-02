@@ -148,6 +148,25 @@ final class AiPdfExtractorUnitTest extends TestCase
         self::assertSame('ai_failed', $result['source']);
     }
 
+    /** @return iterable<string, array{array<string,mixed>}> */
+    public static function notConfiguredResults(): iterable
+    {
+        yield 'klient bez klíče' => [['ok' => false, 'error' => 'AI vytěžování není nastavené', 'code' => 'provider_not_configured']];
+        yield 'router bez providera' => [['ok' => false, 'error' => 'provider_not_configured']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('notConfiguredResults')]
+    public function testMissingKey_isReportedAsNotConfigured(array $llmResult): void
+    {
+        $this->pdfIsdoc->method('extract')->willReturn(null);
+        $this->anthropic->method('extractInvoice')->willReturn($llmResult);
+
+        $result = $this->extractor->extractAndCreate(1, 1, "%PDF-1.4\nfake pdf bez ISDOC", null, 'faktura.pdf');
+
+        self::assertFalse($result['ok']);
+        self::assertSame('ai_not_configured', $result['source']);
+    }
+
     public function testPin_validEmbeddedIsdoc_mapRejectsWrongTenant_structuredErrorNoLlm(): void
     {
         // Regrese H1 (Fable review commit 2): validní ISDOC, ale mapper ho odmítne

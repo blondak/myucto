@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter, RouterLink } from 'vue-router'
+import { useRouter } from 'vue-router'
 import ImportReportPanel from '@/components/exchange/ImportReportPanel.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
+import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
 import { useFileImportJob } from '@/composables/useFileImportJob'
 import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoices'
 import { integrationsApi, type AnthropicCredentialsStatus } from '@/api/integrations'
@@ -200,14 +201,9 @@ async function runScan() {
             <span class="ml-2 font-mono text-xs text-success-600/80">{{ aiStatus.default_model }}</span>
             <span class="ml-3 text-xs">{{ t('imports.ai_active_hint') }}</span>
           </div>
-          <div v-else
-               class="rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
-            <strong>⚠ {{ t('imports.ai_not_configured_title') }}</strong>
-            <span class="ml-2 text-xs">{{ t('imports.ai_not_configured_hint') }}</span>
-            <RouterLink to="/admin/integrations?tab=ai" class="ml-1 text-xs text-primary-700 hover:underline whitespace-nowrap">
-              → {{ t('nav.ai_settings') }}
-            </RouterLink>
-          </div>
+          <AiNotConfiguredNotice v-else>
+            <p class="text-xs leading-relaxed">{{ t('imports.ai_not_configured_skip') }}</p>
+          </AiNotConfiguredNotice>
         </div>
 
         <div class="border border-neutral-200 rounded-lg p-5 bg-neutral-50/50">

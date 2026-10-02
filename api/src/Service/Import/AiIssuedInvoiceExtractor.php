@@ -113,7 +113,12 @@ final class AiIssuedInvoiceExtractor
         // AI extrakce (fallback).
         $extracted = $this->llm->extractInvoice($supplierId, $bytes, $modelOverride);
         if (!$extracted['ok']) {
-            return ['ok' => false, 'error' => $extracted['error'] ?? 'AI extrakce selhala', 'source' => 'ai_failed'];
+            $notConfigured = ($extracted['code'] ?? $extracted['error'] ?? null) === 'provider_not_configured';
+            return [
+                'ok'     => false,
+                'error'  => $extracted['error'] ?? 'AI extrakce selhala',
+                'source' => $notConfigured ? 'ai_not_configured' : 'ai_failed',
+            ];
         }
         $data = (array) ($extracted['data'] ?? []);
 

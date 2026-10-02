@@ -155,7 +155,7 @@ final class AnthropicClient implements LlmGatewayInterface
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
-            return ['ok' => false, 'error' => 'Anthropic API key nenastaven pro tohoto suppliera.'];
+            return ['ok' => false, 'error' => 'AI vytěžování není nastavené: firma nemá uložený API klíč pro Anthropic. Vytvořte si ho u poskytovatele a vložte v Firma → AI nastavení.', 'code' => 'provider_not_configured'];
         }
         if (strlen($pdfBytes) > self::MAX_PDF_BYTES) {
             return ['ok' => false, 'error' => 'PDF přesahuje limit ' . self::MAX_PDF_BYTES . ' B.'];
@@ -689,7 +689,7 @@ EOT . "\n\n" . InvoiceExtractionPrompt::accrualFieldRules() . "\n\n" . InvoiceEx
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
-            return ['ok' => false, 'error' => 'Anthropic API key nenastaven pro tohoto suppliera.'];
+            return ['ok' => false, 'error' => 'AI vytěžování není nastavené: firma nemá uložený API klíč pro Anthropic. Vytvořte si ho u poskytovatele a vložte v Firma → AI nastavení.', 'code' => 'provider_not_configured'];
         }
         if (strlen($pdfBytes) > self::MAX_PDF_BYTES) {
             return ['ok' => false, 'error' => 'PDF přesahuje limit ' . self::MAX_PDF_BYTES . ' B.'];
@@ -788,7 +788,7 @@ EOT;
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
-            return ['ok' => false, 'error' => 'Anthropic API key nenastaven pro tohoto suppliera.'];
+            return ['ok' => false, 'error' => 'AI vytěžování není nastavené: firma nemá uložený API klíč pro Anthropic. Vytvořte si ho u poskytovatele a vložte v Firma → AI nastavení.', 'code' => 'provider_not_configured'];
         }
         if (strlen($pdfBytes) > self::MAX_PDF_BYTES) {
             return ['ok' => false, 'error' => 'PDF přesahuje limit ' . self::MAX_PDF_BYTES . ' B.'];
@@ -880,7 +880,7 @@ EOT;
     {
         $creds = $this->getCredentials($supplierId);
         if ($creds === null) {
-            return ['ok' => false, 'error' => 'Anthropic API key nenastaven pro tohoto suppliera.'];
+            return ['ok' => false, 'error' => 'AI vytěžování není nastavené: firma nemá uložený API klíč pro Anthropic. Vytvořte si ho u poskytovatele a vložte v Firma → AI nastavení.', 'code' => 'provider_not_configured'];
         }
         if (strlen($pdfBytes) > self::MAX_PDF_BYTES) {
             return ['ok' => false, 'error' => 'PDF přesahuje limit ' . self::MAX_PDF_BYTES . ' B.'];

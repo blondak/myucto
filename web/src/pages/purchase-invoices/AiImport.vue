@@ -4,17 +4,16 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { integrationsApi, type AiExtractResult, type AiCredentialsResponse, type AiProvider } from '@/api/integrations'
 import { purchaseInvoicesApi, type ImportBatch, type PurchaseDocumentKind } from '@/api/purchaseInvoices'
-import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
 import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const router = useRouter()
-const auth = useAuthStore()
 
 // ── AI import přijaté faktury (§12b) — extrakční flow vytažený z admin
 // Integrations (?tab=ai). Nastavení brány (provideři, klíče, DPA) zůstává
@@ -202,6 +201,11 @@ async function runAiExtract() {
       if (aiResult.value.purchase_invoice_id && !aiResult.value.duplicate) openReview([aiResult.value.purchase_invoice_id])
     }
   } catch (e: any) {
+    if (apiErrorCode(e) === 'ai_not_configured') {
+      toast.error(apiErrorMessage(e))
+      await loadAiCreds()
+      return
+    }
     // Server vrátil 422 (extraction_failed) — extract ai_data ze response
     const respData = e?.response?.data
     if (respData?.error?.details) {
@@ -242,13 +246,7 @@ onMounted(() => {
     </div>
 
     <!-- Aktivní provider není nakonfigurován — odkaz na admin nastavení (jen kdo smí) -->
-    <div v-if="credsLoaded && !aiConfigured" class="rounded-md bg-warning-50 border border-warning-500/40 px-4 py-3 text-sm text-warning-700">
-      <p>{{ t('integrations.ai.not_configured') }}</p>
-      <RouterLink v-if="auth.canWrite('settings.company.write')" to="/admin/integrations?tab=ai"
-                  class="mt-2 inline-block font-medium underline hover:no-underline">
-        {{ t('integrations.ai.open_settings') }}
-      </RouterLink>
-    </div>
+    <AiNotConfiguredNotice v-if="credsLoaded && !aiConfigured" />
 
     <!-- AI PDF extract (primární akce — jen když je aktivní provider nakonfigurován) -->
     <div v-if="aiConfigured" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

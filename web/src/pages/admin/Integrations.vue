@@ -1009,7 +1009,7 @@ onMounted(() => {
                 <span v-else-if="providerBadge(p) === 'no_key'" data-test="badge-no-key"
                   :title="t('aiGateway.no_key_badge_title')"
                   class="ml-0.5 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide"
-                  :class="aiProvider === p ? 'bg-white/20 text-white' : 'bg-warning-50 text-warning-700'">
+                  :class="aiProvider === p ? 'bg-danger-500 text-white' : 'bg-danger-50 text-danger-600'">
                   {{ t('aiGateway.no_key_badge') }}
                 </span>
                 <span v-if="p === RECOMMENDED_PROVIDER"
@@ -1060,10 +1060,29 @@ onMounted(() => {
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h2 class="text-sm font-medium text-neutral-700 mb-1">{{ t('aiGateway.credentials_title', { provider: providerLabel(aiProvider) }) }}</h2>
           <p class="text-xs text-neutral-500 mb-1">{{ t('aiGateway.credentials_hint') }}</p>
-          <p class="text-xs text-neutral-500 mb-4">
+
+          <div v-if="!providerConfigured(aiProvider)" data-test="ai-onboarding"
+               class="my-4 rounded-md border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-neutral-700 space-y-3">
+            <div>
+              <strong class="text-primary-700">{{ t('aiGateway.onboarding_title') }}</strong>
+              <p class="mt-1 text-xs leading-relaxed">{{ t('aiGateway.onboarding_intro') }}</p>
+            </div>
+            <ol class="list-decimal pl-5 space-y-1 text-xs leading-relaxed">
+              <li>{{ t('aiGateway.onboarding_step1', { provider: providerLabel(aiProvider) }) }}</li>
+              <li>{{ t('aiGateway.onboarding_step2') }}</li>
+              <li>{{ t('aiGateway.onboarding_step3') }}</li>
+              <li>{{ t('aiGateway.onboarding_step4') }}</li>
+            </ol>
+            <a :href="PROVIDER_KEY_URLS[aiProvider]" target="_blank" rel="noopener noreferrer"
+               :class="[btnFilled('primary'), 'whitespace-nowrap']">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+              {{ t('aiGateway.get_key_button', { provider: providerLabel(aiProvider) }) }}
+            </a>
+          </div>
+          <p v-else class="text-xs text-neutral-500 mb-4">
             {{ t('aiGateway.key_link') }}
             <a :href="PROVIDER_KEY_URLS[aiProvider]" target="_blank" rel="noopener noreferrer"
-               class="text-primary-700 hover:underline break-all">{{ PROVIDER_KEY_URLS[aiProvider] }}</a>
+               class="font-medium text-primary-700 underline break-all">{{ PROVIDER_KEY_URLS[aiProvider] }}</a>
           </p>
 
           <div v-if="providerConfigured(aiProvider)" class="rounded-md bg-primary-50 border border-primary-200 px-3 py-2 text-sm text-primary-700 mb-4">
