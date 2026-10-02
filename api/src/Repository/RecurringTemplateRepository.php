@@ -166,6 +166,7 @@ final class RecurringTemplateRepository
             $where[] = 't.client_id = ?';
             $params[] = (int) $filters['client_id'];
         }
+        $this->applySearch($filters, $where, $params);
 
         // Status counts — bez status filtru, ale se zbylými filtry (supplier + client).
         // Counts pro tab badges; mají reflektovat všechny statusy pro daného supplier/client scope.
@@ -177,6 +178,7 @@ final class RecurringTemplateRepository
                 SUM(CASE WHEN t.status = 'expired' THEN 1 ELSE 0 END) AS expired,
                 COUNT(*) AS all_templates
              FROM recurring_invoice_templates t
+             JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
             WHERE $whereForCounts"
         );
         $stmtCounts->execute($params);
@@ -189,7 +191,7 @@ final class RecurringTemplateRepository
         $whereSql = implode(' AND ', $where);
 
         // Total pro aktuální filter
-        $stmtTotal = $this->db->pdo()->prepare("SELECT COUNT(*) FROM recurring_invoice_templates t WHERE $whereSql");
+        $stmtTotal = $this->db->pdo()->prepare("SELECT COUNT(*) FROM recurring_invoice_templates t JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id WHERE $whereSql");
         $stmtTotal->execute($params);
         $total = (int) $stmtTotal->fetchColumn();
 
@@ -236,6 +238,7 @@ final class RecurringTemplateRepository
         $totStmt = $this->db->pdo()->prepare(
             "SELECT cur.code AS currency, COALESCE(SUM($totalExpr), 0) AS total
                FROM recurring_invoice_templates t
+               JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
                JOIN currencies cur ON cur.id = t.currency_id
               WHERE $whereSql
               GROUP BY cur.code
@@ -263,6 +266,29 @@ final class RecurringTemplateRepository
                 'totals_by_currency' => $totalsByCurrency,
             ],
         ];
+    }
+
+    /**
+     * Fulltext seznamu šablon: název šablony, klient (název, e-mail), text položek
+     * a pevný VS šablony. Položky přes EXISTS, ať se šablona nenásobí počtem řádků
+     * a sedí COUNT i stránkování. Očekává alias `c` pro clients.
+     *
+     * @param array<string,mixed> $filters
+     * @param list<string> $where
+     * @param list<mixed> $params
+     */
+    private function applySearch(array $filters, array &$where, array &$params): void
+    {
+        $raw = trim((string) ($filters['q'] ?? ''));
+        if ($raw === '') return;
+        $like = '%' . addcslashes($raw, '%_\\') . '%';
+        $where[] = '(t.name LIKE ?
+                     OR c.company_name LIKE ?
+                     OR c.main_email LIKE ?
+                     OR t.payment_variable_symbol LIKE ?
+                     OR EXISTS (SELECT 1 FROM recurring_invoice_template_items ri
+                                 WHERE ri.template_id = t.id AND ri.description LIKE ?))';
+        array_push($params, $like, $like, $like, $like, $like);
     }
 
     /**
@@ -313,9 +339,11 @@ final class RecurringTemplateRepository
         if (!empty($filters['supplier_id'])) { $where[] = 't.supplier_id = ?'; $params[] = (int) $filters['supplier_id']; }
         if (!empty($filters['client_id']))   { $where[] = 't.client_id = ?';   $params[] = (int) $filters['client_id']; }
         if (!empty($filters['status']))      { $where[] = 't.status = ?';      $params[] = (string) $filters['status']; }
+        $this->applySearch($filters, $where, $params);
         $stmt = $this->db->pdo()->prepare(
             'SELECT DISTINCT cur.code
                FROM recurring_invoice_templates t
+               JOIN clients c ON c.id = t.client_id AND c.supplier_id = t.supplier_id
                JOIN currencies cur ON cur.id = t.currency_id
               WHERE ' . implode(' AND ', $where)
         );

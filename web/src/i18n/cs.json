@@ -18569,6 +18569,8 @@
   "recurring": {
     "title": "Pravidelné fakturace",
     "subtitle": "Šablony pro automatické generování faktur v zadaných intervalech.",
+    "search_placeholder": "Hledat šablonu, klienta, e-mail, položku nebo VS…",
+    "search_empty": "Hledání nenašlo žádnou šablonu.",
     "new": "Nová šablona",
     "empty": "Zatím nemáš žádnou šablonu pravidelné fakturace.",
     "create_first": "Vytvořit první šablonu",

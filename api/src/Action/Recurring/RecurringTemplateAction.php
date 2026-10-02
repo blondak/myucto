@@ -90,6 +90,7 @@ final class RecurringTemplateAction
         $q = $request->getQueryParams();
         if (!empty($q['client_id'])) $filters['client_id'] = (int) $q['client_id'];
         if (!empty($q['status']))    $filters['status'] = (string) $q['status'];
+        if (isset($q['q']) && is_string($q['q']) && trim($q['q']) !== '') $filters['q'] = mb_substr(trim($q['q']), 0, 100);
 
         $page = max(1, (int) ($q['page'] ?? 1));
         $default = (int) $this->config->get('pagination.recurring_per_page', 50);

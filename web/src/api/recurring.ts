@@ -229,9 +229,10 @@ export interface RecurringInvoicesResponse {
 }
 
 export const recurringApi = {
-  list: (filters: { client_id?: number; status?: RecurringStatus; page?: number; per_page?: number; sort?: RecurringSort } = {}) => {
+  list: (filters: { client_id?: number; status?: RecurringStatus; q?: string; page?: number; per_page?: number; sort?: RecurringSort } = {}) => {
     const params: Record<string, string | number> = {}
     if (filters.client_id) params.client_id = filters.client_id
+    if (filters.q)         params.q = filters.q
     if (filters.status)    params.status = filters.status
     if (filters.page)      params.page = filters.page
     if (filters.per_page)  params.per_page = filters.per_page

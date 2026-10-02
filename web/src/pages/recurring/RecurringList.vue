@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { recurringApi, type RecurringTemplate, type RecurringStatus, type RecurringSort, type RecurringSummary } from '@/api/recurring'
 import { useToast } from '@/composables/useToast'
 import { useRowLink } from '@/composables/useRowLink'
@@ -13,6 +13,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t } = useI18n()
 const toast = useToast()
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const priceListEnabled = computed(() => !auth.hasCommercialFeatures || supplierStore.currentSupplier?.stock_enabled !== true)
@@ -22,6 +23,14 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const statusFilter = ref<RecurringStatus | ''>('active')
 const sortBy = ref<RecurringSort>('next_run')
+// Dotaz drží URL (?q=) a sessionStorage — odkaz „Zpět na seznam" z detailu vede
+// na holé /recurring, tak ať se hledání po návratu neztratí.
+const SEARCH_KEY = 'recurring.list.q'
+function storedSearch(): string {
+  try { return sessionStorage.getItem(SEARCH_KEY) ?? '' } catch { return '' }
+}
+const search = ref(typeof route.query.q === 'string' ? route.query.q : storedSearch())
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
 const busy = ref<number | null>(null)
 
 const total = ref(0)
@@ -46,6 +55,7 @@ async function load(reset = true) {
   try {
     const r = await recurringApi.list({
       status: statusFilter.value || undefined,
+      q: search.value.trim() || undefined,
       sort: sortBy.value,
       page: page.value,
     })
@@ -66,6 +76,15 @@ async function load(reset = true) {
 
 onMounted(() => load(true))
 watch([statusFilter, sortBy], () => load(true))
+watch(search, (q) => {
+  try { sessionStorage.setItem(SEARCH_KEY, q) } catch { /* private mode */ }
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    router.replace({ query: { ...route.query, q: q.trim() || undefined } })
+    load(true)
+  }, 300)
+})
+onUnmounted(() => { if (searchTimeout) clearTimeout(searchTimeout) })
 
 function statusBadgeClass(s: RecurringStatus) {
   return {
@@ -160,6 +179,18 @@ function gotoDetail(id: number, e?: MouseEvent) {
     <!-- Filtry v boxu (sjednoceno s /invoices a /purchase-invoices) -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 p-3">
       <div class="flex flex-wrap items-center gap-2">
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            v-model="search"
+            type="search"
+            :placeholder="t('recurring.search_placeholder')"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          />
+        </div>
         <select v-model="statusFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option value="">{{ t('common.all') ?? 'Vše' }} (status)</option>
           <option value="active">{{ t('recurring.status.active') }}</option>
@@ -185,6 +216,8 @@ function gotoDetail(id: number, e?: MouseEvent) {
     </div>
 
     <div v-if="loading" class="text-center py-12 text-neutral-400">…</div>
+    <EmptyState v-else-if="filtered.length === 0 && search.trim()" boxed icon="cycle"
+      :title="t('recurring.search_empty')" />
     <EmptyState v-else-if="filtered.length === 0" boxed icon="cycle"
       :title="t('recurring.empty')"
       :cta="auth.canWrite('recurring.create') ? t('recurring.create_first') : undefined"

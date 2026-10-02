@@ -18569,6 +18569,8 @@
   "recurring": {
     "title": "Recurring invoices",
     "subtitle": "Templates for automatic invoice generation on a schedule.",
+    "search_placeholder": "Search template, client, e-mail, item or VS…",
+    "search_empty": "No template matches the search.",
     "new": "New template",
     "empty": "No recurring invoice templates yet.",
     "create_first": "Create your first template",

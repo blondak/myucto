@@ -301,6 +301,10 @@ V seznamu (a na detailu) šablony jsou tlačítka **Pozastavit / Obnovit**,
 **Vygenerovat teď** a **Vygenerovat koncept** (jednorázový manuál run —
 užitečné pro testování i pro ruční vytvoření dokladu mimo rozvrh).
 
+Pole **Hledat** nad seznamem prochází název šablony, název a e-mail klienta,
+text položek a pevný variabilní symbol šablony. Kombinuje se s filtrem stavu
+i řazením a dotaz zůstane zachovaný i po návratu z detailu šablony.
+
 - **Vygenerovat teď** — respektuje nastavení šablony: u `auto_issue=true`
   fakturu rovnou vystaví (a případně odešle). Otevře modal s **date pickerem**
   (default dnešní datum); u budoucího data upozorní žlutým warningem, že daňově
@@ -414,7 +418,7 @@ Pravidelné fakturace mají vlastní REST endpointy pod `/api/recurring/*`:
 
 | Endpoint | Akce |
 | --- | --- |
-| `GET    /api/recurring` | seznam (filtry: `client_id`, `status`) |
+| `GET    /api/recurring` | seznam (filtry: `client_id`, `status`, `q`) |
 | `POST   /api/recurring` | vytvořit šablonu |
 | `GET    /api/recurring/{id}` | detail |
 | `PUT    /api/recurring/{id}` | update |
