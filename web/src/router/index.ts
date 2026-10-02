@@ -63,6 +63,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/reset',  name: 'reset',  component: () => import('@/pages/ResetPassword.vue'),  meta: { public: true } },
   { path: '/approval/:token([a-f0-9]{32,128})', name: 'approval',
     component: () => import('@/pages/ApprovalPublic.vue'), meta: { public: true } },
+  // Schválení přijatého dokladu manažerem střediska (F6) — odkaz z e-mailu, bez přihlášení.
+  { path: '/purchase-approval/:token([a-f0-9]{32,128})', name: 'purchase-approval-public',
+    component: () => import('@/pages/PurchaseApprovalPublic.vue'), meta: { public: true } },
   { path: '/work-report/:token([a-f0-9]{32,128})', name: 'work-report-tracking',
     component: () => import('@/pages/WorkReportTrackingPublic.vue'), meta: { public: true } },
   { path: '/payroll-document/:token([a-f0-9]{64})', name: 'payroll-document-access',
@@ -89,6 +92,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'invoices-export': ['invoices'], 'invoices-import': ['invoices'],
   'purchase-invoices': ['purchase_invoices'], 'purchase-invoices-payment-orders': ['purchase_invoices.payment_orders'],
   'purchase-invoice-submissions': ['documents.inbox'],
+  // Schvalovací schránka (F6): oprávnění lze přidělit i roli readonly, bez zápisu přijatých faktur.
+  'purchase-approvals': ['purchase_invoices.approve'],
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],
   // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup, viz AppLayout.vue.
   'purchase-invoices-export': ['purchase_invoices'], 'purchase-invoices-import': ['purchase_invoices'],

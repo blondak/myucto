@@ -10,6 +10,7 @@ import { settingsApi } from '@/api/settings'
 import { CHROME_FILLED_PRIMARY } from '@/components/ui/buttonStyles'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useNavOrder } from '@/composables/useNavOrder'
+import { usePurchaseApprovalCount } from '@/composables/usePurchaseApprovalCount'
 import SupplierSwitcher from './SupplierSwitcher.vue'
 import GlobalSearch from './GlobalSearch.vue'
 import CommandPalette from './CommandPalette.vue'
@@ -43,6 +44,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const automationStore = useAutomationStore()
+const approvalCount = usePurchaseApprovalCount()
 const sessionSecurity = useSessionSecurityStore()
 const toast = useToast()
 const keyboardShortcuts = useKeyboardShortcuts()
@@ -444,6 +446,8 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
         { to: '/purchase-invoices/incoming', label: t('nav.incoming_documents'), icon: ICONS.documents, permission: 'documents.inbox' as PermissionKey },
+        // Schvalování dokladů manažerem střediska (F6); badge = čeká na moje rozhodnutí.
+        ...(dimensionsEnabled ? [{ to: '/purchase-approvals', label: t('nav.purchase_approvals'), icon: ICONS.approvals, badge: approvalCount.pending.value, permission: 'purchase_invoices.approve' as PermissionKey }] : []),
         // AI import přijaté faktury (§12b) — denní operativa účetní (nahrát PDF → draft PF);
         // nastavení AI brány (klíče, DPA) zůstává v adminu (Firma → AI nastavení).
         // Explicitní permission: scan zrcadlí BE check AiExtractPdfAction; readonly ji nevidí.
@@ -1436,6 +1440,12 @@ onMounted(async () => {
       && supplierStore.currentSupplier?.accounting_enabled !== false
       && auth.canRead('accounting')) {
     automationStore.startPolling()
+  }
+  // Počet dokladů čekajících na schválení (badge v menu) jen schvalovateli firmy s dimenzemi.
+  if (!clientExperience.value
+      && supplierStore.currentSupplier?.dimensions_enabled === true
+      && auth.canRead('purchase_invoices.approve')) {
+    void approvalCount.refresh()
   }
   try { versionInfo.value = await updateApi.publicVersion() } catch {}
 })
