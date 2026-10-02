@@ -37,6 +37,11 @@ import WhyChip from '@/components/automation/WhyChip.vue'
 import { useSidePreview } from '@/composables/useSidePreview'
 import { appIsoDate } from '@/utils/date'
 import { missingDimensions } from '@/utils/purchaseReview'
+import ApprovalStatusBadge from '@/components/purchase/ApprovalStatusBadge.vue'
+import PurchaseApprovalPanel from '@/components/purchase/PurchaseApprovalPanel.vue'
+import { purchaseApprovalsApi, approvalErrorMessage } from '@/api/purchaseApprovals'
+import { announceApprovalRequested } from '@/utils/purchaseApproval'
+import { useDimensions } from '@/composables/useDimensions'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -411,6 +416,57 @@ async function onSettleRestDone() {
   await load()
 }
 
+// ── Schvalování manažerem střediska (F6) ──────────────────────────────────────
+const approvalRefreshKey = ref(0)
+const approvalDims = useDimensions()
+const approvalStatus = computed(() => invoice.value?.approval_status ?? 'none')
+// Panel se zkouší načíst u každého konceptu firmy s dimenzemi (doklad může schválení vyžadovat),
+// jinak jen tam, kde už nějaké schvalování běželo.
+const showApprovalPanel = computed(() => !!invoice.value
+  && (approvalStatus.value !== 'none' || (invoice.value.status === 'draft' && approvalDims.enabled.value)))
+const canRequestApproval = computed(() => !!invoice.value && invoice.value.status === 'draft'
+  && approvalStatus.value === 'rejected' && auth.canWrite('purchase_invoices') && !lockedForMe.value)
+const canCancelApproval = computed(() => !!invoice.value && invoice.value.status === 'draft'
+  && (approvalStatus.value === 'pending' || approvalStatus.value === 'rejected')
+  && auth.canWrite('purchase_invoices') && !lockedForMe.value)
+
+async function refreshInvoiceAfterApproval() {
+  if (!invoice.value) return
+  const fresh = await purchaseInvoicesApi.get(invoice.value.id)
+  if (invoice.value?.id === fresh.id) invoice.value = fresh
+  approvalRefreshKey.value++
+  purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+}
+
+async function requestApprovalAgain() {
+  if (!invoice.value || !canRequestApproval.value) return
+  acting.value = true
+  try {
+    await purchaseApprovalsApi.request(invoice.value.id)
+    toast.info(t('purchase_approval.toast.requested_again'))
+    await refreshInvoiceAfterApproval()
+  } catch (e) {
+    toast.error(approvalErrorMessage(e, t))
+  } finally {
+    acting.value = false
+  }
+}
+
+async function cancelApproval() {
+  if (!invoice.value || !canCancelApproval.value) return
+  if (!confirm(t('purchase_approval.action.cancel_confirm'))) return
+  acting.value = true
+  try {
+    await purchaseApprovalsApi.cancel(invoice.value.id)
+    toast.success(t('purchase_approval.toast.cancelled'))
+    await refreshInvoiceAfterApproval()
+  } catch (e) {
+    toast.error(approvalErrorMessage(e, t))
+  } finally {
+    acting.value = false
+  }
+}
+
 async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   if (!invoice.value) return
   if (target === 'paid' && !paidDate) { openMarkPaid(); return }
@@ -419,6 +475,12 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
   try {
     invoice.value = await purchaseInvoicesApi.transition(invoice.value.id, target, paidDate)
     markPaidOpen.value = false
+    approvalRefreshKey.value++
+    // Doklad vyžaduje schválení: zůstal konceptem a čeká na schvalovatele, nic se nepřijalo.
+    if (announceApprovalRequested(invoice.value, toast, t)) {
+      purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
+      return
+    }
     toast.success(t(`purchase_invoice.transition.success_${target}`))
     // Hotovostní vyrovnání (migrace 1327): přijetí dokladu s formou úhrady „Hotově"
     // a zvolenou pokladnou z ní udělá zaúčtovaný VPD a fakturu rovnou uhradí.
@@ -432,7 +494,7 @@ async function transition(target: PurchaseInvoiceStatus, paidDate?: string) {
     }
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    toast.error(approvalErrorMessage(e, t))
   } finally {
     acting.value = false
   }
@@ -759,6 +821,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
       // Ruční „Označit jako zaúčtované" (received→booked) je vestigiální (dědictví z MyInvoice
       // bez účetnictví) — z UI odstraněno v obou režimech. BE přechod + testy zůstávají.
       if (target === 'booked') continue
+      // Doklad čeká na schválení / byl zamítnut: přijetí řídí schvalování (odeslat znovu), ne ruční přechod.
+      if (target === 'received' && inv.status === 'draft' && (approvalStatus.value === 'pending' || approvalStatus.value === 'rejected')) continue
       if (target === 'received' && (inv.status === 'paid' || inv.status === 'cancelled')) {
         items.push({ key: `t-${target}`, label: transitionLabel(target), icon: 'uturn', tier: 'secondary', variant: 'neutral',
           disabled: acting.value, run: () => transition('received') })
@@ -774,6 +838,11 @@ const purchaseActions = computed<ActionItem[]>(() => {
       }
     }
   }
+
+  items.push({ key: 'approval-request', label: t('purchase_approval.action.request_again'), icon: 'send', tier: 'primary', variant: 'primary',
+    show: canRequestApproval.value, disabled: acting.value, run: requestApprovalAgain })
+  items.push({ key: 'approval-cancel', label: t('purchase_approval.action.cancel'), icon: 'x', tier: 'overflow', variant: 'danger',
+    show: canCancelApproval.value, disabled: acting.value, run: cancelApproval })
 
   items.push({ key: 'settle-rest', label: t('purchase_invoice.payment_summary.settle_rest'), icon: 'coin', tier: 'secondary', variant: 'warning',
     show: canSettleRest.value, run: () => { settleRestOpen.value = true } })
@@ -885,6 +954,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
           <span class="text-xs px-2 py-0.5 rounded font-normal" :class="statusBadgeClass(invoice.status)">
             {{ t(`purchase_invoice.status.${invoice.status}`) }}
           </span>
+          <ApprovalStatusBadge :status="invoice.approval_status" />
           <span class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600">
             {{ t(`purchase_invoice.document_kind.${invoice.document_kind}`) }}
           </span>
@@ -1289,6 +1359,10 @@ const purchaseActions = computed<ActionItem[]>(() => {
           </dl>
         </div>
       </div>
+
+      <!-- Schvalování manažerem střediska (F6): kola, stavy a komentáře schvalovatelů. -->
+      <PurchaseApprovalPanel v-if="showApprovalPanel" :invoice-id="invoice.id"
+        :approval-status="invoice.approval_status ?? 'none'" :refresh-key="approvalRefreshKey" />
 
       <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
            se přerazítkují. -->

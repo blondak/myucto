@@ -8,6 +8,8 @@ const m = vi.hoisted(() => ({
   saveDocument: vi.fn(),
   setExpenseKinds: vi.fn(),
   toastWarning: vi.fn(),
+  requiresApproval: false,
+  types: () => [{ id: 1, name: 'Středisko', is_active: true, show_on_documents: true, requires_approval: m.requiresApproval }],
 }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -21,7 +23,9 @@ vi.mock('@/composables/useDimensions', () => ({
   useDimensions: () => ({
     enabled: { value: true },
     canEdit: { value: true },
-    documentTypes: { value: [{ id: 1, name: 'Středisko', is_active: true, show_on_documents: true }] },
+    documentTypes: { get value() { return m.types() } },
+    types: { get value() { return m.types() } },
+    values: { value: [] },
     typeById: { value: new Map([[1, { id: 1, name: 'Středisko' }]]) },
     valueLabel: (id: number) => `hodnota-${id}`,
     load: () => Promise.resolve(),
@@ -95,6 +99,28 @@ describe('ExtractionReviewModal — dimenze', () => {
     m.saveDocument.mockReset().mockResolvedValue({ header: { 1: 7 }, items: {}, restamp: { lines: 0, needs_repost: false } })
     m.setExpenseKinds.mockReset()
     m.toastWarning.mockReset()
+    m.requiresApproval = false
+  })
+
+  it('koncept bez hlášení se otevře, když mu chybí dimenze typu se schvalováním (F5/F6)', async () => {
+    m.requiresApproval = true
+    m.prefill.mockResolvedValue({ header: {}, sources: {} })
+    m.getDocument.mockImplementation((_doc: string, id: number) =>
+      Promise.resolve(id === 2 ? { header: { 1: 5 }, items: {} } : { header: {}, items: {} }))
+    m.invoices = { 1: invoice(1), 2: invoice(2) }
+    const wrapper = await mountModal([1, 2])
+
+    expect(wrapper.text()).toContain('FV-1')
+    expect(wrapper.text()).not.toContain('FV-2')
+    expect(wrapper.get('[data-test="review-approval-missing"]').text()).toContain('purchase_approval.review.missing_dimension')
+  })
+
+  it('bez typu se schvalováním se doklad bez hlášení nepřidává a dimenze se neprobírají', async () => {
+    m.invoices = { 1: invoice(1) }
+    const wrapper = await mountModal([1])
+
+    expect(wrapper.find('[data-test="review-approval-missing"]').exists()).toBe(false)
+    expect(m.getDocument).not.toHaveBeenCalled()
   })
 
   it('otevře doklad bez hlášení vytěžení, kterému chybí povinná dimenze, a přeskočí doklad v pořádku', async () => {

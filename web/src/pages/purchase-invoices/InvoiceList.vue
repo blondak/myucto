@@ -43,6 +43,8 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
 import { needsReview } from '@/utils/purchaseReview'
+import ApprovalStatusBadge from '@/components/purchase/ApprovalStatusBadge.vue'
+import { approvalErrorMessage } from '@/api/purchaseApprovals'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -100,6 +102,8 @@ const unmatchedOnly = ref(false)
 // „Uhrazeno s rozdílem": uhrazený doklad, který evidované úhrady nepokrývají.
 const paidShortfallOnly = ref(false)
 const needsReviewOnly = ref(false)
+// Schvalování manažerem střediska (F6): '' = vše.
+const approvalFilter = ref<'' | 'pending' | 'approved' | 'rejected'>('')
 const paymentOrderedFilter = ref<'' | '1' | '0'>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
@@ -129,6 +133,7 @@ const activeFilterCount = computed(() => {
   if (unmatchedOnly.value) n++
   if (paidShortfallOnly.value) n++
   if (needsReviewOnly.value) n++
+  if (approvalFilter.value) n++
   if (paymentOrderedFilter.value) n++
   if (bookedFilter.value) n++
   if (importBatchFilter.value) n++
@@ -170,6 +175,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (unmatchedOnly.value) chips.push({ key: 'unmatched', value: t('purchase_invoice.filters.unmatched') })
   if (paidShortfallOnly.value) chips.push({ key: 'paidShortfall', value: t('purchase_invoice.filters.paid_shortfall') })
   if (needsReviewOnly.value) chips.push({ key: 'needsReview', value: t('purchase_invoice.filters.needs_review') })
+  if (approvalFilter.value) chips.push({ key: 'approval', value: t(`purchase_approval.filter.${approvalFilter.value}`) })
   if (paymentOrderedFilter.value) {
     chips.push({ key: 'paymentOrdered', value: t(paymentOrderedFilter.value === '1' ? 'purchase_invoice.filters.payment_ordered_yes' : 'purchase_invoice.filters.payment_ordered_no') })
   }
@@ -195,6 +201,7 @@ function clearFilter(key: string) {
     case 'unmatched': unmatchedOnly.value = false; break
     case 'paidShortfall': paidShortfallOnly.value = false; break
     case 'needsReview': needsReviewOnly.value = false; break
+    case 'approval': approvalFilter.value = ''; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
     case 'booked': bookedFilter.value = ''; break
     case 'importBatch': importBatchFilter.value = ''; break
@@ -484,13 +491,15 @@ function loadFiltersFromQuery(q: typeof route.query) {
   unmatchedOnly.value = q.unmatched === '1' || q.unmatched === 'true'
   paidShortfallOnly.value = q.paid_shortfall === '1' || q.paid_shortfall === 'true'
   needsReviewOnly.value = q.needs_review === '1' || q.needs_review === 'true'
+  approvalFilter.value = q.approval_status === 'pending' || q.approval_status === 'approved' || q.approval_status === 'rejected'
+    ? q.approval_status : ''
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
   statusFilter.value = typeof q.status === 'string' ? (q.status as PurchaseInvoiceStatus) : ''
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || unmatchedOnly.value || paidShortfallOnly.value || bookedFilter.value === '0') ? '' : DEFAULT_YEAR)
+    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || unmatchedOnly.value || paidShortfallOnly.value || bookedFilter.value === '0' || approvalFilter.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -524,6 +533,7 @@ function buildQuery(): Record<string, string> {
   if (unmatchedOnly.value) q.unmatched = '1'
   if (paidShortfallOnly.value) q.paid_shortfall = '1'
   if (needsReviewOnly.value) q.needs_review = '1'
+  if (approvalFilter.value) q.approval_status = approvalFilter.value
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (bookedFilter.value) q.booked = bookedFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
@@ -546,7 +556,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter,
        currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
@@ -574,6 +584,7 @@ watch(() => route.query, (newQ) => {
     unmatchedOnly.value = false
     paidShortfallOnly.value = false
     needsReviewOnly.value = false
+    approvalFilter.value = ''
     paymentOrderedFilter.value = ''
     bookedFilter.value = ''
     currencyFilter.value = ''
@@ -661,6 +672,7 @@ async function fetchPage(reset: boolean) {
       unmatched:     unmatchedOnly.value || undefined,
       paid_shortfall: paidShortfallOnly.value || undefined,
       needs_review:  needsReviewOnly.value || undefined,
+      approval_status: approvalFilter.value || undefined,
       payment_ordered: paymentOrderedFilter.value || undefined,
       booked:        bookedFilter.value  || undefined,
       import_batch_id: importBatchFilter.value || undefined,
@@ -826,12 +838,24 @@ async function bulkTransition(target: PurchaseInvoiceStatus, ids: number[]) {
   // selhání by záblesk celého výběru tvrdil něco, co se nestalo.
   const done: number[] = []
   let fail = 0
+  let sentToApproval = 0
+  let lastError: unknown = null
   for (const id of ids) {
-    try { await purchaseInvoicesApi.transition(id, target); done.push(id) } catch { fail++ }
+    try {
+      const res = await purchaseInvoicesApi.transition(id, target)
+      done.push(id)
+      if (res.approval_requested === true) sentToApproval++
+    } catch (e) { fail++; lastError = e }
   }
   bulkBusy.value = false
-  if (fail === 0) toast.success(t('purchase_invoice.bulk.success', { n: done.length }))
-  else            toast.error(t('purchase_invoice.bulk.partial', { ok: done.length, fail }))
+  if (fail === 0) {
+    toast.success(t('purchase_invoice.bulk.success', { n: done.length - sentToApproval }))
+  } else {
+    toast.error(t('purchase_invoice.bulk.partial', { ok: done.length, fail }))
+  }
+  // Doklady, které vyžadují schválení, zůstaly konceptem; chyba `approval_no_approver` se vysvětlí jménem střediska.
+  if (sentToApproval > 0) toast.info(t('purchase_approval.toast.requested') + ` (${sentToApproval})`)
+  if (fail > 0 && lastError) toast.error(approvalErrorMessage(lastError, t))
   markRowsTouched('purchase_invoice', done)
   await load()
 }
@@ -1223,6 +1247,14 @@ async function bulkSetKind() {
           <input v-model="needsReviewOnly" type="checkbox" class="rounded border-neutral-300 text-warning-600" />
           {{ t('purchase_invoice.filters.needs_review') }}
         </label>
+        <select v-if="dimensions.enabled.value || approvalFilter" v-model="approvalFilter" data-test="approval-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('purchase_approval.filter.label')">
+          <option value="">{{ t('purchase_approval.filter.all') }}</option>
+          <option value="pending">{{ t('purchase_approval.filter.pending') }}</option>
+          <option value="approved">{{ t('purchase_approval.filter.approved') }}</option>
+          <option value="rejected">{{ t('purchase_approval.filter.rejected') }}</option>
+        </select>
         <select v-model="paymentOrderedFilter" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('purchase_invoice.filters.payment_ordered')">
           <option value="">{{ t('purchase_invoice.filters.payment_ordered_all') }}</option>
@@ -1409,6 +1441,9 @@ async function bulkSetKind() {
                     <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
+                    <div v-if="inv.approval_status && inv.approval_status !== 'none'" class="mt-1">
+                      <ApprovalStatusBadge :status="inv.approval_status" small />
+                    </div>
                     <div v-if="inv.payment_ordered_at" class="mt-1">
                       <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 border border-teal-500/30 inline-flex items-center gap-0.5"
                         :title="t('purchase_invoice.payment_ordered_at_tooltip', { date: formatDate(inv.payment_ordered_at) })">
@@ -1603,6 +1638,9 @@ async function bulkSetKind() {
                       {{ t(`purchase_invoice.status.${inv.status}`) }}
                     </span>
                   </span>
+                </div>
+                <div v-if="inv.approval_status && inv.approval_status !== 'none'" class="mt-1">
+                  <ApprovalStatusBadge :status="inv.approval_status" small />
                 </div>
                 <div v-if="inv.payment_ordered_at" class="mt-1">
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 border border-teal-500/30 inline-flex items-center gap-0.5">
