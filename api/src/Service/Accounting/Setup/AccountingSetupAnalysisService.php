@@ -19,6 +19,9 @@ use PDO;
 
 final class AccountingSetupAnalysisService
 {
+    /** Pravidlo z historie předbíhá katalog (100) i AI (90); nižší číslo = dřív. */
+    private const HISTORY_RULE_PRIORITY = 40;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ImportJobRepository $jobs,
@@ -66,11 +69,18 @@ final class AccountingSetupAnalysisService
             $created = 0;
             $unclassifiedRows = [];
 
+            $this->jobs->updateProgress($jobId, ['current_step' => 'posting_history']);
+            $history = $this->historyRules($runId, $supplierId, $params, $rows, $chart, $activeExpenseRules);
+            $created += $history['created'];
+            $historyCovered = $history['covered_item_ids'];
+            $this->jobs->updateProgress($jobId, ['current_step' => 'purchase_invoices']);
+
             foreach ($rows as $index => $row) {
                 if ($this->jobs->isCancelRequested($jobId)) {
                     $this->jobs->markCancelled($jobId);
                     return;
                 }
+                $coveredByHistory = isset($historyCovered[(int) $row['id']]);
                 $description = (string) $row['description'];
                 $normalized = BankMessageNormalizer::normalizeKeepDigits($description);
                 $matched = self::matchCatalog($normalized, $catalog);
@@ -85,7 +95,7 @@ final class AccountingSetupAnalysisService
                     $year,
                 );
 
-                if ($suggestion === null) {
+                if ($suggestion === null && !$coveredByHistory) {
                     $unclassified++;
                     $unclassifiedRows[] = $row;
                 }
@@ -103,7 +113,10 @@ final class AccountingSetupAnalysisService
                     }
                 }
 
-                if ($matched !== null && $suggestion !== null) {
+                // Položku pokrývá pravidlo ze zaúčtované historie: katalogový odhad by mu
+                // jen konkuroval (a kandidát na majetek u něčeho, co se roky účtovalo do
+                // nákladů, je šum).
+                if ($matched !== null && $suggestion !== null && !$coveredByHistory) {
                     $ruleKind = self::baseRuleKind($matched, $suggestion->kind->value);
                     $groupVendorId = self::groupingVendorId($ruleKind, $row['vendor_id']);
                     $key = implode('|', [
@@ -360,6 +373,7 @@ final class AccountingSetupAnalysisService
                 'classification_coverage_pct' => self::coveragePct(count($rows), $unclassified),
                 'catalog_version' => $catalogVersion,
                 'catalog_locales' => ['cs', 'sk', 'de', 'en'],
+                'history' => $history['summary'],
                 'ai' => $aiSummary,
                 'validation' => [
                     'kind_scorable' => $storedScorable,
@@ -417,6 +431,305 @@ final class AccountingSetupAnalysisService
         );
         $stmt->execute($bind);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Návrhy pravidel ze zaúčtované historie ({@see AccountingHistoryRuleLearner}).
+     *
+     * Historie má přednost před katalogem i před stávajícími pravidly: když dnešní
+     * pravidlo posílá doklady dodavatele jinam, než kam se roky účtovaly, dostane
+     * návrh prioritu těsně nad ním. Kde stávající pravidla už vedou na stejný účet,
+     * návrh nevznikne, jen se položky započítají jako pokryté.
+     *
+     * @param list<array<string,mixed>> $rows položky z items()
+     * @param list<array<string,mixed>> $activeExpenseRules
+     * @return array{created:int,covered_item_ids:array<int,bool>,summary:array<string,int>}
+     */
+    private function historyRules(
+        int $runId,
+        int $supplierId,
+        array $params,
+        array $rows,
+        array $chart,
+        array $activeExpenseRules,
+    ): array {
+        $itemsByInvoice = [];
+        foreach ($rows as $row) {
+            $itemsByInvoice[(int) $row['purchase_invoice_id']][] = $row;
+        }
+        $documents = [];
+        foreach ($this->postedCostAccounts($supplierId, $params) as $invoiceId => $document) {
+            if (!isset($itemsByInvoice[$invoiceId])) {
+                continue;
+            }
+            $document['descriptions'] = array_map(
+                static fn (array $row): string => (string) $row['description'],
+                $itemsByInvoice[$invoiceId],
+            );
+            $documents[] = $document;
+        }
+        $learned = AccountingHistoryRuleLearner::learn($documents);
+
+        $kindsByAccount = $this->postingRuleKindsByAccount($supplierId);
+        $rulesById = [];
+        foreach ($activeExpenseRules as $rule) {
+            $rulesById[(int) $rule['id']] = $rule;
+        }
+        $created = 0;
+        $covered = [];
+        $summary = [
+            'documents' => count($documents),
+            'documents_learned' => $learned['documents'],
+            'rules' => 0,
+            'already_covered' => 0,
+            'overrides' => 0,
+            'not_postable' => 0,
+            'ambiguous_vendors' => count($learned['ambiguous']),
+            'covered_items' => 0,
+        ];
+
+        foreach ($learned['rules'] as $candidate) {
+            $account = (string) $candidate['account'];
+            $kind = $this->historyKind($chart, $account, $kindsByAccount);
+            if ($kind === null) {
+                $summary['not_postable']++;
+                continue;
+            }
+            $keyword = $candidate['keyword'] !== null ? (string) $candidate['keyword'] : null;
+            $items = [];
+            foreach ($candidate['invoice_ids'] as $invoiceId) {
+                foreach ($itemsByInvoice[$invoiceId] ?? [] as $row) {
+                    if ($keyword === null
+                        || str_contains(BankMessageNormalizer::normalizeKeepDigits((string) $row['description']), $keyword)) {
+                        $items[(int) $row['id']] = $row;
+                    }
+                }
+            }
+
+            $current = $this->currentRuleOutcome($supplierId, $items, $activeExpenseRules, $rulesById, $account, $kind);
+            foreach ($items as $itemId => $_) {
+                $covered[$itemId] = true;
+            }
+            if ($current['covered']) {
+                $summary['already_covered']++;
+                continue;
+            }
+
+            $strong = $candidate['share'] >= 0.95 && $candidate['agreeing'] >= 5;
+            $proposal = [
+                'name' => trim((string) ($candidate['vendor_name'] ?? ('#' . $candidate['vendor_id']))
+                    . ($keyword !== null ? ' - ' . $keyword : '')) . ' → ' . $account,
+                'vendor_client_id' => (int) $candidate['vendor_id'],
+                'vendor_name_contains' => null,
+                'description_contains' => $keyword,
+                'expense_kind' => $kind->value,
+                'target_account_code' => $account,
+                'application_mode' => $strong ? 'auto' : 'suggest',
+                'priority' => $current['overrides'] === []
+                    ? self::HISTORY_RULE_PRIORITY
+                    : max(1, min(array_column($current['overrides'], 'priority')) - 1),
+                'is_active' => true,
+                'learned_from' => 'history',
+            ];
+            if ($this->hasEquivalentExpenseRule($activeExpenseRules, $proposal)) {
+                $summary['already_covered']++;
+                continue;
+            }
+            if ($current['overrides'] !== []) {
+                $summary['overrides']++;
+            }
+            $this->setup->addProposal(
+                $runId, $supplierId, 'expense_rule',
+                hash('sha256', self::canonicalJson(array_diff_key($proposal, ['name' => true]))),
+                $proposal['name'], (float) $candidate['share'], (int) $candidate['agreeing'], (float) $candidate['amount'],
+                $proposal,
+                [
+                    'source' => 'history',
+                    'documents' => (int) $candidate['documents'],
+                    'agreeing' => (int) $candidate['agreeing'],
+                    'share' => (float) $candidate['share'],
+                    'window' => (string) $candidate['window'],
+                    'first_seen' => $candidate['first_seen'],
+                    'last_seen' => $candidate['last_seen'],
+                    'other_accounts' => $candidate['other_accounts'],
+                    'overrides' => $current['overrides'],
+                    'samples' => $candidate['samples'],
+                ],
+            );
+            $summary['rules']++;
+            $created++;
+        }
+
+        if ($learned['ambiguous'] !== []) {
+            $ambiguous = $learned['ambiguous'];
+            usort($ambiguous, static fn (array $a, array $b): int => $b['documents'] <=> $a['documents']);
+            $this->setup->addProposal(
+                $runId, $supplierId, 'data_quality',
+                hash('sha256', 'history_ambiguous|' . count($ambiguous)),
+                'Dodavatelé účtovaní na různé účty', 0.0, count($ambiguous), 0.0,
+                ['code' => 'history_ambiguous_vendors'],
+                ['source' => 'history', 'vendors' => array_slice($ambiguous, 0, 30)],
+            );
+            $created++;
+        }
+
+        $summary['covered_items'] = count($covered);
+        return ['created' => $created, 'covered_item_ids' => $covered, 'summary' => $summary];
+    }
+
+    /**
+     * Nákladové účty aktivního zaúčtování každé přijaté faktury (storno má source_id
+     * NULL a stornovaný originál active_source_id NULL, takže se nepočítá ani jedno).
+     * Obě strany: dobropis nese náklad na Dal.
+     *
+     * @return array<int,array{invoice_id:int,vendor_id:int,vendor_name:?string,date:string,accounts:array<string,float>}>
+     */
+    private function postedCostAccounts(int $supplierId, array $params): array
+    {
+        $where = [
+            'pi.supplier_id = ?', "pi.status NOT IN ('draft','cancelled')",
+            "pi.document_kind NOT IN ('advance','tax_document')", 'pi.vendor_id IS NOT NULL',
+        ];
+        $bind = [$supplierId];
+        if (!empty($params['date_from'])) {
+            $where[] = 'COALESCE(pi.tax_date, pi.issue_date) >= ?';
+            $bind[] = $params['date_from'];
+        }
+        if (!empty($params['date_to'])) {
+            $where[] = 'COALESCE(pi.tax_date, pi.issue_date) <= ?';
+            $bind[] = $params['date_to'];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.id invoice_id, pi.vendor_id, c.company_name vendor_name,
+                    COALESCE(pi.tax_date, pi.issue_date) doc_date, coa.account_code, SUM(jel.signed_amount) amount
+               FROM purchase_invoices pi
+               JOIN journal_entries je ON je.supplier_id = pi.supplier_id
+                AND je.source_type = 'purchase_invoice' AND je.active_source_id = pi.id
+               JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
+               JOIN chart_of_accounts coa ON coa.id = jel.account_id AND coa.supplier_id = je.supplier_id
+               LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
+              WHERE " . implode(' AND ', $where) . "
+                AND (coa.account_code LIKE '0%' OR coa.account_code LIKE '1%' OR coa.account_code LIKE '5%')
+              GROUP BY pi.id, pi.vendor_id, c.company_name, doc_date, coa.account_code
+             HAVING SUM(jel.signed_amount) <> 0
+              ORDER BY pi.id"
+        );
+        $stmt->execute($bind);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $invoiceId = (int) $row['invoice_id'];
+            $out[$invoiceId] ??= [
+                'invoice_id' => $invoiceId,
+                'vendor_id' => (int) $row['vendor_id'],
+                'vendor_name' => $row['vendor_name'] !== null ? (string) $row['vendor_name'] : null,
+                'date' => (string) $row['doc_date'],
+                'accounts' => [],
+            ];
+            $code = (string) $row['account_code'];
+            $out[$invoiceId]['accounts'][$code] = ($out[$invoiceId]['accounts'][$code] ?? 0.0) + (float) $row['amount'];
+        }
+        return $out;
+    }
+
+    /** @return array<string,ExpenseKind> účet z předkontace => druh výdaje */
+    private function postingRuleKindsByAccount(int $supplierId): array
+    {
+        $out = [];
+        foreach (ExpenseKind::cases() as $kind) {
+            $debit = trim((string) ($this->postingRules->resolve($supplierId, $kind->ruleKey())['debit_account_code'] ?? ''));
+            if ($debit !== '' && !isset($out[$debit])) {
+                $out[$debit] = $kind;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Druh výdaje pro účet, na který se historicky účtovalo. Majetek (0xx) se z historie
+     * neučí: pořízení je jednorázové a pravidlo „dodavatel → 042" by z každé další
+     * faktury udělalo kartu majetku. Cílem pravidla musí být aktivní analytika, stejně
+     * jako u ostatních návrhů (schválení to vynucuje).
+     *
+     * @param array<string,ExpenseKind> $kindsByAccount
+     */
+    private function historyKind(array $chart, string $account, array $kindsByAccount): ?ExpenseKind
+    {
+        if (!$this->isAnalyticAccount($chart, $account) || preg_match('/^[15]/', $account) !== 1) {
+            return null;
+        }
+        $mapped = $kindsByAccount[$account] ?? null;
+        if ($mapped !== null && $mapped !== ExpenseKind::FixedAsset) {
+            return $mapped;
+        }
+        $name = BankMessageNormalizer::normalizeKeepDigits((string) ($chart['by_code'][$account]['name'] ?? ''));
+        if (str_contains($name, 'drobn')) {
+            return str_starts_with($account, '518') || str_contains($name, 'nehmot')
+                ? ExpenseKind::SmallIntangible
+                : ExpenseKind::SmallAsset;
+        }
+        return str_starts_with($account, '50') || str_starts_with($account, '1')
+            ? ExpenseKind::Material
+            : ExpenseKind::Service;
+    }
+
+    /**
+     * Co s položkami udělají DNEŠNÍ pravidla. `covered` = všechny vyhodnocené položky
+     * už pravidlo vede na stejný účet i druh; `overrides` = pravidla, která je posílají
+     * jinam a historie je má přebít.
+     *
+     * @param array<int,array<string,mixed>> $items
+     * @param list<array<string,mixed>> $activeExpenseRules
+     * @param array<int,array<string,mixed>> $rulesById
+     * @return array{covered:bool,overrides:list<array{id:int,name:string,priority:int,account:?string}>}
+     */
+    private function currentRuleOutcome(
+        int $supplierId,
+        array $items,
+        array $activeExpenseRules,
+        array $rulesById,
+        string $account,
+        ExpenseKind $kind,
+    ): array {
+        if ($activeExpenseRules === [] || $items === []) {
+            return ['covered' => false, 'overrides' => []];
+        }
+        $agree = 0;
+        $evaluated = 0;
+        $overrides = [];
+        foreach (array_slice($items, 0, 50, true) as $row) {
+            $evaluated++;
+            $suggestion = $this->classification->suggestFromRules(
+                $supplierId,
+                (string) $row['description'],
+                $row['vendor_name'] !== null ? (string) $row['vendor_name'] : null,
+                $row['vendor_id'] !== null ? (int) $row['vendor_id'] : null,
+                abs((float) $row['unit_price_without_vat']) * self::fxRate($row['exchange_rate']),
+                (int) $row['acq_year'],
+                $activeExpenseRules,
+            );
+            if ($suggestion === null || $suggestion->ruleId === null) {
+                continue;
+            }
+            $rule = $rulesById[$suggestion->ruleId] ?? null;
+            // Účet null u pravidla = klasifikátor ho záměrně odložil na účetní (pojistka
+            // PHM u řádku, který palivem není). Shodu tedy posuzuje cíl pravidla, ne
+            // odložený výsledek; pojistka pak stejně platí i pro pravidlo z historie.
+            $suggested = $suggestion->accountCode
+                ?? (trim((string) ($rule['target_account_code'] ?? '')) ?: $suggestion->kind->fallbackAccount());
+            if ($suggested === $account && $suggestion->kind === $kind) {
+                $agree++;
+                continue;
+            }
+            if ($rule !== null) {
+                $overrides[(int) $rule['id']] = [
+                    'id' => (int) $rule['id'],
+                    'name' => (string) $rule['name'],
+                    'priority' => (int) $rule['priority'],
+                    'account' => $suggestion->accountCode,
+                ];
+            }
+        }
+        return ['covered' => $evaluated > 0 && $agree === $evaluated, 'overrides' => array_values($overrides)];
     }
 
     private function lockedDocumentCount(int $supplierId, array $params): int

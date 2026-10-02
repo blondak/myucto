@@ -205,6 +205,26 @@ Výsledkem jsou návrhy analytických účtů, pravidel nákladů, předkontací
 bankovních pravidel, kandidátů na dlouhodobý majetek a upozornění na neúplná
 data.
 
+Jako první asistent projde, jak se přijaté faktury skutečně zaúčtovaly. U převzatých
+dat to bývá i deset let historie, a to, co v ní fungovalo, je spolehlivější než
+odhad podle textu položky. Pravidlo nákladů **dodavatel → účet** vznikne, když má
+dodavatel aspoň tři zaúčtované doklady a aspoň 90 % z nich šlo na stejný nákladový
+účet. Doklad se počítá jen tehdy, když jeden účet nese aspoň 95 % jeho nákladové
+částky. Haléřové zaokrouhlení ho tedy nerozbije, ale faktura za zboží i dopravu
+zůstává smíšená a počítá se jako nesouhlas. Pokud se osnova v čase měnila, posoudí
+asistent ještě poslední dva roky dodavatele. Dodavatele, který účtoval na více
+účtů, zkusí rozdělit klíčovým slovem z popisu položek (například nafta proti servisu).
+Když ani to nedá čistou shodu, pravidlo nenavrhne a dodavatele uvede v kvalitě dat
+mezi nejednoznačnými. Z historie se neučí pořízení majetku (účty 0xx).
+
+Pravidla ze zaúčtované historie mají přednost před slovníkem i AI. Pokud stávající
+pravidlo posílá doklady dodavatele jinam, než kam se roky účtovaly, dostane návrh
+prioritu těsně nad ním a u návrhu je vidět, které pravidlo přebije. Když stávající
+pravidla už vedou na stejný účet, návrh nevznikne. Pravidlo s aspoň pěti doklady
+a shodou aspoň 95 % se po schválení uloží v automatickém režimu; ostatní jen
+navrhují. Ruční změna účtu nebo druhu nákladu v editoru návrhu vrátí pravidlo do
+režimu navrhování. Položky pokryté historií se už nenabízejí slovníku ani AI.
+
 Pokud je nákladový účet v osnově plochý, může asistent navrhnout analytiky pro
 opakovaně rozpoznané skupiny, například pohonné hmoty, energie, drobný majetek,
 opravy, pojištění nebo služby. Pravidlo nákladů míří na existující nebo současně
@@ -269,7 +289,7 @@ Postup má tři oddělené kroky:
    návrh upravit v samostatném okně, například změnit český název, klíčovou frázi
    nebo účty MD/D. Technické klíče předkontací se uživateli nezobrazují jako
    názvy. Z vybraných položek pak vznikne neměnný balíček a pravidla se uloží
-   v režimu jen navrhovat. Balíček pro následný dry-run současně zmrazí všechna
+   v režimu jen navrhovat, kromě pravidel silně doložených zaúčtovanou historií. Balíček pro následný dry-run současně zmrazí všechna
    již aktivní pravidla nákladů firmy, takže opakovaná analýza nezapomene pravidla
    vytvořená předchozím během. Pokud opakovaná analýza nenajde žádné nové pravidlo,
    lze tlačítkem **Použít aktivní pravidla** vytvořit balíček pouze z těch stávajících.

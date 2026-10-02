@@ -514,10 +514,18 @@ final class AccountingSetupAssistantAction
                 throw new \InvalidArgumentException('invalid_expense_kind');
             }
             $proposal['name'] = self::requiredText($body['name'] ?? null, 120);
-            $proposal['description_contains'] = self::requiredText($body['description_contains'] ?? null, 190);
+            // Pravidlo z historie může stát jen na dodavateli; bez dodavatele by holé
+            // pravidlo bez klíčového slova chytlo každou položku.
+            $proposal['description_contains'] = (int) ($proposal['vendor_client_id'] ?? 0) > 0
+                ? self::optionalText($body['description_contains'] ?? null, 190)
+                : self::requiredText($body['description_contains'] ?? null, 190);
             $proposal['expense_kind'] = $kind->value;
             $proposal['target_account_code'] = self::accountCode($body['target_account_code'] ?? null);
-            $proposal['application_mode'] = 'suggest';
+            // Ruční změna účtu nebo druhu už není to, co doložila historie.
+            $proposal['application_mode'] = AccountingSetupApprovalService::historyBackedAuto($existing)
+                && $proposal['target_account_code'] === ($existing['target_account_code'] ?? null)
+                && $proposal['expense_kind'] === ($existing['expense_kind'] ?? null)
+                    ? 'auto' : 'suggest';
             $proposal['is_active'] = true;
             return [$proposal['name'], $proposal];
         }

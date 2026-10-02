@@ -21,6 +21,7 @@ import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { dependentProposalIds, requiredChartProposalIds } from '@/utils/accountingSetupDependencies'
 import DateInput from '@/components/ui/DateInput.vue'
+import { formatDate } from '@/composables/useFormat'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -470,7 +471,29 @@ function proposalSummary(item: SetupProposal): string {
   if (item.proposal_type === 'asset_candidate') {
     return `${Number(p.unit_price_czk || 0).toLocaleString()} Kč > ${Number(p.fixed_asset_limit || 0).toLocaleString()} Kč`
   }
+  if (p.code === 'history_ambiguous_vendors' && Array.isArray(item.evidence_json.vendors)) {
+    return (item.evidence_json.vendors as Array<{ vendor_name?: string | null; accounts?: Record<string, number> }>)
+      .slice(0, 5)
+      .map(v => `${v.vendor_name ?? '?'} (${Object.keys(v.accounts ?? {}).join(', ')})`)
+      .join('; ')
+  }
   return t('accounting.setup_assistant.needs_review')
+}
+
+function historyEvidence(item: SetupProposal): string {
+  const e = item.evidence_json
+  if (e.source !== 'history' || item.proposal_type !== 'expense_rule') return ''
+  return t('accounting.setup_assistant.history_evidence', {
+    agreeing: Number(e.agreeing ?? 0),
+    documents: Number(e.documents ?? 0),
+    from: formatDate(String(e.first_seen ?? '')),
+    to: formatDate(String(e.last_seen ?? '')),
+  })
+}
+
+function historyOverrides(item: SetupProposal): Array<{ id: number; name: string }> {
+  const overrides = item.evidence_json.overrides
+  return Array.isArray(overrides) ? overrides as Array<{ id: number; name: string }> : []
 }
 
 function proposalTitle(item: SetupProposal): string {
@@ -617,6 +640,16 @@ onBeforeUnmount(stopPolling)
       <p v-if="run?.summary_json" class="mt-3 text-xs text-neutral-500">
         {{ t('accounting.setup_assistant.catalog', { version: run.summary_json.catalog_version, locales: run.summary_json.catalog_locales.join(', ').toUpperCase() }) }}
       </p>
+      <p v-if="run?.summary_json?.history" class="mt-2 text-xs text-neutral-500">
+        {{ t('accounting.setup_assistant.history_result', {
+          documents: run.summary_json.history.documents,
+          learned: run.summary_json.history.documents_learned,
+          rules: run.summary_json.history.rules,
+          covered: run.summary_json.history.covered_items,
+          already: run.summary_json.history.already_covered,
+          ambiguous: run.summary_json.history.ambiguous_vendors,
+        }) }}
+      </p>
       <p v-if="run?.summary_json?.ai?.requested" class="mt-2 text-xs text-neutral-500">
         {{ t('accounting.setup_assistant.ai_result', {
           status: t(`accounting.setup_assistant.ai_statuses.${run.summary_json.ai.status}`),
@@ -683,6 +716,15 @@ onBeforeUnmount(stopPolling)
                 <span v-if="item.evidence_json.concept" class="text-neutral-400">
                   {{ t('accounting.setup_assistant.concept', { value: conceptLabel(item.evidence_json.concept) }) }}
                 </span>
+                <template v-if="historyEvidence(item)">
+                  <span>{{ historyEvidence(item) }}</span>
+                  <span v-if="item.proposal_json.application_mode === 'auto'" class="rounded-full bg-success-50 px-2 py-0.5 text-success-600">
+                    {{ t('accounting.setup_assistant.history_auto') }}
+                  </span>
+                  <span v-for="rule in historyOverrides(item)" :key="rule.id" class="text-warning-700">
+                    {{ t('accounting.setup_assistant.history_overrides', { name: rule.name }) }}
+                  </span>
+                </template>
               </div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2">
@@ -819,7 +861,7 @@ onBeforeUnmount(stopPolling)
         <template v-if="editingProposal.proposal_type === 'expense_rule'">
           <label class="block text-sm">
             {{ t('accounting.setup_assistant.fields.keyword') }}
-            <input v-model="editForm.description_contains" required maxlength="190" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+            <input v-model="editForm.description_contains" :required="!editingProposal.proposal_json.vendor_client_id" maxlength="190" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
           </label>
           <label class="block text-sm">
             {{ t('accounting.setup_assistant.fields.expense_kind') }}

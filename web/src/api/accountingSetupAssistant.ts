@@ -35,6 +35,16 @@ export interface SetupRun {
     catalog_version: number
     catalog_locales: string[]
     locked_period_documents: number
+    history?: {
+      documents: number
+      documents_learned: number
+      rules: number
+      already_covered: number
+      overrides: number
+      not_postable: number
+      ambiguous_vendors: number
+      covered_items: number
+    }
     ai?: {
       requested: boolean
       status: 'not_requested' | 'skipped' | 'failed' | 'partial' | 'ok'

@@ -94,7 +94,7 @@ final class AccountingSetupApprovalService
                     }
                     $this->requireActiveAnalyticAccount($supplierId, $proposal['target_account_code'] ?? null);
                     $proposal['name'] = mb_substr((string) ($proposal['name'] ?? 'Pravidlo'), 0, 120);
-                    $proposal['application_mode'] = 'suggest';
+                    $proposal['application_mode'] = self::historyBackedAuto($proposal) ? 'auto' : 'suggest';
                     $proposal['is_active'] = true;
                     if (!$this->hasEquivalentExpenseRule($supplierId, $proposal)) {
                         $this->expenseRules->insert($supplierId, $proposal, $userId);
@@ -148,6 +148,19 @@ final class AccountingSetupApprovalService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Katalog a AI hádají, proto jejich pravidla jen navrhují. Pravidlo, které analýza
+     * odvodila ze zaúčtované historie s drtivou shodou, smí účtovat samo: to, co dělá,
+     * firma dělala roky.
+     *
+     * @param array<string,mixed> $proposal
+     */
+    public static function historyBackedAuto(array $proposal): bool
+    {
+        return ($proposal['learned_from'] ?? null) === 'history'
+            && ($proposal['application_mode'] ?? null) === 'auto';
     }
 
     private function requireActiveAccount(int $supplierId, mixed $accountCode): void
