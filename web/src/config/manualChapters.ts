@@ -56,6 +56,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/accounting\/balance-sheet(?:\/|$)/, '57_Rozvaha'],
   [/^\/accounting\/statement-mapping(?:\/|$)/, '57_Rozvaha'],
   [/^\/dimension-stats(?:\/|$)|^\/accounting\/dimension-profit(?:\/|$)|^\/company\/dimensions(?:\/|$)/, '114_Dimenze'],
+  [/^\/purchase-approvals(?:\/|$)/, '114_Dimenze'],
   [/^\/accounting\/income-statement-by-function(?:\/|$)/, '59_Vysledovka_ucelova'],
   [/^\/accounting\/income-statement(?:\/|$)/, '58_Vysledovka_druhova'],
   [/^\/accounting\/saldo(?:\/|$)/, '60_Saldokonto'],
