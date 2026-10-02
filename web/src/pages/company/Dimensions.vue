@@ -16,6 +16,7 @@ import { accountingApi, type CostCenter } from '@/api/accounting'
 import { logbookApi, type Car } from '@/api/logbook'
 import { projectsApi, type Project } from '@/api/projects'
 import { useDimensions } from '@/composables/useDimensions'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -24,6 +25,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 // Záložka Pravidla se načte až při otevření.
 const DimensionRulesPanel = defineAsyncComponent(() => import('@/components/dimensions/DimensionRulesPanel.vue'))
 import Modal from '@/components/ui/Modal.vue'
+import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 
 /**
  * Firma → Dimenze: typy dimenzí a stromy jejich hodnot. Záložky dělí firemní
@@ -142,9 +144,18 @@ const typeForm = reactive({
   drives_accounts_mask: '5, 6',
 })
 
+// Kód typu musí projít `^[a-z0-9_-]{1,30}$`, proto verzálkový kód z názvu převedeme na malá písmena.
+const typeSlug = useAutoSlug(value => { typeForm.code = value.toLowerCase() }, {
+  mode: 'code', maxLen: 30, taken: () => dims.types.value.map(ty => ty.code.toUpperCase()),
+})
+const valueSlug = useAutoSlug(value => { valueForm.code = value }, {
+  mode: 'code', maxLen: 50, taken: () => dims.values.value.filter(v => v.type_id === selectedTypeId.value).map(v => v.code),
+})
+
 function newType() {
   closeForms()
   Object.assign(typeForm, { id: null, code: '', name: '', kind: 'custom', level: level.value, show_on_documents: true, is_active: true, sort_order: 100 })
+  typeSlug.init('')
   typeFormOpen.value = true
 }
 
@@ -177,6 +188,12 @@ async function saveType() {
   await load()
   selectedTypeId.value = result.id
   await loadAccountMap()
+}
+
+async function toggleTypeActive(type: DimensionType) {
+  const result = await run(() => dimensionsApi.updateType(type.id, { is_active: !type.is_active }),
+    type.is_active ? t('dimensions.type_deactivated_toast') : t('dimensions.type_activated'))
+  if (result) await load()
 }
 
 async function removeType(type: DimensionType) {
@@ -285,6 +302,7 @@ function newValue(parentId: number | null = null) {
     id: null, code: '', name: '', parent_id: parentId, is_active: true, responsible_user_id: null,
     responsible_note: '', car_id: null, project_id: null, cost_center_id: null, note: '',
   })
+  valueSlug.init('')
   if (parentId !== null) expanded.value = new Set([...expanded.value, parentId])
   mapRows.value = []
   valueFormOpen.value = true
@@ -603,7 +621,12 @@ function valueCount(typeId: number) {
                 {{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}<span v-if="selectedType.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }} ({{ selectedType.drives_accounts_mask }})</span>
               </p>
             </div>
-            <div class="flex flex-wrap gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <label v-if="canWrite" class="inline-flex items-center gap-2 text-sm text-neutral-700 whitespace-nowrap mr-1" data-test="dimension-type-active">
+                <ToggleSwitch :model-value="selectedType.is_active" :disabled="busy" :label="t('dimensions.type_active')"
+                              @update:model-value="toggleTypeActive(selectedType)" />
+                {{ selectedType.is_active ? t('dimensions.type_state_active') : t('dimensions.type_state_inactive') }}
+              </label>
               <button v-if="parentIds.length > 0" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-test="dimension-toggle-all" @click="toggleAll">
                 <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-180': allExpanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                 {{ allExpanded ? t('dimensions.collapse_all') : t('dimensions.expand_all') }}
@@ -627,9 +650,8 @@ function valueCount(typeId: number) {
           <ul v-else class="divide-y divide-neutral-100">
             <li v-for="{ value, depth } in visibleTree" :key="value.id"
                 class="flex flex-wrap items-center gap-2 px-4 py-2"
-                :class="{ 'opacity-60': !value.is_active }"
                 :data-test="`dimension-value-${value.code}`">
-              <div class="flex items-center gap-2 min-w-0 flex-1" :style="{ paddingLeft: `${depth * 1.25}rem` }">
+              <div class="flex items-center gap-2 min-w-0 flex-1" :class="{ 'opacity-60': !value.is_active }" :style="{ paddingLeft: `${depth * 1.25}rem` }">
                 <button v-if="childCount.get(value.id)" type="button" class="w-5 h-5 inline-flex items-center justify-center text-neutral-500"
                         :aria-expanded="expanded.has(value.id)" :aria-label="t('dimensions.toggle_children')" @click="toggle(value.id)">
                   <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded.has(value.id) }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
@@ -655,10 +677,11 @@ function valueCount(typeId: number) {
                 <button type="button" :class="btnOutlineSm('neutral')" :title="t('common.edit')" @click="editValue(value)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 </button>
-                <button type="button" :class="btnOutlineSm(value.is_active ? 'warning' : 'success')"
-                        :title="value.is_active ? t('dimensions.value_close') : t('dimensions.value_open')" @click="toggleActive(value)">
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="value.is_active ? ICONS.lock : ICONS.check" /></svg>
-                </button>
+                <span class="inline-flex items-center px-1.5" data-test="dimension-value-active">
+                  <ToggleSwitch :model-value="value.is_active" :disabled="busy"
+                                :label="value.is_active ? t('dimensions.value_close') : t('dimensions.value_open')"
+                                @update:model-value="toggleActive(value)" />
+                </span>
                 <button type="button" :class="btnOutlineSm('danger')" :title="t('common.delete')" @click="removeValue(value)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                 </button>
@@ -676,11 +699,11 @@ function valueCount(typeId: number) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
-            <input v-model="typeForm.name" type="text" maxlength="100" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="typeForm.name" type="text" maxlength="100" @input="typeForm.id === null && typeSlug.fromName(typeForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.code') }}</label>
-            <input v-model="typeForm.code" type="text" maxlength="30" :disabled="typeForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
+            <input v-model="typeForm.code" type="text" maxlength="30" @input="typeSlug.markManual(typeForm.code)" :disabled="typeForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('dimensions.type_code_hint') }}</p>
           </div>
           <div>
@@ -744,12 +767,13 @@ function valueCount(typeId: number) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
-            <input v-model="valueForm.name" type="text" maxlength="190" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
+            <input v-model="valueForm.name" type="text" maxlength="190" @input="valueForm.id === null && valueSlug.fromName(valueForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.code') }}</label>
-            <input v-model="valueForm.code" type="text" maxlength="50" :disabled="valueForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" data-test="dimension-value-code" />
+            <input v-model="valueForm.code" type="text" maxlength="50" @input="valueSlug.markManual(valueForm.code)" :disabled="valueForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" data-test="dimension-value-code" />
             <p v-if="valueForm.id !== null" class="text-xs text-neutral-400 mt-1">{{ t('dimensions.code_immutable') }}</p>
+            <p v-else class="text-xs text-neutral-400 mt-1">{{ t('dimensions.value_code_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.parent') }}</label>
