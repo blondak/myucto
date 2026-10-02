@@ -232,7 +232,7 @@ onMounted(() => void load())
       variant="empty"
       accent="accent"
       :title="t('payroll.posting_map.empty_title')"
-      :description="t('payroll.posting_map.empty_description')"
+      :message="t('payroll.posting_map.empty_description')"
     />
 
     <template v-else-if="proposal && summary">

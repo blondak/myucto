@@ -153,7 +153,7 @@ onMounted(() => {
       variant="empty"
       accent="accent"
       :title="t('payroll_imports.no_access_title')"
-      :description="t('payroll_imports.no_access_description')"
+      :message="t('payroll_imports.no_access_description')"
     />
 
     <!-- v-show: rozpracovaný průvodce ani neuložený profil nesmí zmizet jen kvůli přepnutí záložky. -->

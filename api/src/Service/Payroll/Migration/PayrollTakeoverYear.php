@@ -42,6 +42,8 @@ final readonly class PayrollTakeoverYear
     public const PRESENCE_BOTH = 'both';
     /** Měsíc není nikde. */
     public const PRESENCE_NONE = 'none';
+    /** Měsíc ještě neskončil a podklad k němu zatím není; díra v roce to není. */
+    public const PRESENCE_NOT_YET = 'not_yet';
 
     /** @var list<string> */
     public const PRESENCES = [
@@ -49,6 +51,7 @@ final readonly class PayrollTakeoverYear
         self::PRESENCE_CALCULATED_ONLY,
         self::PRESENCE_BOTH,
         self::PRESENCE_NONE,
+        self::PRESENCE_NOT_YET,
     ];
 
     /**
@@ -66,6 +69,11 @@ final readonly class PayrollTakeoverYear
         public ?int $employeeId = null,
         /** `null` = všechny vztahy; jinak vztah, na který je pohled omezený. */
         public ?int $employmentId = null,
+        /**
+         * Měsíc, který právě běží (`YYYY-MM`). Od něj dál se mzda ještě nepočítala,
+         * protože měsíc neskončil, takže prázdný měsíc není díra. `null` = bez hranice.
+         */
+        public ?string $currentPeriod = null,
     ) {}
 
     /** @return list<string> období s převzatým měsícem, vzestupně a bez opakování */
@@ -127,6 +135,7 @@ final readonly class PayrollTakeoverYear
             $this->hasTakeover($period) && $this->hasCalculated($period) => self::PRESENCE_BOTH,
             $this->hasTakeover($period) => self::PRESENCE_TAKEOVER_ONLY,
             $this->hasCalculated($period) => self::PRESENCE_CALCULATED_ONLY,
+            $this->currentPeriod !== null && $period >= $this->currentPeriod => self::PRESENCE_NOT_YET,
             default => self::PRESENCE_NONE,
         };
     }
@@ -152,7 +161,8 @@ final readonly class PayrollTakeoverYear
      * Měsíce zadaného intervalu, ke kterým není podklad ANI z jedné strany.
      *
      * Bez argumentů je intervalem celý rok. `ELDP` sem posílá trvání vztahu
-     * v roce, protože měsíc mimo vztah chybějící podklad není.
+     * v roce, protože měsíc mimo vztah chybějící podklad není. Stejně tak jím
+     * není měsíc, který ještě neskončil ({@see self::PRESENCE_NOT_YET}).
      *
      * Hranice se zadávají jako `YYYY-MM` i `YYYY-MM-DD`; bere se měsíc.
      *

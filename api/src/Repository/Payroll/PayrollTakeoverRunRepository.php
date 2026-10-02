@@ -18,7 +18,7 @@ use PDO;
  * se tedy jedním sloupcem stal zdrojem zákonného tiskopisu — a navíc by ho
  * srovnávací sestava převodu započetla podruhé, protože
  * `PayrollMigrationReconciliationRepository::calculatedPeriods()` se na status
- * neptá vůbec (spojuje aktuální revizi s `payroll_net_results`).
+ * neptá vůbec (spojuje aktuální revizi s `payroll_run_persons`).
  *
  * Proto má převzatý běh vlastní tabulku, žádnou revizi a žádný výsledek osob.
  * Kdo převzatá čísla potřebuje, čte je přiznaně přes `PayrollTakeoverReader`.

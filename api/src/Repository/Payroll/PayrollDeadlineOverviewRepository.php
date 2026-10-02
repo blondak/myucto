@@ -636,26 +636,27 @@ final readonly class PayrollDeadlineOverviewRepository
             return [];
         }
         $statement = $this->db->pdo()->prepare(
-            'SELECT YEAR(net.period_start) AS tax_year,
-                    COUNT(DISTINCT net.employee_id) AS undecided
-               FROM payroll_net_results net
+            'SELECT YEAR(person.period_start) AS tax_year,
+                    COUNT(DISTINCT person.employee_id) AS undecided
+               FROM payroll_run_persons person
                JOIN payroll_run_revisions revision
-                 ON revision.supplier_id = net.supplier_id
-                AND revision.id = net.revision_id
+                 ON revision.supplier_id = person.supplier_id
+                AND revision.id = person.revision_id
                 AND revision.status = "approved"
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
                 AND run.id = revision.run_id
                 AND run.current_revision_no = revision.revision_no
           LEFT JOIN payroll_annual_settlement_requests request
-                 ON request.supplier_id = net.supplier_id
-                AND request.employee_id = net.employee_id
-                AND request.tax_year = YEAR(net.period_start)
-              WHERE net.supplier_id = ?
-                AND net.period_start >= ?
-                AND net.period_start < ?
+                 ON request.supplier_id = person.supplier_id
+                AND request.employee_id = person.employee_id
+                AND request.tax_year = YEAR(person.period_start)
+              WHERE person.supplier_id = ?
+                AND person.status = "calculated"
+                AND person.period_start >= ?
+                AND person.period_start < ?
                 AND (request.id IS NULL OR request.request_status = "unknown")
-              GROUP BY YEAR(net.period_start)'
+              GROUP BY YEAR(person.period_start)'
         );
         $statement->execute([
             $supplierId,

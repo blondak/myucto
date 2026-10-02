@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Migration;
 
 use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use Psr\Clock\ClockInterface;
 
 /**
  * JEDINÁ volatelná cesta k převzatým mzdám roku přechodu.
@@ -33,6 +34,7 @@ final class PayrollTakeoverReader
     public function __construct(
         private readonly PayrollMigrationReconciliationRepository $repository,
         private readonly PayrollHistoricalPeriodService $historical,
+        private readonly ClockInterface $clock,
     ) {}
 
     /**
@@ -63,7 +65,7 @@ final class PayrollTakeoverReader
     /**
      * Převzaté měsíce jednoho pracovního vztahu za rok.
      *
-     * Spočítaná strana zůstává za OSOBU, ne za vztah: `payroll_net_results` je
+     * Spočítaná strana zůstává za OSOBU, ne za vztah: čistá mzda je
      * výsledek osoby a rozpočítat ho na vztahy by znamenalo vymyslet si klíč.
      * Odpověď na „počítalo MyÚčto tenhle měsíc?" je proto u všech vztahů osoby
      * stejná, a je to správně — měsíc počítá modul celý, ne po vztazích.
@@ -149,6 +151,7 @@ final class PayrollTakeoverReader
             $calculatedPeriods,
             $employeeId,
             $employmentId,
+            $this->clock->now()->format('Y-m'),
         );
     }
 

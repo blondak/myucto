@@ -115,6 +115,29 @@ final class PayrollTakeoverYearTest extends TestCase
         self::assertSame(['2026-03'], $year->missingPeriods('2026-01-15', '2026-05-31'));
     }
 
+    /**
+     * Měsíc, který ještě neskončil, není díra: převzato 1–7, spočítáno 8–9,
+     * a od října (běžící měsíc) dál mzda ještě není co počítat.
+     */
+    public function testMonthsNotYetEndedAreNotMissing(): void
+    {
+        $months = array_map(
+            static fn (int $month): PayrollTakeoverMonth => self::month(sprintf('2026-%02d', $month)),
+            range(1, 7),
+        );
+        $year = new PayrollTakeoverYear(1, 2026, '2026-08', $months, ['2026-08', '2026-09'], 7, null, '2026-10');
+
+        self::assertSame([], $year->missingPeriods());
+        self::assertSame(PayrollTakeoverYear::PRESENCE_CALCULATED_ONLY, $year->presence('2026-09'));
+        self::assertSame(PayrollTakeoverYear::PRESENCE_NOT_YET, $year->presence('2026-10'));
+        self::assertSame(PayrollTakeoverYear::PRESENCE_NOT_YET, $year->presence('2026-12'));
+
+        // Měsíc před běžícím, ke kterému nic není, díra zůstává.
+        $gap = new PayrollTakeoverYear(1, 2026, '2026-08', $months, ['2026-08'], 7, null, '2026-10');
+        self::assertSame(['2026-09'], $gap->missingPeriods());
+        self::assertSame(PayrollTakeoverYear::PRESENCE_NONE, $gap->presence('2026-09'));
+    }
+
     /** Souběžné vztahy: peníze se sčítají, kalendářní dny ne. */
     public function testPersonTotalsSumMoneyButNotDays(): void
     {

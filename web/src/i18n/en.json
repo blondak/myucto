@@ -2081,7 +2081,8 @@
           "takeover_only": "taken over",
           "calculated_only": "calculated here",
           "both": "both sides",
-          "none": "missing"
+          "none": "missing",
+          "not_yet": "not over yet"
         },
         "people_count": "{count} people",
         "months": "Months",
@@ -2112,6 +2113,7 @@
       },
       "empty_title": "Nothing to compare for the selected year",
       "empty_description": "Either no processed payroll was migrated from the previous system, or no payroll run exists for that year yet.",
+      "empty_no_overlap": "Taken-over and calculated months do not overlap this year: what the previous program processed was not recalculated in MyÚčto, and what MyÚčto calculates is unknown to the previous system. That is normal for a transition. Completeness of the taken-over part of the year is checked above.",
       "period": "Period",
       "person": "Person",
       "side": "Side",
@@ -2130,6 +2132,7 @@
       "revision_status": "Revision in status {status}",
       "external_person": "Person {ref} from the previous system",
       "not_compared": "Taken-over months {periods} are not compared: the previous program processed them and MyÚčto does not recalculate them, so every person-month would show as a deviation. Only months calculated by MyÚčto are compared.",
+      "calculated_not_compared": "Months {periods} are kept only in MyÚčto and the previous system has nothing for them, so they are not compared. Only months present on both sides are compared.",
       "unknown_person": "Unidentified person",
       "employer_social_note": "Employer social security contribution (company-wide only, it is not a per-person amount):",
       "grain_hint": "A row is one person and month. The migrated side is summed across employment relationships, because contributions and tax are by law amounts of the person, not of the relationship — splitting them back would mean inventing an allocation key.",

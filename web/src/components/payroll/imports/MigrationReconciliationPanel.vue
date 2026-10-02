@@ -54,6 +54,9 @@ let loadSequence = 0
 
 const rowMetrics = computed<PayrollMigrationRowMetric[]>(() => report.value?.row_metrics ?? [])
 const totalMetrics = computed<PayrollMigrationTotalMetric[]>(() => report.value?.total_metrics ?? [])
+/** Převzaté i spočítané měsíce existují, jen se nepřekrývají — běžný přechod, ne chyba. */
+const noOverlap = computed(() => (report.value?.takeover_periods_not_compared?.length ?? 0) > 0
+  && (report.value?.calculated_periods_not_compared?.length ?? 0) > 0)
 
 const months = computed<PayrollMigrationMonth[]>(() => {
   const all = report.value?.months ?? []
@@ -261,12 +264,24 @@ onMounted(() => { void load() })
         }) }}
       </p>
 
+      <p
+        v-if="report.calculated_periods_not_compared?.length"
+        class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+        data-test="reconciliation-calculated-not-compared"
+      >
+        {{ t('payroll.migration_reconciliation.calculated_not_compared', {
+          periods: report.calculated_periods_not_compared.map(period => formatPeriod(period)).join(', '),
+        }) }}
+      </p>
+
       <EmptyState
         v-if="report.summary.row_count === 0"
         variant="empty"
         accent="accent"
         :title="t('payroll.migration_reconciliation.empty_title')"
-        :description="t('payroll.migration_reconciliation.empty_description')"
+        :message="noOverlap
+          ? t('payroll.migration_reconciliation.empty_no_overlap')
+          : t('payroll.migration_reconciliation.empty_description')"
       />
 
       <template v-else>

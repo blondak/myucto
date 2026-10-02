@@ -177,6 +177,35 @@ final class PayrollMigrationReconciliationBuilderTest extends TestCase
         self::assertSame('Převzatá Osoba', $september['full_name'], 'Řádek bez protějšku nese jméno, ne jen id.');
     }
 
+    /**
+     * Převzato 1–7, od srpna vede mzdy MyÚčto. Srpen bez převzatých dat je
+     * běžný provoz, ne odchylka „chybí v původním systému" — ani v ročních
+     * součtech. Měsíc, kde převzatá data aspoň zčásti jsou, se porovnává dál.
+     */
+    public function testCalculatedMonthsWithoutAnyReferenceAreNotCompared(): void
+    {
+        $report = (new PayrollMigrationReconciliationBuilder())->build(
+            self::YEAR,
+            [
+                $this->reference('2026-07', '1001', '1', 11, 21),
+                $this->reference('2026-09', '1001', '1', 11, 21),
+            ],
+            [
+                $this->calculated('2026-08', 11),
+                $this->calculated('2026-09', 11),
+                $this->calculated('2026-09', 12),
+            ],
+            ['2026-08' => 111_600, '2026-09' => 223_200],
+            '2026-08',
+        );
+
+        self::assertSame(['2026-07'], $report['takeover_periods_not_compared']);
+        self::assertSame(['2026-08'], $report['calculated_periods_not_compared']);
+        self::assertSame(['2026-09'], array_column($report['months'], 'period'));
+        self::assertSame(1, $report['summary']['missing_counterpart_count'], 'Osoba bez převzatých dat v porovnávaném měsíci je nález.');
+        self::assertSame(223_200, $report['totals']['employer_social']['calculated_minor']);
+    }
+
     /** Vztah, který původní systém nemá, je druhá polovina téhož pravidla. */
     public function testPersonWithoutReferenceIsNotReportedAsZeroDifference(): void
     {

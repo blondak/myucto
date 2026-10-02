@@ -112,6 +112,8 @@ export interface PayrollMigrationReconciliation {
   takeover_check?: TakeoverCheck
   /** Převzaté měsíce před začátkem vedení mezd, které se nesrovnávají (`YYYY-MM`). */
   takeover_periods_not_compared?: string[]
+  /** Měsíce od začátku vedení mezd, ke kterým původní systém nic nemá (`YYYY-MM`). */
+  calculated_periods_not_compared?: string[]
 }
 
 export const payrollMigrationReconciliationApi = {
@@ -126,8 +128,8 @@ export const payrollMigrationReconciliationApi = {
 // mzdového systému. Nad týmiž daty stojí evidenční list důchodového pojištění
 // a zpětná evidence plateb, takže „chybí měsíc" je tu stejně důležité jako čísla.
 
-/** Odkud je měsíc. `none` = odnikud, tedy díra v roce. */
-export type PayrollTakeoverPresence = 'takeover_only' | 'calculated_only' | 'both' | 'none'
+/** Odkud je měsíc. `none` = odnikud, tedy díra v roce; `not_yet` = měsíc ještě neskončil. */
+export type PayrollTakeoverPresence = 'takeover_only' | 'calculated_only' | 'both' | 'none' | 'not_yet'
 
 export interface PayrollTakeoverPeriod {
   period: string

@@ -455,7 +455,7 @@ onMounted(load)
           <h2 class="text-lg font-semibold text-neutral-900">{{ t('gopay.clearings.title') }}</h2>
         </div>
 
-        <EmptyState v-if="clearings.length === 0" boxed accent="neutral" icon="inbox" :title="t('gopay.clearings.empty')" :description="t('gopay.clearings.empty_description')" />
+        <EmptyState v-if="clearings.length === 0" boxed accent="neutral" icon="inbox" :title="t('gopay.clearings.empty')" :message="t('gopay.clearings.empty_description')" />
 
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">

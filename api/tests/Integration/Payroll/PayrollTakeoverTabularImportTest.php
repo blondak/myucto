@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Import\Takeover\TakeoverTabularImportService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
@@ -30,6 +31,7 @@ final class PayrollTakeoverTabularImportTest extends TestCase
     private Connection $db;
     private TakeoverTabularImportService $imports;
     private PayrollTakeoverReader $reader;
+    private PayrollMigrationReconciliationRepository $reconciliation;
     private int $supplierId;
     private int $employeeId;
     private int $employmentId;
@@ -52,6 +54,7 @@ final class PayrollTakeoverTabularImportTest extends TestCase
         $this->db = $db;
         $this->imports = $imports;
         $this->reader = $reader;
+        $this->reconciliation = $container->get(PayrollMigrationReconciliationRepository::class);
         $pdo = $db->pdo();
         $source = $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1');
         $sourceSupplierId = $source === false ? 0 : (int) $source->fetchColumn();
@@ -266,6 +269,87 @@ final class PayrollTakeoverTabularImportTest extends TestCase
         self::assertSame('1++', $months[0]->eldpCode());
         self::assertSame(['2026-01-01', '2026-01-31'], $months[0]->insuranceSpan());
         self::assertSame(3_080_000, $months[0]->netPayableMinor);
+    }
+
+    /**
+     * Měsíc, který MyÚčto spočítalo, není díra v roce.
+     *
+     * Spočítaná strana se dřív četla z `payroll_net_results`, do které pipeline
+     * nikdy nezapisuje. Přehled roku přechodu proto hlásil každý spočítaný měsíc
+     * jako „chybí" a srovnávací sestava neměla s čím porovnávat.
+     */
+    public function testCalculatedRunCountsAsCalculatedSide(): void
+    {
+        $this->imports->apply(
+            $this->supplierId,
+            'other',
+            'csv',
+            'prevzate.csv',
+            $this->csv([$this->row('2026-07')]),
+        );
+        $this->calculatedRun('2026-08-01');
+
+        $year = $this->reader->forSupplier($this->supplierId, self::YEAR);
+
+        self::assertSame(['2026-08'], $year->calculatedPeriods);
+        self::assertSame(PayrollTakeoverYear::PRESENCE_TAKEOVER_ONLY, $year->presence('2026-07'));
+        self::assertSame(PayrollTakeoverYear::PRESENCE_CALCULATED_ONLY, $year->presence('2026-08'));
+        self::assertNotContains('2026-08', $year->missingPeriods());
+
+        $totals = $this->reconciliation->calculatedTotals($this->supplierId, self::YEAR);
+        self::assertCount(1, $totals);
+        self::assertSame('2026-08', $totals[0]['period']);
+        self::assertSame(4_000_000, (int) $totals[0]['gross_minor']);
+        self::assertSame(3_200_000, (int) $totals[0]['net_minor']);
+        self::assertSame(300_000, (int) $totals[0]['advance_tax_minor']);
+    }
+
+    /** Spočítaný běh s jedním výsledkem osoby ve tvaru, který zapisuje výpočet. */
+    private function calculatedRun(string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, ?, ?, "approved", 1)'
+        )->execute([$this->supplierId, $periodStart, substr($periodStart, 0, 8) . '20']);
+        $runId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                 result_snapshot_json, result_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, "regular", "approved", "v1", ?, "{}", ?, "{}", ?, UNHEX(?))'
+        )->execute([
+            $this->supplierId,
+            $runId,
+            str_repeat('a', 64),
+            str_repeat('b', 64),
+            str_repeat('1', 64),
+            hash('sha256', 'takeover-calculated-' . $this->supplierId . '-' . $periodStart),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $json = json_encode([
+            'employee_id' => $this->employeeId,
+            'statutory' => [
+                'status' => 'calculated',
+                'net_payable_minor_units' => 3_080_000,
+                'net_pay' => [
+                    'cash_income_minor_units' => 4_000_000,
+                    'non_cash_income_minor_units' => 0,
+                    'employee_social_minor_units' => 284_000,
+                    'employee_health_minor_units' => 180_000,
+                    'advance_tax_minor_units' => 300_000,
+                    'withholding_tax_minor_units' => 0,
+                    'tax_bonus_minor_units' => 0,
+                    'deducted_minor_units' => 120_000,
+                    'net_payable_minor_units' => 3_080_000,
+                ],
+            ],
+        ], JSON_THROW_ON_ERROR);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons (supplier_id, revision_id, employee_id, result_json, result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")'
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, $json, hash('sha256', $json)]);
     }
 
     /** @return array<string,mixed> */

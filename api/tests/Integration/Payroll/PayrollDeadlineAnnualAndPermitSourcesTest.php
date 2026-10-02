@@ -177,17 +177,18 @@ final class PayrollDeadlineAnnualAndPermitSourcesTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
+    /**
+     * Výsledek osoby tam, kam ho zapisuje výpočet. Dřív se plnila
+     * `payroll_net_results`, do které pipeline nikdy nezapisuje, takže test
+     * svítil zeleně, zatímco v provozu hlídač vždy hlásil nulu.
+     */
     private function netResult(int $revisionId, int $employeeId): void
     {
         $json = '{"synthetic":' . $employeeId . '}';
         $this->db->pdo()->prepare(
-            'INSERT INTO payroll_net_results
-                (supplier_id, revision_id, employee_id, cash_income_minor,
-                 non_cash_income_minor, employee_social_minor, employee_health_minor,
-                 advance_tax_minor, withholding_tax_minor, tax_bonus_minor,
-                 correction_minor, annual_settlement_minor, deducted_minor,
-                 net_payable_minor, result_json, result_hash)
-             VALUES (?, ?, ?, 100000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100000, ?, ?)',
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, result_json, result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")',
         )->execute([$this->supplierId, $revisionId, $employeeId, $json, hash('sha256', $json)]);
     }
 

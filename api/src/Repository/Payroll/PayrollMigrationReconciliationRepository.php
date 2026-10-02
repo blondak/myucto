@@ -166,6 +166,11 @@ final class PayrollMigrationReconciliationRepository
      * S `$employeeId` jsou to období, ve kterých má vlastní výsledek TA osoba;
      * bez něj kterákoli osoba ve firmě.
      *
+     * Výsledek osoby je `payroll_run_persons` se stavem `calculated`, ne
+     * `payroll_net_results`: ta tabulka se do pipeline nikdy nezapojila a je
+     * prázdná (viz {@see PayrollNetRepository}). Dokud se četla, MyÚčto nevidělo
+     * jediný svůj spočítaný měsíc a rok přechodu je hlásil jako díry.
+     *
      * @return list<string> `YYYY-MM`, vzestupně
      */
     public function calculatedPeriods(int $supplierId, int $year, ?int $employeeId = null): array
@@ -176,15 +181,16 @@ final class PayrollMigrationReconciliationRepository
                     ON revision.supplier_id = run.supplier_id
                    AND revision.run_id = run.id
                    AND revision.revision_no = run.current_revision_no
-                  JOIN payroll_net_results net
-                    ON net.supplier_id = revision.supplier_id
-                   AND net.revision_id = revision.id
+                  JOIN payroll_run_persons person
+                    ON person.supplier_id = revision.supplier_id
+                   AND person.revision_id = revision.id
+                   AND person.status = "calculated"
                  WHERE run.supplier_id = ?
                    AND run.period_start >= ?
                    AND run.period_start < ?';
         $parameters = [$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)];
         if ($employeeId !== null) {
-            $sql .= ' AND net.employee_id = ?';
+            $sql .= ' AND person.employee_id = ?';
             $parameters[] = $employeeId;
         }
         $sql .= ' ORDER BY period';
@@ -212,8 +218,9 @@ final class PayrollMigrationReconciliationRepository
     /**
      * Náš výsledek, granularita osoba × měsíc.
      *
-     * Hrubá mzda a čistá mzda se berou z `payroll_net_results` — z téhož neměnného
-     * výsledku, který vydal výplatní pásku. Čistá mzda je PŘED srážkami
+     * Hrubá mzda a čistá mzda se berou z rozkladu čisté mzdy ve výsledku osoby
+     * (`payroll_run_persons.result_json`, klíč `statutory.net_pay`) — z téhož
+     * neměnného výsledku, který vydal výplatní pásku. Čistá mzda je PŘED srážkami
      * (`net_payable + deducted`), protože právě tu vydává i původní systém v `KcCistaM`;
      * porovnávat částku po srážkách proti částce před nimi by vyrobilo rozdíl,
      * který s přepočtem nemá nic společného.
@@ -230,48 +237,58 @@ final class PayrollMigrationReconciliationRepository
             'SELECT DATE_FORMAT(run.period_start, "%Y-%m") AS period,
                     revision.id AS revision_id,
                     revision.status AS revision_status,
-                    net.employee_id,
+                    person.employee_id,
                     employee.full_name,
-                    net.cash_income_minor + net.non_cash_income_minor AS gross_minor,
-                    net.net_payable_minor + net.deducted_minor AS net_minor,
+                    CAST(JSON_VALUE(person.result_json, "$.statutory.net_pay.cash_income_minor_units") AS SIGNED)
+                        + CAST(JSON_VALUE(person.result_json, "$.statutory.net_pay.non_cash_income_minor_units") AS SIGNED)
+                        AS gross_minor,
+                    CAST(JSON_VALUE(person.result_json, "$.statutory.net_pay.net_payable_minor_units") AS SIGNED)
+                        + CAST(JSON_VALUE(person.result_json, "$.statutory.net_pay.deducted_minor_units") AS SIGNED)
+                        AS net_minor,
                     JSON_VALUE(social.result_snapshot_json, "$.capped_assessment_base_minor_units")
                         AS social_base_minor,
                     JSON_VALUE(health.result_snapshot_json, "$.assessment_base_minor_units")
                         AS health_base_minor,
-                    net.employee_social_minor,
-                    net.employee_health_minor,
+                    JSON_VALUE(person.result_json, "$.statutory.net_pay.employee_social_minor_units")
+                        AS employee_social_minor,
+                    JSON_VALUE(person.result_json, "$.statutory.net_pay.employee_health_minor_units")
+                        AS employee_health_minor,
                     JSON_VALUE(health.result_snapshot_json, "$.employer_contribution_minor_units")
                         AS employer_health_minor,
-                    net.advance_tax_minor,
-                    net.withholding_tax_minor,
-                    net.tax_bonus_minor
+                    JSON_VALUE(person.result_json, "$.statutory.net_pay.advance_tax_minor_units")
+                        AS advance_tax_minor,
+                    JSON_VALUE(person.result_json, "$.statutory.net_pay.withholding_tax_minor_units")
+                        AS withholding_tax_minor,
+                    JSON_VALUE(person.result_json, "$.statutory.net_pay.tax_bonus_minor_units")
+                        AS tax_bonus_minor
                FROM payroll_runs run
                JOIN payroll_run_revisions revision
                  ON revision.supplier_id = run.supplier_id
                 AND revision.run_id = run.id
                 AND revision.revision_no = run.current_revision_no
-               JOIN payroll_net_results net
-                 ON net.supplier_id = revision.supplier_id
-                AND net.revision_id = revision.id
+               JOIN payroll_run_persons person
+                 ON person.supplier_id = revision.supplier_id
+                AND person.revision_id = revision.id
+                AND person.status = "calculated"
                JOIN payroll_employees employee
-                 ON employee.supplier_id = net.supplier_id
-                AND employee.id = net.employee_id
+                 ON employee.supplier_id = person.supplier_id
+                AND employee.id = person.employee_id
           LEFT JOIN payroll_statutory_person_results social
                  ON social.supplier_id = revision.supplier_id
                 AND social.revision_id = revision.id
-                AND social.employee_id = net.employee_id
+                AND social.employee_id = person.employee_id
                 AND social.calculation_kind = "social_insurance"
                 AND social.result_status = "calculated"
           LEFT JOIN payroll_statutory_person_results health
                  ON health.supplier_id = revision.supplier_id
                 AND health.revision_id = revision.id
-                AND health.employee_id = net.employee_id
+                AND health.employee_id = person.employee_id
                 AND health.calculation_kind = "health_insurance"
                 AND health.result_status = "calculated"
               WHERE run.supplier_id = ?
                 AND run.period_start >= ?
                 AND run.period_start < ?
-              ORDER BY run.period_start, net.employee_id',
+              ORDER BY run.period_start, person.employee_id',
         );
         $statement->execute([$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
 

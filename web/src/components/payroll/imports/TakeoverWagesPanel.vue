@@ -67,7 +67,8 @@ function presenceClass(presence: PayrollTakeoverPresence): string {
     takeover_only: 'bg-payroll-50 text-payroll-800',
     calculated_only: 'bg-success-50 text-success-700',
     both: 'bg-warning-50 text-warning-700',
-    none: 'bg-neutral-100 text-neutral-500',
+    none: 'bg-warning-50 text-warning-700',
+    not_yet: 'bg-neutral-100 text-neutral-500',
   }[presence]
 }
 

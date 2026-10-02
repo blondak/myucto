@@ -111,6 +111,35 @@ final class PayrollMigrationReconciliationBuilder
         sort($notCompared);
         $referenceByPerson = $this->groupReference($year, $reference);
 
+        // Druhá polovina téhož pravidla: měsíc od začátku vedení mezd, ke kterému
+        // původní systém nic nemá, je běžný provoz MyÚčta, ne odchylka. Porovnával
+        // se proti prázdnu a každá veličina svítila „chybí v původním systému",
+        // i v ročních součtech. Měsíc, kde převzatá data aspoň zčásti jsou, se
+        // porovnává dál: chybějící osoba v něm je skutečný nález.
+        $calculatedNotCompared = [];
+        if ($startPeriod !== null && preg_match('/^\d{4}-\d{2}/', $startPeriod) === 1) {
+            $start = substr($startPeriod, 0, 7);
+            $referencePeriods = [];
+            foreach ($referenceByPerson as $row) {
+                $referencePeriods[(string) $row['period']] = true;
+            }
+            foreach ($calculatedByPerson as $key => $row) {
+                $period = (string) $row['period'];
+                if ($period >= $start && !isset($referencePeriods[$period])) {
+                    $calculatedNotCompared[$period] = true;
+                    unset($calculatedByPerson[$key]);
+                }
+            }
+            foreach (array_keys($calculatedEmployerSocial) as $period) {
+                if ((string) $period >= $start && !isset($referencePeriods[(string) $period])) {
+                    $calculatedNotCompared[(string) $period] = true;
+                    unset($calculatedEmployerSocial[$period]);
+                }
+            }
+        }
+        $calculatedNotCompared = array_keys($calculatedNotCompared);
+        sort($calculatedNotCompared);
+
         /** @var array<string,array<string,array<string,mixed>>> $rowsByPeriod */
         $rowsByPeriod = [];
         foreach ([...array_keys($referenceByPerson), ...array_keys($calculatedByPerson)] as $key) {
@@ -203,6 +232,8 @@ final class PayrollMigrationReconciliationBuilder
             'deviations' => $deviations,
             // Převzaté měsíce, které se nesrovnávají (MyÚčto je nepočítá).
             'takeover_periods_not_compared' => $notCompared,
+            // Měsíce, které vede jen MyÚčto (od začátku vedení mezd, bez převzatých dat).
+            'calculated_periods_not_compared' => $calculatedNotCompared,
             'summary' => [
                 'row_count' => $rowCount,
                 'deviation_count' => count($deviations),

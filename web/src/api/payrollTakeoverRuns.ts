@@ -13,6 +13,7 @@ export type PayrollTakeoverPresence =
   | 'calculated_only'
   | 'both'
   | 'none'
+  | 'not_yet'
 
 export interface PayrollTakeoverOverviewPeriod {
   period: string
