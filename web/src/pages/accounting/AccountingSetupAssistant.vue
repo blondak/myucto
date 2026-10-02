@@ -19,7 +19,7 @@ import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { dependentProposalIds, requiredChartProposalIds } from '@/utils/accountingSetupDependencies'
+import { bulkSelection, dependentProposalIds, requiredChartProposalIds } from '@/utils/accountingSetupDependencies'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formatDate } from '@/composables/useFormat'
 
@@ -125,6 +125,10 @@ const sourceOptions = ['all', 'catalog', 'ai', 'history'] as const
 const visibleProposals = computed(() => proposals.value.filter(item =>
   item.proposal_type === activeType.value
   && (sourceFilter.value === 'all' || proposalSource(item) === sourceFilter.value)))
+const selectableVisible = computed(() => visibleProposals.value.filter(isSelectable))
+const selectedVisibleCount = computed(() => selectableVisible.value.filter(item => selected.value.has(item.id)).length)
+const minConfidence = ref(95)
+const minConfidenceValid = computed(() => Number.isFinite(minConfidence.value) && minConfidence.value >= 0 && minConfidence.value <= 100)
 const sourceCounts = computed(() => Object.fromEntries(sourceOptions.map(source => [
   source,
   proposals.value.filter(item => item.proposal_type === activeType.value
@@ -289,6 +293,11 @@ function toggle(id: number) {
     for (const dependencyId of requiredChartProposalIds(proposals.value, proposal)) next.add(dependencyId)
   }
   selected.value = next
+}
+
+function selectVisible(mode: 'all' | 'none' | 'threshold') {
+  selected.value = bulkSelection(proposals.value, selected.value, selectableVisible.value, item =>
+    mode === 'all' || (mode === 'threshold' && Math.round(item.confidence * 100) >= minConfidence.value))
 }
 
 function isSelectable(item: SetupProposal): boolean {
@@ -699,6 +708,29 @@ onBeforeUnmount(stopPolling)
             @click="sourceFilter = source">
             {{ t(`accounting.setup_assistant.sources.${source}`) }} ({{ sourceCounts[source] ?? 0 }})
           </button>
+        </div>
+        <div v-if="!bundleId && selectableVisible.length > 0" class="flex flex-wrap items-center gap-2 py-3">
+          <span class="whitespace-nowrap text-sm text-neutral-600">
+            {{ t('accounting.setup_assistant.bulk_selected', { selected: selectedVisibleCount, total: selectableVisible.length }) }}
+          </span>
+          <button type="button" :class="btnOutlineSm('primary')" class="whitespace-nowrap" @click="selectVisible('all')">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.check" /></svg>
+            {{ t('accounting.setup_assistant.bulk_select_all') }}
+          </button>
+          <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" @click="selectVisible('none')">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.x" /></svg>
+            {{ t('accounting.setup_assistant.bulk_select_none') }}
+          </button>
+          <span class="flex items-center gap-1.5 whitespace-nowrap text-sm text-neutral-600">
+            <label for="setup-min-confidence">{{ t('accounting.setup_assistant.bulk_threshold_label') }}</label>
+            <input id="setup-min-confidence" v-model.number="minConfidence" type="number" min="0" max="100" step="1"
+              class="h-8 w-16 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
+            <span>%</span>
+            <button type="button" :disabled="!minConfidenceValid" :class="btnOutlineSm('primary')" class="whitespace-nowrap" @click="selectVisible('threshold')">
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.funnel" /></svg>
+              {{ t('accounting.setup_assistant.bulk_select_threshold') }}
+            </button>
+          </span>
         </div>
         <div class="divide-y divide-neutral-100 rounded-md border border-neutral-200">
           <div v-for="item in visibleProposals" :key="item.id" class="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
