@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Repository\PurchaseInvoiceInboxDismissalRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use PDO;
@@ -20,7 +21,8 @@ use MyInvoice\Infrastructure\Database\Connection;
  *   3. Seskup soubory do ZÁSILEK podle základu jména ({@see InboxFileGrouper}) — dvojice
  *      `faktura.isdoc` + `faktura.pdf` je jeden doklad, ne dvě nezávislé věci.
  *   4. Per zásilku: spočti SHA-256 každého členu; když některý z nich už v DB je
- *      (`pdf_hash` NEBO `source_hash`), celou zásilku přeskoč (dedup).
+ *      (`pdf_hash` NEBO `source_hash`), celou zásilku přeskoč (dedup). Stejně tak,
+ *      když uživatel koncept z některého členu smazal ({@see PurchaseInvoiceInboxDismissalRepository}).
  *   5. Data ber vždy ze strojového originálu, je-li v zásilce:
  *      `.isdoc`/`.xml` → IsdocParser, `.isdocx` → rozbal a parsuj.
  *      Jen PDF → embedded ISDOC (PDF/A-3), jinak AI extrakce.
@@ -62,6 +64,7 @@ final class PurchaseInvoiceInboxScanner
         private readonly AiPdfExtractor $aiExtractor,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
         private readonly InboxPairVerifier $pairVerifier,
+        private readonly PurchaseInvoiceInboxDismissalRepository $dismissals,
     ) {}
 
     /**
@@ -216,6 +219,25 @@ final class PurchaseInvoiceInboxScanner
                     'purchase_invoice_id' => $known['id'],
                 ]);
                 $this->emitExtras($group, $members, $emit, 'Zásilka už byla importována');
+                continue;
+            }
+
+            // 2b) Koncept z téhle zásilky uživatel smazal — soubor v inboxu zůstal,
+            //     ale znovu se nezakládá (issue #118).
+            $dismissedFile = null;
+            foreach ($members as $info) {
+                if ($this->dismissals->isDismissed($supplierId, $info['sha'])) {
+                    $dismissedFile = $info['real'];
+                    break;
+                }
+            }
+            if ($dismissedFile !== null) {
+                $emit([
+                    'file'   => $members[$primary]['real'] ?? $dismissedFile,
+                    'status' => 'skipped',
+                    'reason' => 'Koncept z tohoto souboru byl smazán',
+                ]);
+                $this->emitExtras($group, $members, $emit, 'Koncept z této zásilky byl smazán');
                 continue;
             }
 

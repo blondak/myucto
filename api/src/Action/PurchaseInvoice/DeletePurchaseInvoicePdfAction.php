@@ -10,6 +10,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\PurchaseInvoiceInboxDismissalRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
@@ -37,6 +38,7 @@ final class DeletePurchaseInvoicePdfAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
+        private readonly PurchaseInvoiceInboxDismissalRepository $dismissals,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -71,6 +73,16 @@ final class DeletePurchaseInvoicePdfAction
               WHERE id = ? AND supplier_id = ?'
         )->execute([$id, $supplierId]);
 
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        // Bez pdf_hash by inbox scanner stejné PDF založil jako druhý doklad (issue #118).
+        $this->dismissals->remember(
+            $supplierId,
+            [$hash],
+            $id,
+            isset($invoice['vendor_invoice_number']) ? (string) $invoice['vendor_invoice_number'] : null,
+            isset($user['id']) ? (int) $user['id'] : null,
+        );
+
         // Smazat fyzický soubor JEN POKUD ho už nepoužívá jiná faktura TÉHOŽ dodavatele
         // (dedup případ). Soubory jsou uložené per-supplier (supplier-{id}/{hash}.pdf),
         // takže scope na supplier_id zabrání tomu, aby identické PDF u jiného dodavatele
@@ -103,8 +115,7 @@ final class DeletePurchaseInvoicePdfAction
             }
         }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $ip =$this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.pdf_deleted', $user['id'] ?? null, 'purchase_invoice', $id, [
             'pdf_hash' => $hash,
             'file_deleted' => $fileDeleted,

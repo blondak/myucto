@@ -940,7 +940,8 @@
         "1956_isds_mobile_key_session_follow_up.sql",
         "1957_payroll_warning_suppressions.sql",
         "1958_payroll_annual_settlement_batch.sql",
-        "1959_purchase_invoice_approvals.sql"
+        "1959_purchase_invoice_approvals.sql",
+        "1960_purchase_invoice_inbox_dismissed.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -17745,6 +17746,28 @@
             },
             "foreign_keys": {
                 "fk_pic_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "purchase_invoice_inbox_dismissed": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dismissed_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "dismissed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "sha256": "char(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "vendor_invoice_number": "varchar(64) NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, sha256)",
+                "fk_piid_user": "BTREE (dismissed_by)"
+            },
+            "foreign_keys": {
+                "fk_piid_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_piid_user": "(dismissed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
         },

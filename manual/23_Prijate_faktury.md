@@ -891,6 +891,10 @@ V seznamu Přijaté faktury klikni **📥 Nascanovat inbox**:
   Páruje se jen v rámci téhož adresáře a bez ohledu na velikost písmen.
 - Pro každý soubor spočte SHA-256 — pokud už některý soubor zásilky v systému je
   (archivované PDF nebo strojový originál), přeskočí se celá zásilka.
+- Soubory v adresáři po importu zůstávají. **Smažeš-li koncept** (třeba soukromou fakturu,
+  která do účetnictví nepatří), systém si soubor zapamatuje a další sken ho přeskočí
+  s důvodem „Koncept z tohoto souboru byl smazán". Totéž platí po odebrání PDF z dokladu.
+  Chceš-li takový soubor přesto zpracovat, nahraj ho ručně přes import.
 - Z PDF s embedded ISDOC rozpozná data dodavatele a obsah.
 - Samostatné `.isdoc` i `.isdocx` balíčky v inboxu rozbalí a naimportuje přímo (z `.isdocx`
   archivuje zabalené PDF pro náhled — pokud ale vedle leží PDF od dodavatele, použije se to).

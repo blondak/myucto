@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\PurchaseInvoice;
 
 use Mpdf\Mpdf;
+use MyInvoice\Action\PurchaseInvoice\DeletePurchaseInvoiceAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\ClientRepository;
+use MyInvoice\Repository\PurchaseInvoiceInboxDismissalRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Import\AiPdfExtractor;
 use MyInvoice\Service\Import\InboxPairVerifier;
@@ -19,6 +23,8 @@ use MyInvoice\Service\Import\PurchaseInvoicePdfArchiver;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response as Psr7Response;
 
 /**
  * Inbox scanner páruje PDF a ISDOC, když dorazí jako dva samostatné soubory (issue #16).
@@ -30,6 +36,7 @@ use PHPUnit\Framework\TestCase;
 final class PurchaseInboxPdfIsdocPairingTest extends TestCase
 {
     private Connection $db;
+    private \Psr\Container\ContainerInterface $container;
     private PurchaseInvoiceInboxScanner $scanner;
     private string $inboxDir = '';
     private int $supplierId = 0;
@@ -58,6 +65,7 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
 
         try {
             $c = Bootstrap::buildContainer();
+            $this->container = $c;
             $this->db = $c->get(Connection::class);
             // Config je immutable → scanner sestavíme ručně s inbox_dir mířícím do tempu.
             $config = new Config(
@@ -77,6 +85,7 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
                 $c->get(AiPdfExtractor::class),
                 $c->get(PurchaseInvoicePdfArchiver::class),
                 $c->get(InboxPairVerifier::class),
+                $c->get(PurchaseInvoiceInboxDismissalRepository::class),
             );
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -115,6 +124,8 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
                 $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')->execute([(int) $id]);
                 $pdo->prepare('DELETE FROM purchase_invoices WHERE id = ?')->execute([(int) $id]);
             }
+            $pdo->prepare('DELETE FROM purchase_invoice_inbox_dismissed WHERE supplier_id = ? AND vendor_invoice_number LIKE ?')
+                ->execute([$this->supplierId, $this->vsPrefix . '%']);
             if ($this->vendorId !== null) {
                 $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$this->vendorId]);
             }
@@ -208,6 +219,38 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
         self::assertCount(1, $result['details']);
         self::assertContains($result['details'][0]['status'], ['skipped', 'imported'],
             'bez AI klíče skipped, s nakonfigurovanou AI imported — nikdy tichý propad');
+    }
+
+    /**
+     * Issue #118: smazaný koncept se z inboxu nesmí vrátit. Soubory v adresáři zůstávají
+     * a dedup stál jen na existující faktuře — po smazání ji další sken založil znovu.
+     */
+    public function testDeletedDraftIsNotReimportedOnRescan(): void
+    {
+        $vs = $this->vsPrefix . '4';
+        $this->write('faktura-smazana.isdoc', $this->minimalIsdoc($vs, '1210.00'));
+        $this->write('faktura-smazana.pdf', $this->pdfBytes("Variabilní symbol: {$vs}<br>Celkem k úhradě 1 210,00 Kč"));
+
+        $first = $this->scanner->scan($this->supplierId, $this->userId);
+        self::assertSame(1, $first['created']);
+        $row = $this->loadCreated($vs);
+        self::assertNotNull($row);
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('DELETE', '/api/purchase-invoices/' . $row['id'])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $response = ($this->container->get(DeletePurchaseInvoiceAction::class))(
+            $request, new Psr7Response(), ['id' => (string) $row['id']],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertNull($this->loadCreated($vs), 'koncept je smazaný');
+
+        $second = $this->scanner->scan($this->supplierId, $this->userId);
+        self::assertSame(0, $second['created'], 'smazaný koncept se nesmí založit znovu');
+        self::assertNull($this->loadCreated($vs));
+        self::assertSame(1, $second['skipped']);
+        self::assertSame('Koncept z tohoto souboru byl smazán', $second['details'][0]['reason'] ?? '');
     }
 
     private function write(string $name, string $bytes): void

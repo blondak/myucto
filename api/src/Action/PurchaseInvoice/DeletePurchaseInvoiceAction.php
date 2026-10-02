@@ -11,6 +11,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\PurchaseInvoiceInboxDismissalRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Security\RequestAuthorization;
@@ -43,6 +44,7 @@ final class DeletePurchaseInvoiceAction
         private readonly DocumentJournalSync $journalSync,
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
         private readonly SubmissionOriginalFiler $filer,
+        private readonly PurchaseInvoiceInboxDismissalRepository $dismissals,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -111,6 +113,15 @@ final class DeletePurchaseInvoiceAction
             $reopenedSubmissionIds = $this->submissions->reopenForDeletedInvoice($supplierId, $id);
             // Podání je zpátky ve frontě — jeho originál patří z archivu zpět mezi čekající.
             $this->filer->restore($supplierId, $reopenedSubmissionIds);
+            // Soubor v inbox adresáři zůstává — bez téhle stopy by ho další sken
+            // založil jako nový koncept (issue #118).
+            $this->dismissals->remember(
+                $supplierId,
+                [$existing['pdf_hash'] ?? null, $existing['source_hash'] ?? null],
+                $id,
+                isset($existing['vendor_invoice_number']) ? (string) $existing['vendor_invoice_number'] : null,
+                isset($user['id']) ? (int) $user['id'] : null,
+            );
             $this->repo->delete($id, $supplierId);
             if ($ownTx) {
                 $pdo->commit();
