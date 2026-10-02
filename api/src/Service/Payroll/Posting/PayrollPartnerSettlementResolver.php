@@ -130,20 +130,9 @@ final class PayrollPartnerSettlementResolver
             ) {
                 continue;
             }
-            $relationTypes = [];
-            foreach (self::objectList($person['employments'] ?? null) as $employment) {
-                $identity = $employment['employment'] ?? null;
-                $relationType = is_array($identity)
-                    ? ($identity['relation_type'] ?? null)
-                    : null;
-                if (is_string($relationType)) {
-                    $relationTypes[] = $relationType;
-                }
-            }
-            foreach ($this->forEmployee(
+            foreach ($this->forFrozenPerson(
                 $employeeId,
-                $person['payout_rules'] ?? null,
-                $relationTypes,
+                $person,
                 $payableByEmployee[$employeeId],
             ) as $settlement) {
                 $total += $settlement['amount_minor'];
@@ -151,6 +140,46 @@ final class PayrollPartnerSettlementResolver
         }
 
         return $total;
+    }
+
+    /**
+     * Zápočty jedné osoby ze zmrazeného vstupu revize (výplatní pravidla
+     * a typy pracovních vztahů) a její čisté výplaty po exekuci.
+     *
+     * Volá ji i roční potvrzení o zdanitelných příjmech: započtená část čisté
+     * mzdy je tam vypořádaná stejně jako vyplacená, jen se dokládá
+     * zaúčtovaným předpisem místo platby. Částka proto musí vycházet
+     * z téhož výpočtu jako účetní zápis.
+     *
+     * @param array<string,mixed> $inputPerson osoba ze vstupního snapshotu revize
+     * @return list<array{
+     *   allocation_reference:string,
+     *   account_code:string,
+     *   amount_minor:int
+     * }>
+     */
+    public function forFrozenPerson(
+        int $employeeId,
+        array $inputPerson,
+        int $payableAfterEnforcement,
+    ): array {
+        $relationTypes = [];
+        foreach (self::objectList($inputPerson['employments'] ?? null) as $employment) {
+            $identity = $employment['employment'] ?? null;
+            $relationType = is_array($identity)
+                ? ($identity['relation_type'] ?? null)
+                : null;
+            if (is_string($relationType)) {
+                $relationTypes[] = $relationType;
+            }
+        }
+
+        return $this->forEmployee(
+            $employeeId,
+            $inputPerson['payout_rules'] ?? null,
+            $relationTypes,
+            $payableAfterEnforcement,
+        );
     }
 
     /**

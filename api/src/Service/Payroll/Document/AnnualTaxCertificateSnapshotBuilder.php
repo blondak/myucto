@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
+use MyInvoice\Service\Payroll\Posting\PayrollPartnerSettlementResolver;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -54,6 +55,8 @@ class AnnualTaxCertificateSnapshotBuilder
         private readonly PayrollCarriedOverPeriodReader $carriedOverPeriods,
         private readonly PayrollAnnualSettlementRepository $settlements,
         private readonly AnnualSettlementClaimMonths $claimMonths,
+        private readonly PayrollPartnerSettlementResolver $partnerSettlements =
+            new PayrollPartnerSettlementResolver(),
     ) {}
 
     /**
@@ -782,6 +785,10 @@ class AnnualTaxCertificateSnapshotBuilder
             );
             $proofHash = null;
             if ($amounts['income_minor_units'] > 0) {
+                // Část čisté mzdy jednatele-společníka se nevyplácí, ale
+                // započítává na účet ke společníkům; závazek čisté mzdy pro ni
+                // nevzniká. Kolik to je, říká TÝŽ resolver, ze kterého účtuje
+                // mzdový můstek — doklad pak dodá zaúčtovaný předpis.
                 $proof = $this->payments->prove(
                     $supplierId,
                     $employeeId,
@@ -789,6 +796,11 @@ class AnnualTaxCertificateSnapshotBuilder
                     $this->positiveInt($source, 'revision_id'),
                     $amounts['expected_net_minor_units'],
                     $cutoff,
+                    $this->partnerSettlements->forFrozenPerson(
+                        $employeeId,
+                        $inputPerson,
+                        $amounts['expected_net_minor_units'],
+                    ),
                 );
                 $proofHash = $this->fingerprint(
                     $proof,
