@@ -149,7 +149,9 @@ const actions = computed<ActionItem[]>(() => {
     </div>
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
-      <p>{{ t('money_s3.support_notice') }}</p>
+      <i18n-t keypath="money_s3.support_notice" tag="p">
+        <template #recommend><strong><i18n-t keypath="money_s3.support_notice_recommend" tag="span"><template #contact><a href="https://myucto.cz/support#placena" target="_blank" rel="noopener" class="underline hover:no-underline">{{ t('money_s3.support_notice_contact') }}</a></template></i18n-t></strong></template>
+      </i18n-t>
       <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ t('money_s3.support_notice_link') }}</RouterLink>
     </div>
 

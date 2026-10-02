@@ -31,7 +31,9 @@ const systems = [
       <p class="mt-1 text-sm text-neutral-500">{{ t('migration_overview.systems_hint') }}</p>
       <div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div class="rounded-xl border border-warning-500/30 bg-warning-50 px-5 py-4 text-sm text-warning-700 sm:col-span-2 xl:col-span-3" data-testid="migration-overview-support-notice">
-          <p>{{ t('migration_overview.support_notice') }}</p>
+          <i18n-t keypath="migration_overview.support_notice" tag="p">
+            <template #recommend><strong><i18n-t keypath="migration_overview.support_notice_recommend" tag="span"><template #contact><a href="https://myucto.cz/support#placena" target="_blank" rel="noopener" class="underline hover:no-underline">{{ t('migration_overview.support_notice_contact') }}</a></template></i18n-t></strong></template>
+          </i18n-t>
           <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ t('migration_overview.support_notice_link') }}</RouterLink>
         </div>
         <RouterLink v-for="system in systems" :key="system.key" :to="system.path"

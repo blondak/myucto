@@ -249,6 +249,11 @@ onBeforeUnmount(() => { generation++; stopPolling(); clearCredentials() })
       <h1 class="text-2xl font-semibold">{{ t('abra_flexi.title') }}</h1>
       <p class="text-sm text-neutral-500 mt-1">{{ t('abra_flexi.intro') }}</p>
     </div>
+    <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="abra-flexi-support-notice">
+      <i18n-t keypath="abra_flexi.support_notice" tag="p">
+        <template #recommend><strong><i18n-t keypath="abra_flexi.support_notice_recommend" tag="span"><template #contact><a href="https://myucto.cz/support#placena" target="_blank" rel="noopener" class="underline hover:no-underline">{{ t('abra_flexi.support_notice_contact') }}</a></template></i18n-t></strong></template>
+      </i18n-t>
+    </div>
     <ol class="grid grid-cols-1 gap-2 sm:grid-cols-3" :aria-label="t('abra_flexi.steps')">
       <li v-for="step in [1, 2, 3]" :key="step" class="flex items-center rounded-lg border px-3 py-3 text-sm"
         :aria-current="step === currentStep ? 'step' : undefined"

@@ -1435,7 +1435,9 @@
     "stereo_hint": "Transfer accounting data from Stereo NX.",
     "abra_hint": "Connect ABRA Flexi and load selected accounting years through its API.",
     "pamica_hint": "Move employees, employments, and payroll inputs from PAMICA.",
-    "support_notice": "This import is intended for smaller amounts of data. If your journal has thousands of records or you have special import requirements, contact our support. As part of our paid service, we will be happy to help you with the import and tailor it to your needs.",
+    "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
+    "support_notice_recommend": "we recommend {contact} and leaving the import to us",
+    "support_notice_contact": "contacting our support",
     "support_notice_link": "Contact support"
   },
   "instance_alert": {
@@ -28502,6 +28504,9 @@
     }
   },
   "abra_flexi": {
+    "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
+    "support_notice_recommend": "we recommend {contact} and leaving the import to us",
+    "support_notice_contact": "contacting our support",
     "title": "Migration from ABRA Flexi",
     "steps": "Transfer steps",
     "step1": "Connect to ABRA Flexi",
@@ -28659,7 +28664,9 @@
     "upload_title": "Upload the agenda backup",
     "upload_hint": "In Money S3 choose Back up agenda and upload the resulting .lz file. The backup is only read; the Money installation is not changed.",
     "choose_file": "Agenda backup file (.lz)",
-    "support_notice": "This import is intended for smaller amounts of data. If your journal has thousands of records or you have special import requirements, contact our support. As part of our paid service, we will be happy to help you with the import and tailor it to your needs.",
+    "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
+    "support_notice_recommend": "we recommend {contact} and leaving the import to us",
+    "support_notice_contact": "contacting our support",
     "support_notice_link": "Contact support",
     "file_help_title": "What the agenda backup file is",
     "file_help_items": [
@@ -29067,7 +29074,9 @@
     "step2": "Preview and options",
     "step3": "Dry run",
     "step4": "Transfer",
-    "support_notice": "This import is intended for smaller amounts of data. If your journal has thousands of records or you have special import requirements, contact our support. As part of our paid service, we will be happy to help you with the import and tailor it to your needs.",
+    "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
+    "support_notice_recommend": "we recommend {contact} and leaving the import to us",
+    "support_notice_contact": "contacting our support",
     "support_notice_link": "Contact support",
     "upload_title": "Create a POHODA export and upload it",
     "upload_hint": "Choose one of three routes. All produce a ZIP containing XML for this wizard and only read the source data.",
@@ -31083,7 +31092,9 @@
     "step2": "Preview and options",
     "step3": "Dry run",
     "step4": "Migration",
-    "support_notice": "This import is meant for smaller amounts of data. If your journal has thousands of entries or you have special import requirements, contact our support. As a paid service we're happy to help and tailor the import to your needs.",
+    "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
+    "support_notice_recommend": "we recommend {contact} and leaving the import to us",
+    "support_notice_contact": "contacting our support",
     "support_notice_link": "Contact support",
     "upload_title": "Create a backup in PREMIER and upload it",
     "upload_hint": "Create the backup directly in PREMIER, no separate export tool is needed.",

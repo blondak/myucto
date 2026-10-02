@@ -1435,7 +1435,9 @@
     "stereo_hint": "Převeďte účetní data ze Stereo NX.",
     "abra_hint": "Připojte ABRA Flexi a načtěte vybrané účetní roky přes API.",
     "pamica_hint": "Přeneste zaměstnance, pracovní vztahy a mzdové podklady z PAMICA.",
-    "support_notice": "Tento import je určen pro menší množství dat. Pokud máte v deníku tisíce záznamů nebo speciální požadavky na import, kontaktujte naši podporu. V rámci placeného servisu vám s importem rádi pomůžeme a upravíme ho na míru.",
+    "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
+    "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
+    "support_notice_contact": "kontaktovat naši podporu",
     "support_notice_link": "Kontaktovat podporu"
   },
   "instance_alert": {
@@ -28502,6 +28504,9 @@
     }
   },
   "abra_flexi": {
+    "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
+    "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
+    "support_notice_contact": "kontaktovat naši podporu",
     "title": "Přechod z ABRA Flexi",
     "steps": "Postup převodu",
     "step1": "Připojení k ABRA Flexi",
@@ -28659,7 +28664,9 @@
     "upload_title": "Nahrajte zálohu agendy",
     "upload_hint": "V Money S3 zvolte Zálohovat agendu a nahrajte vzniklý soubor .lz. Záloha se jen čte, instalace Money se převodem nemění.",
     "choose_file": "Soubor zálohy agendy (.lz)",
-    "support_notice": "Tento import je určen pro menší množství dat. Pokud máte v deníku tisíce záznamů nebo speciální požadavky na import, kontaktujte naši podporu. V rámci placeného servisu vám s importem rádi pomůžeme a upravíme ho na míru.",
+    "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
+    "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
+    "support_notice_contact": "kontaktovat naši podporu",
     "support_notice_link": "Kontaktovat podporu",
     "file_help_title": "Co je soubor zálohy agendy",
     "file_help_items": [
@@ -29067,7 +29074,9 @@
     "step2": "Náhled a volby",
     "step3": "Zkouška nanečisto",
     "step4": "Převod",
-    "support_notice": "Tento import je určen pro menší množství dat. Pokud máte v deníku tisíce záznamů nebo speciální požadavky na import, kontaktujte naši podporu. V rámci placeného servisu vám s importem rádi pomůžeme a upravíme ho na míru.",
+    "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
+    "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
+    "support_notice_contact": "kontaktovat naši podporu",
     "support_notice_link": "Kontaktovat podporu",
     "upload_title": "Vytvořte export z POHODY a nahrajte ho",
     "upload_hint": "Vyberte jednu ze tří cest. Všechny vytvoří ZIP s XML pro tento průvodce a zdrojová data jen čtou.",
@@ -31083,7 +31092,9 @@
     "step2": "Náhled a volby",
     "step3": "Zkouška nanečisto",
     "step4": "Převod",
-    "support_notice": "Tento import je určen pro menší množství dat. Pokud máte v deníku tisíce záznamů nebo speciální požadavky na import, kontaktujte naši podporu. V rámci placeného servisu vám s importem rádi pomůžeme a upravíme ho na míru.",
+    "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
+    "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
+    "support_notice_contact": "kontaktovat naši podporu",
     "support_notice_link": "Kontaktovat podporu",
     "upload_title": "Vytvořte zálohu v PREMIER a nahrajte ji",
     "upload_hint": "Zálohu vytvoříte přímo v programu PREMIER, žádný samostatný exportní nástroj není potřeba.",

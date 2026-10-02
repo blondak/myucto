@@ -360,7 +360,9 @@ const actions = computed<ActionItem[]>(() => {
     </div>
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="pohoda-support-notice">
-      <p>{{ tt('support_notice') }}</p>
+      <i18n-t :keypath="te(ownKey('support_notice')) ? ownKey('support_notice') : 'pohoda.support_notice'" tag="p">
+        <template #recommend><strong><i18n-t keypath="pohoda.support_notice_recommend" tag="span"><template #contact><a href="https://myucto.cz/support#placena" target="_blank" rel="noopener" class="underline hover:no-underline">{{ tt('support_notice_contact') }}</a></template></i18n-t></strong></template>
+      </i18n-t>
       <RouterLink to="/admin/support" class="mt-1 inline-block font-medium underline hover:no-underline">{{ tt('support_notice_link') }}</RouterLink>
     </div>
 
