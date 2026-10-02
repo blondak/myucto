@@ -168,6 +168,8 @@ final class Bootstrap
                     'messageProcessor',
                     \DI\get(\MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class),
                 ),
+            \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalNotifier::class =>
+                \DI\get(\MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalMailer::class),
             // PDF přijatého dokladu pro jeho schvalovatele (F6) — nepovinné kvůli
             // testům, které middleware staví ručně.
             \MyInvoice\Middleware\PermissionMiddleware::class =>

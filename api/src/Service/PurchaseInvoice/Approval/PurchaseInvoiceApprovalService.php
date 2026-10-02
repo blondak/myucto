@@ -36,7 +36,7 @@ final class PurchaseInvoiceApprovalService
         private readonly PurchaseInvoiceApprovalRepository $approvals,
         private readonly PurchaseApprovalRequirements $requirements,
         private readonly PurchaseInvoiceReceiver $receiver,
-        private readonly PurchaseApprovalMailer $mailer,
+        private readonly PurchaseApprovalNotifier $mailer,
         private readonly ActivityLogger $logger,
     ) {}
 
@@ -152,7 +152,7 @@ final class PurchaseInvoiceApprovalService
             throw new PurchaseApprovalException('approval_already_decided', 'O tomto schválení už bylo rozhodnuto.', 409);
         }
         if ((string) $row['invoice_status'] !== 'draft') {
-            throw new PurchaseApprovalException('approval_closed', 'Doklad už není koncept — schválení není potřeba.', 409);
+            throw new PurchaseApprovalException('approval_closed', 'Doklad už není koncept, schválení není potřeba.', 409);
         }
 
         $status = $decision === 'approve' ? 'approved' : 'rejected';
@@ -356,7 +356,7 @@ final class PurchaseInvoiceApprovalService
             throw new PurchaseApprovalException(
                 'approval_no_approver',
                 'Hodnota dimenze ' . implode(', ', array_map(static fn (array $r): string => $r['value_code'] . ' ' . $r['value_name'], $missing))
-                    . ' nemá odpovědnou osobu — doklad nejde odeslat ke schválení. Doplňte ji ve Firma → Dimenze.',
+                    . ' nemá odpovědnou osobu, doklad proto nejde odeslat ke schválení. Doplňte ji ve Firma → Dimenze.',
                 422,
                 ['dimension_values' => array_map(static fn (array $r): array => [
                     'id' => $r['value_id'], 'code' => $r['value_code'], 'name' => $r['value_name'],

@@ -16,7 +16,7 @@ use MyInvoice\Service\Tenant\TenantUrlResolver;
  * má v DB jen jeho SHA-256. Odkaz vede na veřejnou stránku `/purchase-approval/{token}`
  * (bez přihlášení), schránka v aplikaci je `/purchase-approvals`.
  */
-final class PurchaseApprovalMailer
+final class PurchaseApprovalMailer implements PurchaseApprovalNotifier
 {
     public const TEMPLATE_CODE = 'purchase_invoice_approval';
 

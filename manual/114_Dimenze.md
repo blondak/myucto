@@ -235,6 +235,52 @@ a to z aktivních hodnot firmy, které se ukazují na dokladech. Ostatní typy
 a interní údaje číselníku (odpovědná osoba, poznámky, vazby) portál nevidí.
 Náhrada originálu převezme středisko nahrazovaného podání.
 
+## Schvalování přijatých dokladů
+
+Přijaté doklady (faktury i účtenky) může před přijetím schválit manažer střediska.
+Schvalovatelem je **odpovědná osoba** hodnoty dimenze.
+
+**Nastavení.** U typu dimenze (typicky Středisko) zapněte **Vyžaduje schválení**
+a volitelně zadejte **limit** v Kč bez DPH. Doklad, na který připadá částka pod
+limitem, se neschvaluje. Bez limitu se schvaluje každý doklad. Hodnotám typu
+nastavte odpovědnou osobu, jinak doklad s touto hodnotou nejde ke schválení
+odeslat. Schvalovatel potřebuje oprávnění **Schvalovat přijaté doklady**, které
+lze přidělit i roli jen pro čtení.
+
+**Které středisko schvaluje.** Středisko se bere z položek i z hlavičky dokladu
+stejně jako při zaúčtování: dimenze položky, pak produkt, hlavička dokladu,
+zakázka a dodavatel. Částka střediska je součet základů položek s jeho hodnotou
+(u rozpadu podíl), u dokladu v cizí měně přepočtená kurzem dokladu. Má-li doklad
+víc středisek, schvaluje každé středisko jeho odpovědná osoba a doklad je
+schválený, až schválí všichni. Daňový doklad k přijaté platbě a dobropis se
+neschvalují.
+
+**Odeslání ke schválení.** Přijetí konceptu (tlačítko **Přijmout**, potvrzení
+v okně kontroly vytěžení, API i MCP) u dokladu, který schválení vyžaduje, doklad
+nepřijme, ale odešle ho ke schválení. Doklad zůstává **konceptem**, takže není
+v platebních příkazech, v nákladech, v evidenci DPH ani v účetnictví. Seznam
+přijatých faktur jde filtrovat podle stavu schválení.
+
+**Rozhodnutí.** Schvalovatel dostane e-mail s odkazem, na kterém vidí doklad
+i jeho PDF a může ho **schválit**, nebo **zamítnout** s povinným důvodem. Odkaz
+platí 14 dní a jde použít pro jedno rozhodnutí. Totéž najde v aplikaci na stránce
+**Ke schválení**, kde vidí jen doklady, které schvaluje on. Nevyřízená schválení
+připomíná denně e-mail (cron `cron-purchase-approval-reminders`), každá
+připomínka nese nový odkaz a ten předchozí přestává platit.
+
+**Po schválení všemi** se doklad přijme sám, stejně jako kdyby ho přijala účetní:
+přidělí se interní číslo a proběhne i automatické zaúčtování, je-li zapnuté.
+**Zamítnutý** doklad zůstává konceptem a účetní ho najde v akčních položkách.
+Může ho upravit a poslat znovu (nové kolo schvalování), nebo stornovat.
+
+**Změna po schválení.** Schválení platí pro středisko a částku. Změní-li se po
+schválení středisko nebo částka, další pokus o přijetí pošle doklad znovu ke
+schválení jen dotčenému středisku. Ostatní schválení zůstávají v platnosti.
+
+Bez typu dimenze se zapnutým schvalováním se doklady přijímají jako dřív. Dávkový
+import ISDOC a Pohoda XML, který doklady rovnou přijímá, schvalování neuplatňuje.
+Kdo chce importované doklady schvalovat, importuje je jako koncepty.
+
 ## Majetek
 
 Karta dlouhodobého majetku (hmotného i nehmotného) nese vlastní dimenze. Zadávají
@@ -591,6 +637,8 @@ pracovat, dokud nebude licence znovu platná.
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
 k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
 a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku.
+Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
+odeslání ke schválení a jeho zrušení patří ke změně stavu přijaté faktury.
 
 ## Převod z Money S3
 

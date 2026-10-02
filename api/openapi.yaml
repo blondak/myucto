@@ -6273,6 +6273,10 @@ paths:
           description: "Zaúčtování (jen podvojné účetnictví): 1 = zaúčtováno (booked_at není NULL), 0 = nezaúčtováno"
           schema: { type: string, enum: ['1', '0'] }
         - in: query
+          name: filter[approval_status]
+          description: "Schvalování manažerem střediska (approval_status dokladu)"
+          schema: { type: string, enum: [none, pending, approved, rejected] }
+        - in: query
           name: filter[group_by_month]
           description: "0 = souvislý seznam; výchozí 1 = skupiny po měsících"
           schema: { type: integer, enum: [0, 1], default: 1 }
@@ -6591,6 +6595,13 @@ paths:
         vrací 403 `token_write_forbidden` a provádí se v aplikaci. Ostatní přechody
         token smí; automatické zaúčtování při přijetí (`received`), které má firma
         zapnuté, proběhne stejně jako z aplikace.
+
+        Schvalování manažerem střediska: vyžaduje-li koncept schválení (typ dimenze
+        se schvalováním a hodnota nad limitem), přechod na `received` doklad
+        nepřijme. Odpověď je 200 s dokladem ve stavu `draft`, `approval_status:
+        pending`, `approval_requested: true` a seznamem `approvals`; schvalovatelé
+        dostanou e-mail a doklad se přijme sám, až schválí všichni. Hodnota
+        dimenze bez odpovědné osoby vrací 422 `approval_no_approver`.
       parameters:
         - in: path
           name: id
@@ -6615,9 +6626,21 @@ paths:
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PurchaseInvoice'
+                  - type: object
+                    properties:
+                      approval_requested:
+                        type: boolean
+                        description: Jen když přechod místo přijetí odeslal doklad ke schválení.
+                      approvals:
+                        type: array
+                        description: Jen s `approval_requested`; aktuální schválení dokladu po hodnotách dimenze.
+                        items: { $ref: '#/components/schemas/PurchaseInvoiceApproval' }
         '403': { description: 'Klientský účet (`forbidden_transition`), nebo `target=booked` přes API token (`token_write_forbidden`)' }
         '409': { description: Invalid transition }
+        '422': { description: 'Mimo jiné `approval_no_approver` — hodnota dimenze vyžadující schválení nemá odpovědnou osobu' }
 
   /api/v1/purchase-invoices/{id}/pdf:
     post:
@@ -35758,6 +35781,10 @@ components:
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
         status: { type: string, enum: [draft, received, booked, paid, cancelled] }
+        approval_status:
+          type: string
+          enum: [none, pending, approved, rejected]
+          description: "Schvalování manažerem střediska. `pending` = koncept čeká na schvalovatele; přijme se sám, až schválí všichni."
         booked_at: { type: [string, "null"], format: date-time }
         paid_at: { type: [string, "null"], format: date }
         cancelled_at: { type: [string, "null"], format: date-time }
@@ -35785,6 +35812,33 @@ components:
         has_small_asset:
           type: boolean
           description: "§DM — aspoň jedna položka dokladu má expense_kind='small_asset' (drobný majetek). Jen v seznamu, v detailu se odvozuje z items[]."
+
+    PurchaseInvoiceApproval:
+      type: object
+      description: Schválení přijatého dokladu jednou odpovědnou osobou za jednu hodnotu dimenze v jednom kole.
+      properties:
+        id: { type: integer }
+        purchase_invoice_id: { type: integer }
+        round: { type: integer }
+        status: { type: string, enum: [pending, approved, rejected, cancelled] }
+        amount_czk: { type: number, description: Základ v Kč bez DPH připadající na hodnotu dimenze }
+        dimension_value:
+          type: object
+          properties:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
+            type_name: { type: string }
+        approver:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            email: { type: string }
+        requested_at: { type: string, format: date-time }
+        decided_at: { type: [string, "null"], format: date-time }
+        decided_via: { type: [string, "null"], enum: [app, email, null] }
+        comment: { type: [string, "null"] }
 
     PurchaseInvoiceItemsResponse:
       type: object
@@ -36138,6 +36192,13 @@ components:
           allOf:
             - $ref: '#/components/schemas/PurchaseInvoiceReview'
           description: Proč doklad potřebuje kontrolu vytěžení (jen detail dokladu).
+        approval_status:
+          type: string
+          enum: [none, pending, approved, rejected]
+          description: |
+            Schvalování manažerem střediska (typ dimenze se schvalováním). `pending` =
+            koncept čeká na odpovědné osoby středisek a přijme se sám, až schválí všichni;
+            `rejected` = schvalovatel doklad zamítl, zůstává konceptem.
         currency_id: { type: integer }
         currency: { type: string }
         currency_symbol: { type: string }
@@ -37036,6 +37097,14 @@ components:
         drives_accounts_mask:
           type: string
           description: Výsledkové účty, na které se mapa uplatní (předpony, vyloučení s !), výchozí `5, 6`.
+        requires_approval:
+          type: boolean
+          description: Přijaté doklady s hodnotou typu schvaluje před přijetím odpovědná osoba hodnoty.
+        approval_threshold:
+          type:
+          - number
+          - 'null'
+          description: Základ v Kč bez DPH, pod kterým se neschvaluje; null nebo 0 = schvaluje se vždy.
         created_at:
           type: string
         updated_at:

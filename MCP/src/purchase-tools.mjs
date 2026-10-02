@@ -578,6 +578,8 @@ export const PURCHASE_TOOLS = [
       + 'DPH (odpočet v období podle DUZP a data přijetí), do závazků a do platebních příkazů. '
       + 'MÁ-LI FIRMA ZAPNUTÉ AUTOMATICKÉ ÚČTOVÁNÍ PŘIJATÝCH FAKTUR, SERVER DOKLAD ROVNOU ZAÚČTUJE; '
       + 'u hotovostní úhrady z pokladny vznikne výdajový pokladní doklad.\n\n'
+      + 'Vyžaduje-li koncept schválení manažerem střediska, server ho místo přijetí odešle ke schválení '
+      + '(odpověď `approval_requested: true`, doklad zůstane konceptem a přijme se sám po schválení).\n\n'
       + 'Z uhrazeného dokladu tím zrušíš označení úhrady, ze stornovaného obnovíš doklad '
       + '(vrátí se do evidence DPH). Vždy vyžaduje `confirm: true`; první volání jen ukáže dopad.',
     inputSchema: schema({ id: id('ID přijaté faktury.'), confirm: CONFIRM }, ['id']),
