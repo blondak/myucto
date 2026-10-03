@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\PurchaseInvoiceRepository;
 
 /**
  * Křížová kontrola DPHDP3 ↔ KH ↔ SH ↔ obrat účtu 343 (audit 2026-07, C8').
@@ -78,6 +79,7 @@ final class VatCrossCheckService
 
         $findings = array_merge($findings, $this->pendingApprovalFindings($supplierId, $start, $end));
         $findings = array_merge($findings, $this->checkDraftAdvanceTaxDocuments($supplierId, $start, $end));
+        $findings = array_merge($findings, $this->checkReverseChargeDomesticCodes($rows));
         $findings = array_merge($findings, $this->checkDomesticVsKh($supplierId, $year, $month, $period, $rows));
         $findings = array_merge($findings, $this->checkReverseChargeVsKh($supplierId, $year, $month, $period, $rows));
         $findings = array_merge($findings, $this->checkEuSuppliesVsSh($supplierId, $year, $month, $period, $rows));
@@ -175,6 +177,61 @@ final class VatCrossCheckService
         }
 
         return $findings;
+    }
+
+    /**
+     * Přijatý doklad s přenesenou povinností, jehož řádek nese tuzemský kód 40/41/42
+     * (issue #119). Kód řádku přebije hlavičku, takže řádek míří na odpočet ř. 40/41
+     * bez daně na výstupu: plátce si odečte daň, kterou nepřiznal, a identifikované
+     * osobě doklad z přiznání zmizí celý. Uložení dokladu kódy řádků srovná
+     * ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}); tady se
+     * vyjmenují doklady uložené dřív.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function checkReverseChargeDomesticCodes(array $rows): array
+    {
+        $docs = [];
+        foreach ($rows as $row) {
+            if (($row['source'] ?? '') !== 'purchase' || empty($row['is_reverse_charge'])
+                || !in_array((string) ($row['code'] ?? ''), PurchaseInvoiceRepository::DOMESTIC_INPUT_CODES, true)) {
+                continue;
+            }
+            $id = (int) $row['invoice_id'];
+            $doc = $docs[$id] ?? [
+                'invoice_id'            => $id,
+                'doc_number'            => $row['vendor_invoice_number'] ?? $row['doc_number'],
+                'vendor_invoice_number' => $row['vendor_invoice_number'],
+                'source'                => 'purchase',
+                'declared'              => 0.0,
+                'counter'               => 0.0,
+                'difference'            => 0.0,
+                'tax_date'              => $row['tax_date'],
+                'partner_name'          => $row['counterparty_name'],
+            ];
+            $doc['counter'] = round($doc['counter'] + (float) $row['vat_czk'], 2);
+            $doc['difference'] = round(-$doc['counter'], 2);
+            $docs[$id] = $doc;
+        }
+        if ($docs === []) {
+            return [];
+        }
+        $total = round(array_sum(array_column($docs, 'counter')), 2);
+        return [[
+            'check'      => 'reverse_charge_domestic_code',
+            'label'      => 'Doklady s přenesenou povinností mají na řádcích tuzemský kód DPH',
+            'severity'   => 'mismatch',
+            'blocking'   => true,
+            'declared'   => 0.0,
+            'counter'    => $total,
+            'difference' => round(-$total, 2),
+            'documents'  => array_values($docs),
+            'note'       => 'Doklady mají zatrženou přenesenou daňovou povinnost, ale řádky nesou tuzemský kód 40, 41 '
+                . 'nebo 42. Daň se proto nesamovyměří a jde jen do odpočtu, identifikované osobě doklad '
+                . 'z přiznání zmizí. Otevřete doklad, zkontrolujte Klasifikaci DPH (služba z EU 24e, '
+                . 'ze 3. země 24, zboží z EU 23) a uložte ho. Uložení kódy řádků srovná.',
+        ]];
     }
 
     /**

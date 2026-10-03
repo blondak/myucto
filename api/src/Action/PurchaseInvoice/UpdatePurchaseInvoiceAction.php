@@ -330,6 +330,10 @@ final class UpdatePurchaseInvoiceAction
             // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
             if (DocumentItemsPayload::replaces($body)) {
                 $this->repo->replaceItems($id, (array) $body['items']);
+            } else {
+                // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
+                // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).
+                $this->repo->reconcileReverseChargeItemCodes($id);
             }
             // Volba „uhradit hotově z pokladny" (migrace 1327) — jen když klíč v těle JE,
             // ať částečný PUT (samotné DUZP, poznámka) volbu tiše nesmaže.

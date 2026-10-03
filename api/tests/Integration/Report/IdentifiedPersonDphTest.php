@@ -6,8 +6,11 @@ namespace MyInvoice\Tests\Integration\Report;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Report\VatCrossCheckService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -35,6 +38,9 @@ final class IdentifiedPersonDphTest extends TestCase
     private Connection $db;
     private DphPriznaniBuilder $dph;
     private KontrolniHlaseniBuilder $kh;
+    private PurchaseInvoiceRepository $purchases;
+    private VatCrossCheckService $crossCheck;
+    private PurchaseInvoiceCalculator $calculator;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -63,6 +69,9 @@ final class IdentifiedPersonDphTest extends TestCase
             $this->db  = $container->get(Connection::class);
             $this->dph = $container->get(DphPriznaniBuilder::class);
             $this->kh  = $container->get(KontrolniHlaseniBuilder::class);
+            $this->purchases = $container->get(PurchaseInvoiceRepository::class);
+            $this->crossCheck = $container->get(VatCrossCheckService::class);
+            $this->calculator = $container->get(PurchaseInvoiceCalculator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -205,6 +214,73 @@ final class IdentifiedPersonDphTest extends TestCase
         self::assertSame('1680', (string) $dp->Veta4['odp_sum_nar'], 'plátce má ř.46 součtový odpočet = ř.43');
     }
 
+    /**
+     * Issue #119: přenesená povinnost zatržená až po prvním uložení nechala na řádku
+     * tuzemský kód 40. Kód řádku přebije hlavičku 24e, takže se daň nesamovyměří a
+     * identifikované osobě doklad z přiznání zmizí. Smír DPH takový doklad vyjmenuje
+     * a uložení položek kód řádku srovná na kód přenesené povinnosti z hlavičky.
+     */
+    public function testReverseChargeInvoiceWithDomesticItemCodeIsReportedAndFixedOnSave(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $euVend = $this->client('EU dodavatel služby IO', $this->deId, 'DE606060606', vendor: true);
+        $id = $this->purchase('IO-2097-200', $euVend, '24e', true, $d(15), $d(15), [[10000, 0, 21]]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET vat_classification_code = '40' WHERE purchase_invoice_id = ?")
+            ->execute([$id]);
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        self::assertSame('', (string) $dp->Veta1['p_sl23_e'], 'Řádek s kódem 40 se nesamovyměří (stav z issue #119).');
+        $finding = $this->finding('reverse_charge_domestic_code');
+        self::assertNotNull($finding, 'Smír DPH musí doklad s tuzemským kódem řádku vyjmenovat.');
+        self::assertTrue($finding['blocking']);
+        self::assertSame([$id], array_column($finding['documents'], 'invoice_id'));
+
+        $item = $this->db->pdo()->prepare('SELECT description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_classification_code
+                                             FROM purchase_invoice_items WHERE purchase_invoice_id = ?');
+        $item->execute([$id]);
+        $this->purchases->replaceItems($id, [(array) $item->fetch(\PDO::FETCH_ASSOC)]);
+        $this->calculator->recompute($id);
+
+        $code = $this->db->pdo()->prepare('SELECT vat_classification_code FROM purchase_invoice_items WHERE purchase_invoice_id = ?');
+        $code->execute([$id]);
+        self::assertSame('24e', $code->fetchColumn(), 'Uložení převezme kód přenesené povinnosti z hlavičky.');
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        self::assertSame('10000', (string) $dp->Veta1['p_sl23_e'], 'ř.5 přijetí služby z EU');
+        self::assertSame('2100', (string) $dp->Veta1['dan_psl23_e'], 'ř.5 samovyměřená daň');
+        self::assertNull($this->finding('reverse_charge_domestic_code'));
+    }
+
+    /** Zatržení přenesené povinnosti bez poslaných položek (částečná úprava) srovná uložené řádky taky. */
+    public function testReconcileWithoutHeaderCodeDerivesThirdCountryService(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $usVend = $this->client('US dodavatel služby IO', $this->countryId('US'), null, vendor: true);
+        $id = $this->purchase('IO-2097-201', $usVend, null, true, $d(16), $d(16), [[5000, 0, 21]]);
+        $rate21 = (int) ($this->db->pdo()->query('SELECT id FROM vat_rates WHERE rate_percent = 21 ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET vat_classification_code = '40', vat_rate_id = ? WHERE purchase_invoice_id = ?")
+            ->execute([$rate21, $id]);
+
+        self::assertSame(1, $this->purchases->reconcileReverseChargeItemCodes($id));
+        $code = $this->db->pdo()->prepare('SELECT vat_classification_code FROM purchase_invoice_items WHERE purchase_invoice_id = ?');
+        $code->execute([$id]);
+        self::assertSame('24', $code->fetchColumn(), 'Služba ze 3. země se samovyměřuje na ř.12.');
+
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 0 WHERE id = ?')->execute([$id]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET vat_classification_code = '40' WHERE purchase_invoice_id = ?")->execute([$id]);
+        self::assertSame(0, $this->purchases->reconcileReverseChargeItemCodes($id), 'Bez přenesené povinnosti zůstává tuzemský kód.');
+    }
+
+    /** @return array<string,mixed>|null */
+    private function finding(string $check): ?array
+    {
+        foreach ($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly') as $f) {
+            if ($f['check'] === $check) {
+                return $f;
+            }
+        }
+        return null;
+    }
+
     // ── helpers (vzor KhDphTaxScenariosTest) ─────────────────────────────────
 
     private function countryId(string $iso2): int
@@ -249,7 +325,7 @@ final class IdentifiedPersonDphTest extends TestCase
     }
 
     /** @param list<array{0:float,1:float,2:float}> $items [base, vat, vat_rate_snapshot] */
-    private function purchase(string $number, int $vendorId, ?string $code, bool $rc, string $issue, ?string $tax, array $items): void
+    private function purchase(string $number, int $vendorId, ?string $code, bool $rc, string $issue, ?string $tax, array $items): int
     {
         [$base, $vat, $with] = $this->sumItems($items);
         $stmt = $this->db->pdo()->prepare(
@@ -266,6 +342,7 @@ final class IdentifiedPersonDphTest extends TestCase
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->purchaseIds[] = $id;
         $this->insertItems('purchase_invoice_items', 'purchase_invoice_id', $id, $items);
+        return $id;
     }
 
     /**

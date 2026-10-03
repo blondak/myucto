@@ -2075,10 +2075,100 @@ final class PurchaseInvoiceRepository
             ]);
         }
 
+        $this->reconcileReverseChargeItemCodes($purchaseInvoiceId);
+
         // Odrážky hlášení AI extrakce u řádků, které teď druh nákladu mají, zmizí.
         if ($supplierId > 0) {
             (new ExtractionReviewSync($this->db))->afterItemsChanged($supplierId, $purchaseInvoiceId);
         }
+    }
+
+    /** Tuzemské kódy přijatého plnění — u dokladu s přenesenou povinností nikdy nepatří na řádek. */
+    public const DOMESTIC_INPUT_CODES = ['40', '41', '42'];
+
+    /**
+     * Srovná kódy řádků dokladu s přenesenou povinností (issue #119).
+     *
+     * Kód řádku má v evidenci DPH přednost před hlavičkou ({@see \MyInvoice\Service\Report\VatLedgerService}).
+     * Řádek, který dostal tuzemský kód 40/41/42 ještě před zatržením přenesené
+     * povinnosti nebo s dodavatelem omylem z CZ, editor při každém uložení posílá
+     * zpět, takže by na dokladu zůstal natrvalo: daň na výstupu nevznikne a
+     * identifikované osobě doklad z přiznání zmizí celý (ř. 40 nevyplňuje).
+     * Takový řádek převezme kód přenesené povinnosti z hlavičky, a když ho hlavička
+     * nemá, odvodí se znovu jako u nového řádku. Jiné kódy řádků (23/24/24e/25/5,
+     * mimo, osvobozené) zůstávají, jsou to vědomá volba.
+     *
+     * @return int počet opravených řádků
+     */
+    public function reconcileReverseChargeItemCodes(int $purchaseInvoiceId): int
+    {
+        $pdo = $this->db->pdo();
+        $metaStmt = $pdo->prepare(
+            'SELECT pi.supplier_id, pi.reverse_charge, pi.vat_classification_code, co.iso2,
+                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date
+               FROM purchase_invoices pi
+               LEFT JOIN clients c    ON c.id  = pi.vendor_id
+               LEFT JOIN countries co ON co.id = c.country_id
+              WHERE pi.id = ?'
+        );
+        $metaStmt->execute([$purchaseInvoiceId]);
+        $meta = $metaStmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($meta) || !(bool) $meta['reverse_charge']) {
+            return 0;
+        }
+        $marks = implode(',', array_fill(0, count(self::DOMESTIC_INPUT_CODES), '?'));
+        $itemsStmt = $pdo->prepare(
+            "SELECT id, vat_rate_id, description FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks})"
+        );
+        $itemsStmt->execute([$purchaseInvoiceId, ...self::DOMESTIC_INPUT_CODES]);
+        $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($items === []) {
+            return 0;
+        }
+
+        $supplierId = (int) $meta['supplier_id'];
+        $headerRcCode = null;
+        $headerCode = $meta['vat_classification_code'] !== null ? (string) $meta['vat_classification_code'] : '';
+        if ($headerCode !== '') {
+            $rc = $pdo->prepare(
+                "SELECT 1 FROM vat_classifications
+                  WHERE code = ? AND is_reverse_charge = 1 AND archived = 0
+                    AND direction IN ('purchase','both')
+                    AND (supplier_id IS NULL OR supplier_id = ?)
+                  LIMIT 1"
+            );
+            $rc->execute([$headerCode, $supplierId]);
+            if ($rc->fetchColumn() !== false) {
+                $headerRcCode = $headerCode;
+            }
+        }
+
+        $docDate = !empty($meta['doc_date']) ? (string) $meta['doc_date'] : date('Y-m-d');
+        $standardRate = $this->taxConstants->vatRateStandard((int) substr($docDate, 0, 4));
+        $tenantIsVatPayer = true;
+        if ($supplierId > 0 && $this->db->hasTable('supplier_vat_status_history')) {
+            $tenantIsVatPayer = VatStatusService::flagsAt($pdo, $supplierId, $docDate)['is_vat_payer'];
+        }
+        $vatRates = $this->vatRateMap();
+        $update = $pdo->prepare('UPDATE purchase_invoice_items SET vat_classification_code = ? WHERE id = ?');
+        $fixed = 0;
+        foreach ($items as $item) {
+            $code = $headerRcCode ?? self::defaultClassificationCode(
+                $vatRates[(int) $item['vat_rate_id']] ?? 0.0,
+                true,
+                (string) ($meta['iso2'] ?? 'CZ'),
+                $standardRate,
+                PublicAuthorityFeeText::indicatesPublicAuthorityFee((string) ($item['description'] ?? '')),
+                $tenantIsVatPayer,
+            );
+            if ($code === null || in_array($code, self::DOMESTIC_INPUT_CODES, true)) {
+                continue;
+            }
+            $update->execute([$code, (int) $item['id']]);
+            $fixed++;
+        }
+        return $fixed;
     }
 
     /**
