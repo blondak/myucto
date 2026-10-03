@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction;
 use MyInvoice\Action\PurchaseInvoice\GetPurchaseInvoiceAction;
+use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -333,6 +334,51 @@ final class DimensionExtractionReviewTest extends TestCase
             }
         }
         self::assertSame([$this->projectType => $project], $submissionDims->validate($this->supplierId, [$this->projectType => $project], false), 'Účetní smí zvolit i projekt.');
+    }
+
+    public function testBulkDimensionsMergeIntoQueuedSubmissionsAndSkipProcessed(): void
+    {
+        $center = $this->value($this->centerType, 'BC-1');
+        $project = $this->value($this->projectType, 'BP-1');
+        $submissionDims = $this->container->get(SubmissionDimensions::class);
+        $kept = $this->submission('bulk-kept');
+        $submissionDims->save($this->supplierId, $kept, [$this->projectType => $project]);
+        $plain = $this->submission('bulk-plain');
+        $processed = $this->submission('bulk-processed');
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_submissions SET status = 'processed' WHERE id = ?")->execute([$processed]);
+
+        $action = $this->container->get(PurchaseInvoiceSubmissionAction::class);
+        $body = ['ids' => [$kept, $plain, $processed], 'dimensions' => [$this->centerType => $center]];
+
+        $denied = $action->bulkDimensions($this->bulkRequest($body, ['documents.inbox' => 2]), (new ResponseFactory())->createResponse());
+        self::assertSame(403, $denied->getStatusCode(), 'Bez práva na účetnictví dimenze nastavit nejde.');
+
+        $response = $action->bulkDimensions(
+            $this->bulkRequest($body, ['documents.inbox' => 2, 'accounting' => 2]),
+            (new ResponseFactory())->createResponse(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $result = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([$kept, $plain], $result['updated']);
+        self::assertSame([$processed], $result['skipped']);
+
+        $map = $submissionDims->forSubmissions($this->supplierId, [$kept, $plain, $processed]);
+        self::assertEquals([$this->projectType => $project, $this->centerType => $center], $map[$kept], 'Ostatní dimenze podání zůstanou.');
+        self::assertSame([$this->centerType => $center], $map[$plain]);
+        self::assertArrayNotHasKey($processed, $map, 'Zpracované podání se nemění.');
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @param array<string,int> $permissions
+     */
+    private function bulkRequest(array $body, array $permissions): \Psr\Http\Message\ServerRequestInterface
+    {
+        return (new ServerRequestFactory())->createServerRequest('POST', '/api/purchase-invoice-submissions/dimensions')
+            ->withParsedBody($body)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(8, 'Účetní', 'staff', true, $permissions));
     }
 
     // ── pomocné ──────────────────────────────────────────────────────────────

@@ -162,6 +162,20 @@ kořene. Fronta ukazuje všechny podání bez ohledu na to, ve které podsložce
 > Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
 > nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
 
+**Hromadné akce.** Každý doklad v seznamu má vlevo zaškrtávátko a nad seznamem je
+**Označit vše** / **Odebrat vše**. U označených dokladů jsou k dispozici akce:
+
+| Akce | Na které doklady se použije |
+| --- | --- |
+| **Vytěžit označené** | jen čekající doklady; po dokončení se otevře kontrola vytěžení všech vzniklých faktur |
+| **Odmítnout označené** | jen čekající doklady; důvod je povinný, pokud mezi nimi je doklad od klienta |
+| **Smazat označené z fronty** | všechny kromě zpracovaných a právě zpracovávaných; vyžaduje stejné oprávnění jako jednotlivé smazání |
+| **Přidat dimenze** | čekající doklady a doklady čekající na doplnění; jen při zapnutých dimenzích |
+
+Doklady, které pro akci nemají vhodný stav, se přeskočí a výsledek je uvede. Přidání
+dimenzí přepíše u dokladů jen zvolené typy, ostatní dimenze zůstanou; zvolené hodnoty
+se při vytěžení propíšou do hlavičky dokladu stejně jako dimenze zadané při nahrání.
+
 Po zpracování se originál přesune do složky **Příchozí doklady / Archiv / rok / měsíc**,
 takže v příchozích zůstává jen to, co na zpracování čeká. Originál se nemaže, je
 auditní stopou toho, co klient předal. Je-li to tentýž soubor jako PDF výsledné

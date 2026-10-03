@@ -150,6 +150,9 @@ export const purchaseInvoiceSubmissionsApi = {
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/needs-information`, { reason }).then(r => r.data),
   reject: (id: number, reason: string) =>
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/reject`, { reason }).then(r => r.data),
+  /** Doplní dimenze vybraným podáním; zvolené typy přepíše, ostatní nechá. */
+  bulkDimensions: (ids: number[], dimensions: Record<number, number | null>) =>
+    api.post<{ updated: number[]; skipped: number[] }>('/purchase-invoice-submissions/dimensions', { ids, dimensions }).then(r => r.data),
   /** Vyřadí podání z fronty a originál pošle do koše Dokumentů (documents.inbox.delete). */
   remove: (id: number) =>
     api.delete<{ ok: boolean; document_id: number }>(`/purchase-invoice-submissions/${id}`).then(r => r.data),

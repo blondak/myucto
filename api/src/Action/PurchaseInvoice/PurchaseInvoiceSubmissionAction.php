@@ -207,6 +207,53 @@ final class PurchaseInvoiceSubmissionAction
         return Json::ok($response, $this->findWithDimensions($id, $supplierId));
     }
 
+    /**
+     * Hromadné doplnění dimenzí vybraným podáním ve frontě. Zvolené typy přepíše,
+     * ostatní dimenze podání nechá. Zpracované podání už má fakturu, na kterou se
+     * dimenze propsaly, proto se přeskočí.
+     */
+    public function bulkDimensions(Request $request, Response $response): Response
+    {
+        if ($denied = $this->deny($request, $response, true)) return $denied;
+        if (!RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Dimenze dokladu může zvolit jen uživatel s právem na účetnictví.', 403);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', is_array($body['ids'] ?? null) ? $body['ids'] : []),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === []) return Json::error($response, 'no_items', 'Vyberte alespoň jeden doklad.', 400);
+        if (count($ids) > 500) return Json::error($response, 'too_many_items', 'Najednou lze upravit nejvýše 500 dokladů.', 413);
+        try {
+            $dims = $this->submissionDimensions->validate(
+                $supplierId,
+                is_array($body['dimensions'] ?? null) ? $body['dimensions'] : [],
+                false,
+            );
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        if ($dims === []) return Json::error($response, 'no_dimensions', 'Zvolte alespoň jednu hodnotu dimenze.', 400);
+
+        $existing = $this->submissionDimensions->forSubmissions($supplierId, $ids);
+        $updated = [];
+        $skipped = [];
+        foreach ($ids as $id) {
+            $submission = $this->submissions->find($id, $supplierId);
+            if ($submission === null || !in_array((string) $submission['status'], ['submitted', 'needs_information'], true)) {
+                $skipped[] = $id;
+                continue;
+            }
+            $merged = array_replace($existing[$id] ?? [], $dims);
+            $this->submissionDimensions->save($supplierId, $id, $merged);
+            $this->audit($request, 'purchase_invoice_submission.dimensions_changed', $id, ['dimensions' => $merged]);
+            $updated[] = $id;
+        }
+        return Json::ok($response, ['updated' => $updated, 'skipped' => $skipped]);
+    }
+
     public function needsInformation(Request $request, Response $response, array $args): Response
     {
         return $this->review($request, $response, $args, 'needs_information');

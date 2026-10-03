@@ -60,12 +60,147 @@ const canDeleteSelected = computed(() =>
   && selected.value.status !== 'processing',
 )
 
+/** Hromadný výběr (checkboxy) je nezávislý na dokladu otevřeném v náhledu. */
+const checkedIds = ref<Set<number>>(new Set())
+const bulkReason = ref('')
+const bulkDims = ref<DimensionMap>({})
+const bulkProgress = ref<{ done: number; total: number } | null>(null)
+const checkedItems = computed(() => items.value.filter(i => checkedIds.value.has(i.id)))
+const allChecked = computed(() => items.value.length > 0 && checkedItems.value.length === items.value.length)
+const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(i => i.status === 'submitted'))
+const bulkCanReject = computed(() => canWrite.value && checkedItems.value.some(i => i.status === 'submitted'))
+const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(i => i.status !== 'processed' && i.status !== 'processing'))
+const bulkCanDimensions = computed(() => canWrite.value && dims.canEdit.value && dims.documentTypes.value.length > 0)
+const bulkNeedsReason = computed(() =>
+  checkedItems.value.some(i => i.status === 'submitted' && i.submitted_via !== 'staff'),
+)
+const bulkHasDims = computed(() => Object.values(bulkDims.value).some(v => !!v))
+
+function toggleChecked(id: number) {
+  const next = new Set(checkedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  checkedIds.value = next
+}
+
+function toggleAll() {
+  checkedIds.value = allChecked.value ? new Set() : new Set(items.value.map(i => i.id))
+}
+
+/** Akce běží po jednom dokladu přes stejné endpointy jako u jednotlivého dokladu. */
+async function runBulk(
+  targets: PurchaseInvoiceSubmission[],
+  action: (item: PurchaseInvoiceSubmission) => Promise<void>,
+): Promise<{ ok: number; failed: number; lastError: string }> {
+  let ok = 0
+  let lastError = ''
+  bulkProgress.value = { done: 0, total: targets.length }
+  for (const item of targets) {
+    try {
+      await action(item)
+      ok++
+    } catch (e) {
+      lastError = apiErrorMessage(e)
+    }
+    bulkProgress.value = { done: bulkProgress.value.done + 1, total: targets.length }
+  }
+  bulkProgress.value = null
+  return { ok, failed: targets.length - ok, lastError }
+}
+
+function reportBulk(result: { ok: number; failed: number; lastError: string }, skipped: number) {
+  const failed = result.failed + skipped
+  if (failed === 0) toast.success(t('purchase_submissions.bulk_done', { ok: result.ok }))
+  else if (result.ok === 0 && result.lastError) toast.error(result.lastError)
+  else toast.warning(t('purchase_submissions.bulk_done_partial', { ok: result.ok, failed }))
+}
+
+async function bulkExtract() {
+  if (acting.value || !bulkCanExtract.value) return
+  const targets = checkedItems.value.filter(i => i.status === 'submitted')
+  const skipped = checkedItems.value.length - targets.length
+  const invoiceIds: number[] = []
+  acting.value = true
+  try {
+    const result = await runBulk(targets, async item => {
+      const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id)
+      if (fresh.purchase_invoice_id) invoiceIds.push(fresh.purchase_invoice_id)
+    })
+    reportBulk(result, skipped)
+    checkedIds.value = new Set()
+    await load()
+    if (invoiceIds.length) bulkReviewInvoiceIds.value = invoiceIds
+  } finally {
+    acting.value = false
+  }
+}
+
+async function bulkReject() {
+  if (acting.value || !bulkCanReject.value) return
+  if (bulkNeedsReason.value && !bulkReason.value.trim()) {
+    toast.error(t('purchase_submissions.reason_required'))
+    return
+  }
+  const targets = checkedItems.value.filter(i => i.status === 'submitted')
+  const skipped = checkedItems.value.length - targets.length
+  if (!confirm(t('purchase_submissions.bulk_reject_confirm', { n: targets.length }))) return
+  acting.value = true
+  try {
+    const result = await runBulk(targets, async item => {
+      await purchaseInvoiceSubmissionsApi.reject(item.id, bulkReason.value)
+    })
+    reportBulk(result, skipped)
+    bulkReason.value = ''
+    checkedIds.value = new Set()
+    await load()
+  } finally {
+    acting.value = false
+  }
+}
+
+async function bulkDelete() {
+  if (acting.value || !bulkCanDelete.value) return
+  const targets = checkedItems.value.filter(i => i.status !== 'processed' && i.status !== 'processing')
+  const skipped = checkedItems.value.length - targets.length
+  if (!confirm(t('purchase_submissions.bulk_delete_confirm', { n: targets.length }))) return
+  acting.value = true
+  try {
+    const result = await runBulk(targets, async item => {
+      await purchaseInvoiceSubmissionsApi.remove(item.id)
+    })
+    reportBulk(result, skipped)
+    checkedIds.value = new Set()
+    if (selected.value && targets.some(i => i.id === selected.value?.id)) selected.value = null
+    await load()
+  } finally {
+    acting.value = false
+  }
+}
+
+async function bulkApplyDimensions() {
+  if (acting.value || !bulkCanDimensions.value || !bulkHasDims.value || checkedItems.value.length === 0) return
+  acting.value = true
+  try {
+    const result = await purchaseInvoiceSubmissionsApi.bulkDimensions(checkedItems.value.map(i => i.id), bulkDims.value)
+    if (result.updated.length === 0) toast.warning(t('purchase_submissions.bulk_nothing_applicable'))
+    else reportBulk({ ok: result.updated.length, failed: 0, lastError: '' }, result.skipped.length)
+    bulkDims.value = {}
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    acting.value = false
+  }
+}
+
 async function load(keepSelection = true) {
   loading.value = true
   error.value = ''
   try {
     const page = await purchaseInvoiceSubmissionsApi.list(status.value || undefined)
     items.value = page.items
+    const present = new Set(items.value.map(i => i.id))
+    checkedIds.value = new Set([...checkedIds.value].filter(id => present.has(id)))
     if (keepSelection && selected.value) {
       selected.value = items.value.find(i => i.id === selected.value?.id) ?? null
     }
@@ -136,6 +271,7 @@ async function upload() {
 }
 
 const reviewInvoiceId = ref<number | null>(null)
+const bulkReviewInvoiceIds = ref<number[]>([])
 async function onReviewClosed(navigated?: boolean) {
   const id = reviewInvoiceId.value
   reviewInvoiceId.value = null
@@ -231,8 +367,8 @@ function kindLabel(item: PurchaseInvoiceSubmission): string {
 }
 
 onMounted(() => { void load(false); void dims.load() })
-watch(status, () => { selected.value = null; void load(false) })
-watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void load(false) })
+watch(status, () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
+watch(() => supplierStore.currentSupplierId, () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
 </script>
 
 <template>
@@ -348,9 +484,64 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
 
     <div v-else class="grid grid-cols-1 xl:grid-cols-[minmax(280px,380px)_minmax(0,1fr)] gap-4 items-start">
       <div class="space-y-2">
-        <button v-for="item in items" :key="item.id" type="button" @click="selected = item"
-          class="w-full text-left bg-surface border rounded-lg p-3 transition"
-          :class="selected?.id === item.id ? 'border-primary-500 ring-1 ring-primary-500/30' : 'border-neutral-200 hover:border-neutral-400'">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-3 space-y-3" data-testid="inbox-bulk">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 cursor-pointer whitespace-nowrap">
+              <input type="checkbox" class="w-4 h-4 accent-primary-600" :checked="allChecked"
+                :indeterminate="checkedItems.length > 0 && !allChecked" data-testid="inbox-check-all" @change="toggleAll" />
+              {{ allChecked ? t('purchase_submissions.bulk_clear') : t('purchase_submissions.bulk_select_all') }}
+            </label>
+            <span v-if="checkedItems.length" class="text-xs text-neutral-500 whitespace-nowrap">
+              {{ bulkProgress
+                ? t('purchase_submissions.bulk_running', bulkProgress)
+                : t('purchase_submissions.bulk_selected', { n: checkedItems.length }) }}
+            </span>
+          </div>
+
+          <template v-if="checkedItems.length">
+            <div class="flex flex-wrap gap-2">
+              <button v-if="bulkCanExtract" type="button" :disabled="acting" :class="btnFilled('primary')"
+                class="whitespace-nowrap" data-testid="inbox-bulk-extract" @click="bulkExtract">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3" /></svg>
+                {{ t('purchase_submissions.bulk_extract') }}
+              </button>
+              <button v-if="bulkCanReject" type="button" :disabled="acting || (bulkNeedsReason && !bulkReason.trim())"
+                :class="btnOutline('danger')" class="whitespace-nowrap" data-testid="inbox-bulk-reject" @click="bulkReject">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                {{ t('purchase_submissions.bulk_reject') }}
+              </button>
+              <button v-if="bulkCanDelete" type="button" :disabled="acting" :class="btnOutline('danger')"
+                class="whitespace-nowrap" data-testid="inbox-bulk-delete" @click="bulkDelete">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M4 7h16M10 7V4h4v3" /></svg>
+                {{ t('purchase_submissions.bulk_delete') }}
+              </button>
+            </div>
+            <input v-if="bulkCanReject" v-model="bulkReason" maxlength="8000"
+              class="w-full h-9 px-3 text-sm border border-neutral-300 rounded-md bg-surface"
+              :placeholder="bulkNeedsReason ? t('purchase_submissions.bulk_reason_placeholder') : t('purchase_submissions.reason_internal_placeholder')" />
+
+            <div v-if="bulkCanDimensions" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-bulk-dimensions">
+              <span class="block text-sm text-neutral-700">{{ t('purchase_submissions.bulk_dimensions_title') }}</span>
+              <DimensionFields v-model="bulkDims" compact />
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" :disabled="acting || !bulkHasDims" :class="btnOutline('primary')"
+                  class="whitespace-nowrap" @click="bulkApplyDimensions">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
+                  {{ t('purchase_submissions.bulk_dimensions_apply') }}
+                </button>
+              </div>
+              <p class="text-xs text-neutral-500">{{ t('purchase_submissions.bulk_dimensions_hint') }}</p>
+            </div>
+          </template>
+        </div>
+
+        <div v-for="item in items" :key="item.id" class="flex items-start gap-2">
+          <input type="checkbox" class="w-4 h-4 mt-3.5 shrink-0 accent-primary-600 cursor-pointer"
+            :checked="checkedIds.has(item.id)" :aria-label="t('purchase_submissions.bulk_select_item', { name: item.original_name })"
+            data-testid="inbox-check" @change="toggleChecked(item.id)" />
+          <button type="button" @click="selected = item"
+            class="flex-1 min-w-0 text-left bg-surface border rounded-lg p-3 transition"
+            :class="selected?.id === item.id ? 'border-primary-500 ring-1 ring-primary-500/30' : 'border-neutral-200 hover:border-neutral-400'">
           <div class="flex items-start justify-between gap-2">
             <span class="font-medium text-sm truncate">{{ item.original_name }}</span>
             <span class="text-[11px] px-2 py-0.5 rounded font-medium shrink-0" :class="badge(item.status)">
@@ -359,7 +550,9 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
           </div>
           <p class="text-xs text-neutral-500 mt-1">{{ item.submitted_by_name || '—' }} · {{ size(item.size_bytes) }}</p>
           <p v-if="item.note" class="text-xs text-neutral-600 mt-2 line-clamp-2">{{ item.note }}</p>
-        </button>
+          <DimensionChips v-if="item.dimensions && Object.keys(item.dimensions).length" :dimensions="item.dimensions" class="mt-2" />
+          </button>
+        </div>
       </div>
 
       <section v-if="selected" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
@@ -463,5 +656,7 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
       </section>
     </div>
     <ExtractionReviewModal v-if="reviewInvoiceId" :invoice-ids="[reviewInvoiceId]" silent-when-empty @close="onReviewClosed" />
+    <ExtractionReviewModal v-else-if="bulkReviewInvoiceIds.length" :invoice-ids="bulkReviewInvoiceIds" silent-when-empty
+      @close="bulkReviewInvoiceIds = []" />
   </div>
 </template>
