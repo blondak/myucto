@@ -527,6 +527,9 @@ Delší limit nastavíte proměnnou `MYINVOICE_OLLAMA_TIMEOUT` (v sekundách):
 - Adresy cloudových metadat, link-local a multicast jsou zakázané vždy. Provozovatel
   instance může povolené cíle omezit proměnnou `MYINVOICE_OLLAMA_ALLOWED_HOSTS`
   (čárkami oddělené názvy hostů nebo rozsahy, např. `gpu.lan,10.0.0.0/8`).
+- Ve spravované instalaci je Ollama dostupná jen na adresách, které provozovatel
+  povolil v `MYINVOICE_OLLAMA_ALLOWED_HOSTS`. Bez této proměnné se žádná adresa
+  uložit nedá.
 
 ## 25.3 AI import vydaných faktur
 

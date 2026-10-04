@@ -151,6 +151,18 @@ final class OllamaEndpointGuardTest extends TestCase
         self::assertSame(OllamaEndpointGuard::ERR_BLOCKED, $this->code(fn () => $g->resolve('http://127.0.0.1:11434')));
     }
 
+    /** Ve spravované instalaci sdílí instance hostitele: bez allowlistu provozovatele nesmí Ollama nikam. */
+    public function testManaged_withoutAllowlistBlocksEverything(): void
+    {
+        $dns = static fn (string $h): array => ['gpu.lan' => ['192.168.1.50'], 'ollama.example.test' => ['93.184.216.34']][$h] ?? [];
+        $g = new OllamaEndpointGuard($dns, '', managed: true);
+        foreach (['http://127.0.0.1:11434', 'http://10.0.0.5:8080', 'http://gpu.lan:11434', 'https://ollama.example.test'] as $url) {
+            self::assertSame(OllamaEndpointGuard::ERR_BLOCKED, $this->code(fn () => $g->resolve($url)), $url);
+        }
+        self::assertSame('eu', (new OllamaEndpointGuard($dns, 'gpu.lan', managed: true))->resolve('http://gpu.lan:11434')->region);
+        self::assertSame('eu', (new OllamaEndpointGuard($dns, '', managed: false))->resolve('http://127.0.0.1:11434')->region);
+    }
+
     public function testAllowlist_readsEnvWhenNotInjected(): void
     {
         putenv(OllamaEndpointGuard::ENV_ALLOWED_HOSTS . '=gpu.lan');

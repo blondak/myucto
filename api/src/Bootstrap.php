@@ -1040,7 +1040,9 @@ final class Bootstrap
             ),
             // Ollama: guard a rasterizér mají volitelné test seamy (resolver, binárka),
             // OllamaClient volitelný Guzzle — proto explicitně, ať autowire nic nedosadí.
-            \MyInvoice\Service\Ai\OllamaEndpointGuard::class => fn () => new \MyInvoice\Service\Ai\OllamaEndpointGuard(),
+            \MyInvoice\Service\Ai\OllamaEndpointGuard::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Ai\OllamaEndpointGuard(
+                managed: $c->get(\MyInvoice\Service\System\ManagedModeGuard::class)->isManaged(),
+            ),
             \MyInvoice\Service\Import\PdfPageRasterizerInterface::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Import\PdfPageRasterizer($c->get(LoggerInterface::class)),
             \MyInvoice\Service\Import\OllamaClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Import\OllamaClient(

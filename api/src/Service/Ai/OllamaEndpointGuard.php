@@ -13,7 +13,9 @@ use MyInvoice\Service\IpMatcher;
  *  - adresa smí být jen `http(s)://host[:port]` — cesty volá klient sám, pevně;
  *  - host se přeloží na všechny IP a žádná nesmí ležet v link-local / metadata /
  *    multicast / unspecified rozsahu;
- *  - volitelný allowlist `MYINVOICE_OLLAMA_ALLOWED_HOSTS` (hostname nebo CIDR);
+ *  - volitelný allowlist `MYINVOICE_OLLAMA_ALLOWED_HOSTS` (hostname nebo CIDR); ve spravované
+ *    instalaci je povinný, jinak by admin firmy mohl posílat requesty na loopback a interní
+ *    síť hostitele, kde běží i ostatní instance;
  *  - region 'eu' jen když VŠECHNY adresy jsou loopback/privátní, jinak fail-closed 'us';
  *  - klient se připojí na ověřenou IP (CURLOPT_RESOLVE), takže DNS rebinding
  *    mezi kontrolou a requestem kontrolu neobejde.
@@ -42,7 +44,11 @@ final class OllamaEndpointGuard
      * @param (callable(string): list<string>)|null $resolver test seam; null = systémové DNS
      * @param string|null $allowedHosts null = číst z env při každém resolve
      */
-    public function __construct(?callable $resolver = null, private readonly ?string $allowedHosts = null)
+    public function __construct(
+        ?callable $resolver = null,
+        private readonly ?string $allowedHosts = null,
+        private readonly bool $managed = false,
+    )
     {
         $this->resolver  = $resolver ?? self::systemResolver(...);
         $this->ipMatcher = new IpMatcher();
@@ -137,7 +143,7 @@ final class OllamaEndpointGuard
             static fn (string $e): bool => $e !== '',
         ));
         if ($entries === []) {
-            return true;
+            return !$this->managed;
         }
         foreach ($entries as $entry) {
             if (!str_contains($entry, '/')) {
