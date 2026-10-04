@@ -43,7 +43,7 @@ const supplierStore = useSupplierStore()
 const paneDom = usePaneDom()
 const listBox = ref<HTMLElement | null>(null)
 const loadMoreTarget = ref<HTMLElement | null>(null)
-useFillViewportHeight(listBox, { keepFiltersVisible: true })
+useFillViewportHeight(listBox)
 
 // Stažení jde přes axios, aby nesl hlavičku X-Supplier-Id. Holý odkaz ji nepošle
 // a server by u výpisu jiné než výchozí firmy vrátil not_found.

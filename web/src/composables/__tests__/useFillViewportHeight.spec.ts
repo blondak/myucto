@@ -5,19 +5,19 @@ import { useFillViewportHeight } from '../useFillViewportHeight'
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
-it('keeps filters above the bank table visible while scrolling rows', async () => {
+it('fills the window under the page header and slides the page when rows scroll', async () => {
   vi.useFakeTimers()
   const el = document.createElement('div')
-  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 250 } as DOMRect)
+  vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 400 } as DOMRect)
   const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   const wrapper = mount({ setup() {
-    useFillViewportHeight(ref(el), { keepFiltersVisible: true })
+    useFillViewportHeight(ref(el))
     return () => null
   } })
   await vi.runOnlyPendingTimersAsync()
-  expect(el.style.maxHeight).toBe(`${Math.max(240, window.innerHeight - 250 - 16)}px`)
+  expect(el.style.maxHeight).toBe(`${window.innerHeight - 2 * 16}px`)
   el.scrollTop = 40
   el.dispatchEvent(new Event('scroll'))
-  expect(scroll).not.toHaveBeenCalled()
+  expect(scroll).toHaveBeenCalledWith({ top: 400 - 16, behavior: 'smooth' })
   wrapper.unmount()
 })

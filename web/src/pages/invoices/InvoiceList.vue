@@ -1021,7 +1021,7 @@ const adaptiveRowsEnabled = computed(() => COLUMNS.some(c => c.available?.() !==
   && tbl.isVisible(c.key) !== (c.required === true || !c.defaultHidden)))
 useAdaptiveTableRows(listBoxes, adaptiveRowsEnabled)
 const listBox = computed(() => (groupByMonth.value ? null : listBoxes.value[0] ?? null))
-useFillViewportHeight(listBox, { keepFiltersVisible: true })
+useFillViewportHeight(listBox)
 function toggleGrouping() {
   tbl.setFlag('group_by_month', !groupByMonth.value)
   load()
