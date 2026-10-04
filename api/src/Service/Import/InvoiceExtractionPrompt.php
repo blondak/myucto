@@ -288,7 +288,8 @@ DŮLEŽITÉ k poli `payment.method` (FORMA ÚHRADY):
 - `payment.method_confidence` = 0..1, jak jistě jsi formu vyčetl (0 když vracíš null).
 
 DŮLEŽITÉ k poli `advance_reference`:
-- Odkaz na zaplacenou zálohu/proformu ("Odečet zálohy", "k zálohové faktuře č. …",
+- Odkaz na zaplacenou zálohu/proformu ("Odečet zálohy", "Odpočet zálohy",
+  "k zálohové faktuře č. …",
   "uhrazeno na základě výzvy k úhradě #…", "výzva k platbě č. …") → vrať identifikátor
   té zálohy; jinak null. Výzva k úhradě / k platbě je proforma.
 - U daňového dokladu k přijaté platbě (`document_kind="tax_document"`) sem VŽDY dej číslo
@@ -312,6 +313,11 @@ DŮLEŽITÉ k `vat_recap` (rekapitulace DPH po sazbách):
 DŮLEŽITÉ k `items`:
 - Vrať POUZE listové (atomické) položky. NIKDY agregační/subtotalové/součtové řádky
   ("Celkem", "Mezisoučet", "Subtotal", "Total" sekce).
+- Řádek ODPOČTU / ÚHRADY ZÁLOHY ("Odpočet zálohy", "Odečet zálohy", "Uhrazeno zálohou",
+  "Zaplaceno zálohou"), který NEMÁ vlastní sazbu ani DPH, NENÍ položka a do `items`
+  NEPATŘÍ — jde jen o úhradu. Jeho číslo zálohy dej do `advance_reference`.
+- Když řádek odpočtu zálohy MÁ sazbu a částku DPH (záloha už byla zdaněna daňovým
+  dokladem k přijaté platbě), vrať ho jako položku se ZÁPORNOU cenou a jeho sazbou.
 - U vícestránkových dokladů (faktura + rozpis) vrať jen fakturační řádky z hlavní
   faktury, jejichž součet odpovídá "K úhradě". NIKDY řádky z podrobného rozpisu.
 

@@ -499,7 +499,7 @@ DŮLEŽITÉ k poli `payment.method` (FORMA ÚHRADY) — ČTI POZORNĚ:
 
 DŮLEŽITÉ k poli `advance_reference`:
 - Pokud doklad odkazuje na zaplacenou zálohu / proformu (typicky "Odečet zálohy",
-  "Zaplaceno zálohou č. ...", "Uhrazeno zálohovou fakturou ...", "k zálohové
+  "Odpočet zálohy", "Zaplaceno zálohou č. ...", "Uhrazeno zálohovou fakturou ...", "k zálohové
   faktuře č. ...", "Hradí se ze zálohy ...", "paid by advance ...", "proforma
   no. ...", "uhrazeno na základě výzvy k úhradě #...", "výzva k platbě č. ...")
   → vrať identifikátor té zálohy/proformy jak je uveden na dokladu (číslo faktury /
@@ -548,6 +548,11 @@ DŮLEŽITÉ k řádkům faktury (`items`):
   "Celkem ", "Mezisoučet", "Subtotal", "Σ ", "Součet ", "Total " (pokud
   je to subtotal sekce, ne celková K úhradě), "Cena celkem za skupinu",
   "Cena celkem za sekci".
+- Řádek ODPOČTU / ÚHRADY ZÁLOHY ("Odpočet zálohy", "Odečet zálohy", "Uhrazeno
+  zálohou", "Zaplaceno zálohou"), který NEMÁ vlastní sazbu ani DPH, NENÍ položka
+  a do `items` NEPATŘÍ — jde jen o úhradu. Jeho číslo zálohy dej do `advance_reference`.
+- Když řádek odpočtu zálohy MÁ sazbu a částku DPH (záloha už byla zdaněna daňovým
+  dokladem k přijaté platbě), vrať ho jako položku se ZÁPORNOU cenou a jeho sazbou.
 - U faktur s vícestupňovou strukturou (typicky autoservis — např. NC Auto
   s.r.o. / BMW Service: skupina práce → jednotlivé úkony → "Celkem Práce" →
   "Celkem <název skupiny>") vrať POUZE jednotlivé úkony s reálnými qty
