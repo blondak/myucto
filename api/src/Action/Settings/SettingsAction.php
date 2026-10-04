@@ -519,9 +519,9 @@ final class SettingsAction
 
         // F7 — ENUM validace AI provider selection (§3.8).
         if (array_key_exists('ai_provider', $body)
-            && !in_array($body['ai_provider'], ['anthropic', 'azure_openai', 'openai', 'gemini'], true)
+            && !in_array($body['ai_provider'], \MyInvoice\Service\Import\LlmProviderRegistry::PROVIDERS, true)
         ) {
-            return Json::error($response, 'validation_failed', "ai_provider musí být 'anthropic', 'azure_openai', 'openai' nebo 'gemini'.", 400);
+            return Json::error($response, 'validation_failed', 'ai_provider musí být jedna z hodnot: ' . implode(', ', \MyInvoice\Service\Import\LlmProviderRegistry::PROVIDERS) . '.', 400);
         }
         if (array_key_exists('ai_data_region', $body)
             && !in_array($body['ai_data_region'], ['eu', 'us'], true)
@@ -1295,6 +1295,7 @@ final class SettingsAction
             'azure_openai' => 'azure_openai_api_key_enc',
             'openai'       => 'openai_api_key_enc',
             'gemini'       => 'gemini_api_key_enc',
+            'ollama'       => 'ollama_default_model',
             default        => null,
         };
         if ($col === null) {

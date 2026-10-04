@@ -16,6 +16,7 @@ use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Service\Ai\AiWorker;
 use MyInvoice\Service\Ai\AnomalyDetector;
 use MyInvoice\Service\Ai\KnnSuggester;
+use MyInvoice\Service\Import\OllamaClient;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
@@ -129,7 +130,7 @@ final class AiLayerSecurityTest extends TestCase
             $sanitizer->sanitizeBankTx($this->supplierId, ['amount' => 1]),
         );
 
-        $gate = new AiDpaGate($this->db);
+        $gate = new AiDpaGate($this->db, Bootstrap::buildContainer()->get(OllamaClient::class));
         self::assertFalse($gate->isConfirmed($this->supplierId, 'openai'));
         $this->expectException(AiDpaException::class);
         $gate->assertConfirmed($this->supplierId, 'openai');

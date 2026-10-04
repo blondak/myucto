@@ -31,6 +31,8 @@ final class AiProviderCredentialsActionTest extends TestCase
     private int $supplierId = 0;
     private int $userId = 0;
     private ?string $savedGeminiKey = null;
+    /** @var array<string,mixed> */
+    private array $savedOllama = [];
 
     protected function setUp(): void
     {
@@ -57,6 +59,9 @@ final class AiProviderCredentialsActionTest extends TestCase
         $val = $stmt->fetchColumn();
         $this->savedGeminiKey = $val === false || $val === null ? null : (string) $val;
         $pdo->prepare('UPDATE supplier SET gemini_api_key_enc = NULL WHERE id = ?')->execute([$this->supplierId]);
+        $this->savedOllama = $this->ollamaRow();
+        $pdo->prepare('UPDATE supplier SET ollama_base_url = NULL, ollama_default_model = NULL, ollama_api_key_enc = NULL WHERE id = ?')
+            ->execute([$this->supplierId]);
     }
 
     protected function tearDown(): void
@@ -64,6 +69,13 @@ final class AiProviderCredentialsActionTest extends TestCase
         if (isset($this->db) && $this->supplierId > 0) {
             $this->db->pdo()->prepare('UPDATE supplier SET gemini_api_key_enc = ? WHERE id = ?')
                 ->execute([$this->savedGeminiKey, $this->supplierId]);
+            $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ?, ollama_api_key_enc = ? WHERE id = ?')
+                ->execute([
+                    $this->savedOllama['ollama_base_url'] ?? null,
+                    $this->savedOllama['ollama_default_model'] ?? null,
+                    $this->savedOllama['ollama_api_key_enc'] ?? null,
+                    $this->supplierId,
+                ]);
             $this->db->close();
         }
     }
@@ -73,7 +85,7 @@ final class AiProviderCredentialsActionTest extends TestCase
         $res = $this->call('status', 'GET', 'admin');
         self::assertSame(200, $res['status']);
         $providers = $res['body']['providers'] ?? [];
-        foreach (['anthropic', 'azure_openai', 'openai', 'gemini'] as $p) {
+        foreach (['anthropic', 'azure_openai', 'openai', 'gemini', 'ollama'] as $p) {
             self::assertArrayHasKey($p, $providers, "provider $p chybí");
             $info = $providers[$p];
             self::assertArrayHasKey('models', $info, "$p.models");
@@ -114,6 +126,234 @@ final class AiProviderCredentialsActionTest extends TestCase
     {
         $res = $this->call('test', 'POST', 'admin', ['provider' => 'bogus']);
         self::assertSame(400, $res['status']);
+    }
+
+    /** @param array<string,string> $body */
+    private function callModels(string $role, array $body): array
+    {
+        $req = $this->req('POST', $role)->withParsedBody($body);
+        $res = $this->action->ollamaModels($req, new Psr7Response());
+        return ['status' => $res->getStatusCode(), 'body' => json_decode((string) $res->getBody(), true)];
+    }
+
+    private function ollamaRow(): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT ollama_base_url, ollama_default_model, ollama_api_key_enc FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplierId]);
+        return (array) $stmt->fetch(\PDO::FETCH_ASSOC);
+    }
+
+    public function testOllamaRejectsBlockedEndpointAndSavesNothing(): void
+    {
+        $res = $this->call('update', 'PUT', 'admin', ['provider' => 'ollama', 'base_url' => 'http://169.254.169.254', 'default_model' => 'vision-model:7b']);
+        self::assertSame(400, $res['status']);
+        self::assertStringContainsString('ollama_endpoint_blocked', (string) ($res['body']['error']['message'] ?? ''));
+        self::assertNull($this->ollamaRow()['ollama_base_url']);
+    }
+
+    public function testOllamaRequiresUrlAndModel(): void
+    {
+        $res = $this->call('update', 'PUT', 'admin', ['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9']);
+        self::assertSame(400, $res['status']);
+        self::assertStringContainsString('Adresa Ollamy i model jsou povinné', (string) ($res['body']['error']['message'] ?? ''));
+    }
+
+    public function testOllamaUnreachableIsReportedNotSaved(): void
+    {
+        $res = $this->call('update', 'PUT', 'admin', ['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b']);
+        self::assertSame(400, $res['status']);
+        self::assertStringContainsString('ollama_unreachable', (string) ($res['body']['error']['message'] ?? ''));
+        self::assertNull($this->ollamaRow()['ollama_base_url']);
+    }
+
+    public function testModelsEndpointValidatesUrl(): void
+    {
+        $blocked = $this->callModels('admin', ['base_url' => 'http://169.254.169.254']);
+        self::assertSame(422, $blocked['status']);
+        self::assertSame('ollama_endpoint_blocked', $blocked['body']['error']['code'] ?? null);
+
+        $invalid = $this->callModels('admin', ['base_url' => 'http://127.0.0.1:11434/v1']);
+        self::assertSame(422, $invalid['status']);
+        self::assertSame('ollama_endpoint_invalid', $invalid['body']['error']['code'] ?? null);
+    }
+
+    public function testModelsEndpointAdminOnly(): void
+    {
+        foreach (['accountant', 'readonly'] as $role) {
+            $res = $this->callModels($role, ['base_url' => 'http://127.0.0.1:9']);
+            self::assertSame(403, $res['status'], "$role musí dostat 403");
+        }
+    }
+
+    public function testChangingBaseUrlWithoutKeyClearsStoredKey(): void
+    {
+        // Simuluj uloženou konfiguraci s klíčem přímo v DB (Ollama v testu neběží).
+        $crypto = Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\SecretEncryption::class);
+        $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ?, ollama_api_key_enc = ? WHERE id = ?')
+            ->execute(['http://127.0.0.1:9', 'vision-model:7b', $crypto->encrypt('tok-secret'), $this->supplierId]);
+
+        $action = Bootstrap::buildContainer()->get(AiProviderCredentialsAction::class);
+        $ref = new \ReflectionMethod($action, 'resolveOllamaKey');
+        self::assertSame('', $ref->invoke($action, $this->supplierId, 'http://127.0.0.2:9', null, false), 'jiná adresa bez nového klíče = klíč smazat');
+        self::assertNull($ref->invoke($action, $this->supplierId, 'http://127.0.0.1:9/', null, false), 'stejná adresa = ponechat');
+        self::assertSame('tok-new', $ref->invoke($action, $this->supplierId, 'http://127.0.0.2:9', 'tok-new', false));
+        self::assertSame('', $ref->invoke($action, $this->supplierId, 'http://127.0.0.1:9', null, true), 'clear_api_key');
+    }
+
+    public function testModelsEndpointDoesNotSendStoredKeyToOtherHost(): void
+    {
+        $crypto = Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\SecretEncryption::class);
+        $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ?, ollama_api_key_enc = ? WHERE id = ?')
+            ->execute(['http://127.0.0.1:9', 'vision-model:7b', $crypto->encrypt('tok-secret'), $this->supplierId]);
+        $action = Bootstrap::buildContainer()->get(AiProviderCredentialsAction::class);
+        $ref = new \ReflectionMethod($action, 'storedOllamaKeyFor');
+        self::assertSame('tok-secret', $ref->invoke($action, $this->supplierId, 'http://127.0.0.1:9'));
+        self::assertSame('', $ref->invoke($action, $this->supplierId, 'http://127.0.0.2:9'));
+    }
+
+    public function testDeleteOllamaClearsAll(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ? WHERE id = ?')
+            ->execute(['http://127.0.0.1:9', 'vision-model:7b', $this->supplierId]);
+        $req = $this->req('DELETE', 'admin')->withQueryParams(['provider' => 'ollama']);
+        $res = $this->action->delete($req, new Psr7Response());
+        self::assertSame(200, $res->getStatusCode());
+        $row = $this->ollamaRow();
+        self::assertNull($row['ollama_base_url']);
+        self::assertNull($row['ollama_default_model']);
+    }
+
+    /**
+     * Skutečná akce s OllamaClientem nad Guzzle MockHandlerem; zaznamenává odeslané requesty.
+     *
+     * @param array<int,array{request:\Psr\Http\Message\RequestInterface}> $history
+     */
+    private function mockedAction(array &$history): AiProviderCredentialsAction
+    {
+        $c = Bootstrap::buildContainer();
+        $queue = [];
+        for ($i = 0; $i < 6; $i++) {
+            $queue[] = new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], '{"models":[{"name":"vision-model:7b","size":1}]}');
+            $queue[] = new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], '{"capabilities":["completion"]}');
+        }
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler($queue));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $ollama = new \MyInvoice\Service\Import\OllamaClient(
+            $c->get(Connection::class),
+            $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+            $c->get(\Psr\Log\LoggerInterface::class),
+            new \MyInvoice\Service\Ai\OllamaEndpointGuard(),
+            $c->get(\MyInvoice\Service\Import\PdfPageRasterizerInterface::class),
+            $c->get(\MyInvoice\Service\Import\PdfTotalExtractor::class),
+            new \GuzzleHttp\Client(['handler' => $stack, 'http_errors' => false]),
+            true,
+        );
+        return new AiProviderCredentialsAction(
+            $c->get(\MyInvoice\Service\Import\AnthropicClient::class),
+            $c->get(\MyInvoice\Service\Import\AzureOpenAiClient::class),
+            $c->get(\MyInvoice\Service\Import\OpenAiClient::class),
+            $c->get(\MyInvoice\Service\Import\GeminiClient::class),
+            $ollama,
+            $c->get(Connection::class),
+            $c->get(\MyInvoice\Service\ActivityLogger::class),
+            $c->get(\MyInvoice\Service\IpMatcher::class),
+            $c->get(\MyInvoice\Service\Import\AiCredentialsBulkApplier::class),
+        );
+    }
+
+    private function storeOllamaKey(string $baseUrl, string $key): string
+    {
+        $enc = Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\SecretEncryption::class)->encrypt($key);
+        $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ?, ollama_api_key_enc = ? WHERE id = ?')
+            ->execute([$baseUrl, 'vision-model:7b', $enc, $this->supplierId]);
+        return $enc;
+    }
+
+    /** @param array<int,array{request:\Psr\Http\Message\RequestInterface}> $history */
+    private function assertNoAuthAndHost(array $history, string $host): void
+    {
+        self::assertNotEmpty($history, 'musel odejít aspoň jeden request');
+        foreach ($history as $h) {
+            self::assertFalse($h['request']->hasHeader('Authorization'), 'klíč nesmí odejít na jiný host');
+            self::assertSame($host, $h['request']->getUri()->getHost());
+        }
+    }
+
+    public function testPutWithChangedBaseUrlNeverSendsNorKeepsStoredKey(): void
+    {
+        $this->storeOllamaKey('http://127.0.0.1:9', 'tok-secret');
+        $history = [];
+        $action = $this->mockedAction($history);
+        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.2:9', 'default_model' => 'vision-model:7b']);
+        $res = $action->update($req, new Psr7Response());
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        $this->assertNoAuthAndHost($history, '127.0.0.2');
+        $row = $this->ollamaRow();
+        self::assertSame('http://127.0.0.2:9', $row['ollama_base_url']);
+        self::assertNull($row['ollama_api_key_enc'], 'klíč se při změně adresy musí smazat');
+    }
+
+    public function testModelsEndpointForOtherHostSendsNoAuthorization(): void
+    {
+        $this->storeOllamaKey('http://127.0.0.1:9', 'tok-secret');
+        $history = [];
+        $res = $this->mockedAction($history)->ollamaModels(
+            $this->req('POST', 'admin')->withParsedBody(['base_url' => 'http://127.0.0.2:9']),
+            new Psr7Response()
+        );
+        self::assertSame(200, $res->getStatusCode());
+        $this->assertNoAuthAndHost($history, '127.0.0.2');
+    }
+
+    public function testModelsEndpointForSameHostSendsStoredKey(): void
+    {
+        $this->storeOllamaKey('http://127.0.0.1:9', 'tok-secret');
+        $history = [];
+        $res = $this->mockedAction($history)->ollamaModels(
+            $this->req('POST', 'admin')->withParsedBody(['base_url' => 'http://127.0.0.1:9']),
+            new Psr7Response()
+        );
+        self::assertSame(200, $res->getStatusCode());
+        self::assertNotEmpty($history);
+        foreach ($history as $h) {
+            self::assertSame('Bearer tok-secret', $h['request']->getHeaderLine('Authorization'));
+            self::assertSame('127.0.0.1', $h['request']->getUri()->getHost());
+        }
+    }
+
+    /** Uložení ověří Ollamu jedním seznamem modelů; druhý průchod /api/tags + /api/show jen zdvojí čekání. */
+    public function testPutListsOllamaModelsOnlyOnce(): void
+    {
+        $history = [];
+        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b']);
+        $res = $this->mockedAction($history)->update($req, new Psr7Response());
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        $body = json_decode((string) $res->getBody(), true);
+        self::assertTrue($body['test_ok']);
+        self::assertSame('vision-model:7b', $body['model']);
+        $tags = array_filter($history, static fn (array $h): bool => $h['request']->getUri()->getPath() === '/api/tags');
+        self::assertCount(1, $tags);
+    }
+
+    public function testPutWithSameBaseUrlKeepsStoredKey(): void
+    {
+        $enc = $this->storeOllamaKey('http://127.0.0.1:9', 'tok-secret');
+        $history = [];
+        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.1:9', 'default_model' => 'vision-model:7b']);
+        $res = $this->mockedAction($history)->update($req, new Psr7Response());
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame($enc, $this->ollamaRow()['ollama_api_key_enc']);
+    }
+
+    public function testPutWithNewUrlDropsUndecryptableOrphanKey(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET ollama_base_url = ?, ollama_default_model = ?, ollama_api_key_enc = ? WHERE id = ?')
+            ->execute(['http://127.0.0.1:9', 'vision-model:7b', 'enc:v1:' . base64_encode(str_repeat('x', 64)), $this->supplierId]);
+        $history = [];
+        $req = $this->req('PUT', 'admin')->withParsedBody(['provider' => 'ollama', 'base_url' => 'http://127.0.0.2:9', 'default_model' => 'vision-model:7b']);
+        $res = $this->mockedAction($history)->update($req, new Psr7Response());
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertNull($this->ollamaRow()['ollama_api_key_enc']);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Ai\OllamaEndpointException;
 use MyInvoice\Service\Import\AiCredentialsBulkApplier;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
@@ -18,6 +19,8 @@ use MyInvoice\Service\Import\GeminiClient;
 use MyInvoice\Service\Import\InvoiceExtractionPrompt;
 use MyInvoice\Service\Import\LlmProviderCapabilities;
 use MyInvoice\Service\Import\LlmGatewayInterface;
+use MyInvoice\Service\Import\LlmProviderRegistry;
+use MyInvoice\Service\Import\OllamaClient;
 use MyInvoice\Service\Import\OpenAiClient;
 use MyInvoice\Service\Import\ResidencyPolicy;
 use MyInvoice\Service\Import\ResidencyViolationException;
@@ -28,9 +31,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * F7 §3.8 / §13.3 — per-provider správa AI credentials (admin-only, BYOK).
  *
- *   GET    /api/admin/imports/ai/credentials       — status všech 4 providerů
+ *   GET    /api/admin/imports/ai/credentials       — status všech providerů ({@see LlmProviderRegistry::PROVIDERS})
  *   PUT    /api/admin/imports/ai/credentials        — set klíče + testConnection (body.provider)
  *   DELETE /api/admin/imports/ai/credentials?provider=…  — remove klíč providera
+ *   POST   /api/admin/imports/ai/ollama/models {base_url}  — modely v Ollamě
  *
  * Secrety jdou VÝHRADNĚ přes {@see \MyInvoice\Service\Auth\SecretEncryption} do
  * `*_enc` sloupců přes dedikované setCredentials klientů — NIKDY přes SettingsAction
@@ -41,7 +45,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class AiProviderCredentialsAction
 {
-    private const PROVIDERS = ['anthropic', 'azure_openai', 'openai', 'gemini'];
+    private const PROVIDERS = LlmProviderRegistry::PROVIDERS;
     /**
      * Zda provider umí pro tenanta dosáhnout EU rezidence dat (FE badge / EU-required
      * filtr). anthropic/gemini v1 = jen US (EU jen přes dedikovaný/Vertex endpoint,
@@ -52,12 +56,14 @@ final class AiProviderCredentialsAction
         'azure_openai' => true,
         'openai'       => true,
         'gemini'       => false,
+        'ollama'       => true,
     ];
     private const COUNTER_COL = [
         'anthropic'    => 'anthropic_extractions_count',
         'azure_openai' => 'azure_extractions_count',
         'openai'       => 'openai_extractions_count',
         'gemini'       => 'gemini_extractions_count',
+        'ollama'       => 'ollama_extractions_count',
     ];
 
     public function __construct(
@@ -65,6 +71,7 @@ final class AiProviderCredentialsAction
         private readonly AzureOpenAiClient $azure,
         private readonly OpenAiClient $openai,
         private readonly GeminiClient $gemini,
+        private readonly OllamaClient $ollama,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -104,6 +111,10 @@ final class AiProviderCredentialsAction
             }
             if ($p === 'openai' && $creds !== null) {
                 $providers[$p]['base_url'] = $creds['base_url'] ?? null;
+            }
+            if ($p === 'ollama' && $creds !== null) {
+                $providers[$p]['base_url']    = $creds['base_url'];
+                $providers[$p]['has_api_key'] = $creds['api_key'] !== '';
             }
         }
 
@@ -152,6 +163,10 @@ final class AiProviderCredentialsAction
         $onlyUnconfigured = ($body['only_unconfigured'] ?? true) !== false;
         if ($bulk && !RequestAuthorization::isSessionAuth($request)) {
             return Json::error($response, 'forbidden', 'Hromadné uložení je dostupné jen z přihlášené relace.', 403);
+        }
+
+        if ($provider === 'ollama') {
+            return $this->updateOllama($request, $response, $supplierId, $body, $userId, $ip, $ua, $bulk, $onlyUnconfigured);
         }
 
         $existing = $this->clientFor($provider)->getCredentials($supplierId);
@@ -217,15 +232,16 @@ final class AiProviderCredentialsAction
      * Jediné volání poskytovatele za celé uložení — i při rozkopírování do dalších
      * firem se klíč testuje jen tady, na aktuální firmě (test stojí uživatele peníze).
      *
+     * @param array<string,mixed>|null $known výsledek testConnection, který volající už má (Ollama)
      * @return array{test_ok:bool, test_error:?string, model:?string}
      */
-    private function runTest(string $provider, int $supplierId): array
+    private function runTest(string $provider, int $supplierId, ?array $known = null): array
     {
         // L1: EU-required tenant nesmí testovat us endpoint — fail-closed před testConnection.
         if ($this->residencyConflict($provider, $supplierId)) {
             return ['test_ok' => false, 'test_error' => 'residency_conflict', 'model' => null];
         }
-        $test = $this->clientFor($provider)->testConnection($supplierId);
+        $test = $known ?? $this->clientFor($provider)->testConnection($supplierId);
         return [
             'test_ok'    => (bool) ($test['ok'] ?? false),
             'test_error' => ($test['ok'] ?? false) ? null : ($test['error'] ?? null),
@@ -266,6 +282,7 @@ final class AiProviderCredentialsAction
             'azure_openai' => $this->azure->clearCredentials($supplierId),
             'openai'       => $this->openai->clearCredentials($supplierId),
             'gemini'       => $this->gemini->clearCredentials($supplierId),
+            'ollama'       => $this->ollama->clearCredentials($supplierId),
         };
         $user   = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
@@ -300,6 +317,106 @@ final class AiProviderCredentialsAction
         ]);
     }
 
+    /**
+     * POST /api/admin/imports/ai/ollama/models {base_url} — modely nainstalované v Ollamě
+     * (admin-only). POST kvůli CSRF: server se podle adresy připojuje ven a GET by spustil
+     * i podvržený odkaz. Uložený klíč se pošle jen na tutéž adresu, na kterou byl uložen.
+     */
+    public function ollamaModels(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        $supplierId = SupplierGuard::currentId($request);
+        $baseUrl = trim((string) (((array) ($request->getParsedBody() ?? []))['base_url'] ?? ''));
+        if ($baseUrl === '') {
+            $baseUrl = (string) ($this->ollama->getCredentials($supplierId)['base_url'] ?? '');
+        }
+        if ($baseUrl === '') {
+            return Json::error($response, 'validation_failed', 'Zadejte adresu Ollamy.', 400);
+        }
+        $list = $this->ollama->listModels($baseUrl, $this->storedOllamaKeyFor($supplierId, $baseUrl));
+        if (!$list['ok']) {
+            return Json::error($response, $list['code'], $list['error'], 422);
+        }
+        return Json::ok($response, ['models' => $list['models']]);
+    }
+
+    /**
+     * Ollama nemá povinný klíč, takže nejde přes obecnou větev update() (ta klíčem
+     * rozlišuje config-only update). Model se ověřuje proti živému `/api/tags`.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function updateOllama(Request $request, Response $response, int $supplierId, array $body, int $userId, ?string $ip, string $ua, bool $bulk, bool $onlyUnconfigured): Response
+    {
+        $existing = $this->ollama->getCredentials($supplierId);
+        $baseUrl = trim((string) ($body['base_url'] ?? ($existing['base_url'] ?? '')));
+        $model   = trim((string) ($body['default_model'] ?? ($existing['default_model'] ?? '')));
+        if ($baseUrl === '' || $model === '') {
+            return Json::error($response, 'validation_failed', 'Adresa Ollamy i model jsou povinné.', 400);
+        }
+        $newKey = trim((string) ($body['api_key'] ?? ''));
+        if ($newKey !== '') {
+            $keyErr = LlmProviderCapabilities::ollama($model, 'us')->validateKey($newKey);
+            if ($keyErr !== null) {
+                return Json::error($response, 'validation_failed', $keyErr, 400);
+            }
+        }
+        $apiKey = $this->resolveOllamaKey($supplierId, $baseUrl, $newKey !== '' ? $newKey : null, ($body['clear_api_key'] ?? false) === true);
+        $keyForCheck = $apiKey ?? $this->storedOllamaKeyFor($supplierId, $baseUrl);
+
+        $list = $this->ollama->listModels($baseUrl, $keyForCheck);
+        if (!$list['ok']) {
+            return Json::error($response, 'validation_failed', $list['error'], 400);
+        }
+        if (!in_array($model, array_column($list['models'], 'name'), true)) {
+            return Json::error($response, 'validation_failed', OllamaClient::message('ollama_model_missing'), 400);
+        }
+        try {
+            $this->ollama->setCredentials($supplierId, $baseUrl, $model, $apiKey);
+        } catch (OllamaEndpointException $e) {
+            return Json::error($response, 'validation_failed', OllamaClient::message($e->errorCode), 400);
+        }
+        $this->logger->log('import.ai_credentials_set', $userId, 'supplier', $supplierId, ['provider' => 'ollama'], $ip, $ua);
+
+        // Spojení i model ověřil seznam výše; testConnection by /api/tags a všechna /api/show zopakoval.
+        $result = ['saved' => true] + $this->runTest('ollama', $supplierId, ['ok' => true, 'model' => $model]);
+        if ($bulk) {
+            $result += $this->bulkOutcome($request, $supplierId, 'ollama', $onlyUnconfigured, $result, $ip, $ua);
+        }
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Co uložit do `ollama_api_key_enc`: null = ponechat, '' = smazat, jinak nový klíč.
+     * Změna adresy bez nového klíče (i nečitelná uložená konfigurace) klíč maže — jinak by uložený Bearer token odešel
+     * na host, pro který nebyl zadán.
+     */
+    private function resolveOllamaKey(int $supplierId, string $baseUrl, ?string $newKey, bool $clear): ?string
+    {
+        if ($clear) {
+            return '';
+        }
+        if ($newKey !== null) {
+            return $newKey;
+        }
+        $existing = $this->ollama->getCredentials($supplierId);
+        if ($existing === null) {
+            // Nečitelná/neúplná konfigurace: případný osiřelý šifrovaný klíč nesmí přežít pod novou adresou.
+            return '';
+        }
+        if ($existing['api_key'] === '') {
+            return null;
+        }
+        return $this->ollama->sameBaseUrl($existing['base_url'], $baseUrl) ? null : '';
+    }
+
+    /** Uložený klíč, ale jen pro tutéž adresu, na kterou byl uložen. */
+    private function storedOllamaKeyFor(int $supplierId, string $baseUrl): string
+    {
+        $existing = $this->ollama->getCredentials($supplierId);
+        return ($existing !== null && $this->ollama->sameBaseUrl($existing['base_url'], $baseUrl)) ? $existing['api_key'] : '';
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private function isAdmin(Request $request): bool
@@ -314,6 +431,7 @@ final class AiProviderCredentialsAction
             'azure_openai' => $this->azure,
             'openai'       => $this->openai,
             'gemini'       => $this->gemini,
+            'ollama'       => $this->ollama,
         };
     }
 
@@ -324,6 +442,7 @@ final class AiProviderCredentialsAction
             'anthropic'    => LlmProviderCapabilities::anthropic(),
             'openai'       => LlmProviderCapabilities::openai((string) ($body['base_url'] ?? ''), (string) ($body['default_model'] ?? '')),
             'gemini'       => LlmProviderCapabilities::gemini((string) ($body['default_model'] ?? '')),
+            'ollama'       => LlmProviderCapabilities::ollama((string) ($body['default_model'] ?? ''), 'us'),
             'azure_openai' => LlmProviderCapabilities::azureOpenai((string) ($body['endpoint'] ?? ''), (string) ($body['deployment'] ?? ''), 'eu'),
         };
     }
@@ -506,7 +625,7 @@ final class AiProviderCredentialsAction
     private function extractionCounts(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT anthropic_extractions_count, azure_extractions_count, openai_extractions_count, gemini_extractions_count
+            'SELECT anthropic_extractions_count, azure_extractions_count, openai_extractions_count, gemini_extractions_count, ollama_extractions_count
                FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
@@ -516,6 +635,7 @@ final class AiProviderCredentialsAction
             'azure_openai' => (int) ($row['azure_extractions_count'] ?? 0),
             'openai'       => (int) ($row['openai_extractions_count'] ?? 0),
             'gemini'       => (int) ($row['gemini_extractions_count'] ?? 0),
+            'ollama'       => (int) ($row['ollama_extractions_count'] ?? 0),
         ];
     }
 

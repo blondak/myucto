@@ -55,6 +55,11 @@ final class AiAssistSettingsAction
             }
         }
         $pdo = $this->db->pdo();
+        // Výjimka z DPA (lokální Ollama) stojí DNS dotaz — počítá se předem, ne pod zámkem řádku.
+        $current = $pdo->prepare('SELECT ai_provider FROM supplier WHERE id=?');
+        $current->execute([$supplierId]);
+        $exemptProvider = (string) ($current->fetchColumn() ?: 'anthropic');
+        $exempt = $this->exempt($supplierId, $exemptProvider);
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare('SELECT ai_provider,ai_assist_enabled,ai_assist_scope,ai_pseudo_salt,ai_dpa_confirmations FROM supplier WHERE id=? FOR UPDATE');
@@ -70,7 +75,7 @@ final class AiAssistSettingsAction
                 $confirmations = [];
             }
             if (isset($body['dpa_confirm']) && is_string($body['dpa_confirm'])) {
-                if (!in_array($body['dpa_confirm'], ['anthropic', 'azure_openai', 'openai', 'gemini'], true)) {
+                if (!in_array($body['dpa_confirm'], \MyInvoice\Service\Import\LlmProviderRegistry::PROVIDERS, true)) {
                     throw new \InvalidArgumentException('validation_failed');
                 }
                 $confirmations[$body['dpa_confirm']] = ['confirmed_at' => gmdate('c'), 'user_id' => $userId];
@@ -79,7 +84,7 @@ final class AiAssistSettingsAction
                 unset($confirmations[$body['dpa_revoke']]);
             }
             $enabled = array_key_exists('enabled', $body) ? (bool) $body['enabled'] : (bool) $row['ai_assist_enabled'];
-            if ($enabled && !is_string($confirmations[$provider]['confirmed_at'] ?? null)) {
+            if ($enabled && !is_string($confirmations[$provider]['confirmed_at'] ?? null) && !($exempt && $provider === $exemptProvider)) {
                 $pdo->rollBack();
                 return Json::error($response, 'dpa_required', 'Bez potvrzení DPA nelze AI návrhy zapnout.', 409);
             }
@@ -146,6 +151,7 @@ final class AiAssistSettingsAction
             'scope' => array_values(array_filter(explode(',', (string) ($row['ai_assist_scope'] ?? '')))),
             'provider' => $provider, 'provider_label' => $label, 'data_region' => $region,
             'dpa_confirmed' => $this->dpa->confirmations($supplierId),
+            'dpa_exempt' => $this->exempt($supplierId, $provider),
             'embedding_available' => $this->embeddings->isAvailable($supplierId),
             'knn_warm' => [
                 'bank_transaction' => $bankLabels >= KnnSuggester::COLD_START_MIN_LABELS,
@@ -156,6 +162,16 @@ final class AiAssistSettingsAction
             'daily_limit' => AiJobService::DAILY_JOB_LIMIT,
             'today_used' => $this->jobs->todayUsed($supplierId),
         ];
+    }
+
+    /** Fail-closed: když výjimku nejde spočítat (DNS, DB), platí, že DPA je potřeba. */
+    private function exempt(int $supplierId, string $provider): bool
+    {
+        try {
+            return $this->dpa->isExempt($supplierId, $provider);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function supplierId(Request $request): int

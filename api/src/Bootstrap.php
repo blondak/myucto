@@ -1038,6 +1038,19 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
                 $c->get(LoggerInterface::class),
             ),
+            // Ollama: guard a rasterizér mají volitelné test seamy (resolver, binárka),
+            // OllamaClient volitelný Guzzle — proto explicitně, ať autowire nic nedosadí.
+            \MyInvoice\Service\Ai\OllamaEndpointGuard::class => fn () => new \MyInvoice\Service\Ai\OllamaEndpointGuard(),
+            \MyInvoice\Service\Import\PdfPageRasterizerInterface::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Import\PdfPageRasterizer($c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Import\OllamaClient::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Import\OllamaClient(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(LoggerInterface::class),
+                $c->get(\MyInvoice\Service\Ai\OllamaEndpointGuard::class),
+                $c->get(\MyInvoice\Service\Import\PdfPageRasterizerInterface::class),
+                $c->get(\MyInvoice\Service\Import\PdfTotalExtractor::class),
+            ),
 
             // "Upload PDF" bankovních výpisů — registry bank-specifických PDF parserů
             // (banky bez GPC/ABO exportu). PŘIDÁNÍ NOVÉ BANKY: nová třída implements

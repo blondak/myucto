@@ -72,6 +72,10 @@ services:
       # Workery php-fpm (image default 8, každý ~30-60 MB). Na silnějším stroji zvyš,
       # aby souběžní uživatelé nečekali ve frontě; prázdné = default image.
       PHP_FPM_MAX_CHILDREN: ${PHP_FPM_MAX_CHILDREN:-}
+      # Lokální AI přes Ollamu (Nastavení → Integrace → AI brána). Prázdné = výchozí.
+      MYINVOICE_OLLAMA_TIMEOUT: ${MYINVOICE_OLLAMA_TIMEOUT:-}
+      MYINVOICE_OLLAMA_NUM_CTX: ${MYINVOICE_OLLAMA_NUM_CTX:-}
+      MYINVOICE_OLLAMA_ALLOWED_HOSTS: ${MYINVOICE_OLLAMA_ALLOWED_HOSTS:-}
 
   db:
     image: mariadb:11.8

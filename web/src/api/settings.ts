@@ -40,10 +40,12 @@ export type AiAssistScope = 'bank_tx' | 'purchase_invoices'
 export interface AiAssistSettings {
   enabled: boolean
   scope: AiAssistScope[]
-  provider: 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+  provider: 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
   provider_label: string
   data_region: 'eu' | 'us'
   dpa_confirmed: Record<string, string | null>
+  /** Ollama na lokální/privátní adrese — DPA potvrzení není potřeba. */
+  dpa_exempt: boolean
   embedding_available: boolean
   knn_warm: {
     bank_transaction: boolean
@@ -324,7 +326,7 @@ export interface Supplier {
   cssz_ossz_code?: string | null
   health_insurance_number?: string | null
   // AI extrakční brána (Epic F7) — non-secret volby (secrety jen přes /ai/credentials).
-  ai_provider?: 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+  ai_provider?: 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
   ai_data_region?: 'eu' | 'us'
   ai_eu_residency_required?: boolean
   // Globální cfg fallback (read-only) — UI ho ukáže jako placeholder

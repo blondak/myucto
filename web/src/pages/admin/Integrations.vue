@@ -13,6 +13,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
+import OllamaProviderFields from '@/components/admin/OllamaProviderFields.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -273,13 +274,14 @@ async function startFakImport() {
 // ── AI extrakční brána (Epic F7) — 4 provideři + EU rezidence ─────────
 // Nastavení brány (provideři, klíče, DPA, rozsah) zůstává tady v adminu;
 // samotný AI import přijatých faktur je vytažený na /purchase-invoices/ai-import (§12b).
-const ALL_PROVIDERS: AiProvider[] = ['anthropic', 'azure_openai', 'openai', 'gemini']
+const ALL_PROVIDERS: AiProvider[] = ['anthropic', 'azure_openai', 'openai', 'gemini', 'ollama']
 const RECOMMENDED_PROVIDER: AiProvider = 'anthropic'
 const PROVIDER_KEY_URLS: Record<AiProvider, string> = {
   anthropic: 'https://platform.claude.com/settings/keys',
   azure_openai: 'https://portal.azure.com/#create/Microsoft.CognitiveServicesOpenAI',
   openai: 'https://platform.openai.com/api-keys',
   gemini: 'https://aistudio.google.com/app/apikey',
+  ollama: 'https://ollama.com/download',
 }
 
 const aiCreds = ref<AiCredentialsResponse | null>(null)
@@ -295,7 +297,7 @@ const aiAssistSaving = ref(false)
 
 // per-provider credential form (klíč WRITE-ONLY — nikdy neecho)
 const credForm = reactive({
-  api_key: '', default_model: '',
+  api_key: '', default_model: '', clear_api_key: false,
   endpoint: '', deployment: '', api_version: '',   // azure_openai
   base_url: '',                                     // openai
 })
@@ -333,6 +335,7 @@ const aiExtractCount = computed(() => providerInfo.value?.extractions_count ?? 0
 function syncCredForm() {
   const inf = providerInfo.value
   credForm.api_key = ''
+  credForm.clear_api_key = false
   credForm.default_model = inf?.default_model ?? (models.value[0] ?? '')
   credForm.endpoint = inf?.endpoint ?? ''
   credForm.deployment = inf?.deployment ?? ''
@@ -389,7 +392,7 @@ async function loadAiAssist() {
     aiAssist.value = await settingsApi.getAiAssist()
     aiAssistEnabled.value = aiAssist.value.enabled
     aiAssistScopes.value = [...aiAssist.value.scope]
-    aiAssistDpa.value = !!aiAssist.value.dpa_confirmed[aiAssist.value.provider]
+    aiAssistDpa.value = aiAssist.value.dpa_exempt || !!aiAssist.value.dpa_confirmed[aiAssist.value.provider]
   } catch {
     aiAssist.value = null
   }
@@ -399,7 +402,7 @@ async function saveAiAssist() {
   if (!aiAssist.value || aiAssistSaving.value) return
   aiAssistSaving.value = true
   const provider = aiAssist.value.provider
-  const wasConfirmed = !!aiAssist.value.dpa_confirmed[provider]
+  const wasConfirmed = aiAssist.value.dpa_exempt || !!aiAssist.value.dpa_confirmed[provider]
   try {
     aiAssist.value = await settingsApi.updateAiAssist({
       enabled: aiAssistEnabled.value,
@@ -409,7 +412,7 @@ async function saveAiAssist() {
     })
     aiAssistEnabled.value = aiAssist.value.enabled
     aiAssistScopes.value = [...aiAssist.value.scope]
-    aiAssistDpa.value = !!aiAssist.value.dpa_confirmed[aiAssist.value.provider]
+    aiAssistDpa.value = aiAssist.value.dpa_exempt || !!aiAssist.value.dpa_confirmed[aiAssist.value.provider]
     toast.success(t('common.saved'))
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -463,7 +466,7 @@ function validateKeyClient(): string | null {
 async function saveAiCredentials() {
   const err = validateKeyClient()
   if (err) { toast.error(err); return }
-  if (!credForm.api_key && !providerConfigured(aiProvider.value)) { toast.error(t('aiGateway.err_key_required')); return }
+  if (aiProvider.value !== 'ollama' && !credForm.api_key && !providerConfigured(aiProvider.value)) { toast.error(t('aiGateway.err_key_required')); return }
   credSaving.value = true
   credTestMsg.value = null
   bulkResult.value = null
@@ -485,7 +488,8 @@ async function saveAiCredentials() {
       payload.deployment = credForm.deployment
       payload.api_version = credForm.api_version
     }
-    if (aiProvider.value === 'openai') payload.base_url = credForm.base_url
+    if (aiProvider.value === 'openai' || aiProvider.value === 'ollama') payload.base_url = credForm.base_url
+    if (aiProvider.value === 'ollama' && credForm.clear_api_key) payload.clear_api_key = true
     if (bulkApply.value) {
       payload.apply_to_all_companies = true
       payload.only_unconfigured = bulkOnlyUnconfigured.value
@@ -503,6 +507,8 @@ async function saveAiCredentials() {
       await loadAiAssist()
       toast.success(t('aiGateway.switched_active', { provider: providerLabel(aiProvider.value) }))
     }
+    // dpa_exempt závisí na uložené adrese Ollamy (privátní → veřejná vrací DPA checkbox).
+    else if (aiProvider.value === 'ollama') await loadAiAssist()
     if (r.bulk) reportBulk(r.bulk)
     await loadAiCreds(true)
   } catch (e) {
@@ -1067,7 +1073,12 @@ onMounted(() => {
               <strong class="text-primary-700">{{ t('aiGateway.onboarding_title') }}</strong>
               <p class="mt-1 text-xs leading-relaxed">{{ t('aiGateway.onboarding_intro') }}</p>
             </div>
-            <ol class="list-decimal pl-5 space-y-1 text-xs leading-relaxed">
+            <ol v-if="aiProvider === 'ollama'" class="list-decimal pl-5 space-y-1 text-xs leading-relaxed">
+              <li>{{ t('aiGateway.ollama_onboarding_step1') }}</li>
+              <li>{{ t('aiGateway.ollama_onboarding_step2') }}</li>
+              <li>{{ t('aiGateway.ollama_onboarding_step3') }}</li>
+            </ol>
+            <ol v-else class="list-decimal pl-5 space-y-1 text-xs leading-relaxed">
               <li>{{ t('aiGateway.onboarding_step1', { provider: providerLabel(aiProvider) }) }}</li>
               <li>{{ t('aiGateway.onboarding_step2') }}</li>
               <li>{{ t('aiGateway.onboarding_step3') }}</li>
@@ -1076,7 +1087,7 @@ onMounted(() => {
             <a :href="PROVIDER_KEY_URLS[aiProvider]" target="_blank" rel="noopener noreferrer"
                :class="[btnFilled('primary'), 'whitespace-nowrap']">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
-              {{ t('aiGateway.get_key_button', { provider: providerLabel(aiProvider) }) }}
+              {{ aiProvider === 'ollama' ? t('aiGateway.ollama_download_button') : t('aiGateway.get_key_button', { provider: providerLabel(aiProvider) }) }}
             </a>
           </div>
           <p v-else class="text-xs text-neutral-500 mb-4">
@@ -1094,7 +1105,7 @@ onMounted(() => {
 
           <div class="space-y-3">
             <!-- API key (write-only) — anthropic/openai/gemini -->
-            <div v-if="aiProvider !== 'azure_openai'">
+            <div v-if="aiProvider !== 'azure_openai' && aiProvider !== 'ollama'">
               <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.api_key') }} *</label>
               <div class="flex gap-2">
                 <input v-model="credForm.api_key" :type="credShowKey ? 'text' : 'password'" maxlength="512"
@@ -1150,8 +1161,14 @@ onMounted(() => {
               <p class="text-xs text-neutral-500 mt-1">{{ t('aiGateway.openai_base_url_hint') }}</p>
             </div>
 
+            <!-- Ollama: adresa + model ze seznamu nainstalovaných + volitelný klíč -->
+            <OllamaProviderFields v-if="aiProvider === 'ollama'" :key="'ollama-' + (providerInfo?.base_url ?? '')"
+                                  v-model:base-url="credForm.base_url" v-model:model="credForm.default_model"
+                                  v-model:api-key="credForm.api_key" v-model:clear-api-key="credForm.clear_api_key"
+                                  :has-api-key="!!providerInfo?.has_api_key" />
+
             <!-- Model whitelist z capability descriptoru -->
-            <div v-if="models.length">
+            <div v-if="models.length && aiProvider !== 'ollama'">
               <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.model') }}</label>
               <select v-model="credForm.default_model" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                 <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
@@ -1292,7 +1309,8 @@ onMounted(() => {
           <a href="/manual?ch=53_Automat#5311-ai-navrhy-uctovani" target="_blank" rel="noopener" class="mt-2 inline-block text-xs font-medium text-primary-700 underline">{{ t('automation.ai.manual_link') }}</a>
         </div>
 
-        <label class="mt-4 flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
+        <p v-if="aiAssist.dpa_exempt" class="mt-4 text-xs text-neutral-600">{{ t('automation.ai.dpa_exempt_local') }}</p>
+        <label v-else class="mt-4 flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
           <input v-model="aiAssistDpa" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
           <span>{{ t('automation.ai.dpa_confirm', { provider: aiAssist.provider_label }) }}</span>
         </label>

@@ -13,12 +13,17 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Ai\AiDpaGate;
 use MyInvoice\Service\Ai\AiProviderHttpClient;
 use MyInvoice\Service\Ai\LlmClassifierRouter;
+use MyInvoice\Service\Ai\OllamaEndpointGuard;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
 use MyInvoice\Service\Import\GeminiClient;
 use MyInvoice\Service\Import\LlmProviderRegistry;
+use MyInvoice\Service\Import\OllamaClient;
 use MyInvoice\Service\Import\OpenAiClient;
+use MyInvoice\Service\Import\PdfIsdocExtractor;
+use MyInvoice\Service\Import\PdfPageRasterizer;
+use MyInvoice\Service\Import\PdfTotalExtractor;
 use MyInvoice\Service\Import\ResidencyPolicy;
 use PDO;
 use PDOStatement;
@@ -69,13 +74,16 @@ final class LlmClassifierRouterEscalationTest extends TestCase
         $crypto->method('decrypt')->willReturn('sk-ant-' . str_repeat('a', 40));
         $logger = new NullLogger();
 
+        $ollama = new OllamaClient($conn, $crypto, $logger, new OllamaEndpointGuard(static fn (): array => [], ''),
+            new PdfPageRasterizer($logger, false, ''), new PdfTotalExtractor(new PdfIsdocExtractor()));
         $registry = new LlmProviderRegistry(
             new AnthropicClient($conn, $crypto, $logger),
             new AzureOpenAiClient($conn, $crypto, $logger),
             new OpenAiClient($conn, $crypto, $logger),
             new GeminiClient($conn, $crypto, $logger),
+            $ollama,
         );
-        $client = new AiProviderHttpClient($conn, $registry, new ResidencyPolicy(), new AiDpaGate($conn), $logger, $http);
+        $client = new AiProviderHttpClient($conn, $registry, new ResidencyPolicy(), new AiDpaGate($conn, $ollama), $logger, $http);
 
         return new LlmClassifierRouter($conn, $client, $logger);
     }

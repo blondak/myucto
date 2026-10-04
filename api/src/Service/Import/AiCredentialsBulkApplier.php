@@ -39,6 +39,7 @@ final class AiCredentialsBulkApplier
         private readonly AzureOpenAiClient $azure,
         private readonly OpenAiClient $openai,
         private readonly GeminiClient $gemini,
+        private readonly OllamaClient $ollama,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly UserSupplierRepository $memberships,
@@ -193,6 +194,7 @@ final class AiCredentialsBulkApplier
             ),
             'openai'       => $this->openai->setCredentials($supplierId, $creds['api_key'], $creds['default_model'] ?? null, $creds['base_url'] ?? null),
             'gemini'       => $this->gemini->setCredentials($supplierId, $creds['api_key'], $creds['default_model'] ?? null),
+            'ollama'       => $this->ollama->setCredentials($supplierId, $creds['base_url'], $creds['default_model'], $creds['api_key']),
         };
     }
 
@@ -202,6 +204,7 @@ final class AiCredentialsBulkApplier
             'azure_openai' => $this->azure,
             'openai'       => $this->openai,
             'gemini'       => $this->gemini,
+            'ollama'       => $this->ollama,
             default        => $this->anthropic,
         };
     }

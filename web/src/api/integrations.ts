@@ -101,7 +101,7 @@ export interface AnthropicCredentialsUpdateResult {
 }
 
 // ── AI provider brána (Epic F7) — 4 provideři za LlmGateway ─────────────────
-export type AiProvider = 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+export type AiProvider = 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
 export type AiDataRegion = 'eu' | 'us'
 
 /** Per-provider stav + capability descriptor (whitelist modelů, region). */
@@ -119,7 +119,8 @@ export interface AiProviderInfo {
   endpoint?: string | null       // azure_openai
   deployment?: string | null     // azure_openai
   api_version?: string | null    // azure_openai
-  base_url?: string | null       // openai (EU: eu.api.openai.com)
+  base_url?: string | null       // openai (EU: eu.api.openai.com), ollama
+  has_api_key?: boolean          // ollama (klíč je volitelný; hodnota se nikdy nevrací)
 }
 
 /** Míra uvažování AI. `default` = neposílat providerovi nic navíc. */
@@ -159,10 +160,20 @@ export interface AiCredentialsPayload {
   api_version?: string
   // openai
   base_url?: string
+  // ollama: `base_url` + `default_model` povinné, `api_key` volitelný
+  clear_api_key?: boolean
   /** Rozkopírovat do dalších firem uživatele (cílové firmy určuje server). */
   apply_to_all_companies?: boolean
   /** Jen firmy, jejichž aktivní poskytovatel nemá klíč. */
   only_unconfigured?: boolean
+}
+
+/** Model nainstalovaný v Ollamě; `null` = Ollama capabilities nehlásí (starší verze). */
+export interface OllamaModel {
+  name: string
+  size: number
+  vision: boolean | null
+  thinking: boolean | null
 }
 
 export interface AiBulkCompany {
@@ -269,6 +280,9 @@ export const integrationsApi = {
     api.put<AiTuningResult>('/admin/imports/ai/tuning', payload).then(r => r.data),
   testAiConnection: (provider: AiProvider) =>
     api.post<AiCredentialsUpdateResult>('/admin/imports/ai/credentials/test', { provider }).then(r => r.data),
+  // POST kvůli CSRF ochraně — server se podle adresy připojuje ven.
+  listOllamaModels: (baseUrl: string) =>
+    api.post<{ models: OllamaModel[] }>('/admin/imports/ai/ollama/models', { base_url: baseUrl }).then(r => r.data),
   extractPdfAi: (file: File, model?: string, importBatchId?: string) => {
     const fd = new FormData()
     fd.append('pdf', file, file.name)
