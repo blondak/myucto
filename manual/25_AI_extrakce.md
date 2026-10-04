@@ -2,9 +2,9 @@
 
 [Přijaté](23_Prijate_faktury.md) i vydané faktury lze importovat z PDF pomocí
 AI extrakce.
-Extrakci provádí jeden ze čtyř podporovaných poskytovatelů AI (Anthropic Claude,
-Azure OpenAI, OpenAI nebo Google Gemini) — volbu a přihlašovací údaje nastavíš
-v [§ 25.7 Multi-provider AI brána](#252-multi-provider-ai-brana-vyber-poskytovatele).
+Extrakci provádí jeden z pěti podporovaných poskytovatelů AI (Anthropic Claude,
+Azure OpenAI, OpenAI, Google Gemini nebo Ollama lokální) — volbu a přihlašovací údaje nastavíš
+v [§ 25.2 Multi-provider AI brána](#252-multi-provider-ai-brana-vyber-poskytovatele).
 Tato kapitola dále popisuje **kontrolu výsledků** extrakce a automatiky, které
 doklad daňově připraví.
 
@@ -240,8 +240,8 @@ druhu nákladu s tlačítkem **Použít**.
 
 ## 25.2 Multi-provider AI brána (výběr poskytovatele)
 
-AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI bránu** se
-čtyřmi poskytovateli, mezi kterými si každý dodavatel (tenant) vybere podle toho,
+AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI bránu** s
+pěti poskytovateli, mezi kterými si každý dodavatel (tenant) vybere podle toho,
 co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci dat:
 
 - **Anthropic Claude** — BYOK (vlastní klíč z `platform.claude.com`), výchozí
@@ -263,6 +263,9 @@ co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci 
   `gemini-3.7-flash`; dostupné jsou také `gemini-3.6-flash`,
   `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`,
   `gemini-3.1-pro-preview` a `gemini-2.5-pro`.
+- **Ollama (lokální)** — open-source model spuštěný na vlastním stroji, bez API klíče
+  (komunikace přes lokální nebo privátní síť). Data neopouštějí vaši infrastrukturu.
+  Viz [§ 25.2.6](#2526-lokalni-model-pres-ollamu).
 
 Nastavení je **per dodavatel** (celá firma/tenant sdílí jednoho aktivního
 poskytovatele a jeho přihlašovací údaje, ne po jednotlivých uživatelích).
@@ -277,8 +280,8 @@ zelené ✓ s jeho jménem (a případně štítek **EU data residency**).
 
 V sekci nastavíš:
 
-1. **Poskytovatele AI** — přepínač se čtyřmi tlačítky (Anthropic / Azure OpenAI
-   / OpenAI / Gemini), zelené ✓ u tlačítka znamená, že ten poskytovatel má už
+1. **Poskytovatele AI** — přepínač s pěti tlačítky (Anthropic / Azure OpenAI
+   / OpenAI / Gemini / Ollama), zelené ✓ u tlačítka znamená, že ten poskytovatel má už
    uložené přihlašovací údaje. Štítek **aktivní** nese poskytovatel, přes kterého
    extrakce opravdu běží: je pro firmu zvolený a má uložený klíč. Zvolený
    poskytovatel bez klíče má místo toho štítek **bez klíče** a extrakce zatím
@@ -441,6 +444,89 @@ a projeví se okamžitě na další extrakci.
 > nejodladěnější volba (nativní čtení PDF, nejlepší přesnost na komplexních
 > fakturách). Azure OpenAI zvol, pokud firma potřebuje EU rezidenci dat se
 > smluvním zajištěním nebo už Azure OpenAI používá pro jiné účely.
+
+### 25.2.6 Lokální model přes Ollamu
+
+Místo cloudového poskytovatele může vytěžování i AI návrhy kontací běžet na vlastním
+stroji přes [Ollamu](https://ollama.com). Doklady pak neopouštějí vaši infrastrukturu.
+
+**Příprava**
+
+1. Nainstalujte Ollamu na stroj s grafickou kartou (doporučeno) nebo na server MyÚčta.
+2. Stáhněte model, který umí číst obrázky (v knihovně Ollamy má označení *vision*),
+   příkazem `ollama pull <název modelu>`. Seznam modelů ukáže `ollama list`.
+3. Aby byla Ollama dostupná z Docker kontejneru nebo ze sítě (nikoli jen z `localhost`), spusťte ji s `OLLAMA_HOST=0.0.0.0`.
+
+**Nastavení v MyÚčtu**
+
+V **Firma → AI nastavení**, v sekci **Nastavení AI extrakční brány**, vyberte **Ollama (lokální)** a zadejte adresu:
+
+| Kde běží MyÚčto | Adresa Ollamy |
+|---|---|
+| Docker, Ollama na stejném stroji (Windows, macOS) | `http://host.docker.internal:11434` |
+| Docker na Linuxu | `http://host.docker.internal:11434` a ve službě aplikace `extra_hosts: ["host.docker.internal:host-gateway"]` |
+| Přímo na serveru (IIS, Apache) | `http://localhost:11434` |
+| Ollama na jiném stroji v síti | `http://192.168.x.y:11434` |
+
+Název hostu s podtržítkem (`gpu_server.lan`) adresa nepřijme — zadejte IP adresu nebo
+název bez znaku `_`.
+
+Tlačítko **Načíst modely** vypíše modely nainstalované v Ollamě. Štítek *čte obrázky*
+označuje modely, které vytěží i skeny a fotky; model bez něj zpracuje jen PDF s textovou
+vrstvou. Po uložení proběhne test spojení. API klíč vyplňte, jen pokud je Ollama za
+reverse proxy s autentizací; při změně adresy se uložený klíč smaže.
+
+**Jak se doklad zpracuje**
+
+Model dostane obrázky prvních 6 stran dokladu a k nim text z PDF, protože čísla dokladu,
+IBAN, variabilní symbol a částky jsou v textu přesnější než na obrázku. Volba
+**rychle / přesně** u modelů, které umí přemýšlet (capability *thinking*), vypíná nebo zapíná
+přemýšlení. Na obrázky stránek potřebuje server přednostně nástroj `pdftoppm` z balíku
+Poppler (je v Docker image), záložně Imagick s Ghostscriptem; bez nich se posílá jen text a sken
+bez textové vrstvy nejde vytěžit. Spojení s Ollamou vyžaduje PHP rozšíření `curl`
+(v Docker image je); bez něj ohlásí test spojení chybu `ollama_curl_missing`.
+
+**Rychlost a časový limit**
+
+Rychlost závisí hlavně na tom, jestli se model celý vejde do paměti grafické karty:
+
+- Když se model vejde do VRAM celý, trvá jedna faktura desítky sekund.
+- Když se nevejde (model i s kontextem potřebuje víc paměti, než má karta volné),
+  běží část modelu na procesoru a jedna faktura může trvat i několik minut.
+- První dotaz po delší pauze navíc čeká, než Ollama model načte do paměti. MyÚčto
+  ji žádá, aby model po každém dotazu držela načtený 30 minut.
+
+Pokud je vytěžování pomalé, zvolte menší model, který čte obrázky, nebo grafickou
+kartu s větší pamětí.
+
+Velikost kontextu nastavíte proměnnou `MYINVOICE_OLLAMA_NUM_CTX` (výchozí 32768,
+rozsah 8192–131072). Menší kontext zabere méně paměti grafické karty, takže se menší
+model vejde do VRAM celý a odpovídá výrazně rychleji. Při hodnotě 16384 se do kontextu
+vejdou zhruba 3–4 strany dokladu, delší doklady potřebují výchozí hodnotu.
+
+Výchozí limit na jeden doklad je 110 s a počítá se do něj i příprava obrázků stránek.
+Delší limit nastavíte proměnnou `MYINVOICE_OLLAMA_TIMEOUT` (v sekundách):
+
+- **Import z prohlížeče** (AI import přijaté i vydané faktury) čeká na výsledek
+  nejvýš zhruba 2 minuty, pak to prohlížeč vzdá. Vyšší `MYINVOICE_OLLAMA_TIMEOUT`
+  ho neprodlouží. Webserver ale musí požadavek nechat ty 2 minuty doběhnout: v Docker
+  image s nginx je `fastcgi_read_timeout` 120 s (nastavení je uvnitř image, pro změnu
+  připojte vlastní `nginx.conf` jako bind mount do `/etc/nginx/nginx.conf`); na IIS
+  zvyšte u FastCGI `activityTimeout` i `requestTimeout`.
+- **Zpracování na pozadí** (scan inboxu přes `cron-scan-purchase-inbox` a AI návrhy
+  kontací přes `cron-ai-worker`) běží mimo webserver, takže vyšší `MYINVOICE_OLLAMA_TIMEOUT` pomůže právě
+  tady. Pomalý model proto nechte vytěžovat hlavně přes scan inbox.
+
+**Rezidence dat a bezpečnost**
+
+- Ollama na adrese v lokální nebo privátní síti (`localhost`, `10.x`, `172.16–31.x`,
+  `192.168.x`) se počítá jako **Lokální** a splní i požadavek na EU rezidenci dat.
+  AI návrhy kontací pak nevyžadují potvrzení DPA.
+- Adresa ve veřejném internetu se počítá jako **Vzdálená**: EU rezidenci nesplní
+  a AI návrhy vyžadují potvrzení DPA jako u cloudových poskytovatelů.
+- Adresy cloudových metadat, link-local a multicast jsou zakázané vždy. Provozovatel
+  instance může povolené cíle omezit proměnnou `MYINVOICE_OLLAMA_ALLOWED_HOSTS`
+  (čárkami oddělené názvy hostů nebo rozsahy, např. `gpu.lan,10.0.0.0/8`).
 
 ## 25.3 AI import vydaných faktur
 

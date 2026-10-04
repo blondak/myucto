@@ -91,7 +91,7 @@ final readonly class LlmProviderCapabilities
     ];
 
     public function __construct(
-        public string $id,               // 'anthropic' | 'azure_openai' | 'openai' | 'gemini'
+        public string $id,               // 'anthropic' | 'azure_openai' | 'openai' | 'gemini' | 'ollama'
         public string $label,            // human-readable
         /** @var list<string> whitelist model/deployment id */
         public array  $models,
@@ -192,6 +192,29 @@ final readonly class LlmProviderCapabilities
     }
 
     /**
+     * Lokální Ollama descriptor. Model vybírá admin firmy ze seznamu toho, co Ollama
+     * na stroji má (`/api/tags`), takže whitelist = jen ten jeden. Region dodává
+     * {@see \MyInvoice\Service\Ai\OllamaEndpointGuard} z resolvované IP; cokoli jiného
+     * než 'eu' je fail-closed 'us'.
+     */
+    public static function ollama(?string $model, string $region): self
+    {
+        $model  = trim((string) $model);
+        $region = $region === 'eu' ? 'eu' : 'us';
+        return new self(
+            id: 'ollama',
+            label: 'Ollama',
+            models: $model !== '' ? [$model] : [],
+            defaultModel: $model,
+            maxPdfBytes: 20 * 1024 * 1024,
+            dataRegion: $region,
+            residencyLabel: $region === 'eu' ? 'Lokální (Ollama)' : 'Vzdálená (Ollama)',
+            supportsPdfDocumentBlock: false,
+            requiresStructuredOutputJsonMode: true,
+        );
+    }
+
+    /**
      * Další stupeň na žebříčku {@see ESCALATION_LADDERS} — co použít, když extrakce
      * na aktuálním modelu neprojde. Anthropic jde haiku → sonnet → opus → fable,
      * OpenAI/Azure nano → mini → plný model, Gemini lite → flash → pro.
@@ -261,6 +284,9 @@ final readonly class LlmProviderCapabilities
                 str_starts_with($model, 'gemini-')     => ['thinkingConfig' => ['thinkingLevel' => $accurate ? 'high' : 'low']],
                 default                                => [],
             },
+            // `think` posílá OllamaClient jen modelu, který v /api/show hlásí capability
+            // `thinking` — jinak Ollama vrací 400.
+            'ollama' => ['think' => $accurate],
             default => [],
         };
     }
@@ -336,6 +362,10 @@ final readonly class LlmProviderCapabilities
                 : null,
             'azure_openai' => ($key === '' || strlen($key) > 256)
                 ? 'api_key je povinné.'
+                : null,
+            // Klíč je u Ollamy volitelný (Bearer pro reverse proxy); prázdný se sem nedostane.
+            'ollama' => (strlen($key) > 512 || preg_match('/\s/', $key) === 1)
+                ? 'api_key má neplatný formát.'
                 : null,
             default => $key === '' ? 'api_key je povinné.' : null,
         };

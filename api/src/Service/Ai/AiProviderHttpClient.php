@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Import\AzureOpenAiClient;
 use MyInvoice\Service\Import\GeminiClient;
 use MyInvoice\Service\Import\LlmProviderRegistry;
+use MyInvoice\Service\Import\OllamaClient;
 use MyInvoice\Service\Import\ResidencyPolicy;
 use MyInvoice\Service\Import\ResidencyViolationException;
 use Psr\Log\LoggerInterface;
@@ -162,7 +163,7 @@ final class AiProviderHttpClient
         }
     }
 
-    /** @return array{provider:string,region:string,model:string,credentials:array<string,mixed>} */
+    /** @return array{provider:string,region:string,model:string,credentials:array<string,mixed>,supplier_id:int} */
     private function context(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT ai_provider,ai_eu_residency_required FROM supplier WHERE id=?');
@@ -184,10 +185,11 @@ final class AiProviderHttpClient
             'region' => $caps->dataRegion,
             'model' => (string) ($credentials['default_model'] ?? $caps->defaultModel),
             'credentials' => $credentials,
+            'supplier_id' => $supplierId,
         ];
     }
 
-    /** @param array{provider:string,region:string,model:string,credentials:array<string,mixed>} $ctx @param array<string,mixed> $schema @return array<string,mixed> */
+    /** @param array{provider:string,region:string,model:string,credentials:array<string,mixed>,supplier_id:int} $ctx @param array<string,mixed> $schema @return array<string,mixed> */
     private function completeForProvider(array $ctx, string $system, string $user, array $schema, int $maxOutputTokens): array
     {
         $provider = $ctx['provider'];
@@ -267,6 +269,18 @@ final class AiProviderHttpClient
             $data = is_string($text) ? json_decode($text, true) : null;
             $usage = ['input_tokens' => (int) ($body['usageMetadata']['promptTokenCount'] ?? 0), 'output_tokens' => (int) ($body['usageMetadata']['candidatesTokenCount'] ?? 0)];
             $model = $ctx['model'];
+        } elseif ($provider === 'ollama') {
+            $client = $this->registry->resolve('ollama');
+            if (!$client instanceof OllamaClient) {
+                return ['ok' => false, 'error' => 'provider_not_configured'];
+            }
+            $r = $client->completeJson($ctx['supplier_id'], $ctx['model'], $system, $user, $schema, $maxOutputTokens);
+            if (!$r['ok']) {
+                return ['ok' => false, 'error' => $this->ollamaError($ctx['supplier_id'], $r)];
+            }
+            $data  = $r['data'];
+            $usage = $r['usage'];
+            $model = $r['model'];
         } else {
             return ['ok' => false, 'error' => 'provider_not_configured'];
         }
@@ -302,6 +316,26 @@ final class AiProviderHttpClient
             'provider_error' => is_array($body) ? mb_substr((string) ($body['error']['message'] ?? ''), 0, 500) : '',
         ]);
         return 'provider_http_' . $code;
+    }
+
+    /**
+     * Síťové a HTTP chyby Ollamy převede na obecný slovník, podle kterého AiWorker::transient()
+     * rozhoduje o opakování (uspaná GPU stanice nesmí job trvale shodit). Původní kód jde do logu.
+     *
+     * @param array{error:string, status?:int} $r
+     */
+    private function ollamaError(int $supplierId, array $r): string
+    {
+        $code = $r['error'];
+        $mapped = match ($code) {
+            'ollama_unreachable', 'ollama_timeout' => 'provider_transport_error',
+            'ollama_http_error' => 'provider_http_' . (isset($r['status']) && $r['status'] >= 400 ? $r['status'] : '5xx'),
+            default => $code,
+        };
+        if ($mapped !== $code) {
+            $this->logger->warning('Ollama classifier request failed', ['supplier_id' => $supplierId, 'code' => $code, 'mapped' => $mapped]);
+        }
+        return $mapped;
     }
 
     private function safeRuntimeError(\RuntimeException $e): string

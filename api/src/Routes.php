@@ -2933,12 +2933,15 @@ final class Routes
         $app->post   ('/api/admin/imports/fakturoid/start',       StartFakturoidImportAction::class);
 
         // F7 — AI extrakční brána (LlmGateway): per-provider credentials (admin-only).
-        // anthropic + azure_openai + openai + gemini přes jeden endpoint.
+        // všichni provideři (LlmProviderRegistry::PROVIDERS) přes jeden endpoint.
         $app->get    ('/api/admin/imports/ai/credentials',        [AiProviderCredentialsAction::class, 'status']);
         $app->put    ('/api/admin/imports/ai/credentials',        [AiProviderCredentialsAction::class, 'update']);
         $app->delete ('/api/admin/imports/ai/credentials',        [AiProviderCredentialsAction::class, 'delete']);
         // TestConnection bez změny uložených creds (admin-only; default 403 fallback).
         $app->post   ('/api/admin/imports/ai/credentials/test',   [AiProviderCredentialsAction::class, 'test']);
+        // Ollama: modely nainstalované na zadané adrese (admin-only, přes SSRF guard).
+        // POST, ne GET: request jde ze serveru ven a podvržený odkaz nesmí projít bez CSRF tokenu.
+        $app->post   ('/api/admin/imports/ai/ollama/models',     [AiProviderCredentialsAction::class, 'ollamaModels']);
         // Ladění extrakce (poznámky do promptu + rychle/přesně). Žádné secrety.
         $app->put    ('/api/admin/imports/ai/tuning',             [AiProviderCredentialsAction::class, 'updateTuning']);
 

@@ -4691,7 +4691,7 @@ paths:
     put:
       tags: [Settings]
       summary: Nastavení AI asistence účtování
-      description: Session-only, vyžaduje settings.ai_provider.write. Zapnutí bez DPA potvrzení selže fail-closed.
+      description: Session-only, vyžaduje settings.ai_provider.write. Zapnutí bez DPA potvrzení selže fail-closed (409 `dpa_required`); výjimkou je lokální Ollama (`dpa_exempt`).
       requestBody:
         required: true
         content:
@@ -4704,8 +4704,8 @@ paths:
                   type: array
                   uniqueItems: true
                   items: { type: string, enum: [bank_tx, purchase_invoices] }
-                dpa_confirm: { type: string, enum: [anthropic, azure_openai, openai, gemini] }
-                dpa_revoke: { type: string, enum: [anthropic, azure_openai, openai, gemini] }
+                dpa_confirm: { type: string, enum: [anthropic, azure_openai, openai, gemini, ollama] }
+                dpa_revoke: { type: string, enum: [anthropic, azure_openai, openai, gemini, ollama] }
                 unmute_source: { type: string, enum: [knn, llm] }
       responses:
         '403':
@@ -35960,13 +35960,13 @@ components:
 
     AiAssistSettings:
       type: object
-      required: [enabled, scope, provider, provider_label, data_region, dpa_confirmed, embedding_available, knn_warm, muted_sources, daily_limit, today_used]
+      required: [enabled, scope, provider, provider_label, data_region, dpa_confirmed, dpa_exempt, embedding_available, knn_warm, muted_sources, daily_limit, today_used]
       properties:
         enabled: { type: boolean }
         scope:
           type: array
           items: { type: string, enum: [bank_tx, purchase_invoices] }
-        provider: { type: string, enum: [anthropic, azure_openai, openai, gemini] }
+        provider: { type: string, enum: [anthropic, azure_openai, openai, gemini, ollama] }
         provider_label: { type: string }
         data_region: { type: string, enum: [us, eu] }
         dpa_confirmed:
@@ -35974,6 +35974,12 @@ components:
           additionalProperties:
             type: [string, "null"]
             format: date-time
+        dpa_exempt:
+          type: boolean
+          description: |
+            Aktivní poskytovatel nepotřebuje potvrzení DPA — lokální Ollama, jejíž adresa
+            se přeloží jen na loopback nebo privátní IP. Když výjimku nejde ověřit
+            (DNS, databáze), vrací se fail-closed `false`.
         embedding_available: { type: boolean }
         knn_warm:
           type: object

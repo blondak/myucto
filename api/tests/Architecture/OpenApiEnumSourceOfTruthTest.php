@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Repository\DocumentLinkRepository;
+use MyInvoice\Service\Import\LlmProviderRegistry;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Support\PaymentMethods;
 use PHPUnit\Framework\TestCase;
@@ -75,6 +76,17 @@ final class OpenApiEnumSourceOfTruthTest extends TestCase
             [],
             array_values(array_diff($domain, $this->enumAfter('    Invoice:', 'invoice_type'))),
             'Invoice.invoice_type ve spec neuvádí celou doménu sloupce.',
+        );
+    }
+
+    public function testAiProvidersCoverWholeDomain(): void
+    {
+        $this->assertEveryEnumNamed('dpa_confirm', LlmProviderRegistry::PROVIDERS);
+        $this->assertEveryEnumNamed('dpa_revoke', LlmProviderRegistry::PROVIDERS);
+        self::assertSame(
+            [],
+            array_values(array_diff(LlmProviderRegistry::PROVIDERS, $this->enumAfter('    AiAssistSettings:', 'provider'))),
+            'AiAssistSettings.provider ve spec neuvádí všechny poskytovatele.',
         );
     }
 

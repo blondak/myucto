@@ -314,9 +314,27 @@ final class RoutePermissionMapTest extends TestCase
             ['PUT', '/api/admin/imports/ai/credentials'],
             ['DELETE', '/api/admin/imports/anthropic/credentials'],
             ['POST', '/api/admin/imports/ai/credentials/test'],
+            ['POST', '/api/admin/imports/ai/ollama/models'],
         ] as [$method, $path]) {
             self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match($method, $path)?->kind, "$method $path");
         }
+    }
+
+    /**
+     * Seznam modelů Ollamy otevírá spojení ze serveru na zadanou adresu. Jako GET by ho
+     * spustil i podvržený odkaz (SameSite=Lax cookie, CSRF kontrola jen pro ne-GET).
+     */
+    public function testOllamaModelsRouteIsPostOnly(): void
+    {
+        $app = \Slim\Factory\AppFactory::create();
+        \MyInvoice\Routes::register($app);
+        $methods = [];
+        foreach ($app->getRouteCollector()->getRoutes() as $route) {
+            if ($route->getPattern() === '/api/admin/imports/ai/ollama/models') {
+                $methods = array_merge($methods, $route->getMethods());
+            }
+        }
+        self::assertSame(['POST'], $methods);
     }
 
     public function testApprovalInboxUsesCompanyPermission(): void

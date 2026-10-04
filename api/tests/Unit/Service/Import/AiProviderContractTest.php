@@ -10,6 +10,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Ai\OllamaEndpointGuard;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
@@ -18,7 +19,11 @@ use MyInvoice\Service\Import\InvoiceExtractionPrompt;
 use MyInvoice\Service\Import\LlmGatewayRouter;
 use MyInvoice\Service\Import\LlmProviderCapabilities;
 use MyInvoice\Service\Import\LlmProviderRegistry;
+use MyInvoice\Service\Import\OllamaClient;
 use MyInvoice\Service\Import\OpenAiClient;
+use MyInvoice\Service\Import\PdfIsdocExtractor;
+use MyInvoice\Service\Import\PdfPageRasterizer;
+use MyInvoice\Service\Import\PdfTotalExtractor;
 use MyInvoice\Service\Import\ResidencyPolicy;
 use PDO;
 use PDOStatement;
@@ -104,7 +109,7 @@ final class AiProviderContractTest extends TestCase
     public function testResidencyPolicy_blocksEuRequiredToUs_allProviders(): void
     {
         $policy = new ResidencyPolicy();
-        foreach (['anthropic', 'azure_openai', 'openai', 'gemini'] as $provider) {
+        foreach (['anthropic', 'azure_openai', 'openai', 'gemini', 'ollama'] as $provider) {
             // us + eu-required → výjimka.
             try {
                 $policy->assertAllowed($provider, 'us', true);
@@ -147,7 +152,7 @@ final class AiProviderContractTest extends TestCase
      */
     public function testRouter_euRequiredBlocksAllDelegatedMethods_allProviders(): void
     {
-        foreach (['anthropic', 'azure_openai', 'openai', 'gemini'] as $provider) {
+        foreach (['anthropic', 'azure_openai', 'openai', 'gemini', 'ollama'] as $provider) {
             $router = $this->makeRouter($provider, true, 'eu');
             // extrakce — všechny 4 metody vrací residency_conflict (žádný HTTP call).
             self::assertSame(['ok' => false, 'error' => 'residency_conflict'], $router->extractInvoice(1, '%PDF-1.4 x'), "$provider extractInvoice");
@@ -378,6 +383,35 @@ final class AiProviderContractTest extends TestCase
         // Azure deployment může nést cokoliv → fail-safe mlčíme.
         self::assertSame([], LlmProviderCapabilities::azureOpenai('https://x.openai.azure.com', 'gpt-5')
             ->effortPayload('gpt-5', LlmProviderCapabilities::EFFORT_ACCURATE));
+    }
+
+    public function testOllamaCapabilities(): void
+    {
+        $local = LlmProviderCapabilities::ollama('vision-model:7b', 'eu');
+        self::assertSame('ollama', $local->id);
+        self::assertSame(['vision-model:7b'], $local->models);
+        self::assertSame('vision-model:7b', $local->defaultModel);
+        self::assertSame('eu', $local->dataRegion);
+        self::assertSame('Lokální (Ollama)', $local->residencyLabel);
+        self::assertNull($local->strongerModel('vision-model:7b'), 'Ollama nemá žebříček eskalace');
+
+        $remote = LlmProviderCapabilities::ollama(null, 'cokoliv');
+        self::assertSame([], $remote->models);
+        self::assertSame('', $remote->defaultModel);
+        self::assertSame('us', $remote->dataRegion, 'neznámý region = fail-closed us');
+        self::assertSame('Vzdálená (Ollama)', $remote->residencyLabel);
+    }
+
+    public function testOllamaEffortAndKey(): void
+    {
+        $caps = LlmProviderCapabilities::ollama('vision-model:7b', 'eu');
+        self::assertSame(['think' => false], $caps->effortPayload('vision-model:7b', LlmProviderCapabilities::EFFORT_FAST));
+        self::assertSame(['think' => true], $caps->effortPayload('vision-model:7b', LlmProviderCapabilities::EFFORT_ACCURATE));
+        self::assertSame([], $caps->effortPayload('vision-model:7b', LlmProviderCapabilities::EFFORT_DEFAULT));
+
+        self::assertNull($caps->validateKey('tok-' . str_repeat('a', 30)));
+        self::assertNotNull($caps->validateKey('má mezeru'));
+        self::assertNotNull($caps->validateKey(str_repeat('a', 513)));
     }
 
     /**
@@ -650,6 +684,8 @@ final class AiProviderContractTest extends TestCase
             new AzureOpenAiClient($conn, $crypto, $logger),
             new OpenAiClient($conn, $crypto, $logger),
             new GeminiClient($conn, $crypto, $logger),
+            new OllamaClient($conn, $crypto, $logger, new OllamaEndpointGuard(static fn (): array => [], ''),
+                new PdfPageRasterizer($logger, false, ''), new PdfTotalExtractor(new PdfIsdocExtractor())),
         );
 
         return new LlmGatewayRouter($conn, $registry, new ResidencyPolicy(), $logger);
