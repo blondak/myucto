@@ -195,6 +195,22 @@ export const payrollAgendas: readonly PayrollAgendaDefinition[] = [
     }),
   },
   {
+    /*
+     * Personální spis (nahrané pracovní smlouvy, dodatky a poznámky) má
+     * vlastní stránku i vlastní právo — jsou to soukromá data, ne mzdový
+     * výstup, a proto neleží ani v Dokumentech, ani v mzdových dokumentech.
+     */
+    key: 'personnel_file',
+    scope: 'person',
+    permission: 'payroll.personnel',
+    icon: 'folderOpen',
+    variant: 'primary',
+    to: (_employmentId, employeeId) => ({
+      name: 'payroll-personnel-file',
+      query: { person: String(employeeId) },
+    }),
+  },
+  {
     key: 'documents',
     scope: 'person',
     permission: 'payroll.documents',

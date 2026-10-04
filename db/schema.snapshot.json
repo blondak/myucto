@@ -942,7 +942,8 @@
         "1958_payroll_annual_settlement_batch.sql",
         "1959_purchase_invoice_approvals.sql",
         "1960_purchase_invoice_inbox_dismissed.sql",
-        "1961_ollama_provider.sql"
+        "1961_ollama_provider.sql",
+        "1962_payroll_personnel_file.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -14484,6 +14485,75 @@
             "checks": {
                 "chk_pp_tax_residence_evidence": "`residence` = 'czech-resident' and `country_code` = 'CZ' or `residence` = 'non-resident' and `country_code` regexp '^[A-Z]{2}$' and `country_code` <> 'CZ' or `residence` = 'unverified' and `country_code` is null and `evidence_reference` is null",
                 "chk_pp_tax_residence_interval": "`effective_to` is null or `effective_to` >= `effective_from`"
+            }
+        },
+        "payroll_personnel_documents": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "category": "enum('employment_contract','contract_amendment','job_description','termination','agreement','certificate','medical','training','other') NOT NULL DEFAULT 'other'",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "document_date": "date NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "file_sha256": "char(64) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "mime_type": "varchar(127) NOT NULL",
+                "note": "varchar(1000) NULL DEFAULT NULL",
+                "original_name": "varchar(255) NOT NULL",
+                "size_bytes": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "title": "varchar(255) NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "uploaded_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "valid_until": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_personnel_document_updated_by": "BTREE (updated_by)",
+                "fk_payroll_personnel_document_uploaded_by": "BTREE (uploaded_by)",
+                "idx_payroll_personnel_document_employee": "BTREE (supplier_id, employee_id, document_date)",
+                "uq_payroll_personnel_document_file": "UNIQUE BTREE (supplier_id, employee_id, file_sha256)"
+            },
+            "foreign_keys": {
+                "fk_payroll_personnel_document_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_personnel_document_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_personnel_document_uploaded_by": "(uploaded_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_personnel_document_sha": "`file_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_personnel_document_validity": "`valid_until` is null or `document_date` is null or `valid_until` >= `document_date`"
+            }
+        },
+        "payroll_personnel_notes": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "body_ciphertext": "mediumtext NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "pinned": "tinyint(1) NOT NULL DEFAULT 0",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_personnel_note_created_by": "BTREE (created_by)",
+                "fk_payroll_personnel_note_updated_by": "BTREE (updated_by)",
+                "idx_payroll_personnel_note_employee": "BTREE (supplier_id, employee_id, pinned, created_at)"
+            },
+            "foreign_keys": {
+                "fk_payroll_personnel_note_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_personnel_note_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_personnel_note_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_payroll_personnel_note_pinned": "`pinned` in (0,1)"
             }
         },
         "payroll_posting_allocations": {

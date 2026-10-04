@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-10-purchase-approvals-v1';
+    public const VERSION = '2026-10-payroll-personnel-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -94,6 +94,7 @@ final class PermissionCatalog
             ['payroll.settings', 'payroll', 'Nastavení mezd', $staffOnly],
             ['payroll.person.read_sensitive', 'payroll', 'Odhalit citlivé osobní údaje', $staffOnly],
             ['payroll.person.write', 'payroll', 'Spravovat zaměstnance', $staffOnly],
+            ['payroll.personnel', 'payroll', 'Personální spis', $staffOnly],
             ['payroll.employment.write', 'payroll', 'Spravovat pracovní vztahy', $staffOnly],
             ['payroll.time.write', 'payroll', 'Spravovat docházku a absence', $staffOnly],
             ['payroll.inputs.write', 'payroll', 'Spravovat mzdové vstupy', $staffOnly],

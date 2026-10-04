@@ -12,12 +12,13 @@ use MyInvoice\Infrastructure\Config\Config;
  * Čtecí pohled na adresář se zálohami ({@see BackupLocation}) pro stránku
  * „Stažení záloh".
  *
- * Zálohy vyrábí čtveřice cronů a každý si drží vlastní jmennou konvenci:
+ * Zálohy vyrábí pětice cronů a každý si drží vlastní jmennou konvenci:
  *
  *   {db}-RRRR-MM-DD_HH-MM.zip             cron-backup.php            (databáze)
  *   {db}-pdf-RRRR-MM-DD_HH-MM.zip         cron-backup-pdf.php        (PDF doklady)
  *   {db}-documents-RRRR-MM-DD_HH-MM.zip   cron-backup-documents.php  (dokumenty a přílohy)
  *   {db}-payroll-RRRR-MM-DD_HH-MM.zip     cron-backup-payroll.php    (mzdové podklady)
+ *   {db}-personnel-RRRR-MM-DD_HH-MM.zip   cron-backup-personnel.php  (personální spisy)
  *
  * Rozdělení do sekcí se proto počítá z tvaru názvu. Prefix `{db}` se záměrně
  * nesrovnává s aktuálním `db.name`: je to jméno databáze v době zálohy, a po
@@ -37,6 +38,7 @@ final class BackupArchiveCatalog
     public const KIND_PDF       = 'pdf';
     public const KIND_DOCUMENTS = 'documents';
     public const KIND_PAYROLL   = 'payroll';
+    public const KIND_PERSONNEL = 'personnel';
     public const KIND_OTHER     = 'other';
 
     /** Pořadí sekcí v UI — od nejmenší a nejdůležitější (databáze) po zbytek. */
@@ -45,6 +47,7 @@ final class BackupArchiveCatalog
         self::KIND_DOCUMENTS,
         self::KIND_PDF,
         self::KIND_PAYROLL,
+        self::KIND_PERSONNEL,
         self::KIND_OTHER,
     ];
 
@@ -58,13 +61,14 @@ final class BackupArchiveCatalog
     public const LATEST_PER_KIND = 5;
 
     /** `{db}-[infix-]RRRR-MM-DD[_HH-MM].zip`; `.sql.gz` jsou dumpy z doby před ZIPy. */
-    private const CRON_NAME = '/^.+?-(?:(pdf|documents|payroll)-)?\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2})?\.(?:zip|sql\.gz)$/i';
+    private const CRON_NAME = '/^.+?-(?:(pdf|documents|payroll|personnel)-)?\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2})?\.(?:zip|sql\.gz)$/i';
 
     /** Infix v názvu → sekce. */
     private const INFIX_KINDS = [
         'pdf'       => self::KIND_PDF,
         'documents' => self::KIND_DOCUMENTS,
         'payroll'   => self::KIND_PAYROLL,
+        'personnel' => self::KIND_PERSONNEL,
     ];
 
     public function __construct(private readonly Config $config) {}

@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentCryptoErasure;
+use MyInvoice\Service\Payroll\Personnel\PayrollPersonnelFileService;
 use MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment;
 use MyInvoice\Service\Payroll\Retention\PayrollRetentionService;
 use PDO;
@@ -66,6 +67,7 @@ final class PayrollErasureProposalRepository
         private readonly PayrollPersonAnonymizationRepository $anonymization,
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollDocumentCryptoErasure $documentErasure,
+        private readonly PayrollPersonnelFileService $personnelFile,
     ) {}
 
     /**
@@ -596,7 +598,11 @@ final class PayrollErasureProposalRepository
             ];
         }
 
-        $counts = $action === PayrollRetentionAssessment::ACTION_ERASE
+        // Personální spis nemá zákonnou lhůtu, která by osobu držela: po
+        // uplynutí retence se odstraní celý dřív, než se osoba smaže nebo
+        // anonymizuje. Jinak by ji jeho stráž ve smazání držela napořád.
+        $counts = $this->personnelFile->purge($supplierId, $employeeId, $userId, $ip, (string) $userAgent);
+        $counts += $action === PayrollRetentionAssessment::ACTION_ERASE
             ? $this->deletion->delete($supplierId, $employeeId, $userId, $ip, $userAgent)
             : $this->anonymization->anonymize($supplierId, $employeeId, $userId, $ip, $userAgent);
 

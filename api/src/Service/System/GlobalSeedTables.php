@@ -376,6 +376,7 @@ final class GlobalSeedTables
         'payroll_business_trip_free_meals', 'payroll_business_trip_items', 'payroll_business_trips',
         'payroll_calendar_days', 'payroll_deduction_agreement_versions', 'payroll_deduction_agreements',
         'payroll_deduction_ledger', 'payroll_dependants', 'payroll_discount_intents',
+        'payroll_personnel_documents', 'payroll_personnel_notes',
         'payroll_document_access_codes', 'payroll_document_access_links', 'payroll_document_access_sessions',
         'payroll_document_batch_attempts', 'payroll_document_batch_items', 'payroll_document_batches',
         'payroll_document_data_keys', 'payroll_document_delivery_events', 'payroll_document_dms_links',

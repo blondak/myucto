@@ -115,6 +115,14 @@ final class PayrollEmployeeDeletionRepository
             'message' => 'Na zaměstnance jsou navázané peníze — platební závazek, výplata '
                 . 'nebo sražená částka. Smazat ho nelze.',
         ],
+        // Personální spis má soubory na disku; smazat je potichu spolu s osobou
+        // by znamenalo přijít o pracovní smlouvu jedním kliknutím.
+        'personnel_file' => [
+            'tables' => ['payroll_personnel_documents', 'payroll_personnel_notes'],
+            'code' => 'payroll_employee_has_personnel_file',
+            'message' => 'Zaměstnanec má v personálním spisu dokumenty nebo poznámky. '
+                . 'Nejdřív je ve spisu smažte, teprve pak půjde osobu smazat.',
+        ],
         'deduction' => [
             'tables' => ['payroll_deduction_agreements'],
             'code' => 'payroll_employee_has_deduction_agreement',

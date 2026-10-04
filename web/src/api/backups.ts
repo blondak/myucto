@@ -10,7 +10,7 @@ import { api } from './client'
  * (passkey, nebo heslo + TOTP) a odpověď se nikde necachuje.
  */
 
-export type BackupKind = 'database' | 'documents' | 'pdf' | 'payroll' | 'other'
+export type BackupKind = 'database' | 'documents' | 'pdf' | 'payroll' | 'personnel' | 'other'
 
 export interface BackupFile {
   name: string

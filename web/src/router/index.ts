@@ -139,6 +139,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-enforcement': ['payroll.enforcement'],
   'payroll-enforcement-cooperation': ['payroll.enforcement.cooperation'],
   'payroll-insolvency': ['payroll.insolvency'],
+  'payroll-personnel-file': ['payroll.personnel'],
   'payroll-documents': ['payroll.documents'],
   'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],

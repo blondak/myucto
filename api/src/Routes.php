@@ -1592,6 +1592,39 @@ final class Routes
                 '/people/{id:[0-9]+}/foreign-permits',
                 [PayrollForeignPermitAction::class, 'create'],
             );
+            // Personální spis: nahrané dokumenty a poznámky (vlastní úložiště mimo DMS).
+            $g->get(
+                '/people/{id:[0-9]+}/personnel-file',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'show'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/personnel-file/documents',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'upload'],
+            );
+            $g->put(
+                '/people/{id:[0-9]+}/personnel-file/documents/{documentId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'updateDocument'],
+            );
+            $g->delete(
+                '/people/{id:[0-9]+}/personnel-file/documents/{documentId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'deleteDocument'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/personnel-file/documents/{documentId:[0-9]+}/content',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'content'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/personnel-file/notes',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'createNote'],
+            );
+            $g->put(
+                '/people/{id:[0-9]+}/personnel-file/notes/{noteId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'updateNote'],
+            );
+            $g->delete(
+                '/people/{id:[0-9]+}/personnel-file/notes/{noteId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollPersonnelFileAction::class, 'deleteNote'],
+            );
             $g->get(
                 '/people/{id:[0-9]+}/taxable-income-requests',
                 [\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, 'show'],

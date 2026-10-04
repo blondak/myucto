@@ -1617,6 +1617,74 @@
       "personal_number": "Osobní číslo",
       "personal_number_invalid": "Osobní číslo smí obsahovat písmena, číslice a znaky . _ / -, nejvýše 64 znaků."
     },
+    "personnel_file": {
+      "title": "Personální spis",
+      "subtitle": "Pracovní smlouvy, dodatky a další dokumenty zaměstnance spolu s poznámkami personalisty. Spis je soukromý: neleží v sekci Dokumenty, soubory se ukládají šifrovaně a zálohují se samostatně.",
+      "employee": "Zaměstnanec",
+      "empty_title": "Vyberte zaměstnance",
+      "empty_message": "Personální spis se vede u každého zaměstnance zvlášť. Vyberte ho výše, nebo spis otevřete z jeho karty v Navazujících agendách.",
+      "load_failed": "Personální spis se nepodařilo načíst.",
+      "read_only": "Personální spis můžete jen prohlížet. Ke změnám potřebujete oprávnění k zápisu do personálního spisu.",
+      "documents_title": "Dokumenty",
+      "documents_empty_title": "Ve spisu zatím nejsou žádné dokumenty",
+      "documents_empty_message": "Nahrajte pracovní smlouvu, dodatek nebo jiný dokument zaměstnance.",
+      "notes_title": "Poznámky",
+      "notes_empty": "Zatím žádné poznámky.",
+      "note_placeholder": "Nová poznámka k zaměstnanci…",
+      "note_erased": "Poznámka je po výmazu osobních údajů nečitelná.",
+      "add_note": "Přidat poznámku",
+      "pin": "Připnout nahoru",
+      "pin_short": "Připnout",
+      "unpin": "Odepnout",
+      "pinned": "Připnuto",
+      "edited_by": "upravil(a) {name} {date}",
+      "expired": "Platnost skončila",
+      "dated": "ze dne {date}",
+      "valid_until_short": "platí do {date}",
+      "uploaded": "nahráno {date} ({name})",
+      "validity_before_date": "Platnost do nemůže být dřív než datum dokumentu.",
+      "edit_title": "Upravit údaje dokumentu",
+      "delete_title": "Smazat ze spisu",
+      "delete_document_confirm": "Opravdu smazat dokument „{title}“? Soubor se z personálního spisu nevratně odstraní a zůstane jen v dřívějších zálohách.",
+      "delete_note_confirm": "Opravdu smazat tuto poznámku? Smazání nelze vrátit.",
+      "saved": "Uloženo.",
+      "deleted": "Smazáno.",
+      "save_failed": "Uložení se nezdařilo.",
+      "delete_failed": "Smazání se nezdařilo.",
+      "preview_failed": "Náhled dokumentu se nepodařilo otevřít.",
+      "download_failed": "Dokument se nepodařilo stáhnout.",
+      "action": {
+        "preview": "Zobrazit",
+        "download": "Stáhnout"
+      },
+      "upload": {
+        "choose": "Vybrat soubory",
+        "drop_hint": "nebo je sem přetáhněte: PDF, Word, sken (JPG, PNG, TIFF) nebo podepsaný dokument, nejvýše {mb} MB na soubor",
+        "pick_first": "Nejdřív vyberte soubor.",
+        "multi_title_hint": "Při nahrání více souborů se název dokumentu převezme z názvu souboru.",
+        "submit": "Nahrát | Nahrát soubor | Nahrát {count} soubory | Nahrát {count} souborů",
+        "done": "Nic nenahráno | Nahrán 1 dokument | Nahrány {count} dokumenty | Nahráno {count} dokumentů",
+        "failed": "Nahrání se nezdařilo."
+      },
+      "field": {
+        "category": "Druh dokumentu",
+        "title": "Název",
+        "document_date": "Datum dokumentu",
+        "valid_until": "Platnost do",
+        "note": "Poznámka k dokumentu"
+      },
+      "category": {
+        "employment_contract": "Pracovní smlouva / dohoda",
+        "contract_amendment": "Dodatek ke smlouvě",
+        "job_description": "Popis pracovní pozice",
+        "termination": "Ukončení pracovního poměru",
+        "agreement": "Jiná dohoda",
+        "certificate": "Osvědčení a doklady",
+        "medical": "Lékařská prohlídka",
+        "training": "Školení",
+        "other": "Ostatní"
+      }
+    },
     "agendas": {
       "title": "Navazující agendy",
       "subtitle": "Kam u tohoto pracovního vztahu zadat další záznam — u každé agendy je vidět, kolik v ní tento člověk má záznamů, a odkaz vede na seznam už zúžený na něj.",
@@ -1637,7 +1705,8 @@
         "annual_settlement": "Roční zúčtování",
         "insolvency": "Insolvence",
         "statutory_evidence": "Zákonná evidence",
-        "dependants": "Vyživované osoby"
+        "dependants": "Vyživované osoby",
+        "personnel_file": "Personální spis"
       },
       "focus": {
         "title": "Seznam je zúžený na {name}.",
@@ -23825,6 +23894,7 @@
     "freq_daily_0230": "denně v 02:30",
     "freq_daily_0235": "denně v 02:35",
     "freq_daily_0240": "denně v 02:40",
+    "freq_daily_0245": "denně v 02:45",
     "freq_daily_0300": "denně v 03:00",
     "freq_daily_0315": "denně v 03:15",
     "freq_daily_0400": "denně v 04:00",
@@ -28383,6 +28453,7 @@
       "documents": "Dokumenty a přílohy",
       "pdf": "PDF doklady",
       "payroll": "Mzdy",
+      "personnel": "Personální spisy",
       "other": "Ostatní"
     },
     "kind_hint": {
@@ -28390,6 +28461,7 @@
       "documents": "Nahrané soubory, přílohy dokladů a bankovní výpisy.",
       "pdf": "Vygenerovaná PDF vystavených i přijatých dokladů.",
       "payroll": "Mzdové podklady, výplatní pásky a podání.",
+      "personnel": "Soubory personálních spisů zaměstnanců (pracovní smlouvy, dodatky). Jsou šifrované a obnovují se spolu s databází.",
       "other": "Soubory, které neodpovídají pojmenování automatických záloh — ruční kopie nebo záloha z jiné instalace."
     }
   },

@@ -113,6 +113,7 @@ final class PayrollEmploymentAgendaSummaryApiTest extends TestCase
             'deduction_agreements',
             'enforcement',
             'insolvency',
+            'personnel_file',
             'documents',
             'annual_settlement',
         ], PayrollEmploymentAgendaSummaryRepository::agendaKeys());

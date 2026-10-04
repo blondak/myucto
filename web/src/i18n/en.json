@@ -1617,6 +1617,74 @@
       "personal_number": "Personal number",
       "personal_number_invalid": "The personal number may contain letters, digits and the characters . _ / -, at most 64 characters."
     },
+    "personnel_file": {
+      "title": "Personnel file",
+      "subtitle": "Employment contracts, amendments and other employee documents together with HR notes. The file is private: it is not part of Documents, files are stored encrypted and backed up separately.",
+      "employee": "Employee",
+      "empty_title": "Select an employee",
+      "empty_message": "A personnel file is kept for each employee separately. Select one above, or open the file from the employee card under Related agendas.",
+      "load_failed": "The personnel file could not be loaded.",
+      "read_only": "You can only view the personnel file. Changes require write permission for personnel files.",
+      "documents_title": "Documents",
+      "documents_empty_title": "No documents in the file yet",
+      "documents_empty_message": "Upload an employment contract, amendment or another employee document.",
+      "notes_title": "Notes",
+      "notes_empty": "No notes yet.",
+      "note_placeholder": "New note about the employee…",
+      "note_erased": "The note is unreadable after personal data erasure.",
+      "add_note": "Add note",
+      "pin": "Pin to top",
+      "pin_short": "Pin",
+      "unpin": "Unpin",
+      "pinned": "Pinned",
+      "edited_by": "edited by {name} {date}",
+      "expired": "Expired",
+      "dated": "dated {date}",
+      "valid_until_short": "valid until {date}",
+      "uploaded": "uploaded {date} ({name})",
+      "validity_before_date": "Valid until cannot be earlier than the document date.",
+      "edit_title": "Edit document details",
+      "delete_title": "Delete from file",
+      "delete_document_confirm": "Really delete document “{title}”? The file will be permanently removed from the personnel file and remain only in earlier backups.",
+      "delete_note_confirm": "Really delete this note? This cannot be undone.",
+      "saved": "Saved.",
+      "deleted": "Deleted.",
+      "save_failed": "Saving failed.",
+      "delete_failed": "Deleting failed.",
+      "preview_failed": "The document preview could not be opened.",
+      "download_failed": "The document could not be downloaded.",
+      "action": {
+        "preview": "View",
+        "download": "Download"
+      },
+      "upload": {
+        "choose": "Choose files",
+        "drop_hint": "or drop them here: PDF, Word, scan (JPG, PNG, TIFF) or a signed document, at most {mb} MB per file",
+        "pick_first": "Choose a file first.",
+        "multi_title_hint": "When uploading several files, the document name is taken from the file name.",
+        "submit": "Upload | Upload file | Upload {count} files | Upload {count} files",
+        "done": "Nothing uploaded | 1 document uploaded | {count} documents uploaded | {count} documents uploaded",
+        "failed": "Upload failed."
+      },
+      "field": {
+        "category": "Document type",
+        "title": "Name",
+        "document_date": "Document date",
+        "valid_until": "Valid until",
+        "note": "Document note"
+      },
+      "category": {
+        "employment_contract": "Employment contract / agreement",
+        "contract_amendment": "Contract amendment",
+        "job_description": "Job description",
+        "termination": "Termination of employment",
+        "agreement": "Other agreement",
+        "certificate": "Certificates and records",
+        "medical": "Medical examination",
+        "training": "Training",
+        "other": "Other"
+      }
+    },
     "agendas": {
       "title": "Related agendas",
       "subtitle": "Where to record more for this employment — each agenda shows how many records this person has in it, and the link opens a list already narrowed to them.",
@@ -1637,7 +1705,8 @@
         "annual_settlement": "Annual settlement",
         "insolvency": "Insolvency",
         "statutory_evidence": "Statutory evidence",
-        "dependants": "Dependants"
+        "dependants": "Dependants",
+        "personnel_file": "Personnel file"
       },
       "focus": {
         "title": "The list is narrowed to {name}.",
@@ -23825,6 +23894,7 @@
     "freq_daily_0230": "daily at 02:30",
     "freq_daily_0235": "daily at 02:35",
     "freq_daily_0240": "daily at 02:40",
+    "freq_daily_0245": "daily at 02:45",
     "freq_daily_0300": "daily at 03:00",
     "freq_daily_0315": "daily at 03:15",
     "freq_daily_0400": "daily at 04:00",
@@ -28383,6 +28453,7 @@
       "documents": "Documents and attachments",
       "pdf": "PDF documents",
       "payroll": "Payroll",
+      "personnel": "Personnel files",
       "other": "Other"
     },
     "kind_hint": {
@@ -28390,6 +28461,7 @@
       "documents": "Uploaded files, document attachments and bank statements.",
       "pdf": "Generated PDFs of issued and received documents.",
       "payroll": "Payroll data, payslips and submissions.",
+      "personnel": "Employee personnel file documents (employment contracts, amendments). Encrypted; restore them together with the database.",
       "other": "Files that do not match the automatic backup naming — manual copies or a backup from another installation."
     }
   },

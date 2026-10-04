@@ -44,7 +44,8 @@ final class PayrollEmploymentAgendaSummaryRepository
      *   2) osobní evidence, která rozhoduje o SPRÁVNOSTI výpočtu — chybějící
      *      prohlášení k dani nebo nezadané dítě se neprojeví jako chybějící
      *      záznam, ale jako špatně spočítaná mzda, takže patří na oči nahoru,
-     *   3) občasné agendy (složky, cesty, průměry, srážky, exekuce, insolvence),
+     *   3) občasné agendy (složky, cesty, průměry, srážky, exekuce, insolvence,
+     *      personální spis),
      *   4) výstupy na konec (dokumenty, roční zúčtování).
      */
     public const AGENDA_KEYS = [
@@ -59,6 +60,7 @@ final class PayrollEmploymentAgendaSummaryRepository
         'deduction_agreements',
         'enforcement',
         'insolvency',
+        'personnel_file',
         'documents',
         'annual_settlement',
     ];
@@ -206,6 +208,28 @@ final class PayrollEmploymentAgendaSummaryRepository
                        NULL AS amount_minor
                   FROM payroll_enforcement_cases
                  WHERE supplier_id = ? AND employee_id = ?
+                SQL,
+        ],
+        // Personální spis: dokumenty i poznámky jsou jeden panel, takže jeden
+        // počet. Datum je poslední pořízení, ne datum dokumentu — rozcestník
+        // odpovídá na „kdy se ve spisu naposledy něco změnilo".
+        'personnel_file' => [
+            'scope' => self::SCOPE_EMPLOYEE,
+            'permission' => 'payroll.personnel',
+            'pairs' => 2,
+            'sql' => <<<'SQL'
+                SELECT COUNT(*) AS record_count,
+                       MAX(occurred_on) AS last_on,
+                       NULL AS amount_minor
+                  FROM (
+                       SELECT DATE(created_at) AS occurred_on
+                         FROM payroll_personnel_documents
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT DATE(created_at)
+                         FROM payroll_personnel_notes
+                        WHERE supplier_id = ? AND employee_id = ?
+                       ) AS combined
                 SQL,
         ],
         'documents' => [

@@ -179,6 +179,17 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Personální spisy (pracovní smlouvy) jsou soukromá data
+                // zaměstnanců, a proto mají vlastní zálohu mimo mzdové úložiště.
+                'script' => 'cron-backup-personnel',
+                'recommended' => 'daily_0245',
+                'linux_cron' => '45 2 * * *',
+                'windows_schtasks' => '/sc daily /st 02:45',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-bank-scan',
                 'recommended' => 'every_30_min',
                 'linux_cron' => '*/30 * * * *',

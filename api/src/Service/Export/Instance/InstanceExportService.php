@@ -1484,6 +1484,7 @@ final class InstanceExportService
             [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
             [RuntimePaths::storage('payroll-payment-exports/sup-' . $supplierId), null, 'prilohy/mzdove-platebni-exporty'],
             [RuntimePaths::storage('payroll-period-exports/sup-' . $supplierId), null, 'prilohy/mzdove-obdobi'],
+            [RuntimePaths::storage('payroll-personnel/sup-' . $supplierId), null, 'prilohy/personalni-spisy'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/attachments', null, 'prilohy/vydane-faktury-prilohy'],
             [RuntimePaths::storage('archives/sup-' . $supplierId), null, 'prilohy/ucetni-archivy'],

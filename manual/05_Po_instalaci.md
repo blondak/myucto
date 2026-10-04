@@ -85,6 +85,8 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-backup` | 4× denně (02:00, 08:00, 14:00, 20:00) |
 | `cron-backup-pdf` | 1× denně 02:30 |
 | `cron-backup-documents` | 1× denně 02:35 |
+| `cron-backup-payroll` | 1× denně 02:40 |
+| `cron-backup-personnel` | 1× denně 02:45; personální spisy zaměstnanců, záměrně samostatná záloha |
 | `cron-bank-scan` | každých 30 min |
 | `cron-bank-email-notices` | každých 30 min |
 | `cron-scan-purchase-inbox` | každých 10 min |
@@ -150,6 +152,8 @@ adresáře se zálohami rozdělený do sekcí podle toho, která úloha soubor v
 - **Dokumenty a přílohy** — nahrané soubory a bankovní výpisy z `cron-backup-documents`;
 - **PDF doklady** — vygenerovaná PDF z `cron-backup-pdf`;
 - **Mzdy** — mzdové podklady z `cron-backup-payroll`;
+- **Personální spisy** — soubory personálních spisů zaměstnanců
+  z `cron-backup-personnel`;
 - **Ostatní** — soubory, které pojmenování automatických záloh neodpovídají,
   typicky ruční kopie bez data v názvu.
 

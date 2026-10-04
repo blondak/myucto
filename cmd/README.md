@@ -54,6 +54,7 @@ má vždy přednost před oběma.
 | `cron-backup-pdf.{cmd,sh}` | ZIP všech PDF (`storage/invoices/` + `storage/work-reports/`) do `storage/backup/{dbname}-pdf-YYYY-MM-DD.zip`, stejná retention jako `cron-backup` |
 | `cron-backup-documents.{cmd,sh}` | ZIP celé sekce Dokumenty (`storage/documents/`, všechny typy; vynechává `_thumbs`/`_jobs`) do `storage/backup/{dbname}-documents-YYYY-MM-DD.zip`, stejná retention; oddělené od `cron-backup-pdf` (ten Dokumenty nezahrnuje) |
 | `cron-backup-payroll.{cmd,sh}` | ZIP mzdového úložiště (`storage/payroll-documents/`, `payroll-period-exports/`, `payroll-payment-exports/`) do `storage/backup/{dbname}-payroll-YYYY-MM-DD.zip`, stejná retention. Do žádné z ostatních záloh tyhle soubory nespadají — po obnově by zbyla metadata bez obsahu. Ukládá je tak, jak leží (šifrované, pod otiskem), pro člověka přikládá `MANIFEST.csv` |
+| `cron-backup-personnel.{cmd,sh}` | ZIP personálních spisů zaměstnanců (`storage/payroll-personnel/`) do `storage/backup/{dbname}-personnel-YYYY-MM-DD.zip`, stejná retention. Záměrně oddělené od mzdové zálohy i od Dokumentů (soukromá data). Soubory jsou šifrované klíčem zaměstnance, obnovují se spolu s dumpem databáze, pro člověka přikládá `MANIFEST.csv` |
 | `cron-bank-scan.{cmd,sh}` | Auto-import nových GPC výpisů z `private/bank-incoming/` + matching plateb na faktury |
 | `cron-bank-connections.{cmd,sh}` | Načtení výpisů a pohybů z aktivních přímých bankovních konektorů do společného importu a párování; ČSOB současně kontroluje výpisy GPC a průběžná avíza BBF, opakované pohyby deduplikuje |
 | `cron-bank-email-notices.{cmd,sh}` | IMAP polling bankovních e-mailových avíz, parsování plateb a matching na faktury (konfigurace v **Admin → Bankovní účty**) |
@@ -144,6 +145,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-backup-pdf` | 1× denně | 02:30 (po DB backupu) |
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
 | `cron-backup-payroll` | 1× denně | 02:40 (po Dokumentech) |
+| `cron-backup-personnel` | 1× denně | 02:45 (po mzdách) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
 | `cron-bank-connections` | každých 15 minut (jen když je zapnutý aspoň jeden konektor; KB+ se sám stahuje nejvýš jednou za 61 minut) | `*/15 * * * *` |
 | `cron-bank-email-notices` | každých 30 minut (jen když je zapnutá aspoň jedna IMAP schránka) | `*/30 * * * *` |
@@ -238,6 +240,7 @@ schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupPayroll" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-payroll.cmd" /sc daily /st 02:40 /ru SYSTEM
+schtasks /create /tn "MyUcto BackupPersonnel" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-personnel.cmd" /sc daily /st 02:45 /ru SYSTEM
 schtasks /create /tn "MyUcto BankScan"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM
 schtasks /create /tn "MyUcto BankConnections" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-connections.cmd" /sc minute /mo 15 /ru SYSTEM
 schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
@@ -308,6 +311,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-pdf.sh
  35  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-documents.sh
  40  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-payroll.sh
+ 45  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-personnel.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-scan.sh
 */15 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-connections.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-email-notices.sh

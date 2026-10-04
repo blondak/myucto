@@ -783,7 +783,8 @@ nutné načíst aktuální verzi.
 Karta vztahu má sekci **Navazující agendy**. Vede z ní jedno kliknutí do každé
 agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,
 nepřítomnosti, mzdové vstupy, pracovní cesty, opakované složky, průměrný
-výdělek, dohody o srážkách, exekuce, dokumenty a roční zúčtování. Cílová
+výdělek, dohody o srážkách, exekuce, personální spis, dokumenty a roční
+zúčtování. Cílová
 obrazovka se otevře už zúžená na daného zaměstnance; zúžení je vidět v horní
 liště a jedním tlačítkem se ruší. Zužuje server, ne jen zobrazená stránka —
 hledaný člověk se najde, i kdyby jeho záznamy ležely až na několikáté straně,
@@ -795,6 +796,43 @@ Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
 posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují
 jednou nenápadnou větou pod souhrnem. Agenda, na kterou uživatel nemá
 oprávnění, se nenabízí ani nezapočítává.
+
+### 86.12.3 Personální spis
+
+**Personální spis** je místo pro dokumenty a poznámky k zaměstnanci, které se
+netýkají výpočtu mzdy: pracovní smlouvy a dohody, dodatky, popis pracovní
+pozice, doklady o ukončení, osvědčení, lékařské prohlídky a školení. Otevírá se
+z karty zaměstnance odkazem **Personální spis** v Navazujících agendách, nebo
+přímo stránkou **Mzdy → Personální spis** s výběrem zaměstnance.
+
+Dokumenty se nahrávají tlačítkem **Vybrat soubory** nebo přetažením do
+vyznačené plochy. U každého dokumentu se vyplní druh, název, datum dokumentu,
+případně platnost do a krátká poznámka. Nahrát jde víc souborů najednou; název
+dokumentu se pak převezme z názvu souboru. Povolené jsou PDF, dokumenty Wordu
+a OpenOffice, tabulky, skeny (JPG, PNG, TIFF, HEIC), podepsané dokumenty
+(P7S, P7M, ASiC-E, ZFO) a e-maily, nejvýše 25 MB na soubor. Stejný soubor
+nejde k jednomu zaměstnanci nahrát dvakrát. Dokument s prošlou platností je
+v seznamu označený.
+
+U každého dokumentu jsou akce:
+
+- **Zobrazit** otevře náhled přímo v aplikaci (PDF a obrázky),
+- **Stáhnout** uloží originál souboru,
+- **Upravit** změní druh, název, data a poznámku (soubor se nemění),
+- **Smazat** odstraní dokument ze spisu i soubor z úložiště. Smazání nejde
+  vrátit, soubor zůstane jen v dřívějších zálohách.
+
+Vedle dokumentů se vedou **poznámky**. Poznámku lze připnout, aby zůstala
+nahoře, upravit ji nebo smazat; u každé je vidět, kdo a kdy ji zapsal.
+
+Personální spis je soukromý a má vlastní oprávnění **Personální spis**.
+Výchozí dostávají role, které smějí spravovat zaměstnance; role jen pro čtení
+ho nemá. Spis neleží v sekci Dokumenty: soubory se ukládají zašifrované do
+samostatné složky úložiště a zálohují se vlastní úlohou `cron-backup-personnel`
+(viz kapitola [5. Po instalaci](05_Po_instalaci.md)). Poznámky jsou v databázi
+uložené také zašifrované. Při výmazu osobních údajů zaměstnance se dokumenty
+i poznámky stanou nečitelnými. Zaměstnance s neprázdným personálním spisem
+nejde smazat, nejdřív je potřeba spis vyprázdnit.
 
 ## 86.13 Skončení vztahu
 

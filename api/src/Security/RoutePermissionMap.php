@@ -220,6 +220,10 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/statutory-openings/import/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/foreign-permits$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Personální spis (pracovní smlouvy, poznámky personalisty) má vlastní
+        // právo: jsou to soukromá data, která nemusí vidět každý mzdový účetní.
+        ['GET', '#^/api/payroll/people/[0-9]+/personnel-file(/documents/[0-9]+/content)?$#', 'payroll.personnel', AccessLevel::READ],
+        ['*', '#^/api/payroll/people/[0-9]+/personnel-file/(documents|notes)(/[0-9]+)?$#', 'payroll.personnel', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/taxable-income-requests$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/taxable-income-requests$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],

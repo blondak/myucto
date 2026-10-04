@@ -51,6 +51,15 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
             . 'Rodič je payroll_annual_document_revisions (kategorie payroll_sheet) přes '
             . 'NOT NULL annual_revision_id, takže rodičovský řádek pro tutéž osobu existuje '
             . 'vždy, když existuje tenhle. Vlastní lhůta by byla druhé číslo pro tutéž věc.',
+        'payroll_personnel_documents' =>
+            'Personální spis nemá zákonnou lhůtu a osobu ve výmazu nedrží: výkon výmazu '
+            . '(PayrollErasureProposalRepository::executeItem) ho přes '
+            . 'PayrollPersonnelFileService::purge() odstraní dřív, než osobu smaže. '
+            . 'Blokátor chrání jen ruční smazání omylem založené osoby.',
+        'payroll_personnel_notes' =>
+            'Poznámky personálního spisu: stejný důvod jako u dokumentů spisu. Výkon '
+            . 'výmazu je odstraní přes PayrollPersonnelFileService::purge() před smazáním '
+            . 'nebo anonymizací osoby, blokátor chrání jen ruční smazání.',
     ];
 
     public function testEveryBlockingTableHasARetentionCategoryOrAWrittenReason(): void

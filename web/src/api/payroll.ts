@@ -5132,6 +5132,7 @@ export type PayrollAgendaKey =
   | 'deduction_agreements'
   | 'enforcement'
   | 'insolvency'
+  | 'personnel_file'
   | 'documents'
   | 'annual_settlement'
 

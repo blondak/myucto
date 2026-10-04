@@ -33,6 +33,7 @@ final class ResetStorageScope
         'payroll-documents',
         'payroll-payment-exports',
         'payroll-period-exports',
+        'payroll-personnel',
     ];
 
     /** Loga firem (`sup-N.png` …) se mažou jen s firmou, tedy při úplném resetu. */

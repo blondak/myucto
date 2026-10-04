@@ -18,7 +18,7 @@ export const PERMISSION_KEYS = [
   'accounting.templates',
   'tax_evidence', 'tax_evidence.classification.write', 'tax_evidence.export',
   'reports', 'reports.finalize', 'reports.submit', 'reports.reopen', 'reports.export',
-  'payroll', 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.person.write',
+  'payroll', 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.person.write', 'payroll.personnel',
   'payroll.employment.write', 'payroll.time.write', 'payroll.inputs.write',
   'payroll.calculate', 'payroll.review', 'payroll.approve', 'payroll.reopen',
   'payroll.post', 'payroll.payments', 'payroll.submissions', 'payroll.enforcement', 'payroll.enforcement.cooperation',

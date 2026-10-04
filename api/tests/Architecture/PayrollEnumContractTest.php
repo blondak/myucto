@@ -73,6 +73,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Druh dokumentu personálního spisu
+        'payrollPersonnel.ts::PersonnelDocumentCategory'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPersonnelFileRepository::CATEGORIES',
         // Ke komu se váže trvalé skrytí mzdového varování po osobách
         'payroll.ts::PayrollWarningSubjectType'
             => 'const:MyInvoice\Service\Payroll\Run\PayrollWarningSuppressionCatalog::SUBJECT_TYPES',
