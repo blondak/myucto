@@ -11,8 +11,10 @@ use Psr\Log\LoggerInterface;
  * PDF → PNG stránky pro vision modely (Ollama). Pořadí backendů:
  *   1. CLI `pdftoppm` z Poppleru (Linux i Windows; v Docker image) — přednostně,
  *      protože jen vykresluje a na podstrčená PDF je méně náchylný než Ghostscript,
- *   2. Imagick s Ghostscript delegatem jako záloha, když pdftoppm chybí,
- *   3. nic → prázdný seznam.
+ *   2. Imagick s Ghostscript delegatem jako záloha, když pdftoppm chybí nebo selže
+ *      (po překročení limitu ne: stejné PDF by jen dostal rizikovější backend),
+ *   3. nic → prázdný seznam. Rasterizace nikdy nevyhodí výjimku, vytěžování pak
+ *      pokračuje jen s textovou vrstvou.
  * Dočasné soubory jdou do `storage/cache/ollama` přes {@see RuntimePaths}.
  */
 final class PdfPageRasterizer implements PdfPageRasterizerInterface
@@ -35,6 +37,18 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
 
     public function rasterize(string $pdfBytes, int $maxPages): array
     {
+        try {
+            return $this->rasterizeUnsafe($pdfBytes, $maxPages);
+        } catch (\Throwable $e) {
+            // Typicky shell_exec/proc_open v disable_functions: PHP 8 hází \Error, který @ neumlčí.
+            $this->logger->warning('Rasterizace PDF selhala: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /** @return list<string> */
+    private function rasterizeUnsafe(string $pdfBytes, int $maxPages): array
+    {
         if ($maxPages < 1 || !str_starts_with($pdfBytes, '%PDF')) {
             return [];
         }
@@ -55,8 +69,8 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
             $bin = $this->pdftoppmBinary ?? self::findBinary('pdftoppm');
             if ($bin !== null && $bin !== '') {
                 $pages = $this->viaPdftoppm($bin, $pdfPath, $maxPages);
-                if ($pages !== []) {
-                    return $pages;
+                if ($pages === null || $pages !== []) {
+                    return $pages ?? [];
                 }
             }
             return ($this->useImagick && class_exists(\Imagick::class)) ? $this->viaImagick($pdfPath, $maxPages) : [];
@@ -113,8 +127,8 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
         }
     }
 
-    /** @return list<string> */
-    private function viaPdftoppm(string $bin, string $pdfPath, int $maxPages): array
+    /** @return list<string>|null null = překročen časový limit */
+    private function viaPdftoppm(string $bin, string $pdfPath, int $maxPages): ?array
     {
         $prefix = $pdfPath . '-p';
         $errPath = $pdfPath . '-err.txt';
@@ -122,6 +136,9 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
         $cmd = [$bin, '-png', '-r', (string) self::DPI, '-scale-to', (string) self::MAX_EDGE,
             '-f', '1', '-l', (string) $maxPages, $pdfPath, $prefix];
         // Soubory místo pipes: žádný deadlock na plné rouře, funguje stejně na Windows.
+        if (!function_exists('proc_open')) {
+            return [];
+        }
         $proc = @proc_open($cmd, [1 => ['file', $nullDev, 'w'], 2 => ['file', $errPath, 'w']], $pipes);
         if (!is_resource($proc)) {
             return [];
@@ -142,6 +159,7 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
             usleep(50_000);
         }
         if ($timedOut) {
+            self::killTree($proc);
             proc_terminate($proc);
             usleep(100_000);
             if (proc_get_status($proc)['running']) {
@@ -165,7 +183,28 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
             $this->logger->warning('pdftoppm ' . ($timedOut ? 'překročilo časový limit' : 'selhalo')
                 . ' (exit ' . $exit . '): ' . mb_substr($stderr, 0, 300));
         }
-        return $timedOut ? [] : array_slice($out, 0, $maxPages);
+        return $timedOut ? null : array_slice($out, 0, $maxPages);
+    }
+
+    /**
+     * Na Windows proc_terminate ukončí jen přímý proces (u .cmd obalu cmd.exe), potomek
+     * běží dál a drží otevřený stderr soubor, který pak nejde smazat. taskkill /T vezme celý strom.
+     *
+     * @param resource $proc
+     */
+    private static function killTree($proc): void
+    {
+        if (PHP_OS_FAMILY !== 'Windows') {
+            return;
+        }
+        $pid = (int) (proc_get_status($proc)['pid'] ?? 0);
+        if ($pid <= 0) {
+            return;
+        }
+        $kill = @proc_open(['taskkill', '/T', '/F', '/PID', (string) $pid], [1 => ['file', 'NUL', 'w'], 2 => ['file', 'NUL', 'w']], $pipes);
+        if (is_resource($kill)) {
+            proc_close($kill);
+        }
     }
 
     /** @return list<string> PNG výstupy pdftoppm (`<prefix>*.png`), přirozeně seřazené; bez glob(). */
@@ -195,6 +234,9 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
     /** `command -v` / `where` jako SupplierLogoConverter::findBinary(), ale s přesnou detekcí Windows. */
     private static function findBinary(string $name): ?string
     {
+        if (!function_exists('shell_exec')) {
+            return null;
+        }
         $out = (string) @shell_exec(self::lookupCommand($name, PHP_OS_FAMILY));
         foreach (preg_split('/\r?\n/', trim($out)) ?: [] as $line) {
             $line = trim($line);

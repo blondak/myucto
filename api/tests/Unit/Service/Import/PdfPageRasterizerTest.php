@@ -9,6 +9,7 @@ use Mpdf\Output\Destination;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Service\Import\PdfPageRasterizer;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
 
 /**
@@ -106,6 +107,38 @@ final class PdfPageRasterizerTest extends TestCase
         self::assertSame([], $pages);
         self::assertLessThan(10.0, $elapsed);
         self::assertSame($before, is_dir($cacheDir) ? scandir($cacheDir) : [], 'v cache nesmí zůstat dočasné soubory');
+    }
+
+    /** PDF, na kterém pdftoppm překročilo limit, se nesmí poslat rizikovějšímu Ghostscriptu. */
+    public function testTimedOutPdftoppmDoesNotFallBackToImagick(): void
+    {
+        if (!class_exists(\Imagick::class)) {
+            self::markTestSkipped('Bez Imagicku není kam padat.');
+        }
+        $dir = sys_get_temp_dir() . '/rasterizer-fake-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        $isWin = PHP_OS_FAMILY === 'Windows';
+        $fake = $dir . ($isWin ? '/pdftoppm.cmd' : '/pdftoppm');
+        file_put_contents($fake, $isWin ? "@echo off\r\nping -n 30 127.0.0.1 >NUL\r\n" : "#!/bin/sh\nsleep 30\n");
+        chmod($fake, 0755);
+        $logger = new class extends AbstractLogger {
+            /** @var list<string> */
+            public array $messages = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->messages[] = (string) $message;
+            }
+        };
+        try {
+            $pages = (new PdfPageRasterizer($logger, useImagick: true, pdftoppmBinary: $fake, timeoutSeconds: 1))
+                ->rasterize(self::pdf(1), 6);
+        } finally {
+            @unlink($fake);
+            @rmdir($dir);
+        }
+        self::assertSame([], $pages);
+        self::assertCount(1, $logger->messages, implode("\n", $logger->messages));
+        self::assertStringContainsString('pdftoppm', $logger->messages[0]);
     }
 
     /**
