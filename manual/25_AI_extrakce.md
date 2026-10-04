@@ -206,9 +206,11 @@ není co kontrolovat.
   **Návrh** i se zdrojem. Chybí-li povinná dimenze, sekce je orámovaná červeně
   a řekne, na kterém účtu ji pravidlo vyžaduje. Jinou dimenzi pro jednotlivou
   položku nastavíte štítkem u řádku.
-- **Uložit a další** uloží druhy nákladu i dimenze a přejde na další doklad.
-  Dimenze, včetně převzatého návrhu, se uloží přímo do dokladu. Odrážky
-  vyřešených řádků z hlášení zmizí, nevyřešené body zůstanou.
+- **Uložit a další** (u posledního dokladu **Uložit a dokončit**) uloží druhy
+  nákladu i dimenze a přejde na další doklad. Dimenze, včetně převzatého návrhu,
+  se uloží přímo do dokladu. Uložením potvrzujete, že jste doklad zkontrolovali,
+  takže body hlášení zobrazené v okně se vyřídí a upozornění z detailu dokladu
+  zmizí. Zůstanou jen návrhy druhu nákladu u řádků, kterým druh nevyberete.
   **Přeskočit** nechá doklad beze změny, návrh dimenzí se neuloží.
 
 Doklad, na kterém je napsáno „zaplaceno", import zakládá jako **koncept**, aby šel

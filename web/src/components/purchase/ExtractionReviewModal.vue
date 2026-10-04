@@ -15,7 +15,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
-import { withoutExpenseKindSection } from '@/utils/extractionWarning'
+import { parseExtractionWarning, withoutExpenseKindSection } from '@/utils/extractionWarning'
 import { missingDimensions, needsReview } from '@/utils/purchaseReview'
 import { announceApprovalRequested } from '@/utils/purchaseApproval'
 import { approvalErrorMessage } from '@/api/purchaseApprovals'
@@ -274,8 +274,7 @@ async function save(): Promise<void> {
     const changed = items.value
       .filter((it) => (it.expense_kind ?? null) !== kinds[it.id as number])
       .map((it) => ({ id: it.id as number, expense_kind: kinds[it.id as number] ?? null }))
-    // Odrážky hlášení u řádků, které teď druh mají, odebere backend sám; ostatní
-    // body hlášení zůstávají, dokud je uživatel neoznačí jako vyřešené.
+    // Odrážky hlášení u řádků, které teď druh mají, odebere backend sám.
     if (changed.length && !readOnlyReason.value) {
       const res = await purchaseInvoicesApi.setExpenseKinds(inv.id, changed)
       if (res._repost) toast.info(t('purchase_invoice.extraction_review.reposted'))
@@ -284,6 +283,13 @@ async function save(): Promise<void> {
     const dimsSaved = await saveDimensions(inv)
     // Doklad i s přepočteným `review` — rodič (seznam, detail) nesmí ukazovat zastaralé upozornění.
     if (changed.length || dimsSaved) updated = await purchaseInvoicesApi.get(inv.id).catch(() => updated)
+    // Uložením uživatel potvrzuje, že doklad zkontroloval: body hlášení zobrazené v okně
+    // jsou vyřízené. Návrhy druhu nákladu bez zvoleného druhu zůstávají.
+    if (!readOnlyReason.value) {
+      for (const section of parseExtractionWarning(withoutExpenseKindSection(updated.extraction_warning))) {
+        updated = await purchaseInvoicesApi.dismissExtractionWarning(inv.id, section.raw)
+      }
+    }
     queue.value[index.value] = updated
     emit('updated', updated)
     next()

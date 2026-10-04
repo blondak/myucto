@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   prefill: vi.fn(),
   saveDocument: vi.fn(),
   setExpenseKinds: vi.fn(),
+  dismiss: vi.fn(),
   toastWarning: vi.fn(),
   requiresApproval: false,
   types: () => [{ id: 1, name: 'Středisko', is_active: true, show_on_documents: true, requires_approval: m.requiresApproval }],
@@ -35,6 +36,7 @@ vi.mock('@/api/purchaseInvoices', () => ({
   purchaseInvoicesApi: {
     get: (id: number) => Promise.resolve(m.invoices[id]),
     setExpenseKinds: (...args: unknown[]) => m.setExpenseKinds(...args),
+    dismissExtractionWarning: (...args: unknown[]) => m.dismiss(...args),
   },
 }))
 vi.mock('@/api/dimensions', async (importOriginal) => ({
@@ -98,6 +100,7 @@ describe('ExtractionReviewModal — dimenze', () => {
     m.prefill.mockReset().mockResolvedValue({ header: { 1: 7 }, sources: { 1: 'history' } })
     m.saveDocument.mockReset().mockResolvedValue({ header: { 1: 7 }, items: {}, restamp: { lines: 0, needs_repost: false } })
     m.setExpenseKinds.mockReset()
+    m.dismiss.mockReset().mockImplementation((id: number) => Promise.resolve({ ...m.invoices[id], extraction_warning: null }))
     m.toastWarning.mockReset()
     m.requiresApproval = false
   })
@@ -195,5 +198,30 @@ describe('ExtractionReviewModal — dimenze', () => {
     await saveButton(wrapper).trigger('click')
     await flushPromises()
     expect(m.saveDocument).not.toHaveBeenCalled()
+  })
+
+  it('„Uložit a dokončit" vyřídí body hlášení zobrazené v okně, návrhy druhu nákladu nechá', async () => {
+    const warning = 'Podle dokladu je faktura už uhrazená.\n\nRozdíl součtů položek\n\nAI navrhuje druh nákladu:\n• řádek 1: služba'
+    m.invoices = { 2: invoice(2, { extraction_warning: warning, review: { reasons: ['extraction_warning'], details: {} } }) }
+    const wrapper = await mountModal([2])
+
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(m.dismiss.mock.calls).toEqual([
+      [2, 'Podle dokladu je faktura už uhrazená.'],
+      [2, 'Rozdíl součtů položek'],
+    ])
+    const updated = wrapper.emitted('updated')?.[0]?.[0] as { extraction_warning: string | null }
+    expect(updated.extraction_warning).toBeNull()
+  })
+
+  it('jen ke čtení (storno) hlášení při uložení nemaže', async () => {
+    m.invoices = { 2: invoice(2, { status: 'cancelled', extraction_warning: 'Rozdíl součtů', review: { reasons: ['extraction_warning'], details: {} } }) }
+    const wrapper = await mountModal([2])
+
+    await saveButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(m.dismiss).not.toHaveBeenCalled()
   })
 })
