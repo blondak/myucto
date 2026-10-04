@@ -115,7 +115,7 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
             $im->clear();
             return array_slice($out, 0, $maxPages);
         } catch (\Throwable $e) {
-            $this->logger->info('Imagick rasterizace PDF selhala, zkouším pdftoppm: ' . $e->getMessage());
+            $this->logger->info('Imagick rasterizace PDF selhala: ' . $e->getMessage());
             return [];
         } finally {
             foreach ($previous as $type => $value) {

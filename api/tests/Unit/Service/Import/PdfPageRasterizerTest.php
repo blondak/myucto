@@ -32,6 +32,19 @@ final class PdfPageRasterizerTest extends TestCase
         return (string) $mpdf->Output('', Destination::STRING_RETURN);
     }
 
+    /** Logger, který si zprávy pamatuje (`->messages`). */
+    private static function logger(): AbstractLogger
+    {
+        return new class extends AbstractLogger {
+            /** @var list<string> */
+            public array $messages = [];
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->messages[] = (string) $message;
+            }
+        };
+    }
+
     /** @param list<string> $pages */
     private static function assertPngPages(array $pages, int $expected): void
     {
@@ -70,8 +83,16 @@ final class PdfPageRasterizerTest extends TestCase
         if (!class_exists(\Imagick::class)) {
             self::markTestSkipped('PHP rozšíření Imagick není v prostředí k dispozici.');
         }
-        $r = new PdfPageRasterizer(new NullLogger(), useImagick: true, pdftoppmBinary: '');
-        self::assertPngPages($r->rasterize(self::pdf(3), 2), 2);
+        $logger = self::logger();
+        $pages = (new PdfPageRasterizer($logger, useImagick: true, pdftoppmBinary: ''))->rasterize(self::pdf(3), 2);
+        // Ubuntu (CI) má Imagick bez Ghostscriptu nebo s policy, která PDF zakazuje. To je
+        // vlastnost prostředí; jiná chyba Imagicku ale test shodí.
+        $refused = implode("\n", $logger->messages);
+        if ($pages === [] && preg_match('/not authorized|security policy|delegate|ghostscript|FailedToExecuteCommand|\bgs\b/i', $refused) === 1) {
+            self::markTestSkipped('Imagick v prostředí neumí číst PDF: ' . $refused);
+        }
+        self::assertNotSame([], $pages, 'Imagick nevrátil žádnou stránku: ' . $refused);
+        self::assertPngPages($pages, 2);
     }
 
     /** PHP_OS_FAMILY 'Darwin' obsahuje „win" — macOS nesmí dostat Windows `where`. */
@@ -121,14 +142,7 @@ final class PdfPageRasterizerTest extends TestCase
         $fake = $dir . ($isWin ? '/pdftoppm.cmd' : '/pdftoppm');
         file_put_contents($fake, $isWin ? "@echo off\r\nping -n 30 127.0.0.1 >NUL\r\n" : "#!/bin/sh\nsleep 30\n");
         chmod($fake, 0755);
-        $logger = new class extends AbstractLogger {
-            /** @var list<string> */
-            public array $messages = [];
-            public function log($level, string|\Stringable $message, array $context = []): void
-            {
-                $this->messages[] = (string) $message;
-            }
-        };
+        $logger = self::logger();
         try {
             $pages = (new PdfPageRasterizer($logger, useImagick: true, pdftoppmBinary: $fake, timeoutSeconds: 1))
                 ->rasterize(self::pdf(1), 6);
