@@ -537,7 +537,11 @@ final class OllamaClient implements LlmGatewayInterface
             return new OllamaEndpointException('ollama_request_invalid');
         } catch (GuzzleException $e) {
             $ctx = method_exists($e, 'getHandlerContext') ? $e->getHandlerContext() : [];
-            $timedOut = (int) ($ctx['errno'] ?? 0) === 28 || stripos($e->getMessage(), 'timed out') !== false;
+            $msg = $e->getMessage();
+            // cURL hlásí kódem 28 i vypršení PŘIPOJENÍ/DNS („Connection/Resolving timed out")
+            // — to je nedostupná adresa (firewall, vypnutý stroj), ne pomalý model.
+            $notConnected = stripos($msg, 'Connection timed out') !== false || stripos($msg, 'Resolving timed out') !== false;
+            $timedOut = !$notConnected && ((int) ($ctx['errno'] ?? 0) === 28 || stripos($msg, 'timed out') !== false);
             return new OllamaEndpointException($timedOut ? 'ollama_timeout' : 'ollama_unreachable');
         } catch (\Throwable $e) {
             $this->logger->error('Ollama request failed', ['exception' => $e::class]);
