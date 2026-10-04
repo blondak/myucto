@@ -286,6 +286,23 @@ final class OllamaClientTest extends TestCase
         self::assertSame('ollama_timeout', $c->extractInvoice(1, self::textPdf())['code']);
     }
 
+    /**
+     * cURL hlásí vypršení PŘIPOJENÍ stejným kódem 28 jako vypršení odpovědi. Nedostupná
+     * adresa (firewall, vypnutý stroj) ale není pomalý model — rada „pomůže GPU / vyšší
+     * timeout" by uživatele poslala špatným směrem.
+     */
+    public function testConnectTimeoutIsUnreachableNotSlowModel(): void
+    {
+        $c = $this->client([new ConnectException('cURL error 28: Connection timed out after 5001 milliseconds', new Request('POST', self::BASE), null, ['errno' => 28])]);
+        self::assertSame('ollama_unreachable', $c->extractInvoice(1, self::textPdf())['code']);
+
+        $c = $this->client([new ConnectException('cURL error 28: Resolving timed out after 5000 milliseconds', new Request('GET', self::BASE), null, ['errno' => 28])]);
+        self::assertSame('ollama_unreachable', $c->listModels(self::BASE)['code']);
+
+        $c = $this->client([new ConnectException('cURL error 28: Operation timed out after 110001 milliseconds with 0 bytes received', new Request('POST', self::BASE), null, ['errno' => 28])]);
+        self::assertSame('ollama_timeout', $c->extractInvoice(1, self::textPdf())['code'], 'vypršení odpovědi zůstává timeout');
+    }
+
     public function testUnreachable(): void
     {
         $c = $this->client([new ConnectException('cURL error 7: Failed to connect', new Request('POST', self::BASE), null, ['errno' => 7])]);
