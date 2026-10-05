@@ -191,7 +191,7 @@ describe('TimeAttendance', () => {
     await flushPromises()
   }
 
-  it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí', async () => {
+  it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí a pošle vyplněný počet nebo null', async () => {
     m.timeMonth.mockResolvedValue({
       items: [row(12, 'Syntetická osoba A')],
       total: 1,
@@ -214,21 +214,7 @@ describe('TimeAttendance', () => {
     await categorySelect.setValue('night')
     await flushPromises()
     expect(wrapper.find(field).exists()).toBe(false)
-    wrapper.unmount()
-  })
 
-  it('pošle počet ztěžujících vlivů, a bez vyplnění pošle null', async () => {
-    m.timeMonth.mockResolvedValue({
-      items: [row(12, 'Syntetická osoba A')],
-      total: 1,
-      limit: 25,
-      offset: 0,
-    })
-    const wrapper = mount(TimeAttendance)
-    await flushPromises()
-    await openRowEditor(wrapper)
-
-    const categorySelect = wrapper.get('[data-test="time-record-form"]').findAll('select')[1]
     await categorySelect.setValue('difficult_environment')
     await flushPromises()
 

@@ -4,19 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
+use MyInvoice\Tests\Support\JmhzControlValidatorFactory;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -72,9 +71,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         );
         self::assertNotSame($result['xml'], $withBreakdown, 'Fixtura se musí změnit.');
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($withBreakdown, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($withBreakdown, new JmhzControlContext('2026-08-05', schemaValidated: true));
 
         $verdict267 = array_values(array_filter(
             $report->findings,
@@ -117,7 +115,7 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
 
         self::assertStringContainsString('<form:cinnostKS', $result['xml']);
         self::assertStringContainsString('<form:kod>P++</form:kod>', $result['xml']);
-        $report = JmhzScenario1ControlValidator::create(CzechPayrollRulesets2026::provider())
+        $report = JmhzControlValidatorFactory::create()
             ->validate($result['xml'], new JmhzControlContext('2026-08-14', schemaValidated: true));
         $failed343 = array_filter(
             $report->findings,
@@ -513,9 +511,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
     /** @param list<int> $controlIds */
     private function assertControlsPassed(string $xml, array $controlIds): void
     {
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
         foreach ($controlIds as $controlId) {
             $findings = array_values(array_filter(
                 $report->findings,
@@ -560,9 +557,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertStringContainsString('<form:penezitaPomocMaterstvi>20</form:penezitaPomocMaterstvi>', $compact);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>20</form:vylouceneDobyCelkem>', $compact);
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
         $verdicts = array_values(array_filter(
             $report->findings,
             static fn (JmhzControlFinding $finding): bool => in_array($finding->controlId, [121, 329], true),
@@ -754,9 +750,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertSame(1, substr_count($xml, '<form:zakladDane>8000</form:zakladDane>'));
         self::assertSame(1, substr_count($xml, '<form:pojisteniZamestnanec>'));
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
         $failed = array_values(array_filter(
             $report->findings,
             static fn (JmhzControlFinding $finding): bool =>
@@ -799,9 +794,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertStringContainsString('<form:pojisteniZamestnavatel><form:socialniPojisteni>248</form:socialniPojisteni>', $xml);
         self::assertStringContainsString('<form:pojisteniZamestnavatel><form:socialniPojisteni>1985</form:socialniPojisteni>', $xml);
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
         $failed = array_values(array_filter(
             $report->findings,
             static fn (JmhzControlFinding $finding): bool =>

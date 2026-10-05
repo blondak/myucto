@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
@@ -21,6 +19,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatal
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use MyInvoice\Tests\Support\JmhzControlValidatorFactory;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1XmlSerializerTest extends TestCase
@@ -417,9 +416,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             ]),
         );
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate(
+        $report = JmhzControlValidatorFactory::create()->validate(
             $result['xml'],
             new JmhzControlContext('2026-08-26', schemaValidated: true),
         );
@@ -828,9 +825,8 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         // identity i kontrolu věku pokryje datum narození.
         self::assertStringNotContainsString('form:rodneCislo', $result['xml']);
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($result['xml'], new JmhzControlContext('2026-08-14', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($result['xml'], new JmhzControlContext('2026-08-14', schemaValidated: true));
         self::assertSame([], $report->coverageGaps());
         self::assertTrue($report->submittable());
     }
@@ -927,9 +923,8 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
      */
     private function failedControls(string $xml, array $controlIds): array
     {
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-14', schemaValidated: true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-14', schemaValidated: true));
         $evaluated = [];
         $failed = [];
         foreach ($report->findings as $finding) {

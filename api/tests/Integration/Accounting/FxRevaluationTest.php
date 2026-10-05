@@ -263,6 +263,7 @@ final class FxRevaluationTest extends TestCase
 
     public function testI9OpenNextCreatesSaldoReversalOnlyWhenEnabled(): void
     {
+        $this->seedRate(self::YEAR . '-06-15', 'EUR', 24.60);
         $this->postEurInvoice(1000.00, 24.50);
         $this->manual([
             self::l('221', 'debit', 50000.00),
@@ -288,6 +289,7 @@ final class FxRevaluationTest extends TestCase
 
     public function testI9NoReversalWhenSettingDisabled(): void
     {
+        $this->seedRate(self::YEAR . '-06-15', 'EUR', 24.60);
         $this->postEurInvoice(1000.00, 24.50);
         $this->settings->upsert($this->supplierId, null, null, null, null, false);
         $this->runChainToClosed([]);

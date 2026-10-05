@@ -301,7 +301,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     mocks.employerSettings.mockResolvedValue({ default_health_insurer_code: '205' })
   })
 
-  it('pojmenuje konkrétně, co chybí, a co se stane, když to zůstane nevyplněné', async () => {
+  it('u prázdné evidence pojmenuje chybějící údaje a odliší neuplatněné slevy a výjimky', async () => {
     const wrapper = await mounted()
 
     const blockers = wrapper.get('[data-test="statutory-evidence-blockers"]')
@@ -313,6 +313,21 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       'payroll.people.statutory_evidence.blockers_consequence',
     )
     expect(wrapper.find('[data-test="statutory-evidence-complete"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="current-tax_credit_claims"]').text())
+      .toContain('payroll.people.statutory_evidence.current_none_claimed')
+    expect(wrapper.get('[data-test="history-tax_credit_claims"]').attributes('open'))
+      .toBeUndefined()
+    expect(wrapper.get('[data-test="current-health_minimum_reductions"]').text())
+      .toContain('payroll.people.statutory_evidence.current_no_exemption')
+    expect(wrapper.get('[data-test="history-health_minimum_reductions"]').attributes('open'))
+      .toBeUndefined()
+    // Nápověda vysvětluje, které výjimky existují a co výpočet odvodí sám.
+    expect(wrapper.get('[data-test="section-health_minimum_reductions"]').text())
+      .toContain('payroll.people.statutory_evidence.section_hint.health_minimum_reductions')
+    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
+      .toContain('payroll.people.statutory_evidence.current_discount_not_claimed')
+    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
+      .not.toContain('payroll.people.statutory_evidence.current_missing')
   })
 
   it('má jediné společné Uložit, žádné tlačítko na jednotlivý záznam', async () => {
@@ -540,15 +555,6 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
     expect(savedRow('tax_credit_claims', 0)).toMatchObject({ credit_kind: 'taxpayer' })
     expect(savedRow('tax_credit_claims', 1)).toMatchObject({ credit_kind: 'ztp-p' })
-  })
-
-  it('nevyplněné slevy nehlásí chybějící údaj — neuplatnit žádnou je běžný stav', async () => {
-    const wrapper = await mounted()
-
-    expect(wrapper.get('[data-test="current-tax_credit_claims"]').text())
-      .toContain('payroll.people.statutory_evidence.current_none_claimed')
-    expect(wrapper.get('[data-test="history-tax_credit_claims"]').attributes('open'))
-      .toBeUndefined()
   })
 
   it('podepsané prohlášení ukáže slevu na poplatníka i bez řádku nároku (UI-14)', async () => {
@@ -1014,27 +1020,6 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       effective_to: null,
     })
     expect(validatorRejection('health_minimum_reductions', row)).toBeNull()
-  })
-
-  it('bez výjimky z minima nehlásí chybějící údaj a sekce zůstane sbalená', async () => {
-    const wrapper = await mounted()
-
-    expect(wrapper.get('[data-test="current-health_minimum_reductions"]').text())
-      .toContain('payroll.people.statutory_evidence.current_no_exemption')
-    expect(wrapper.get('[data-test="history-health_minimum_reductions"]').attributes('open'))
-      .toBeUndefined()
-    // Nápověda vysvětluje, které výjimky existují a co výpočet odvodí sám.
-    expect(wrapper.get('[data-test="section-health_minimum_reductions"]').text())
-      .toContain('payroll.people.statutory_evidence.section_hint.health_minimum_reductions')
-  })
-
-  it('bez záznamu slevy pracujícího důchodce ukáže „neuplatňuje se“, ne chybějící údaj', async () => {
-    const wrapper = await mounted()
-
-    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
-      .toContain('payroll.people.statutory_evidence.current_discount_not_claimed')
-    expect(wrapper.get('[data-test="current-social_discount_claims"]').text())
-      .not.toContain('payroll.people.statutory_evidence.current_missing')
   })
 
   it('neověřenou výjimku ukáže jako blokující stav', async () => {

@@ -443,7 +443,7 @@ describe('EmploymentRegistrationPanel', () => {
    * Formulář místo syrového JSONu: hodnoty přijdou předvyplněné ze serveru,
    * u každé je vidět zdroj a co aplikace nevede, se hlásí konkrétně.
    */
-  it('prefills the A1 form from the server draft and names the gaps', async () => {
+  it('prefills the A1 form, names the gaps and shows labelled payload rows', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
@@ -457,6 +457,14 @@ describe('EmploymentRegistrationPanel', () => {
     expect(missing).not.toContain('permanent_address.house_number')
     expect(missing).toContain('payroll.people.registration.a1.section.permanent_address · payroll.people.registration.a1.address.house_number')
     expect(missing).toContain('Aplikace vede adresu jedním řádkem včetně čísla.')
+    await wrapper.get('[data-test="registration-a1-payload-toggle"]').trigger('click')
+
+    /** UI-23: „Co odesíláme" je čitelný seznam s popisky, ne syrový JSON. */
+    const payload = wrapper.get('[data-test="registration-a1-payload"]')
+    expect(payload.element.tagName).toBe('DL')
+    expect(payload.text()).not.toContain('"employment"')
+    expect(payload.text()).toContain('payroll.people.registration.a1.employment.activity_code')
+    expect(payload.text()).toContain('payroll.people.registration.a1.section.permanent_address · payroll.people.registration.a1.address.city')
   })
 
   function driftedView(submitted: boolean) {
@@ -1928,20 +1936,6 @@ describe('EmploymentRegistrationPanel', () => {
     expect(warning.text()).toContain('payroll.people.registration.missing.variable_symbol_placeholder')
     expect(JSON.parse(wrapper.get('[data-test="registration-preview-warning-link"]').attributes('data-to')!))
       .toMatchObject({ name: 'payroll-settings', query: { tab: 'employer' } })
-  })
-
-  /** UI-23: „Co odesíláme" je čitelný seznam s popisky, ne syrový JSON. */
-  it('shows the A1 payload as labelled rows instead of raw JSON', async () => {
-    const wrapper = mountPanel()
-    await flushPromises()
-    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
-    await wrapper.get('[data-test="registration-a1-payload-toggle"]').trigger('click')
-
-    const payload = wrapper.get('[data-test="registration-a1-payload"]')
-    expect(payload.element.tagName).toBe('DL')
-    expect(payload.text()).not.toContain('"employment"')
-    expect(payload.text()).toContain('payroll.people.registration.a1.employment.activity_code')
-    expect(payload.text()).toContain('payroll.people.registration.a1.section.permanent_address · payroll.people.registration.a1.address.city')
   })
 
   /** UI-21: obec pracoviště se doplní z kódu obce, který přišel ze vztahu. */

@@ -305,6 +305,11 @@ final class PurchasePartialUpdateTest extends TestCase
         if ($foreignId === 0) {
             self::markTestSkipped('Dodavatel nemá aktivní cizí měnu.');
         }
+        $this->db->pdo()->prepare(
+            'INSERT INTO exchange_rates (rate_date, currency_code, rate)
+             SELECT ?, code, ? FROM currencies WHERE id = ?
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
+        )->execute([self::ISSUE_DATE, 27.0, $foreignId]);
         $id = $this->createInvoice();
         $this->db->pdo()->prepare(
             "UPDATE purchase_invoices SET currency_id = ?, exchange_rate = 25.125, exchange_rate_date = '2096-04-09',
