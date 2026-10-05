@@ -72,7 +72,7 @@ final class SmallAssetService
     }
 
     /**
-     * Prodej karty drobného majetku. Prodej je běžná vydaná faktura (výnos 602/604 + DPH);
+     * Prodej karty drobného majetku. Prodej je běžná vydaná faktura (výnos 642 + DPH);
      * náklad na 501 padl už při pořízení, takže zůstatková cena je 0 a z KARTY se NIC
      * neúčtuje — jen se propojí s dokladem prodeje a přejde do stavu 'sold'. Idempotence
      * s AssetService::dispose (dlouhodobý majetek) tu vědomě není: drobný majetek disposal

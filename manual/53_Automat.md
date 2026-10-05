@@ -413,7 +413,7 @@ minut.
 ## 53.11 AI návrhy účtování
 
 AI asistence je ve výchozím stavu vypnutá. Správce ji může zapnout v části
-**Nastavení → Integrace → AI → AI asistence účtování** zvlášť pro bankovní
+**Firma → AI nastavení → AI asistence účtování** zvlášť pro bankovní
 transakce a přijaté faktury. Před zapnutím je nutné potvrdit zpracovatelskou
 smlouvu (DPA) s právě zvoleným poskytovatelem. Po změně poskytovatele je
 vyžadováno nové potvrzení; bez něj systém žádná data neodešle. Rozbalovací AI

@@ -16469,7 +16469,7 @@
       "already_settled": "Karta už není v užívání — je vyřazená nebo prodaná.",
       "status_sold": "Prodáno",
       "sell": "Prodat",
-      "sell_hint": "Prodej karty „{name}“. Prodej je běžná vydaná faktura (výnos 602/604 + DPH); z karty se nic neúčtuje — jen se propojí s dokladem prodeje.",
+      "sell_hint": "Prodej karty „{name}“. Prodej je běžná vydaná faktura (výnos 642 + DPH); z karty se nic neúčtuje — jen se propojí s dokladem prodeje.",
       "sale_invoice": "Vydaná faktura prodeje",
       "sale_invoice_search": "Hledat fakturu (variabilní symbol nebo odběratel)…",
       "sale_invoice_create": "vystavit fakturu",

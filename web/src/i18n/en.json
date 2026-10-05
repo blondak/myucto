@@ -16469,7 +16469,7 @@
       "already_settled": "Card is no longer in use — it was disposed or sold.",
       "status_sold": "Sold",
       "sell": "Sell",
-      "sell_hint": "Selling card “{name}”. A sale is an ordinary issued invoice (revenue 602/604 + VAT); nothing is posted from the card — it is only linked to the sale document.",
+      "sell_hint": "Selling card “{name}”. A sale is an ordinary issued invoice (revenue 642 + VAT); nothing is posted from the card — it is only linked to the sale document.",
       "sale_invoice": "Issued sale invoice",
       "sale_invoice_search": "Search invoice (variable symbol or customer)…",
       "sale_invoice_create": "create an invoice",

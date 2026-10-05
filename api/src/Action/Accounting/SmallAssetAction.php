@@ -140,7 +140,7 @@ final class SmallAssetAction
 
     /**
      * Prodej karty — vlastní endpoint (jako dispose). Prodej drobného majetku je běžná
-     * vydaná faktura (výnos 602/604 + DPH); z karty se NIC neúčtuje (ZC=0), jen se propojí
+     * vydaná faktura (výnos 642 + DPH); z karty se NIC neúčtuje (ZC=0), jen se propojí
      * s dokladem prodeje a přejde do stavu 'sold'.
      */
     public function sell(Request $request, Response $response, array $args): Response

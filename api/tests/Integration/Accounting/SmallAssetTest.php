@@ -245,7 +245,7 @@ final class SmallAssetTest extends BankPostingTestCase
     // ── prodej ───────────────────────────────────────────────────────────────
 
     /**
-     * Prodej drobného majetku = běžná vydaná faktura (výnos 602/604 + DPH); z KARTY se nic
+     * Prodej drobného majetku = běžná vydaná faktura (výnos 642 + DPH); z KARTY se nic
      * neúčtuje (ZC=0, náklad na 501 padl při pořízení). Karta jen přejde do 'sold' a naváže
      * se na doklad prodeje — a tím zmizí ze soupisu k inventarizaci.
      */
