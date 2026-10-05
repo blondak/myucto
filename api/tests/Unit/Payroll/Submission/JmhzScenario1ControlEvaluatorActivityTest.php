@@ -15,10 +15,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlVerdict;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlEvaluator;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioSelectorResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Tests\Support\JmhzControlValidatorFactory;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -149,9 +149,8 @@ final class JmhzScenario1ControlEvaluatorActivityTest extends TestCase
         $xml = self::byName('1');
         $this->assertSchemaValid($xml);
 
-        $report = JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate($xml, new JmhzControlContext('2026-08-14', null, true));
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-14', null, true));
 
         self::assertSame([], array_map(
             static fn (JmhzControlFinding $finding): int => $finding->controlId,

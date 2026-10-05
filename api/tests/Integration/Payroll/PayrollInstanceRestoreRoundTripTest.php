@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Anonymization\DatabaseCloner;
 use MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService;
 use MyInvoice\Service\Export\Instance\InstanceExportService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
@@ -259,7 +260,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'Provozní exportní job se nesmí přenášet do obnovené instance.',
         );
 
-        $this->createAndMigrateTargetDatabase();
+        $this->createTargetDatabase();
         self::assertNotNull($this->target);
         $sourceRole = $source->query('SELECT r.id, r.system_key FROM roles r JOIN users u ON u.role_id = r.id ORDER BY u.id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
         self::assertIsArray($sourceRole);
@@ -897,7 +898,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         ];
     }
 
-    private function createAndMigrateTargetDatabase(): void
+    private function createTargetDatabase(): void
     {
         self::assertNotNull($this->server);
         if (!$this->isSafeTargetDatabase($this->targetDatabase)) {
@@ -908,30 +909,47 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
         );
 
-        $environment = getenv();
-        $environment['MYINVOICE_DB_NAME'] = $this->targetDatabase;
-        $environment['MYSQL_DATABASE'] = $this->targetDatabase;
-        $environment['MYINVOICE_SCHEMA_CACHE'] = '0';
-        $process = proc_open(
-            [PHP_BINARY, $this->rootDir . '/api/bin/migrate.php', '--no-backfills'],
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
-            $this->rootDir,
-            $environment,
-            ['bypass_shell' => true],
+        $sourceDatabase = (string) $this->sourceConnection->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9_]+_test$/D', $sourceDatabase);
+        self::assertNotSame($sourceDatabase, $this->targetDatabase);
+        $cloner = new DatabaseCloner($this->server);
+        $plan = $cloner->plan($sourceDatabase);
+        $rebase = fn (string $ddl): string => str_replace(
+            DatabaseCloner::quote($sourceDatabase) . '.',
+            DatabaseCloner::quote($this->targetDatabase) . '.',
+            $ddl,
         );
-        self::assertIsResource($process);
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-        self::assertSame(
-            0,
-            $exitCode,
-            "Migrace prázdné cílové DB selhala.\n"
-                . substr((string) $stdout . "\n" . (string) $stderr, -12000),
-        );
+        $this->server->exec('USE ' . DatabaseCloner::quote($this->targetDatabase));
+        $this->server->exec('SET SESSION FOREIGN_KEY_CHECKS = 0');
+        try {
+            foreach ($plan['tables'] as $table) {
+                $this->server->exec($rebase($table['ddl']));
+            }
+            foreach (['roles', 'role_permissions'] as $name) {
+                $columns = $plan['tables'][$name]['columns'];
+                $rows = $this->sourceConnection->pdo()->query(
+                    'SELECT ' . $columns . ' FROM ' . DatabaseCloner::quote($name),
+                )->fetchAll(PDO::FETCH_NUM);
+                if ($rows !== []) {
+                    $insert = $this->server->prepare(
+                        'INSERT INTO ' . DatabaseCloner::quote($name) . ' (' . $columns . ') VALUES ('
+                        . implode(', ', array_fill(0, count($rows[0]), '?')) . ')',
+                    );
+                    foreach ($rows as $row) {
+                        $insert->execute($row);
+                    }
+                }
+            }
+            $plan['views'] = array_map($rebase, $plan['views']);
+            $plan['routines'] = array_map($rebase, $plan['routines']);
+            foreach ($plan['triggers'] as &$trigger) {
+                $trigger['ddl'] = $rebase($trigger['ddl']);
+            }
+            unset($trigger);
+            $cloner->finalize($plan, $this->targetDatabase);
+        } finally {
+            $this->server->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
+        }
 
         $this->target = new PDO(
             sprintf(

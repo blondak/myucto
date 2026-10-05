@@ -14,10 +14,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlEvaluator;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use MyInvoice\Tests\Support\JmhzControlValidatorFactory;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1ControlValidatorTest extends TestCase
@@ -1618,9 +1618,7 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         string $xml,
         ?JmhzControlContext $context = null,
     ): JmhzControlEvaluationReport {
-        return JmhzScenario1ControlValidator::create(
-            CzechPayrollRulesets2026::provider(),
-        )->validate(
+        return JmhzControlValidatorFactory::create()->validate(
             $xml,
             $context ?? new JmhzControlContext('2026-08-14'),
         );

@@ -138,6 +138,7 @@ final class OssFilingArchiveTest extends TestCase
     {
         $this->requireEcbSchema();
         $this->seedEcbDay('2099-03-31', 25.0);
+        $this->seedCnbDay('2099-02-10', 28.0);
         $this->ossSale($this->euConsumer('PL'), '2099-02-10', 25_000.0, 23.0, currencyId: $this->czkId);
         [$submissionId, $preview] = $this->archive(2099, 1);
         $this->evidence->capture($this->supplierId, $submissionId, 2099, 1, $preview, $this->userId);
@@ -181,6 +182,7 @@ final class OssFilingArchiveTest extends TestCase
     {
         $this->requireEcbSchema();
         $this->seedEcbDay('2099-03-31', 25.0);
+        $this->seedCnbDay('2099-02-10', 28.0);
         $this->ossSale($this->euConsumer('PL'), '2099-02-10', 25_000.0, 23.0, currencyId: $this->czkId);
         [$submissionId, $preview] = $this->archive(2099, 1);
         $this->evidence->capture($this->supplierId, $submissionId, 2099, 1, $preview, $this->userId);
@@ -496,6 +498,14 @@ final class OssFilingArchiveTest extends TestCase
             'INSERT INTO ecb_exchange_rate_days (rate_date, published) VALUES (?, 1)
              ON DUPLICATE KEY UPDATE published = VALUES(published)'
         )->execute([$date]);
+    }
+
+    private function seedCnbDay(string $date, float $czkPerEur): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
+        )->execute([$date, 'EUR', $czkPerEur]);
     }
 
     /** OSS prodej — bez `currencyId` v EUR, tedy v měně podání a bez přepočtu. */

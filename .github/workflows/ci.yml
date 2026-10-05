@@ -291,6 +291,25 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
+      - name: Frontend cache toolchain
+        id: frontend-toolchain
+        shell: pwsh
+        run: |
+          $nodeVersion = node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node version is unavailable.' }
+          $pnpmVersion = pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw 'pnpm version is unavailable.' }
+          "versions=$nodeVersion-$pnpmVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Cache frontend compilation
+        uses: actions/cache@v5
+        with:
+          path: |
+            web/node_modules/.cache/tsbuildinfo*
+            web/node_modules/.vite/vitest
+          key: frontend-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.frontend-toolchain.outputs.versions }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/package.json') }}-${{ hashFiles('web/tsconfig*.json', 'web/vitest.config.ts', 'web/vite.config.ts', 'web/tests/setup-dom.ts', 'web/scripts/run-vitest.mjs') }}-${{ github.sha }}
+          restore-keys: frontend-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.frontend-toolchain.outputs.versions }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/package.json') }}-${{ hashFiles('web/tsconfig*.json', 'web/vitest.config.ts', 'web/vite.config.ts', 'web/tests/setup-dom.ts', 'web/scripts/run-vitest.mjs') }}-
+
       - name: TypeScript check
         working-directory: web
         run: pnpm type-check
