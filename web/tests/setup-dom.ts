@@ -1,5 +1,24 @@
-import { config } from '@vue/test-utils'
+import { config, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
+import { afterEach } from 'vitest'
+
+enableAutoUnmount(afterEach)
+
+for (const name of ['confirm', 'prompt'] as const) {
+  if (typeof window[name] === 'function') continue
+  Object.defineProperty(window, name, {
+    configurable: true,
+    writable: true,
+    value: () => { throw new Error(`Test musí nastavit odpověď na window.${name}().`) },
+  })
+  if (globalThis !== window) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      get: () => window[name],
+      set: value => { window[name] = value },
+    })
+  }
+}
 
 // Component tests mount pages without installing a router. Keep links visible
 // and let individual tests override this stub when they inspect route objects.

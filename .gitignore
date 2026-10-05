@@ -14,12 +14,14 @@ storage/
 api/vendor/
 api/vendor.prod/
 api/.phpunit.cache/
+api/test-results/
 node_modules/
 web/node_modules/
 MCP/node_modules/
 MCP/dist/
 web/dist/
 web/dist.bak/
+web/test-results/
 dist/
 manual/generated/
 manual/generated.bak/

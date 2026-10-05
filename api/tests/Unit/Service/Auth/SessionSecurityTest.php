@@ -54,7 +54,7 @@ final class SessionSecurityTest extends TestCase
             );
             $stmt->execute([
                 'session-test-' . bin2hex(random_bytes(8)) . '@example.invalid',
-                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT),
+                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT, ['cost' => 4]),
                 'Synthetic Session Test',
                 'admin',
                 'cs',

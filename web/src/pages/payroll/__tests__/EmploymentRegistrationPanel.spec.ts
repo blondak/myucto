@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
@@ -269,6 +269,10 @@ function rejection(code: string, message: string) {
 }
 
 const A1_DRAFT_KEY = 'myinvoice.payroll.a1-draft.0.5'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('EmploymentRegistrationPanel', () => {
   beforeEach(() => {
@@ -1390,6 +1394,7 @@ describe('EmploymentRegistrationPanel', () => {
    * (searchJmhzMunicipalities) — výběr zároveň doplní i název obce.
    */
   it('picks the workplace municipality from the search codebook', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     m.searchMunicipalities.mockResolvedValue([
       { code: '554791', label: 'Neratovice' },
     ])
@@ -1410,8 +1415,8 @@ describe('EmploymentRegistrationPanel', () => {
       .get('input[role="combobox"]')
     await municipality.trigger('focus')
     await municipality.setValue('Neratovice')
-    // SearchableSelect debounce hledání o 250 ms — reálný čas, ne fake timers.
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     expect(m.searchMunicipalities).toHaveBeenCalledWith('Neratovice')
     await municipality.trigger('keydown', { key: 'Enter' })

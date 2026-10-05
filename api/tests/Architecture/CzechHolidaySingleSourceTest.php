@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
 use MyInvoice\Service\Report\CzechWorkingDays;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -114,18 +115,11 @@ final class CzechHolidaySingleSourceTest extends TestCase
         $offenders = [];
         $root = dirname(__DIR__, 2) . '/src';
 
-        /** @var \SplFileInfo $file */
-        foreach (new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-        ) as $file) {
-            if (!$file->isFile() || $file->getExtension() !== 'php') {
-                continue;
-            }
-            $path = $file->getPathname();
+        foreach (SourceCorpus::files($root) as $path) {
             if (str_ends_with(str_replace('\\', '/', $path), 'Service/Report/CzechWorkingDays.php')) {
                 continue; // jediný povolený zdroj
             }
-            $code = (string) file_get_contents($path);
+            $code = SourceCorpus::read($path);
             if (str_contains($code, '07-05') && str_contains($code, '11-17')) {
                 $offenders[] = basename($path);
             }

@@ -387,6 +387,9 @@ final class OssReturnExchangeRateTest extends TestCase
     private function ossSale(string $taxDate, float $base, ?int $currencyId = null, string $invoiceType = 'invoice'): int
     {
         $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT IGNORE INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)'
+        )->execute([$taxDate, 'EUR', 30.0]);
         $countryId = (int) ($pdo->query("SELECT id FROM countries WHERE UPPER(iso2) = 'DE' LIMIT 1")->fetchColumn() ?: 0);
         if ($countryId === 0) {
             self::markTestSkipped('Německo není v číselníku zemí.');

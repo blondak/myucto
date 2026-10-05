@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
@@ -32,10 +32,6 @@ function mountMenu(props: Record<string, unknown> = {}) {
     props: { actions: actions(), inlineCount: 1, ...props },
   })
 }
-
-// Nabídka je teleportovaná; ruční mazání <body> by rozbilo odmontování a
-// další test by běžel nad zbytkem předchozího.
-enableAutoUnmount(afterEach)
 
 describe('RowActionsMenu', () => {
   it('otevře nabídku šipkou dolů a stoupne na první položku', async () => {

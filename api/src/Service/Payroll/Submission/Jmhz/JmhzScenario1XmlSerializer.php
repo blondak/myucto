@@ -21,6 +21,10 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
  */
 final class JmhzScenario1XmlSerializer
 {
+    public function __construct(
+        private readonly JmhzPackageSplitter $packageSplitter = new JmhzPackageSplitter(),
+    ) {}
+
     private const XMLNS = 'http://www.w3.org/2000/xmlns/';
 
     /**
@@ -136,7 +140,12 @@ final class JmhzScenario1XmlSerializer
      * Nejvýš tolik součástí individualizované části nese jeden dílčí balík
      * (kontroly 300 a 301); první balík k nim přidává souhrn a pojistnou část.
      */
-    public const PACKAGE_FORM_LIMIT = 1500;
+    public const PACKAGE_FORM_LIMIT = JmhzPackageSplitter::DEFAULT_FORM_LIMIT;
+
+    public function packageFormLimit(): int
+    {
+        return $this->packageSplitter->formLimit;
+    }
 
     /**
      * Řádné hlášení rozdělené do dílčích balíků.
@@ -156,11 +165,11 @@ final class JmhzScenario1XmlSerializer
     ): array {
         $payload = $document->payload;
         $forms = $this->employmentForms($this->rows($payload['people'] ?? null));
-        if (count($forms) <= self::PACKAGE_FORM_LIMIT) {
+        if (!$this->packageSplitter->requiresSplit(count($forms))) {
             return [$this->serialize($document, $envelope->forPackage(1, 1))];
         }
         $this->assertProfile($payload, $envelope, true);
-        $chunks = array_chunk($forms, self::PACKAGE_FORM_LIMIT);
+        $chunks = $this->packageSplitter->split($forms);
         $total = count($forms) + 2;
         $packages = [];
         foreach ($chunks as $index => $chunk) {

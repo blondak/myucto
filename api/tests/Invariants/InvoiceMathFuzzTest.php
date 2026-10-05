@@ -79,6 +79,28 @@ final class InvoiceMathFuzzTest extends TestCase
             );
             yield $label => [$items, $reverseCharge, $pricesIncludeVat];
         }
+        yield 'shora+3 půlhaléřové řádky' => [
+            array_fill(0, 3, ['quantity' => 1.0, 'unit_price_without_vat' => 0.14, 'vat_rate_snapshot' => 12.0]),
+            false,
+            true,
+        ];
+    }
+
+    #[DataProvider('documents')]
+    public function testDocumentInvariants(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    {
+        $computed = InvoiceMath::compute($items, $reverseCharge, $pricesIncludeVat);
+        $this->assertLineSumsEqualDocumentTotals($computed);
+        $this->assertEveryLineIsInternallyConsistent($computed);
+        if ($reverseCharge) {
+            $this->assertReverseChargeAlwaysYieldsZeroVatButKeepsRate($items, $computed);
+        } elseif ($pricesIncludeVat) {
+            $this->assertTopDownVatPerRateMatchesCoefficientOfTotal($computed);
+            $this->assertTopDownPerLineVatFollowsCoefficientExceptOneResidualLine($computed);
+        } else {
+            $this->assertBottomUpVatFollowsStatutoryFormulaPerLine($computed);
+        }
+        $this->assertDocumentPlusItsMirrorCreditNoteIsZero($items, $reverseCharge, $pricesIncludeVat, $computed);
     }
 
     /**
@@ -87,13 +109,10 @@ final class InvoiceMathFuzzTest extends TestCase
      * Tohle je vlastnost, na které stojí celá evidence DPH — `VatLedgerService`
      * sčítá ULOŽENÉ řádkové totály, takže rozdíl mezi řádky a hlavičkou znamená,
      * že doklad a přiznání ukazují jiné číslo.
-     *
-     * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testLineSumsEqualDocumentTotals(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertLineSumsEqualDocumentTotals(array $computed): void
     {
-        $r = InvoiceMath::compute($items, $reverseCharge, $pricesIncludeVat);
+        $r = $computed;
 
         $base = 0;
         $vat = 0;
@@ -112,13 +131,10 @@ final class InvoiceMathFuzzTest extends TestCase
     /**
      * Invariant: na každém řádku platí `základ + daň = brutto`, do haléře.
      * Bez toho by se rozešel doklad se svým vlastním součtem.
-     *
-     * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testEveryLineIsInternallyConsistent(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertEveryLineIsInternallyConsistent(array $computed): void
     {
-        foreach (InvoiceMath::compute($items, $reverseCharge, $pricesIncludeVat)['items'] as $i => $line) {
+        foreach ($computed['items'] as $i => $line) {
             self::assertSame(
                 self::cents($line['with']),
                 self::cents($line['base']) + self::cents($line['vat']),
@@ -134,20 +150,12 @@ final class InvoiceMathFuzzTest extends TestCase
      * Tohle je vlastnost, kvůli které existuje distribuce zaokrouhlovacího rezidua.
      * Bez ní by se doklad o dvou řádcích téže sazby rozešel s přiznáním o haléř —
      * a haléřové rozdíly v přiznání jsou přesně ta třída chyb, kterou nikdo nehledá.
-     *
-     * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testTopDownVatPerRateMatchesCoefficientOfTotal(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertTopDownVatPerRateMatchesCoefficientOfTotal(array $computed): void
     {
-        if (!$pricesIncludeVat || $reverseCharge) {
-            self::assertTrue(true, 'Invariant platí jen pro režim shora bez přenesené daňové povinnosti.');
-            return;
-        }
-
         $grossByRate = [];
         $vatByRate = [];
-        foreach (InvoiceMath::compute($items, false, true)['items'] as $line) {
+        foreach ($computed['items'] as $line) {
             $key = number_format((float) $line['rate'], 2, '.', '');
             $grossByRate[$key] = ($grossByRate[$key] ?? 0) + self::cents($line['with']);
             $vatByRate[$key]   = ($vatByRate[$key] ?? 0) + self::cents($line['vat']);
@@ -179,20 +187,12 @@ final class InvoiceMathFuzzTest extends TestCase
      * nad celou sadou 6 406 testů, kterou NEODHALIL nikdo. Rozdíl je nedaňový (přiznání
      * vyjde stejně, sčítá se za sazbu), ale rozpad na dokladu se rozejde, a hlavně by
      * se tichá změna vzorce nedozvěděla. Tenhle invariant to zachytí.
-     *
-     * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testTopDownPerLineVatFollowsCoefficientExceptOneResidualLine(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertTopDownPerLineVatFollowsCoefficientExceptOneResidualLine(array $computed): void
     {
-        if (!$pricesIncludeVat || $reverseCharge) {
-            self::assertTrue(true, 'Invariant platí jen pro režim shora bez přenesené daňové povinnosti.');
-            return;
-        }
-
         /** @var array<string, list<int>> $deviationsByRate odchylky v haléřích */
         $deviationsByRate = [];
-        foreach (InvoiceMath::compute($items, false, true)['items'] as $line) {
+        foreach ($computed['items'] as $line) {
             $rate = (float) $line['rate'];
             if ($rate <= 0.0) {
                 continue;
@@ -224,18 +224,10 @@ final class InvoiceMathFuzzTest extends TestCase
     /**
      * Invariant § 37 odst. 1: v režimu ZDOLA je daň na řádku přesně
      * `round(základ × sazba/100, 2)` — bez rezidua, protože základ je vstup.
-     *
-     * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testBottomUpVatFollowsStatutoryFormulaPerLine(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertBottomUpVatFollowsStatutoryFormulaPerLine(array $computed): void
     {
-        if ($pricesIncludeVat || $reverseCharge) {
-            self::assertTrue(true, 'Invariant platí jen pro režim zdola bez přenesené daňové povinnosti.');
-            return;
-        }
-
-        foreach (InvoiceMath::compute($items, false, false)['items'] as $i => $line) {
+        foreach ($computed['items'] as $i => $line) {
             $rate = (float) $line['rate'];
             self::assertSame(
                 self::cents(round((float) $line['base'] * $rate / 100.0, 2)),
@@ -252,15 +244,9 @@ final class InvoiceMathFuzzTest extends TestCase
      *
      * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testReverseChargeAlwaysYieldsZeroVatButKeepsRate(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertReverseChargeAlwaysYieldsZeroVatButKeepsRate(array $items, array $computed): void
     {
-        if (!$reverseCharge) {
-            self::assertTrue(true, 'Netýká se dokladů bez přenesené daňové povinnosti.');
-            return;
-        }
-
-        $r = InvoiceMath::compute($items, true, $pricesIncludeVat);
+        $r = $computed;
         self::assertSame(0, self::cents($r['totals']['vat']), 'Reverse charge: daň na dokladu musí být nulová.');
 
         foreach ($r['items'] as $i => $line) {
@@ -285,15 +271,14 @@ final class InvoiceMathFuzzTest extends TestCase
      *
      * @param list<array{quantity:float,unit_price_without_vat:float,vat_rate_snapshot:float}> $items
      */
-    #[DataProvider('documents')]
-    public function testDocumentPlusItsMirrorCreditNoteIsZero(array $items, bool $reverseCharge, bool $pricesIncludeVat): void
+    private function assertDocumentPlusItsMirrorCreditNoteIsZero(array $items, bool $reverseCharge, bool $pricesIncludeVat, array $computed): void
     {
         $mirrored = array_map(
             static fn (array $it): array => ['quantity' => -$it['quantity']] + $it,
             $items,
         );
 
-        $a = InvoiceMath::compute($items, $reverseCharge, $pricesIncludeVat)['totals'];
+        $a = $computed['totals'];
         $b = InvoiceMath::compute($mirrored, $reverseCharge, $pricesIncludeVat)['totals'];
 
         foreach (['without_vat', 'vat', 'with_vat'] as $key) {

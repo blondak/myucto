@@ -49,7 +49,7 @@ final class PasskeyPersistenceTest extends TestCase
             );
             $stmt->execute([
                 'passkey-test-' . bin2hex(random_bytes(8)) . '@example.invalid',
-                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT),
+                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT, ['cost' => 4]),
                 'Synthetic Passkey Test',
                 'admin',
                 'cs',

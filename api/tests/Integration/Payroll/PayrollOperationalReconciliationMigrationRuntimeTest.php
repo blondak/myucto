@@ -12,9 +12,8 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCase
 {
-    private const DATABASE = 'myucto_mz27_reconciliation_agent_test';
-
-    private PDO $server;
+    private ?PDO $server = null;
+    private string $database = '';
     private Config $config;
     private string $rootDir;
 
@@ -22,6 +21,7 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
     {
         $this->rootDir = dirname(__DIR__, 4);
         $this->config = Config::load($this->rootDir);
+        $this->database = 'myucto_reconciliation_' . bin2hex(random_bytes(6)) . '_test';
         $this->server = new PDO(
             sprintf(
                 'mysql:host=%s;port=%d;charset=utf8mb4',
@@ -33,14 +33,31 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
         );
         $this->server->exec(
-            'CREATE DATABASE IF NOT EXISTS `' . self::DATABASE
+            'CREATE DATABASE `' . $this->database
             . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
         );
+        $this->createParentTables();
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->server !== null && $this->database !== '') {
+            if (preg_match('/^myucto_reconciliation_[0-9a-f]{12}_test$/D', $this->database) !== 1) {
+                throw new \LogicException('Neplatný název izolované testovací DB.');
+            }
+            $this->server->exec('DROP DATABASE IF EXISTS `' . $this->database . '`');
+        }
     }
 
     public function testMigrationIsIdempotentOnIsolatedMariaDb(): void
     {
-        $this->runProcess([PHP_BINARY, $this->rootDir . '/api/bin/migrate.php', '--no-backfills']);
+        $this->runProcess([
+            PHP_BINARY,
+            $this->rootDir . '/api/bin/migrate.php',
+            '--no-backfills',
+            '--no-analyze',
+            '--only=1607_payroll_operational_reconciliation_issues.sql',
+        ]);
         $db = $this->databasePdo();
         self::assertSame(2, (int) $db->query(
             "SELECT COUNT(*) FROM information_schema.TABLES
@@ -64,6 +81,7 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
             PHP_BINARY,
             $this->rootDir . '/api/bin/migrate.php',
             '--no-backfills',
+            '--no-analyze',
             '--only=1607_payroll_operational_reconciliation_issues.sql',
         ]);
         self::assertSame(2, (int) $db->query(
@@ -72,9 +90,41 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
                 AND TABLE_NAME LIKE 'payroll_operational_reconciliation_issue%'",
         )->fetchColumn());
 
-        $supplierCount = (int) $db->query('SELECT COUNT(*) FROM supplier')->fetchColumn();
-        if ($supplierCount === 0) {
-            $this->runProcess([PHP_BINARY, $this->rootDir . '/api/bin/ci-seed.php']);
+    }
+
+    private function createParentTables(): void
+    {
+        $source = new PDO(
+            sprintf(
+                'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
+                (string) $this->config->get('db.host', '127.0.0.1'),
+                (int) $this->config->get('db.port', 3306),
+                (string) $this->config->get('db.name'),
+            ),
+            (string) $this->config->get('db.user'),
+            (string) $this->config->get('db.pass', ''),
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
+        );
+        $target = $this->databasePdo();
+        $target->exec('SET SESSION FOREIGN_KEY_CHECKS = 0');
+        try {
+            foreach ([
+                'countries',
+                'currencies',
+                'vat_rates',
+                'supplier_groups',
+                'supplier',
+                'roles',
+                'users',
+                'payroll_offices',
+                'payroll_runs',
+                'payroll_run_revisions',
+            ] as $table) {
+                $ddl = $source->query('SHOW CREATE TABLE `' . $table . '`')->fetch(PDO::FETCH_NUM);
+                $target->exec($ddl[1]);
+            }
+        } finally {
+            $target->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
         }
     }
 
@@ -95,8 +145,8 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
         }
         $environment = getenv();
         self::assertIsArray($environment);
-        $environment['MYINVOICE_DB_NAME'] = self::DATABASE;
-        $environment['MYSQL_DATABASE'] = self::DATABASE;
+        $environment['MYINVOICE_DB_NAME'] = $this->database;
+        $environment['MYSQL_DATABASE'] = $this->database;
         $pipes = [];
         $process = proc_open(
             $command,
@@ -121,7 +171,7 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
                 'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
                 (string) $this->config->get('db.host', '127.0.0.1'),
                 (int) $this->config->get('db.port', 3306),
-                self::DATABASE,
+                $this->database,
             ),
             (string) $this->config->get('db.user'),
             (string) $this->config->get('db.pass', ''),

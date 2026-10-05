@@ -22,10 +22,26 @@ use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1ControlValidatorTest extends TestCase
 {
-    public function testCleanSubmissionHasNoFailedControl(): void
+    public function testBaselineControlReport(): void
     {
         $report = $this->validate(JmhzXmlSample::minimal());
 
+        $this->assertCleanSubmissionHasNoFailedControl($report);
+        $this->assertUnimplementedBlockingControlKeepsSubmissionUnready($report);
+        $this->assertOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol($report);
+        $this->assertFullMonthOfInsuranceDaysPassesDespiteLiteralFormula($report);
+        $this->assertGovTalkVariableSymbolIsNotEvaluatedWithoutEnvelope($report);
+        $this->assertRegistryControlsAreReportedAsNotEvaluable($report);
+        $this->assertControlWithoutAnyPresentAttributeIsNotApplicable($report);
+        $this->assertEveryCatalogControlGetsExactlyOneDisposition($report);
+        $this->assertCatalogPinIsCarriedIntoTheReport($report);
+        $this->assertZeroTaxBonusWithoutDeclarationIsAccepted($report);
+        $this->assertControlThatReadsNothingIsNotReportedAsPassed($report);
+        $this->assertControlStandingOnAnUnmappedAttributeIsNotEvaluable($report);
+    }
+
+    private function assertCleanSubmissionHasNoFailedControl(JmhzControlEvaluationReport $report): void
+    {
         self::assertSame([], array_map(
             static fn (JmhzControlFinding $finding): int => $finding->controlId,
             $report->blocking(),
@@ -40,10 +56,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * kterou na podání umíme vztáhnout a neumíme vyhodnotit, podání není
      * připravené k odeslání.
      */
-    public function testUnimplementedBlockingControlKeepsSubmissionUnready(): void
+    private function assertUnimplementedBlockingControlKeepsSubmissionUnready(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         if ($report->coverageGaps() === []) {
             self::assertTrue($report->submittable());
 
@@ -59,9 +73,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
-    public function testOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol(): void
+    private function assertOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
         $finding = array_values(array_filter(
             $report->findings,
             static fn (JmhzControlFinding $finding): bool => $finding->controlId === 333,
@@ -341,10 +354,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * ale 31 dnů pojištění, ne 30 — doslovné znění by neprošlo ani bezvadné
      * hlášení za celý měsíc, takže se interval počítá včetně krajních dnů.
      */
-    public function testFullMonthOfInsuranceDaysPassesDespiteLiteralFormula(): void
+    private function assertFullMonthOfInsuranceDaysPassesDespiteLiteralFormula(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         self::assertNotContains(134, $this->blockingIds($report));
     }
 
@@ -396,9 +407,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertContains(90, $this->blockingIds($report));
     }
 
-    public function testGovTalkVariableSymbolIsNotEvaluatedWithoutEnvelope(): void
+    private function assertGovTalkVariableSymbolIsNotEvaluatedWithoutEnvelope(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
         $finding = $this->finding($report, 355);
 
         self::assertSame(JmhzControlOutcome::NotEvaluable, $finding->outcome);
@@ -428,10 +438,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * Kontroly proti registru ČSSZ se nesmí vydávat za splněné. Pro uživatele
      * je rozdíl mezi „ověřeno" a „ověří až ČSSZ" podstatný.
      */
-    public function testRegistryControlsAreReportedAsNotEvaluable(): void
+    private function assertRegistryControlsAreReportedAsNotEvaluable(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         foreach ([143, 261, 262, 263, 264, 326] as $controlId) {
             self::assertSame(
                 JmhzControlOutcome::NotEvaluable,
@@ -441,9 +449,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
-    public function testControlWithoutAnyPresentAttributeIsNotApplicable(): void
+    private function assertControlWithoutAnyPresentAttributeIsNotApplicable(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
         $projection = \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzAttributeProjection
             ::fromXml(JmhzXmlSample::minimal());
         // Vlastní implementace smí prohlásit kontrolu za nedopadající i z jiného
@@ -472,9 +479,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
-    public function testEveryCatalogControlGetsExactlyOneDisposition(): void
+    private function assertEveryCatalogControlGetsExactlyOneDisposition(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
         $catalog = JmhzControlSourceCatalog::load();
         $seen = [];
         foreach ($report->findings as $finding) {
@@ -551,10 +557,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
-    public function testCatalogPinIsCarriedIntoTheReport(): void
+    private function assertCatalogPinIsCarriedIntoTheReport(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         self::assertSame(JmhzControlSourceCatalog::CATALOG_KEY, $report->catalogKey);
         self::assertSame(
             JmhzControlSourceCatalog::MANIFEST_SHA256,
@@ -677,10 +681,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * Vykázaná nula slevu neuplatňuje. Katalog zakazuje „nabývat hodnot",
      * ne uvést nulu — jinak by neprošel ani zaměstnanec bez prohlášení.
      */
-    public function testZeroTaxBonusWithoutDeclarationIsAccepted(): void
+    private function assertZeroTaxBonusWithoutDeclarationIsAccepted(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         self::assertNotContains(244, $this->failedIds($report));
     }
 
@@ -969,10 +971,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * Kontrola, jejíž vstupy v podání nejsou, se nesmí hlásit jako splněná.
      * „Prošlo" a „nebylo co číst" jsou dvě různé odpovědi.
      */
-    public function testControlThatReadsNothingIsNotReportedAsPassed(): void
+    private function assertControlThatReadsNothingIsNotReportedAsPassed(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         // 23 porovnává neodpracované hodiny s dovolenou; první profil ani
         // jedno nevykazuje, takže kontrola nemá co číst.
         self::assertSame(
@@ -986,10 +986,8 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * takže se z podání nedá přečíst. Kontrola 133 se proto nesmí tvářit,
      * že něco ověřila.
      */
-    public function testControlStandingOnAnUnmappedAttributeIsNotEvaluable(): void
+    private function assertControlStandingOnAnUnmappedAttributeIsNotEvaluable(JmhzControlEvaluationReport $report): void
     {
-        $report = $this->validate(JmhzXmlSample::minimal());
-
         self::assertSame(
             JmhzControlOutcome::NotEvaluable,
             $this->finding($report, 133)->outcome,

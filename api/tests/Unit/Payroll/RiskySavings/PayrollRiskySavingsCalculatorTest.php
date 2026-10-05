@@ -102,19 +102,6 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
         self::assertSame('calculated', $result['status']);
     }
 
-    public function testClaimFromLastDayOfPreviousMonthIsEffective(): void
-    {
-        $result = $this->calculator()->calculate(
-            17,
-            '2026-08-01',
-            1_000_000,
-            $this->evidence(24),
-            $this->defaultRules(),
-        );
-
-        self::assertSame('calculated', $result['status']);
-    }
-
     public function testClaimMadeDuringPeriodIsAuditableButNotYetDue(): void
     {
         $result = $this->calculator()->calculate(

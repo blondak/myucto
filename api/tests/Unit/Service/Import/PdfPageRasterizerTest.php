@@ -8,6 +8,8 @@ use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Service\Import\PdfPageRasterizer;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
@@ -78,6 +80,8 @@ final class PdfPageRasterizerTest extends TestCase
         self::assertPngPages($r->rasterize(self::pdf(8), 6), 6);
     }
 
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
     public function testImagickBackendRespectsPageLimit(): void
     {
         if (!class_exists(\Imagick::class)) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Tests\Support\PhpSourceRegions;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -58,7 +59,7 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
     {
         $findings = [];
         foreach ($this->payrollSourceFiles() as $relative => $file) {
-            $code = (string) file_get_contents($file);
+            $code = SourceCorpus::read($file);
             $allowed = self::ALLOWED_SYMBOLS[$relative] ?? [];
             self::assertSame(
                 [],
@@ -199,17 +200,7 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
         $src = str_replace('\\', '/', dirname(__DIR__, 2) . '/src');
         $files = [];
         foreach (['Service/Payroll', 'Action/Payroll'] as $module) {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator(
-                    $src . '/' . $module,
-                    \FilesystemIterator::SKIP_DOTS,
-                ),
-            );
-            foreach ($iterator as $file) {
-                if (!$file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
-                    continue;
-                }
-                $path = str_replace('\\', '/', $file->getPathname());
+            foreach (SourceCorpus::files($src . '/' . $module) as $path) {
                 $files[substr($path, strlen($src) + 1)] = $path;
             }
         }

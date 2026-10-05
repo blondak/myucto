@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +24,6 @@ const row = {
   samples: [{ description: 'Synthetic evidence', document_id: 1, date: '2099-01-01' }],
 }
 const response = { items: [row], total: 1, page: 1, per_page: 30, summary: { sales: 0, purchases: 1, bank: 0 }, snapshots: [{ supplier_id: 2, generated_at: '2099-01-01 12:00:00' as string | null, refresh_pending: false }] }
-enableAutoUnmount(afterEach)
 afterEach(() => { vi.useRealTimers() })
 function render(suppliers = [2]) {
   return mount(AutomationRecommendations, { props: { suppliers }, global: { stubs: { PaginationBar: true, ExpenseRules: true, RuleFormModal: true, PostingPreviewModal: true, Teleport: true } } })

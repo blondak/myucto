@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -27,11 +28,11 @@ final class BypassFinalsSingleSourceTest extends TestCase
             // Bootstrap je jediné legitimní místo; tenhle test se vynechává sám,
             // protože hledaný řetězec nutně obsahuje ve své vlastní kontrole.
             if (str_ends_with(str_replace('\\', '/', $file), 'api/tests/bootstrap.php')
-                || $file === __FILE__
+                || $file === str_replace('\\', '/', __FILE__)
             ) {
                 continue;
             }
-            $source = (string) file_get_contents($file);
+            $source = SourceCorpus::read($file);
             if (str_contains($source, 'BypassFinals::allowPaths')) {
                 $offenders[] = $file;
             }
@@ -49,16 +50,6 @@ final class BypassFinalsSingleSourceTest extends TestCase
     /** @return list<string> */
     private function testFiles(): array
     {
-        $root = dirname(__DIR__);
-        $files = [];
-        foreach (new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-        ) as $item) {
-            if ($item->isFile() && $item->getExtension() === 'php') {
-                $files[] = $item->getPathname();
-            }
-        }
-
-        return $files;
+        return SourceCorpus::files(dirname(__DIR__));
     }
 }

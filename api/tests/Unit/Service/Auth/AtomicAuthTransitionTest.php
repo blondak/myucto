@@ -84,7 +84,7 @@ final class AtomicAuthTransitionTest extends TestCase
             );
             $stmt->execute([
                 'atomic-auth-' . bin2hex(random_bytes(8)) . '@example.invalid',
-                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT),
+                password_hash('Synthetic-test-password-42', PASSWORD_BCRYPT, ['cost' => 4]),
                 'Synthetic Atomic Auth Test',
                 'admin',
                 'cs',
@@ -591,7 +591,7 @@ final class AtomicAuthTransitionTest extends TestCase
                 ->execute(['2000-01-01 00:00:00.000000', hash('sha256', $grant, true)]);
         } elseif ($change === 'password_changed') {
             $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-                ->execute([password_hash('Changed-synthetic-password-42', PASSWORD_BCRYPT), $this->userId]);
+                ->execute([password_hash('Changed-synthetic-password-42', PASSWORD_BCRYPT, ['cost' => 4]), $this->userId]);
         } elseif ($change === 'other_session') {
             $session = $this->sessions->create($this->userId, '127.0.0.1', 'Other');
         } elseif ($change === 'locked' || $change === 'revoked') {
@@ -637,7 +637,7 @@ final class AtomicAuthTransitionTest extends TestCase
         $session = $this->sessions->create($this->userId, '127.0.0.1', 'PHPUnit');
         $authorizedHash = $this->passwordHash();
         $this->db->pdo()->prepare('UPDATE users SET password_hash = ?, totp_secret = NULL WHERE id = ?')
-            ->execute([password_hash('Different-synthetic-password-42', PASSWORD_BCRYPT), $this->userId]);
+            ->execute([password_hash('Different-synthetic-password-42', PASSWORD_BCRYPT, ['cost' => 4]), $this->userId]);
 
         try {
             $this->protectedOperations->storePendingTotpSecret(

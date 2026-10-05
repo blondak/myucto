@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 
 /**
  * Vypnutá kontrola cizích klíčů vypne i `ON DELETE CASCADE`. Kdo v takovém okně smaže
@@ -59,16 +58,7 @@ final class ForeignKeyChecksGuardTest extends TestCase
     /** @return array<string,string> relativní cesta => obsah */
     private function phpFilesIn(string $root): array
     {
-        $out = [];
-        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
-        foreach ($it as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $rel = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
-                $out[$rel] = (string) file_get_contents($file->getPathname());
-            }
-        }
-        ksort($out);
-        return $out;
+        return SourceCorpus::sources($root);
     }
 
     private function nextOffset(string $pattern, string $code, int $from): ?int

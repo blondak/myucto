@@ -39,6 +39,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlDryRunService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFormExclusion;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPackageSplitter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -1505,15 +1506,14 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     }
 
     /**
-     * Nad 1500 formulářů se hlášení zmrazí jako jedno podání s dílčími
-     * balíky: součást a artefakt za balík, všechny se stejným GUID podání
-     * a datem vyplnění, souhrn a pojistná část jen v prvním. Opakované
-     * zmrazení vrátí tytéž balíky. Dřív se zmrazení odmítlo a hlášení se
-     * muselo podat ručně přes ePortál.
+     * Orchestrace rozděleného hlášení běží nad dvěma skutečnými balíky. Ostrou
+     * hranici 1500/1501 ověřuje JmhzPackageSplitterTest bez výroby 1501 plných
+     * mezd; tady malý limit zachová celý databázový, transportní a protokolový
+     * tok včetně retry a agregace stavů.
      */
     public function testSplitSubmissionFreezesRetriesAndAggregatesProtocols(): void
     {
-        $people = 1501;
+        $people = 2;
         $resolution = $this->resolutionFor(
             $this->pvpoj(employerTotal: 248 * $people, people: $people),
             $this->payloadWithPeople($people),
@@ -1521,7 +1521,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame('resolved', $resolution->status(), CanonicalJson::encode($resolution->blockers));
         $obligationId = $this->registerObligation();
 
-        $frozen = $this->bridge($resolution)->bridge(
+        $frozen = $this->bridge($resolution, packageFormLimit: 1)->bridge(
             $this->supplierId,
             self::PREPARATION_ID,
             $obligationId,
@@ -1542,11 +1542,11 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
         foreach ([$first, $second] as $xml) {
             self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
-            self::assertStringContainsString('<formularePocetCelkem>1503</formularePocetCelkem>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $xml);
         }
-        self::assertStringContainsString('<formularePocetVBaliku>1502</formularePocetVBaliku>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $first);
         self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
-        self::assertSame(1500, substr_count($first, '</formularOsoby>'));
+        self::assertSame(1, substr_count($first, '</formularOsoby>'));
         self::assertSame(1, substr_count($second, '</formularOsoby>'));
         self::assertStringContainsString('<so:souhrn>', $first);
         self::assertStringNotContainsString('<so:souhrn>', $second);
@@ -1556,7 +1556,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertStringContainsString('<datumVyplneni>' . $firstDate[1] . '</datumVyplneni>', $second);
 
         $reader = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
-        self::assertCount(1501, $reader->formGuids($this->supplierId, self::ENVIRONMENT, $frozen['submission_id']));
+        self::assertCount(2, $reader->formGuids($this->supplierId, self::ENVIRONMENT, $frozen['submission_id']));
         self::assertSame(
             $frozen['submission_guid'],
             $reader->identity($this->supplierId, self::ENVIRONMENT, $frozen['submission_id'])->submissionGuid,
@@ -1568,7 +1568,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::assertSame('jmhz_submission_split_payload', $exception->validationCode);
         }
 
-        $replayed = $this->bridge($resolution)->bridge(
+        $replayed = $this->bridge($resolution, packageFormLimit: 1)->bridge(
             $this->supplierId,
             self::PREPARATION_ID,
             $obligationId,
@@ -2197,6 +2197,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function bridge(
         ?JmhzScenario1Resolution $resolution = null,
         string $now = '2026-08-05 11:30:00 Europe/Prague',
+        ?int $packageFormLimit = null,
     ): JmhzSubmissionBridgeService {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
         $documents->method('resolve')->willReturn(
@@ -2205,7 +2206,13 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
         return new JmhzSubmissionBridgeService(
             $documents,
-            new JmhzScenario1XmlValidator(),
+            new JmhzScenario1XmlValidator(
+                serializer: new JmhzScenario1XmlSerializer(
+                    $packageFormLimit === null
+                        ? new JmhzPackageSplitter()
+                        : new JmhzPackageSplitter($packageFormLimit),
+                ),
+            ),
             JmhzScenario1ControlValidator::create(
                 CzechPayrollRulesets2026::provider(),
             ),

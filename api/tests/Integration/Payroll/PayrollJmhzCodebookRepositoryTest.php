@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use MyInvoice\Repository\Payroll\JmhzSpecPackageRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -16,6 +19,8 @@ final class PayrollJmhzCodebookRepositoryTest extends TestCase
 {
     private Connection $db;
     private JmhzSpecPackageRepository $repository;
+    private ?PDO $server = null;
+    private string $database = '';
 
     protected function setUp(): void
     {
@@ -27,12 +32,62 @@ final class PayrollJmhzCodebookRepositoryTest extends TestCase
         if (!$db->hasTable('payroll_jmhz_spec_packages')) {
             $this->markTestSkipped('Migrace 1334 neproběhla.');
         }
-        $this->db = $db;
-        $this->repository = new JmhzSpecPackageRepository($db);
+        $config = $container->get(Config::class);
+        $this->database = 'myucto_jmhz_install_' . bin2hex(random_bytes(6)) . '_test';
+        $this->server = new PDO(
+            sprintf(
+                'mysql:host=%s;port=%d;charset=utf8mb4',
+                (string) $config->get('db.host', '127.0.0.1'),
+                (int) $config->get('db.port', 3306),
+            ),
+            (string) $config->get('db.user'),
+            (string) $config->get('db.pass', ''),
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
+        );
+        $this->server->exec("CREATE DATABASE `{$this->database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $values = $config->all();
+        $values['db']['name'] = $this->database;
+        $this->db = Connection::withoutSharedTestConnection(
+            static fn () => new Connection(new Config($values)),
+        );
+        $source = $db->pdo();
+        $target = $this->db->pdo();
+        $tables = [
+            'payroll_jmhz_spec_packages',
+            'payroll_jmhz_codebooks',
+            'payroll_jmhz_dictionary_attributes',
+            'payroll_jmhz_codebook_entries',
+        ];
+        foreach ($tables as $table) {
+            $ddl = $source->query("SHOW CREATE TABLE `{$table}`")->fetch(PDO::FETCH_NUM);
+            $target->exec($ddl[1]);
+        }
+        foreach (TriggerMetadata::read($source, (string) $config->get('db.name')) as $trigger) {
+            if (!in_array($trigger['EVENT_OBJECT_TABLE'], $tables, true)) {
+                continue;
+            }
+            $ddl = $source->query('SHOW CREATE TRIGGER `' . $trigger['TRIGGER_NAME'] . '`')->fetch(PDO::FETCH_NUM);
+            $target->exec($ddl[2]);
+        }
+        $this->repository = new JmhzSpecPackageRepository($this->db);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db)) {
+            $this->db->close();
+        }
+        if ($this->server !== null && $this->database !== '') {
+            if (preg_match('/^myucto_jmhz_install_[0-9a-f]{12}_test$/D', $this->database) !== 1) {
+                throw new \LogicException('Neplatný název izolované testovací DB.');
+            }
+            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+        }
     }
 
     public function testOfficialPackageIsInstalledIdempotentlyAndCannotBeMutated(): void
     {
+        self::assertSame(0, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM payroll_jmhz_spec_packages')->fetchColumn());
         $manifest = (new JmhzSpecPackageCatalog())->load(
             JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
         );

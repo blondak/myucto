@@ -89,6 +89,30 @@ vi.mock('@/pages/payroll/EmploymentDeferredIncomePanel.vue', () => ({
   default: { template: '<div data-test="deferred-income" />' },
 }))
 
+vi.mock('@/pages/payroll/EmploymentDimensionsPanel.vue', () => ({
+  default: { name: 'EmploymentDimensionsPanel', props: ['employmentId', 'canWrite'], template: '<div />' },
+}))
+
+vi.mock('@/pages/payroll/EmploymentSurchargePolicyPanel.vue', () => ({
+  default: { name: 'EmploymentSurchargePolicyPanel', props: ['employmentId', 'canWrite'], template: '<div />' },
+}))
+
+vi.mock('@/pages/payroll/EmploymentExitDocumentsPanel.vue', () => ({
+  default: { name: 'EmploymentExitDocumentsPanel', props: ['employment', 'canWrite', 'terminationReasonKind', 'employeeStatedReason'], template: '<div />' },
+}))
+
+vi.mock('@/pages/payroll/EmploymentWageStatementPanel.vue', () => ({
+  default: { name: 'EmploymentWageStatementPanel', props: ['employmentId', 'canWrite'], template: '<div />' },
+}))
+
+vi.mock('@/pages/payroll/EmploymentRegistrationPanel.vue', () => ({
+  default: { name: 'EmploymentRegistrationPanel', props: ['employmentId', 'personId', 'canWrite', 'a2Prefill', 'terminationEndDate', 'masterDataVersion'], template: '<div />' },
+}))
+
+vi.mock('@/pages/payroll/EmploymentTerminationPanel.vue', () => ({
+  default: { name: 'EmploymentTerminationPanel', props: ['employmentId', 'canWrite'], emits: ['loaded'], template: '<div />' },
+}))
+
 const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({

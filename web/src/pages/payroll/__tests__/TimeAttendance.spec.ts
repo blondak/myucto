@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { formatPeriod } from '@/composables/useFormat'
 
@@ -149,6 +149,10 @@ function historyMonth(period: string) {
   }
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('TimeAttendance', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -290,11 +294,13 @@ describe('TimeAttendance', () => {
 
   /* Q8-18: bez hledání šel člověk mezi stovkami vztahů najít jen z karty. */
   it('hledání podle jména pošle dotaz na server a vrátí se na první stránku', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     m.routeQuery = { period: '2026-09' }
     const wrapper = mount(TimeAttendance)
     await flushPromises()
     await wrapper.get('[data-test="payroll-time-search"]').setValue('Nov')
-    await new Promise(resolve => setTimeout(resolve, 350))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(350)
     await flushPromises()
     expect(m.timeMonth).toHaveBeenLastCalledWith('2026-09', false, { limit: 25, offset: 0 }, null, 'Nov')
     m.routeQuery = {}

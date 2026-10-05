@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, reactive } from 'vue'
 import type { PayrollPersonListItem } from '@/api/payroll'
 
@@ -136,8 +136,6 @@ async function mountPage(people: PayrollPersonListItem[]) {
   await flushPromises()
   return wrapper
 }
-
-enableAutoUnmount(afterEach)
 
 /**
  * Atrapa routeru musí navigaci opravdu promítnout do `route.query`. Bez toho

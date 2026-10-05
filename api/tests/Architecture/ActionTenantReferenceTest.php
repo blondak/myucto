@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Http\TenantReferenceGuard;
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -177,7 +178,7 @@ final class ActionTenantReferenceTest extends TestCase
 
         foreach ($this->actionFiles() as $file) {
             $base = basename($file);
-            $code = self::stripComments((string) file_get_contents($file));
+            $code = self::stripComments(SourceCorpus::read($file));
             foreach (self::unguardedBodyColumns($base, $code) as $column) {
                 $violations[] = "{$base} čte '{$column}' z těla requestu bez vazby na tenanta";
             }
@@ -209,7 +210,7 @@ final class ActionTenantReferenceTest extends TestCase
                 $violations[] = "{$base} v src/Action neexistuje — přejmenování? Aktualizuj inventuru.";
                 continue;
             }
-            $guarded = self::guardedColumns(self::stripComments((string) file_get_contents($byBasename[$base])));
+            $guarded = self::guardedColumns(self::stripComments(SourceCorpus::read($byBasename[$base])));
             foreach ($required as $column) {
                 if (!in_array($column, $guarded, true)) {
                     $violations[] = "{$base} už nepředává '{$column}' do TenantReferenceGuard::violations()";
@@ -234,7 +235,7 @@ final class ActionTenantReferenceTest extends TestCase
     {
         $violations = [];
         foreach ($this->actionFiles() as $file) {
-            $code = self::stripComments((string) file_get_contents($file));
+            $code = self::stripComments(SourceCorpus::read($file));
             foreach (self::guardCallArguments($code) as $argument) {
                 preg_match_all('/[\'"](\w+_id)[\'"]/', $argument, $m);
                 foreach ($m[1] as $column) {
@@ -259,16 +260,7 @@ final class ActionTenantReferenceTest extends TestCase
         $dir = dirname(__DIR__, 2) . '/src/Action';
         self::assertDirectoryExists($dir);
 
-        $out = [];
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
-        );
-        foreach ($it as $entry) {
-            if ($entry->isFile() && $entry->getExtension() === 'php') {
-                $out[] = $entry->getPathname();
-            }
-        }
-        sort($out);
+        $out = SourceCorpus::files($dir);
         self::assertNotEmpty($out);
 
         return $out;

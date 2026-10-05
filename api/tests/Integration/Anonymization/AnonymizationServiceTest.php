@@ -40,6 +40,7 @@ final class AnonymizationServiceTest extends TestCase
     private Config $config;
     private string $source;
     private string $target;
+    private string $testDatabase;
     private string $ico;
     private string $birthNumber;
     private int $clientId;
@@ -55,6 +56,7 @@ final class AnonymizationServiceTest extends TestCase
         $container = Bootstrap::buildContainer();
         $this->config = $container->get(Config::class);
         $testDb = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        $this->testDatabase = $testDb;
         self::assertStringEndsWith('_test', $testDb);
         $this->source = substr($testDb, 0, -5) . '_anonsrc_test';
         $this->target = substr($testDb, 0, -5) . '_anondst_test';
@@ -68,11 +70,6 @@ final class AnonymizationServiceTest extends TestCase
         // Jako v CI: bez striktního režimu projde lokálně i INSERT bez povinného sloupce.
         $this->server->exec("SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@@SESSION.sql_mode, ''), 'STRICT_ALL_TABLES')");
         $this->dropDatabases();
-        $cloner = new DatabaseCloner($this->server);
-        $plan = $cloner->plan($testDb);
-        $cloner->copyTables($plan, $this->source, static function (): void {});
-        $cloner->finalize($plan, $this->source);
-        $this->seedSource();
     }
 
     protected function tearDown(): void
@@ -84,6 +81,11 @@ final class AnonymizationServiceTest extends TestCase
 
     public function testCopyContainsNoOriginalIdentifiersAndKeepsAmounts(): void
     {
+        $cloner = new DatabaseCloner($this->server);
+        $plan = $cloner->plan($this->testDatabase);
+        $cloner->copyTables($plan, $this->source, static function (): void {});
+        $cloner->finalize($plan, $this->source);
+        $this->seedSource();
         $report = (new AnonymizationService($this->config))->run(
             new AnonymizationOptions(source: $this->source, target: $this->target, seed: 'integration'),
             static function (): void {},
@@ -134,6 +136,7 @@ final class AnonymizationServiceTest extends TestCase
 
     public function testRefusesToOverwriteForeignDatabaseAndLiveDatabase(): void
     {
+        $this->server->exec('CREATE DATABASE ' . DatabaseCloner::quote($this->source));
         $service = new AnonymizationService($this->config);
         $this->server->exec('CREATE DATABASE ' . DatabaseCloner::quote($this->target));
         try {

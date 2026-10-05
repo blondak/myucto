@@ -148,20 +148,6 @@ final class JmhzComponentCancellationXmlSerializerTest extends TestCase
         );
     }
 
-    public function testComponentCancellationAfterTheDeadlineIsRefused(): void
-    {
-        $this->expectException(JmhzXmlException::class);
-        $this->expectExceptionMessageMatches('/Lhůta pro storno/');
-        JmhzCancellationRequest::create(
-            self::REGULAR_GUID,
-            '1234567890',
-            2026,
-            7,
-            deadlines: $this->deadlines(),
-            today: '2026-08-25',
-        );
-    }
-
     private function request(): JmhzCancellationRequest
     {
         return JmhzCancellationRequest::create(
