@@ -219,7 +219,7 @@ Ruční volba má vždy přednost. Předvyplněná hodnota je v okně označená
 dodavatele). **Uložit a další** ji uloží přímo do dokladu jako jeho dimenzi.
 
 Okno se otevře i u dokladu bez hlášení vytěžení, pokud mu chybí dimenze, kterou
-[pravidlo](#pravidla-dimenzi-podle-uctu) s vynucením **Chyba** vyžaduje na účtu
+[pravidlo](#pravidla-dimenzi-podle-uctu) s vynucením **Povinné** vyžaduje na účtu
 některé položky. Počítá se přitom se vším, co by doklad dostal při zaúčtování
 (položka, produkt, hlavička, zakázka, dodavatel, výchozí hodnota pravidla).
 Detail takového dokladu ukáže červené upozornění s tlačítkem **Zkontrolovat**.
@@ -258,7 +258,7 @@ víc středisek, schvaluje každé středisko jeho odpovědná osoba a doklad je
 schválený, až schválí všichni. Daňový doklad k přijaté platbě a dobropis se
 neschvalují.
 
-**Odeslání ke schválení.** Přijetí konceptu (tlačítko **Přijmout**, potvrzení
+**Odeslání ke schválení.** Přijetí konceptu (tlačítko **Označit jako přijaté**, potvrzení
 v okně kontroly vytěžení, API i MCP) u dokladu, který schválení vyžaduje, doklad
 nepřijme, ale odešle ho ke schválení. Doklad zůstává **konceptem**, takže není
 v platebních příkazech, v nákladech, v evidenci DPH ani v účetnictví. Seznam
