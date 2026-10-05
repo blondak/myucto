@@ -172,7 +172,7 @@ Automatické upomínky lze řídit na třech úrovních; cron pošle upomínku, 
 
 | Úroveň | Kde | Význam |
 |---|---|---|
-| Dodavatel | Nastavení → dodavatel | Globální vypnutí pro celého dodavatele |
+| Dodavatel | Nastavení → dodavatel | Globální přepínač pro celého dodavatele; u nově založené firmy je vypnutý |
 | Klient | Detail klienta | Vypnutí pro všechny faktury daného klienta |
 | **Faktura** | Editor faktury | Vypnutí pro jedinou konkrétní fakturu |
 

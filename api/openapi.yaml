@@ -35235,7 +35235,7 @@ components:
         pdf_logo_show_name: { type: boolean, description: "Zobrazit vedle loga v PDF i název dodavatele" }
         branding_profiles_enabled: { type: boolean, description: "Zapíná volbu brandingových profilů; výchozí hodnota je false." }
         default_branding_profile_id: { type: [integer, "null"], readOnly: true }
-        auto_send_reminders: { type: boolean }
+        auto_send_reminders: { type: boolean, description: "Automatické odesílání upomínek; u nově založené firmy je výchozí hodnota false." }
         reminder_days_after_due: { type: integer, minimum: 1, maximum: 365 }
         epo_taxpayer_code:
           type: [string, "null"]
