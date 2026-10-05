@@ -285,7 +285,7 @@ $__localPath = $__rootDir . DIRECTORY_SEPARATOR . 'cfg.local.php';
 if (is_file($__localPath)) {
     $__localCfg = require $__localPath;
     $__localDb  = is_array($__localCfg) ? (string) ($__localCfg['db']['name'] ?? '') : '';
-    if ($__localDb !== '' && $__localDb !== $__realDb) {
+    if ($__localDb !== '' && $__localDb !== $__realDb && !function_exists('__phpunit_run_isolated_test')) {
         // Hláška MUSÍ jmenovat databázi, nad kterou se poběží doopravdy. Dřív tvrdila
         // natvrdo `<cfg-db>_test` i tehdy, když MYINVOICE_DB_NAME mířilo jinam —
         // souběžní agenti pak hledali kontaminaci sdílené DB, kterou nikdo nepoužil.

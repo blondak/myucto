@@ -1057,10 +1057,11 @@ final class CashDocumentServiceTest extends TestCase
 
     public function testForeignCashManualRateOverride(): void
     {
+        $this->seedRate('USD', self::YEAR . '-06-15', 29.00);
         $reg = $this->registers->create($this->supplierId, [
             'name' => 'USD pokladna', 'account_code' => '211510', 'currency_code' => 'USD',
         ]);
-        // Ruční kurz 30 → 50 USD = 1 500 CZK (žádný ČNB lookup).
+        // Ruční kurz 30 → 50 USD = 1 500 CZK, nikoli kurzem ČNB 29.
         $res = $this->service->create($this->supplierId, $this->doc([
             'purpose' => 'purchase', 'doc_type' => 'out', 'amount_foreign' => 50.00, 'fx_rate' => 30.0,
         ], $reg), $this->userId);

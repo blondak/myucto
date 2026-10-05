@@ -254,7 +254,7 @@ jobs:
         working-directory: api
         env:
           MYINVOICE_TEST_URL: http://localhost:8080
-        run: php bin/test-parallel.php --processes=4 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
+        run: php bin/test-parallel.php --processes=8 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
 
       - name: Backend test results and timings
         if: always()

@@ -70,6 +70,11 @@ final class PurchaseSplitPaymentTest extends TestCase
         }
 
         $pdo->beginTransaction();
+        $pdo->prepare(
+            "INSERT INTO exchange_rates (rate_date, currency_code, rate)
+             VALUES ('2099-06-10', 'EUR', 27.00), ('2099-06-15', 'EUR', 27.00)
+             ON DUPLICATE KEY UPDATE rate = VALUES(rate)"
+        )->execute();
         $this->eurId = $this->currency('EUR');
         $this->vendorA = $this->vendor('__purchase_split_vendor_a__');
         $this->vendorB = $this->vendor('__purchase_split_vendor_b__');
