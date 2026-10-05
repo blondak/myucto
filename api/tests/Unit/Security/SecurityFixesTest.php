@@ -2,14 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MyInvoice\Tests\Integration;
+namespace MyInvoice\Tests\Unit\Security;
 
-use MyInvoice\Bootstrap;
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Import\PohodaXmlParser;
-use MyInvoice\Service\Mail\SafeLogoPath;
-use PDO;
-use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -22,53 +17,16 @@ use PHPUnit\Framework\TestCase;
  *   #4 WorkReport project_id cross-supplier
  *
  * Tento test ověřuje **negative cases** — že útok teď selže. Volá přímo služby
- * (ne přes HTTP), takže nepotřebuje běžící server, jen DB.
+ * (ne přes HTTP), takže nepotřebuje běžící server ani DB.
  */
-#[Group('integration')]
 final class SecurityFixesTest extends TestCase
 {
-    private Connection $db;
-
-    protected function setUp(): void
-    {
-        $rootDir = dirname(__DIR__, 3);
-        if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php missing');
-        }
-        try {
-            $app = Bootstrap::buildApp();
-            $container = $app->getContainer();
-            if ($container === null) {
-                $this->markTestSkipped('Container not available');
-            }
-            $this->db = $container->get(Connection::class);
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('DI unavailable: ' . $e->getMessage());
-        }
-    }
-
-    protected function tearDown(): void
-    {
-        // Uvolni MySQL connection (per-metodu container → kumulace → max_connections).
-        if (isset($this->db)) $this->db->close();
-    }
-
-    /**
-     * #2 — SafeLogoPath rejects cfg.php exfiltration attempt
-     */
-    public function testSafeLogoPathRejectsCfgExfil(): void
-    {
-        self::assertNull(SafeLogoPath::resolve('cfg.php', 1));
-        self::assertNull(SafeLogoPath::resolve('../cfg.php', 1));
-        self::assertNull(SafeLogoPath::resolve('storage/supplier-logos/../../cfg.php', 1));
-    }
-
     /**
      * #2 — SettingsAction mass-assignment whitelist nesmí obsahovat logo_path / signature_path
      */
     public function testSettingsActionMassAssignDoesNotIncludeLogoPath(): void
     {
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Action/Settings/SettingsAction.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Action/Settings/SettingsAction.php');
         self::assertIsString($code);
 
         // Najdi $allowed array — najdeme jen relevantní řádky uvnitř updateSupplierById
@@ -90,8 +48,8 @@ final class SecurityFixesTest extends TestCase
     public function testEmailTemplatesDoNotUseIntroRaw(): void
     {
         $tpls = [
-            dirname(__DIR__, 3) . '/api/templates/email/invoice_send.cs.html.twig',
-            dirname(__DIR__, 3) . '/api/templates/email/invoice_send.en.html.twig',
+            dirname(__DIR__, 4) . '/api/templates/email/invoice_send.cs.html.twig',
+            dirname(__DIR__, 4) . '/api/templates/email/invoice_send.en.html.twig',
         ];
         foreach ($tpls as $tpl) {
             $content = file_get_contents($tpl);
@@ -137,13 +95,13 @@ final class SecurityFixesTest extends TestCase
 
         // SSOT je pořád TEN allowlist (A-Z, a-z, 0-9, _, -, max 20) — ne uvolněný regex,
         // který by testům výše vyhověl jinou cestou.
-        $parser = file_get_contents(dirname(__DIR__, 3) . '/api/src/Service/Import/PohodaXmlParser.php');
+        $parser = file_get_contents(dirname(__DIR__, 4) . '/api/src/Service/Import/PohodaXmlParser.php');
         self::assertIsString($parser);
         self::assertStringContainsString("'/^[A-Za-z0-9_-]{1,20}\$/'", $parser,
             'VARSYMBOL_PATTERN musí zůstat allowlistem A-Z, a-z, 0-9, _, - (security #3)');
 
         // A brána ho musí volat — import bez validace by SSOT obešel.
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Service/Import/InvoiceImportService.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Service/Import/InvoiceImportService.php');
         self::assertIsString($code);
         self::assertStringContainsString('PohodaXmlParser::isAcceptableVarsymbol($varsymbol)', $code,
             'processOne() musí validovat varsymbol přes sdílený allowlist (security #3)');
@@ -156,7 +114,7 @@ final class SecurityFixesTest extends TestCase
      */
     public function testBankIgnoreWritesActivityLog(): void
     {
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Action/Bank/BankStatementAction.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Action/Bank/BankStatementAction.php');
         self::assertIsString($code);
 
         // Najdi `ignore` method
@@ -178,7 +136,7 @@ final class SecurityFixesTest extends TestCase
      */
     public function testBankMutationsCheckSupplierScope(): void
     {
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Action/Bank/BankStatementAction.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Action/Bank/BankStatementAction.php');
         self::assertIsString($code);
 
         foreach (['manualMatch', 'unmatch', 'ignore'] as $method) {
@@ -196,7 +154,7 @@ final class SecurityFixesTest extends TestCase
      */
     public function testPdfRendererUsesSafeLogoPath(): void
     {
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Service/Pdf/InvoicePdfRenderer.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Service/Pdf/InvoicePdfRenderer.php');
         self::assertIsString($code);
 
         $start = strpos($code, 'private function resolveLogoPath(');
@@ -213,7 +171,7 @@ final class SecurityFixesTest extends TestCase
      */
     public function testWorkReportValidatesProjectOwnership(): void
     {
-        $code = file_get_contents(dirname(__DIR__, 3) . '/api/src/Action/WorkReport/SaveWorkReportAction.php');
+        $code = file_get_contents(dirname(__DIR__, 4) . '/api/src/Action/WorkReport/SaveWorkReportAction.php');
         self::assertIsString($code);
         self::assertStringContainsString('ProjectRepository', $code,
             'SaveWorkReportAction musí mít DI na ProjectRepository (security #4)');

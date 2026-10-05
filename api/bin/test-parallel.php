@@ -342,11 +342,11 @@ if ($source === $configuredDb) {
 
 $availableProcessors = (int) (getenv('NUMBER_OF_PROCESSORS') ?: 0);
 $defaultProcesses = $availableProcessors > 0
-    ? min(12, max(2, (int) floor($availableProcessors * 0.75)))
+    ? min(8, max(2, (int) floor($availableProcessors * 0.75)))
     : 4;
 $processes = (int) ($options['processes'] ?? $defaultProcesses);
-if ($processes < 2 || $processes > 16) {
-    fail('--processes musí být mezi 2 a 16.');
+if ($processes < 2 || $processes > 8) {
+    fail('--processes musí být mezi 2 a 8.');
 }
 
 $runId = bin2hex(random_bytes(6));
@@ -473,6 +473,15 @@ try {
     fwrite(STDERR, '[PARALLEL TEST] ' . $details . "\n");
     $exitCode = 1;
 } finally {
+    if ($exitCode !== 0) {
+        foreach (glob($runtimeRoot . '/worker-*/log/php-errors.log') ?: [] as $errorLog) {
+            foreach (file($errorLog, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+                if (str_contains($line, 'PHP Fatal error:')) {
+                    fwrite(STDERR, '[PARALLEL TEST] ' . basename(dirname($errorLog, 2)) . ': ' . $line . "\n");
+                }
+            }
+        }
+    }
     try {
         $phase('cleanup', function () use ($keepDatabases, $databases, $pdo, $runtimeRoot): void {
             if ($keepDatabases) {

@@ -124,10 +124,14 @@ final class IntegrationCoreTest extends StockTestCase
 
     public function testProductTriggersEmitOnlyAffectedRowsAndTotalPurgeKeepsExpirationFloor(): void
     {
+        $otherSupplier = $this->createSupplier();
+        $this->item($otherSupplier, 'FOREIGN-CHANGE');
         $sid = $this->createSupplier();
         $connection = $this->connection($sid);
         $this->db->pdo()->prepare('UPDATE integration_connections SET retention_days = 1 WHERE id = ?')->execute([$connection['id']]);
-        $start = (int) $this->db->pdo()->query('SELECT COALESCE(MAX(cursor_id), 0) FROM integration_change_log')->fetchColumn();
+        $cursor = $this->db->pdo()->prepare('SELECT COALESCE(MAX(cursor_id), 0) FROM integration_change_log WHERE supplier_id = ?');
+        $cursor->execute([$sid]);
+        $start = (int) $cursor->fetchColumn();
         for ($i = 1; $i <= 37; $i++) {
             $this->item($sid, sprintf('CHANGE-%02d', $i));
         }

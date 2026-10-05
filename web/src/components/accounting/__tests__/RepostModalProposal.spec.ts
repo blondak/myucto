@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({ plan: {} as Record<string, unknown> }))
@@ -47,6 +47,10 @@ function editorCodes(wrapper: Awaited<ReturnType<typeof mountModal>>) {
     .map(l => l.account_code)
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('RepostModal — kontace z nového pravidla', () => {
   beforeEach(() => {
     vi.mocked(accountingApi.repostPlanForLines).mockClear()
@@ -68,6 +72,7 @@ describe('RepostModal — kontace z nového pravidla', () => {
   })
 
   it('odesílá červené storno také při náhledu zamčeného přeúčtování', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     m.plan.strategy = 'reverse'
     m.plan.tax_neutral_available = true
     m.plan.lines = [
@@ -80,7 +85,8 @@ describe('RepostModal — kontace z nového pravidla', () => {
       { account_code: '501', side: 'debit', amount: 100, is_red_storno: true },
       { account_code: '321', side: 'credit', amount: 100, is_red_storno: true },
     ])
-    await new Promise(resolve => setTimeout(resolve, 450))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(450)
     await flushPromises()
     expect(accountingApi.repostPlanForLines).toHaveBeenCalledWith('purchase-invoices', 42, [
       { account_code: '501', side: 'debit', amount: 100, is_red_storno: true },
@@ -90,12 +96,14 @@ describe('RepostModal — kontace z nového pravidla', () => {
   })
 
   it('přepočítá plán také při změně samotného znaménka', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     m.plan.strategy = 'reverse'
     m.plan.tax_neutral_available = true
     const wrapper = await mountModal({})
     const editor = wrapper.findComponent({ name: 'JournalLinesEditor' })
     editor.vm.$emit('update:modelValue', (m.plan.lines as Array<Record<string, unknown>>).map(line => ({ ...line, is_red_storno: true })))
-    await new Promise(resolve => setTimeout(resolve, 450))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(450)
     await flushPromises()
     expect(accountingApi.repostPlanForLines).toHaveBeenCalledTimes(1)
     wrapper.unmount()

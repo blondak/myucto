@@ -30,9 +30,14 @@ final class SharedTestConnectionGuard implements Extension
 {
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
-        $facade->registerSubscriber(new class implements FinishedSubscriber {
+        $facade->registerSubscriber(new class((int) ini_get('max_execution_time')) implements FinishedSubscriber {
+            public function __construct(private readonly int $executionTimeLimit) {}
+
             public function notify(Finished $event): void
             {
+                if ((int) ini_get('max_execution_time') !== $this->executionTimeLimit) {
+                    set_time_limit($this->executionTimeLimit);
+                }
                 ParallelRuntime::restore();
                 foreach (Connection::resetSharedTestSessions() as $dsn) {
                     EventFacade::emitter()->testTriggeredPhpunitError(

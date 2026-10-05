@@ -283,16 +283,15 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             '',
             true,
         );
-        $validation = $restore->validate($archivePath);
+        $report = $restore->restore($archivePath);
         foreach ($sourceCounts as $table => $expected) {
             self::assertSame(
                 $expected,
-                (int) ($validation['counts'][$table] ?? -1),
-                "Před obnovou nesedí počet řádků {$table} v archivu.",
+                (int) ($report['counts'][$table] ?? -1),
+                "Nesedí počet řádků {$table} v obnoveném archivu.",
             );
         }
 
-        $report = $restore->restore($archivePath);
         self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM roles WHERE id = ' . $shiftedRoleId)->fetchColumn());
         self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = ' . $shiftedRoleId)->fetchColumn());
         self::assertGreaterThanOrEqual(2, $report['files'], 'Obnova musí vrátit výplatní i DMS PDF.');

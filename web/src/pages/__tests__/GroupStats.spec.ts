@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { reactive, ref } from 'vue'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { GroupCompany, GroupDashboard, GroupSection } from '@/api/groupDashboard'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), push: vi.fn(), replace: vi.fn(), switchTo: vi.fn() }))
@@ -20,7 +20,6 @@ vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () =>
 
 import GroupStats from '../GroupStats.vue'
 
-enableAutoUnmount(afterEach)
 
 const amounts = { currency: 'CZK', revenue: 100, costs: 60, profit: 40, previous_revenue: 50, previous_costs: 30, previous_profit: 20 }
 const company = (id = 1): GroupCompany => ({

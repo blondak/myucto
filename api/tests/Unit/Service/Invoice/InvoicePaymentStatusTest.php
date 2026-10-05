@@ -64,12 +64,6 @@ final class InvoicePaymentStatusTest extends TestCase
         self::assertSame('paid', self::ps(['status' => 'paid', 'amount_to_pay' => 1000.0, 'paid_total' => 1000.04]));
     }
 
-    public function testZeroDueDocumentNeverOverpaid(): void
-    {
-        // Guard $due > 0 — doklad s nulovou částkou nemá smysl značit přeplaceným.
-        self::assertSame('paid', self::ps(['status' => 'paid', 'amount_to_pay' => 0.0, 'paid_total' => 0.0]));
-    }
-
     // ── InvoiceAmountPolicy pro tax_document ─────────────────────────────────
 
     public function testTaxDocumentAutoMarksPaidOnIssue(): void

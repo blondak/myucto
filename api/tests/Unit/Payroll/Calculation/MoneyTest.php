@@ -20,7 +20,6 @@ final class MoneyTest extends TestCase
         self::assertSame(12_345, $money->minorUnits);
         self::assertSame('CZK', $money->currency);
         self::assertSame('{"currency":"CZK","minor_units":12345}', $money->toCanonicalJson());
-        self::assertSame($money->toCanonicalJson(), $money->toCanonicalJson());
     }
 
     public function testArithmeticReturnsNewValuesAndPreservesOriginals(): void

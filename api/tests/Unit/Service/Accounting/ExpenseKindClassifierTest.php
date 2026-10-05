@@ -375,6 +375,7 @@ final class ExpenseKindClassifierTest extends TestCase
         self::assertNotNull($s);
         self::assertSame(ExpenseKind::SmallAsset, $s->kind);
         self::assertTrue($s->isAutoApplicable(), 'Explicitní pravidlo uživatele je jistota 1,0.');
+        self::assertSame('rule', $s->source);
         self::assertStringContainsString('Alza — drobný majetek', $s->reason);
     }
 
@@ -419,7 +420,7 @@ final class ExpenseKindClassifierTest extends TestCase
         $s = $this->c->classify('Doprava zásilky', 'Alza.cz a.s.', null, 150.0, self::LIMIT, $rules);
 
         self::assertNotNull($s);
-        self::assertNotSame(ExpenseKind::SmallAsset, $s->kind, 'Doprava od Alzy není drobný majetek.');
+        self::assertSame(ExpenseKind::Service, $s->kind, 'Doprava není drobný majetek ani u Alzy.');
     }
 
     public function testRuleDoesNotMatchDifferentVendor(): void

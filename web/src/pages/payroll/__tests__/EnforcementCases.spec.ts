@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type {
   EnforcementCaseDetail,
@@ -255,6 +255,10 @@ async function expandFirstCase(wrapper: ReturnType<typeof mountPage>) {
   await flushPromises()
 }
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('EnforcementCases', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -333,6 +337,7 @@ describe('EnforcementCases', () => {
   })
 
   it('records a documented recipient instruction only through current legal party, verified account and DMS evidence', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const claim = verifiedClaim()
     m.detail.mockResolvedValue({ ...detailOf(summary()), claims: [claim] })
     m.parties.mockResolvedValue([
@@ -420,7 +425,8 @@ describe('EnforcementCases', () => {
     await facts.get('[data-test="recipient-instruction-party"]').setValue('72')
     await facts.get('[data-test="recipient-instruction-account"]').setValue('91')
     await facts.get('[data-test="recipient-instruction-document"]').setValue('Syntetické')
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     await facts.get('[data-test="recipient-instruction-document-83"]').trigger('click')
     await facts.get('[data-test="recipient-instruction-reason"]')
@@ -768,6 +774,7 @@ describe('EnforcementCases', () => {
   })
 
   it('vydá depozit insolvenčnímu správci s rozhodnutím, účtem správce a důvodem', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const remitting = summary({ status: 'remit', evidence_complete: true, recipient_verified: true })
     m.casesPage.mockResolvedValue(page([remitting]))
     m.detail.mockResolvedValue({
@@ -801,7 +808,8 @@ describe('EnforcementCases', () => {
     const apply = wrapper.get('[data-test="transition-apply"]')
     expect(apply.attributes('disabled')).toBeDefined()
     await wrapper.get('form input[type="search"]').setValue('Schválení')
-    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     await wrapper.get('form ul button').trigger('click')
     await wrapper.get('form textarea').setValue('Schváleno oddlužení.')
@@ -1214,6 +1222,7 @@ describe('EnforcementCases', () => {
      * proti evidované částce zůstává (součet musí sedět na korunu).
      */
     it('bere prázdné složky rozpadu jako nulu', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       const claim = verifiedClaim()
       m.detail.mockResolvedValue({ ...detailOf(summary()), claims: [claim] })
       m.claimBreakdowns.mockResolvedValue([])
@@ -1246,7 +1255,8 @@ describe('EnforcementCases', () => {
       }
       await facts.get('[data-test="enforcement-breakdown-form"] input[type="search"]')
         .setValue('Syntetické')
-      await new Promise(resolve => setTimeout(resolve, 300))
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(300)
       await flushPromises()
       await facts.get('[data-test="enforcement-breakdown-form"] ul button').trigger('click')
       await facts.get('[data-test="enforcement-breakdown-form"]').trigger('submit')

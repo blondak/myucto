@@ -290,15 +290,33 @@ final class PartialUpdateHeaderTest extends TestCase
         if ($eur === 0) {
             self::markTestSkipped('Dodavatel nemá aktivní EUR.');
         }
-        $id = $this->createInvoice(null, $eur);
-        $this->db->pdo()->prepare("UPDATE invoices SET exchange_rate = 33.3333, exchange_rate_date = '2096-04-01' WHERE id = ?")
-            ->execute([$id]);
+        $pdo = $this->db->pdo();
+        $cached = $pdo->prepare("SELECT * FROM exchange_rates WHERE currency_code = 'EUR' AND rate_date IN (?, ?)");
+        $cached->execute([self::ISSUE_DATE, self::TAX_DATE]);
+        $originalRates = $cached->fetchAll(\PDO::FETCH_ASSOC);
+        $insert = $pdo->prepare("REPLACE INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, 'EUR', 25.0)");
+        try {
+            foreach ([self::ISSUE_DATE, self::TAX_DATE] as $date) {
+                $insert->execute([$date]);
+            }
+            $id = $this->createInvoice(null, $eur);
+            self::assertSame(25.0, (float) $this->row($id)['exchange_rate']);
+            $pdo->prepare("UPDATE invoices SET exchange_rate = 33.3333, exchange_rate_date = '2096-04-01' WHERE id = ?")
+                ->execute([$id]);
 
-        $res = $this->put($id, ['note_above_items' => 'Jen poznámka']);
-        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
-        $row = $this->row($id);
-        self::assertEqualsWithDelta(33.3333, (float) $row['exchange_rate'], 0.00001);
-        self::assertSame('2096-04-01', $row['exchange_rate_date']);
+            $res = $this->put($id, ['note_above_items' => 'Jen poznámka']);
+            self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            $row = $this->row($id);
+            self::assertEqualsWithDelta(33.3333, (float) $row['exchange_rate'], 0.00001);
+            self::assertSame('2096-04-01', $row['exchange_rate_date']);
+        } finally {
+            $pdo->prepare("DELETE FROM exchange_rates WHERE currency_code = 'EUR' AND rate_date IN (?, ?)")
+                ->execute([self::ISSUE_DATE, self::TAX_DATE]);
+            $restore = $pdo->prepare('INSERT INTO exchange_rates (rate_date, currency_code, rate, fetched_at) VALUES (?, ?, ?, ?)');
+            foreach ($originalRates as $rate) {
+                $restore->execute([$rate['rate_date'], $rate['currency_code'], $rate['rate'], $rate['fetched_at']]);
+            }
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -1,9 +1,8 @@
 import { defineComponent, nextTick, ref } from 'vue'
-import { enableAutoUnmount, flushPromises, mount, shallowMount } from '@vue/test-utils'
+import { flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PriceMatrix from '../PriceMatrix.vue'
 
-enableAutoUnmount(afterEach)
 
 const RouterLinkStub = defineComponent({
   name: 'RouterLink',

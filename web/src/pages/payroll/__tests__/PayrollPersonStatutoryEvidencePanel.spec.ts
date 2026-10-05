@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PayrollStatutoryEvidence, PayrollStatutoryEvidenceRow } from '@/api/payroll'
 
 const mocks = vi.hoisted(() => ({
@@ -286,6 +286,10 @@ function savedRow(section: string, index = 0): PayrollStatutoryEvidenceRow {
   const [, payload] = mocks.saveStatutoryEvidence.mock.calls[0]!
   return payload.sections[section][index]
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('PayrollPersonStatutoryEvidencePanel', () => {
   beforeEach(() => {
@@ -1193,13 +1197,14 @@ describe('PayrollPersonStatutoryEvidencePanel — přidání a uložení v sekci
   })
 
   it('doskok z varování otevře nový záznam a kurzor postaví do pojišťovny', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const wrapper = await mounted(true, true)
 
     const revealed = await (wrapper.vm as unknown as {
       revealSection: (key: string) => Promise<boolean>
     }).revealSection('health_coverages')
     await flushPromises()
-    await new Promise(resolve => setTimeout(resolve, 450))
+    await vi.advanceTimersByTimeAsync(450)
 
     expect(revealed).toBe(true)
     const insurer = wrapper.get('[data-test="health_coverages-0-insurer_code"]')

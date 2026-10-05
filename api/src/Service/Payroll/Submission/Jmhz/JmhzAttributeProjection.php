@@ -50,6 +50,12 @@ final class JmhzAttributeProjection
     /** @var list<JmhzAttributeScope> */
     private array $forms = [];
 
+    /** @var array<int, int> */
+    private array $formOrdinals = [];
+
+    /** @var array<int, JmhzAttributeScope> */
+    private array $formsByOrdinal = [];
+
     /** @param array<string, string> $pathToAttribute */
     private function __construct(private readonly array $pathToAttribute)
     {
@@ -120,15 +126,18 @@ final class JmhzAttributeProjection
     /** @return list<string> */
     public function presentAttributeIds(): array
     {
-        $ids = array_merge(
-            $this->submission->attributeIds(),
-            $this->summary->attributeIds(),
-            $this->pvpoj->attributeIds(),
-        );
-        foreach ($this->forms as $form) {
-            $ids = array_merge($ids, $form->attributeIds());
+        $ids = [];
+        foreach ([$this->submission, $this->summary, $this->pvpoj] as $scope) {
+            foreach ($scope->attributeIds() as $attributeId) {
+                $ids[$attributeId] = true;
+            }
         }
-        $ids = array_values(array_unique($ids));
+        foreach ($this->forms as $scope) {
+            foreach ($scope->attributeIds() as $attributeId) {
+                $ids[$attributeId] = true;
+            }
+        }
+        $ids = array_keys($ids);
         sort($ids);
 
         return $ids;
@@ -161,6 +170,9 @@ final class JmhzAttributeProjection
         foreach ($children as $child) {
             $name = $child->localName ?? '';
             $seen[$name] = ($seen[$name] ?? 0) + 1;
+            if ($name === 'formularOsoby') {
+                $this->formOrdinals[spl_object_id($child)] = $seen[$name] - 1;
+            }
             [$childRoot, $childPrefix] = $this->descend($child, $root, $prefix, $name);
             $childCounters = $counters;
             $childCounters[$childPrefix] = $seen[$name];
@@ -302,18 +314,22 @@ final class JmhzAttributeProjection
                 'Formulář osoby nemá v podání nadřazenou součást.',
             );
         }
-        $ordinal = 0;
-        for ($node = $holder->previousSibling; $node !== null; $node = $node->previousSibling) {
-            if ($node instanceof DOMElement && ($node->localName ?? '') === 'formularOsoby') {
-                ++$ordinal;
+        $holderId = spl_object_id($holder);
+        $ordinal = $this->formOrdinals[$holderId] ?? null;
+        if ($ordinal === null) {
+            $ordinal = 0;
+            for ($node = $holder->previousSibling; $node !== null; $node = $node->previousSibling) {
+                if ($node instanceof DOMElement && ($node->localName ?? '') === 'formularOsoby') {
+                    ++$ordinal;
+                }
             }
+            $this->formOrdinals[$holderId] = $ordinal;
         }
-        foreach ($this->forms as $form) {
-            if ($form->ordinal === $ordinal) {
-                return $form;
-            }
+        if (isset($this->formsByOrdinal[$ordinal])) {
+            return $this->formsByOrdinal[$ordinal];
         }
         $scope = new JmhzAttributeScope(self::PART_FORM, $ordinal);
+        $this->formsByOrdinal[$ordinal] = $scope;
         $this->forms[] = $scope;
 
         return $scope;

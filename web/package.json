@@ -17,7 +17,7 @@
     "test": "node scripts/run-vitest.mjs run",
     "test:unit": "node scripts/run-vitest.mjs run",
     "test:watch": "node scripts/run-vitest.mjs",
-    "test:pwa": "node --test \"tests/*.test.mjs\"",
+    "test:pwa": "node --test --test-concurrency=8 \"tests/*.test.mjs\"",
     "gen:i18n": "node scripts/gen-i18n-map.mjs"
   },
   "dependencies": {
@@ -36,6 +36,7 @@
     "@types/node": "^26.6.2",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^20.14.5",
     "jsdom": "^30.1.0",
     "lightningcss": "^1.33.0",
     "tailwindcss": "^4.3.3",

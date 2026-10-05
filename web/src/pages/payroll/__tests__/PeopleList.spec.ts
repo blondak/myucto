@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, nextTick } from 'vue'
 import type { PayrollPeopleFilter, PayrollPersonListItem } from '@/api/payroll'
@@ -170,7 +170,8 @@ function serveRoster(params: PageParams) {
 
 /** Hledání je odložené — test musí počkat, než odklad doběhne. */
 async function settleSearch() {
-  await new Promise(resolve => setTimeout(resolve, 350))
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(350)
   await flushPromises()
 }
 
@@ -198,6 +199,10 @@ function mountPage(employmentCardStub: unknown = true) {
     },
   })
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('PeopleList toolbar and shared employee creation', () => {
   beforeEach(() => {
@@ -278,6 +283,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * o člověku ze třetí stránky by obrazovka tvrdila, že neexistuje.
    */
   it('sends the search term and the filter to the server instead of narrowing the page', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const wrapper = mountPage()
     await flushPromises()
 
@@ -637,6 +643,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
   })
 
   it('returns to the list from the breadcrumb and keeps the search and filter', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     m.person.mockResolvedValue({
       ...person(3, 'Gama K doplnění', true, true),
       employments: [],

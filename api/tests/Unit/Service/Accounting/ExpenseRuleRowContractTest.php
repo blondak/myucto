@@ -32,20 +32,6 @@ final class ExpenseRuleRowContractTest extends TestCase
         $this->c = new ExpenseKindClassifier();
     }
 
-    /** Řádek z repozitáře (cast() → bool/int/float) musí klasifikátor přečíst beze změny tvaru. */
-    public function testRepositoryRowShapeMatchesOnVendorName(): void
-    {
-        $s = $this->c->classify('položka bez klíčového slova', 'Mironet.cz a.s.', null, 3000.0, self::LIMIT, [
-            $this->row(['name' => 'Mironet = zboží', 'vendor_name_contains' => 'Mironet', 'expense_kind' => 'small_asset']),
-        ]);
-
-        self::assertNotNull($s);
-        self::assertSame(ExpenseKind::SmallAsset, $s->kind);
-        self::assertSame('rule', $s->source);
-        self::assertStringContainsString('Mironet = zboží', $s->reason, 'Důvod nese jméno pravidla — UI ho zobrazuje.');
-        self::assertTrue($s->isAutoApplicable(), 'Shoda pravidlem má plnou jistotu.');
-    }
-
     public function testMatchesOnVendorClientIdFromRepositoryRow(): void
     {
         $s = $this->c->classify('nespecifikovaná položka', null, 42, 3000.0, self::LIMIT, [
@@ -96,31 +82,6 @@ final class ExpenseRuleRowContractTest extends TestCase
         $general = $this->c->classify('monitor', 'Alza.cz a.s.', null, 6000.0, self::LIMIT, $ordered);
         self::assertNotNull($general);
         self::assertSame(ExpenseKind::SmallAsset, $general->kind, 'Na co konkrétní nesedí, bere obecné.');
-    }
-
-    /** is_active = false z repozitáře (bool po cast()) musí pravidlo vyřadit. */
-    public function testInactiveRuleFromRepositoryIsSkipped(): void
-    {
-        $s = $this->c->classify('položka bez klíčového slova', 'Ukázka', null, 500.0, self::LIMIT, [
-            $this->row(['name' => 'Vypnuté', 'vendor_name_contains' => 'Ukázka',
-                'expense_kind' => 'small_asset', 'is_active' => false]),
-        ]);
-
-        self::assertNull($s, 'Deaktivované pravidlo se nesmí uplatnit.');
-    }
-
-    /**
-     * Past z §DM: dodavatel sedí, ale řádek je doprava. Negativní slova přebijí i pravidlo —
-     * Alza prodá notebook i dopravu na jedné faktuře.
-     */
-    public function testNegativeKeywordOverridesTenantRule(): void
-    {
-        $s = $this->c->classify('doprava zásilky', 'Alza.cz a.s.', null, 150.0, self::LIMIT, [
-            $this->row(['name' => 'Alza = drobný majetek', 'vendor_name_contains' => 'Alza', 'expense_kind' => 'small_asset']),
-        ]);
-
-        self::assertNotNull($s);
-        self::assertSame(ExpenseKind::Service, $s->kind, 'Doprava není drobný majetek ani u Alzy.');
     }
 
     /** Práh §26/2 ZDP se prosadí i nad pravidlem tenanta — limit je zákon, ne preference. */

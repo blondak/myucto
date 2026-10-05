@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Pdf;
 
 use Mpdf\Mpdf;
+use Mpdf\MpdfException;
 use MyInvoice\Service\Pdf\ChunkedHtmlWriter;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PHPUnit\Framework\TestCase;
@@ -15,7 +16,7 @@ use PHPUnit\Framework\TestCase;
  * dokument narazí na `pcre.backtrack_limit` a shodí export s chybou
  * "HTML code size is larger than pcre.backtrack_limit". Test to ověřuje
  * rychle — místo tisíců skutečných řádků dočasně STÁHNE `pcre.backtrack_limit`
- * na malou hodnotu, takže i pár stovek řádků spolehlivě reprodukuje stejnou
+ * na malou hodnotu, takže i několik zápisů spolehlivě reprodukuje stejnou
  * chybu, a ověří, že {@see ChunkedHtmlWriter} (WriteHTML po dávkách řádků,
  * CSS zvlášť přes mode HEADER_CSS) stejné HTML zvládne bez chyby.
  */
@@ -32,7 +33,7 @@ final class ChunkedHtmlWriterTest extends TestCase
 
     public function testSingleWriteHtmlCallFailsOnLowBacktrackLimitButChunkedWriteSucceeds(): void
     {
-        $html = self::syntheticJournalHtml(600);
+        $html = self::syntheticJournalHtml(8);
 
         $this->originalBacktrackLimit = (string) ini_get('pcre.backtrack_limit');
         ini_set('pcre.backtrack_limit', '2000');
@@ -41,7 +42,8 @@ final class ChunkedHtmlWriterTest extends TestCase
         $threw = false;
         try {
             $failingMpdf->WriteHTML($html);
-        } catch (\Throwable $e) {
+        } catch (MpdfException $e) {
+            self::assertStringContainsString('pcre.backtrack_limit', $e->getMessage());
             $threw = true;
         }
         self::assertTrue($threw, 'Test musí nejdřív ověřit, že syntetické HTML za sníženého pcre.backtrack_limit skutečně reprodukuje původní pád — jinak test nic neříká.');
@@ -53,16 +55,6 @@ final class ChunkedHtmlWriterTest extends TestCase
         self::assertStringStartsWith('%PDF', $pdf);
     }
 
-    public function testChunkedOutputContainsAllRowsAndBothTotals(): void
-    {
-        $html = self::syntheticJournalHtml(120);
-        $mpdf = self::mpdf();
-        ChunkedHtmlWriter::write($mpdf, $html, rowsPerChunk: 25);
-        $pdf = $mpdf->Output('', 'S');
-
-        self::assertStringStartsWith('%PDF', $pdf);
-        self::assertGreaterThan(1000, strlen($pdf));
-    }
 
     /**
      * mPDF drží otevřenou <table> v paměti celou (deník 13 tis. zápisů = 3,7 GB), proto

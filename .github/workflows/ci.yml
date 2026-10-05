@@ -216,7 +216,15 @@ jobs:
         working-directory: api
         env:
           MYINVOICE_TEST_URL: http://localhost:8080
-        run: php bin/test-parallel.php --processes=4 --application
+        run: php bin/test-parallel.php --processes=8 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
+
+      - name: Backend test results and timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-test-results
+          path: api/test-results/
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend (Vue + TypeScript)
@@ -258,7 +266,15 @@ jobs:
       # ležely nepovšimnuté od 6.6.0. Sada běží ~3 minuty, což za to stojí.
       - name: Unit and component tests
         working-directory: web
-        run: pnpm test
+        run: pnpm test -- --reporter=default --reporter=json --outputFile=test-results/vitest.json
+
+      - name: Frontend test results and timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-test-results
+          path: web/test-results/
+          if-no-files-found: ignore
 
       # Typy už zkontroloval krok TypeScript check; build:image je build bez druhé kontroly.
       - name: Production build

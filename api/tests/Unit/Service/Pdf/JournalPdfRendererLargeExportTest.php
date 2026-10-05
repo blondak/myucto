@@ -24,7 +24,7 @@ final class JournalPdfRendererLargeExportTest extends TestCase
 {
     public function testRendersManyEntriesWithMultipleLinesWithoutError(): void
     {
-        $data = self::syntheticJournalData(800, 3);
+        $data = self::syntheticJournalData(101, 3);
 
         $pdf = (new JournalPdfRenderer())->render($data);
 

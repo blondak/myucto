@@ -92,7 +92,49 @@ final class JmhzAttributeProjectionTest extends TestCase
         $projection = JmhzAttributeProjection::fromXml(JmhzXmlSample::twoForms());
 
         self::assertCount(2, $projection->forms());
+        self::assertSame(0, $projection->forms()[0]->ordinal);
+        self::assertSame(1, $projection->forms()[1]->ordinal);
         self::assertSame('1000000001', $projection->forms()[0]->value('10051'));
         self::assertSame('1000000012', $projection->forms()[1]->value('10051'));
+    }
+
+    public function testManyFormsKeepOrdinalsIncludingEmptySiblings(): void
+    {
+        $forms = '';
+        for ($ordinal = 0; $ordinal <= 1_500; ++$ordinal) {
+            $forms .= $ordinal === 750
+                ? '<formularOsoby/>'
+                : self::compactForm($ordinal);
+        }
+
+        $projection = JmhzAttributeProjection::fromXml(
+            JmhzXmlSample::document($forms, formCount: 1_501),
+        );
+
+        self::assertCount(1_500, $projection->forms());
+        self::assertSame(749, $projection->forms()[749]->ordinal);
+        self::assertSame(751, $projection->forms()[750]->ordinal);
+        self::assertSame('1000000751', $projection->forms()[750]->value('10051'));
+        self::assertSame(1_500, $projection->forms()[1_499]->ordinal);
+        self::assertContains(10051, $projection->presentAttributeIds());
+        self::assertContains(10495, $projection->presentAttributeIds());
+    }
+
+    private static function compactForm(int $ordinal): string
+    {
+        $personId = sprintf('%010d', 1_000_000_000 + $ordinal);
+
+        return <<<XML
+                <formularOsoby>
+                  <hlavicka>
+                    <primarniPpv>true</primarniPpv>
+                  </hlavicka>
+                  <form:bezPriznaku>
+                    <form:identifikace>
+                      <form:ikMpsv>{$personId}</form:ikMpsv>
+                    </form:identifikace>
+                  </form:bezPriznaku>
+                </formularOsoby>
+            XML;
     }
 }

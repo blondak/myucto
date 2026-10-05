@@ -64,6 +64,7 @@ describe('payrollAgendaLinks', () => {
       // občasné agendy
       'components', 'travel', 'average_earnings',
       'deduction_agreements', 'enforcement', 'insolvency',
+      'personnel_file',
       // výstupy
       'documents', 'annual_settlement',
     ])

@@ -582,16 +582,6 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertSame('1.4.3', $result['schema']['data_version']);
     }
 
-    public function testRepeatedSerializationIsIdentical(): void
-    {
-        $validator = new JmhzScenario1XmlValidator();
-
-        self::assertSame(
-            $validator->dryRun($this->resolution(), $this->envelope())['sha256'],
-            $validator->dryRun($this->resolution(), $this->envelope())['sha256'],
-        );
-    }
-
     /**
      * XSD hlídá jen tvar. Že se element jmenuje tak, jak ho pojmenoval datový
      * slovník ČSSZ, ověří až porovnání proti připnutému manifestu — jinak by

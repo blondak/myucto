@@ -53,8 +53,8 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
 
     public function testLegacyBackfillAndIdempotentRerun(): void
     {
-        $this->runMigrator('--until=1073_purchase_invoice_vat_allocations.sql');
         $db = $this->databasePdo();
+        $this->createLegacyParentTables($db);
         $this->seedLegacyScenarios($db);
 
         $this->runMigrator();
@@ -126,6 +126,83 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         self::assertSame(6, (int) $db->query('SELECT COUNT(*) FROM roles')->fetchColumn());
     }
 
+    private function createLegacyParentTables(PDO $db): void
+    {
+        $tables = [
+            'countries' => 'id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'vat_rates' => 'id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'currencies' => "id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                supplier_id INT UNSIGNED NOT NULL, code CHAR(3) NOT NULL,
+                label VARCHAR(60) NOT NULL, symbol VARCHAR(8) NOT NULL,
+                name_cs VARCHAR(60) NOT NULL, name_en VARCHAR(60) NOT NULL,
+                KEY idx_currencies_supplier (supplier_id)",
+            'supplier' => "id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                company_name VARCHAR(190) NOT NULL, street VARCHAR(190) NOT NULL,
+                city VARCHAR(120) NOT NULL, zip VARCHAR(10) NOT NULL,
+                country_id SMALLINT UNSIGNED NOT NULL, email VARCHAR(190) NOT NULL,
+                default_currency_id INT UNSIGNED NOT NULL, default_vat_rate_id INT UNSIGNED NOT NULL,
+                CONSTRAINT fk_sup_country FOREIGN KEY (country_id) REFERENCES countries(id),
+                CONSTRAINT fk_sup_vat FOREIGN KEY (default_vat_rate_id) REFERENCES vat_rates(id),
+                CONSTRAINT fk_sup_currency FOREIGN KEY (default_currency_id) REFERENCES currencies(id)",
+            'users' => "id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(190) NOT NULL, password_hash CHAR(60) NOT NULL,
+                name VARCHAR(120) NOT NULL,
+                role ENUM('admin','accountant','readonly','client') NOT NULL DEFAULT 'readonly',
+                locale ENUM('cs','en') NOT NULL DEFAULT 'cs', is_active TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_users_email (email)",
+            'user_suppliers' => "user_id BIGINT UNSIGNED NOT NULL, supplier_id INT UNSIGNED NOT NULL,
+                role ENUM('accountant','readonly') NULL DEFAULT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, supplier_id), KEY idx_usersup_supplier (supplier_id),
+                CONSTRAINT fk_usersup_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                CONSTRAINT fk_usersup_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE",
+            'documents' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'bank_transactions' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'purchase_invoices' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, supplier_id INT UNSIGNED NOT NULL',
+            'document_requests' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, purchase_invoice_id BIGINT UNSIGNED NULL',
+            'warehouses' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, is_active TINYINT(1) NOT NULL DEFAULT 1',
+            'stock_documents' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'stock_document_lines' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'stock_items' => "id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, supplier_id INT UNSIGNED NOT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                lifecycle_status ENUM('draft','ready','retired') NOT NULL DEFAULT 'ready'",
+            'stock_item_prices' => 'supplier_id INT UNSIGNED NOT NULL, stock_item_id BIGINT UNSIGNED NOT NULL',
+            'stock_item_i18n' => 'supplier_id INT UNSIGNED NOT NULL, stock_item_id BIGINT UNSIGNED NOT NULL',
+            'stock_media' => 'supplier_id INT UNSIGNED NOT NULL, stock_item_id BIGINT UNSIGNED NOT NULL',
+            'stock_levels' => 'supplier_id INT UNSIGNED NOT NULL, stock_item_id BIGINT UNSIGNED NOT NULL',
+            'dimension_types' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'dimension_values' => 'id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY',
+            'payroll_employees' => "id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                supplier_id INT UNSIGNED NOT NULL, UNIQUE KEY uq_payroll_employee_supplier_id (supplier_id, id)",
+            'external_entity_map' => "id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                supplier_id INT UNSIGNED NOT NULL, source_key VARCHAR(100) NOT NULL,
+                entity_type VARCHAR(40) NOT NULL, external_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
+                internal_id BIGINT UNSIGNED NOT NULL, created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                UNIQUE KEY uq_external_entity_identity (supplier_id, source_key, entity_type, external_id),
+                KEY ix_external_entity_internal (supplier_id, entity_type, internal_id),
+                FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE",
+            'bank_rule_templates' => "id SMALLINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                template_key VARCHAR(64) NOT NULL, name_cs VARCHAR(120) NOT NULL, name_en VARCHAR(120) NOT NULL,
+                direction ENUM('incoming','outgoing') NOT NULL, operation_type VARCHAR(40) NOT NULL,
+                counterparty_bank VARCHAR(10) NULL, counterparty_prefix VARCHAR(6) NULL,
+                vs_placeholder VARCHAR(40) NULL, message_contains VARCHAR(120) NULL, rule_key VARCHAR(64) NOT NULL,
+                default_priority SMALLINT UNSIGNED NOT NULL DEFAULT 100, sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                is_active TINYINT(1) NOT NULL DEFAULT 1, UNIQUE KEY uq_brt_key (template_key)",
+        ];
+        foreach ($tables as $table => $columns) {
+            $db->exec("CREATE TABLE `{$table}` ({$columns}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        $db->exec('ALTER TABLE currencies ADD FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE');
+        $db->exec('INSERT INTO countries (id) VALUES (1)');
+        $db->exec('INSERT INTO vat_rates (id) VALUES (1)');
+        $db->exec("INSERT INTO bank_rule_templates
+            (template_key, name_cs, name_en, direction, operation_type, rule_key) VALUES
+            ('fixture.incoming', 'Příchozí test', 'Incoming test', 'incoming', 'bank.rule.custom', 'fixture.incoming'),
+            ('fixture.outgoing', 'Odchozí test', 'Outgoing test', 'outgoing', 'bank.rule.custom', 'fixture.outgoing')");
+    }
+
     private function seedLegacyScenarios(PDO $db): void
     {
         $db->exec('SET FOREIGN_KEY_CHECKS = 0');
@@ -181,10 +258,26 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         );
     }
 
-    private function runMigrator(?string $extraArgument = null): void
+    private function runMigrator(): void
     {
-        $command = [PHP_BINARY, $this->rootDir . '/api/bin/migrate.php', '--no-backfills'];
-        if ($extraArgument !== null) $command[] = $extraArgument;
+        $command = [
+            PHP_BINARY,
+            $this->rootDir . '/api/bin/migrate.php',
+            '--no-backfills',
+            '--no-analyze',
+            '--only=' . implode(',', [
+                '1074_dynamic_roles_permissions.sql',
+                '1186_payroll_module_foundation.sql',
+                '1404_purchase_invoice_submissions.sql',
+                '1747_predefined_admin_roles.sql',
+                '1748_bank_rule_templates_tenant_scope.sql',
+                '1792_stock_fulfillment.sql',
+                '1796_integration_core.sql',
+                '1888_other_items_role_permissions.sql',
+                '1959_purchase_invoice_approvals.sql',
+                '1962_payroll_personnel_file.sql',
+            ]),
+        ];
         $env = getenv();
         self::assertIsArray($env);
         $env['MYINVOICE_DB_NAME'] = $this->database;

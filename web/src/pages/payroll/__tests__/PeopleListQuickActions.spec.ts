@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { PayrollPersonListItem } from '@/api/payroll'
 
 /**
@@ -114,9 +114,6 @@ function mountPage(people: PayrollPersonListItem[]) {
     },
   })
 }
-
-// Dialog i nabídka jsou teleportované — odmontovat je musí VTU, ne mazání <body>.
-enableAutoUnmount(afterEach)
 
 describe('PeopleList — rychlé akce v řádku', () => {
   beforeEach(() => {
