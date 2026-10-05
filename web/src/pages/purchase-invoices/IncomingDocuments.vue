@@ -7,6 +7,7 @@ import {
   type PurchaseInvoiceSubmission,
   type PurchaseInvoiceSubmissionKindHint,
   type PurchaseInvoiceSubmissionStatus,
+  type SubmissionUploadResult,
 } from '@/api/purchaseInvoiceSubmissions'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
@@ -41,7 +42,11 @@ const kindHint = ref<PurchaseInvoiceSubmissionKindHint | null>(null)
 const uploadDims = ref<DimensionMap>({})
 const dims = useDimensions()
 const uploading = ref(false)
+const uploadProgress = ref({ done: 0, total: 0 })
 const fileInput = ref<HTMLInputElement | null>(null)
+
+/** Výběr najednou; na server jde každý soubor zvlášť (limit požadavku i PHP max_file_uploads je 20). */
+const MAX_FILES = 500
 
 const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png'
 /** Server bere podle `documents.max_file_bytes`, výchozí 50 MiB; tady jen UX pojistka. */
@@ -212,17 +217,23 @@ async function load(keepSelection = true) {
   }
 }
 
+function limitFiles(list: File[]): File[] {
+  if (list.length <= MAX_FILES) return list
+  toast.warning(t('purchase_submissions.inbox_too_many_files', { max: MAX_FILES }))
+  return list.slice(0, MAX_FILES)
+}
+
 function selectFiles(event: Event) {
-  files.value = Array.from((event.target as HTMLInputElement).files ?? [])
+  files.value = limitFiles(Array.from((event.target as HTMLInputElement).files ?? []))
 }
 
 /** Drag&drop i klik v dropzone plní tentýž výběr, odeslání zůstává na tlačítku. */
 function addDroppedFiles(dropped: File[]) {
   const known = new Set(files.value.map(f => `${f.name}:${f.size}:${f.lastModified}`))
-  files.value = [
+  files.value = limitFiles([
     ...files.value,
     ...dropped.filter(f => !known.has(`${f.name}:${f.size}:${f.lastModified}`)),
-  ]
+  ])
 }
 
 function clearFiles() {
@@ -233,8 +244,26 @@ function clearFiles() {
 async function upload() {
   if (uploading.value || files.value.length === 0) return
   uploading.value = true
+  uploadProgress.value = { done: 0, total: files.value.length }
   try {
-    const result = await purchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value, dims.canEdit.value ? uploadDims.value : {})
+    // Po jednom souboru: velká dávka nenarazí na limit požadavku a chyba jednoho
+    // souboru (velikost, formát, výpadek spojení) neshodí ostatní.
+    const result: SubmissionUploadResult = { items: [], created: 0, duplicates: 0, errors: [] }
+    for (const file of files.value) {
+      try {
+        const part = await purchaseInvoiceSubmissionsApi.upload([file], note.value, kindHint.value, dims.canEdit.value ? uploadDims.value : {})
+        result.items.push(...part.items)
+        result.created += part.created
+        result.duplicates += part.duplicates
+        result.errors.push(...part.errors)
+      } catch (e) {
+        result.errors.push({ filename: file.name, code: 'upload_failed', message: apiErrorMessage(e) })
+      }
+      uploadProgress.value = { done: uploadProgress.value.done + 1, total: uploadProgress.value.total }
+    }
+    if (result.items.length === 0 && result.errors.length > 0) {
+      throw new Error(result.errors[0].message)
+    }
     if (result.errors.length > 0) {
       toast.warning(t('purchase_submissions.uploaded_partial', {
         accepted: result.items.length,
@@ -473,7 +502,7 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; chec
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 12l4 4L19 6" />
           </svg>
-          {{ uploading ? t('purchase_submissions.uploading') : t('purchase_submissions.inbox_submit_action') }}
+          {{ uploading ? t('purchase_submissions.inbox_uploading_progress', uploadProgress) : t('purchase_submissions.inbox_submit_action') }}
         </button>
       </div>
     </section>
