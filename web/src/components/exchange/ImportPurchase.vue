@@ -32,7 +32,7 @@ const isManaged = computed(() => auth.isManagedInstallation)
 // ── Upload (multipart, kind=purchase) ───────────────────────────────────────
 // Import běží na pozadí, stejným composablem jako vydaná strana: dávka z Pohody má
 // běžně stovky až tisíce dokladů a synchronní request ji nepřežije.
-const { files, running, cancelling, error, report, job, percent, purchaseStatus, pick, start, cancel, reset } =
+const { files, running, cancelling, error, report, job, percent, purchaseStatus, uploaded, pick, start, cancel, reset } =
   useFileImportJob('purchase')
 
 // Koncept se nezapočítává do nákladů, závazků ani výkazů. Doklad ze strukturovaného
@@ -170,7 +170,7 @@ async function runScan() {
             class="flex-1 justify-center whitespace-nowrap"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/></svg>
-            {{ running ? t('imports.uploading') : t('imports.upload') }}
+            {{ running ? (uploaded ? t('imports.uploading_files', uploaded) : t('imports.uploading')) : t('imports.upload') }}
           </button>
           <button
             v-if="files.length > 0 || report"

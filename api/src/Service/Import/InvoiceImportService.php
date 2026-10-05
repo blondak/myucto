@@ -127,9 +127,13 @@ final class InvoiceImportService
         'payment_calendar' => 'splátkový kalendář',
     ];
 
-    /** Bezpečnostní limity proti zip-bomb / DoS. */
-    private const MAX_ZIP_ENTRIES = 500;
-    private const MAX_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MiB
+    /**
+     * Bezpečnostní limity proti zip-bomb / DoS. Počet položek zahrnuje i PDF, které se
+     * přeskakují (export z Fakturoidu nese ke každému ISDOC i PDF), součet velikostí jen
+     * načítané XML/ISDOC.
+     */
+    private const MAX_ZIP_ENTRIES = 20000;
+    private const MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024;
     private const MAX_SINGLE_ENTRY_BYTES = 10 * 1024 * 1024;       // 10 MiB
 
     /**
@@ -265,6 +269,14 @@ final class InvoiceImportService
 
         // 1. Rozbalení ZIPů na ploché soubory.
         $flat = [];
+        $flatBytes = 0;
+        $append = static function (array $entry) use (&$flat, &$flatBytes): void {
+            $flatBytes += strlen($entry['content']) + strlen($entry['pdf'] ?? '');
+            if ($flatBytes > self::MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                throw new \RuntimeException('Celková velikost importu po rozbalení překračuje povolený limit.');
+            }
+            $flat[] = $entry;
+        };
         foreach ($files as $f) {
             // ISDOCX balíček (ZIP s .isdoc + PDF + manifest) → vytáhni vnitřní .isdoc.
             // Musí předcházet obecnému isZip(): jinak by se rozbalil jako bundle a
@@ -274,7 +286,7 @@ final class InvoiceImportService
             if ($this->isIsdocx($f['name'], $f['content'])) {
                 $pkg = (new IsdocxExtractor())->unwrap($f['content']);
                 if ($pkg !== null) {
-                    $flat[] = [
+                    $append([
                         'name'     => $f['name'] . '/' . $pkg['isdoc_name'],
                         'content'  => $pkg['isdoc'],
                         'pdf'      => $pkg['pdf'],
@@ -284,19 +296,19 @@ final class InvoiceImportService
                         'source'        => $f['content'],
                         'source_name'   => basename($f['name']),
                         'source_format' => 'isdocx',
-                    ];
+                    ]);
                 } else {
                     // Nepodařilo se rozbalit → necháme na parseRaw čitelnou chybu.
-                    $flat[] = $f;
+                    $append($f);
                 }
                 continue;
             }
             if ($this->isZip($f['name'], $f['content'])) {
                 foreach ($this->unzip($f['content']) as $sub) {
-                    $flat[] = ['name' => $f['name'] . '/' . $sub['name'], 'content' => $sub['content']];
+                    $append(['name' => $f['name'] . '/' . $sub['name'], 'content' => $sub['content']]);
                 }
             } else {
-                $flat[] = $f;
+                $append($f);
             }
         }
 

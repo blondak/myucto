@@ -142,7 +142,7 @@ Do fronty vede několik cest:
 | **Portál → Doklady pro účetní** — dávka až 20 souborů | klient, spontánně |
 | Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
 | **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
-| **Nahrát do fronty** přímo na stránce Příchozí doklady — až 500 souborů najednou, nahrávají se postupně a tlačítko ukazuje průběh | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+| **Nahrát do fronty** přímo na stránce Příchozí doklady — až 5000 souborů najednou, nahrávají se postupně a tlačítko ukazuje průběh | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
 | **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní; doklad je rovnou navázaný na platbu kartou |
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do

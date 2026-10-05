@@ -131,19 +131,56 @@ export interface StartedImportJob {
  * Spustí import na pozadí. Dávka z jiného systému má běžně tisíce dokladů —
  * synchronní {@link uploadImport} na ni nestačí a její utnutí uprostřed nechá doklady
  * založené, ale nedorovná číselné řady ani nepřepočte statistiky klientů.
+ *
+ * Soubory jdou po částech (PHP bere v jednom požadavku jen omezený počet souborů
+ * a bajtů); server je skládá do jedné dávky a job založí až poslední požadavek.
  */
+export const IMPORT_JOB_MAX_FILES = 5000
+export const IMPORT_JOB_MAX_FILE_BYTES = 40 * 1024 * 1024
+const CHUNK_FILES = 20
+const CHUNK_BYTES = 40 * 1024 * 1024
+
 export async function startImportJob(
   files: File[],
   kind: ImportKind = 'auto',
   purchaseStatus: PurchaseImportStatus = 'received',
+  onUploaded?: (done: number, total: number) => void,
 ): Promise<StartedImportJob> {
-  const fd = new FormData()
-  for (const f of files) fd.append('files[]', f, f.name)
-  const r = await api.post<StartedImportJob>(
-    `/admin/import/start?kind=${kind}&purchase_status=${purchaseStatus}`, fd,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
-  )
-  return r.data
+  if (files.length > IMPORT_JOB_MAX_FILES) throw new RangeError('import_too_many_files')
+  const chunks: File[][] = []
+  let current: File[] = []
+  let bytes = 0
+  for (const f of files) {
+    if (f.size > IMPORT_JOB_MAX_FILE_BYTES) throw new RangeError('import_file_too_large')
+    if (current.length > 0 && (current.length >= CHUNK_FILES || bytes + f.size > CHUNK_BYTES)) {
+      chunks.push(current)
+      current = []
+      bytes = 0
+    }
+    current.push(f)
+    bytes += f.size
+  }
+  if (current.length > 0) chunks.push(current)
+
+  let token = ''
+  let done = 0
+  for (const [i, chunk] of chunks.entries()) {
+    const fd = new FormData()
+    for (const f of chunk) fd.append('files[]', f, f.name)
+    const params = new URLSearchParams({ kind, purchase_status: purchaseStatus, file_count: String(chunk.length) })
+    if (token) params.set('upload', token)
+    const last = i === chunks.length - 1
+    if (!last) params.set('stage', '1')
+    const r = await api.post<StartedImportJob & { upload_token?: string }>(
+      `/admin/import/start?${params.toString()}`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    )
+    done += chunk.length
+    onUploaded?.(done, files.length)
+    if (last) return r.data
+    token = r.data.upload_token ?? ''
+  }
+  throw new Error('no_files')
 }
 
 export async function fetchImportJob(id: number): Promise<FileImportJob> {

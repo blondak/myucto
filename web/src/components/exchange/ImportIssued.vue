@@ -11,7 +11,7 @@ const { t } = useI18n()
 // Import běží na pozadí — dávka z jiného systému má běžně tisíce dokladů a synchronní
 // request na ni nestačí. Průběh i zrušení řeší sdílený composable, aby vydaná a přijatá
 // strana nesledovaly tentýž job dvěma různými způsoby.
-const { files, running, cancelling, error, report, job, percent, pick, start, cancel, reset } =
+const { files, running, cancelling, error, report, job, percent, uploaded, pick, start, cancel, reset } =
   useFileImportJob('issued')
 
 // `e.message` je u axiosu jen „Request failed with status code 500". Backend přitom
@@ -85,7 +85,7 @@ const clear = reset
             class="flex-1 justify-center whitespace-nowrap"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/></svg>
-            {{ running ? t('imports.uploading') : t('imports.upload') }}
+            {{ running ? (uploaded ? t('imports.uploading_files', uploaded) : t('imports.uploading')) : t('imports.upload') }}
           </button>
           <button
             v-if="files.length > 0 || report"

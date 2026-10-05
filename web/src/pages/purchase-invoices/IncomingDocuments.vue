@@ -46,7 +46,7 @@ const uploadProgress = ref({ done: 0, total: 0 })
 const fileInput = ref<HTMLInputElement | null>(null)
 
 /** Výběr najednou; na server jde každý soubor zvlášť (limit požadavku i PHP max_file_uploads je 20). */
-const MAX_FILES = 500
+const MAX_FILES = 5000
 
 const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png'
 /** Server bere podle `documents.max_file_bytes`, výchozí 50 MiB; tady jen UX pojistka. */

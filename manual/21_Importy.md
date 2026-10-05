@@ -27,8 +27,15 @@ Formulář:
   - `.isdoc` (ISDOC 5.x nebo 6.x)
   - `.isdocx` (ISDOC Package — ZIP balíček se strukturovaným ISDOC + PDF; viz § 21.6)
   - `.pdf` (PDF/A-3 s embedded ISDOC nebo ISDOCX přílohou — viz § 21.6)
-  - `.zip` s libovolným počtem těchto souborů uvnitř
+  - `.zip` s exportovanými doklady
 - **Importovat** — odešle soubory a spustí import **na pozadí**.
+
+Najednou lze vybrat až 5000 souborů. Jeden soubor může mít nejvýše 40 MiB,
+celá nahrávaná dávka 128 MiB. Větší export rozděl do menších dávek. Soubory
+se nahrávají po částech a tlačítko ukazuje průběh. Import se spustí až po
+úspěšném nahrání celé dávky; neúplná nebo odmítnutá část import nespustí.
+ZIP může mít nejvýše 20 000 položek a rozbalené doklady celé dávky nejvýše
+128 MiB. Jednotlivé XML nebo ISDOC v ZIP může mít nejvýše 10 MiB.
 
 Import běží jako úloha na pozadí, ne v rámci odeslání formuláře. Export z jiného
 systému běžně nese tisíce dokladů a takový běh by se do jednoho požadavku nevešel.

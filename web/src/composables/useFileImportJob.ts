@@ -1,8 +1,10 @@
 import { computed, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   cancelImportJob,
   fetchImportJob,
   fetchImportJobReport,
+  IMPORT_JOB_MAX_FILES,
   startImportJob,
   type FileImportJob,
   type ImportKind,
@@ -23,6 +25,7 @@ import {
  * `kind`, a proto tu není dvakrát.
  */
 export function useFileImportJob(kind: ImportKind) {
+  const { t } = useI18n()
   const purchaseStatus = ref<PurchaseImportStatus>('received')
   const files = ref<File[]>([])
   const running = ref(false)
@@ -30,6 +33,8 @@ export function useFileImportJob(kind: ImportKind) {
   const report = ref<ImportReport | null>(null)
   const job = ref<FileImportJob | null>(null)
   const cancelling = ref(false)
+  /** Průběh nahrávání po částech, než vznikne job; `null` = nic se nenahrává. */
+  const uploaded = ref<{ done: number; total: number } | null>(null)
 
   let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -62,6 +67,10 @@ export function useFileImportJob(kind: ImportKind) {
     report.value = null
     job.value = null
     error.value = ''
+    if (files.value.length > IMPORT_JOB_MAX_FILES) {
+      files.value = []
+      error.value = t('imports.too_many_files', { max: IMPORT_JOB_MAX_FILES })
+    }
   }
 
   async function start(onError: (e: unknown) => string) {
@@ -71,11 +80,20 @@ export function useFileImportJob(kind: ImportKind) {
     report.value = null
     job.value = null
     try {
-      const started = await startImportJob(files.value, kind, purchaseStatus.value)
+      uploaded.value = { done: 0, total: files.value.length }
+      const started = await startImportJob(files.value, kind, purchaseStatus.value, (done, total) => {
+        uploaded.value = { done, total }
+      })
+      uploaded.value = null
       poll(started.job_id, onError)
     } catch (e) {
-      error.value = onError(e)
+      error.value = e instanceof RangeError && e.message === 'import_file_too_large'
+        ? t('imports.file_too_large')
+        : e instanceof RangeError && e.message === 'import_too_many_files'
+          ? t('imports.too_many_files', { max: IMPORT_JOB_MAX_FILES })
+        : onError(e)
       running.value = false
+      uploaded.value = null
     }
   }
 
@@ -135,5 +153,5 @@ export function useFileImportJob(kind: ImportKind) {
 
   onUnmounted(stopPolling)
 
-  return { files, running, cancelling, error, report, job, percent, purchaseStatus, pick, start, cancel, reset }
+  return { files, running, cancelling, error, report, job, percent, purchaseStatus, uploaded, pick, start, cancel, reset }
 }
