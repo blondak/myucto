@@ -127,7 +127,7 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
      * @param list<string> $contains
      */
     #[DataProvider('badInput')]
-    public function testMessageStartsWithHumanFieldName(
+    public function testMessageUsesHumanFieldNameTrailingTechnicalNameAndNoJargon(
         string $method,
         array $arguments,
         string $startsWith,
@@ -143,20 +143,6 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
         foreach ($contains as $needle) {
             self::assertStringContainsString($needle, $message);
         }
-    }
-
-    /**
-     * @param list<mixed> $arguments
-     * @param list<string> $contains
-     */
-    #[DataProvider('badInput')]
-    public function testTechnicalNameStaysInTrailingParentheses(
-        string $method,
-        array $arguments,
-        string $startsWith,
-        array $contains,
-    ): void {
-        $message = $this->messageFrom($method, $arguments);
         $path = (string) $arguments[1];
 
         self::assertStringEndsWith(
@@ -169,21 +155,6 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
             substr_count($message, $path),
             'Technický název se nesmí v hlášce objevit dvakrát.',
         );
-    }
-
-    /**
-     * @param list<mixed> $arguments
-     * @param list<string> $contains
-     */
-    #[DataProvider('badInput')]
-    public function testMessageAvoidsJargon(
-        string $method,
-        array $arguments,
-        string $startsWith,
-        array $contains,
-    ): void {
-        $message = $this->messageFrom($method, $arguments);
-
         foreach (self::BANNED as $word) {
             self::assertStringNotContainsString(
                 $word,

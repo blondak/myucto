@@ -353,9 +353,45 @@ if ($__realDb !== '' || $__chosenDb !== '') {
 
     __applyPendingTestMigrations($__rootDir, $__cfg, $__chosenDb);
     __normalizeTestTenant($__cfg, $__chosenDb);
+    __seedDefaultTestJmhzSpecPackage($__cfg, $__chosenDb);
 }
 
 unset($__rootDir, $__cfgPath, $__cfg, $__realDb, $__chosenDb);
+
+function __seedDefaultTestJmhzSpecPackage(array $cfg, string $chosenDb): void
+{
+    $config = new \MyInvoice\Infrastructure\Config\Config(
+        array_replace_recursive($cfg, ['db' => ['name' => $chosenDb]]),
+    );
+    $connection = \MyInvoice\Infrastructure\Database\Connection::withoutSharedTestConnection(
+        static fn () => new \MyInvoice\Infrastructure\Database\Connection($config),
+    );
+    try {
+        try {
+            $pdo = $connection->pdo();
+        } catch (\PDOException) {
+            return;
+        }
+        if ($pdo->inTransaction()) {
+            throw new \LogicException('Globální JMHZ fixture se musí připravit mimo testovací transakci.');
+        }
+        if (!$connection->hasTable('payroll_jmhz_spec_packages')) {
+            return;
+        }
+        $catalog = \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog::class;
+        $existing = $pdo->prepare(
+            'SELECT id FROM payroll_jmhz_spec_packages WHERE package_key = ? AND manifest_sha256 = ?',
+        );
+        $existing->execute([$catalog::DEFAULT_PACKAGE_KEY, $catalog::DEFAULT_MANIFEST_SHA256]);
+        if ($existing->fetchColumn() !== false) {
+            return;
+        }
+        $manifest = (new $catalog())->load($catalog::DEFAULT_PACKAGE_KEY, $catalog::DEFAULT_MANIFEST_SHA256);
+        (new \MyInvoice\Repository\Payroll\JmhzSpecPackageRepository($connection))->install($manifest);
+    } finally {
+        $connection->close();
+    }
+}
 
 /**
  * Automatická aktualizace schématu test DB.

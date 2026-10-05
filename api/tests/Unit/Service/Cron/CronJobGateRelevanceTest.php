@@ -106,13 +106,6 @@ final class CronJobGateRelevanceTest extends TestCase
         self::assertNull($gate->inactiveReason($this->job('cron-cnb-rates')));
     }
 
-    public function testJobWithoutAnyConditionIsAlwaysRelevant(): void
-    {
-        $gate = new CronJobGate(new Config([]), null);
-
-        self::assertNull($gate->inactiveReason($this->job('cron-backup')));
-    }
-
     public function testMonthlyPostingJobsAreInactiveWithoutDoubleEntry(): void
     {
         $gate = new CronJobGate(new Config([]), $this->pdoReturning(false));

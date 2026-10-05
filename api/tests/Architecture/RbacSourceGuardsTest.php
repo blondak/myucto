@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Tests\Support\SourceCorpus;
 use PHPUnit\Framework\TestCase;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 
 final class RbacSourceGuardsTest extends TestCase
 {
@@ -67,7 +66,7 @@ final class RbacSourceGuardsTest extends TestCase
             $relative = str_replace('\\', '/', substr($path, strlen($src) + 1));
             if (in_array($relative, self::BACKEND_ROLE_IDENTITY_BOUNDARY, true)) continue;
             $method = null;
-            foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $index => $line) {
+            foreach (explode("\n", SourceCorpus::read($path)) as $index => $line) {
                 if (preg_match('/\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $line, $methodMatch) === 1) {
                     $method = $methodMatch[1];
                 }
@@ -88,7 +87,7 @@ final class RbacSourceGuardsTest extends TestCase
         foreach (self::sourceFiles($src, ['ts', 'vue']) as $path) {
             $relative = str_replace('\\', '/', substr($path, strlen($src) + 1));
             if (in_array($relative, self::FRONTEND_ROLE_IDENTITY_BOUNDARY, true)) continue;
-            foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $index => $line) {
+            foreach (explode("\n", SourceCorpus::read($path)) as $index => $line) {
                 if (!preg_match('/(?:===|!==|==|!=|includes\s*\(|in_array\s*\()[^;]*(?:[\'\"](?:admin|superadmin|accountant|readonly|client)[\'\"])/', $line)) continue;
                 if (!preg_match('/\b(?:role|role_type|system_key|is_superadmin)\b/i', $line)) continue;
                 $violations[] = $relative . ':' . ($index + 1) . ' ' . trim($line);
@@ -177,10 +176,9 @@ final class RbacSourceGuardsTest extends TestCase
     private static function sourceFiles(string $root, array $extensions): array
     {
         $files = [];
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
-        foreach ($iterator as $file) {
-            if (!$file->isFile() || !in_array(strtolower($file->getExtension()), $extensions, true)) continue;
-            $files[] = $file->getPathname();
+        foreach (SourceCorpus::files($root, '') as $path) {
+            if (!in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), $extensions, true)) continue;
+            $files[] = $path;
         }
         sort($files);
         return $files;

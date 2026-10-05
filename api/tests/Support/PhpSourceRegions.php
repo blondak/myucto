@@ -120,6 +120,9 @@ final class PhpSourceRegions
      */
     public static function missingSymbols(string $code, array $names): array
     {
+        if ($names === []) {
+            return [];
+        }
         $present = [];
         foreach (self::symbols($code) as $sym) {
             $present[$sym['name']] = true;
