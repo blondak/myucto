@@ -47,9 +47,9 @@ Osoby a vztahy založíte v [kapitole 58k](86_Zamestnanci.md), složky v [58p](9
 ## 90.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Nastavení mezd** se evidují registrační a kontaktní údaje
-pro mzdovou agendu. Stránka používá čtyři samostatné záložky:
-**Zaměstnavatel a účtárny**, **Účty institucí**, **Automatické účtování** a
-**Politiky a připravenost**. Firma může mít více mzdových účtáren, ale právě jedna
+pro mzdovou agendu. Stránka používá sedm samostatných záložek:
+**Zaměstnavatel a účtárny**, **Účty institucí**, **Automatické účtování**,
+**Politiky a připravenost**, **Podání**, **Dimenze** a **Skrytá varování**. Firma může mít více mzdových účtáren, ale právě jedna
 aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní název,
 kód a vlastní variabilní symbol pro platby sociálního pojištění. Vyplňuje se
 **název**; kód se z něj předvyplní sám (bez diakritiky, velkými písmeny) a
@@ -191,13 +191,14 @@ Cestovní náhrady se účtují proti závazkovému účtu pracovního vztahu, n
 samostatný účet jiných závazků. Zaměstnanci se vyplácí přesně totéž co dřív;
 mění se jen zápis v deníku.
 
-**Analytika pojistného.** Pole účtu přijme i analytiku, například `336.100` pro
-sociální a `336.200` pro zdravotní pojištění. Založíte-li tyto účty ve své
-osnově, můstek je použije a saldo 336 se rozdělí. Firmám, které je nemají,
-aplikace tyto účty **sama nedoplní** a předvyplněná hodnota zůstává na
-syntetickém `336` — doplnění uprostřed roku by rozdělilo saldo, které do té
-doby bylo jedno. Rozhodnutí je na účetní; udělejte je k začátku účetního
-období.
+**Analytika pojistného a daně.** Pole účtu přijme i analytiku. U **nově
+založené firmy** se předvyplní `336.100` pro sociální a `336.200` pro zdravotní
+pojištění a `342.100` pro zálohovou a `342.200` pro srážkovou daň. Firmám, které
+už mají uložené syntetické `336` a `342`, je aplikace **sama nepřepíše**:
+zůstávají na syntetice, protože přepnutí uprostřed roku by rozdělilo saldo,
+které do té doby bylo jedno. Chcete-li rozpad i u dříve založené firmy,
+přepněte účty v této záložce a ověřte, že analytiky máte v osnově. Rozhodnutí
+je na účetní; udělejte je k začátku účetního období.
 
 Nové předkontace se do už zaúčtovaných revizí nepromítají. Zmrazený snapshot
 nese vlastní sadu účtů, takže opakované zaúčtování staršího období vypadá

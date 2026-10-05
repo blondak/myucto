@@ -110,7 +110,7 @@ a nakonec účty DPH 343. **Uhrazeno dne** je datum, **Uhrazeno celkem** částk
 
 | Filtr | Hodnoty |
 |---|---|
-| Stav | Koncept / Vystaveno / Odesláno / Po splatnosti / Upomínka / Zaplaceno / Storno / Dobropis |
+| Stav | Koncept / Vystaveno / Odesláno / Po splatnosti / Upomínka / Zaplaceno / Částečně uhrazeno / Přeplaceno / Storno |
 | Typ | Faktura / Zálohová / Dobropis / Storno |
 | Klient | Dropdown se všemi klienty |
 | Zakázka | Závisí na vybraném klientovi |
@@ -206,14 +206,15 @@ pracují se skutečným prodlením.
 | Stav | Význam | Co lze udělat |
 |---|---|---|
 | 📝 **Koncept** (`draft`) | Rozpracovaná, neviditelná pro klienta | Editovat, smazat, vystavit |
-| ✅ **Vystaveno** (`issued`) | Číslo přiděleno, immutable PDF, ale klientovi nešla | Odeslat e-mailem, zaplatit, upomínka, dobropis, storno |
+| ✅ **Vystaveno** (`issued`) | Číslo přiděleno, immutable PDF, ale klientovi nešla | Odeslat klientovi, zaplatit, upomínka, dobropis, storno |
 | 📧 **Odesláno** (`sent`) | E-mail s PDF odešel klientovi | Zaplatit, upomínka |
-| ⏰ **Upomínka** (`reminded`) | Upomínkový e-mail odešel | Zaplatit, další upomínka (s cooldownem), dobropis |
+| ⏰ **Upomínka** (`reminded`) | Upomínkový e-mail odešel | Zaplatit, další upomínka, dobropis |
 | 💰 **Zaplaceno** (`paid`) | Platba přišla a byla spárována | (terminální) |
 | 🟠 **Částečně uhrazeno** | Přišla jen část peněz (evidence plateb) — zbytek je dál pohledávka | Doplatit, částečná úhrada, upomínka |
 | 🟣 **Přeplaceno** | Evidované platby převyšují částku k úhradě | (řeší se ručně — vratka / dobropis) |
 | ⚫ **Storno** (`cancellation`) | Interní storno — faktura ztratila platnost | Zrušit storno (viz 16.7.4), smazat (admin) |
-| 🔄 **Dobropis** (`credit_note`) | Vytvořen opravný daňový doklad | (terminální) |
+
+> ℹ️ **Dobropis** není stav, ale typ dokladu (opravný daňový doklad vystavený k původní faktuře); původní faktura si svůj stav ponechává.
 
 > 💡 **Edituj jen koncepty.** Vystavená faktura má immutable snapshot dodavatele,
 > klienta a banky — pro změnu je třeba storno + nová faktura, nebo dobropis.
@@ -225,14 +226,12 @@ Zaškrtni více faktur (checkbox). Nahoře se objeví lišta s akcemi:
 
 | Akce | Funkce | Aplikuje se na |
 |---|---|---|
+| **Vystavit (N)** | Hromadně vystaví vybrané koncepty | Koncepty |
 | **Vystavit znovu (N)** | Vytvoří klony jako nové koncepty s auto-inkrementem měsíce v popiscích položek (`3/2026 → 4/2026`) | Faktury libovolného stavu |
 | **Odeslat klientovi (N)** | Hromadně odešle e-mail s PDF přílohou | Vystavené, neodeslané (`issued`) |
-| **Označit zaplacené (N)** | Manuálně označí jako zaplacené dnešním datem | Vystavené / odeslané / upomínkované |
-| **Upomínka (N)** | Pošle upomínkový e-mail | Po splatnosti, ne zaplacené, cooldown 14 dní mezi upomínkami |
-| **Stáhnout PDF ZIP** | ZIP archiv všech vybraných PDF | Vystavené (status ≥ `issued`) |
-| **PDF export (N)** | Sloučí PDF vybraných vystavených dokladů do jednoho souboru; volitelně jej elektronicky podepíše nastaveným profilem | Vystavené faktury a dobropisy, maximálně 200 dokladů |
-| **Stáhnout ISDOC ZIP** | ISDOC 6.0.2 XML pro každou + ZIP | Vystavené |
-| **Stáhnout Pohoda XML** | Sloučený dataPack pro import do Pohody | Vystavené |
+| **Označit za zaplacené (N)** | Manuálně označí jako zaplacené dnešním datem | Vystavené / odeslané / upomínkované |
+| **Odeslat upomínky (N)** | Pošle upomínkový e-mail (hromadná akce neuplatňuje ochrannou lhůtu, ta platí jen u automatiky - viz [22. Upomínky](22_Upominky.md)) | Po splatnosti, ne zaplacené |
+| **PDF export (N)** | Sloučí PDF vybraných vystavených dokladů do jednoho souboru; volitelně jej elektronicky podepíše nastaveným profilem | Vystavené faktury a dobropisy, maximálně 100 dokladů |
 | **Zaúčtovat (N)** | Zaúčtuje vybrané do deníku, jednu po druhé (chyba jedné neblokuje ostatní); na konci souhrn ok/chyby. Max 500 dokladů na dávku. | Vystavené a dosud nezaúčtované — jen podvojné účetnictví, viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku) |
 | **Nastavit OSS (N)** | Hromadně nastaví režim OSS, zemi spotřeby, typ sazby a typ plnění na položkách. Náhled je povinný. Max 200 dokladů na dávku — viz [§ 14.3.2](#1432-hromadne-nastaveni-oss) | Doklady, které nejsou stornované, zamčené ani v podaném období |
 
@@ -242,7 +241,7 @@ Zaškrtni více faktur (checkbox). Nahoře se objeví lišta s akcemi:
 
 Sloučený PDF export obsahuje pouze samotné faktury v pořadí výběru. Nepřidává
 uživatelské přílohy, ISDOC soubory ani výkazy víceprací jako samostatné
-dokumenty. Pro archiv jednotlivých souborů použij **Stáhnout PDF ZIP**.
+dokumenty. Pro archiv jednotlivých souborů (PDF ZIP, ISDOC ZIP, Pohoda XML) použij **Prodej → Export** ([kapitola 20](20_Exporty.md)).
 
 ### 14.3.1 Workflow měsíční retainer
 
@@ -323,12 +322,12 @@ ve spodní liště.
 - **Nepoužívej hromadné odesílání bez review** — pokud máš v koncepcích
   drobné chyby (špatná částka, chybějící popis), pošlou se klientovi všechny
   najednou.
-- **„Označit zaplacené" je manuální fallback** — primárně se faktury označují
+- **Označení za zaplacené je manuální fallback** — primárně se faktury označují
   zaplacenými automaticky při importu bankovního výpisu (viz [28. Banka](29_Banka.md)),
   u hotovosti pak volbou způsobu úhrady **Hotově** s pokladnou přímo v editoru
   ([§ 15.2.7](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove)).
   Částečné platby a evidenci úhrad popisuje [§ 16.1.2](16_Faktura_PDF.md).
 - **Filtr „Po splatnosti"** je nejrychlejší způsob, jak zjistit, kdo dluží —
-  klik na řádek a hned máš tlačítko **Upomínka**.
+  klik na řádek a hned máš tlačítko **Odeslat upomínku**.
 - **Klik na číslo faktury** otevře [Detail faktury](16_Faktura_PDF.md).
 - **Klik na ikonu PDF** stáhne přímo PDF (bez otvírání detailu).

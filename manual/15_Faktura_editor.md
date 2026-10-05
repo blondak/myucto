@@ -472,14 +472,17 @@ Stejně se se zapnutou volbou vyplácí i **dobropis** placený hotově.
 
 ## 15.5 Tlačítka
 
-| Tlačítko | Funkce |
+Editor má dole jedno tlačítko: **Vytvořit** u nové faktury, **Uložit** u úpravy
+konceptu. Faktura se uloží jako `draft` - zůstane v konceptech, neviditelná pro
+klienta. Další akce najdeš v **detailu faktury**:
+
+| Tlačítko (detail) | Funkce |
 |---|---|
-| **Uložit koncept** | Uloží jako `draft` — zůstane v konceptech, neviditelné pro klienta |
 | **Vystavit** | Přidělí variabilní symbol, vygeneruje PDF, status → `issued`. **Nelze vrátit zpět** (jen storno / dobropis). |
-| **Vystavit a odeslat** | Vystaví + okamžitě pošle e-mailem klientovi |
-| **Náhled PDF** | Otevře PDF v novém tabu (jen pro koncepty s vodoznakem „NÁHLED") |
-| **Smazat koncept** | Jen pro `draft` — nelze smazat vystavenou |
-| **Klonovat** | Vytvoří nový koncept jako kopii (kapitola 8 „Vystavit znovu") |
+| **Odeslat klientovi** | Pošle vystavenou fakturu e-mailem klientovi (samostatný krok po vystavení). |
+| **Zobrazit PDF** / **Stáhnout PDF** | Otevře, resp. stáhne PDF (menu více akcí). U konceptu jsou dostupné, jakmile má faktura aspoň jednu položku. |
+| **Smazat** | Jen pro `draft` - vystavenou nelze smazat. |
+| **Klonovat** | Vytvoří nový koncept jako kopii vystavené faktury (kapitola 8 „Vystavit znovu"). |
 
 ## 15.6 Výkaz víceprací (work report)
 
@@ -629,7 +632,7 @@ Workflow:
 1. Vystavíš **zálohovou (proforma)** — variabilní symbol `9NNNNNN`, status
    `issued`, žádné DUZP.
 2. Klient zaplatí — banka spáruje (nebo manuálně označíš jako `paid`).
-3. Klikneš **Vystavit daňový doklad** (tlačítko v detailu zálohové).
+3. Klikneš **Vystavit fakturu k záloze** (tlačítko v detailu zálohové).
 4. Vytvoří se **daňový doklad** typu „Faktura" s automatickým **odečtem
    zaplacené zálohy** (záporná položka „Odpočet zálohy 92605001").
 

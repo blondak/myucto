@@ -1,6 +1,6 @@
 # 108. Přechod z PAMICA
 
-**Cesta: `Systém → Přechod z PAMICA (i SQL)`**
+**Cesta: `Systém → Přechod z jiných účetních systémů → PAMICA (i SQL)`**
 
 Průvodce převede personalistiku a mzdy z datového souboru mzdového programu
 PAMICA, nebo z databáze PAMICA SQL, do firmy v MyÚčtu, i do firmy, která

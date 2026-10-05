@@ -1,6 +1,6 @@
 # 51. Přehled firem
 
-**Cesta: `Účetnictví → Přehled firem`**
+**Cesta: `Systém → Přehled firem`**
 
 Přehled firem je pracovní rozcestník pro účetní kancelář nebo jiného uživatele,
 který má přístup k více firmám. Položka se v menu zobrazí jen tehdy, když má

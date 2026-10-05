@@ -1,6 +1,6 @@
 # 28. Majetek
 
-**Cesta: `Účetnictví → Majetek`**
+**Cesta: `Nákup → Majetek`**
 
 Modul vede evidenci **dlouhodobého
 hmotného a nehmotného majetku** — karty s inventárními čísly, výpočet **daňových

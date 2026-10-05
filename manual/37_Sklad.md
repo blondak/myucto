@@ -494,7 +494,7 @@ bez zapnuté skladové evidence se na PDF nezobrazuje nikdy.
 
 ### 37.5.2 Naskladnění z přijaté faktury
 
-Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Naskladnit**, pokud
+Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Přijmout na sklad**, pokud
 má alespoň jeden dosud nenaskladněný řádek navázaný na skladovou kartu. Faktura bez
 jediné takové vazby tlačítko nenabízí. Akce otevře průvodce naskladněním. Průvodce
 nabídne řádky faktury s vazbou na skladovou
@@ -589,7 +589,7 @@ v detailu inventury; po chybě lze přípravu opakovat a běžící přípravu z
    (HTTP 409); totéž platí i pro storno staršího dokladu na tomto skladu.
 2. **Sčítání** — u každé položky zadáš **skutečně napočítané množství**; systém
    průběžně dopočítává **rozdíl** oproti očekávanému stavu (zvýrazněný, pokud není
-   nulový). Tlačítko **Napočítat vše dle očekávání** rychle předvyplní všechny
+   nulový). Tlačítko **Převzít očekávané u všech** rychle předvyplní všechny
    řádky očekávanou hodnotou (pro položky, které sedí). Rozepsané počty jde průběžně
    ukládat tlačítkem **Uložit průběh**, aniž by se inventura uzavřela. U kladného
    rozdílu se zadává reprodukční pořizovací cena za jednotku; systém nabídne cenu
@@ -782,7 +782,7 @@ Přijato, Uzavřeno a Stornováno.
 
 Firma si může přepnout, že se má počítat **až od potvrzení** dodavatelem (pak se
 započítávají jen stavy Potvrzeno a Částečně přijato) — přepínač
-`stock_in_transit_from` na firmě.
+`stock_in_transit_from` na firmě (viz níže, kde ho v Nastavení najdeš).
 
 Přepínač najdeš v **Nastavení → Daně a účetnictví**, v sekci skladu, jako
 „Zboží se počítá „na cestě" od stavu". Výchozí je *Odesláno*. Pokud je pro tebe
@@ -1152,16 +1152,15 @@ dodání obou objednávek by na skladě leželo o 24 ks víc, než je potřeba.
 
 Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 37.11.5).
 
-> [!WARNING]
-> **Vlastní obrazovka doplnění zásob v tomto vydání ještě není.** Tlačítko
-> **Doplnění zásob** vede zatím jen na **seznam skladových karet s filtrem
-> „jen pod minimem"** (§ 37.2) — a ten pracuje s **prostým** porovnáním
-> „skladem < minimum". Nezná rezervace, neodečítá zboží na cestě a nenavrhuje
-> množství. Kompletní výpočet podle § 37.12.1 i **hromadné založení objednávek
-> z návrhu** (jedna objednávka na dodavatele, vždy jako koncept, karty bez
-> dodavatele se vypíšou jako přeskočené) jsou zatím dostupné **jen přes
-> [REST API](104_API.md) a [MCP server](106_MCP_server.md)** — asistenta se tedy
-> zeptat můžeš, na obrazovce to zatím neuvidíš.
+Obrazovka **Doplnění zásob** (`/stock/replenishment`) počítá návrh podle § 37.12.1
+a ukazuje u každé karty sklad, rezervace, zboží na cestě, minimum, navržené množství,
+hlavního dodavatele a odhad ceny. Filtrovat jde podle skladu, **Jen pod minimem** a
+**Koeficientu** (násobek minimální zásoby, na který se doobjednává). Zaškrtnuté
+řádky pak tlačítkem **Vytvořit objednávky** hromadně založíš: vznikne jedna
+objednávka na dodavatele, vždy jako koncept, a karty bez dodavatele nebo množství se
+vypíšou jako přeskočené. Odeslat objednávku (a tím pustit zboží „na cestu") můžeš až
+na jejím detailu. Stejný výpočet je dostupný i přes [REST API](104_API.md) a
+[MCP server](106_MCP_server.md).
 
 ## 37.13 Vychystání, expedice a vratky
 
@@ -1356,9 +1355,7 @@ zboží. Tohle v ní **není**:
 | **Dropshipping** — objednávání zboží až na zakázku | Doplnění zásob pracuje jen s kartami, které mají **minimální zásobu**. Zboží na objednávku objednávej ručně (§ 37.11). Cenotvorbu pro dropshipping popisuje [§ 36.9.2](38_Eshop.md#3892-dropshipping-zbozi-bez-skladu). |
 | **Schvalovací workflow objednávky** | PDF má podpisové pole „Schválil", ale žádný schvalovací krok v aplikaci není. |
 | **Hromadné akce nad existujícími objednávkami** | Hromadně jde jen *zakládat* (z návrhu doplnění zásob); odeslat, uzavřít nebo stornovat se musí po jedné. |
-| **Obrazovka doplnění zásob a hromadné objednání** | Zatím jen přes API a MCP (§ 37.12.3). |
 | **Import ceníku dodavatele přes UI** | V tomto vydání nedoběhne (§ 37.10.2) — zadávej nabídky ručně nebo přes MCP. |
-| **Přepnutí „na cestě až od potvrzení" v nastavení** | Pole existuje jen v databázi (§ 37.9.3). |
 
 > [!TIP]
 > Skladovou kartu nemusíš mít vždy založenou dopředu — v průvodci **naskladněním

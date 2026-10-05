@@ -123,7 +123,7 @@ Každý dodavatel má vlastní:
 ## 95.5 Editace dodavatele
 
 Nastavení aktuálně zvolené firmy je v **Firma → Nastavení** rozdělené do
-záložek **Údaje firmy**, **Fakturace**, **Daně a účetnictví** a **Pokročilé**.
+záložek **Údaje firmy**, **Fakturace** a **Daně a účetnictví**.
 Změny ze všech záložek se ukládají společným tlačítkem dole pod obsahem.
 
 **Systém → Firmy → klik na řádek → Editovat**.
@@ -533,7 +533,7 @@ přepínač firem.
 
 Přepínání dodavatele (§ 95.1) stačí, dokud spravuješ pár firem. Účetní kancelář
 se 8+ klienty ale potřebuje vidět termíny a resty **napříč všemi firmami
-najednou**, ne proklikávat každou zvlášť. K tomu slouží stránka **Účetnictví →
+najednou**, ne proklikávat každou zvlášť. K tomu slouží stránka **Systém →
 Přehled firem** (`/portfolio`).
 
 > [!NOTE]

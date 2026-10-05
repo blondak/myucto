@@ -415,7 +415,7 @@ nezapne:
 > 042/321). Majetek pořízený před datem přechodu se založí jako historická karta
 > a jeho pořizovací cena i oprávky patří do otevírací rozvahy; majetek pořízený
 > po datu přechodu se následně zařadí do užívání a odpisy se zaúčtují v modulu
-> **Účetnictví → Majetek**.
+> **Nákup → Majetek**.
 
 Pod průvodcem je stránkovaná historie všech kontrol a ostrých spuštění. Výběrem
 staršího běhu lze znovu zobrazit jeho uložený protokol; dlouhá historie se proto

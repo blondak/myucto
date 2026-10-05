@@ -43,7 +43,7 @@ a počítá se v [Daních](41_Vykazy_DPH.md).
 
 Nastavení odpočtu nic neúčtuje — odpočet uplatňuje doklad. Kniha jízd ale u každého
 tankování porovná odpočet navázaného dokladu s nastavením vozidla a nesoulad ukáže
-jako upozornění (viz 32.3.6).
+jako upozornění (viz 36.3.6).
 
 Auto, které má navázané jízdy nebo tankování, nelze smazat (jen archivovat při
 úpravě) — historie zůstane zachována.
@@ -126,7 +126,7 @@ jsou nahoře a označené. Seznam zúžíš hledáním (číslo dokladu, partner
 Vazbu zrušíš tlačítkem **Zrušit vazbu**.
 
 Navážeš-li tankování bez vybraného vozidla na bankovní pohyb kartou, aplikace dohledá
-vozidlo podle karty (viz 32.3.7).
+vozidlo podle karty (viz 36.3.7).
 
 Tankování vytěžené z přijaté faktury má vazbu na fakturu pevnou (vznikla vytěžením).
 V seznamu tankování je u každé vazby **proklik**: na přijatou fakturu, na tisk
@@ -147,7 +147,7 @@ doklad vlastní firmy.
 
 Tlačítko **Vytěžit historii** projede zpětně **jen dosud nezpracované** faktury
 od stanic a hromadně z nich vytvoří záznamy. Vozidlo se u nich určí automaticky
-(SPZ v řádku výpisu, platební karta dokladu, výchozí vozidlo — viz 32.3.7). Každá faktura se zpracuje jen
+(SPZ v řádku výpisu, platební karta dokladu, výchozí vozidlo — viz 36.3.7). Každá faktura se zpracuje jen
 jednou, opakované spuštění nic nezdvojí.
 
 U dokladů s detailním rozpisem (např. **Axigon**) se aplikace pokusí dohledat
@@ -177,7 +177,7 @@ Z popisu dokladu aplikace přečte, co v něm je: **litry** (nebo kWh), **cenu z
 („Nafta 42,5 l, tach. 98 765, 1AB 2345"). Částka a DPH se převezmou z dokladu.
 **Vozidlo** se přiřadí podle SPZ (bez ohledu na mezery a velikost písmen), jinak
 podle SPZ uvedené kdekoli v popisu, jinak podle platební karty, je-li v popisu její
-maskované číslo („karta **** 1234"), jinak výchozí vozidlo (viz 32.3.7).
+maskované číslo („karta **** 1234"), jinak výchozí vozidlo (viz 36.3.7).
 
 Tlačítko **Z pokladny** ukáže všechny takové doklady s odznakem **Nová** /
 **Zpracováno**. U každého můžeš zvolit vozidlo (nebo nechat **automaticky**)
@@ -224,7 +224,7 @@ u některého vozidla:
   téhož vozidla (nebo nižší než počáteční stav vozidla); typicky překlep nebo tankování
   přiřazené jinému autu,
 - **odpočet DPH dokladu nesedí s nastavením vozidla** — např. doklad uplatňuje plný
-  odpočet u vozidla se smíšeným užíváním (viz 32.1.1).
+  odpočet u vozidla se smíšeným užíváním (viz 36.1.1).
 
 Řada tachometru se posuzuje z celé historie vozidla, filtr roku jen zúží, co se
 vypíše. Tlačítko **Detail** rozbalí konkrétní data a stavy. U dotčených řádků seznamu
@@ -258,7 +258,7 @@ první krok, který vozidlo najde:
 2. **SPZ z dokladu** — porovnává se bez mezer, pomlček a velikosti písmen,
 3. **SPZ uvedená v textu dokladu**,
 4. **platební karta** — karta platná k datu tankování → její držitel (zaměstnanec)
-   → vozidlo, jehož je řidičem (32.1.1). Jen aktivní vozidla; řídí-li držitel víc
+   → vozidlo, jehož je řidičem (36.1.1). Jen aktivní vozidla; řídí-li držitel víc
    vozidel, nepřiřadí se podle karty nic, protože nejde poznat, kterým tankoval,
 5. **výchozí vozidlo** firmy (nebo jediné aktivní).
 
@@ -281,7 +281,7 @@ vytvoří tankování, pokud firma vede knihu jízd a účtenka je tankování:
 - účtenka položky nemá a dodavatel je čerpací stanice, případně účtenka nese SPZ.
 
 Z účtenky se převezmou datum, částka, litry, cena za litr, druh paliva, stanice,
-SPZ a koncovka platební karty; vozidlo se určí podle 32.3.7. Tankování je navázané
+SPZ a koncovka platební karty; vozidlo se určí podle 36.3.7. Tankování je navázané
 na doklad, ke kterému se sken připojil.
 
 Jeden doklad dá vždy nejvýš jedno tankování. Když doklad tankování už má (vzniklo

@@ -1,7 +1,7 @@
 # 20. Exporty (PDF ZIP, ISDOC, Pohoda, Stereo, Money S3, CSV)
 
 Pro účetní (interní oddělení nebo externí kancelář) nabízí MyÚčto šest
-formátů hromadného exportu **vystavených faktur** a per-faktura export
+formátů hromadného exportu **vystavených faktur** (plus přímý přenos do **Fakturoidu**) a per-faktura export
 **přijatých faktur** (ISDOC / Pohoda / naše PDF rekonstrukce — viz [Export přijatých faktur](24_Export_prijatych.md)).
 
 > [!TIP]
@@ -19,11 +19,11 @@ formátů hromadného exportu **vystavených faktur** a per-faktura export
 | **Stereo XML** | Stereo for Windows — import vydaných faktur | Sloučený DocumentPack XML soubor |
 | **Money S3 XML** | Seyfor Money S3 — import vydaných faktur | Sloučený `SeznamFaktVyd` XML soubor |
 | **CSV** | Excel, datová kontrola a další zpracování | Jeden UTF-8 tabulkový soubor za období |
+| **Fakturoid** | Přenos faktur do Fakturoid.cz | Push přes API token (nastavený per dodavatel), bez souboru ke stažení |
 
 ## 20.1 Obrazovka exportů
 
-V hlavním menu **Účetnictví → Export / Import**, záložka **Export vystavených**
-(firmy bez podvojného účetnictví najdou položku **Export / Import** v sekci **Daně**).
+V hlavním menu **Prodej → Export** (formulář **Export vydaných faktur**).
 
 ![Exporty](img/13_exporty.webp)
 
@@ -31,7 +31,7 @@ Formulář:
 
 | Pole | Význam |
 |---|---|
-| Formát | `PDF / PDF ZIP` / `ISDOC` / `Pohoda XML` / `Stereo XML` / `Money S3 XML` / `CSV` |
+| Formát | `PDF / PDF ZIP` / `ISDOC` / `Pohoda XML` / `Stereo XML` / `Money S3 XML` / `CSV` / `Fakturoid` |
 | Období | Měsíc-rok (např. „Duben 2026") nebo celé čtvrtletí (`Q1` až `Q4`) |
 | Filtrovat podle | Datum vystavení nebo DUZP (u DUZP se při prázdné hodnotě použije datum vystavení) |
 | Typ | Všechny / Faktury / Zálohové / Dobropisy |
@@ -69,7 +69,7 @@ profil pro exporty, lze zapnout také **Elektronicky podepsat**; podepisuje se
 výsledný sloučený soubor, ne jednotlivé faktury uvnitř ZIPu.
 
 Stejný sloučený export lze spustit ručně nad konkrétními doklady v seznamu
-faktur přes hromadnou akci **PDF export (N)**. Výběr je omezen na 200
+faktur přes hromadnou akci **PDF export (N)**. Výběr je omezen na 100
 vystavených faktur a dobropisů. Přílohy a samostatné ISDOC soubory nejsou
 součástí sloučeného PDF.
 

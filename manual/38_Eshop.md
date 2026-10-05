@@ -1,16 +1,15 @@
 # 38. E-shop
 
-**Cesta: `Zboží → E-shop`** *(poslední položka sekce Zboží, viditelná jen když je
+**Cesta: `Sklad → E-shop`** *(položka sekce Sklad, viditelná jen když je
 v [Nastavení](96_Nastaveni.md) zapnutý modul **Sklad**)*
 
-Modul **E-shop** rozšiřuje skladovou kartu zboží (`Zboží → Skladové karty`) o vše,
+Modul **E-shop** rozšiřuje skladovou kartu zboží (`Sklad → Skladové karty`) o vše,
 co potřebuješ pro **prodej přes e-shop**: vícejazyčný popis a SEO, zařazení do
 kategorií a označení štítky, typované parametry/atributy, poplatky (autorský,
 recyklační…), cenotvorbu odvozenou z nákupní ceny ve více měnách, dodavatele zboží
 a hromadný import. Stránka `/eshop` obsahuje číselníky, nastavení a správu
 hlavních produktů s variantami. Obsah jednotlivého zboží upravuješ na kartě
-konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie &
-štítky", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
+konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategorie", „Parametry", „Ceny", „Dodavatelé", „Přílohy").
 
 Tlačítko **Uložit** v editoru zapíše základní údaje, e-shopový obsah, ceny,
 akční ceny a dodavatele jako jeden celek. Pokud některá z těchto částí neprojde
@@ -64,7 +63,7 @@ tabu se ukládá do URL, takže jde odkázat i naback/refresh):
 | **Balení** | Kódy balení (karton, paleta…), které karty používají jako nadřazené jednotky ([§ 38.17](#3817-baleni)) |
 | **Cenové hladiny** | Hladiny odběratelů (Bronze, Silver, Gold…) s výchozí slevou a pravidly pro produkty, kategorie a výrobce ([§ 38.18](#3818-cenove-hladiny)) |
 | **Jazyky** | Jazykové mutace, ve kterých vedeš názvy a popisy zboží a kategorií ([§ 38.13](#3813-jazyky)) |
-| **Sklady** | Stejná záložka jako `Zboží → Skladové karty → Sklady` — sklady patří oběma pohledům |
+| **Sklady** | Stejná záložka jako `Sklad → Skladové karty → Sklady` — sklady patří oběma pohledům |
 | **Import zboží** | Hromadný import/aktualizace karet z XLSX/CSV |
 
 Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Balení, Cenové hladiny, Jazyky) má stejný tvar:
@@ -112,8 +111,7 @@ Přesun rovnou přepočítá cestu/hloubku pro celý přesouvaný podstrom.
 Kategorie s podřízeným zbožím nebo podkategoriemi nelze smazat — systém
 nabídne archivaci místo mazání (viz [§ 38.11](#3811-mazani-vs-archivace)).
 
-Konkrétní kartě zboží přiřadíš jednu i více kategorií na záložce „Kategorie &
-štítky" editoru skladové karty, kde navíc označíš jednu jako **hlavní**
+Konkrétní kartě zboží přiřadíš jednu i více kategorií na záložce „Kategorie" editoru skladové karty, kde navíc označíš jednu jako **hlavní**
 (pro drobečkovou navigaci a kanonickou URL na e-shopu).
 
 ## 38.4 Atributy (parametry)
@@ -162,8 +160,7 @@ slouží jen k vizuálnímu odlišení a filtrování na e-shopu. Formulář: **
 něj pro pohodlný výběr) a **Aktivní**. V tabulce vidíš barevný čtvereček u
 každého tagu, aby bylo na první pohled jasné, jak bude vypadat na e-shopu.
 
-Konkrétní kartě zboží přiřadíš libovolný počet tagů na záložce „Kategorie &
-štítky" editoru skladové karty.
+Konkrétní kartě zboží přiřadíš libovolný počet tagů na záložce „Kategorie" editoru skladové karty.
 
 ## 38.6 Poplatky
 
@@ -255,7 +252,7 @@ Názvy a pořadí sloupců jsou volitelné, jejich význam určuje mapování. S
 
 ## 38.8 Cenotvorba
 
-**Cesta: `Zboží → Skladové karty → (karta) → záložka „Ceny"`**
+**Cesta: `Sklad → Skladové karty → (karta) → záložka „Ceny"`**
 
 Zatímco stránka `/eshop` drží číselníky, samotná **cena zboží** se rodí na kartě
 konkrétní položky. Prodejní cena přitom není hodnota, kterou prostě zadáš — je
@@ -363,7 +360,7 @@ Vzorce pro přepočet:
 
 ### 38.8.4 Cenové profily, pravidla a obchodní kurzy
 
-V **Zboží → Cenová pravidla** nastavíš profil pro jednu měnu: přirážku nebo
+V **Sklad → E-shop → Cenová pravidla** nastavíš profil pro jednu měnu: přirážku nebo
 cílovou marži, zaokrouhlení, zdroj obchodního kurzu a jeho maximální stáří.
 Pravidlo přiřadí profil konkrétní kartě, kategorii, výrobci, dodavateli nebo celé firmě.
 Přednost má karta, potom kategorie a výrobce, dodavatel a nakonec výchozí pravidlo.
@@ -532,7 +529,7 @@ Přepočet na pozadí vyžaduje běžící plánovač s úlohou `cron-catalog-wo
 
 ### 38.8.11 Akční ceny
 
-**Cesta: `Zboží → Skladové karty → (karta) → záložka „Ceny" → sekce „Akční ceny"`**
+**Cesta: `Sklad → Skladové karty → (karta) → záložka „Ceny" → sekce „Akční ceny"`**
 
 Akční cena je **dočasná sleva položená nad standardní cenou**. Standardní
 cenotvorba (přirážka, přepočet měn, zaokrouhlení) běží dál beze změny — akce
@@ -683,7 +680,7 @@ bez ohledu na odběratele.
 
 ## 38.9 Dodavatelé zboží
 
-**Cesta: `Zboží → Skladové karty → (karta) → záložka „Dodavatelé"`**
+**Cesta: `Sklad → Skladové karty → (karta) → záložka „Dodavatelé"`**
 
 Ke kartě zboží můžeš přiřadit **libovolný počet dodavatelů** — každého s
 vlastními podmínkami. Slouží ke dvěma věcem: jako **podklad pro nákup** a jako
@@ -824,7 +821,7 @@ zboží ani v exportu na e-shop.
   stromu).
 - Atribut typu `Enum` bez alespoň jedné volby nemá u karty zboží co nabídnout
   k výběru — volby zakládej rovnou při vytváření atributu.
-- Import zboží zvládne jen **XLSX/CSV do 2 MB** a nikdy nezakládá výrobce —
+- Import zboží zvládne jen **XLSX/CSV do 50 MB** a nikdy nezakládá výrobce —
   connect-the-dots pořadí je: nejdřív číselníky (výrobci), pak import.
 - Readonly uživatelé vidí všechny záložky i importní report, ale nemají
   tlačítka pro zápis (nový/upravit/smazat/import naostro).
@@ -841,7 +838,6 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 
 | Chybějící funkce | Náhradní řešení |
 |---|---|
-| **Cenové hladiny / skupiny zákazníků** | Ceny per zákazník existují jen v jednoduchém **Ceníku** pro fakturaci ([§ 96.1.5](96_Nastaveni.md)), který se se skladem nekombinuje |
 | **Množstevní slevy** (od X ks levněji) | Samostatná karta pro balení, nebo sleva na dokladu — akční cena umí jen *strop* počtu kusů, ne cenové pásmo |
 | **Částečné uplatnění akce v jednom řádku** | Akce je vše nebo nic per řádek — rozděl řádek ([§ 38.8.9](#38811-akcni-ceny)) |
 | **Historie cen** | Není — uchovává se jen aktuální hodnota a datum posledního přepočtu |
@@ -851,7 +847,7 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 
 ## 38.13 Jazyky
 
-**Cesta: `E-shop → Jazyky`**
+**Cesta: `Sklad → E-shop → Jazyky`**
 
 Číselník jazykových mutací, ve kterých vedeš názvy a popisy zboží a kategorií.
 Karta zboží na záložce **Jazyky** rovnou otevře češtinu. Další jazyk vybereš
@@ -886,18 +882,18 @@ s takovým překladem jde dál uložit.
 > další jazyky přidáš v číselníku.
 ## 38.14 Varianty a vztahy produktů
 
-Na stránce E-shop v záložce **Hlavní produkty** vytvoříš společný produkt a
-připojíš k němu existující skladové karty jako varianty. Hlavní produkt nemá
+Na stránce E-shop v záložce **Variantní produkty** vytvoříš společný produkt a
+připojíš k němu existující skladové karty jako varianty. Variantní produkt nemá
 vlastní SKU ani skladovou zásobu. Každá varianta si ponechá své SKU, ceny,
 skladové pohyby a externí identitu.
 
 Osy variant vybereš z jednohodnotových výčtových parametrů, například velikost
 a barva. Pro každou variantu zadáš jednu možnost každé osy. Dvě varianty
 stejného produktu nemohou mít stejnou kombinaci. Parametry určující variantu
-měň přes hlavní produkt; běžná záložka Parametry jejich změnu odmítne.
+měň přes variantní produkt; běžná záložka Parametry jejich změnu odmítne.
 
 Varianta standardně přebírá výrobce a obsah překladů hlavního produktu.
-V záložce **Hlavní produkt** na kartě můžeš jednotlivá pole přepnout na vlastní
+V záložce **Master** na kartě můžeš jednotlivá pole přepnout na vlastní
 hodnotu. Náhled ukazuje výsledný obsah. Slug zůstává vlastní pro každé SKU.
 Před odpojením varianty aplikace ukáže obsah, který na kartě zachová, aby
 odpojením nezmizel převzatý popis ani výrobce.
@@ -925,7 +921,7 @@ odmítne; nejprve stornuj kompletaci nebo proveď korekci po ní.
 
 ## 38.16 Integrační centrum
 
-**Cesta: `Zboží → Integrace`**
+**Cesta: `Sklad → Integrace`**
 
 Integrační centrum propojuje MyÚčto s e-shopem nebo jiným externím systémem.
 Pro každé propojení založíš **připojení**: vybereš konektor, přiřadíš místním
@@ -989,9 +985,9 @@ nenamapuješ, konektor nepřenáší.
 
 | Typ | Místní hodnota | Příklad hodnoty v e-shopu |
 |---|---|---|
-| **Sklady** | Kód skladu (`E-shop → Sklady`) | ID skladu v e-shopu, např. `1` |
+| **Sklady** | Kód skladu (`Sklad → E-shop → Sklady`) | ID skladu v e-shopu, např. `1` |
 | **Měny** | Měna firmy nebo měna, ve které má zboží prodejní cenu | `CZK`, `EUR` |
-| **Jazyky** | Jazyk z číselníku `E-shop → Jazyky` | `cs`, `sk` |
+| **Jazyky** | Jazyk z číselníku `Sklad → E-shop → Jazyky` | `cs`, `sk` |
 | **Sazby DPH** | Sazba DPH podle číselníku | `21` nebo ID sazby |
 
 Výběr nabízí jen aktivní hodnoty. Když sklad deaktivuješ nebo jazyk

@@ -505,7 +505,7 @@ podávacího XML. V těchto případech přepiš údaje do formuláře instituce
 
 ## 43.11 Termíny podání
 
-- **Daň z příjmů FO (bez poradce):** **1. 4.** následujícího roku · **elektronicky / s poradcem:** **2. 5.**, resp. **1. 7.**
+- **Daň z příjmů FO (bez poradce):** **1. 4.** následujícího roku · **elektronicky:** **1. 5.**, připadne-li na víkend nebo svátek, nejbližší následující pracovní den (v roce 2026 tedy 4. 5.), **s poradcem:** **1. 7.**
 - **Daň z příjmů PO:** dle účetního období (řádně 1. 4., s auditem/poradcem 1. 7.)
 - **Přehledy pojistného OSVČ:** do **1 měsíce** po lhůtě pro daňové přiznání.
 

@@ -417,7 +417,7 @@ a vznikne nový.
 > MyÚčto proto u OSS snapshotu nenabízí ani asistované předání, ani panel
 > přímého podání (a odmítá obě cesty i přes API). Stáhni XML a nahraj ho
 > v aplikaci MOSS/OSS na Daňovém portálu — podrobně
-> [§ 43.8.5](45_OSS.md#4595-kde-se-oss-priznani-podava).
+> [§ 45.9.5](45_OSS.md#4595-kde-se-oss-priznani-podava).
 
 > [!NOTE]
 > Parametr EPO `test=1` je v technické dokumentaci určen pro přímo odesílané
@@ -477,7 +477,7 @@ za shodu. Rozhodnutí o opravném podání zůstává na účetní.
 Tamtéž je i evidence podle § 110f ZDPH (struktura dle čl. 63c nařízení (EU)
 č. 282/2011), která vzniká write-once při archivaci podání, uchovává se 10 let od
 konce roku plnění a exportuje se do CSV nebo JSON. Celý režim OSS včetně podání
-a evidence popisuje kapitola [43. Režim OSS](45_OSS.md#459-priznani-a-podani).
+a evidence popisuje kapitola [45. Režim OSS](45_OSS.md#459-priznani-a-podani).
 
 ### 49.5.3 DPH, KH, DPFO a pojistné
 

@@ -4,8 +4,9 @@ Po čerstvé instalaci je celá aplikace **zamčená na setup wizard**. Žádný
 endpoint kromě setup endpointů a healthchecku neodpovídá. Wizard je jednorázový
 — jakmile vznikne první admin účet, wizard zmizí a obnoví se až po `reset.php`.
 
-Wizard má **3 kroky** (admin → dodavatel → sample data) a po dokončení tě
-**automaticky přihlásí**. Předchází jim ještě **kontrola prostředí**, která se
+Wizard má **3 kroky** (**Admin účet** → **Dodavatel** (volitelné) → **Hotovo**)
+a po dokončení tě **automaticky přihlásí**. Ukázková data se volí v kroku
+Dodavatel. Předchází jim ještě **kontrola prostředí**, která se
 ale ukáže jen tehdy, když je co řešit.
 
 ## 7.1 Kontrola prostředí
@@ -45,18 +46,19 @@ Vytvoříš první uživatelský účet se systémovou rolí **Superadmin** (pln
 | E-mail | Login + adresa pro reset hesla / system notifikace |
 | Heslo | Min. 12 znaků, indikátor síly (slabé / střední / silné). Bez maxima — passphrase je OK. |
 | Heslo znovu | Ověřovací duplicita |
-| Vyžadovat silné MFA | Po dokončení wizardu musí admin zaregistrovat passkey nebo zapnout TOTP |
+| Vynutit vícefaktorové ověření (MFA) pro všechny uživatele | Po dokončení wizardu musí admin zaregistrovat passkey nebo zapnout TOTP |
+| Přijímám licenční ujednání a obchodní podmínky | **Povinné.** Bez zaškrtnutí nejde pokračovat; odkazy vedou na **Licenční ujednání** a **Obchodní podmínky** produktu MyÚčto.cz |
 
 Povolené jsou obě metody — uživatel si na stránce `/setup-mfa` vybere. Zúžit
 výběr jde až v konfiguraci přes `auth.allowed_mfa_methods`, viz
-[102. Bezpečnost](101_Bezpecnost.md).
+[101. Bezpečnost](101_Bezpecnost.md).
 
 Klikni **Další**.
 
 > 💡 Tip: Použij passphrase 4–5 slov místo krátkého složitého hesla. „korelace
 > medvědí dýně přístav 2026" je odolnější vůči brute-force než „Hu1@n!".
 
-## 7.3 Krok 2 — Dodavatel
+## 7.3 Krok 2 — Dodavatel (volitelné)
 
 ![Setup wizard krok 2](img/03_setup_dodavatel.webp)
 
@@ -72,17 +74,21 @@ fakturovat. Můžeš jich později přidat víc — viz [95. Multi-supplier](95_
 | E-mail / telefon | Kontakt pro klienta |
 | Bankovní účet | První účet pro CZK — číslo + bank kód (např. `1000000005 / 0100` pro KB) |
 
-Klikni **Další**.
+Celý krok je volitelný: zaškrtni **Vyplnit dodavatele později v Nastavení** a
+vyplnění přeskoč. Začneš-li pole vyplňovat, jsou ta označená * povinná. Krok
+končí tlačítkem **Dokončit setup** (viz 7.4); předtím se můžeš vrátit tlačítkem
+**Předchozí**.
 
 > ⚠️ Bankovní účet musí projít **mod-11 kontrolou** (povinný formát českých
 > účtů). Pokud zadáš neplatné číslo, QR platba se ve faktuře nezobrazí. Příklad
 > platného testovacího čísla: `1000000005 / 0100`.
 
-## 7.4 Krok 3 — Sample data (volitelné)
+## 7.4 Ukázková data (volitelná část kroku 2)
 
 ![Setup wizard krok 3](img/03_setup_sample.webp)
 
-Checkboxem si můžeš nechat vygenerovat **testovací sadu dat** pro vyzkoušení
+Checkboxem **Vygenerovat ukázková data** v kroku Dodavatel (zobrazí se jen,
+nepřeskakuješ-li dodavatele) si můžeš nechat vygenerovat **testovací sadu dat** pro vyzkoušení
 systému před tím, než začneš fakturovat naostro:
 
 - 24 klientů a 12 dodavatelů z více zemí s různými jazyky a měnami
@@ -109,7 +115,7 @@ vlastní záznamy nechá být. Sekce se zobrazí jen tehdy, když nějaká ukáz
 existují. Alternativně z příkazové řádky `php api/bin/reset.php --keep-users-supplier`
 smaže všechna byznys data, ale ponechá přihlášení a nastaveného dodavatele.
 
-Klikni **Dokončit**. Pokud není silné MFA povinné, wizard tě **automaticky
+Klikni **Dokončit setup**; wizard zobrazí závěrečný krok **Hotovo**. Pokud není silné MFA povinné, wizard tě **automaticky
 přihlásí** a přesměruje na [Přehled (dashboard)](10_Prehled.md). Při povinném MFA
 dostaneš nejprve omezenou stránku `/setup-mfa`; plný přístup vznikne až po
 registraci jedné z povolených metod. Passkey vyžaduje stabilní HTTPS hostname

@@ -222,7 +222,7 @@ navázaná firemní, účetní nebo auditní data. V takovém případě účet 
 |---|---|
 | Jméno | Zobrazení v UI |
 | E-mail | Login |
-| Heslo | Min. 12 znaků |
+| Heslo | Nepovinné, min. 12 znaků. U nového uživatele ho můžeš nechat prázdné: uživateli pak přijde e-mailem jednorázový odkaz a heslo si nastaví sám. U existujícího uživatele ponech prázdné, pokud heslo neměníš, nebo klikni na **Poslat odkaz na nastavení hesla** |
 | Role | Výchozí aktivní role z číselníku rolí |
 | Jazyk | `cs` / `en` |
 | Aktivní | Vypnutý uživatel nemůže se přihlásit |

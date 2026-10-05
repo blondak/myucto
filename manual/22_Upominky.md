@@ -22,7 +22,7 @@ Aby šla upomínka odeslat, faktura musí:
 
 ## 22.2 Manuální upomínka
 
-Otevři [Detail faktury](16_Faktura_PDF.md) → tlačítko **Upomínka**.
+Otevři [Detail faktury](16_Faktura_PDF.md) → tlačítko **Odeslat upomínku**.
 
 ![Tlačítko upomínka](img/12_upominka_btn.webp)
 
@@ -44,7 +44,7 @@ Activity log: `invoice.reminded` s počtem dní po splatnosti.
 
 ### 22.2.1 Test upomínky
 
-Vedle **Upomínka** je tlačítko **Test upomínky** — pošle stejný e-mail jen na
+Vedle **Odeslat upomínku** je tlačítko **Test upomínky** — pošle stejný e-mail jen na
 **tvůj** e-mail (admina, kterého jsi přihlášen). Užitečné pro:
 
 - Vyzkoušení šablony před odesláním klientovi
@@ -54,19 +54,23 @@ Vedle **Upomínka** je tlačítko **Test upomínky** — pošle stejný e-mail j
 ## 22.3 Hromadná upomínka
 
 Z **Faktury → filtr „Po splatnosti"** zaškrtni více faktur → bulk action
-**Upomínka (N)**.
+**Odeslat upomínky (N)**.
 
 ![Hromadná upomínka](img/12_upominka_bulk.webp)
 
 Server:
 
 1. Pro každou fakturu zkontroluje, že splňuje předpoklady (§ 22.1)
-2. Cooldown — pokud byla upomínka poslána před **<14 dny**, faktura se
-   přeskočí
-3. Pošle e-mail
-4. Update statusu
+2. Pošle e-mail
+3. Update statusu
 
-Hláška o výsledku: `Odesláno: 8, přeskočeno (cooldown): 2, chyb: 0`.
+Hromadná akce **neuplatňuje ochrannou lhůtu** (cooldown) mezi upomínkami -
+pošle upomínku každé vybrané fakturě, která splňuje předpoklady, i když už
+jednou upomenuta byla. Ochranná lhůta platí jen u automatického odesílání
+(§ 22.4), kde je výchozí **7 dní**.
+
+Po dokončení se zobrazí hláška o výsledku (počet odeslaných a případné chyby
+u jednotlivých faktur).
 
 ## 22.4 Cron — automatické upomínky
 
@@ -107,7 +111,7 @@ Vypíše:
 ```
 [dry-run] Faktura #2604012 (ACME s.r.o., 12 dní po splatnosti) — by se odeslala na 3 adresy
 [dry-run] Faktura #2604015 (Studio Fialka, 7 dní po splatnosti) — by se odeslala na 1 adresu
-[dry-run] Faktura #2604008 — přeskočena (poslední upomínka před 4 dny < cooldown 14)
+[dry-run] Faktura #2604008 — přeskočena (poslední upomínka před 4 dny < cooldown 7)
 [dry-run] CELKEM: 2 by se odeslaly, 1 přeskočena.
 ```
 
@@ -150,7 +154,7 @@ Vybere se podle `klient.language`.
 
 ## 22.6 Tipy
 
-- **Cooldown 14 dní** je rozumný — kratší by byl agresivní, delší se obchází.
+- **Cooldown** výchozích 7 dní u automatiky lze přes `--cooldown=N` zvýšit (např. na 14) - kratší lhůta by byla agresivní.
 - **Eskalace tónu** — pomocí `{{ reminder_count }}` můžeš v šabloně použít
   Twig logiku: `{% if reminder_count >= 3 %}poslední výzva{% endif %}`.
 - **Cron nepouštěj v sobotu/neděli** — klient nečte e-maily, vyřeší to až

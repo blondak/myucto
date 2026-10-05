@@ -19,7 +19,7 @@ Aktuální implementace pracuje jen s doklady v **CZK** a jen v podvojném
 
 Tabulka zobrazuje číslo dohody, datum, partnera, částku a stav:
 
-- **Koncept (`draft`)** — dohoda je sestavená, ale doklady ani deník se ještě
+- **Návrh (`draft`)** — dohoda je sestavená, ale doklady ani deník se ještě
   nezměnily.
 - **Potvrzeno (`confirmed`)** — vznikl účetní zápis a vyrovnání dokladů.
 - **Zrušeno (`cancelled`)** — případný zápis byl stornován a vytvořené vyrovnání

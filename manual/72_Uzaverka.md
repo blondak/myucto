@@ -201,7 +201,7 @@ u dokončeného kroku se zobrazí datum potvrzení.
 > odpisy dál nezaúčtuje (hlásí neotevřené období). Backend umí zaúčtovat odpisy
 > přímo pro tento krok i do období ve stavu Uzavírá se, ale vlastní tlačítko v panelu
 > není. V běžném provozu proto odpisy zaúčtuj na Majetku ještě **před** zahájením
-> uzávěrky, jak je popsáno v [Majetek § 59.6](28_Majetek.md).
+> uzávěrky, jak je popsáno v [Majetek § 28.6](28_Majetek.md).
 
 ### 72.2.3 Krok 3 — Kurzové rozdíly
 
@@ -386,10 +386,13 @@ Při otevření dalšího roku se konečný stav zrcadlově rozpustí. Výpočet
 skladových dokladů a inventur, ale účetní musí před spuštěním doložit fyzickou
 inventuru, ocenění, neidentifikované doklady a posouzení mank a přebytků.
 
-> [!WARNING]
-> Tento krok nemá ovládání ve webovém průvodci. Je-li sklad zapnutý, backend jej
-> vyžaduje před uzavřením knih, takže standardní UI cestou nelze uzávěrku dokončit.
-> Firma bez skladu je tímto omezením nedotčena — krok se označí jako nepoužitelný.
+**Ovládání ve webu.** Krok **Zásoby** je dostupný až po zahájení uzávěrky (stav
+Uzavírá se). Zobrazí konečný stav zásob k rozvahovému dni po druzích (materiál,
+zboží, výrobky), inventurní manka a přebytky, již zaúčtované zápisy a podklady
+k ověření. Tlačítko **Zaúčtovat / přepočítat zásoby** zápisy vytvoří nebo
+přepočítá, **Zrušit uzávěrku zásob** je vrátí zpět (jen s oprávněním k uzavírání
+období). Firma bez skladu v podvojném účetnictví krok nevidí jako povinný: ten se
+přeskočí sám a uzavření knih neblokuje.
 
 ## 72.3 Uzavření knih a otevření nového roku
 

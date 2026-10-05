@@ -19,7 +19,7 @@ ukazuje množství, cenu, umístění, odpovědnou osobu a stav.
 
 Stavy jsou:
 
-- **V používání (`in_use`)**,
+- **V užívání (`in_use`)**,
 - **Vyřazeno (`disposed`)**,
 - **Prodáno (`sold`)**.
 
@@ -80,7 +80,7 @@ ID řádku. Přirozeným klíčem je v rámci dokladu normalizovaný **název + 
 Opakované spuštění nebo nevinná editace dokladu tak nevytvoří duplicitu.
 
 Při synchronizaci se doplní nově klasifikované položky. Automatická karta bez
-protějšku se může odstranit jen tehdy, pokud je stále v používání a uživatel
+protějšku se může odstranit jen tehdy, pokud je stále v užívání a uživatel
 na ní nevyplnil inventární číslo, umístění, odpovědnou osobu ani poznámku.
 Ručně doplněná či vyřazená karta se potichu nemaže.
 
@@ -123,7 +123,7 @@ musí nejdřív doplnit vazbu nebo provést evidenční opravu ručně.
 
 ## 27.5 Úprava, vyřazení, prodej a obnovení
 
-Kartu v používání lze upravit nebo vyřadit s datem a důvodem. Datum vyřazení
+Kartu v užívání lze upravit nebo vyřadit s datem a důvodem. Datum vyřazení
 nesmí předcházet pořízení. Vyřazení mění stav, ale kartu nemaže, aby byla
 zachovaná historická inventurní stopa.
 
@@ -142,13 +142,13 @@ každý řádek sedne na svůj účet. Po vystavení faktury se karta uzavře sa
 drobný majetek přejde na *prodáno*, dlouhodobý se vyřadí včetně doúčtování
 zůstatkové ceny. Storno faktury karty vrátí do užívání.
 
-Vyřazenou nebo prodanou kartu lze vrátit do stavu v používání. Obnovení vymaže
+Vyřazenou nebo prodanou kartu lze vrátit do stavu v užívání. Obnovení vymaže
 údaje vyřazení/prodeje na kartě, ale nestornuje zdrojovou fakturu ani jiné
 ruční účetní zápisy. Ty musí účetní posoudit samostatně.
 
 Kartu lze otevřít k prodeji i z opačné strany — z **detailu přijaté faktury**, ze
 které vznikla. U položky s vazbou na kartu se zobrazí její název a stav; u karty
-v používání odkaz **Vyřadit prodejem** otevře v evidenci drobného majetku rovnou
+v užívání odkaz **Vyřadit prodejem** otevře v evidenci drobného majetku rovnou
 okno prodeje pro tuto kartu, takže ji není třeba dohledávat ručně v seznamu.
 
 Fyzické smazání používej jen pro chybně založenou kartu. Běžné vyřazení se

@@ -1,6 +1,6 @@
 # 109. Přechod z PREMIER
 
-**Cesta: `Systém → Přechod z PREMIER`**
+**Cesta: `Systém → Přechod z jiných účetních systémů → PREMIER`**
 
 Průvodce převede vybrané účetní roky z programu PREMIER do firmy v MyÚčtu. Vstupem je
 záloha dat, kterou vytvoříte přímo v PREMIERu. Na rozdíl od POHODY tu není

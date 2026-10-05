@@ -1,6 +1,6 @@
 # 65. Šablony a pravidla
 
-**Cesta: `Nástroje → Šablony`**
+**Cesta: `Nástroje → Šablony účtování`**
 
 Stránka soustřeďuje tři rozdílné druhy pomůcek. Nejde o jeden univerzální
 automat: každá záložka vstupuje do jiné části zpracování.

@@ -1,6 +1,6 @@
 # 103. Přechod z Money S3
 
-**Cesta: `Systém → Přechod z Money S3`**
+**Cesta: `Systém → Přechod z jiných účetních systémů → Money S3`**
 
 Průvodce převede účetní agendu z Money S3 do firmy v MyÚčtu. Vstupem je záloha
 agendy, kterou si firma nebo účetní vytvoří v Money funkcí *Zálohovat agendu*

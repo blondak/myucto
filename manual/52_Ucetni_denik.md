@@ -968,9 +968,9 @@ měsících funguje beze změny, chráněná je jen minulost před zamčeným da
 **Posun po podání.** Vygenerování ani stažení přiznání k DPH nebo kontrolního hlášení
 (viz [Výkazy DPH](41_Vykazy_DPH.md)) samo zámek neposouvá. Backend jej posune až při
 explicitním označení validního snapshotu za skončené období jako **odeslaného**, a to
-jen **dopředu** (nikdy ho automaticky nezmenší). Běžná obrazovka Archivu podání tuto
-akci nenabízí, proto v UI použij po doloženém podání ruční nastavení
-zámku administrátorem.
+jen **dopředu** (nikdy ho automaticky nezmenší). V Archivu podání tuto akci
+spustíš tlačítkem **Označit jako podané**; zámek lze alternativně nastavit ručně
+administrátorem.
 
 **Co uvidíš.** Pokus o zaúčtování, přeúčtování nebo storno dokladu s datem v zamčeném
 rozsahu skončí chybou, že datum je zamčené. Storno zaúčtovaného zápisu, jehož datum už

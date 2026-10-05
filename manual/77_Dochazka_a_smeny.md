@@ -161,15 +161,17 @@ nezařazuje a hlásí se zvlášť.
 
 ### 77.9.3 Zákonné příplatky ke mzdě (§ 114 až § 118)
 
-Docházka je **jediný** zdroj zákonných příplatků. Kolik hodin bylo odpracováno
-v noci, o víkendu, ve svátek nebo ve ztíženém prostředí, se nikde jinde
-nezadává — mzdovým vstupem ani rychlým měsíčním vstupem tyto příplatky založit
-nelze.
+Příplatky se berou z docházky, kde se odpracovaná doba a její příznaky (noc,
+víkend, svátek, ztížené prostředí) evidují po dnech. Druhou cestou je
+[rychlý měsíční vstup](79_Rychly_mesicni_vstup.md), kde po stisku **Zadat i
+příplatky** zadáte počet hodin za měsíc a výslednou částku dopočte aplikace.
+Tentýž příplatek za měsíc ale nelze vykázat z obou zdrojů najednou, aplikace
+to zastaví.
 
 > [!IMPORTANT]
-> Firma, která docházku nevede, nedostane z aplikace příplatky podle § 116,
-> § 117 ani § 118 vůbec. Chcete-li je vyplácet, musíte odpracovanou dobu
-> a její příznaky evidovat zde.
+> Firma, která docházku nevede, dostane příplatky podle § 115 až § 118 jen
+> z rychlého měsíčního vstupu. Pro denní evidenci příznaků a automatický
+> výpočet z odpracované doby je potřeba docházka.
 
 | Ustanovení | Příplatek | Mzdová složka |
 |---|---|---|

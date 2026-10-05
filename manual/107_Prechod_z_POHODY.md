@@ -1,6 +1,6 @@
 # 107. Přechod z POHODY
 
-**Cesta: `Systém → Přechod z POHODA (i SQL)`**
+**Cesta: `Systém → Přechod z jiných účetních systémů → POHODA (i SQL)`**
 
 Průvodce převede vybrané účetní roky z programu POHODA do firmy v MyÚčtu. Vstupem je ZIP
 s XML, který připravíte jednou ze tří cest: exportem přes XML rozhraní POHODY,

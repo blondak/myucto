@@ -306,7 +306,7 @@ počtů kontrol; u běhu se místo nich ukáže odkaz **Skrytá varování (N)**
 Souhrnné varování „Počet osob s nepodepsaným prohlášením…" se po skrytí části
 osob ukáže se sníženým počtem; zmizí, až jsou skryté všechny dotčené osoby.
 
-Přehled všech skrytí je v **Mzdy → Nastavení zaměstnavatele → Skrytá
+Přehled všech skrytí je v **Mzdy → Nastavení mezd → Skrytá
 varování**, seskupený podle typu, s tím, kdo a kdy varování skryl a proč.
 Odtud ho obnovíte jednotlivě nebo celou skupinu najednou. Skrytí i obnovení
 se zapisují do auditního logu. Skrývat a obnovovat smí uživatel s právem

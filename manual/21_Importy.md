@@ -599,7 +599,7 @@ doklad před zaúčtováním vždy otevři a zkontroluj dodavatele, období, DUZ
 
 Na stejné stránce je také ruční spuštění **scan inboxu**. Ten projde
 nakonfigurovaný adresář, použije ISDOC přednostně a u nestrukturovaného PDF může
-přejít na nastavenou AI bránu. Volba **Nanečisto** vrátí report bez vytvoření
+přejít na nastavenou AI bránu. Volba **Zkušební běh (bez zápisu)** vrátí report bez vytvoření
 dokladů. Nezpracované a chybné soubory zůstávají v samostatném seznamu s důvodem,
 aby se neztratily v souhrnných počtech.
 

@@ -73,9 +73,8 @@ plnění.
 
 Stažené XML projde strukturální validací a uloží se do Archivu podání jako stažené.
 Stažení samo neznamená odeslání. Po nahrání na portál zkontroluj jeho výsledek,
-odešli formulář a uschovej potvrzení. Backend umí archivní záznam označit jako
-odeslaný, běžná stránka Archivu podání ale tento krok nenabízí; bez něj
-archiv není spolehlivým dokladem skutečného podání.
+odešli formulář a uschovej potvrzení. V Archivu podání proto záznam označ tlačítkem **Označit jako podané**; bez
+tohoto kroku archiv není spolehlivým dokladem skutečného podání.
 
 Tlačítko pro stažení je dostupné uživateli s právem exportovat výkazy. Uživatel
 bez tohoto práva může náhled zkontrolovat, ale XML nestáhne.

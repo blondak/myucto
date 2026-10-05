@@ -100,7 +100,7 @@ kontrolu.
   podle [předkontace](73_Ucetni_nastroje.md#733-predkontace)
   a doklad dostane účetní ikonu **Zaúčtováno** s tooltipem a odkazem na zápis v deníku.
 - Badge **Nezaúčtováno** vidíš přímo v seznamech faktur (filtr **Zaúčtování**
-  ve FilterBar) i na dlaždici **Akce k řešení** na [Přehledu](10_Prehled.md) —
+  ve FilterBar) i na dlaždici **Akce pro tebe** na [Přehledu](10_Prehled.md) —
   to je tvůj denní vstupní bod, kolik dokladů ještě čeká na zaúčtování.
 - Když zaúčtování selže, aplikace vrátí srozumitelnou chybu místo tichého
   selhání — přehled chybových hlášek a jak je opravit viz
@@ -439,7 +439,7 @@ automatického zápisu ho vrátí zpět do režimu návrhů.
 
 ## 50.3 Denní cyklus
 
-1. **[Přehled](10_Prehled.md)** → dlaždice **Akce k řešení** ukáže nejdůležitější
+1. **[Přehled](10_Prehled.md)** → dlaždice **Akce pro tebe** ukáže nejdůležitější
    termíny a nehotové doklady.
 2. **K doúčtování** ([samostatná kapitola](54_Rucni_fronta_doctovani.md))
    je pracovní fronta napříč bankou, vydanými a přijatými fakturami a vyžádanými

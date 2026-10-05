@@ -125,9 +125,11 @@ na pozadí: podání zůstane ve stavu odesláno bez doručenky, dokud ji sám
 nenahrajete, nebo dokud ručně nenačtete příchozí zprávy. Doručení do schránky
 příjemce navíc pořád nevypovídá o tom, jak úřad podání vyřídil.
 
-> 🛈 Pozn: V tomto vydání je přímé odeslání zapnuté v jádře aplikace, ale
-> obrazovka, která do něj živou relaci předá, teprve přijde. Do té doby Vás
-> potvrzení podání dovede na bránu ISDS nebo na ruční postup níž.
+> 🛈 Pozn: Přímé odeslání z relace je v aplikaci k dispozici. U připraveného
+> podání nabídne tlačítko **Odeslat Mobilním klíčem** a odeslání potvrdíte
+> v mobilu; více podání najednou odešle hromadné tlačítko (viz
+> [kapitola 85](85_Podani_a_hlaseni.md)). Bez Mobilního klíče Vás potvrzení
+> podání dovede na bránu ISDS nebo na ruční postup níž.
 
 ### 97.4.3 Ruční odeslání
 

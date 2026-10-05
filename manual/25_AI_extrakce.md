@@ -40,7 +40,7 @@ kontrole"** a uživatel by měl řádky před zaúčtováním ověřit.
 Pokud levnější model (Haiku 4.5) vrátí slabý výsledek (vendor se shoduje s
 tenantem nebo součet řádků se výrazně liší od totalu), extractor automaticky
 zkusí znovu se silnějším modelem (Sonnet 4.6, ~4× dráž za extract). Pokud máš
-Sonnet/Opus jako default, retry se přeskočí.
+Sonnet jako default, retry se přeskočí.
 
 ### 25.1.4 Katastrofální mismatch — placeholder
 

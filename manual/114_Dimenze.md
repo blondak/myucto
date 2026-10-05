@@ -253,7 +253,8 @@ bez schvalovatele.
 **Které středisko schvaluje.** Středisko se bere z položek i z hlavičky dokladu
 stejně jako při zaúčtování: dimenze položky, pak produkt, hlavička dokladu,
 zakázka a dodavatel. Částka střediska je součet základů položek s jeho hodnotou
-(u rozpadu podíl), u dokladu v cizí měně přepočtená kurzem dokladu. Má-li doklad
+(u rozpadu podíl), u dokladu v cizí měně přepočtená kurzem dokladu. Doklad v cizí měně bez kurzu
+nejde ocenit, proto se u něj limit neuplatní a schvaluje se vždy. Má-li doklad
 víc středisek, schvaluje každé středisko jeho odpovědná osoba a doklad je
 schválený, až schválí všichni. Daňový doklad k přijaté platbě a dobropis se
 neschvalují.

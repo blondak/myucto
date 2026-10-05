@@ -2,7 +2,7 @@
 
 Přehled je úvodní obrazovka po přihlášení — okamžitý report, kolik jsi vystavil,
 co je po splatnosti, jaký je obrat za letošní a loňský rok, a kdo jsou tví
-top klienti.
+top klienti. V hlavním menu je tato úvodní stránka (první položka sekce **Grafy**) označená jako **Akce pro tebe**.
 
 Průvodce úvodním nastavením se nezobrazuje, pokud firma už eviduje přijatou
 fakturu, i když dosud žádnou fakturu nevystavila. Rozhoduje existence dokladu,

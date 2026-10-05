@@ -51,9 +51,12 @@ Má-li účet současně aktivní TOTP, můžeš místo passkey zvolit
 zadat aktuální šestimístný kód. Zrušení systémového dialogu passkey TOTP samo
 nespustí.
 
-MyÚčto nepoužívá záložní jednorázové recovery kódy. Obnova přístupu probíhá
+Pro případ, že přijdeš o passkey i autentikátor, si můžeš v **Profil →
+Přístupové klíče → Záložní kódy** vygenerovat sadu jednorázových záložních
+kódů. Každý kód funguje právě jednou a zobrazí se jen při vygenerování, proto
+si je ulož mimo počítač, ze kterého se přihlašuješ. Obnova přístupu jde také
 jinou passkey, TOTP nebo administrátorským CLI rescue. Podrobnosti jsou v
-[102. Bezpečnost](101_Bezpecnost.md).
+[101. Bezpečnost](101_Bezpecnost.md).
 
 ## 8.4 Zapomenuté heslo
 
