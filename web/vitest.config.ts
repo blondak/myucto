@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { availableParallelism } from 'node:os'
 
 const nodeTests = [
   'src/utils/__tests__/{accrualPeriod,extractionWarning,groupDashboard,integrationEditor,integrationWebhook,journalPairs,journalSourceLink,netTurnoverRows,productSetSelections,rowAutoCode,stockSearchMatch}.spec.ts',
@@ -55,7 +56,7 @@ export default defineConfig({
     env: { TZ: 'Europe/Prague' },
     isolate: true,
     fileParallelism: true,
-    maxWorkers: 8,
+    maxWorkers: Math.min(8, availableParallelism()),
     maxConcurrency: 1,
     projects: [
       { extends: true, test: { name: 'node', environment: 'node', include: nodeTests } },

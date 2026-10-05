@@ -71,6 +71,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
+          --tmpfs /var/lib/mysql:rw,size=4g
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=5s
           --health-timeout=5s
@@ -96,9 +97,42 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pdo, pdo_mysql, mbstring, intl, gd, zip, opcache, bcmath, exif
+          extensions: pdo, pdo_mysql, mbstring, intl, gd, zip, opcache, bcmath, exif, imagick
           coverage: none
           tools: composer:v2
+        env:
+          fail-fast: true
+
+      - name: Prepare PDF rasterization backends
+        shell: pwsh
+        run: |
+          sudo apt-get update
+          if ($LASTEXITCODE -ne 0) { throw 'Package index update failed.' }
+          sudo apt-get install --no-install-recommends -y ghostscript poppler-utils
+          if ($LASTEXITCODE -ne 0) { throw 'PDF backend installation failed.' }
+          foreach ($file in Get-ChildItem -Path '/etc/ImageMagick-*/policy.xml') {
+              [xml]$policy = Get-Content -LiteralPath $file.FullName -Raw
+              $changed = $false
+              foreach ($rule in $policy.SelectNodes('//policy[@domain="coder" and @pattern="PDF"]')) {
+                  $rights = $rule.GetAttribute('rights')
+                  if ($rights -notmatch '\bread\b') {
+                      $rule.SetAttribute('rights', $(if ($rights -match '\bwrite\b') { 'read | write' } else { 'read' }))
+                      $changed = $true
+                  }
+              }
+              if ($changed) {
+                  $temporaryPolicy = Join-Path $env:RUNNER_TEMP ($file.Directory.Name + '-policy.xml')
+                  $policy.Save($temporaryPolicy)
+                  sudo install -m 644 $temporaryPolicy $file.FullName
+                  if ($LASTEXITCODE -ne 0) { throw 'CI PDF read policy configuration failed.' }
+              }
+          }
+          gs --version
+          if ($LASTEXITCODE -ne 0) { throw 'Ghostscript is unavailable.' }
+          pdftoppm -v
+          if ($LASTEXITCODE -ne 0) { throw 'Poppler is unavailable.' }
+          php --ri imagick
+          if ($LASTEXITCODE -ne 0) { throw 'Imagick is unavailable.' }
 
       - name: Cache composer dependencies
         uses: actions/cache@v5
@@ -179,6 +213,10 @@ jobs:
       - name: Struktura databáze proti otisku
         run: MYINVOICE_DB_NAME=myinvoice_ci_test php api/bin/check-schema.php --strict
 
+      - name: Verify PDF rasterization backends
+        working-directory: api
+        run: php vendor/bin/phpunit --filter 'test(Imagick|Pdftoppm)BackendRespectsPageLimit' --fail-on-skipped tests/Unit/Service/Import/PdfPageRasterizerTest.php
+
       # Část integračních testů mluví na běžící instanci přes HTTP (bearer auth,
       # rate-limit hlavičky, cross-tenant vazba tokenu). Bez serveru se přeskočí.
       #
@@ -216,7 +254,7 @@ jobs:
         working-directory: api
         env:
           MYINVOICE_TEST_URL: http://localhost:8080
-        run: php bin/test-parallel.php --processes=8 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
+        run: php bin/test-parallel.php --processes=4 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
 
       - name: Backend test results and timings
         if: always()
