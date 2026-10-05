@@ -36,11 +36,16 @@ final class ChartImporter
         }
 
         $names = [];
+        $deductibility = [];
         foreach ($ctx->backup->rowsAcrossYears('UcOsnova') as $r) {
             $code = trim((string) ($r['Ucet'] ?? ''));
             $name = trim((string) ($r['Nazev'] ?? ''));
             if ($code !== '' && ctype_digit($code) && $name !== '') {
                 $names[$code] = $name;
+            }
+            $flag = self::deductibility($code, $r);
+            if ($flag !== null) {
+                $deductibility[$code] = $flag;
             }
         }
 
@@ -72,6 +77,7 @@ final class ChartImporter
             }
             if (isset($ctx->accountIds[$target])) {
                 $p->count(self::STEP, 'existing');
+                $this->alignDeductibility($ctx, $target, $deductibility[$moneyCode] ?? null);
                 continue;
             }
             $synthetic = substr($target, 0, 3);
@@ -87,8 +93,53 @@ final class ChartImporter
             );
             $ctx->accountIds[$target] = $id;
             $p->count(self::STEP, 'created');
+            $this->alignDeductibility($ctx, $target, $deductibility[$moneyCode] ?? null);
+        }
+        $nonDeductible = [];
+        foreach (array_keys($used) as $raw) {
+            if (($deductibility[(string) $raw] ?? null) === 'non_deductible') {
+                $nonDeductible[] = AccountCode::fromMoney((string) $raw) . ' ' . ($names[(string) $raw] ?? '');
+            }
+        }
+        if ($nonDeductible !== []) {
+            sort($nonDeductible);
+            // Účetní v Money občas nechá „nedaňový" typ i u běžného nákladu — v DPPO ř. 40
+            // by se to projevilo celým obratem, proto seznam na očích.
+            $p->info(self::STEP, 'non_deductible_accounts', 'Daňově neuznatelné náklady podle osnovy Money (DPPO ř. 40): '
+                . implode(', ', array_map('trim', $nonDeductible)) . '. Ověřte proti podanému přiznání.', ['accounts' => $nonDeductible]);
         }
         $p->finish(self::STEP);
+    }
+
+    /**
+     * Daňová uznatelnost nákladového účtu podle osnovy Money: `Typ` 1 = daňový, 0 = nedaňový
+     * (513, 543, 545, „nedaňové" analytiky…). Bez ní by DPPO ř. 40 nevidělo nic. Účty 59x
+     * (daň z příjmů, převody) jsou v Money „nedaňové" také, ale do základu daně nevstupují
+     * vůbec — výpočet DPPO je řeší sám. Starší záloha bez sloupce `Typ` = nic nepřebírat.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function deductibility(string $moneyCode, array $row): ?string
+    {
+        if (!ctype_digit($moneyCode) || $moneyCode[0] !== '5' || str_starts_with($moneyCode, '59') || !array_key_exists('Typ', $row)) {
+            return null;
+        }
+        return (int) $row['Typ'] === 0 ? 'non_deductible' : 'deductible';
+    }
+
+    /** Money rozhoduje i u účtu, který už je ve firmě (ze šablony nebo z dřívějšího převodu). */
+    private function alignDeductibility(ImportContext $ctx, string $target, ?string $flag): void
+    {
+        if ($flag === null) {
+            return;
+        }
+        $row = $this->accounts->findById($ctx->supplierId, $ctx->accountIds[$target]);
+        if ($row !== null && (string) ($row['tax_deductibility'] ?? 'deductible') !== $flag) {
+            $this->accounts->setTaxDeductibility($ctx->supplierId, $ctx->accountIds[$target], $flag);
+        }
+        if ($flag === 'non_deductible') {
+            $ctx->protocol->count(self::STEP, 'non_deductible');
+        }
     }
 
     /**

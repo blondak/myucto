@@ -29,6 +29,7 @@ use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -204,6 +205,49 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         $stmt->execute([$supplierId]);
         self::assertSame([[1, '1030.00', '1000.00', '24e'], [1, '1030.00', '30.00', 'mimo']],
             array_map(static fn (array $r): array => [(int) $r[0], (string) $r[1], (string) $r[2], $r[3]], $stmt->fetchAll(PDO::FETCH_NUM)));
+    }
+
+    /**
+     * Odkaz interního dokladu na fakturu píše účetní volně — malými písmeny s mezerou,
+     * jen číslicemi, nebo vůbec (pak páruje číslo dokladu dodavatele). Samovyměření se
+     * musí najít ve všech případech, jinak faktura skončí v přiznání bez ř. 5 a 43.
+     */
+    #[DataProvider('looseSelfAssessmentReferences')]
+    public function testSelfAssessmentIsFoundByLooseReferenceOrVendorDocument(string $description, string $vendorDocument): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/ref.lz', SyntheticAgenda::filesWithSelfAssessmentReference($description, $vendorDocument));
+        $backup = Ms3Backup::extract($this->tmp . '/ref.lz', $this->tmp . '/ref');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP25005' AND reverse_charge = 1"));
+        $july = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 7, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(210.0, (float) ($july['5']['vat'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function looseSelfAssessmentReferences(): iterable
+    {
+        yield 'malá písmena a mezera' => ['PDP k fp 25005', ''];
+        yield 'jen číslice' => ['Přiznání daně z 25005', ''];
+        yield 'číslo dokladu dodavatele' => ['Přiznání daně z licence', 'DE-2025-001'];
+    }
+
+    /**
+     * Faktura s příznakem přenesené povinnosti bez interního dokladu se samovyměřením
+     * nesmí projít jako plnění bez daně (ř. 40 s nulovou daní) — jde do konceptu.
+     */
+    public function testReverseChargeWithoutSelfAssessmentGoesToReview(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/revch.lz', SyntheticAgenda::filesWithReverseChargeWithoutSelfAssessment());
+        $backup = Ms3Backup::extract($this->tmp . '/revch.lz', $this->tmp . '/revch');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP25005' AND status = 'draft'"));
+        self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP24001' AND status = 'draft'"), 'Ostatní faktury beze změny.');
     }
 
     /**

@@ -82,7 +82,7 @@ final class ChartOfAccountsRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, account_code, name, account_type, normal_side,
-                    is_synthetic, parent_id, is_active, created_at
+                    is_synthetic, parent_id, is_active, tax_deductibility, created_at
                FROM chart_of_accounts
               WHERE supplier_id = ? AND id = ?'
         );

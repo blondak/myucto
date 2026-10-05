@@ -122,6 +122,28 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Daňová uznatelnost nákladového účtu jde z osnovy Money (`Typ` 0 = nedaňový) — bez ní
+     * DPPO ř. 40 nevidí nic. Účet, který Money vede jako daňový, zůstane daňový.
+     */
+    public function testChartDeductibilityIsTakenFromMoney(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/typ.lz', SyntheticAgenda::filesWithChartDeductibility());
+        $backup = Ms3Backup::extract($this->tmp . '/typ.lz', $this->tmp . '/typ');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT LEFT(c.account_code, 3), c.tax_deductibility FROM chart_of_accounts c
+              WHERE c.supplier_id = ? AND LEFT(c.account_code, 3) IN ('518', '568')
+                AND c.id IN (SELECT l.account_id FROM journal_entry_lines l WHERE l.supplier_id = c.supplier_id)
+              ORDER BY c.account_code"
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame(['518' => 'deductible', '568' => 'non_deductible'], $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+    }
+
+    /**
      * Money otevře další rok i bez uzávěrky (XZ). Rok, jehož PS navazují, převod uzavře
      * dál (reálné agendy nemají XZ u většiny podaných let), ale upozorní, že uzávěrka
      * v Money neproběhla.

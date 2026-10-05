@@ -136,7 +136,13 @@ final class InvoiceImporter
                 continue;
             }
             $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
-            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year);
+            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year, (string) ($r['PrijatDokl'] ?? ''), $usedSelfAssessments);
+            if (!$review && $selfAssessment === null && (int) ($r['RevCH'] ?? 0) === 1) {
+                // Přenesená povinnost bez dohledaného samovyměření by v přiznání skončila
+                // jako plnění bez daně (ř. 40 s nulovou daní, bez ř. 10 a 43).
+                $class['reasons'][] = 'přenesená daňová povinnost bez dohledaného interního dokladu se samovyměřením';
+                $review = true;
+            }
             $reverseCharge = false;
             if ($selfAssessment !== null) {
                 $usedSelfAssessments[$selfAssessment['key']] = true;
@@ -238,12 +244,15 @@ final class InvoiceImporter
         }
         $unlinked = [];
         foreach ($selfAssessed as $byYear) {
-            foreach ($byYear as $sa) {
-                if (!isset($usedSelfAssessments[$sa['key']]) && count($unlinked) < ImportProtocol::LIST_LIMIT) {
-                    $unlinked[] = $sa['doc'];
+            foreach ($byYear as $list) {
+                foreach ($list as $sa) {
+                    if (!isset($usedSelfAssessments[$sa['key']]) && count($unlinked) < ImportProtocol::LIST_LIMIT) {
+                        $unlinked[$sa['key']] = $sa['doc'];
+                    }
                 }
             }
         }
+        $unlinked = array_values($unlinked);
         if ($unlinked !== []) {
             $p->warn(self::STEP_PURCHASE, 'self_assessment_unlinked', count($unlinked) . ' interních dokladů se samovyměřením DPH nejde přiřadit k převedené faktuře ('
                 . implode(', ', array_slice($unlinked, 0, 20)) . '). Jejich DPH doplňte ručně.', ['documents' => $unlinked]);
@@ -256,6 +265,12 @@ final class InvoiceImporter
         $p = $ctx->protocol;
         $currencyId = $this->homeCurrency->id($ctx->supplierId);
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE);
+        $itemCodes = [];
+        foreach ($ctx->backup->rowsAcrossYears('VFaktPol', ['Cislo', 'SazbaDPH', 'KodDPH', 'Cena', 'PocetMJ']) as $item) {
+            if (round((float) ($item['Cena'] ?? 0), 2) !== 0.0) {
+                $itemCodes[$item['__dir'] . '|' . (int) ($item['Cislo'] ?? 0)][] = $item;
+            }
+        }
 
         $clients = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
@@ -301,7 +316,7 @@ final class InvoiceImporter
                 $this->skipUnknownRate($ctx, self::STEP_ISSUED, $docNo, $year, $e);
                 continue;
             }
-            $class = self::classify($r, true, $amounts['vat']);
+            [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
             $review = $class['reasons'] !== [];
             if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
                 $p->count(self::STEP_ISSUED, 'unposted_review_skipped');
@@ -353,7 +368,7 @@ final class InvoiceImporter
             $clients[$clientId] = $clientId;
             $items = [];
             foreach ($amounts['items'] as $i => $item) {
-                $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], $class['code']);
+                $items[$i] = self::issuedItem($r, $item['base'], $item['vat'], $item['rate_id'], $item['rate'], array_key_exists('code', $item) ? $item['code'] : $class['code']);
             }
             $this->writer->insertIssuedItems($id, $items);
             ForeignCurrencyTakeover::report($p, self::STEP_ISSUED, $docNo, $fx);
@@ -580,6 +595,74 @@ final class InvoiceImporter
     }
 
     /**
+     * Členění DPH po sazbách z položek dokladu (`VFaktPol.KodDPH`, prázdné = kód hlavičky).
+     * Money vykazuje každou položku jejím členěním: nájem bytu ř. 50 a zabezpečení ř. 1
+     * na jedné faktuře, ať hlavička říká cokoli. Sazba s položkami různého členění zůstane
+     * na kódu hlavičky. Prázdné pole = položky nic nemění.
+     *
+     * @param array<string,mixed> $r
+     * @param list<array<string,mixed>> $items
+     * @return array<string,string> sazba ('21') => členění
+     */
+    private static function lineCodes(array $r, array $items): array
+    {
+        $header = trim((string) ($r['KodDPH'] ?? ''));
+        $byRate = [];
+        foreach ($items as $item) {
+            $code = trim((string) ($item['KodDPH'] ?? '')) ?: $header;
+            $byRate[self::rateKey((float) ($item['SazbaDPH'] ?? 0))][$code] = true;
+        }
+        $out = [];
+        $differs = false;
+        foreach ($byRate as $rate => $codes) {
+            if (count($codes) === 1) {
+                $out[$rate] = (string) array_key_first($codes);
+                $differs = $differs || $out[$rate] !== $header;
+            }
+        }
+        return $differs ? $out : [];
+    }
+
+    /**
+     * Klasifikace dokladu po řádcích sazeb, když položky nesou vlastní členění
+     * ({@see lineCodes()}); jinak klasifikace hlavičky beze změny. Kód řádku jde na položku,
+     * hlavička přebírá klasifikaci řádku s daní (jinak prvního řádku).
+     *
+     * @param array<string,mixed> $r
+     * @param array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float} $amounts
+     * @param array<string,string> $codes
+     * @return array{0:array{reasons:list<string>,vat_deduction:string,code:?string,kind:string,fixed_asset:bool},1:array{items:list<array<string,mixed>>,base:float,vat:float,total:float,rounding:float}}
+     */
+    private static function classifyLines(array $r, bool $issued, array $amounts, array $codes): array
+    {
+        if ($codes === []) {
+            return [self::classify($r, $issued, $amounts['vat']), $amounts];
+        }
+        $header = null;
+        $reasons = [];
+        foreach ($amounts['items'] as $i => $item) {
+            $code = $codes[self::rateKey((float) $item['rate'])] ?? null;
+            $line = self::classify(($code !== null ? ['KodDPH' => $code] : []) + $r, $issued, (float) $item['vat']);
+            $reasons = array_merge($reasons, $line['reasons']);
+            $amounts['items'][$i]['code'] = $line['code'];
+            if ($header === null || (abs((float) $item['vat']) >= 0.005 && $header['taxed'] === false)) {
+                $header = $line + ['taxed' => abs((float) $item['vat']) >= 0.005];
+            }
+        }
+        if ($header === null) {
+            return [self::classify($r, $issued, $amounts['vat']), $amounts];
+        }
+        unset($header['taxed']);
+        $header['reasons'] = array_values(array_unique($reasons));
+        return [$header, $amounts];
+    }
+
+    private static function rateKey(float $rate): string
+    {
+        return rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
+    }
+
+    /**
      * Doklad k ruční kontrole (záloha, proforma, nejisté DPH), který Money v historickém roce
      * vůbec nezaúčtovalo. Do uzavřeného roku nic nepřidá — v účetnictví ani v DPH není —
      * a jen by zaplevelil koncepty; převod ho přeskočí. V posledním (otevřeném) roce se
@@ -630,10 +713,12 @@ final class InvoiceImporter
      * Samovyměření DPH, které Money vede interním dokladem (`IntDokl`, řádky `PolUcDID`)
      * k faktuře v přenesené povinnosti — pořízení z EU, služby ze zahraničí, dovoz,
      * tuzemský přenos. Faktura sama má členění mimo přiznání; výstup (ř. 3–13) a zrcadlový
-     * odpočet (ř. 43/44) nese interní doklad. Faktura se pozná z popisu („RCH k PFZ…").
+     * odpočet (ř. 43/44) nese interní doklad. Faktura se pozná z popisu („RCH k PFZ…",
+     * „PDP k FP 241001", „Přiznání daně z 241003") nebo z čísla dokladu dodavatele, které
+     * interní doklad přebírá z faktury ({@see selfAssessmentKeys()}).
      *
-     * @return array<string,array<int,array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>
-     *   číslo faktury (''= nepoznaná) => rok interního dokladu => samovyměření
+     * @return array<string,array<int,list<array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>>
+     *   klíč faktury => rok interního dokladu => samovyměření (jeden doklad pod více klíči)
      */
     private function selfAssessments(ImportContext $ctx): array
     {
@@ -681,25 +766,66 @@ final class InvoiceImporter
                 $entry['deduction'] = $resolved['deduction'];
                 $entry['fixed_asset'] = $resolved['fixed_asset'];
             }
-            // „RCH k PFZ190001" — první číslo dokladu v popisu (písmena + číslice).
-            $ref = preg_match('/\b([A-Z]{1,5}\d{4,})\b/u', (string) ($h['Popis'] ?? ''), $m) === 1 ? $m[1] : '';
-            $out[$ref][$year] = $entry;
+            foreach (self::selfAssessmentKeys((string) ($h['Popis'] ?? ''), (string) ($h['PrijatDokl'] ?? '')) as $ref) {
+                $out[$ref][$year][] = $entry;
+            }
         }
         return $out;
     }
 
     /**
-     * Samovyměření k faktuře: interní doklad z roku faktury, z následujícího (faktura
-     * z prosince samovyměřená v lednu) nebo z předchozího.
+     * Klíče, pod kterými se interní doklad hledá: první číslo dokladu v popisu tak, jak je
+     * (bez mezery a velkými písmeny: „PFZ190001"), totéž jen číslicemi („#241001" — řada
+     * faktury v Money je číselná, předponu FP/PF dopisuje účetní) a číslo dokladu dodavatele
+     * („@DF-2024-001"). Bez čísla v popisu i bez dokladu dodavatele zůstane pod klíčem ''.
      *
-     * @param array<string,array<int,array<string,mixed>>> $selfAssessed
+     * @return list<string>
+     */
+    public static function selfAssessmentKeys(string $description, string $vendorDocument): array
+    {
+        $keys = [];
+        if (preg_match('/(?<![\p{L}\d])(\p{L}{0,5})\s?(\d{4,})(?!\d)/u', $description, $m) === 1) {
+            $keys[] = mb_strtoupper($m[1]) . $m[2];
+            $keys[] = '#' . $m[2];
+        }
+        $vendor = mb_strtoupper(preg_replace('/\s+/u', '', $vendorDocument) ?? '');
+        if ($vendor !== '') {
+            $keys[] = '@' . $vendor;
+        }
+        return $keys === [] ? [''] : array_values(array_unique($keys));
+    }
+
+    /**
+     * Samovyměření k faktuře: interní doklad z roku faktury, z následujícího (faktura
+     * z prosince samovyměřená v lednu) nebo z předchozího. Hledá se podle čísla faktury,
+     * pak podle jeho číslic a nakonec podle čísla dokladu dodavatele; doklad už přiřazený
+     * jiné faktuře se přeskočí.
+     *
+     * @param array<string,array<int,list<array<string,mixed>>>> $selfAssessed
+     * @param array<string,bool> $used
      * @return array<string,mixed>|null
      */
-    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year): ?array
+    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year, string $vendorDocument = '', array $used = []): ?array
     {
-        foreach ([$year, $year + 1, $year - 1] as $y) {
-            if (isset($selfAssessed[$docNo][$y])) {
-                return $selfAssessed[$docNo][$y];
+        $keys = [mb_strtoupper(preg_replace('/\s+/u', '', $docNo) ?? '')];
+        $digits = preg_replace('/\D+/', '', $docNo) ?? '';
+        if (strlen($digits) >= 4) {
+            $keys[] = '#' . $digits;
+        }
+        $vendor = mb_strtoupper(preg_replace('/\s+/u', '', $vendorDocument) ?? '');
+        if ($vendor !== '') {
+            $keys[] = '@' . $vendor;
+        }
+        foreach ($keys as $key) {
+            if ($key === '' || !isset($selfAssessed[$key])) {
+                continue;
+            }
+            foreach ([$year, $year + 1, $year - 1] as $y) {
+                foreach ($selfAssessed[$key][$y] ?? [] as $sa) {
+                    if (!isset($used[$sa['key']])) {
+                        return $sa;
+                    }
+                }
             }
         }
         return null;
@@ -902,6 +1028,12 @@ final class InvoiceImporter
         $sumBase = round(array_sum(array_column($items, 'base')), 2);
         $sumVat = round(array_sum(array_column($items, 'vat')), 2);
         $moneyTotal = array_key_exists('CelkemSDPH', $r) ? round((float) $r['CelkemSDPH'], 2) : null;
+        // Konečná faktura po odečtu zálohy: `CelkemSDPH` je celá cena, sazby (a doklad
+        // v MyÚčtu) jen doplatek; odečtená záloha je v `SumZaloha` se záporným znaménkem.
+        $advance = round((float) ($r['SumZaloha'] ?? 0), 2);
+        if ($moneyTotal !== null && $advance !== 0.0 && abs($moneyTotal + $advance - round($sumBase + $sumVat, 2)) < 0.005) {
+            $moneyTotal = round($moneyTotal + $advance, 2);
+        }
 
         if ($items === [] && $moneyTotal !== null && $moneyTotal !== 0.0) {
             $items[] = ['base' => $moneyTotal, 'rate' => 0.0, 'vat' => 0.0, 'rate_id' => $this->rateId(0.0, $taxDate)];

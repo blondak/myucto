@@ -811,6 +811,65 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které interní doklad se samovyměřením k FP25005 odkazuje na fakturu
+     * jinak než „RCH k FP25005": účetní píše malá písmena s mezerou, jen číslice, nebo
+     * číslo v popisu vůbec nemá a doklad nese jen číslo dokladu dodavatele (`PrijatDokl`).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSelfAssessmentReference(string $description, string $vendorDocument = ''): array
+    {
+        $files = self::files();
+        $files['ROK.002/IntDokl.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['PrijatDokl', 'C', 20], ['DatUcPr', 'D', 2], ['DatUplDPH', 'D', 2],
+            ['Cleneni', 'C', 12], ['ZaklZS', 'E', 10], ['DPHZS', 'E', 10],
+        ], [
+            ['Cislo' => 1, 'Doklad' => 'ICH25001', 'Popis' => $description, 'PrijatDokl' => $vendorDocument, 'DatUcPr' => '2025-07-10', 'DatUplDPH' => '2025-07-10',
+                'Cleneni' => '19Ř00P', 'ZaklZS' => 2000.0, 'DPHZS' => 420.0],
+        ]);
+        return $files;
+    }
+
+    /**
+     * Agenda, ve které FP25005 nese příznak přenesené povinnosti (`RevCH`), ale interní
+     * doklad se samovyměřením k ní v záloze není.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithReverseChargeWithoutSelfAssessment(): array
+    {
+        $files = self::files();
+        $rows = iterator_to_array(Ms3Table::fromString($files['ROK.002/PFaktury.DAT'], 'PFAKTURY')->rows(), false);
+        foreach ($rows as &$r) {
+            $r['RevCH'] = trim((string) $r['Doklad']) === 'FP25005' ? 1 : 0;
+        }
+        unset($r);
+        $files['ROK.002/PFaktury.DAT'] = Ms3FixtureWriter::table(array_merge(self::PURCHASE_FIELDS, [['RevCH', 'B', 1]]), $rows);
+        unset($files['ROK.002/IntDokl.DAT'], $files['ROK.002/PolUcDID.DAT']);
+        return $files;
+    }
+
+    /**
+     * Agenda s osnovou, která nese daňovou uznatelnost (`Typ` 1 = daňový, 0 = nedaňový):
+     * bankovní poplatky 568000 jsou v Money vedené jako nedaňové, ostatní náklady daňové.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithChartDeductibility(): array
+    {
+        $files = self::files();
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $rows = iterator_to_array(Ms3Table::fromString($files[$dir . '/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
+            foreach ($rows as &$r) {
+                $r['Typ'] = trim((string) $r['Ucet']) === '568000' ? 0 : 1;
+            }
+            unset($r);
+            $files[$dir . '/UcOsnova.DAT'] = Ms3FixtureWriter::table(array_merge(self::CHART_FIELDS, [['Typ', 'L', 4]]), $rows);
+        }
+        return $files;
+    }
+
+    /**
      * Agenda, ve které přijatá FP25002 nese sazbu DPH 17 %, kterou číselník sazeb nezná.
      *
      * @return array<string,string>
