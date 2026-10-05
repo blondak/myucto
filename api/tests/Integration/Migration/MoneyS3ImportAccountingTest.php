@@ -37,11 +37,24 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
 {
-    public function testNewYearsDayEntryStaysInNewYear(): void
+    public function testImportedAccountingPreservesPeriodsBalancesAndClassification(): void
     {
         $supplierId = $this->supplier();
-        $this->import($supplierId);
+        $protocol = $this->import($supplierId);
 
+        $this->assertNewYearsDayEntryStaysInNewYear($supplierId, $protocol);
+        $this->assertEntryDatedOutsideItsBookYearIsPostedAtPeriodBoundary($supplierId, $protocol);
+        $this->assertSyntheticFromRetiredGroupTakesTypeFromAccountClass($supplierId, $protocol);
+        $this->assertMoneyYearEndClosingIsNotImported($supplierId, $protocol);
+        $this->assertUnusedPostingRulesAreTransferredInactive($supplierId, $protocol);
+        $this->assertHistoricalYearClosesDespiteDocumentMoneyLeftUnposted($supplierId, $protocol);
+        $this->assertUnpostedReviewDocumentFromHistoricalYearIsSkipped($supplierId, $protocol);
+        $this->assertHistoricalYearIsClosedWithoutDoublingOpeningBalances($supplierId, $protocol);
+        $this->assertAccountingModeIsRecordedInBothPlaces($supplierId, $protocol);
+    }
+
+    private function assertNewYearsDayEntryStaysInNewYear(int $supplierId, ImportProtocol $protocol): void
+    {
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.entry_date, p.fiscal_year FROM journal_entries e JOIN accounting_periods p ON p.id = e.period_id
               WHERE e.supplier_id = ? AND e.document_no = 'ID25001'"
@@ -57,11 +70,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
      * Money vede v knize roku i doklad s datem z vedlejšího roku a počítá ho do obratů
      * toho roku. Zápis jde k prvnímu dni období, původní datum zůstává jako datum dokladu.
      */
-    public function testEntryDatedOutsideItsBookYearIsPostedAtPeriodBoundary(): void
+    private function assertEntryDatedOutsideItsBookYearIsPostedAtPeriodBoundary(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.entry_date, e.document_date, p.fiscal_year FROM journal_entries e JOIN accounting_periods p ON p.id = e.period_id
@@ -79,11 +89,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
      * Skupinu 61 osnova od roku 2016 nemá, šablona MyÚčta taky ne. Typ účtu se převezme
      * od sourozence ze stejné třídy (6 = výnosy), jinak by převod staré agendy skončil.
      */
-    public function testSyntheticFromRetiredGroupTakesTypeFromAccountClass(): void
+    private function assertSyntheticFromRetiredGroupTakesTypeFromAccountClass(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $stmt = $this->db->pdo()->prepare(
             "SELECT account_code, account_type FROM chart_of_accounts WHERE supplier_id = ? AND account_code IN ('602', '613', '613.000') ORDER BY account_code"
@@ -103,11 +110,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
      * vynulovaly konečné stavy roku a uzávěrka MyÚčta by nesouhlasila s počátečními stavy
      * dalšího roku — rok by zůstal otevřený.
      */
-    public function testMoneyYearEndClosingIsNotImported(): void
+    private function assertMoneyYearEndClosingIsNotImported(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
         self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "description = 'Účetní závěrka roku 2024'"));
@@ -138,11 +142,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
     }
 
     /** Předkontace, kterou doklady posledních dvou let nepoužily, se převede vypnutá. */
-    public function testUnusedPostingRulesAreTransferredInactive(): void
+    private function assertUnusedPostingRulesAreTransferredInactive(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rowCount('posting_rules', $supplierId, "rule_key = 'PV001' AND is_active = 1"));
         self::assertSame(1, $this->rowCount('posting_rules', $supplierId, "rule_key = 'PF001' AND is_active = 0"));
@@ -155,11 +156,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
      * kvůli ní historický rok neuzavřel nikdy — u dokladů převzatých z Money proto uzavře
      * knihy s výjimkou a důvodem (audit + závěrkový balíček).
      */
-    public function testHistoricalYearClosesDespiteDocumentMoneyLeftUnposted(): void
+    private function assertHistoricalYearClosesDespiteDocumentMoneyLeftUnposted(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame('closed', array_column($protocol->get('closing'), null, 'year')[2024]['status']);
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2024-099' AND status <> 'draft'"));
@@ -263,11 +261,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
      * v uzavřeném roce by jen visel jako koncept. V posledním roce (RC-2025-001) zůstává ke
      * kontrole. Zálohová faktura (ZF24001) koncept není: převede se jako nezaúčtovaná záloha.
      */
-    public function testUnpostedReviewDocumentFromHistoricalYearIsSkipped(): void
+    private function assertUnpostedReviewDocumentFromHistoricalYearIsSkipped(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'RC-2024-001'"));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'RC-2025-001' AND status = 'draft'"));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'ZF-2024-001' AND document_kind = 'advance' AND booked_at IS NULL"));
@@ -521,11 +516,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         self::assertSame('in_use', $this->assetsByInventory($supplierId)['DM-008']['status']);
     }
 
-    public function testHistoricalYearIsClosedWithoutDoublingOpeningBalances(): void
+    private function assertHistoricalYearIsClosedWithoutDoublingOpeningBalances(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         $closing = array_column($protocol->get('closing'), null, 'year');
         self::assertSame('closed', $closing[2024]['status'], $this->explain($protocol));
         self::assertSame('open', $closing[2025]['status']);
@@ -587,11 +579,8 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         self::assertSame('double_entry', $modes->forYear($supplierId, 2025));
     }
 
-    public function testAccountingModeIsRecordedInBothPlaces(): void
+    private function assertAccountingModeIsRecordedInBothPlaces(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $this->import($supplierId);
-
         $s = $this->db->pdo()->prepare('SELECT accounting_mode, accounting_enabled, accounting_starts_on FROM supplier WHERE id = ?');
         $s->execute([$supplierId]);
         self::assertSame(['accounting_mode' => 'double_entry', 'accounting_enabled' => 1, 'accounting_starts_on' => '2024-01-01'],

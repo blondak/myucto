@@ -26,6 +26,13 @@ const nodeTests = [
   'src/workspace/__tests__/panelSizing.spec.ts',
   'src/composables/__tests__/usePayrollLabels.spec.ts',
   'src/components/bank/__tests__/bankTranslations.spec.ts',
+  'src/api/__tests__/{integrationsOllama,journalFilters,kbPlusOnboarding,moneyS3,payrollBankSubmissions,payrollEnforcement,payrollRegistration,pohoda,premier,productMasters,stereoNx}.spec.ts',
+  'src/components/payroll/imports/__tests__/attendanceSourceChecks.spec.ts',
+  'src/composables/__tests__/{bankStatementRefresh,useSupplierSwitch,useTableColors}.spec.ts',
+  'src/config/__tests__/payrollManualChapters.spec.ts',
+  'src/pages/company/__tests__/{creditCardImport,creditCardWork}.spec.ts',
+  'src/utils/__tests__/{kbPlusOnboarding,purchaseApproval}.spec.ts',
+  'src/workspace/__tests__/panelShortcuts.spec.ts',
 ]
 
 const jsdomTests = [
@@ -55,6 +62,7 @@ export default defineConfig({
     globals: true,
     env: { TZ: 'Europe/Prague' },
     isolate: true,
+    pool: 'threads',
     fileParallelism: true,
     maxWorkers: Math.min(8, availableParallelism()),
     maxConcurrency: 1,

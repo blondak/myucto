@@ -383,33 +383,39 @@ describe('EmployerSettings — účtová osnova', () => {
    * chybějící klíč doplní výchozím účtem. Účetní si ale předkontaci nenastaví
    * a nikdy se nedozví, že podle ní modul účtuje.
    */
-  it.each([
-    ['risky_savings_debit', '527'],
-    ['risky_savings_credit', '379'],
-    ['employee_receivable_debit', '335'],
-    ['non_deductible_benefit_debit', '528'],
-    ['travel_expense_debit', '512'],
-    // Zákonné pojištění odpovědnosti — předpis vzniká se čtvrtletním závazkem.
-    ['accident_insurance_debit', '548'],
-    ['accident_insurance_credit', '379'],
-    // Ú-13: srážková daň má vlastní předkontaci; firma založená dřív ji má
-    // srovnanou na účet zálohové daně, takže se pošle zpátky 342.
-    ['withholding_tax_credit', '342'],
-    // Výnos z paušálu plátce mzdy (§ 270 odst. 2 o. s. ř.) — jediný výnosový klíč.
-    ['enforcement_fee_revenue_credit', '648'],
-  ] as const)('nabízí předkontaci %s a pošle ji zpět', async (key, code) => {
+  it('nabízí všechny doplněné předkontace a pošle je zpět', async () => {
+    const accounts = [
+      ['risky_savings_debit', '527'],
+      ['risky_savings_credit', '379'],
+      ['employee_receivable_debit', '335'],
+      ['non_deductible_benefit_debit', '528'],
+      ['travel_expense_debit', '512'],
+      // Zákonné pojištění odpovědnosti — předpis vzniká se čtvrtletním závazkem.
+      ['accident_insurance_debit', '548'],
+      ['accident_insurance_credit', '379'],
+      // Ú-13: srážková daň má vlastní předkontaci; firma založená dřív ji má
+      // srovnanou na účet zálohové daně, takže se pošle zpátky 342.
+      ['withholding_tax_credit', '342'],
+      // Výnos z paušálu plátce mzdy (§ 270 odst. 2 o. s. ř.) — jediný výnosový klíč.
+      ['enforcement_fee_revenue_credit', '648'],
+    ] as const
     const wrapper = await mountPage()
     await openAccounting(wrapper)
 
-    const picker = wrapper.findAll(`[data-account-key="${key}"]`)[0]
-    expect(picker).toBeTruthy()
-    expect(picker.find('input').attributes('aria-invalid')).not.toBe('true')
+    for (const [key] of accounts) {
+      const picker = wrapper.findAll(`[data-account-key="${key}"]`)[0]
+      expect(picker, key).toBeTruthy()
+      expect(picker.find('input').attributes('aria-invalid'), key).not.toBe('true')
+    }
 
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
     await save!.trigger('click')
     await flushPromises()
 
-    expect(m.saveEmployerSettings.mock.calls[0][0].accounts[key]).toBe(code)
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    for (const [key, code] of accounts) {
+      expect(m.saveEmployerSettings.mock.calls[0][0].accounts[key], key).toBe(code)
+    }
     wrapper.unmount()
   })
 

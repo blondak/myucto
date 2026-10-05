@@ -171,7 +171,7 @@ final readonly class JmhzSubmissionBridgeService
          * jedno podání, jedna součást a jeden artefakt na balík. Každý balík
          * se pak odesílá jako samostatné dílčí podání s vlastním protokolem.
          */
-        $split = self::formCount($document) > JmhzScenario1XmlSerializer::PACKAGE_FORM_LIMIT;
+        $split = self::formCount($document) > $this->validator->packageFormLimit();
         $snapshotHash = self::snapshotHash($document);
         $runId = self::runId($document);
         $periodStart = self::periodStart($document);

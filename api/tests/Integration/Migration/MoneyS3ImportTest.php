@@ -102,16 +102,28 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         self::assertEqualsWithDelta(20000.0, $rows['602']['turnover_d'], 0.001);
     }
 
+    public function testImportedDocumentsPreserveNumberingPaymentsAndBankLinks(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->import($supplierId);
+
+        $this->assertRepeatedMoneyNumberingAcrossYearsDoesNotAbortImport($supplierId, $protocol);
+        $this->assertMoneyPaymentMethodIsKeptOnPurchaseInvoice($supplierId, $protocol);
+        $this->assertDeletedInvoiceWithReusedNumberIsSkipped($supplierId, $protocol);
+        $this->assertNegativeCashReceiptBecomesExpenseAndZeroIsSkipped($supplierId, $protocol);
+        $this->assertImportedBankStatementsAreMonthlyWithBalances($supplierId, $protocol);
+        $this->assertBankEntriesCarryTransactionIdAndStatementSourceIsImport($supplierId, $protocol);
+        $this->assertSameBankDocumentNumberOnTwoAccountsIsImportedTwice($supplierId, $protocol);
+        $this->assertBankTransactionsBookedWithoutInvoiceAreResolved($supplierId, $protocol);
+    }
+
     /**
      * Money čísluje řadu každý rok od začátku. Faktura FP24001 z roku 2025 narazí na
      * unikátní číslo dokladu z roku 2024 — nesmí shodit celý krok přijatých faktur
      * (a s ním pokladnu, banku, vazby a uzávěrku).
      */
-    public function testRepeatedMoneyNumberingAcrossYearsDoesNotAbortImport(): void
+    private function assertRepeatedMoneyNumberingAcrossYearsDoesNotAbortImport(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP24001' AND vendor_invoice_number = 'DF-2024-017'"));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "varsymbol = 'FP24001/2025' AND vendor_invoice_number = 'DF-2025-020'"));
@@ -121,11 +133,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         }
     }
 
-    public function testMoneyPaymentMethodIsKeptOnPurchaseInvoice(): void
+    private function assertMoneyPaymentMethodIsKeptOnPurchaseInvoice(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $this->import($supplierId);
-
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-010' AND payment_method = 'card'"));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-003' AND payment_method = 'bank_transfer'"));
     }
@@ -135,11 +144,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
      * přidělí znovu. Převod ji nesmí vzít jako druhý doklad téhož čísla — mapa by hlásila
      * konflikt a zastavila celý převod.
      */
-    public function testDeletedInvoiceWithReusedNumberIsSkipped(): void
+    private function assertDeletedInvoiceWithReusedNumberIsSkipped(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'DF-2025-003'"));
         self::assertSame(0, $this->rowCount('purchase_invoices', $supplierId, "vendor_invoice_number = 'SMAZ-2025-001'"));
@@ -149,11 +155,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
      * Záporný pokladní příjem je vratka (peníze odešly) — jde jako výdej, jinak by pokladna
      * nesouhlasila s deníkem. Nulový doklad MyÚčto nepřijme a v pokladně nemá účinek.
      */
-    public function testNegativeCashReceiptBecomesExpenseAndZeroIsSkipped(): void
+    private function assertNegativeCashReceiptBecomesExpenseAndZeroIsSkipped(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, $this->rowCount('cash_documents', $supplierId, "doc_number = 'PP25001' AND doc_type = 'out' AND total_amount = 200"));
         self::assertSame(0, $this->rowCount('cash_documents', $supplierId, "doc_number = 'PP25002'"));
@@ -167,11 +170,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
      * dál po pohybech. Převzatý výpis je výpis se zůstatkem: vidí ho záložka Stavy na účtech
      * a jde z něj vytvořit GPC.
      */
-    public function testImportedBankStatementsAreMonthlyWithBalances(): void
+    private function assertImportedBankStatementsAreMonthlyWithBalances(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $this->import($supplierId);
-
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, statement_number, currency, prev_balance, curr_balance FROM bank_statements
               WHERE supplier_id = ? AND statement_number LIKE 'BU/2024/%' ORDER BY statement_date, id"
@@ -273,11 +273,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         self::assertSame([], $changed);
     }
 
-    public function testBankEntriesCarryTransactionIdAndStatementSourceIsImport(): void
+    private function assertBankEntriesCarryTransactionIdAndStatementSourceIsImport(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $this->import($supplierId);
-
         $stmt = $this->db->pdo()->prepare(
             "SELECT e.source_type, e.source_id, t.id AS tx_id, s.source
                FROM journal_entries e
@@ -297,11 +294,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
      * na dvou účtech je běžné. Klíč jen „rok|číslo" by druhý pohyb zahodil (nebo shodil
      * celý krok banky) a oba pohyby by se navázaly na oba zápisy deníku.
      */
-    public function testSameBankDocumentNumberOnTwoAccountsIsImportedTwice(): void
+    private function assertSameBankDocumentNumberOnTwoAccountsIsImportedTwice(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
-
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $stmt = $this->db->pdo()->prepare(
             "SELECT t.amount, COUNT(k.entry_id) AS links
@@ -351,10 +345,8 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
      * Pohyb, který Money zaúčtovalo bez faktury (poplatek, vratka), je vyřízený - výpis
      * nesvítí jako nedopárovaný. Úhrady faktur zůstávají spárované.
      */
-    public function testBankTransactionsBookedWithoutInvoiceAreResolved(): void
+    private function assertBankTransactionsBookedWithoutInvoiceAreResolved(int $supplierId, ImportProtocol $protocol): void
     {
-        $supplierId = $this->supplier();
-        $protocol = $this->import($supplierId);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
         $stmt = $this->db->pdo()->prepare(

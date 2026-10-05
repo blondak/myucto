@@ -21,6 +21,11 @@ final readonly class JmhzScenario1XmlValidator
         private JmhzScenario1XmlSerializer $serializer = new JmhzScenario1XmlSerializer(),
     ) {}
 
+    public function packageFormLimit(): int
+    {
+        return $this->serializer->packageFormLimit();
+    }
+
     /** @return array{xml:string,sha256:string,schema:array<string,string>} */
     public function dryRun(
         JmhzScenario1Resolution $resolution,
