@@ -180,7 +180,7 @@ do faktury jde vyhodnocený text. Inline přehled je přímo v editoru šablony
 
 | Token | Výsledek | Poznámka |
 |---|---|---|
-| `{YYYY}`, `{YY}` | 2026, 26 | rok; posun po letech: `{YYYY+1}` → 2027, `{YY-1}` → 25 |
+| `{YYYY}`, `{YY}` | 2026, 26 | rok; posun po letech: `{YYYY+1}` → 2027, `{YY-1}` → 25; rok měsíce posunutého o N měsíců: `{YYYY+8M}` → 2027 (patří k `{MMMM+8}`, `{M+8}`) |
 | `{M}`, `{MM}` | 5, 05 | měsíc; posun po **měsících** vč. přetečení roku: `{MM+8}` → 01 |
 | `{MMMM}` | květen | název měsíce **dle jazyka dokladu** (cs/en); `{MMMM+1}` → červen |
 | `{Q}` | 2 | čtvrtletí 1–4; posun po čtvrtletích: `{Q+1}` → 3 |
@@ -198,7 +198,9 @@ Prodloužení domény example.cz na období {DATE} - {DATE+1Y-1D}
 
 Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY}` →
 „servis 2Q/2026", `úklid za {MMMM} {YYYY}` → „úklid za květen 2026",
-`služby za období {BOM} - {EOM}` → „služby za období 1. 5. 2026 - 31. 5. 2026".
+`služby za období {BOM} - {EOM}` → „služby za období 1. 5. 2026 - 31. 5. 2026",
+`nájem na měsíc {MMMM+1} {YYYY+1M}` → „nájem na měsíc červen 2026" (v prosinci
+„leden" s následujícím rokem).
 
 > 💡 **Přetečení měsíce je ošetřené.** Posun po měsících/letech v `{DATE±…}`
 > se ořezává na poslední den cílového měsíce (jako MySQL `DATE_ADD`):

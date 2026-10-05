@@ -8,13 +8,15 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Migration\Shared\RecurringSeriesTakeover;
 use PDO;
 
 /**
  * Převod agendy Money S3 do firmy v MyÚčtu — orchestrátor kroků průvodce.
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
- * faktury → pokladna a banka → vazby dokladů na deník a úhrady → uzávěrka historických
+ * faktury → pokladna a banka → vazby dokladů na deník a úhrady → pozastavené šablony
+ * pravidelných faktur z historie → uzávěrka historických
  * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace. Automatika účtování je po celou dobu vypnutá
  * ({@see AccountingUnitSwitch}).
  *
@@ -51,6 +53,7 @@ final class MoneyS3Importer
         private readonly MoneyS3Reconciler $reconciler,
         private readonly TableStatistics $statistics,
         private readonly PayrollImporter $payroll,
+        private readonly RecurringSeriesTakeover $recurring,
     ) {}
 
     /** @return list<string> klíče kroků v pořadí, v jakém běží */
@@ -69,6 +72,7 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK,
             DimensionImporter::STEP,
             DocumentLinker::STEP_PAYMENTS,
+            RecurringSeriesTakeover::STEP,
             AssetImporter::STEP,
             AssetImporter::STEP_SMALL,
             VatCoefficientSeeder::STEP,
@@ -336,13 +340,30 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
             DimensionImporter::STEP => fn () => $this->dimensions->run($ctx),
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
-            AssetImporter::STEP => fn () => $this->assets->importLongTerm($ctx),
+            RecurringSeriesTakeover::STEP => fn () => $this->takeOverRecurring($ctx),
+            AssetImporter::STEP =>fn () => $this->assets->importLongTerm($ctx),
             AssetImporter::STEP_SMALL => fn () => $this->assets->importSmall($ctx),
             VatCoefficientSeeder::STEP => fn () => $this->coefficients->run($ctx),
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
             PayrollImporter::STEP => fn () => $this->payroll->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
         ];
+    }
+
+    private function takeOverRecurring(ImportContext $ctx): void
+    {
+        $result = $this->recurring->run($ctx->supplierId, $ctx->userId);
+        $ctx->protocol->setCount(RecurringSeriesTakeover::STEP, 'created', $result['created']);
+        if ($result['existing'] > 0) {
+            $ctx->protocol->setCount(RecurringSeriesTakeover::STEP, 'existing', $result['existing']);
+        }
+        if ($result['templates'] !== []) {
+            $ctx->protocol->info(RecurringSeriesTakeover::STEP, 'paused_templates', sprintf(
+                'Z pravidelných faktur v historii vzniklo %d pozastavených šablon pravidelné fakturace (%s). Nic se samo nevystaví: zkontrolujte je v Pravidelné fakturace a spusťte.',
+                count($result['templates']),
+                implode(', ', array_map(static fn (array $t): string => $t['client'], array_slice($result['templates'], 0, 10))) . (count($result['templates']) > 10 ? ', …' : ''),
+            ), ['templates' => array_slice($result['templates'], 0, 50)]);
+        }
     }
 
     private function switchMode(ImportContext $ctx): void

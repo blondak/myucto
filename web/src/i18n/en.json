@@ -12138,7 +12138,9 @@
     "inbox_uploaded": "Documents added to the queue: {n}.",
     "inbox_uploaded_with_duplicates": "Newly added: {created}, already in the queue: {duplicates}.",
     "inbox_dropzone_hint": "Drop documents here (or click to choose)",
-    "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML or ISDOCX · up to 20 files at once",
+    "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML or ISDOCX · up to 500 files at once",
+    "inbox_uploading_progress": "Uploading {done} / {total}…",
+    "inbox_too_many_files": "At most {max} files can be uploaded at once, the rest were left out.",
     "clear_files": "Clear selection",
     "reason_internal": "Note on the rejection (optional)",
     "reason_internal_placeholder": "Why the document does not belong in the accounts",
@@ -18743,7 +18745,7 @@
     "placeholders_rows": [
       {
         "c": "{'{YYYY}'}, {'{YY}'}",
-        "d": "year → 2026, 26 · shift by years: {'{YYYY+1}'} → 2027, {'{YY-1}'} → 25"
+        "d": "year → 2026, 26 · shift by years: {'{YYYY+1}'} → 2027, {'{YY-1}'} → 25 · year of a shifted month: {'{YYYY+8M}'} → 2027 (pairs with {'{MMMM+8}'})"
       },
       {
         "c": "{'{M}'}, {'{MM}'}",
@@ -28930,6 +28932,7 @@
       "link": "Documents linked to the journal",
       "dimensions": "Cost centres and projects",
       "payments": "Invoice payments",
+      "recurring": "Recurring invoices from history",
       "assets": "Fixed assets",
       "small_assets": "Small assets",
       "vat_coefficients": "VAT deduction coefficient",
@@ -28941,6 +28944,7 @@
     },
     "counts": {
       "seeded": "chart from template",
+      "non_deductible": "non-deductible accounts",
       "created": "created",
       "inactive": "transferred inactive",
       "existing": "already transferred",

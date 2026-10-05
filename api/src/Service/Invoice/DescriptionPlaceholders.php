@@ -16,7 +16,8 @@ use DateTimeImmutable;
  *
  * Podporované tokeny (STRIKTNĚ velká písmena; pro ref. datum 15. 5. 2026):
  *   {YYYY} {YY}            2026, 26          — rok; offset po letech: {YYYY+1} → 2027
- *   {M} {MM}               5, 05             — měsíc; offset po MĚSÍCÍCH vč. přetečení
+ *                                              offset po měsících (rok k {MMMM±N}): {YYYY+8M} → 2027
+ *   {M} {MM}             5, 05             — měsíc; offset po MĚSÍCÍCH vč. přetečení
  *                                              roku: {MM+8} → 01
  *   {MMMM}                 květen / May      — název měsíce dle jazyka faktury (cs/en),
  *                                              offset po měsících: {MMMM+1} → červen
@@ -54,8 +55,14 @@ final class DescriptionPlaceholders
         $monthAnchor = $ref->setDate((int) $ref->format('Y'), (int) $ref->format('n'), 1);
 
         $result = preg_replace_callback(
-            '/\{(YYYY|YY|MMMM|MM|M|Q|DD|D)([+-]\d{1,3})?\}|\{DATE((?:[+-]\d{1,3}[DMY])*)\}|\{(BOM|EOM)([+-]\d{1,3})?\}/',
+            '/\{(YYYY|YY)([+-]\d{1,3})M\}|\{(YYYY|YY|MMMM|MM|M|Q|DD|D)([+-]\d{1,3})?\}|\{DATE((?:[+-]\d{1,3}[DMY])*)\}|\{(BOM|EOM)([+-]\d{1,3})?\}/',
             static function (array $m) use ($ref, $monthAnchor, $lang): string {
+                // {YYYY±NM}/{YY±NM} — rok měsíce posunutého o N měsíců, dvojice k {MMMM±N}:
+                // „{MMMM+1} {YYYY+1M}" dá v prosinci „leden" následujícího roku.
+                if (($m[1] ?? '') !== '') {
+                    return $monthAnchor->modify(sprintf('%+d months', (int) $m[2]))->format($m[1] === 'YYYY' ? 'Y' : 'y');
+                }
+                $m = [$m[0], $m[3] ?? '', $m[4] ?? '', $m[5] ?? '', $m[6] ?? '', $m[7] ?? ''];
                 // {BOM±N}/{EOM±N} větev — začátek/konec měsíce posunutého o N měsíců.
                 if (($m[4] ?? '') !== '') {
                     $month = $monthAnchor->modify(sprintf('%+d months', (int) ($m[5] ?? 0)));

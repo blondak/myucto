@@ -108,6 +108,18 @@ final class DescriptionPlaceholdersTest extends TestCase
         self::assertSame('1/2027', DescriptionPlaceholders::apply('{M+1}/{YYYY+1}', self::ref('2026-12-10'), 'cs'));
     }
 
+    public function testYearShiftedByMonthsFollowsMonthToken(): void
+    {
+        // Nájem „na příští měsíc": rok musí jít s měsícem, ne s referenčním datem.
+        $text = 'Nájem na měsíc {MMMM+1} {YYYY+1M}';
+        self::assertSame('Nájem na měsíc listopad 2026', DescriptionPlaceholders::apply($text, self::ref('2026-10-02'), 'cs'));
+        self::assertSame('Nájem na měsíc leden 2027', DescriptionPlaceholders::apply($text, self::ref('2026-12-02'), 'cs'));
+        self::assertSame('3/2026 - 2/2027', DescriptionPlaceholders::apply('{M}/{YYYY+0M} - {M+11}/{YYYY+11M}', self::ref('2026-03-17'), 'cs'));
+        self::assertSame('25', DescriptionPlaceholders::apply('{YY-1M}', self::ref('2026-01-31'), 'cs'));
+        // Bez jednotky zůstává offset v letech.
+        self::assertSame('2027', DescriptionPlaceholders::apply('{YYYY+1}', self::ref('2026-03-17'), 'cs'));
+    }
+
     public function testDateArithmeticClampsMonthOverflow(): void
     {
         // PHP modify() by dal 31. 1. +1M = 3. 3. — clampujeme na konec února (jako MySQL DATE_ADD).

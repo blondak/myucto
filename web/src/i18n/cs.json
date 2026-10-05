@@ -12138,7 +12138,9 @@
     "inbox_uploaded": "Do fronty přidáno souborů: {n}.",
     "inbox_uploaded_with_duplicates": "Nově přidáno: {created}, již ve frontě: {duplicates}.",
     "inbox_dropzone_hint": "Sem přetáhni doklady (nebo klikni pro výběr)",
-    "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML nebo ISDOCX · až 20 souborů zaráz",
+    "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML nebo ISDOCX · až 500 souborů zaráz",
+    "inbox_uploading_progress": "Nahrávám {done} / {total}…",
+    "inbox_too_many_files": "Najednou lze nahrát nejvýše {max} souborů, zbylé jsem vynechal.",
     "clear_files": "Zrušit výběr",
     "reason_internal": "Poznámka k odmítnutí (nepovinné)",
     "reason_internal_placeholder": "Proč doklad do účetnictví nepatří",
@@ -18743,7 +18745,7 @@
     "placeholders_rows": [
       {
         "c": "{'{YYYY}'}, {'{YY}'}",
-        "d": "rok → 2026, 26 · posun po letech: {'{YYYY+1}'} → 2027, {'{YY-1}'} → 25"
+        "d": "rok → 2026, 26 · posun po letech: {'{YYYY+1}'} → 2027, {'{YY-1}'} → 25 · rok posunutého měsíce: {'{YYYY+8M}'} → 2027 (k {'{MMMM+8}'})"
       },
       {
         "c": "{'{M}'}, {'{MM}'}",
@@ -28930,6 +28932,7 @@
       "link": "Vazby dokladů na deník",
       "dimensions": "Střediska a zakázky",
       "payments": "Úhrady faktur",
+      "recurring": "Pravidelné faktury z historie",
       "assets": "Dlouhodobý majetek",
       "small_assets": "Drobný majetek",
       "vat_coefficients": "Koeficient krácení DPH",
@@ -28941,6 +28944,7 @@
     },
     "counts": {
       "seeded": "osnova ze šablony",
+      "non_deductible": "nedaňových účtů",
       "created": "založeno",
       "inactive": "převedeno vypnuté",
       "existing": "už převedeno",
