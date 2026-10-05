@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use DOMElement;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 
 /**
  * Sdílený helper pro sestavení `<VetaP>` (identifikace daňového subjektu)
@@ -64,9 +65,13 @@ final class EpoSupplierBlockBuilder
      *        k tomuto datu z historie (migrace 1181 historizuje i identifikovanou
      *        osobu — {@see \MyInvoice\Service\Vat\VatStatusService::flagsAt()}).
      *        Ostatní pole zůstávají živá.
+     * @param ?string $representationDate Datum, ke kterému se čte zastoupení
+     *        (`tax_representation`, podepisující osoba ve větě P). Výchozí je dnešek:
+     *        podepisuje ten, kdo podání podává teď, ne ten, kdo zastupoval v období
+     *        výkazu.
      * @return array<string,mixed>
      */
-    public static function loadSupplier(\PDO $pdo, int $supplierId, ?string $statusDate = null): array
+    public static function loadSupplier(\PDO $pdo, int $supplierId, ?string $statusDate = null, ?string $representationDate = null): array
     {
         $stmt = $pdo->prepare(
             'SELECT ' . self::supplierSelect() . '
@@ -84,6 +89,7 @@ final class EpoSupplierBlockBuilder
             $row['is_vat_payer'] = $flags['is_vat_payer'] ? 1 : 0;
             $row['is_identified'] = $flags['is_identified'] ? 1 : 0;
         }
+        $row['tax_representation'] = TaxRepresentationService::statusAt($pdo, $supplierId, $representationDate ?? date('Y-m-d'));
 
         return $row;
     }
@@ -152,10 +158,13 @@ final class EpoSupplierBlockBuilder
             if (!empty($supplier['phone'])) $vetaP->setAttribute('c_telef', self::normalizePhone((string) $supplier['phone']));
         }
 
-        // Oprávněná osoba (POVINNÉ u PO — jednatel apod.)
-        if (!empty($supplier['opr_jmeno']))     $vetaP->setAttribute('opr_jmeno', (string) $supplier['opr_jmeno']);
-        if (!empty($supplier['opr_prijmeni']))  $vetaP->setAttribute('opr_prijmeni', (string) $supplier['opr_prijmeni']);
-        if (!empty($supplier['opr_postaveni'])) $vetaP->setAttribute('opr_postaveni', (string) $supplier['opr_postaveni']);
+        // Podepisující osoba: oprávněná osoba firmy (POVINNÉ u PO — jednatel apod.),
+        // nebo zástupce z evidence zastoupení, kterou sem přidává loadSupplier().
+        // Řádek bez klíče (ručně složený) = nezastoupená firma.
+        $representation = is_array($supplier['tax_representation'] ?? null)
+            ? $supplier['tax_representation']
+            : ['represented' => false];
+        self::fillSignerAttributes($vetaP, $supplier, $representation);
 
         // Sestavitel přiznání (typicky účetní). Příjmení má vlastní sloupec
         // `sest_prijmeni` (sjednoceno s jednatelem opr_*). Když není vyplněno,
@@ -343,28 +352,80 @@ final class EpoSupplierBlockBuilder
      * `dan_por` (DPPO) / `pln_moc` (DPFO) — „zpracoval a podává přiznání daňový poradce
      * na plnou moc?" (§ 29 odst. 2 DŘ). Obě VetaD atributy mají stejnou sémantiku a
      * hodnotovou množinu 'A'/'N', jen jiný název — sdílíme jeden zdroj pravdy.
+     * Jiný zástupce než daňový poradce nebo advokát (obecný zmocněnec, zákonný
+     * zástupce…) podepisuje, ale `dan_por` je u něj 'N'.
      *
      * @param array{represented:bool,...} $representation výstup {@see \MyInvoice\Service\Tax\Return\TaxRepresentationService::at()}
      */
     public static function representationFlag(array $representation): string
     {
-        return !empty($representation['represented']) ? 'A' : 'N';
+        return TaxRepresentationService::isTaxAdvisor($representation) ? 'A' : 'N';
     }
 
     /**
-     * Vyplní `zast_*` atributy VetaP (DPPDP9/DPFDP7) identifikací daňového poradce.
-     * Beze zbytku vynechá, když firma zastoupena není — přesně dnešní chování ('N'
-     * bez identifikace), jen teď řízené evidencí místo natvrdo.
+     * Podepisující osoba ve větě P: `zast_*` zástupce a `opr_*` fyzické osoby
+     * oprávněné k podpisu. Jediné místo pravidla pro DPPO, DPFO, DPH, kontrolní
+     * i souhrnné hlášení.
      *
-     * `zast_kod` je odvozený, ne uživatelský vstup: 4b = fyzická osoba daňový
-     * poradce/advokát, 4c = právnická osoba vykonávající daňové poradenství — jediné
-     * dvě hodnoty číselníku, které evidence zastoupení daňovým poradcem pokrývá
-     * (číselník má dalších ~10 typů zástupce mimo rozsah této evidence — zákonný
-     * zástupce, dědic apod.).
+     * XSD: `opr_*` se „vyplňuje, je-li typ daňového subjektu nebo typ jeho
+     * podepisující osoby právnická osoba". Podle toho:
+     *   - bez zastoupení vyplní `opr_*` z firmy, pokud to volající chce
+     *     ($subjectOprFromSupplier — u DPFO je `opr_*` firmy vlastní jméno OSVČ);
+     *   - zástupce fyzická osoba: `opr_*` se nevyplňuje (zkušební EPO: „Je-li
+     *     podepisující osobou fyzická osoba, pak se jméno oprávněné osoby nevyplňuje");
+     *   - zástupce právnická osoba: `opr_*` = osoba, která za něj podepisuje. U řádku
+     *     z doby před evidencí podepisující osoby zůstane jednatel firmy, pokud ho
+     *     volající dovolí, jako dřív.
+     *
+     * @param array<string,mixed> $supplier
+     * @param array<string,mixed> $representation výstup {@see TaxRepresentationService::at()}
+     */
+    public static function fillSignerAttributes(
+        DOMElement $vetaP,
+        array $supplier,
+        array $representation,
+        bool $subjectOprFromSupplier = true,
+    ): void {
+        $represented = !empty($representation['represented']);
+        $type = (string) ($representation['type'] ?? '');
+
+        if (!$represented) {
+            if ($subjectOprFromSupplier) {
+                self::fillOpr($vetaP, $supplier['opr_jmeno'] ?? null, $supplier['opr_prijmeni'] ?? null, $supplier['opr_postaveni'] ?? null);
+            }
+            return;
+        }
+
+        if ($type === 'P') {
+            $signerFirst = trim((string) ($representation['signer_first_name'] ?? ''));
+            $signerLast = trim((string) ($representation['signer_last_name'] ?? ''));
+            if ($signerFirst !== '' && $signerLast !== '') {
+                self::fillOpr($vetaP, $signerFirst, $signerLast, $representation['signer_position'] ?? null);
+            } elseif ($subjectOprFromSupplier) {
+                self::fillOpr($vetaP, $supplier['opr_jmeno'] ?? null, $supplier['opr_prijmeni'] ?? null, $supplier['opr_postaveni'] ?? null);
+            }
+        }
+
+        self::fillRepresentationAttributes($vetaP, $representation);
+    }
+
+    private static function fillOpr(DOMElement $vetaP, mixed $firstName, mixed $lastName, mixed $position): void
+    {
+        if (!empty($firstName)) $vetaP->setAttribute('opr_jmeno', mb_substr((string) $firstName, 0, 20));
+        if (!empty($lastName))  $vetaP->setAttribute('opr_prijmeni', mb_substr((string) $lastName, 0, 36));
+        if (!empty($position))  $vetaP->setAttribute('opr_postaveni', mb_substr((string) $position, 0, 40));
+    }
+
+    /**
+     * Vyplní `zast_*` atributy VetaP identifikací zástupce. Beze zbytku vynechá,
+     * když firma zastoupena není.
+     *
+     * `zast_kod` je kód podepisující osoby z evidence ({@see TaxRepresentationService::codeOf()}).
+     * Fyzickou osobu EPO identifikuje evidenčním číslem, nebo datem narození.
      *
      * @param array{
-     *   represented: bool, type: ?string, first_name: ?string, last_name: ?string,
-     *   company_name: ?string, ico: ?string, ev_number: ?string,
+     *   represented: bool, type: ?string, code?: ?string, first_name: ?string, last_name: ?string,
+     *   company_name: ?string, ico: ?string, ev_number: ?string, birth_date?: ?string,
      * } $representation výstup {@see \MyInvoice\Service\Tax\Return\TaxRepresentationService::at()}
      */
     public static function fillRepresentationAttributes(DOMElement $vetaP, array $representation): void
@@ -375,7 +436,7 @@ final class EpoSupplierBlockBuilder
 
         $type = (string) ($representation['type'] ?? '');
         $vetaP->setAttribute('zast_typ', $type);
-        $vetaP->setAttribute('zast_kod', $type === 'P' ? '4c' : '4b');
+        $vetaP->setAttribute('zast_kod', (string) TaxRepresentationService::codeOf($representation));
 
         if ($type === 'P') {
             $vetaP->setAttribute('zast_nazev', mb_substr((string) ($representation['company_name'] ?? ''), 0, 255));
@@ -391,6 +452,11 @@ final class EpoSupplierBlockBuilder
         $evNumber = trim((string) ($representation['ev_number'] ?? ''));
         if ($evNumber !== '') {
             $vetaP->setAttribute('zast_ev_cislo', mb_substr($evNumber, 0, 36));
+        }
+
+        $birthDate = (string) ($representation['birth_date'] ?? '');
+        if ($type === 'F' && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $birthDate, $m) === 1) {
+            $vetaP->setAttribute('zast_dat_nar', sprintf('%s.%s.%s', $m[3], $m[2], $m[1]));
         }
     }
 

@@ -944,7 +944,8 @@
         "1960_purchase_invoice_inbox_dismissed.sql",
         "1961_ollama_provider.sql",
         "1962_payroll_personnel_file.sql",
-        "1963_supplier_auto_send_reminders_default_off.sql"
+        "1963_supplier_auto_send_reminders_default_off.sql",
+        "1964_supplier_tax_representation_code.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -21592,11 +21593,16 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "power_of_attorney_granted_on": "date NULL DEFAULT NULL",
+                "representative_birth_date": "date NULL DEFAULT NULL",
+                "representative_code": "enum('1','2','3','4a','4b','4c','5a','5b','6a','6b','7a','7b') NULL DEFAULT NULL",
                 "representative_company_name": "varchar(255) NULL DEFAULT NULL",
                 "representative_ev_number": "varchar(36) NULL DEFAULT NULL",
                 "representative_first_name": "varchar(20) NULL DEFAULT NULL",
                 "representative_ico": "varchar(10) NULL DEFAULT NULL",
                 "representative_last_name": "varchar(36) NULL DEFAULT NULL",
+                "representative_signer_first_name": "varchar(20) NULL DEFAULT NULL",
+                "representative_signer_last_name": "varchar(36) NULL DEFAULT NULL",
+                "representative_signer_position": "varchar(40) NULL DEFAULT NULL",
                 "representative_type": "enum('F','P') NULL DEFAULT NULL",
                 "represented": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -21612,7 +21618,7 @@
                 "fk_supplier_tax_representation_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_supplier_tax_representation_identity": "`represented` = 0 or `representative_type` is not null and `representative_ev_number` is not null and (`representative_type` = 'F' and `representative_first_name` is not null and `representative_last_name` is not null or `representative_type` = 'P' and `representative_company_name` is not null)"
+                "chk_supplier_tax_representation_identity": "`represented` = 0 or `representative_type` is not null and `representative_code` is not null and (`representative_type` = 'F' and `representative_code` in ('1','2','3','4a','4b','5a','5b','6a','6b','7b') and `representative_first_name` is not null and `representative_last_name` is not null and (`representative_code` <> '4b' or `representative_ev_number` is not null) or `representative_type` = 'P' and `representative_code` in ('1','2','3','4a','4c','5a','5b','6a','6b','7a','7b') and `representative_company_name` is not null)"
             }
         },
         "supplier_vat_status_history": {

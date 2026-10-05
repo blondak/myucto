@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload, type InvoiceCounterType } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload, type TaxRepresentationCode, TAX_REPRESENTATION_CODES, type InvoiceCounterType } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { closingSettingsApi, type AccountingClosingSettings, type NetTurnoverHints } from '@/api/closing'
 import { isCoveredByParent, isTurnoverRowVisible, toggleTurnoverRow } from '@/utils/netTurnoverRows'
@@ -840,10 +840,10 @@ function vatCollisionLabel(c: VatStatusCollision): string {
   return t('settings.vat_status.collision_tax_submission', { form: c.form_code ?? '', period })
 }
 
-// ── Zastoupení daňovým poradcem (§29/2 DŘ) ──────────────────────────────────
+// ── Zastoupení a podepisující osoba u správce daně ──────────────────────────
 // Stejný vzor jako Plátcovství DPH výše (VH-01): CRUD historie je okamžitá akce
 // přes API, NE součást společného Uložit. Bez retro-guardu (viz migrace 1662 —
-// zastoupení nic neúčtuje, jen dan_por/pln_moc/zast_* v XML přiznání).
+// zastoupení nic neúčtuje, jen věta P podání a dan_por/pln_moc u poradce).
 const TAX_REP_BASELINE_DATE = '1900-01-01'
 const taxRepHistory = computed<TaxRepresentationHistoryEntry[]>(() => supplier.value?.tax_representation_history ?? [])
 const taxRepCurrent = computed<TaxRepresentationHistoryEntry | null>(() => {
@@ -854,16 +854,33 @@ const taxRepCurrent = computed<TaxRepresentationHistoryEntry | null>(() => {
 const taxRepCurrentLabel = computed(() => {
   const current = taxRepCurrent.value
   if (!current || !current.represented) return t('settings.tax_representation.state_none')
-  return current.type === 'P'
-    ? (current.company_name ?? '')
-    : `${current.first_name ?? ''} ${current.last_name ?? ''}`.trim()
+  return taxRepEntryLabel(current)
 })
+
+function taxRepEntryLabel(entry: TaxRepresentationHistoryEntry): string {
+  const name = entry.type === 'P'
+    ? (entry.company_name ?? '')
+    : `${entry.first_name ?? ''} ${entry.last_name ?? ''}`.trim()
+  return entry.code ? `${name} (${entry.code})` : name
+}
 
 const taxRepFormOpen = ref(false)
 const taxRepFormEditingId = ref<number | null>(null)
 const taxRepFormDate = ref(todayIso())
 const taxRepFormRepresented = ref(false)
 const taxRepFormType = ref<'F' | 'P'>('F')
+const taxRepFormCode = ref<TaxRepresentationCode>('4b')
+const taxRepFormBirthDate = ref('')
+const taxRepFormSignerFirstName = ref('')
+const taxRepFormSignerLastName = ref('')
+const taxRepFormSignerPosition = ref('')
+const taxRepCodeOptions = computed(() => TAX_REPRESENTATION_CODES[taxRepFormType.value])
+// Kód přípustný jen u jednoho typu (4b, 4c, 7a) se při změně typu nahradí výchozím.
+watch(taxRepFormType, (type) => {
+  if (!TAX_REPRESENTATION_CODES[type].includes(taxRepFormCode.value)) {
+    taxRepFormCode.value = TAX_REPRESENTATION_CODES[type][0]
+  }
+})
 const taxRepFormFirstName = ref('')
 const taxRepFormLastName = ref('')
 const taxRepFormCompanyName = ref('')
@@ -878,6 +895,11 @@ function openTaxRepForm(entry?: TaxRepresentationHistoryEntry) {
   taxRepFormDate.value = entry ? entry.effective_from : todayIso()
   taxRepFormRepresented.value = entry?.represented ?? false
   taxRepFormType.value = entry?.type ?? 'F'
+  taxRepFormCode.value = entry?.code ?? TAX_REPRESENTATION_CODES[taxRepFormType.value][0]
+  taxRepFormBirthDate.value = entry?.birth_date ?? ''
+  taxRepFormSignerFirstName.value = entry?.signer_first_name ?? ''
+  taxRepFormSignerLastName.value = entry?.signer_last_name ?? ''
+  taxRepFormSignerPosition.value = entry?.signer_position ?? ''
   taxRepFormFirstName.value = entry?.first_name ?? ''
   taxRepFormLastName.value = entry?.last_name ?? ''
   taxRepFormCompanyName.value = entry?.company_name ?? ''
@@ -905,11 +927,16 @@ async function submitTaxRepForm() {
     represented: taxRepFormRepresented.value,
     ...(taxRepFormRepresented.value ? {
       type: taxRepFormType.value,
+      code: taxRepFormCode.value,
       first_name: taxRepFormType.value === 'F' ? (taxRepFormFirstName.value.trim() || null) : null,
       last_name: taxRepFormType.value === 'F' ? (taxRepFormLastName.value.trim() || null) : null,
       company_name: taxRepFormType.value === 'P' ? (taxRepFormCompanyName.value.trim() || null) : null,
       ico: taxRepFormType.value === 'P' ? (taxRepFormIco.value.trim() || null) : null,
       ev_number: taxRepFormEvNumber.value.trim() || null,
+      birth_date: taxRepFormType.value === 'F' ? (taxRepFormBirthDate.value.trim() || null) : null,
+      signer_first_name: taxRepFormType.value === 'P' ? (taxRepFormSignerFirstName.value.trim() || null) : null,
+      signer_last_name: taxRepFormType.value === 'P' ? (taxRepFormSignerLastName.value.trim() || null) : null,
+      signer_position: taxRepFormType.value === 'P' ? (taxRepFormSignerPosition.value.trim() || null) : null,
       power_of_attorney_granted_on: taxRepFormPoaDate.value.trim() || null,
     } : {}),
     note: taxRepFormNote.value.trim() || null,
@@ -1856,8 +1883,10 @@ async function confirmTaxRepDelete() {
                       </td>
                       <td class="py-1.5 pr-3">
                         <template v-if="!entry.represented">{{ t('settings.tax_representation.state_none') }}</template>
-                        <template v-else-if="entry.type === 'P'">{{ entry.company_name }}</template>
-                        <template v-else>{{ entry.first_name }} {{ entry.last_name }}</template>
+                        <template v-else>
+                          {{ entry.type === 'P' ? entry.company_name : `${entry.first_name ?? ''} ${entry.last_name ?? ''}` }}
+                          <span v-if="entry.code" class="block text-xs text-neutral-500">{{ entry.code }} – {{ t(`settings.tax_representation.code.${entry.code}`) }}</span>
+                        </template>
                       </td>
                       <td class="py-1.5 pr-3 text-neutral-500">{{ entry.note || '—' }}</td>
                       <td class="py-1.5 text-right whitespace-nowrap">
@@ -1907,10 +1936,33 @@ async function confirmTaxRepDelete() {
                         <option value="P">{{ t('settings.tax_representation.type_p') }}</option>
                       </select>
                     </div>
+                    <div class="md:col-span-2">
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_code') }}</label>
+                      <select v-model="taxRepFormCode" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                        <option v-for="code in taxRepCodeOptions" :key="code" :value="code">
+                          {{ code }} – {{ t(`settings.tax_representation.code.${code}`) }}
+                        </option>
+                      </select>
+                      <p class="text-xs text-neutral-500 mt-1">
+                        {{ taxRepFormCode === '4b' || taxRepFormCode === '4c'
+                          ? t('settings.tax_representation.code_hint_advisor')
+                          : t('settings.tax_representation.code_hint_other') }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                     <div>
-                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_ev_number') }}</label>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">
+                        {{ t('settings.tax_representation.form_ev_number') }}
+                        <span v-if="taxRepFormCode !== '4b'" class="font-normal text-neutral-400">{{ t('common.optional') }}</span>
+                      </label>
                       <input v-model="taxRepFormEvNumber" type="text" maxlength="36"
                         class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                    </div>
+                    <div v-if="taxRepFormType === 'F'">
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_birth_date') }}</label>
+                      <DateInput v-model="taxRepFormBirthDate"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                     </div>
                     <div>
                       <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_poa_date') }}</label>
@@ -1918,6 +1970,7 @@ async function confirmTaxRepDelete() {
                         class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                     </div>
                   </div>
+                  <p v-if="taxRepFormType === 'F'" class="text-xs text-neutral-500 mt-1">{{ t('settings.tax_representation.identity_hint') }}</p>
                   <div v-if="taxRepFormType === 'F'" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <div>
                       <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_first_name') }}</label>
@@ -1942,6 +1995,27 @@ async function confirmTaxRepDelete() {
                         class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                     </div>
                   </div>
+                  <template v-if="taxRepFormType === 'P'">
+                    <p class="text-xs font-medium text-neutral-700 mt-3">{{ t('settings.tax_representation.signer_title') }}</p>
+                    <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.tax_representation.signer_hint') }}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+                      <div>
+                        <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_signer_first_name') }}</label>
+                        <input v-model="taxRepFormSignerFirstName" type="text" maxlength="20"
+                          class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_signer_last_name') }}</label>
+                        <input v-model="taxRepFormSignerLastName" type="text" maxlength="36"
+                          class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_signer_position') }}</label>
+                        <input v-model="taxRepFormSignerPosition" type="text" maxlength="40"
+                          class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                      </div>
+                    </div>
+                  </template>
                 </template>
                 <div class="flex justify-end gap-2 mt-3">
                   <button type="button" @click="closeTaxRepForm" :disabled="taxRepSaving" :class="btnOutline('neutral')">

@@ -595,7 +595,7 @@ final class AnonymizationPolicy
         'supplier_domains' => ['hostname' => 'host', 'verification_error' => 'text', 'verification_token' => 'token'],
         'supplier_groups' => ['name' => 'text'],
         'supplier_osvc_month_statuses' => ['note' => 'text'],
-        'supplier_tax_representation_history' => ['note' => 'text', 'representative_company_name' => 'party_name', 'representative_ev_number' => 'shape', 'representative_first_name' => 'first_name', 'representative_ico' => 'ico', 'representative_last_name' => 'last_name'],
+        'supplier_tax_representation_history' => ['note' => 'text', 'representative_company_name' => 'party_name', 'representative_ev_number' => 'shape', 'representative_first_name' => 'first_name', 'representative_ico' => 'ico', 'representative_last_name' => 'last_name', 'representative_signer_first_name' => 'first_name', 'representative_signer_last_name' => 'last_name', 'representative_signer_position' => 'keep'],
         'supplier_vat_status_history' => ['note' => 'text'],
         'tax_advance_overrides' => ['note' => 'text'],
         'tax_advance_schedules' => ['variable_symbol' => 'symbol'],

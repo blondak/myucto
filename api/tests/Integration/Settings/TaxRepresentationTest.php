@@ -112,9 +112,10 @@ final class TaxRepresentationTest extends TestCase
         $this->save(['effective_from' => '2025-01-01', 'represented' => false]);
         $r = $this->save([
             'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'P',
-            'company_name' => 'Vzorová poradna s.r.o.', 'ev_number' => 'EV-0002',
+            'company_name' => 'Vzorová poradna s.r.o.', 'ico' => '01234567', 'ev_number' => 'EV-0002',
+            'signer_first_name' => 'Petr', 'signer_last_name' => 'Podepisující',
         ]);
-        self::assertSame(200, $r['status']);
+        self::assertSame(200, $r['status'], (string) json_encode($r['body']));
         self::assertCount(1, $r['body']['tax_representation_history'], 'Stejné datum = upsert, ne nový řádek.');
         self::assertSame('Vzorová poradna s.r.o.', $r['body']['tax_representation_history'][0]['company_name']);
     }
@@ -148,6 +149,82 @@ final class TaxRepresentationTest extends TestCase
             'first_name' => 'A', 'last_name' => 'B',
         ]);
         self::assertSame(422, $r['status']);
+    }
+
+    /** Bez kódu se uloží kód daňového poradce podle typu (chování před #124). */
+    public function testMissingCodeDefaultsToTaxAdvisor(): void
+    {
+        $r = $this->save([
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'F',
+            'first_name' => 'Vzorový', 'last_name' => 'Poradce', 'ev_number' => 'EV-0005',
+        ]);
+        self::assertSame(200, $r['status']);
+        self::assertSame('4b', $r['body']['tax_representation_history'][0]['code']);
+    }
+
+    /** Obecný zmocněnec FO: evidenční číslo nemá, identifikuje ho datum narození. */
+    public function testGeneralProxyWithBirthDate(): void
+    {
+        $r = $this->save([
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'F', 'code' => '4a',
+            'first_name' => 'Vzorová', 'last_name' => 'Zmocněnkyně', 'birth_date' => '1980-05-17',
+        ]);
+        self::assertSame(200, $r['status'], (string) json_encode($r['body']));
+        $row = $r['body']['tax_representation_history'][0];
+        self::assertSame('4a', $row['code']);
+        self::assertNull($row['ev_number']);
+        self::assertSame('1980-05-17', $row['birth_date']);
+
+        $status = $this->service->at($this->supplierId, '2025-06-01');
+        self::assertSame('4a', $status['code']);
+        self::assertFalse(TaxRepresentationService::isTaxAdvisor($status));
+
+        $supplier = \MyInvoice\Service\Report\EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $this->supplierId, null, '2025-06-01');
+        self::assertSame('4a', $supplier['tax_representation']['code'], 'DPH/KH/SH dostávají zástupce přes loadSupplier().');
+    }
+
+    public function testNaturalPersonNeedsEvNumberOrBirthDate(): void
+    {
+        $r = $this->save([
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'F', 'code' => '4a',
+            'first_name' => 'A', 'last_name' => 'B',
+        ]);
+        self::assertSame(422, $r['status']);
+    }
+
+    public function testCodeMustMatchType(): void
+    {
+        $r = $this->save([
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'F', 'code' => '4c',
+            'first_name' => 'A', 'last_name' => 'B', 'ev_number' => 'EV-0006',
+        ]);
+        self::assertSame(422, $r['status']);
+
+        $r = $this->save([
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'P', 'code' => '4b',
+            'company_name' => 'Vzorová s.r.o.', 'ico' => '01234567',
+            'signer_first_name' => 'A', 'signer_last_name' => 'B',
+        ]);
+        self::assertSame(422, $r['status']);
+    }
+
+    /** Zastupující PO: EPO chce IČO a fyzickou osobu, která za ni podepisuje. */
+    public function testLegalPersonNeedsIcoAndSigner(): void
+    {
+        $base = [
+            'effective_from' => '2025-01-01', 'represented' => true, 'type' => 'P', 'code' => '4a',
+            'company_name' => 'Vzorová účetní kancelář s.r.o.',
+        ];
+        self::assertSame(422, $this->save($base + ['signer_first_name' => 'A', 'signer_last_name' => 'B'])['status']);
+        self::assertSame(422, $this->save($base + ['ico' => '01234567'])['status']);
+        self::assertSame(200, $this->save($base + ['ico' => '01234567', 'signer_first_name' => 'A', 'signer_last_name' => 'B'])['status']);
+    }
+
+    /** DB CHECK (migrace 1964): kód 4b bez evidenčního čísla neprojde ani mimo API. */
+    public function testDatabaseRejectsAdvisorWithoutEvNumber(): void
+    {
+        $this->expectException(\PDOException::class);
+        $this->service->upsert($this->supplierId, '2025-01-01', true, 'F', 'A', 'B', code: '4b', birthDate: '1980-01-01');
     }
 
     public function testInvalidDateRejected(): void

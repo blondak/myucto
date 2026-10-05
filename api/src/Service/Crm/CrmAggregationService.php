@@ -2226,7 +2226,8 @@ final class CrmAggregationService
      * Splatnost doplatku = lhůta podání přiznání. Ruční vstup (`filing_deadline`) má
      * VŽDY přednost — účetní ho zadala schválně a lépe zná konkrétní případ. Bez
      * ručního vstupu: byla-li firma podle evidence zastoupení (TaxRepresentationService)
-     * zastoupena daňovým poradcem k původní (neprodloužené) lhůtě $filingYear-04-01,
+     * zastoupena daňovým poradcem nebo advokátem (kód 4b/4c, jiný zástupce lhůtu
+     * neprodlužuje) k původní (neprodloužené) lhůtě $filingYear-04-01,
      * platí prodloužená lhůta § 136 odst. 2 DŘ (6 měsíců od konce období = 1. 7.);
      * jinak standardní elektronický termín (~1. 5., posunuto z pevného svátku na
      * nejbližší pracovní den) — stejná logika jako taxCalendarItems() (tam se
@@ -2238,7 +2239,7 @@ final class CrmAggregationService
             return $manualDeadline;
         }
         if ($this->representation !== null
-            && $this->representation->at($supplierId, sprintf('%04d-04-01', $filingYear))['represented']
+            && TaxRepresentationService::isTaxAdvisor($this->representation->at($supplierId, sprintf('%04d-04-01', $filingYear)))
         ) {
             return $this->nextBusinessDayCz(sprintf('%04d-07-01', $filingYear));
         }

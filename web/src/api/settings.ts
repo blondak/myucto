@@ -111,19 +111,35 @@ export interface VatStatusState {
   suggest_s79?: VatStatusS79Suggest
 }
 
-/** Řádek historie zastoupení daňovým poradcem/advokátem (supplier_tax_representation_history). */
+/** Kód podepisující osoby podle číselníku EPO (zast_kod). */
+export type TaxRepresentationCode = '1' | '2' | '3' | '4a' | '4b' | '4c' | '5a' | '5b' | '6a' | '6b' | '7a' | '7b'
+
+/** Kódy přípustné podle typu zástupce (zrcadlí TaxRepresentationService::CODES_*). */
+export const TAX_REPRESENTATION_CODES: Record<'F' | 'P', TaxRepresentationCode[]> = {
+  F: ['4b', '4a', '1', '2', '3', '5a', '5b', '6a', '6b', '7b'],
+  P: ['4c', '4a', '1', '2', '3', '5a', '5b', '6a', '6b', '7a', '7b'],
+}
+
+/** Řádek historie zastoupení a podepisující osoby (supplier_tax_representation_history). */
 export interface TaxRepresentationHistoryEntry {
   id: number
   effective_from: string
   represented: boolean
-  /** F = fyzická osoba (daňový poradce/advokát), P = právnická osoba. Jen když represented. */
+  /** F = fyzická osoba, P = právnická osoba. Jen když represented. */
   type: 'F' | 'P' | null
+  code: TaxRepresentationCode | null
   first_name: string | null
   last_name: string | null
   company_name: string | null
   ico: string | null
   /** Evidenční číslo v seznamu KDP ČR / ČAK. */
   ev_number: string | null
+  /** Datum narození zástupce fyzické osoby bez evidenčního čísla. */
+  birth_date: string | null
+  /** Osoba podepisující za zástupce právnickou osobu (opr_*). */
+  signer_first_name: string | null
+  signer_last_name: string | null
+  signer_position: string | null
   power_of_attorney_granted_on: string | null
   note: string | null
 }
@@ -132,11 +148,16 @@ export interface TaxRepresentationSavePayload {
   effective_from: string
   represented: boolean
   type?: 'F' | 'P' | null
+  code?: TaxRepresentationCode | null
   first_name?: string | null
   last_name?: string | null
   company_name?: string | null
   ico?: string | null
   ev_number?: string | null
+  birth_date?: string | null
+  signer_first_name?: string | null
+  signer_last_name?: string | null
+  signer_position?: string | null
   power_of_attorney_granted_on?: string | null
   note?: string | null
 }

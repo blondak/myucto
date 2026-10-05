@@ -2119,29 +2119,9 @@ final class DppoXmlBuilder
         if (!empty($supplier['phone'])) {
             $vetaP->setAttribute('c_telef', EpoSupplierBlockBuilder::normalizePhone((string) $supplier['phone']));
         }
-        // Oprávněná osoba (jednatel) — povinné pro EPO podání PO, ALE JEN když
-        // podepisující osobou není fyzická osoba zástupce (zast_typ='F'): zkušební
-        // EPO to vytýká („Je-li podepisující osobou fyzická osoba, pak se jméno
-        // oprávněné osoby nevyplňuje") a reálné referenční podání se zast_typ='F'
-        // opr_jmeno/opr_prijmeni/opr_postaveni skutečně nemá vůbec — podepisující
-        // osobou je tam poradce (zast_*), ne jednatel (opr_*), oba naráz EPO odmítá.
-        // Zastoupení právnickou osobou (zast_typ='P') opr_* naopak potřebuje —
-        // identifikuje fyzickou osobu, která jménem té poradenské firmy podepisuje.
-        $signerIsRepresentativeNaturalPerson = !empty($representation['represented'])
-            && ($representation['type'] ?? null) === 'F';
-        if (!$signerIsRepresentativeNaturalPerson) {
-            if (!empty($supplier['opr_jmeno'])) {
-                $vetaP->setAttribute('opr_jmeno', (string) $supplier['opr_jmeno']);
-            }
-            if (!empty($supplier['opr_prijmeni'])) {
-                $vetaP->setAttribute('opr_prijmeni', (string) $supplier['opr_prijmeni']);
-            }
-            if (!empty($supplier['opr_postaveni'])) {
-                $vetaP->setAttribute('opr_postaveni', (string) $supplier['opr_postaveni']);
-            }
-        }
-
-        EpoSupplierBlockBuilder::fillRepresentationAttributes($vetaP, $representation);
+        // Oprávněná osoba (jednatel) nebo zástupce — pravidlo opr_*/zast_* je
+        // sdílené s DPH, KH a SH ({@see EpoSupplierBlockBuilder::fillSignerAttributes()}).
+        EpoSupplierBlockBuilder::fillSignerAttributes($vetaP, $supplier, $representation);
 
         return $vetaP;
     }

@@ -98,6 +98,45 @@ final class CrmTaxBalanceEarlyGateTest extends TestCase
         self::assertStringContainsString('750', $item['hint']);
     }
 
+    /**
+     * Lhůtu § 136 odst. 2 DŘ (1. 7.) prodlužuje jen daňový poradce nebo advokát (4b/4c).
+     * Obecný zmocněnec (4a) podepisuje, ale firma podává v běžné lhůtě (4. 5. 2026).
+     */
+    public function testGeneralProxyDoesNotExtendDeadline(): void
+    {
+        $this->finalReturn2025WithoutDeadline();
+        (new TaxRepresentationService($this->db))->upsert(
+            $this->supplierId, '2025-01-01', true, 'P',
+            companyName: 'Vzorová účetní kancelář s.r.o.', ico: '01234567',
+            code: '4a', signerFirstName: 'Petr', signerLastName: 'Podepisující',
+        );
+
+        $item = $this->service->taxBalanceDueItem($this->supplierId, null, new \DateTimeImmutable('2026-04-25'));
+
+        self::assertNotNull($item, 'Obecný zmocněnec neprodlužuje lhůtu — doplatek je splatný 4. 5. 2026.');
+        self::assertSame(9, $item['days']);
+    }
+
+    public function testTaxAdvisorExtendsDeadline(): void
+    {
+        $this->finalReturn2025WithoutDeadline();
+        (new TaxRepresentationService($this->db))->upsert(
+            $this->supplierId, '2025-01-01', true, 'F',
+            firstName: 'Vzorový', lastName: 'Poradce', evNumber: 'EV-0001', code: '4b',
+        );
+
+        $item = $this->service->taxBalanceDueItem($this->supplierId, null, new \DateTimeImmutable('2026-04-25'));
+
+        self::assertNull($item, 'Daňový poradce prodlužuje lhůtu do 1. 7. 2026 — na připomínku je brzy.');
+    }
+
+    private function finalReturn2025WithoutDeadline(): void
+    {
+        $this->returns->create($this->supplierId, 2025, 'po', [], null);
+        $this->pdo->prepare("UPDATE income_tax_returns SET status = 'final', computed = ? WHERE supplier_id = ? AND year = 2025 AND taxpayer_type = 'po' AND variant = 'radne' AND variant_seq = 1")
+            ->execute([json_encode(['computed' => ['balance_due' => 1000]], JSON_THROW_ON_ERROR), $this->supplierId]);
+    }
+
     private function selectCount(): int
     {
         return (int) $this->pdo->query("SHOW SESSION STATUS LIKE 'Com_select'")->fetch(PDO::FETCH_NUM)[1];

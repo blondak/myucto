@@ -509,6 +509,11 @@ podávacího XML. V těchto případech přepiš údaje do formuláře instituce
 - **Daň z příjmů PO:** dle účetního období (řádně 1. 4., s auditem/poradcem 1. 7.)
 - **Přehledy pojistného OSVČ:** do **1 měsíce** po lhůtě pro daňové přiznání.
 
+Lhůtu 1. 7. prodlužuje jen zastoupení daňovým poradcem nebo advokátem (kód
+podepisující osoby 4b nebo 4c v **Nastavení firmy → Zastoupení a podepisující
+osoba**). Obecný zmocněnec, například účetní kancelář bez osvědčení daňového
+poradce, lhůtu neprodlužuje (viz 41.2.5).
+
 ## 43.12 Oznámení o příjmech plynoucích do zahraničí a zajištění daně
 
 Platí-li firma daňovému nerezidentovi příjem ze zdrojů v České republice, vzniká

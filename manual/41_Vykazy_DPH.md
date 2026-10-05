@@ -105,6 +105,47 @@ přiznání podepsat (typicky jednatel, předseda představenstva).
 
 U FO (OSVČ) zůstávají prázdná — fallback je `jmeno` + `prijmeni`.
 
+#### Zastoupení a podepisující osoba
+
+Podává-li za firmu podání někdo jiný než jednatel nebo podnikatel sám, zapiš ho
+v **Nastavení firmy → Daně a účetnictví → Zastoupení a podepisující osoba**.
+Zástupce se pak vyplní jako podepisující osoba (`zast_*`) do přiznání DPH,
+kontrolního a souhrnného hlášení i do přiznání k dani z příjmů. Zastoupení se
+eviduje v čase: podání dostane zástupce platného ke dni, kdy XML vytváříš,
+finalizované přiznání k dani z příjmů zástupce platného ke dni finalizace.
+
+| Pole | XML atribut | Popis |
+|---|---|---|
+| **Typ zástupce** | `zast_typ` | Fyzická (F), nebo právnická osoba (P) |
+| **Kód podepisující osoby** | `zast_kod` | Podle číselníku EPO, viz tabulka níže |
+| **Jméno a příjmení** (F) | `zast_jmeno`, `zast_prijmeni` | Zástupce fyzická osoba |
+| **Název a IČO** (P) | `zast_nazev`, `zast_ic` | Zastupující právnická osoba, IČO je povinné |
+| **Evidenční číslo** | `zast_ev_cislo` | Číslo v seznamu KDP ČR nebo ČAK, povinné u kódu 4b |
+| **Datum narození** (F) | `zast_dat_nar` | U fyzické osoby bez evidenčního čísla |
+| **Osoba podepisující za zástupce** (P) | `opr_*` | Fyzická osoba, která za zastupující právnickou osobu podepisuje |
+
+| Kód | Fyzická osoba | Právnická osoba |
+|---|---|---|
+| 1 | zákonný zástupce nebo opatrovník | zákonný zástupce nebo opatrovník |
+| 2 | ustanovený zástupce | ustanovený zástupce |
+| 3 | společný zástupce, společný zmocněnec | společný zástupce, společný zmocněnec |
+| 4a | obecný zmocněnec | obecný zmocněnec |
+| 4b | daňový poradce nebo advokát | – |
+| 4c | – | právnická osoba vykonávající daňové poradenství |
+| 5a / 5b | osoba spravující pozůstalost / její zástupce | osoba spravující pozůstalost / její zástupce |
+| 6a / 6b | dědic po skončení řízení / jeho zástupce | dědic po skončení řízení / jeho zástupce |
+| 7a | – | právní nástupce právnické osoby |
+| 7b | zástupce právního nástupce právnické osoby | zástupce právního nástupce právnické osoby |
+
+Účetní kancelář, která podává na plnou moc a nemá osvědčení daňového poradce,
+je **obecný zmocněnec (4a)**. Jen u kódů **4b a 4c** se v přiznání k dani
+z příjmů vyplní „podává daňový poradce“ a jen u nich se lhůta pro podání
+prodlužuje podle § 136 odst. 2 daňového řádu.
+
+Je-li podepisující osobou zástupce fyzická osoba, jméno oprávněné osoby
+(`opr_*`) se do podání nevyplňuje. U zastupující právnické osoby se do `opr_*`
+vyplní osoba, která za ni podepisuje.
+
 ### 41.2.6 Sestavitel přiznání (sest_*)
 
 Pole sestavitele jsou relevantní jen pokud **přiznání za tebe podává jiná osoba**

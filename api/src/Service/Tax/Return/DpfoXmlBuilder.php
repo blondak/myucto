@@ -867,7 +867,9 @@ final class DpfoXmlBuilder
             $vetaP->setAttribute('c_telef', EpoSupplierBlockBuilder::normalizePhone((string) $supplier['phone']));
         }
 
-        EpoSupplierBlockBuilder::fillRepresentationAttributes($vetaP, $representation);
+        // opr_* firmy je u OSVČ její vlastní jméno (jmeno/prijmeni výše), jako
+        // podepisující osobu ho tedy nepřebíráme.
+        EpoSupplierBlockBuilder::fillSignerAttributes($vetaP, $supplier, $representation, subjectOprFromSupplier: false);
 
         return $vetaP;
     }
