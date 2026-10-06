@@ -115,6 +115,16 @@ PHP);
         self::assertFalse(Config::load($this->tmpDir)->get('invoices.overdue_includes_today'));
     }
 
+    public function testInvoicePublicLinksDefaultOnAndCanBeDisabledByEnvironment(): void
+    {
+        $this->unsetEnv('MYINVOICE_INVOICE_PUBLIC_LINKS');
+        self::assertTrue(Config::load($this->tmpDir)->get('invoices.public_links'));
+        $this->setEnv('MYINVOICE_INVOICE_PUBLIC_LINKS', '0');
+        self::assertFalse(Config::load($this->tmpDir)->get('invoices.public_links'));
+        $this->setEnv('MYINVOICE_INVOICE_PUBLIC_LINKS', 'true');
+        self::assertTrue(Config::load($this->tmpDir)->get('invoices.public_links'));
+    }
+
     public function testEpoTestDefaultsOffAndCanBeEnabledByEnvironment(): void
     {
         $cfg = Config::load($this->tmpDir);

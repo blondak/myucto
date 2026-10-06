@@ -212,6 +212,34 @@ final class MeActionTest extends TestCase
 
     public function testClientAccountDoesNotReceiveSubscriptionState(): void
     {
+        $body = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+
+        self::assertNull($body['license']['subscription_state']);
+    }
+
+    /**
+     * Tlačítko Web faktura v detailu faktury se řídí tímhle polem. Chybějící
+     * volba v cfg znamená zapnuto, aby se stávajícím instalacím nic nezměnilo.
+     */
+    public function testInvoicePublicLinksFlagFollowsInstallationConfig(): void
+    {
+        $default = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+        $disabled = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+            'invoices' => ['public_links' => false],
+        ]));
+
+        self::assertTrue($default['invoice_public_links_enabled']);
+        self::assertFalse($disabled['invoice_public_links_enabled']);
+    }
+
+    /** @return array<string,mixed> */
+    private function meBodyForClient(Config $config): array
+    {
         $db = $this->createMock(Connection::class);
         $userSuppliers = $this->createMock(UserSupplierRepository::class);
         $userSuppliers->method('allowedSupplierIds')->willReturn([]);
@@ -223,9 +251,6 @@ final class MeActionTest extends TestCase
         $credentials->method('countActiveForUser')->willReturn(0);
         $clock = $this->createMock(ClockInterface::class);
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-07-24 12:00:00 UTC'));
-        $config = new Config([
-            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
-        ]);
         $action = new MeAction(
             $db,
             $config,
@@ -269,8 +294,7 @@ final class MeActionTest extends TestCase
             ->withAttribute(LicenseMiddleware::ATTR_STATE, $state);
 
         $response = $action($request, (new ResponseFactory())->createResponse());
-        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
 
-        self::assertNull($body['license']['subscription_state']);
+        return json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
     }
 }

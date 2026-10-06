@@ -127,7 +127,8 @@ final class InvoiceEmailVarsBuilder
             // „K vrácení" s kladnou částkou (stejné pravidlo jako PDF).
             'refund_amount'  => InvoicePdfRenderer::refundInvoiceAmount($invoice),
             // Trvalý odkaz na web fakturu do e-mailu; token vzniká lazy při
-            // prvním odeslání. Null pro draft (test e-mail) a bez app.url.
+            // prvním odeslání. Null pro draft (test e-mail), bez app.url a při
+            // vypnuté web faktuře (InvoicePublicLinkFeature).
             'public_url'     => $this->publicLinks->ensureUrl($invoice),
         ];
     }

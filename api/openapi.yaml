@@ -2170,6 +2170,10 @@ paths:
         volání vrací tentýž odkaz (idempotentní). Odkaz se také automaticky
         přikládá do e-mailu při odeslání faktury klientovi.
 
+        Provozovatel může web fakturu pro celou instalaci vypnout
+        (`invoices.public_links` v cfg.php) — pak endpoint vrací 404
+        s kódem `public_links_disabled` a odkaz nevzniká.
+
         `public_viewed_at` = poslední zobrazení klientem (anonymní přístup);
         null dokud klient fakturu neotevřel.
       responses:
@@ -2188,7 +2192,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-        '404': { description: "Faktura nenalezena" }
+        '404': { description: "Faktura nenalezena, nebo je web faktura na instalaci vypnutá (`public_links_disabled`)" }
 
   /api/v1/invoices/{id}/public-link/regenerate:
     parameters:
@@ -2203,6 +2207,7 @@ paths:
       description: |
         Revokace veřejného odkazu (např. při úniku URL) — starý token přestane
         okamžitě platit, vrací se nová URL. `public_viewed_at` se resetuje.
+        Při vypnuté web faktuře 404 `public_links_disabled`.
       responses:
         '200':
           description: OK
@@ -2219,7 +2224,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-        '404': { description: "Faktura nenalezena" }
+        '404': { description: "Faktura nenalezena, nebo je web faktura na instalaci vypnutá (`public_links_disabled`)" }
 
   /api/v1/invoices/{id}/pdfs:
     parameters:

@@ -444,7 +444,9 @@ hlavičky vynucuje HTTP→HTTPS redirect a vzniká redirect loop.
 
 `app.url` se používá v emailových odkazech (faktury, reset hesla, upomínky) —
 musí přesně odpovídat veřejné URL, jinak budou linky vést na špatnou doménu
-nebo `localhost:8080`. `__Host-` cookie prefix vyžaduje HTTPS — pokud jsi po
+nebo `localhost:8080`. Pokud instance z internetu dostupná není (jen LAN/VPN),
+vypněte odkaz na web fakturu v e-mailech klientům — viz
+[§ 16.5.1](16_Faktura_PDF.md#1651-vypnuti-web-faktury-na-instalaci). `__Host-` cookie prefix vyžaduje HTTPS — pokud jsi po
 této změně zkusil load přes `http://`, login se rozbije (cookie se neuloží).
 
 Stejná hodnota je bezpečnostní autoritou pro WebAuthn: určuje přesný origin a

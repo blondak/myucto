@@ -1734,7 +1734,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'mark-refunded', label: t('refundPayment.mark_refunded'), icon: 'checkCircle', tier: 'overflow', variant: 'success',
       show: isOpenRefund.value && canMarkPaidPermission, disabled: b, loading: busy.value === 'mark-refunded', run: markRefunded },
     { key: 'public-link', label: t('invoice.public_link.btn'), icon: 'link', tier: 'overflow', variant: 'primary',
-      show: !isDraft.value && w, disabled: b,
+      show: !isDraft.value && w && auth.invoicePublicLinksEnabled, disabled: b,
       title: t('invoice.public_link.btn_title') as string, run: openPublicLink },
     { key: 'clone', label: t('invoice.clone'), icon: 'copy', tier: 'overflow', variant: 'primary',
       show: !isDraft.value && !['cancellation', 'credit_note'].includes(inv.invoice_type) && canClonePermission,

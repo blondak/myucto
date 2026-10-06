@@ -37,11 +37,15 @@ final class InvoicePublicLinkService
 
     /**
      * Absolutní URL web faktury pro e-mail; token vytvoří lazy při prvním
-     * použití. Null pro draft (veřejná stránka koncepty nezobrazuje) a bez
-     * app.url (relativní odkaz je v e-mailu k ničemu).
+     * použití. Null pro draft (veřejná stránka koncepty nezobrazuje), bez
+     * app.url (relativní odkaz je v e-mailu k ničemu) a při vypnuté web faktuře
+     * (InvoicePublicLinkFeature) — tehdy ani nevzniká token.
      */
     public function ensureUrl(array $invoice): ?string
     {
+        if (!(new InvoicePublicLinkFeature($this->config))->isEnabled()) {
+            return null;
+        }
         if (($invoice['status'] ?? '') === 'draft') {
             return null;
         }

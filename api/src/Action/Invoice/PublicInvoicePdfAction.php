@@ -10,6 +10,7 @@ use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
+use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Tenant\PublicTenantGuard;
@@ -32,6 +33,7 @@ final class PublicInvoicePdfAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PublicTenantGuard $tenantGuard,
+        private readonly InvoicePublicLinkFeature $feature,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -40,6 +42,11 @@ final class PublicInvoicePdfAction
         // skončily v PDF binary streamu).
         ini_set('display_errors', '0');
         ini_set('html_errors', '0');
+
+        // Vypnutá web faktura = odkaz neexistuje (stejná 404 jako neplatný token).
+        if (!$this->feature->isEnabled()) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
+        }
 
         $token = (string) ($args['token'] ?? '');
         if (!ApprovalTokenValidator::isValidFormat($token)) {

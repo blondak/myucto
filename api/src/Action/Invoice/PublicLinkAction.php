@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Invoice\InvoicePublicLinkService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -21,7 +22,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/invoices/{id}/public-link/regenerate → revokace = nový token
  *
  * Jen pro vystavené doklady (draft 409) — veřejná stránka drafty nezobrazuje,
- * odkaz na ně by byl mrtvý.
+ * odkaz na ně by byl mrtvý. Při vypnuté web faktuře (InvoicePublicLinkFeature)
+ * 404 — token nevzniká ani se neregeneruje.
  */
 final class PublicLinkAction
 {
@@ -30,6 +32,7 @@ final class PublicLinkAction
         private readonly InvoicePublicLinkService $links,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly InvoicePublicLinkFeature $feature,
     ) {}
 
     public function ensure(Request $request, Response $response, array $args): Response
@@ -70,11 +73,15 @@ final class PublicLinkAction
     }
 
     /**
-     * Načte fakturu a ověří vlastnictví (SupplierGuard) + ne-draft stav.
+     * Ověří zapnutou web fakturu, načte fakturu a ověří vlastnictví
+     * (SupplierGuard) + ne-draft stav.
      * Při neúspěchu vrací rovnou chybovou Response.
      */
     private function loadIssuedInvoice(Request $request, Response $response, array $args): array|Response
     {
+        if (!$this->feature->isEnabled()) {
+            return Json::error($response, 'public_links_disabled', 'Web faktura je na této instalaci vypnutá.', 404);
+        }
         $invoice = $this->repo->find((int) ($args['id'] ?? 0));
         if (!SupplierGuard::owns($request, $invoice)) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);

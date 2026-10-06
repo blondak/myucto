@@ -443,6 +443,12 @@ return [
         // true = v seznamech a souhrnech zahrnout mezi doklady po splatnosti i dnešní.
         // Odeslání upomínky zůstává možné až po dni splatnosti.
         'overdue_includes_today' => false,
+        // Web faktura — trvalý veřejný odkaz /invoice/{token} v e-mailu s fakturou
+        // a v detailu faktury. false = instalace, na kterou se klient nedostane
+        // (server jen v LAN/VPN): odkaz z e-mailu zmizí, tlačítko Web faktura se
+        // skryje a veřejné stránky dřív rozeslaných odkazů vrací 404.
+        // ENV varianta: MYINVOICE_INVOICE_PUBLIC_LINKS=0
+        'public_links' => true,
     ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.
