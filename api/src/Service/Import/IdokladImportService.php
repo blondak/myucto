@@ -61,6 +61,7 @@ final class IdokladImportService
         private readonly ExchangeRateApplier $exchangeRateApplier,
         private readonly OssItemPlanner $planner,
         private readonly StatsRecomputer $stats,
+        private readonly ImportedSubjectLinker $subjectLinker,
     ) {}
 
     /**
@@ -312,7 +313,7 @@ final class IdokladImportService
         // Incremental sync: iDoklad v3 filtr ve tvaru `column~operator~value` (#197).
         $query = self::incrementalFilter($bookmarkSince);
 
-        $created = 0; $skipped = 0; $processed = 0;
+        $created = 0; $linked = 0; $skipped = 0; $processed = 0;
         foreach ($this->idoklad->getAll($supplierId, 'Contacts', $query) as $contact) {
             $processed++;
             if ($processed % self::PROGRESS_FLUSH_EVERY === 0) {
@@ -340,6 +341,13 @@ final class IdokladImportService
 
             // Create — map iDoklad Contact → clients schema
             try {
+                $linkedId = $this->subjectLinker->linkExisting(
+                    $supplierId, 'idoklad_id', $idokladId,
+                    (string) ($contact['IdentificationNumber'] ?? ''), (string) ($contact['VatIdentificationNumber'] ?? ''),
+                    true, false,
+                );
+                if ($linkedId !== null) { $linked++; continue; }
+
                 $clientId = $this->createClientFromIdoklad($contact, $supplierId);
                 $this->db->pdo()->prepare(
                     'UPDATE clients SET idoklad_id = ? WHERE id = ?'
@@ -350,7 +358,7 @@ final class IdokladImportService
             }
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped]);
-        $this->jobs->appendLog($jobId, "Kontakty: vytvořeno {$created}, přeskočeno {$skipped} (z {$processed}).");
+        $this->jobs->appendLog($jobId, "Kontakty: vytvořeno {$created}, napojeno na existující kartu {$linked}, přeskočeno {$skipped} (z {$processed}).");
     }
 
     /**

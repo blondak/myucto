@@ -63,6 +63,7 @@ final class FakturoidImportService
         private readonly ExchangeRateApplier $exchangeRateApplier,
         private readonly OssItemPlanner $planner,
         private readonly StatsRecomputer $stats,
+        private readonly ImportedSubjectLinker $subjectLinker,
     ) {}
 
     /**
@@ -149,7 +150,7 @@ final class FakturoidImportService
         $this->jobs->appendLog($jobId, 'Stahuji subjekty z Fakturoid…');
 
         $query = $bookmarkSince !== null ? ['updated_since' => $bookmarkSince] : [];
-        $created = 0; $skipped = 0; $processed = 0;
+        $created = 0; $linked = 0; $skipped = 0; $processed = 0;
 
         foreach ($this->fakturoid->getAll($supplierId, 'subjects.json', $query) as $subj) {
             $processed++;
@@ -176,6 +177,13 @@ final class FakturoidImportService
                 $isVendor   = $type === 'supplier' || $type === 'both';
                 if (!$isCustomer && !$isVendor) $isCustomer = true; // fallback
 
+                $linkedId = $this->subjectLinker->linkExisting(
+                    $supplierId, 'fakturoid_id', $fakturoidId,
+                    (string) ($subj['registration_no'] ?? ''), (string) ($subj['vat_no'] ?? ''),
+                    $isCustomer, $isVendor,
+                );
+                if ($linkedId !== null) { $linked++; continue; }
+
                 $data = [
                     'company_name' => (string) ($subj['name'] ?? 'Fakturoid import'),
                     'ic'           => (string) ($subj['registration_no'] ?? '') ?: null,
@@ -200,7 +208,7 @@ final class FakturoidImportService
             }
         }
         $this->jobs->updateProgress($jobId, ['processed' => $processed, 'created_count' => $created, 'skipped_count' => $skipped]);
-        $this->jobs->appendLog($jobId, "Subjekty: vytvořeno {$created}, přeskočeno {$skipped} (z {$processed}).");
+        $this->jobs->appendLog($jobId, "Subjekty: vytvořeno {$created}, napojeno na existující kartu {$linked}, přeskočeno {$skipped} (z {$processed}).");
     }
 
     private function importInvoices(int $jobId, int $supplierId, int $userId, bool $dryRun, ?string $bookmarkSince, bool $downloadAttachments = false): void
