@@ -95,6 +95,10 @@ export interface Client {
   credit_note_number_format?: string | null
   invoice_number_period?: 'year' | 'month' | 'none' | null
   default_branding_profile_id?: number | null
+  /** Předmět e-mailu s fakturou se zástupnými znaky (#277); null = výchozí. */
+  email_subject_format?: string | null
+  /** Název přiloženého PDF bez přípony se zástupnými znaky; null = výchozí. */
+  email_attachment_name_format?: string | null
   archived_at?: string | null
   active_projects_count?: number
   invoices_count?: number
@@ -276,6 +280,10 @@ export interface ClientPayload {
   credit_note_number_format?: string | null
   invoice_number_period?: 'year' | 'month' | 'none' | null
   default_branding_profile_id?: number | null
+  /** Předmět e-mailu s fakturou se zástupnými znaky (#277); null = výchozí. */
+  email_subject_format?: string | null
+  /** Název přiloženého PDF bez přípony se zástupnými znaky; null = výchozí. */
+  email_attachment_name_format?: string | null
   /** Replace-all (#86): pošli kompletní pole; vynech klíč, pokud kontakty neměníš. */
   email_contacts?: ClientEmailContact[]
 }

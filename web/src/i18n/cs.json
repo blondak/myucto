@@ -20916,6 +20916,13 @@
       "employment": "Pracovněprávní vztah"
     },
     "note": "Poznámka",
+    "email_format_section": "E-mail s fakturou (volitelné)",
+    "email_format_hint": "Pro klienty, kteří faktury zpracovávají automaticky a předepisují předmět e-mailu nebo název souboru. Prázdné pole = výchozí text. Předmět platí pro e-mail s fakturou, název souboru pro všechny e-maily s přiloženým PDF faktury včetně upomínek a poděkování za úhradu.",
+    "email_subject_format": "Předmět e-mailu",
+    "email_attachment_name_format": "Název přiloženého PDF",
+    "email_format_preview": "Ukázka: {value}",
+    "email_format_sample": "Ukázka počítá s fakturou {vs} vystavenou {issued} s DUZP {taxed}.",
+    "email_format_tokens_hint": "Zástupné znaky (vždy ve složených závorkách): VS variabilní symbol · TYP druh dokladu · KLIENT · DODAVATEL · MM, YYYY, YY měsíc a rok vystavení · DUZP_MM, DUZP_YYYY, DUZP_YY měsíc a rok zdanitelného plnění (u zálohy bez DUZP datum vystavení).",
     "numbering_section": "Vlastní číselná řada (volitelné)",
     "numbering_hint": "Pokud zde vyplníš formát, dostane tento klient vlastní řadu faktur s nezávislým počítadlem. Bez vyplnění se použije řada z nastavení dodavatele.",
     "invoice_number_format": "Faktury",

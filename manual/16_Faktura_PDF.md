@@ -274,8 +274,10 @@ Tlačítko **Odeslat e-mailem** (na detailu faktury). E-mail jde na:
 - `klient.hlavni_email`
 - `+ zakazka.fakturacni_emaily[]` (až 3 dodatečné adresy)
 
-Předmět + tělo e-mailu se vezme ze šablony `invoice_new` (CZ / EN podle jazyka
-klienta) — viz [96. Nastavení](96_Nastaveni.md).
+Předmět + tělo e-mailu se vezme ze šablony `invoice_send` (CZ / EN podle jazyka
+klienta) — viz [96. Nastavení](96_Nastaveni.md). Předmět i název přiloženého PDF
+lze předepsat pro konkrétního klienta, viz
+[§ 18.2.4](18_Klienti.md#1824-predmet-e-mailu-a-nazev-prilozeneho-pdf).
 
 Po odeslání:
 

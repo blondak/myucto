@@ -86,7 +86,7 @@ final class PaymentThanksMailer
         if ($settings['attach_paid_pdf']) {
             try {
                 $pdfPath = $this->renderer->render($invoiceId, false, $userId);
-                $attachments[] = ['path' => $pdfPath, 'name' => basename($pdfPath), 'contentType' => 'application/pdf'];
+                $attachments[] = $this->varsBuilder->pdfAttachment($invoice, $pdfPath);
             } catch (\Throwable $e) {
                 // PDF příloha je volitelná — když selže, pošli e-mail bez ní.
                 $attachments = [];
@@ -168,6 +168,8 @@ final class PaymentThanksMailer
         }
 
         $vars['subject']        = $subject;
+        // Předmět podle klienta (#277) patří e-mailu s fakturou, ne poděkování.
+        $vars['client_subject'] = null;
         $vars['paid_at']        = (string) ($invoice['paid_at'] ?? date('Y-m-d'));
         $vars['amount_paid']    = (float) ($invoice['amount_to_pay'] ?? $invoice['total_with_vat'] ?? 0);
         $vars['currency']       = (string) ($invoice['currency'] ?? 'CZK');

@@ -180,7 +180,7 @@ final class AnonymizationPolicy
         'chart_of_accounts' => ['account_code' => 'keep', 'name' => 'text'],
         'client_bank_accounts' => ['account_key' => 'account_key', 'account_number' => 'bank_account', 'bank_code' => 'keep', 'bank_key' => 'keep', 'iban' => 'iban'],
         'client_email_contacts' => ['contact_name' => 'person_name', 'email' => 'email', 'label' => 'text', 'usages' => 'keep'],
-        'clients' => ['city' => 'city', 'company_name' => 'party_name', 'credit_note_number_format' => 'keep', 'dic' => 'dic', 'first_name' => 'first_name', 'ic' => 'ico', 'invoice_number_format' => 'keep', 'last_name' => 'last_name', 'main_email' => 'email', 'note' => 'text', 'phone' => 'phone', 'proforma_number_format' => 'keep', 'related_party_note' => 'text', 'street' => 'street', 'tax_number' => 'shape', 'zip' => 'zip'],
+        'clients' => ['city' => 'city', 'company_name' => 'party_name', 'credit_note_number_format' => 'keep', 'dic' => 'dic', 'email_attachment_name_format' => 'text', 'email_subject_format' => 'text', 'first_name' => 'first_name', 'ic' => 'ico', 'invoice_number_format' => 'keep', 'last_name' => 'last_name', 'main_email' => 'email', 'note' => 'text', 'phone' => 'phone', 'proforma_number_format' => 'keep', 'related_party_note' => 'text', 'street' => 'street', 'tax_number' => 'shape', 'zip' => 'zip'],
         'cnb_repo_rates' => ['note' => 'keep'],
         'cost_centers' => ['code' => 'keep', 'name' => 'text'],
         'countries' => ['iso2' => 'keep', 'iso3' => 'keep', 'name_cs' => 'keep', 'name_en' => 'keep'],

@@ -82,6 +82,7 @@ Doporučený postup pro českého klienta:
 | Splatnost | Preset **7 dnů / 14 dnů / Měsíc / Vlastní**, nebo **Použít výchozí** = dědit z dodavatele. „Měsíc" = kalendářní měsíc (1. 2. → 1. 3., 31. 1. → 28. 2.), ne fixních 30 dní |
 | Cenová hladina | Zobrazí se jen se zapnutým skladem. **Default** = bez hladiny, skladové zboží se naceňuje standardní cenou. Jinak aktivní hladina firmy, podle které se naceňují skladové položky faktury (viz [§ 36.18](38_Eshop.md#3818-cenove-hladiny)) |
 | Poznámka | Interní text — nezobrazí se na faktuře |
+| E-mail s fakturou | Volitelný předmět e-mailu a název přiloženého PDF pro klienta, viz [§ 18.2.4](#1824-predmet-e-mailu-a-nazev-prilozeneho-pdf) |
 
 ### 18.2.2 18.2.1a Slovenský klient a národní daňová čísla
 
@@ -143,6 +144,45 @@ konkrétní odeslání ručně upravit jako dosud.
 
 Limit je 10 kontaktů na klienta. Kontakty jsou dostupné i přes API
 (`email_contacts` v detailu klienta, replace-all při create/update).
+
+### 18.2.4 Předmět e-mailu a název přiloženého PDF
+
+Firemní odběratelé často zpracovávají přijaté faktury automaticky a předepisují,
+jak se má jmenovat předmět e-mailu a přiložený soubor. Sekce **E-mail s fakturou
+(volitelné)** ve formuláři odběratele (nad vlastní číselnou řadou) to umožňuje
+nastavit pro každého klienta zvlášť.
+
+| Pole | Kde platí | Prázdné pole |
+|---|---|---|
+| Předmět e-mailu | E-mail s fakturou, zálohou i dobropisem — ruční i hromadné odeslání, automatické odeslání pravidelné fakturace a test odeslání (s prefixem `[TEST]`) | Předmět podle e-mailové šablony, standardně „Faktura 2610001 — Dodavatel" |
+| Název přiloženého PDF | Každý e-mail s PDF faktury: odeslání, upomínky i poděkování za úhradu | Podle druhu dokladu: `Faktura-2610001.pdf`, `Proforma-…`, `Dobropis-…` |
+
+Upomínky a poděkování za úhradu si předmět ponechávají vlastní — jde o jinou
+zprávu než samotnou fakturu.
+
+Formát je text se zástupnými znaky ve složených závorkách:
+
+| Zástupný znak | Hodnota |
+|---|---|
+| `{VS}` | Variabilní symbol (číslo dokladu) |
+| `{TYP}` | Druh dokladu v jazyce klienta — Faktura, Zálohová faktura, Opravný daňový doklad, Daňový doklad k přijaté platbě, Platební kalendář |
+| `{KLIENT}` | Název klienta |
+| `{DODAVATEL}` | Název dodavatele |
+| `{MM}`, `{YYYY}`, `{YY}` | Měsíc a rok vystavení |
+| `{DUZP_MM}`, `{DUZP_YYYY}`, `{DUZP_YY}` | Měsíc a rok zdanitelného plnění; u zálohy bez DUZP datum vystavení |
+
+Například faktura vystavená 6. 10. 2026 za září (DUZP 30. 9. 2026):
+
+| Formát | Výsledek |
+|---|---|
+| `Klient_{DUZP_MM}_{DUZP_YYYY}_Dodavatel` | `Klient_09_2026_Dodavatel` |
+| `Dodavatel_{DUZP_MM}_{DUZP_YYYY}` (název PDF) | `Dodavatel_09_2026.pdf` |
+
+Pod vyplněným polem je živá ukázka výsledku. Příponu `.pdf` doplní aplikace
+sama. Název souboru nesmí obsahovat znaky `\ / : * ? " < > |`; když je obsahují
+dosazené hodnoty (třeba lomítko v názvu firmy), nahradí se podtržítkem.
+Neznámý zástupný znak formulář při uložení odmítne. Předmět klienta má přednost
+i před předmětem upraveným v administraci e-mailových šablon.
 
 ## 18.3 Detail klienta
 

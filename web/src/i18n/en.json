@@ -20916,6 +20916,13 @@
       "employment": "Employment relationship"
     },
     "note": "Note",
+    "email_format_section": "Invoice e-mail (optional)",
+    "email_format_hint": "For clients who process invoices automatically and prescribe the e-mail subject or file name. Empty = default text. The subject applies to the invoice e-mail, the file name to every e-mail with the invoice PDF attached, including reminders and payment thank-you e-mails.",
+    "email_subject_format": "E-mail subject",
+    "email_attachment_name_format": "Attached PDF file name",
+    "email_format_preview": "Preview: {value}",
+    "email_format_sample": "The preview assumes invoice {vs} issued on {issued} with tax point date {taxed}.",
+    "email_format_tokens_hint": "Placeholders (always wrap in curly braces): VS variable symbol · TYP document type · KLIENT client · DODAVATEL supplier · MM, YYYY, YY month and year of issue · DUZP_MM, DUZP_YYYY, DUZP_YY month and year of the tax point (issue date for a proforma without one).",
     "numbering_section": "Custom invoice numbering (optional)",
     "numbering_hint": "Filling these gives this client a separate invoice series with its own counter. Leave empty to inherit the supplier-wide format.",
     "invoice_number_format": "Invoices",

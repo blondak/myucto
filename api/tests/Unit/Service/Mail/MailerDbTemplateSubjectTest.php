@@ -73,6 +73,133 @@ final class MailerDbTemplateSubjectTest extends TestCase
         self::assertStringContainsString('Faktura 2605001', $transport->message->getHtmlBody() ?? '');
     }
 
+    /**
+     * Předmět podle klienta (#277) přebíjí předmět e-mailové šablony z administrace.
+     * Je to hotový text: `&` se nesmí HTML-escapovat a `{` v názvu se nesmí brát jako Twig.
+     */
+    public function testPredmetKlientaMaPrednostPredSablonouZAdministrace(): void
+    {
+        // Přes Twig by `{{ … }}` dosadil varsymbol a `{%` bez konce shodil vykreslení.
+        $clientSubject = 'Klient & Syn {{ invoice.varsymbol }} {% x';
+        $transport = $this->sendInvoiceMail(dbSubject: 'Faktura {{ invoice.varsymbol }}', vars: [
+            'subject'        => $clientSubject,
+            'client_subject' => $clientSubject,
+        ]);
+
+        self::assertSame($clientSubject, $transport->message->getSubject());
+    }
+
+    public function testJednorazovyPredmetMaPrednostPredPredmetemKlienta(): void
+    {
+        $transport = $this->sendInvoiceMail(
+            dbSubject: 'Faktura {{ invoice.varsymbol }}',
+            vars: ['subject' => 'Klientský', 'client_subject' => 'Klientský'],
+            subjectOverride: 'Ručně {{ invoice.varsymbol }}',
+        );
+
+        self::assertSame('Ručně 2605001', $transport->message->getSubject());
+    }
+
+    /**
+     * Bez šablony z administrace builder `subject` nastavuje vždy (i z formátu
+     * klienta) — jednorázový předmět ho přesto musí přebít. Bere se doslova, jako
+     * dosud u e-mailů bez `subject` ve vars (měsíční výkaz).
+     */
+    public function testJednorazovyPredmetVyhrajeIBezSablonyZAdministrace(): void
+    {
+        $transport = $this->sendInvoiceMail(
+            dbSubject: null,
+            vars: ['subject' => 'Klientský', 'client_subject' => 'Klientský'],
+            subjectOverride: 'Ručně {{ invoice.varsymbol }} & {% x',
+        );
+
+        self::assertSame('Ručně {{ invoice.varsymbol }} & {% x', $transport->message->getSubject());
+    }
+
+    /** E-mail bez `subject` ve vars (měsíční výkaz) dostane jednorázový předmět doslova. */
+    public function testJednorazovyPredmetBezSubjectVeVarsZustavaDoslovny(): void
+    {
+        $transport = $this->sendInvoiceMail(dbSubject: null, vars: [], subjectOverride: 'Výkaz {% obdobi');
+
+        self::assertSame('Výkaz {% obdobi', $transport->message->getSubject());
+    }
+
+    /** API/MCP posílá prázdný řetězec — nesmí odejít e-mail bez předmětu. */
+    public function testPrazdnyJednorazovyPredmetSeIgnoruje(): void
+    {
+        $withClient = $this->sendInvoiceMail(dbSubject: null, vars: [
+            'subject'        => 'Klient_09_2026',
+            'client_subject' => 'Klient_09_2026',
+        ], subjectOverride: '  ');
+        $withTemplate = $this->sendInvoiceMail(dbSubject: 'Faktura {{ invoice.varsymbol }}', vars: [
+            'subject'        => 'Faktura 2605001 — Dodavatel',
+            'client_subject' => null,
+        ], subjectOverride: '');
+
+        self::assertSame('Klient_09_2026', $withClient->message->getSubject());
+        self::assertSame('Faktura 2605001', $withTemplate->message->getSubject());
+    }
+
+    public function testBezPredmetuKlientaPlatiSablonaZAdministrace(): void
+    {
+        $transport = $this->sendInvoiceMail(dbSubject: 'Faktura {{ invoice.varsymbol }}', vars: [
+            'subject'        => 'Faktura 2605001 — Dodavatel',
+            'client_subject' => null,
+        ]);
+
+        self::assertSame('Faktura 2605001', $transport->message->getSubject());
+    }
+
+    public function testBezSablonyZAdministracePlatiPredmetKlienta(): void
+    {
+        $transport = $this->sendInvoiceMail(dbSubject: null, vars: [
+            'subject'        => 'Klient_09_2026_Dodavatel',
+            'client_subject' => 'Klient_09_2026_Dodavatel',
+        ]);
+
+        self::assertSame('Klient_09_2026_Dodavatel', $transport->message->getSubject());
+    }
+
+    /** @param array<string,mixed> $vars */
+    private function sendInvoiceMail(?string $dbSubject, array $vars, ?string $subjectOverride = null): CapturingTransport
+    {
+        $templates = $this->createStub(EmailTemplateRepository::class);
+        $templates->method('find')->willReturn($dbSubject === null ? null : [
+            'id' => 1,
+            'code' => 'invoice_send',
+            'locale' => 'cs',
+            'subject' => $dbSubject,
+            'body_html' => '<p>Faktura {{ invoice.varsymbol }}</p>',
+            'body_text' => 'Faktura {{ invoice.varsymbol }}',
+            'updated_at' => '2026-06-02 12:00:00',
+        ]);
+        $mailer = new Mailer(
+            new Config(['smtp' => [
+                'from_email' => 'noreply@example.test',
+                'from_name' => 'MyInvoice',
+                'dkim' => ['enabled' => false],
+            ]]),
+            $this->createStub(LoggerInterface::class),
+            $this->createStub(Connection::class),
+            $templates,
+        );
+        $transport = new CapturingTransport();
+        (new \ReflectionProperty(Mailer::class, 'transport'))->setValue($mailer, $transport);
+
+        $mailer->sendTemplate('invoice_send', 'cs', ['client@example.test'], $vars + [
+            'invoice' => ['varsymbol' => '2605001'],
+            'supplier' => [
+                'id' => 1,
+                'company_name' => 'Dodavatel s.r.o.',
+                'display_name' => 'Dodavatel',
+                'email_branding_enabled' => false,
+            ],
+        ], $subjectOverride);
+
+        self::assertInstanceOf(Email::class, $transport->message);
+        return $transport;
+    }
+
     public function testEmailProfileWithDisabledReplyToDoesNotUseFallback(): void
     {
         $templates = $this->createStub(EmailTemplateRepository::class);

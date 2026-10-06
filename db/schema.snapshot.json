@@ -945,7 +945,8 @@
         "1961_ollama_provider.sql",
         "1962_payroll_personnel_file.sql",
         "1963_supplier_auto_send_reminders_default_off.sql",
-        "1964_supplier_tax_representation_code.sql"
+        "1964_supplier_tax_representation_code.sql",
+        "1965_client_email_subject_attachment_name.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3504,6 +3505,8 @@
                 "default_payment_method": "enum('bank_transfer','direct_debit','card','cash','cash_on_delivery','offset','other') NULL DEFAULT NULL",
                 "default_revenue_category_id": "int(10) unsigned NULL DEFAULT NULL",
                 "dic": "varchar(20) NULL DEFAULT NULL",
+                "email_attachment_name_format": "varchar(120) NULL DEFAULT NULL",
+                "email_subject_format": "varchar(200) NULL DEFAULT NULL",
                 "fakturoid_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "first_name": "varchar(60) NULL DEFAULT NULL",
                 "hourly_rate": "decimal(14,6) NOT NULL DEFAULT 0.000000",

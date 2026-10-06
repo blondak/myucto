@@ -14,6 +14,16 @@ import { settingsApi, type BrandingProfile } from '@/api/settings'
 import { eshopApi, type PriceLevel } from '@/api/eshop'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
+import { formatDate } from '@/composables/useFormat'
+import { addDaysIso, appIsoDate } from '@/utils/date'
+import {
+  CLIENT_EMAIL_DEFAULT_ATTACHMENT_NAME,
+  CLIENT_EMAIL_DEFAULT_SUBJECT,
+  CLIENT_EMAIL_INVOICE_LABEL,
+  clientEmailAttachmentName,
+  clientEmailSubject,
+  type ClientEmailFormatSample,
+} from '@/utils/clientEmailFormat'
 
 /**
  * V `embedded` módu komponenta nečte route, neredirektuje a vrací výsledek
@@ -147,11 +157,35 @@ const form = ref<ClientPayload>({
   credit_note_number_format: null,
   invoice_number_period: null,
   default_branding_profile_id: null,
+  email_subject_format: null,
+  email_attachment_name_format: null,
 })
 
 // Cenová hladina odběratele — jen se zapnutým skladem. Drží se mimo `form`, aby se bez
 // skladu vůbec neposlala (backend pak hladinu nemění). null = hladina „Default".
 const stockEnabled = computed(() => supplierStore.currentSupplier?.stock_enabled === true)
+
+// E-mail s fakturou podle klienta (#277). Sekce se otevře sama jen při načtení
+// vyplněného klienta nebo při chybě — ne podle hodnoty, jinak by se zavřela
+// uprostřed psaní ve chvíli, kdy uživatel pole vymaže.
+const emailFormatOpen = ref(false)
+const emailFormatLocale = computed<'cs' | 'en'>(() => (form.value.language === 'en' ? 'en' : 'cs'))
+// Ukázka počítá s měsíční fakturací: vystaveno dnes za předchozí měsíc, aby byl
+// vidět rozdíl mezi {MM} (vystavení) a {DUZP_MM} (plnění).
+const emailFormatSample = computed<ClientEmailFormatSample>(() => {
+  const issueDate = appIsoDate()
+  return {
+    varsymbol: `${issueDate.slice(2, 4)}${issueDate.slice(5, 7)}001`,
+    issueDate,
+    taxDate: addDaysIso(`${issueDate.slice(0, 8)}01`, -1),
+    client: form.value.company_name || '',
+    supplier: supplierStore.currentSupplier?.company_name || '',
+    typeLabel: CLIENT_EMAIL_INVOICE_LABEL[emailFormatLocale.value],
+  }
+})
+const emailSubjectPreview = computed(() => clientEmailSubject(form.value.email_subject_format, emailFormatSample.value))
+const emailAttachmentPreview = computed(() =>
+  clientEmailAttachmentName(form.value.email_attachment_name_format, emailFormatSample.value))
 const priceLevels = ref<PriceLevel[]>([])
 const priceLevelsLoaded = ref(false)
 const priceLevelId = ref<number | null>(null)
@@ -234,6 +268,7 @@ const formEl = ref<HTMLFormElement | null>(null)
 const INLINE_ERROR_FIELDS = [
   'company_name', 'first_name', 'last_name', 'main_email', 'hourly_rate',
   'ic', 'street', 'zip', 'city', 'phone', 'price_level_id',
+  'email_subject_format', 'email_attachment_name_format',
 ]
 const unplacedErrors = computed(() =>
   Object.entries(errors.value)
@@ -302,6 +337,7 @@ onMounted(async () => {
   if (isEdit.value && clientId.value) {
     const c = await clientsApi.get(clientId.value)
     Object.assign(form.value, sanitize(c))
+    emailFormatOpen.value = !!(c.email_subject_format || c.email_attachment_name_format)
     priceLevelId.value = c.price_level_id ?? null
     priceLevelName.value = c.price_level_name ?? null
     emailContacts.value = (c.email_contacts ?? []).map(ec => ({
@@ -364,6 +400,8 @@ function sanitize(c: Client): Partial<ClientPayload> {
     credit_note_number_format: c.credit_note_number_format ?? null,
     invoice_number_period: c.invoice_number_period ?? null,
     default_branding_profile_id: c.default_branding_profile_id ?? null,
+    email_subject_format: c.email_subject_format ?? null,
+    email_attachment_name_format: c.email_attachment_name_format ?? null,
   }
 }
 
@@ -515,6 +553,9 @@ async function submit() {
     error.value = data?.message || t('errors.generic')
     if (data?.fields) {
       errors.value = data.fields
+      if (data.fields.email_subject_format || data.fields.email_attachment_name_format) {
+        emailFormatOpen.value = true
+      }
       // Uložit je na patě dlouhého formuláře, chybné pole bývá nahoře mimo
       // obraz — bez odskoku uživatel vidí jen „Validace selhala" (#120).
       // Hledá se uvnitř TOHOHLE formuláře: v embedded módu běží komponenta
@@ -1012,6 +1053,44 @@ async function submit() {
           </select>
           <p class="text-xs text-neutral-500 mt-1">{{ t('client.branding_profile_hint') }}</p>
         </div>
+
+        <!-- E-mail s fakturou podle klienta (#277) — předmět a název přiloženého PDF -->
+        <details v-if="form.is_customer" class="pt-3 border-t border-neutral-100" :open="emailFormatOpen"
+          @toggle="emailFormatOpen = ($event.target as HTMLDetailsElement).open">
+          <summary class="cursor-pointer text-sm font-medium text-neutral-700">
+            {{ t('client.email_format_section') }}
+          </summary>
+          <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('client.email_format_hint') }}</p>
+          <div class="space-y-3">
+            <div>
+              <label for="client-email-subject-format" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.email_subject_format') }}</label>
+              <input id="client-email-subject-format" v-model="form.email_subject_format" type="text" maxlength="200"
+                :placeholder="CLIENT_EMAIL_DEFAULT_SUBJECT[emailFormatLocale]"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <p v-if="emailSubjectPreview" class="text-xs text-neutral-500 mt-1 break-all">{{ t('client.email_format_preview', { value: emailSubjectPreview }) }}</p>
+              <p data-field-error v-if="errors.email_subject_format" class="text-xs text-danger-500 mt-1">{{ errors.email_subject_format[0] }}</p>
+            </div>
+            <div>
+              <label for="client-email-attachment-name-format" class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.email_attachment_name_format') }}</label>
+              <div class="flex items-center gap-2">
+                <input id="client-email-attachment-name-format" v-model="form.email_attachment_name_format" type="text" maxlength="120"
+                  :placeholder="CLIENT_EMAIL_DEFAULT_ATTACHMENT_NAME"
+                  class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                <span class="text-sm text-neutral-500 font-mono">.pdf</span>
+              </div>
+              <p v-if="emailAttachmentPreview" class="text-xs text-neutral-500 mt-1 break-all">{{ t('client.email_format_preview', { value: emailAttachmentPreview }) }}</p>
+              <p data-field-error v-if="errors.email_attachment_name_format" class="text-xs text-danger-500 mt-1">{{ errors.email_attachment_name_format[0] }}</p>
+            </div>
+          </div>
+          <p v-if="emailSubjectPreview || emailAttachmentPreview" class="text-xs text-neutral-500 mt-2">
+            {{ t('client.email_format_sample', {
+              vs: emailFormatSample.varsymbol,
+              issued: formatDate(emailFormatSample.issueDate),
+              taxed: formatDate(emailFormatSample.taxDate),
+            }) }}
+          </p>
+          <p class="text-xs text-neutral-500 mt-2">{{ t('client.email_format_tokens_hint') }}</p>
+        </details>
 
         <!-- Per-client číselná řada (volitelná) -->
         <details class="pt-3 border-t border-neutral-100" :open="!!(form.invoice_number_format || form.proforma_number_format || form.credit_note_number_format)">

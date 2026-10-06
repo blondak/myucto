@@ -2355,7 +2355,7 @@ paths:
                   items: { type: string, format: email }
                 subject_override:
                   type: string
-                  description: Override předmětu emailu (jinak předmět ze šablony `invoice_send`)
+                  description: Předmět jen pro toto odeslání; má přednost před předmětem klienta (`email_subject_format`) i šablony `invoice_send`. S šablonou upravenou v administraci se vykreslí jako její Twig předmět, jinak se použije doslova. Prázdný řetězec = nezadaný.
                 note:
                   type: string
                   maxLength: 5000
@@ -33429,6 +33429,8 @@ components:
         credit_note_number_format: { type: [string, "null"] }
         invoice_number_period: { type: [string, "null"], enum: [year, month, none, null] }
         default_branding_profile_id: { type: [integer, "null"], description: "Výchozí brandingový profil pro nové vydané faktury klienta." }
+        email_subject_format: { type: [string, "null"], maxLength: 200, description: "Předmět e-mailu s fakturou pro tohoto klienta. Zástupné znaky: {VS} {TYP} {KLIENT} {DODAVATEL} {MM} {YYYY} {YY} {DUZP_MM} {DUZP_YYYY} {DUZP_YY} (MM/YYYY/YY z data vystavení, DUZP_* z data plnění). NULL = předmět podle e-mailové šablony." }
+        email_attachment_name_format: { type: [string, "null"], maxLength: 120, description: "Název přiloženého PDF bez přípony `.pdf`, stejné zástupné znaky jako u předmětu. Platí pro všechny e-maily s PDF faktury (odeslání, upomínky, poděkování za úhradu). NULL = výchozí název podle druhu dokladu (Faktura-{VS}.pdf, Proforma-{VS}.pdf, Dobropis-{VS}.pdf…)." }
         price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele (skladový modul). NULL = bez hladiny (v UI „Default“) — skladové položky se naceňují standardní cenou." }
         price_level_name: { type: [string, "null"], readOnly: true, description: "Název přiřazené cenové hladiny (jen čtení)." }
         archived_at: { type: [string, "null"], format: date-time, description: "NULL = aktivní; vyplněno = archivováno" }
@@ -33588,6 +33590,8 @@ components:
         credit_note_number_format: { type: [string, "null"] }
         invoice_number_period: { type: [string, "null"], enum: [year, month, none, null] }
         default_branding_profile_id: { type: [integer, "null"], description: "Volitelný výchozí brandingový profil; musí patřit aktuálnímu supplier-ovi." }
+        email_subject_format: { type: [string, "null"], maxLength: 200, description: "Předmět e-mailu s fakturou; zástupné znaky {VS} {TYP} {KLIENT} {DODAVATEL} {MM} {YYYY} {YY} {DUZP_MM} {DUZP_YYYY} {DUZP_YY}. Neznámý znak nebo víc řádků = 400 `validation_failed`. Prázdné / null = výchozí." }
+        email_attachment_name_format: { type: [string, "null"], maxLength: 120, description: "Název přiloženého PDF bez přípony; stejné zástupné znaky; znaky zakázané v názvech souborů (lomítka, dvojtečka, `* ? < > |`, uvozovky) = 400 `validation_failed`. Prázdné / null = výchozí." }
         price_level_id: { type: [integer, "null"], description: "Cenová hladina odběratele; musí patřit firmě a být aktivní (jinak 422 `invalid_price_level`). `null` = bez hladiny. Klíč vynech, pokud hladinu neměníš — bez něj zůstane beze změny." }
         email_contacts:
           type: array
