@@ -51,12 +51,19 @@ final class BankMatchSearchTest extends BankPostingTestCase
         $foreign = $this->saleInvoice('209987004', $party, 1200);
         $this->db->pdo()->prepare('UPDATE invoices SET supplier_id = ? WHERE id = ?')->execute([$this->otherSupplierId(), $foreign]);
         $search = new BankMatchSearch($this->db);
-        $incoming = $search->searchDocuments($this->supplierId, 1200, 'CZK', 'Syntetický společný partner', ['invoice', 'purchase_invoice']);
-        self::assertEqualsCanonicalizing([$sale, $purchaseRefund], array_column($incoming, 'id'));
-        $outgoing = $search->searchDocuments($this->supplierId, -1200, 'CZK', '1 200,00', ['invoice', 'purchase_invoice']);
-        self::assertEqualsCanonicalizing([$refund, $purchase], array_column($outgoing, 'id'));
-        self::assertNotContains($draft, array_column($incoming, 'id'));
-        self::assertNotContains($foreign, array_column($incoming, 'id'));
+        // Vydané a přijaté doklady mají vlastní řadu id, v čisté DB se čísla potkají.
+        $incoming = self::documentKeys($search->searchDocuments($this->supplierId, 1200, 'CZK', 'Syntetický společný partner', ['invoice', 'purchase_invoice']));
+        self::assertEqualsCanonicalizing(["invoice:$sale", "purchase_invoice:$purchaseRefund"], $incoming);
+        $outgoing = self::documentKeys($search->searchDocuments($this->supplierId, -1200, 'CZK', '1 200,00', ['invoice', 'purchase_invoice']));
+        self::assertEqualsCanonicalizing(["invoice:$refund", "purchase_invoice:$purchase"], $outgoing);
+        self::assertNotContains("invoice:$draft", $incoming);
+        self::assertNotContains("invoice:$foreign", $incoming);
+    }
+
+    /** @return list<string> */
+    private static function documentKeys(array $rows): array
+    {
+        return array_map(static fn (array $row): string => $row['type'] . ':' . $row['id'], $rows);
     }
 
     public function testPaymentCandidatesExcludeUsedForeignAndWrongDirectionMovements(): void
