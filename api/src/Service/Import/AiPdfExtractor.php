@@ -337,7 +337,19 @@ final class AiPdfExtractor
 
         // Create purchase invoice draft
         try {
-            $invoiceId = $this->createDraft($data, $supplierId, $userId, $resolved['id'], $resolved['is_vat_payer'] ?? null);
+            $existed = false;
+            $invoiceId = $this->createDraft($data, $supplierId, $userId, $resolved['id'], $resolved['is_vat_payer'] ?? null, $existed);
+            // Stejná faktura v jiném PDF (jiný hash, stejný dodavatel + číslo + datum) —
+            // existující doklad se nesmí měnit: žádné nové PDF ani automatika navíc.
+            if ($existed) {
+                return [
+                    'ok'                  => true,
+                    'purchase_invoice_id' => $invoiceId,
+                    'source'              => 'duplicate',
+                    'duplicate'           => true,
+                    'message'             => 'Faktura je již v systému jako faktura #' . $invoiceId,
+                ];
+            }
             // Attach PDF — uložit do archive a updatnout pdf_path/hash/size na faktuře
             $this->attachPdf($invoiceId, $supplierId, $pdfBytes, $originalFilename);
             $this->tagImportBatch($invoiceId, $supplierId, $importBatchId);
@@ -488,8 +500,9 @@ final class AiPdfExtractor
         return null;
     }
 
-    private function createDraft(array $data, int $supplierId, int $userId, int $vendorId, ?bool $vendorIsVatPayer = null): int
+    private function createDraft(array $data, int $supplierId, int $userId, int $vendorId, ?bool $vendorIsVatPayer = null, bool &$existed = false): int
     {
+        $existed = false;
         // Datum, ke kterému se páruje sazba — DUZP s fallbackem na vystavení, tedy
         // stejná definice „rozhodného data", jakou používá zbytek importní vrstvy.
         $rateDate = (string) ($data['tax_date'] ?? '') ?: (string) ($data['issue_date'] ?? date('Y-m-d'));
@@ -1008,6 +1021,7 @@ final class AiPdfExtractor
             (string) $payload['issue_date'],
         );
         if ($existingId !== null) {
+            $existed = true;
             return $existingId;
         }
         $id = $this->repo->createDraft($payload, $userId, $supplierId);

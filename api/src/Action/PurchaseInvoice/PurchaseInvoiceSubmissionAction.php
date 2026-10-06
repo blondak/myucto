@@ -204,7 +204,9 @@ final class PurchaseInvoiceSubmissionAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         $this->audit($request, 'purchase_invoice_submission.processed', $id, $result);
-        return Json::ok($response, $this->findWithDimensions($id, $supplierId));
+        return Json::ok($response, (array) $this->findWithDimensions($id, $supplierId) + [
+            'duplicate' => (bool) $result['duplicate'],
+        ]);
     }
 
     /**

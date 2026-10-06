@@ -113,6 +113,10 @@ async function runBulk(
   return { ok, failed: targets.length - ok, lastError }
 }
 
+function invoiceLabel(item: PurchaseInvoiceSubmission): string {
+  return item.purchase_invoice_varsymbol || item.vendor_invoice_number || `#${item.purchase_invoice_id}`
+}
+
 function reportBulk(result: { ok: number; failed: number; lastError: string }, skipped: number) {
   const failed = result.failed + skipped
   if (failed === 0) toast.success(t('purchase_submissions.bulk_done', { ok: result.ok }))
@@ -125,13 +129,16 @@ async function bulkExtract() {
   const targets = checkedItems.value.filter(i => i.status === 'submitted')
   const skipped = checkedItems.value.length - targets.length
   const invoiceIds: number[] = []
+  let duplicates = 0
   acting.value = true
   try {
     const result = await runBulk(targets, async item => {
       const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id)
-      if (fresh.purchase_invoice_id) invoiceIds.push(fresh.purchase_invoice_id)
+      if (fresh.duplicate) duplicates++
+      else if (fresh.purchase_invoice_id) invoiceIds.push(fresh.purchase_invoice_id)
     })
     reportBulk(result, skipped)
+    if (duplicates > 0) toast.warning(t('purchase_submissions.bulk_duplicates', { n: duplicates }))
     checkedIds.value = new Set()
     await load()
     if (invoiceIds.length) bulkReviewInvoiceIds.value = invoiceIds
@@ -277,6 +284,16 @@ async function upload() {
           })
         : t('purchase_submissions.inbox_uploaded', { n: result.created }))
     }
+    // Soubor, který už prošel zpracováním, ve frontě nečeká — bez hlášky by nebylo
+    // poznat, kam se poděl.
+    for (const item of result.items) {
+      if (item.duplicate && item.status === 'processed' && item.purchase_invoice_id) {
+        toast.warning(t('purchase_submissions.upload_already_processed', {
+          file: item.original_name,
+          number: invoiceLabel(item),
+        }))
+      }
+    }
     clearFiles()
     note.value = ''
     kindHint.value = null
@@ -313,6 +330,13 @@ async function extract() {
   try {
     const fresh = await purchaseInvoiceSubmissionsApi.extract(selected.value.id)
     selected.value = fresh
+    if (fresh.duplicate) {
+      // Doklad zůstane vybraný i s tlačítkem na existující fakturu, místo aby z fronty
+      // potichu zmizel.
+      items.value = items.value.map(i => (i.id === fresh.id ? fresh : i))
+      toast.warning(t('purchase_submissions.already_exists', { number: invoiceLabel(fresh) }))
+      return
+    }
     toast.success(t('purchase_submissions.processed_success'))
     if (fresh.purchase_invoice_id) {
       // Nejdřív kontrola vytěženého (okno se samo zavře, když není co kontrolovat),

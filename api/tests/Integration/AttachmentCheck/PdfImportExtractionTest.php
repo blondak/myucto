@@ -130,4 +130,50 @@ final class PdfImportExtractionTest extends TestCase
         self::assertIsArray($check, 'doklad je po importu rovnou zkontrolovaný proti svému PDF');
         self::assertSame('match', $check['status'], 'rozdíly: ' . $check['findings']);
     }
+
+    /**
+     * Issue #125: stejná faktura v jiném PDF (jiný hash, stejný dodavatel + číslo + datum)
+     * se nahlásí jako duplicita a existující doklad zůstane netknutý, včetně PDF.
+     */
+    public function testSameInvoiceInDifferentPdfIsReportedAsDuplicateAndLeftIntact(): void
+    {
+        $number = 'AICHK-DUP-' . strtoupper(bin2hex(random_bytes(3)));
+        $llm = new FakeLlmGateway(fn (string $bytes): array => [
+            'vendor' => ['company_name' => 'Syntetická čerpací stanice s.r.o.', 'ic' => '11220044', 'dic' => null, 'is_vat_payer' => true],
+            'customer' => ['company_name' => 'Syntetický odběratel', 'ic' => $this->ownIco, 'dic' => null],
+            'vendor_invoice_number' => $number,
+            'document_kind' => 'invoice',
+            'issue_date' => '2091-07-15',
+            'tax_date' => '2091-07-15',
+            'due_date' => '2091-07-29',
+            'currency' => 'CZK',
+            'total_without_vat' => 1000.0,
+            'total_with_vat' => 1210.0,
+            'company_role' => null,
+            'items' => [['description' => 'Syntetické zboží', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 1000.0, 'vat_rate' => 21]],
+        ]);
+        $resolver = $this->createMock(ClientResolver::class);
+        $resolver->method('resolveVendor')->willReturn(['id' => $this->vendorId, 'created' => false, 'role_added' => false, 'is_vat_payer' => true]);
+        $extractor = $this->c->make(AiPdfExtractor::class, ['anthropic' => $llm, 'clientResolver' => $resolver]);
+
+        $first = "%PDF-1.4\n% SYNTHETIC-DUP-A-" . bin2hex(random_bytes(6)) . "\n%%EOF\n";
+        $second = "%PDF-1.4\n% SYNTHETIC-DUP-B-" . bin2hex(random_bytes(6)) . "\n%%EOF\n";
+        $this->sha = hash('sha256', $first);
+
+        $res = $extractor->extractAndCreate($this->sid, $this->userId, $first, null, 'faktura.pdf');
+        self::assertTrue($res['ok'], (string) ($res['error'] ?? ''));
+        $this->invoiceId = (int) $res['purchase_invoice_id'];
+
+        try {
+            $dup = $extractor->extractAndCreate($this->sid, $this->userId, $second, null, 'faktura-znovu.pdf');
+        } finally {
+            $this->pdo->prepare('DELETE FROM document_extractions WHERE sha256 = ?')->execute([hash('sha256', $second)]);
+        }
+
+        self::assertTrue($dup['ok']);
+        self::assertTrue($dup['duplicate'] ?? false, 'druhé nahrání musí být nahlášené jako duplicita');
+        self::assertSame($this->invoiceId, (int) $dup['purchase_invoice_id']);
+        $pdfHash = $this->pdo->query("SELECT pdf_hash FROM purchase_invoices WHERE id = {$this->invoiceId}")->fetchColumn();
+        self::assertSame($this->sha, $pdfHash, 'PDF existující faktury se nesmí přepsat');
+    }
 }
