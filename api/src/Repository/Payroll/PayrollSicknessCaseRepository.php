@@ -265,6 +265,36 @@ final readonly class PayrollSicknessCaseRepository
     }
 
     /**
+     * Nezrušené případy vztahu a druhu dávky s daným číslem rozhodnutí (číslo
+     * eNeschopenky). Podle něj ČSSZ páruje NEMPRI i HZUPN téže události, takže
+     * podání cizího programu se k případu přiřadí bez ohledu na dny.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function findByDecisionNumber(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $benefitKind,
+        string $decisionNumber,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND benefit_kind = ?
+                AND decision_number = ?
+                AND cancelled = 0
+              ORDER BY incapacity_from, id'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $benefitKind, $decisionNumber]);
+
+        return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Nezrušený případ, jehož konec tvoří zadaná nepřítomnost: končí týmž dnem
      * a začal dřív. Navazující nepřítomnost případ jen prodloužila, takže vazbu
      * `absence_id` nemá; po jejím zrušení se konec případu musí vrátit zpět.

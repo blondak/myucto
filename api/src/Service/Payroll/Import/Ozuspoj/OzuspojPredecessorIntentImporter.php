@@ -62,10 +62,7 @@ final readonly class OzuspojPredecessorIntentImporter
         }
         $file = $this->reader->read($xml);
         $payload = $file->payload;
-        $warnings = $this->assertOwnEmployer($supplierId, $payload->employerVariableSymbol);
-        $employeeId = $this->employee($supplierId, $payload);
-        $anchorDate = (string) ($payload->intentFrom ?? $payload->intentTo);
-        $employmentId = $this->employment($supplierId, $employeeId, $anchorDate);
+        ['employment_id' => $employmentId, 'warnings' => $warnings] = $this->locate($supplierId, $payload);
         $reference = $file->sha256;
 
         $result = match ($payload->kind) {
@@ -95,6 +92,26 @@ final readonly class OzuspojPredecessorIntentImporter
         };
 
         return $result + ['warnings' => $warnings, 'file_sha256' => $reference];
+    }
+
+    /**
+     * Zaměstnavatel, osoba a pracovní vztah, ke kterým oznámení patří.
+     * Nic nezapisuje, takže slouží i náhledu importu.
+     *
+     * @return array{employee_id:int,employment_id:int,warnings:list<string>}
+     * @throws OzuspojException
+     */
+    public function locate(int $supplierId, OzuspojXmlPayload $payload): array
+    {
+        $warnings = $this->assertOwnEmployer($supplierId, $payload->employerVariableSymbol);
+        $employeeId = $this->employee($supplierId, $payload);
+        $anchorDate = (string) ($payload->intentFrom ?? $payload->intentTo);
+
+        return [
+            'employee_id' => $employeeId,
+            'employment_id' => $this->employment($supplierId, $employeeId, $anchorDate),
+            'warnings' => $warnings,
+        ];
     }
 
     /**

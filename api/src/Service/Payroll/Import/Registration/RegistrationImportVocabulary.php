@@ -14,7 +14,17 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzTakeoverPlanner;
 final class RegistrationImportVocabulary
 {
     public const ENVIRONMENTS = ['production', 'test'];
-    public const DOCUMENT_TYPES = ['REGZEC25', 'PREZEC26', 'CSSZ_EXPORT', 'JMHZ', 'JMHZ_DERIVED'];
+    public const DOCUMENT_TYPES = [
+        'REGZEC25',
+        'PREZEC26',
+        'CSSZ_EXPORT',
+        'JMHZ',
+        'JMHZ_DERIVED',
+        'NEMPRI25',
+        'NEMPRI20',
+        'HZUPN20',
+        'OZUSPOJ23',
+    ];
     public const RELATION_TYPES = ['employment', 'small_scale_employment', 'dpc', 'dpp', 'statutory_body'];
     public const MATCH_STATUSES = ['new', 'matched', 'ambiguous', 'not_found'];
     public const MATCHED_BY = ['birth_number', 'vcp', 'oic', 'id_ppv', 'name_birth_date', 'manual'];
@@ -25,6 +35,9 @@ final class RegistrationImportVocabulary
         'terminate',
         'assign_identifiers',
         'pair_required',
+        'create_case',
+        'update_case',
+        'import_intent',
         'none',
         'unsupported',
     ];
@@ -47,6 +60,13 @@ final class RegistrationImportVocabulary
         'tax_credit_claims',
         'social_discount',
         'dependants',
+        'case_created',
+        'case_updated',
+        'nempri_predecessor',
+        'hzupn_predecessor',
+        'intent_created',
+        'intent_ended',
+        'intent_unchanged',
     ];
     /** Typ podání a formuláře měsíčního hlášení (`files[].submission_type`). */
     public const SUBMISSION_TYPES = ['R', 'O', 'S'];

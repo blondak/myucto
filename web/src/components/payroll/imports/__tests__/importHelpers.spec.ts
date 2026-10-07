@@ -24,6 +24,11 @@ import {
   creatablePersonKeys,
   hasReadyItem,
   isRegistrationApplicable,
+  buildReceivedOn,
+  isBenefitRecord,
+  pruneReceivedOn,
+  recordAcceptsReceivedOn,
+  setReceivedOn,
   minutesToHours,
   openingBalanceTotals,
   personCanBeCreated,
@@ -193,6 +198,56 @@ describe('registrace', () => {
     const records = [record('a:1', true), record('a:2', false), record('b:1', true)]
     expect(selectableRegistrationKeys(records)).toEqual(['a:1', 'b:1'])
     expect(pruneRegistrationSelection(['a:1', 'a:2', 'x:9'], records)).toEqual(['a:1'])
+  })
+})
+
+describe('podání dávek předchozího programu', () => {
+  const benefit = (
+    key: string,
+    operation: RegistrationRecord['operation'],
+    needsReceivedOn = false,
+  ) => ({
+    key,
+    selectable: true,
+    operation,
+    benefit: {
+      document: needsReceivedOn ? 'OZUSPOJ' : 'NEMPRI',
+      benefit_kind: null,
+      decision_number: null,
+      incapacity_from: null,
+      incapacity_to: null,
+      case_id: null,
+      case_source: null,
+      received_on: null,
+      needs_received_on: needsReceivedOn,
+    },
+  }) as RegistrationRecord
+
+  it('pozná podání dávky a nabídne u něj den doručení', () => {
+    const nempri = benefit('a:1', 'update_case')
+    const none = benefit('a:2', 'none')
+    const plain = { key: 'a:3', operation: 'update', selectable: true } as RegistrationRecord
+    expect(isBenefitRecord(nempri)).toBe(true)
+    expect(isBenefitRecord(plain)).toBe(false)
+    expect(recordAcceptsReceivedOn(nempri)).toBe(true)
+    expect(recordAcceptsReceivedOn(none)).toBe(false)
+    expect(recordAcceptsReceivedOn(plain)).toBe(false)
+    expect(recordAcceptsReceivedOn(benefit('a:4', 'none', true)), 'OZUSPOJ bez dne doručení ho musí nabídnout.').toBe(true)
+  })
+
+  it('dny doručení posílá jen platné a po novém náhledu nechá jen u podání dávek', () => {
+    let map = setReceivedOn({}, 'a:1', '2026-09-30')
+    map = setReceivedOn(map, 'a:2', 'rozepsáno')
+    map = setReceivedOn(map, 'x:9', '2026-10-01')
+    expect(buildReceivedOn(map)).toEqual([
+      { key: 'a:1', received_on: '2026-09-30' },
+      { key: 'x:9', received_on: '2026-10-01' },
+    ])
+    expect(pruneReceivedOn(map, [benefit('a:1', 'update_case'), benefit('a:2', 'none')])).toEqual({
+      'a:1': '2026-09-30',
+      'a:2': 'rozepsáno',
+    })
+    expect(setReceivedOn(map, 'a:1', '')).not.toHaveProperty('a:1')
   })
 })
 

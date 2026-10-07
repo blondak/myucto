@@ -13,8 +13,19 @@ export type RegistrationEnvironment = 'production' | 'test'
 /**
  * `CSSZ_EXPORT` = export zaměstnanců z ePortálu ČSSZ (bez data nástupu),
  * `JMHZ_DERIVED` = přihlášení vztahu, který dokládá řada měsíčních hlášení (v žádném souboru není).
+ * `NEMPRI25`, `NEMPRI20`, `HZUPN20` a `OZUSPOJ23` jsou podání dávek a záměrů slevy,
+ * která už odeslal předchozí program (nic se znovu neodesílá).
  */
-export type RegistrationDocumentType = 'REGZEC25' | 'PREZEC26' | 'CSSZ_EXPORT' | 'JMHZ' | 'JMHZ_DERIVED'
+export type RegistrationDocumentType =
+  | 'REGZEC25'
+  | 'PREZEC26'
+  | 'CSSZ_EXPORT'
+  | 'JMHZ'
+  | 'JMHZ_DERIVED'
+  | 'NEMPRI25'
+  | 'NEMPRI20'
+  | 'HZUPN20'
+  | 'OZUSPOJ23'
 export type RegistrationRelationType =
   | 'employment'
   | 'small_scale_employment'
@@ -30,6 +41,9 @@ export type RegistrationOperation =
   | 'terminate'
   | 'assign_identifiers'
   | 'pair_required'
+  | 'create_case'
+  | 'update_case'
+  | 'import_intent'
   | 'none'
   | 'unsupported'
 /** Typ podání měsíčního hlášení: řádné, opravné, storno. */
@@ -162,6 +176,21 @@ export interface RegistrationChange {
   imported: string | null
 }
 
+/** Podání NEMPRI, HZUPN nebo OZUSPOJ předchozího programu (`document_type` NEMPRI25, NEMPRI20, HZUPN20, OZUSPOJ23). */
+export interface RegistrationBenefit {
+  document: 'NEMPRI' | 'HZUPN' | 'OZUSPOJ'
+  benefit_kind: string | null
+  decision_number: string | null
+  incapacity_from: string | null
+  incapacity_to: string | null
+  /** Případ dávky v evidenci, ke kterému se podání vztahuje (`null` = případ vznikne). */
+  case_id: number | null
+  case_source: 'myucto' | 'predecessor' | null
+  received_on: string | null
+  /** OZUSPOJ: den doručení z protokolu ČSSZ je povinný a soubor ho nenese. */
+  needs_received_on: boolean
+}
+
 export interface RegistrationRecord {
   key: string
   file: string
@@ -219,6 +248,8 @@ export interface RegistrationRecord {
   period?: string | null
   form_id?: string | null
   history?: RegistrationHistory | null
+  /** Jen podání dávek a záměrů slevy předchozího programu. */
+  benefit?: RegistrationBenefit | null
 }
 
 export interface RegistrationPreview {
@@ -246,6 +277,12 @@ export interface RegistrationRelationChoice {
   relation_type: RegistrationRelationType
 }
 
+/** Den doručení podání podle protokolu ČSSZ (nepovinný u NEMPRI a HZUPN, povinný u OZUSPOJ). */
+export interface RegistrationReceivedOn {
+  key: string
+  received_on: string
+}
+
 export interface RegistrationPreviewPayload {
   environment: RegistrationEnvironment
   files: ImportFilePayload[]
@@ -254,6 +291,8 @@ export interface RegistrationPreviewPayload {
   relation_types?: RegistrationRelationChoice[]
   /** Klíče vět, u kterých účetní potvrdila „Ukončit vztah" podle exportu ČSSZ. */
   terminations?: string[]
+  /** Den doručení podání předchozího programu podle protokolu ČSSZ. */
+  received_on?: RegistrationReceivedOn[]
 }
 
 export interface RegistrationUnresolvedForm {
@@ -294,6 +333,13 @@ export type RegistrationResultOperation =
   | 'tax_credit_claims'
   | 'social_discount'
   | 'dependants'
+  | 'case_created'
+  | 'case_updated'
+  | 'nempri_predecessor'
+  | 'hzupn_predecessor'
+  | 'intent_created'
+  | 'intent_ended'
+  | 'intent_unchanged'
 
 export interface RegistrationApplyResult {
   results: {

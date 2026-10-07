@@ -269,8 +269,9 @@ na serveru neukládají, při použití se náhled spočítá znovu ze stejných
 ### 90.9.1 JMHZ: registrace a měsíční hlášení
 
 Záložka načte XML registrací zaměstnanců pro ČSSZ, tedy přihlášky a oznámení
-REGZEC a přihlášky před nástupem PREZEC, export zaměstnanců z ePortálu ČSSZ
-i měsíční hlášení JMHZ. Soubory může
+REGZEC a přihlášky před nástupem PREZEC, export zaměstnanců z ePortálu ČSSZ,
+měsíční hlášení JMHZ i podání NEMPRI, HZUPN a OZUSPOJ, která už odeslal
+předchozí program. Soubory může
 vytvořit i jiný mzdový program. Najednou lze nahrát víc souborů. Vyžaduje
 oprávnění `payroll.person.write`.
 
@@ -516,6 +517,44 @@ vypnout:
   zůstávají.
 - **Průměry rovnou schválit.** Bez této volby čekají založené průměry na
   schválení v Nepřítomnostech.
+
+**Podání dávek a záměrů slevy předchozího programu.** Do stejné dávky můžete
+nahrát i podání, která za vás už odeslal jiný mzdový program: **NEMPRI**
+(oznámení o žádosti o dávku, formát 2025 i starší 2020 z Money S3), **HZUPN**
+(hlášení při ukončení neschopnosti) a **OZUSPOJ** (oznámení záměru uplatňovat
+slevu na pojistném). Nic se znovu neodesílá. Import do evidence zapíše, že
+dané podání vyřídil předchozí program, aby ho hlídač termínů nepožadoval
+podruhé.
+
+- **Případ dávky.** NEMPRI a HZUPN se přiřadí k případu v Podání → Dávky
+  nemocenského pojištění, nebo ho import založí jako převzatý z předchozího
+  programu. Případ se hledá podle čísla rozhodnutí, jinak podle dne vzniku
+  nebo konce neschopnosti. NEMPRI nemocenského den vzniku nenese (zná ho ČSSZ
+  z eNeschopenky), proto se přiřadí k případu nebo ke schválené nepřítomnosti
+  v měsíci události; nenajde-li se žádná, věta zůstane zablokovaná a den vzniku
+  se nedomýšlí. Zapište nejdřív neschopnost v Nepřítomnostech a import
+  zopakujte.
+- **Co se zapíše.** U NEMPRI stav podání **vyřízeno předchozím programem**, u
+  HZUPN k tomu návrat do práce, odpracované hodiny posledního dne, dny práce a
+  poslední den neschopnosti podle podání. Případ vedený v MyÚčtu jako vlastní
+  podání předchozí program nevyřídí; přijetí takového podání zapíšete dnem
+  doručení z protokolu ČSSZ. Den doručení můžete u věty vyplnit, u NEMPRI a
+  HZUPN je nepovinný.
+- **Hlídač termínů.** Rozběhnutá neschopnost, ke které import převzal jen
+  NEMPRI, zůstává v hlídači lhůt: HZUPN k návratu do práce se podává, až
+  neschopnost skončí. Po převzetí HZUPN a při vyřízeném NEMPRI případ
+  z hlídače zmizí.
+- **Osoba a zaměstnavatel.** Osoba se hledá podle rodného čísla (u cizince
+  EČP), u HZUPN bez rodného čísla podle jména a data narození; pracovní vztah
+  podle doby události a dne nástupu. Víc shod znamená zablokovanou větu.
+  Variabilní symbol a IČ zaměstnavatele se porovnávají s vaší firmou, podání
+  jiného zaměstnavatele se nepřevezme.
+- **OZUSPOJ.** Soubor nenese den doručení oznámení, ten je v protokolu ČSSZ a
+  nárok na slevu na něm stojí. Zadejte ho u věty; bez něj se věta nepoužije.
+  Záměr se založí jako převzatý, bez povinnosti oznámení. Storno záměru se
+  nepřebírá.
+- **Opakovaný import.** Případ si pamatuje, ze kterého souboru a věty podání
+  vzniklo, takže opakovaný import téhož souboru nic nezapíše podruhé.
 
 ### 90.9.2 Docházka
 
