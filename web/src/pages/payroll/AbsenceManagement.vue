@@ -297,10 +297,17 @@ const entryForm = reactive({
   reason: '',
   source_reference: '',
 })
+type DpnReduction = 'none' | 'half_192_4' | 'reduced_192_5'
+const DPN_REDUCTIONS: DpnReduction[] = ['none', 'half_192_4', 'reduced_192_5']
 const dpnReviews = reactive<Record<number, {
   firstDayFullyWorked: boolean
   insuranceConfirmed: boolean
   noConflictingBenefit: boolean
+  notEligible: boolean
+  reduction: DpnReduction
+  reductionMode: 'percent' | 'amount'
+  reductionValue: string
+  reductionReason: string
 }>>({})
 
 const approvedAverages = computed(() => averages.value.filter(item => item.status === 'approved'))
@@ -704,6 +711,11 @@ async function loadData() {
           firstDayFullyWorked: false,
           insuranceConfirmed: false,
           noConflictingBenefit: false,
+          notEligible: false,
+          reduction: 'none',
+          reductionMode: 'percent',
+          reductionValue: '',
+          reductionReason: '',
         }
       }
     }
@@ -836,6 +848,35 @@ function showSicknessNotice(outcome: PayrollAbsenceSicknessCaseOutcome | null | 
   }
 }
 
+/*
+ * DPN bez nároku je VÝSLOVNÁ volba, ne nezaškrtnuté potvrzení účasti: server
+ * nezaškrtnuté políčko odmítne, aby se neschopnost tiše neschválila bez náhrady.
+ * Snížení náhrady se posílá jen tehdy, když ho účetní zvolila.
+ */
+type DpnDecisionExtras = {
+  insurance_eligibility?: 'not_eligible'
+  compensation_reduction?: DpnReduction
+  compensation_reduction_reason?: string
+  compensation_reduction_basis_points?: number
+  compensation_reduction_minor?: number
+}
+
+function dpnDecisionExtras(review: (typeof dpnReviews)[number] | undefined): DpnDecisionExtras {
+  if (!review) return {}
+  if (review.notEligible) return { insurance_eligibility: 'not_eligible' }
+  if (review.reduction === 'none') return {}
+  const extras: DpnDecisionExtras = {
+    compensation_reduction: review.reduction,
+    compensation_reduction_reason: review.reductionReason,
+  }
+  if (review.reduction === 'reduced_192_5') {
+    const value = Number(review.reductionValue.replace(',', '.'))
+    if (review.reductionMode === 'percent') extras.compensation_reduction_basis_points = Math.round(value * 100)
+    else extras.compensation_reduction_minor = Math.round(value * 100)
+  }
+  return extras
+}
+
 async function decide(
   item: PayrollAbsence,
   decision: 'approved' | 'rejected',
@@ -849,8 +890,9 @@ async function decide(
       row_version: item.row_version,
       decision,
       first_day_fully_worked: review?.firstDayFullyWorked ?? false,
-      insurance_eligibility_confirmed: review?.insuranceConfirmed ?? false,
-      conflicting_benefit_excluded: review?.noConflictingBenefit ?? false,
+      insurance_eligibility_confirmed: review?.notEligible ? false : (review?.insuranceConfirmed ?? false),
+      conflicting_benefit_excluded: review?.notEligible ? false : (review?.noConflictingBenefit ?? false),
+      ...(decision === 'approved' ? dpnDecisionExtras(review) : {}),
       ...(overdrawConfirmed ? { overdraw_confirmed: true } : {}),
     })
     showSicknessNotice(result?.sickness_case)
@@ -1925,9 +1967,41 @@ onMounted(async () => {
               data-test="dpn-review"
               class="mt-4 space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-xs text-warning-900"
             >
-              <label class="flex gap-2"><input v-model="dpnReviews[item.id].insuranceConfirmed" type="checkbox"> {{ t('payroll_absence.dpn.insurance') }}</label>
-              <label class="flex gap-2"><input v-model="dpnReviews[item.id].noConflictingBenefit" type="checkbox"> {{ t('payroll_absence.dpn.no_conflict') }}</label>
+              <label class="flex gap-2"><input v-model="dpnReviews[item.id].insuranceConfirmed" type="checkbox" :disabled="dpnReviews[item.id].notEligible"> {{ t('payroll_absence.dpn.insurance') }}</label>
+              <label class="flex gap-2"><input v-model="dpnReviews[item.id].noConflictingBenefit" type="checkbox" :disabled="dpnReviews[item.id].notEligible"> {{ t('payroll_absence.dpn.no_conflict') }}</label>
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].firstDayFullyWorked" type="checkbox"> {{ t('payroll_absence.dpn.first_day_worked') }}</label>
+              <label class="flex gap-2"><input v-model="dpnReviews[item.id].notEligible" type="checkbox" data-test="dpn-not-eligible"> {{ t('payroll_absence.dpn.not_eligible') }}</label>
+              <p
+                v-if="dpnReviews[item.id].notEligible || ['dpp', 'dpc'].includes(item.relation_type)"
+                class="text-warning-800"
+                data-test="dpn-not-eligible-hint"
+              >{{ t('payroll_absence.dpn.not_eligible_hint') }}</p>
+              <div v-if="!dpnReviews[item.id].notEligible" class="flex flex-wrap items-end gap-2 border-t border-warning-200 pt-2" data-test="dpn-reduction">
+                <label class="min-w-0">
+                  <span class="mb-1 block font-medium">{{ t('payroll_absence.dpn.reduction') }}</span>
+                  <select v-model="dpnReviews[item.id].reduction" :class="fieldClass" data-test="dpn-reduction-kind">
+                    <option v-for="kind in DPN_REDUCTIONS" :key="kind" :value="kind">{{ t(`payroll_absence.dpn.reduction_kinds.${kind}`) }}</option>
+                  </select>
+                </label>
+                <template v-if="dpnReviews[item.id].reduction === 'reduced_192_5'">
+                  <label class="min-w-0">
+                    <span class="mb-1 block font-medium">{{ t('payroll_absence.dpn.reduction_mode') }}</span>
+                    <select v-model="dpnReviews[item.id].reductionMode" :class="fieldClass" data-test="dpn-reduction-mode">
+                      <option value="percent">{{ t('payroll_absence.dpn.reduction_modes.percent') }}</option>
+                      <option value="amount">{{ t('payroll_absence.dpn.reduction_modes.amount') }}</option>
+                    </select>
+                  </label>
+                  <label class="min-w-0">
+                    <span class="mb-1 block font-medium">{{ t('payroll_absence.dpn.reduction_value') }}</span>
+                    <input v-model="dpnReviews[item.id].reductionValue" type="text" inputmode="decimal" :class="fieldClass" data-test="dpn-reduction-value">
+                  </label>
+                </template>
+                <label v-if="dpnReviews[item.id].reduction !== 'none'" class="min-w-0 flex-1">
+                  <span class="mb-1 block font-medium">{{ t('payroll_absence.dpn.reduction_reason') }}</span>
+                  <input v-model="dpnReviews[item.id].reductionReason" type="text" maxlength="500" :class="fieldClass" data-test="dpn-reduction-reason">
+                </label>
+                <p v-if="dpnReviews[item.id].reduction !== 'none'" class="w-full">{{ t('payroll_absence.dpn.reduction_hint') }}</p>
+              </div>
             </div>
             <div
               v-if="overdrawPrompt && overdrawPrompt.absenceId === item.id"

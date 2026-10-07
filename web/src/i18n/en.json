@@ -27144,15 +27144,31 @@
       "record_childbirth_save": "Save date of birth",
       "record_childbirth_once": "The date of birth can be added only once. To correct a wrong date, cancel the absence and record it again.",
       "childbirth_recorded": "The date of birth has been added.",
-      "sickness_window_carried_days": "Days of the compensation window used up by the previous payer",
+      "sickness_window_carried_days": "Days of the compensation window used up before this part",
       "sickness_window_carried_edit": "Edit days of the compensation window",
-      "sickness_window_carried_hint": "Fill in only when the employee was with a different employer or a previous payroll program at the start of the incapacity — the wage compensation window (Section 192 of the Labour Code) shortens by the days already used up there. It can no longer be changed once the wage compensation has been calculated.",
+      "sickness_window_carried_hint": "Fill in only when the employee was with a different employer or a previous payroll program at the start of the incapacity — the wage compensation window (Section 192 of the Labour Code) shortens by the days already used up there. For a continuation of an incapacity recorded here, the days are calculated on approval automatically. It can no longer be changed once the wage compensation has been calculated.",
       "sickness_window_carried_saved": "The compensation window days have been saved."
     },
     "dpn": {
       "insurance": "Sickness insurance participation confirmed",
       "no_conflict": "No conflicting statutory benefit",
-      "first_day_worked": "The first scheduled shift was fully worked"
+      "first_day_worked": "The first scheduled shift was fully worked",
+      "not_eligible": "The employee is not entitled to compensation (incapacity without entitlement)",
+      "not_eligible_hint": "Wage compensation belongs only to an employee participating in sickness insurance (Section 192(1) of the Labour Code). For agreements to perform work and small-scale employment, participation in the month in which the incapacity began decides (Section 15a of Act No. 187/2006 Coll.). Without entitlement the wage is reduced for the days of incapacity and neither compensation nor a sickness benefit case is created.",
+      "reduction": "Compensation reduction",
+      "reduction_kinds": {
+        "none": "No reduction",
+        "half_192_4": "To one half (Section 192(4) of the Labour Code)",
+        "reduced_192_5": "Breach of the sick-leave regime (Section 192(5) of the Labour Code)"
+      },
+      "reduction_mode": "Reduce by",
+      "reduction_modes": {
+        "percent": "percentage",
+        "amount": "amount in CZK"
+      },
+      "reduction_value": "Reduction",
+      "reduction_reason": "Reason for the reduction",
+      "reduction_hint": "The compensation must be reduced to one half when the incapacity arose in the cases of Section 31 of Act No. 187/2006 Coll. (a fight, drunkenness, addictive substances, an intentional crime or offence). For a breach of the regime the employer may reduce the compensation or not provide it at all (100 %). The reduction is applied to the exact compensation before rounding."
     },
     "averages": {
       "new": "New average earning snapshot",

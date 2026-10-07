@@ -166,11 +166,17 @@ final class PayrollJmhzAbsenceHoursDeriver
                 );
                 continue;
             }
-            $firstDayFullyWorked = $this->firstDayFullyWorked($supplierId, $absence);
-            if ($firstDayFullyWorked === null) {
+            $event = $this->sicknessEvent($supplierId, $absence);
+            if ($event === null) {
                 return self::unsupported();
             }
-            $buckets['dpn_with_employer_compensation'] += $this->minutesInMonth(
+            $firstDayFullyWorked = $event['first_day_fully_worked'];
+            // DPN bez nároku (§ 15a zák. č. 187/2006 Sb.): náhradu zaměstnavatel
+            // neposkytuje ani v okně § 192 ZP, všechny hodiny jdou do 10277.
+            $windowBucket = $event['eligible']
+                ? 'dpn_with_employer_compensation'
+                : 'dpn_without_employer_compensation';
+            $buckets[$windowBucket] += $this->minutesInMonth(
                 $this->absences->publishedShiftSegments(
                     $row,
                     $firstDayFullyWorked,
@@ -200,23 +206,29 @@ final class PayrollJmhzAbsenceHoursDeriver
      * hlášené hodiny by přestaly sedět na vyplacenou náhradu. Chybí-li výpočet,
      * vrací se `null` a měsíc zůstane bez návrhu.
      *
+     * Spolu s ním se čte i nárok: DPN bez nároku náhradu nemá ani v okně.
+     *
      * @param array<string,mixed> $absence
+     * @return array{first_day_fully_worked:bool,eligible:bool}|null
      */
-    private function firstDayFullyWorked(int $supplierId, array $absence): ?bool
+    private function sicknessEvent(int $supplierId, array $absence): ?array
     {
         $absenceId = $absence['id'] ?? null;
         if (!is_int($absenceId) || $absenceId <= 0) {
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT first_day_fully_worked
+            'SELECT first_day_fully_worked, insurance_eligibility_confirmed
                FROM payroll_sickness_events
               WHERE supplier_id = ? AND absence_id = ?'
         );
         $stmt->execute([$supplierId, $absenceId]);
-        $value = $stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        return $value === false ? null : (int) $value === 1;
+        return is_array($row) ? [
+            'first_day_fully_worked' => (int) $row['first_day_fully_worked'] === 1,
+            'eligible' => (int) $row['insurance_eligibility_confirmed'] === 1,
+        ] : null;
     }
 
     /**

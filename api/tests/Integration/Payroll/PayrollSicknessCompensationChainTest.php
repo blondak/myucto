@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
+use MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -39,6 +40,7 @@ final class PayrollSicknessCompensationChainTest extends TestCase
     private PayrollAbsenceRepository $absences;
     private PayrollWageProrationService $proration;
     private EldpExcludedPeriodDeriver $eldp;
+    private PayrollJmhzAbsenceHoursDeriver $jmhzDeriver;
     private int $userId;
     private int $supplierId;
     private int $employmentId;
@@ -56,6 +58,7 @@ final class PayrollSicknessCompensationChainTest extends TestCase
             $this->absences = $container->get(PayrollAbsenceRepository::class);
             $this->proration = $container->get(PayrollWageProrationService::class);
             $this->eldp = $container->get(EldpExcludedPeriodDeriver::class);
+            $this->jmhzDeriver = $container->get(PayrollJmhzAbsenceHoursDeriver::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -140,6 +143,12 @@ final class PayrollSicknessCompensationChainTest extends TestCase
             $june['replaced_minutes_by_title'],
             'Dny 22.–26. 6. jsou nemocenské (StateBenefit), ne náhrada mzdy.',
         );
+
+        // Měsíční hlášení (10278/10277) čte řádky bez sloupce vyčerpaných dnů.
+        $hours = $this->jmhzHours([$first, $second, $third]);
+        self::assertTrue($hours['supported']);
+        self::assertSame(10 * 480, $hours['minutes']['dpn_with_employer_compensation']);
+        self::assertSame(5 * 480, $hours['minutes']['dpn_without_employer_compensation']);
     }
 
     /**
@@ -237,6 +246,10 @@ final class PayrollSicknessCompensationChainTest extends TestCase
         self::assertTrue($june['supported'], json_encode($june) ?: '');
         self::assertSame(['unpaid' => 15 * 480], $june['replaced_minutes_by_title']);
 
+        $hours = $this->jmhzHours([$body]);
+        self::assertSame(0, $hours['minutes']['dpn_with_employer_compensation']);
+        self::assertSame(15 * 480, $hours['minutes']['dpn_without_employer_compensation']);
+
         $eldp = $this->eldp->deriveSection18([[
             'id' => (int) $absence['id'],
             'absence_type' => 'dpn',
@@ -330,6 +343,34 @@ final class PayrollSicknessCompensationChainTest extends TestCase
         $approved = $this->approve($absence);
         self::assertSame('2026-06-10', $approved['calculation']['compensation_window_to']);
         self::assertContains('sickness_beyond_employment_end', array_column($approved['warnings'], 'code'));
+    }
+
+    /**
+     * Hodiny DPN pro měsíční hlášení za červen 2026. Řádky mají jen sloupce, které
+     * vybírá souhrn měsíce pro JMHZ — bez vyčerpaných dnů okna.
+     *
+     * @param list<array<string,mixed>> $approved odpovědi schválení
+     * @return array{supported:bool,minutes:array<string,int>,total:int,paid:int}
+     */
+    private function jmhzHours(array $approved): array
+    {
+        $rows = [];
+        foreach ($approved as $decision) {
+            $absence = $decision['absence'];
+            $rows[] = [
+                'id' => (int) $absence['id'],
+                'absence_type' => $absence['absence_type'],
+                'date_from' => $absence['date_from'],
+                'date_to' => $absence['date_to'],
+                'timezone_name' => $absence['timezone_name'],
+                'partial_first_minutes' => null,
+                'partial_last_minutes' => null,
+                'status' => $absence['status'],
+                'correction_pending' => false,
+            ];
+        }
+
+        return $this->jmhzDeriver->derive($this->supplierId, $this->employmentId, '2026-06-01', '2026-07-01', $rows);
     }
 
     /** @return array<string,mixed> */

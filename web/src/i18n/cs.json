@@ -27144,15 +27144,31 @@
       "record_childbirth_save": "Uložit den porodu",
       "record_childbirth_once": "Den porodu jde doplnit jen jednou. Chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.",
       "childbirth_recorded": "Den porodu je doplněný.",
-      "sickness_window_carried_days": "Dnů okna náhrady vyčerpaných předchozím plátcem",
+      "sickness_window_carried_days": "Dnů okna náhrady vyčerpaných před touto částí",
       "sickness_window_carried_edit": "Upravit dny okna náhrady",
-      "sickness_window_carried_hint": "Vyplňte, jen když zaměstnanec byl na začátku neschopnosti u jiného zaměstnavatele nebo v předchozím mzdovém programu — okno náhrady mzdy (§ 192 ZP) se pak zkrátí o dny, které tam už vyčerpal. Po spočítané náhradě mzdy se už nezmění.",
+      "sickness_window_carried_hint": "Vyplňte, jen když zaměstnanec byl na začátku neschopnosti u jiného zaměstnavatele nebo v předchozím mzdovém programu — okno náhrady mzdy (§ 192 ZP) se pak zkrátí o dny, které tam už vyčerpal. Navazující část neschopnosti zapsanou tady se dny dopočítají při schválení samy. Po spočítané náhradě mzdy se už nezmění.",
       "sickness_window_carried_saved": "Dny okna náhrady jsou uložené."
     },
     "dpn": {
       "insurance": "Potvrzena účast na nemocenském pojištění",
       "no_conflict": "Vyloučen souběh s dávkou, která náhradu nepřipouští",
-      "first_day_worked": "První plánovaná směna byla celá odpracována"
+      "first_day_worked": "První plánovaná směna byla celá odpracována",
+      "not_eligible": "Zaměstnanec nemá nárok na náhradu (DPN bez nároku)",
+      "not_eligible_hint": "Náhrada mzdy přísluší jen zaměstnanci účastnému nemocenského pojištění (§ 192 odst. 1 ZP). U DPP a zaměstnání malého rozsahu rozhoduje účast v měsíci, kdy neschopnost vznikla (§ 15a zák. č. 187/2006 Sb.). Bez nároku se mzda za dny neschopnosti krátí, náhrada ani případ nemocenské nevzniká.",
+      "reduction": "Snížení náhrady",
+      "reduction_kinds": {
+        "none": "Bez snížení",
+        "half_192_4": "Na polovinu (§ 192 odst. 4 ZP)",
+        "reduced_192_5": "Porušení režimu (§ 192 odst. 5 ZP)"
+      },
+      "reduction_mode": "Snížit o",
+      "reduction_modes": {
+        "percent": "procento",
+        "amount": "částku v Kč"
+      },
+      "reduction_value": "Výše snížení",
+      "reduction_reason": "Důvod snížení",
+      "reduction_hint": "Na polovinu se náhrada snižuje povinně, vznikla-li neschopnost v případech § 31 zák. č. 187/2006 Sb. (rvačka, opilost, návykové látky, úmyslný trestný čin nebo přestupek). Při porušení režimu smí zaměstnavatel náhradu snížit nebo neposkytnout (100 %). Snížení se počítá z přesné náhrady před zaokrouhlením."
     },
     "averages": {
       "new": "Nový snapshot průměrného výdělku",

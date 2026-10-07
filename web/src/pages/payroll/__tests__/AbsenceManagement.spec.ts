@@ -334,7 +334,7 @@ describe('AbsenceManagement', () => {
     expect(wrapper.text()).toContain('payroll_absence.types.dpn')
     expect(wrapper.text()).toContain('Syntetická osoba')
     const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
-    expect(checks).toHaveLength(3)
+    expect(checks).toHaveLength(4)
     await checks[0].setValue(true)
     await checks[1].setValue(true)
     const approve = wrapper.findAll('button')
@@ -348,6 +348,52 @@ describe('AbsenceManagement', () => {
       first_day_fully_worked: false,
       insurance_eligibility_confirmed: true,
       conflicting_benefit_excluded: true,
+    })
+    wrapper.unmount()
+  })
+
+  /**
+   * DPN bez nároku (§ 15a zák. č. 187/2006 Sb.) je výslovná volba, ne nezaškrtnuté
+   * potvrzení účasti, a snížení náhrady (§ 192 odst. 4 a 5 ZP) jde se schválením.
+   */
+  it('sends an explicit no-entitlement choice and a compensation reduction', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    const approve = () => wrapper.findAll('button')
+      .find(button => button.text().includes('payroll_absence.actions.approve'))!
+      .trigger('click')
+
+    await wrapper.get('[data-test="dpn-not-eligible"]').setValue(true)
+    expect(wrapper.find('[data-test="dpn-reduction"]').exists()).toBe(false)
+    await approve()
+    await flushPromises()
+    expect(m.decide).toHaveBeenLastCalledWith(44, {
+      row_version: 1,
+      decision: 'approved',
+      first_day_fully_worked: false,
+      insurance_eligibility_confirmed: false,
+      conflicting_benefit_excluded: false,
+      insurance_eligibility: 'not_eligible',
+    })
+
+    await wrapper.get('[data-test="dpn-not-eligible"]').setValue(false)
+    const checks = wrapper.findAll('[data-test="dpn-review"] input[type="checkbox"]')
+    await checks[0].setValue(true)
+    await checks[1].setValue(true)
+    await wrapper.get('[data-test="dpn-reduction-kind"]').setValue('reduced_192_5')
+    await wrapper.get('[data-test="dpn-reduction-value"]').setValue('30')
+    await wrapper.get('[data-test="dpn-reduction-reason"]').setValue('Syntetické porušení režimu.')
+    await approve()
+    await flushPromises()
+    expect(m.decide).toHaveBeenLastCalledWith(44, {
+      row_version: 1,
+      decision: 'approved',
+      first_day_fully_worked: false,
+      insurance_eligibility_confirmed: true,
+      conflicting_benefit_excluded: true,
+      compensation_reduction: 'reduced_192_5',
+      compensation_reduction_reason: 'Syntetické porušení režimu.',
+      compensation_reduction_basis_points: 3000,
     })
     wrapper.unmount()
   })
