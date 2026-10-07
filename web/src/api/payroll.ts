@@ -563,7 +563,12 @@ export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed' | 'partner_settlemen
 export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
 export type PayrollPersonAddressType = 'residence' | 'mailing'
 export type PayrollPersonContactType = 'email' | 'phone'
-export type PayrollPersonIdentifierType = 'birth_number' | 'ecp' | 'vcp' | 'foreign_tax_identifier'
+export type PayrollPersonIdentifierType =
+  | 'birth_number'
+  | 'ecp'
+  | 'vcp'
+  | 'foreign_tax_identifier'
+  | 'health_insurance_number'
 export type PayrollPersonSex = 'female' | 'male' | 'unspecified'
 export type PayrollPersonAccountVerificationSource =
   | 'employee_confirmation'

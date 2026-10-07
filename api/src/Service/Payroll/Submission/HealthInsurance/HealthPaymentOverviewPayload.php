@@ -12,7 +12,10 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  *
  * - `pocetZamestnancu` je `positiveInteger` — **nula neprojde**. Měsíc bez
  *   započtené osoby se tedy nepodává jako nulový přehled, protože ho datová
- *   věta neumí vyjádřit.
+ *   věta neumí vyjádřit. Bývalý zaměstnanec s příjmem po skončení vztahu se
+ *   do počtu NEZAPOČÍTÁVÁ (v měsíci zaměstnancem nebyl), jeho základ
+ *   a pojistné do součtů ano; když je jediný, přehled touto cestou nevznikne
+ *   a chyba to řekne.
  * - `soucetPojistneho` je `nonNegativeInteger`, tedy CELÉ KORUNY. Haléře
  *   se do věty nevejdou a zaokrouhlovat je smí jen ten, kdo počítal pojistné,
  *   ne serializér.
@@ -58,6 +61,20 @@ final readonly class HealthPaymentOverviewPayload
             throw new HealthNotificationException(
                 'zp_overview_year_invalid',
                 'Rok hlášení musí být 2000 až 2099.',
+            );
+        }
+        if ($this->employeeCount < 1 && $this->contributionCzk > 0) {
+            // Pojistné vzniklo jen z příjmů bývalých zaměstnanců (do počtu
+            // zaměstnanců přehledu se nezapočítávají). Přehled podat je třeba,
+            // ale datová věta nulový počet nepřijme — vymyslet počet 1 by
+            // znamenalo hlásit zaměstnance, který v měsíci nebyl.
+            throw new HealthNotificationException(
+                'zp_overview_only_former_employees',
+                'Pojistné za měsíc plyne jen z příjmů bývalých zaměstnanců, '
+                . 'kteří se do počtu zaměstnanců přehledu nezapočítávají. '
+                . 'Datová věta neumí počet nula (positiveInteger), proto '
+                . 'přehled podejte na tiskopisu pojišťovny nebo podle jejích '
+                . 'pokynů a pojistné uhraďte jako obvykle.',
             );
         }
         if ($this->employeeCount < 1) {

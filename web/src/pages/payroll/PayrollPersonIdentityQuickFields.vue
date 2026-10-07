@@ -20,6 +20,9 @@ const vcp = defineModel<string>('vcp', { required: true })
 const foreignTaxIdentifier = defineModel<string>('foreignTaxIdentifier', {
   required: true,
 })
+const healthInsuranceNumber = defineModel<string>('healthInsuranceNumber', {
+  default: '',
+})
 
 const { t } = useI18n()
 const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-100 disabled:text-neutral-500'
@@ -31,6 +34,7 @@ const masked = computed<Record<PayrollPersonIdentifierType, string | null>>(() =
     ecp: null,
     vcp: null,
     foreign_tax_identifier: null,
+    health_insurance_number: null,
   }
   for (const identifier of props.identifiers) {
     values[identifier.identifier_type] = identifier.value_masked
@@ -51,7 +55,8 @@ function placeholder(type: PayrollPersonIdentifierType): string {
 const hasAlternativeIdentifier = computed(
   () => masked.value.ecp !== null
     || masked.value.vcp !== null
-    || masked.value.foreign_tax_identifier !== null,
+    || masked.value.foreign_tax_identifier !== null
+    || masked.value.health_insurance_number !== null,
 )
 </script>
 
@@ -124,7 +129,7 @@ const hasAlternativeIdentifier = computed(
           </span>
         </span>
       </summary>
-      <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 sm:grid-cols-3 sm:p-4">
+      <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-4">
         <label :class="labelClass">
           {{ t('payroll.people.profile.identifier_type.ecp') }}
           <input
@@ -154,6 +159,20 @@ const hasAlternativeIdentifier = computed(
             :class="inputClass"
             data-test="identifier-foreign-tax"
           >
+        </label>
+        <label :class="labelClass">
+          {{ t('payroll.people.profile.identifier_type.health_insurance_number') }}
+          <input
+            v-model="healthInsuranceNumber"
+            autocomplete="off"
+            inputmode="numeric"
+            :placeholder="placeholder('health_insurance_number')"
+            :class="inputClass"
+            data-test="identifier-health-insurance-number"
+          >
+          <span class="mt-1 block text-xs font-normal text-neutral-500">
+            {{ t('payroll.people.quick_edit.health_insurance_number_hint') }}
+          </span>
         </label>
       </div>
     </details>

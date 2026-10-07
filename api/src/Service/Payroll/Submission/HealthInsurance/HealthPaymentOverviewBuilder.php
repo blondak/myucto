@@ -14,10 +14,18 @@ final class HealthPaymentOverviewBuilder
      *   revision:array<string,mixed>,
      *   statutory_result:array<string,mixed>
      * } $source
+     * @param ?string $onlyInsurerCode sestavit jen přehled této pojišťovny.
+     *        Nesoulad osob a závazku u JINÉ pojišťovny ho pak nezablokuje —
+     *        přehledy jsou samostatná podání a vada jednoho nesmí zastavit
+     *        ostatní. Integrita celého výsledku (kořenové součty, otisky,
+     *        stav osob) se kontroluje vždy.
      * @return list<HealthPaymentOverview>
      */
-    public function build(int $supplierId, array $source): array
-    {
+    public function build(
+        int $supplierId,
+        array $source,
+        ?string $onlyInsurerCode = null,
+    ): array {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musí být kladné číslo.');
         }
@@ -149,6 +157,10 @@ final class HealthPaymentOverviewBuilder
         foreach ($liabilities as $reference => $totals) {
             $code = substr($reference, 1);
             $people = $peopleByInsurer[$reference] ?? [];
+            if ($onlyInsurerCode !== null && $code !== $onlyInsurerCode) {
+                unset($peopleByInsurer[$reference]);
+                continue;
+            }
             $this->assertInsurerTotals($code, $totals, $people);
             $overviews[] = new HealthPaymentOverview(
                 $supplierId,
@@ -167,6 +179,12 @@ final class HealthPaymentOverviewBuilder
                 $correctionDiscoveredOn,
             );
             unset($peopleByInsurer[$reference]);
+        }
+        if ($onlyInsurerCode !== null) {
+            $peopleByInsurer = array_intersect_key(
+                $peopleByInsurer,
+                ["i{$onlyInsurerCode}" => true],
+            );
         }
         if ($peopleByInsurer !== []) {
             throw new HealthInsuranceOverviewException(
@@ -248,7 +266,7 @@ final class HealthPaymentOverviewBuilder
                     "Výsledek osoby employee:{$employeeId} nemá příznak PPZ.",
                 );
             }
-            if (!$ppzCounted) {
+            if (!$ppzCounted && !$this->participates($result)) {
                 continue;
             }
             $code = $this->insurerCode(
@@ -295,6 +313,11 @@ final class HealthPaymentOverviewBuilder
                 'employer_contribution_minor_units' => $employerContribution,
                 'total_contribution_minor_units' => $totalContribution,
             ];
+            // Klíč jen u nezapočtené osoby: obsah (a otisk) přehledu bez
+            // takové osoby zůstává bajtově stejný jako dřív.
+            if (!$ppzCounted) {
+                $grouped["i{$code}"][$employeeId]['ppz_counted'] = false;
+            }
         }
         ksort($grouped, SORT_STRING);
         $normalized = [];
@@ -304,6 +327,39 @@ final class HealthPaymentOverviewBuilder
         }
 
         return $normalized;
+    }
+
+    /**
+     * Účastní se osoba zdravotního pojištění, i když se do počtu zaměstnanců
+     * přehledu nezapočítává?
+     *
+     * Typicky bývalý zaměstnanec, kterému po skončení vztahu přišel příjem
+     * (doplatek mzdy, odměna). Pojistné z něj se odvádí a výpočet ho zahrnuje
+     * do závazku pojišťovny ({@see \MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthCalculator}),
+     * jen do `pocetZamestnancu` nepatří, protože v měsíci zaměstnancem nebyl.
+     * Dřív se taková osoba z přehledu vynechala celá, součty osob pak nesouhlasily
+     * se závazkem a přehled nešel sestavit vůbec.
+     *
+     * Rozhoduje stejný údaj jako ve výpočtu: aspoň jeden vztah s účastí.
+     *
+     * @param array<string,mixed> $result
+     */
+    private function participates(array $result): bool
+    {
+        $relationships = $result['relationships'] ?? null;
+        if (!is_array($relationships)) {
+            return false;
+        }
+        foreach ($relationships as $relationship) {
+            if (is_array($relationship)
+                && is_array($relationship['participation'] ?? null)
+                && ($relationship['participation']['status'] ?? null) === 'participates'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -434,7 +490,11 @@ final class HealthPaymentOverviewBuilder
         array $totals,
         array $people,
     ): void {
-        if ($totals['person_count'] !== count($people)) {
+        $counted = count(array_filter(
+            $people,
+            static fn (array $person): bool => ($person['ppz_counted'] ?? true) !== false,
+        ));
+        if ($totals['person_count'] !== $counted) {
             throw new HealthInsuranceOverviewException(
                 'health_insurance_totals_mismatch',
                 "Počet osob pojišťovny {$code} nesouhlasí.",

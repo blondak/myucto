@@ -8,8 +8,9 @@ use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Účast na pojištění známá už při nástupu — podle ní se hlásí nástup ČSSZ
- * i zdravotní pojišťovně. DPČ se sjednanou odměnou nad rozhodným příjmem
+ * Účast na pojištění známá už při nástupu — podle ní se hlásí nástup ČSSZ.
+ * Zdravotní pojišťovna má vlastní pravidlo (PayrollExpectedHealthParticipation).
+ * DPČ se sjednanou odměnou nad rozhodným příjmem
  * pojistí výpočet vždy, takže nástup se hlásí hned, ne až po mzdovém běhu.
  */
 final class PayrollExpectedParticipationTest extends TestCase

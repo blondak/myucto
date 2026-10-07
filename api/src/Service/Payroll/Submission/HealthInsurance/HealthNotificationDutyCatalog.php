@@ -27,8 +27,33 @@ final class HealthNotificationDutyCatalog
     /** Den, ke kterému se zúžila povinnost u kategorií s plátcem státem. */
     public const NARROWING_EFFECTIVE_FROM = '2026-01-01';
 
+    /**
+     * Vznik veřejného zdravotního pojištění v dnešní podobě. Skutečnost dřívější
+     * (nástup v roce 1985 u zaměstnance, který pracuje dodnes) žádnou oznamovací
+     * povinnost vůči zdravotní pojišťovně nezaložila — pojišťovny ještě nebyly.
+     */
+    public const PUBLIC_HEALTH_INSURANCE_FROM = '1993-01-01';
+
+    /** Účinnost zákona č. 48/1997 Sb. */
+    private const ACT_48_1997_EFFECTIVE_FROM = '1997-04-01';
+
     private const ACT_PUBLIC_HEALTH_INSURANCE =
         'zákon č. 48/1997 Sb., o veřejném zdravotním pojištění';
+
+    private const ACT_GENERAL_HEALTH_INSURANCE =
+        'zákon č. 550/1991 Sb., o všeobecném zdravotním pojištění';
+
+    /**
+     * Do 31. 3. 1997 oznamovací povinnost zaměstnavatele upravoval zákon
+     * č. 550/1991 Sb. Přesné ustanovení v podkladech není, proto se neuvádí
+     * a stav pramene to říká. Pravidlo existuje kvůli dávným nástupům: dokud
+     * katalog začínal 1. 4. 1997, shodil zaměstnanec s nástupem v roce 1995
+     * vyhodnocení povinností celé firmy.
+     */
+    private const PREDECESSOR_NOTE =
+        'Skutečnost před účinností zákona č. 48/1997 Sb. (1. 4. 1997). '
+        . 'Oznamovací povinnost zaměstnavatele tehdy upravoval zákon '
+        . 'č. 550/1991 Sb.; přesné ustanovení v podkladech není ověřené.';
 
     /**
      * Lhůta i sama oznamovací povinnost zaměstnavatele plynou z § 10; přesný
@@ -79,6 +104,16 @@ final class HealthNotificationDutyCatalog
         );
     }
 
+    /**
+     * Nastala skutečnost před vznikem veřejného zdravotního pojištění? Taková
+     * skutečnost povinnost vůči pojišťovně nezakládá a resolver ji vynechá;
+     * {@see self::ruleFor()} pro ni dál pravidlo nemá.
+     */
+    public function predatesPublicHealthInsurance(string $onDate): bool
+    {
+        return $onDate < self::PUBLIC_HEALTH_INSURANCE_FROM;
+    }
+
     /** Hlásí zaměstnavatel tuhle skutečnost ke dni jejího vzniku? */
     public function employerReports(
         HealthNotificationDutyKind $kind,
@@ -90,6 +125,32 @@ final class HealthNotificationDutyCatalog
     /** @return list<HealthNotificationDutyRule> */
     private static function build(): array
     {
+        $current = self::currentRules();
+        $predecessors = [];
+        foreach ($current as $rule) {
+            if ($rule->effectiveFrom !== self::ACT_48_1997_EFFECTIVE_FROM) {
+                continue;
+            }
+            $predecessors[] = new HealthNotificationDutyRule(
+                kind: $rule->kind,
+                label: $rule->label,
+                employerReports: true,
+                effectiveFrom: self::PUBLIC_HEALTH_INSURANCE_FROM,
+                effectiveTo: '1997-03-31',
+                act: self::ACT_GENERAL_HEALTH_INSURANCE,
+                section: null,
+                sourceStatus: HealthNotificationDutyRule::EXTERNAL_UNVERIFIED,
+                verifiedOn: self::VERIFIED_ON,
+                note: self::PREDECESSOR_NOTE,
+            );
+        }
+
+        return [...$current, ...$predecessors];
+    }
+
+    /** @return list<HealthNotificationDutyRule> */
+    private static function currentRules(): array
+    {
         $employment = static fn (
             HealthNotificationDutyKind $kind,
             string $label,
@@ -98,7 +159,7 @@ final class HealthNotificationDutyCatalog
             kind: $kind,
             label: $label,
             employerReports: true,
-            effectiveFrom: '1997-04-01',
+            effectiveFrom: self::ACT_48_1997_EFFECTIVE_FROM,
             effectiveTo: null,
             act: self::ACT_PUBLIC_HEALTH_INSURANCE,
             section: self::SECTION_NOTIFICATION_DUTY,
@@ -145,7 +206,7 @@ final class HealthNotificationDutyCatalog
                 kind: HealthNotificationDutyKind::MaternityLeaveStart,
                 label: 'Nástup na mateřskou dovolenou',
                 employerReports: true,
-                effectiveFrom: '1997-04-01',
+                effectiveFrom: self::ACT_48_1997_EFFECTIVE_FROM,
                 effectiveTo: null,
                 act: self::ACT_PUBLIC_HEALTH_INSURANCE,
                 section: self::SECTION_NOTIFICATION_DUTY,
@@ -157,7 +218,7 @@ final class HealthNotificationDutyCatalog
                 kind: HealthNotificationDutyKind::ParentalLeaveStart,
                 label: 'Nástup na rodičovskou dovolenou',
                 employerReports: true,
-                effectiveFrom: '1997-04-01',
+                effectiveFrom: self::ACT_48_1997_EFFECTIVE_FROM,
                 effectiveTo: null,
                 act: self::ACT_PUBLIC_HEALTH_INSURANCE,
                 section: self::SECTION_NOTIFICATION_DUTY,
@@ -169,7 +230,7 @@ final class HealthNotificationDutyCatalog
                 kind: HealthNotificationDutyKind::MaternityOrParentalLeaveEnd,
                 label: 'Ukončení mateřské nebo rodičovské dovolené',
                 employerReports: true,
-                effectiveFrom: '1997-04-01',
+                effectiveFrom: self::ACT_48_1997_EFFECTIVE_FROM,
                 effectiveTo: null,
                 act: self::ACT_PUBLIC_HEALTH_INSURANCE,
                 section: self::SECTION_NOTIFICATION_DUTY,
@@ -187,7 +248,7 @@ final class HealthNotificationDutyCatalog
                 kind: HealthNotificationDutyKind::StateCategoryOther,
                 label: 'Ostatní skutečnosti, kde je plátcem stát',
                 employerReports: true,
-                effectiveFrom: '1997-04-01',
+                effectiveFrom: self::ACT_48_1997_EFFECTIVE_FROM,
                 effectiveTo: '2025-12-31',
                 act: self::ACT_PUBLIC_HEALTH_INSURANCE,
                 section: self::SECTION_NOTIFICATION_DUTY,

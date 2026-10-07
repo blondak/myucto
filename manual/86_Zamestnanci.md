@@ -74,8 +74,13 @@ má firma v nastavení jako výchozí, a zapíše se do **zákonné evidence oso
 k datu nástupu — týmž uložením jako zaměstnanec, takže nemůže vzniknout karta
 bez ní. Neznámý kód pojišťovny proto celé založení odmítne a nic se neuloží.
 Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
-EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
-přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
+EČP, VČP, zahraniční identifikátor a **číslo pojištěnce ZP** se vedou samostatně
+a lze je doplnit přímo v běžné editaci; úplná osobní evidence dál uchovává jejich
+1:N historii. Číslo pojištěnce ZP vyplňte jen tehdy, když ho zdravotní
+pojišťovna přidělila odlišně od rodného čísla nebo zaměstnanec rodné číslo
+nemá (typicky cizinec po prvním přihlášení): opište ho z průkazu pojištěnce nebo
+z oznámení pojišťovny. EČP je evidenční číslo ČSSZ a číslem pojištěnce zdravotní
+pojišťovny není.
 Rodné číslo se v seznamu nezobrazuje. Kde se maskované rodné číslo zobrazuje
 jinde, jsou z něj vidět už jen **poslední dvě číslice**: se čtyřmi šlo celé
 rodné číslo dopočítat z data narození a pohlaví. Otevřít celou hodnotu lze jen
@@ -86,7 +91,7 @@ Hvězdička u popisku znamená, že bez toho pole uložení neprojde. Při zakl�
 jsou takové jen tři: jméno, druh vztahu a plánovaný nástup. Rodné číslo, datum
 narození ani mzda povinné nejsou a jdou doplnit kdykoli později — rodné číslo
 je potřeba až u přihlášky na ČSSZ (kde stačí i EČP) a u oznámení zdravotní
-pojišťovně.
+pojišťovně (kde ho může nahradit jen číslo pojištěnce ZP, EČP ne).
 
 Toolbar nad seznamem umožňuje hledání podle jména nebo osobního čísla (stačí
 i jeho část), přepnutí mezi aktivními,

@@ -123,6 +123,26 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
         );
     }
 
+    /**
+     * ZP-06: číslo pojištěnce zdravotní pojišťovny je identifikátor jen pro
+     * podání pojišťovnám. Registrace na ČSSZ ho nezná a nesmí kvůli němu
+     * spadnout na „nesrovnalosti v datech".
+     */
+    public function testHealthInsuranceNumberDoesNotBreakTheCsszIdentity(): void
+    {
+        $this->insertIdentifier('health_insurance_number', '9561234567');
+        $this->insertIdentifier('ecp', '1234567890');
+
+        $snapshot = $this->service->sensitiveIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-04',
+        );
+
+        self::assertSame('1234567890', $snapshot['identifiers']['ecp']);
+        self::assertArrayNotHasKey('health_insurance_number', $snapshot['identifiers']);
+    }
+
     public function testNeverDerivesStructuredNameFromDisplayName(): void
     {
         $this->db->pdo()->prepare(

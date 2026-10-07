@@ -132,12 +132,102 @@ final class HealthNotificationDutyTest extends TestCase
         );
     }
 
+    /**
+     * Před vznikem veřejného zdravotního pojištění (1. 1. 1993) pravidlo
+     * není a být nemá — taková skutečnost povinnost vůči pojišťovně
+     * nezaložila. Resolver ji proto vynechá, viz test níže.
+     */
     public function testUnknownDateHasNoRuleAndSaysSo(): void
     {
         $this->expectException(HealthNotificationException::class);
         $this->duties->ruleFor(
             HealthNotificationDutyKind::EmploymentStart,
             '1990-01-01',
+        );
+    }
+
+    /**
+     * ZP-02: nástup mezi 1. 1. 1993 a 31. 3. 1997 pravidlo má (zákon
+     * č. 550/1991 Sb.), jen s přiznaným neověřeným ustanovením.
+     */
+    public function testEmploymentStartBefore1997HasAPredecessorRule(): void
+    {
+        $rule = $this->duties->ruleFor(
+            HealthNotificationDutyKind::EmploymentStart,
+            '1995-03-01',
+        );
+
+        self::assertTrue($rule->employerReports);
+        self::assertStringContainsString('550/1991', $rule->act);
+        self::assertNull($rule->section);
+        self::assertSame(HealthNotificationDutyRule::EXTERNAL_UNVERIFIED, $rule->sourceStatus);
+        self::assertStringContainsString(
+            '48/1997',
+            $this->duties->ruleFor(HealthNotificationDutyKind::EmploymentStart, '1997-04-01')->act,
+        );
+    }
+
+    /**
+     * ZP-02: přehled za červenec 2026 se na nástup v roce 1995 neptá. Dřív se
+     * vyhodnotil i on, nenašel pravidlo a vztah skončil mezi nevyřešenými —
+     * a s ním celé období firmy.
+     */
+    public function testWindowEvaluatesOnlyOccurrencesInsideIt(): void
+    {
+        $duties = $this->resolver->resolve(
+            new HealthNotificationFacts(
+                employmentId: 7,
+                employeeId: 3,
+                relationType: 'employment',
+                participates: true,
+                insurerCode: '111',
+                startedOn: '1995-03-01',
+                endedOn: '2026-07-31',
+            ),
+            '2026-07-01',
+            '2026-07-31',
+        );
+
+        self::assertCount(1, $duties);
+        self::assertSame(HealthNotificationDutyKind::EmploymentEnd, $duties[0]->kind);
+        self::assertSame('2026-07-31', $duties[0]->occurredOn);
+    }
+
+    /** Okno vyřadí i skutečnost, která by jinak skončila výjimkou (bez pojišťovny). */
+    public function testOccurrenceOutsideTheWindowNeedsNoInsurer(): void
+    {
+        $duties = $this->resolver->resolve(
+            new HealthNotificationFacts(
+                employmentId: 7,
+                employeeId: 3,
+                relationType: 'employment',
+                participates: true,
+                insurerCode: null,
+                startedOn: '2026-03-01',
+            ),
+            '2026-07-01',
+            '2026-07-31',
+        );
+
+        self::assertSame([], $duties);
+    }
+
+    /** Nástup před vznikem veřejného zdravotního pojištění povinnost nezakládá. */
+    public function testOccurrenceBeforePublicHealthInsuranceIsNotADuty(): void
+    {
+        $duties = $this->resolver->resolve(new HealthNotificationFacts(
+            employmentId: 7,
+            employeeId: 3,
+            relationType: 'employment',
+            participates: true,
+            insurerCode: '111',
+            startedOn: '1985-09-01',
+            endedOn: '2026-07-31',
+        ));
+
+        self::assertSame(
+            [HealthNotificationDutyKind::EmploymentEnd],
+            array_map(static fn (HealthNotificationDuty $duty) => $duty->kind, $duties),
         );
     }
 
@@ -295,6 +385,54 @@ final class HealthNotificationDutyTest extends TestCase
             self::assertSame('2026-04-20', $window->dueOn, $relationType);
             self::assertSame('external_unverified', $window->sourceStatus);
         }
+    }
+
+    /**
+     * ZP-04: výjimka 20. dne platí u dohod jen pro nástup a skončení. Přestup
+     * k jiné pojišťovně na příjmu měsíce nezávisí, takže i u DPČ je osm dnů.
+     */
+    public function testAgreementExceptionCoversOnlyStartAndEnd(): void
+    {
+        self::assertSame(
+            '2026-07-09',
+            $this->deadlines->forNotification(
+                HealthNotificationDutyKind::InsurerChange,
+                '2026-07-01',
+                'dpc',
+            )->dueOn,
+        );
+        self::assertSame(
+            '2026-08-20',
+            $this->deadlines->forNotification(
+                HealthNotificationDutyKind::EmploymentStart,
+                '2026-07-10',
+                'dpc',
+            )->dueOn,
+        );
+        self::assertSame(
+            '2026-08-20',
+            $this->deadlines->forNotification(
+                HealthNotificationDutyKind::EmploymentEnd,
+                '2026-07-31',
+                'dpp',
+            )->dueOn,
+        );
+        self::assertSame(
+            '2026-08-20',
+            $this->deadlines->forNotification(
+                HealthNotificationDutyKind::SingleDayEmployment,
+                '2026-07-15',
+                'dpp',
+            )->dueOn,
+        );
+        self::assertSame(
+            '2026-07-09',
+            $this->deadlines->forNotification(
+                HealthNotificationDutyKind::EmployeeDataChange,
+                '2026-07-01',
+                'dpp',
+            )->dueOn,
+        );
     }
 
     public function testMaternityIsReportedMonthlyRegardlessOfRelationType(): void

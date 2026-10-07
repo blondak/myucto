@@ -70,7 +70,13 @@ final class PayrollPersonProfileValidator
     private const DELIVERY_CHANNELS = ['portal', 'paper'];
     private const ADDRESS_TYPES = ['residence', 'mailing'];
     private const CONTACT_TYPES = ['email', 'phone'];
-    private const IDENTIFIER_TYPES = ['birth_number', 'ecp', 'vcp', 'foreign_tax_identifier'];
+    private const IDENTIFIER_TYPES = [
+        'birth_number',
+        'ecp',
+        'vcp',
+        'foreign_tax_identifier',
+        'health_insurance_number',
+    ];
 
     public function __construct(
         private readonly IbanValidator $ibanValidator,
@@ -886,6 +892,14 @@ final class PayrollPersonProfileValidator
             'ecp' => $this->numericIdentifier($compact, 'EČP', 9, 10),
             'vcp' => PayrollVcp::normalize($compact),
             'foreign_tax_identifier' => $this->foreignTaxIdentifier($compact),
+            // Číslo z průkazu pojištěnce nebo z oznámení zdravotní pojišťovny;
+            // `cisloPojistenceTyp` v HOZ XSD připouští 9 nebo 10 číslic.
+            'health_insurance_number' => $this->numericIdentifier(
+                str_replace('/', '', $compact),
+                'Číslo pojištěnce zdravotní pojišťovny',
+                9,
+                10,
+            ),
             default => throw new \InvalidArgumentException('Typ identifikátoru není podporovaný.'),
         };
     }
