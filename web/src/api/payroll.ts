@@ -4885,7 +4885,7 @@ export interface PayrollEldpSupport {
 
 /**
  * Důchodové údaje zaměstnance k evidenčnímu listu. Všechny klíče se posílají
- * vždy, i prázdné — „nic jsem nezadala" a „důchod nepobírá" se jinak nedají
+ * vždy, i prázdné: „nic jsem nezadala" a „důchod nepobírá" se jinak nedají
  * rozlišit.
  */
 export interface PayrollEldpPensionStatus {

@@ -965,6 +965,17 @@ zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
 
+**Záměr uplatňovat slevu na pojistném (OZUSPOJ) a přihláška.** Záměr lze
+oznámit nejdříve měsíc přede dnem, od kterého se sleva uplatní, a **ne dříve
+než dnem podání přihlášky zaměstnance** (§ 7a odst. 5 věta druhá zákona
+č. 589/1992 Sb.). Aplikace bere den podání přihlášky PREZEC nebo REGZEC
+z vlastních podání i z přihlášky předchozího programu a posouvá podle něj
+začátek lhůty oznámení. Přijetí záměru s dnem doručení před podáním přihlášky
+nezapíše, protože takovou slevu by ČSSZ mohla doměřit. Nezná-li den podání
+přihlášky, záměr na to v záložce záměrů slevy upozorní; byla-li přihláška
+podána až po lhůtě oznámení, záměr od zvoleného dne oznámit nelze a hláška
+vyzve ke zvolení pozdějšího dne.
+
 ### 85.11.2 Hlášení změn do registru pojištěnců (A3)
 
 Změní-li se u přihlášené osoby nebo u jejího pracovního vztahu údaj, který
@@ -1271,7 +1282,11 @@ Tiskopis ale zrušen nebyl a v aplikaci jej připravíte ve třech výjimkách:
 - **na výzvu ČSSZ/ÚSSZ** podle § 38a odst. 2 a 3 — uplynula-li lhůta pro měsíční
   nebo opravné hlášení, anebo nelze-li z nahlášených údajů evidenční list
   sestavit. U výzvy zaškrtněte příslušné potvrzení a zadejte skutečné datum
-  jejího doručení; od tohoto dne běží lhůta osmi dnů.
+  jejího doručení. U listu za roky do 2026 od tohoto dne běží lhůta osmi dnů
+  (za rok 2025 podle § 39 odst. 3 dřívějšího znění, za rok 2026 podle
+  přechodného ustanovení). Za roky od 2027 lhůtu neurčuje zákon, ale výzva:
+  formulář si proto vyžádá i **lhůtu uvedenou ve výzvě** a bez ní list
+  nesestaví.
 
 Nad formulářem vždy stojí věta, jestli evidenční list pro zvolený rok a pracovní
 vztah vůbec vzniká, a proč. Není-li přípustný, věta jmenuje konkrétní důvod —
@@ -1285,6 +1300,29 @@ rozsahu), **dohodu o pracovní činnosti** i **dohodu o provedení práce**. Kó
 do doby pojištění počítají jen měsíce, ve kterých se dohoda účastnila
 pojištění; ostatní měsíce řádku se vyznačí „X". Dohoda, která se v roce
 neúčastnila ani jednou, evidenční list nemá.
+
+### Důchodové údaje zaměstnance
+
+Mzdová revize nenese údaje o důchodu, a přitom na nich stojí kód řádku i to,
+zda se list vůbec vede. Formulář je proto chce výslovně potvrdit, i když
+nic z toho nenastalo (prázdné pole znamená „nenastalo"):
+
+- **Den dosažení důchodového věku** a **den, od kterého zaměstnanec pobírá
+  předčasný starobní důchod.** Od dřívějšího z nich má činnost druhý znak
+  kódu `D` (například `1D+`, `AD+`); řádek se k tomuto dni rozdělí na dvě
+  sekce. Připadne-li den doprostřed měsíce, aplikace list nesestaví, protože
+  vyměřovací základ za část měsíce nevede; takový list podejte mimo aplikaci.
+- **První měsíc výplaty starobního důchodu v plné výši.** Od roku 2025 se za
+  poživatele plného starobního důchodu evidenční list nevede (§ 38 odst. 1
+  věta druhá zákona č. 582/1991 Sb.). Měsíce od tohoto měsíce se z listu
+  vypustí; nezbude-li žádný, list se nesestaví a hláška to řekne. Za roky do
+  2024 se list za pracujícího důchodce vede dál.
+- **Účast na důchodovém pojištění v cizině.** Je-li zaměstnanec účasten
+  pojištění v cizině, vede se list i za poživatele plného starobního důchodu.
+
+Má-li zaměstnanec v zákonné evidenci ověřenou slevu pracujícího důchodce,
+ale potvrzení žádný starobní důchod neuvádí, aplikace list nesestaví
+a vyzve k doplnění údajů.
 
 **Příjem zúčtovaný po skončení zaměstnání** (doplatek, odměna vyplacená
 v dalším měsíci) se zapíše samostatným řádkem s kódem `1P+` (u dohody

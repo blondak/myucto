@@ -237,14 +237,14 @@ final class EldpDeadlinePolicy
      *
      * Lhůta i její zákonný důvod závisí na vykazovaném roce, ne na dni výzvy:
      *
-     * - **rok 2026** — přechodné ustanovení čl. V bod 8 zák. č. 360/2025 Sb.:
+     * - **rok 2026**: přechodné ustanovení čl. V bod 8 zák. č. 360/2025 Sb.:
      *   do 8 dnů ode dne obdržení výzvy (ruleset `authority-request.v1`, beze
      *   změny proti dřívějším listům, aby se zmrazené listy daly zopakovat),
-     * - **roky do 2025** — § 39 odst. 3 ve znění účinném do 31. 12. 2025, které
+     * - **roky do 2025**: § 39 odst. 3 ve znění účinném do 31. 12. 2025, které
      *   se na ně podle čl. V bod 1 použije: také 8 dnů od obdržení výzvy, ale
      *   s vlastním citovaným ustanovením (dřív list za rok 2025 citoval
      *   přechodné ustanovení „za rok 2026"),
-     * - **roky od 2027** — žádné přechodné ustanovení už nedopadá a samostatný
+     * - **roky od 2027**: žádné přechodné ustanovení už nedopadá a samostatný
      *   list zaměstnavateli neukládá žádná obecná lhůta; § 38a odst. 1 a 2 se
      *   cituje jen jako obdoba (lhůta pro hlášení na výzvu). Termín proto
      *   určuje sama výzva a bez něj se lhůta nevymýšlí.
@@ -280,7 +280,7 @@ final class EldpDeadlinePolicy
                 'authority_request_within_8_days_old_wording',
                 'annual',
                 'Zákon č. 582/1991 Sb., § 39 odst. 3 ve znění účinném do 31. 12. 2025 '
-                    . '(čl. V bod 1 zákona č. 360/2025 Sb.) — evidenční list za rok '
+                    . '(čl. V bod 1 zákona č. 360/2025 Sb.): evidenční list za rok '
                     . $year . ' je zaměstnavatel povinen předložit na výzvu orgánu '
                     . 'sociálního zabezpečení do 8 dnů ode dne obdržení výzvy.',
             );
@@ -289,7 +289,7 @@ final class EldpDeadlinePolicy
             throw new EldpValidationException(
                 'eldp_authority_request_due_on_missing',
                 'Za rok ' . $year . ' žádná zákonná lhůta pro samostatný evidenční '
-                    . 'list na výzvu neplatí — termín určuje výzva ČSSZ/ÚSSZ. Zadejte '
+                    . 'list na výzvu neplatí, termín určuje výzva ČSSZ/ÚSSZ. Zadejte '
                     . 'lhůtu, kterou výzva uvádí.',
             );
         }
@@ -307,7 +307,7 @@ final class EldpDeadlinePolicy
             self::AUTHORITY_REQUEST_STATED_RULESET,
             'authority_request_due_on_stated_in_request',
             'annual',
-            'Zákon č. 582/1991 Sb., § 38a odst. 1 a 2 obdobně — evidenční list za rok '
+            'Zákon č. 582/1991 Sb., § 38a odst. 1 a 2 obdobně: evidenční list za rok '
                 . $year . ' se sestavuje jen na výzvu ČSSZ/ÚSSZ a předkládá se ve lhůtě, '
                 . 'kterou určila výzva.',
         );

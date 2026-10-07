@@ -79,6 +79,35 @@ describe('TakeoverCheckSection', () => {
     expect(target).toContain('"employment":"12"')
   })
 
+  /** Převzatý vztah s důvodem slevy bez přijatého záměru OZUSPOJ: sleva se neuplatní. */
+  it('vypíše vztah s důvodem slevy bez přijatého záměru', () => {
+    const wrapper = mount(TakeoverCheckSection, {
+      props: {
+        check: {
+          takeover_months: [1, 2, 3],
+          missing_openings: [],
+          missing_discount_intents: [{
+            employee_id: 9,
+            employee_name: 'Syntetická osoba',
+            employment_id: 12,
+            employment_code: 'SYN-1',
+            discount_reason: 'age_55_plus',
+          }],
+          differences: [],
+          opening_only: [],
+          takeover_only: [],
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="takeover-check-ok"]').exists()).toBe(false)
+    const section = wrapper.get('[data-test="takeover-check-discount-intents"]')
+    expect(section.text()).toContain('Syntetická osoba')
+    expect(section.text()).toContain('payroll.discountIntents.reasons.age_55_plus')
+    expect(section.get('[data-test="takeover-discount-intent-link-12"]').attributes('data-to'))
+      .toContain('discount_intents')
+  })
+
   it('nic nevykreslí, když rok převzaté měsíce nemá', () => {
     const wrapper = mount(TakeoverCheckSection, {
       props: {

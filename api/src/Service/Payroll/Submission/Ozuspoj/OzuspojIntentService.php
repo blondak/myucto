@@ -43,14 +43,40 @@ final readonly class OzuspojIntentService
         string $environment,
         ?int $employmentId = null,
     ): array {
-        return array_map(
-            fn (array $row): array => $this->describe($row),
-            $this->intents->listForSupplier(
-                $supplierId,
-                $environment,
-                $employmentId,
-            ),
+        $rows = $this->intents->listForSupplier(
+            $supplierId,
+            $environment,
+            $employmentId,
         );
+        $registrations = $this->intents->registrationSubmittedOn(
+            $supplierId,
+            $environment,
+            array_map(static fn (array $row): int => (int) $row['employment_id'], $rows),
+        );
+
+        return array_map(
+            fn (array $row): array => $this->describe(
+                $row,
+                $registrations[(int) $row['employment_id']] ?? null,
+            ),
+            $rows,
+        );
+    }
+
+    /**
+     * Den podání přihlášky zaměstnance, od kterého smí ČSSZ záměr nejdříve
+     * evidovat (§ 7a odst. 5 věta druhá); `null`, když o přihlášce nevíme.
+     */
+    public function registrationSubmittedOn(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?string {
+        return $this->intents->registrationSubmittedOn(
+            $supplierId,
+            $environment,
+            [$employmentId],
+        )[$employmentId] ?? null;
     }
 
     /** @return array<string,mixed> */
@@ -103,7 +129,12 @@ final readonly class OzuspojIntentService
             );
         }
         $osszCode = $this->osszCode($context);
-        $window = $this->deadlines->forIntentStart($intentFrom);
+        $registeredOn = $this->registrationSubmittedOn(
+            $supplierId,
+            $environment,
+            $employmentId,
+        );
+        $window = $this->deadlines->forIntentStart($intentFrom, $registeredOn);
         if ($employeeInformedOn !== null) {
             $this->assertDate($employeeInformedOn);
         }
@@ -126,10 +157,171 @@ final readonly class OzuspojIntentService
             );
         }
 
-        return $this->describe($stored) + ['window' => [
+        return $this->describe($stored, $registeredOn) + ['window' => [
             'earliest_notification_on' => $window->earliestNotificationOn,
             'due_on' => $window->dueOn,
         ]];
+    }
+
+    /**
+     * Převzetí záměru, který ČSSZ přijala od předchozího mzdového programu
+     * (datová věta OZUSPOJ23 typ 1 a den doručení z protokolu).
+     *
+     * Jde stejnou cestou jako {@see self::create()}: důvod slevy z podmínek
+     * vztahu, trvání vztahu, souběh u téhož zaměstnavatele, a stejnými
+     * mezemi doručení jako zápis přijetí (§ 7a odst. 5). Liší se jen tím, že
+     * nevzniká podání z MyÚčta: záměr je rovnou přijatý a nese příznak
+     * převzatého podání, takže se k němu neeviduje povinnost oznámení.
+     * Opakované převzetí téhož souboru vrátí už založený záměr.
+     *
+     * @return array<string,mixed> popis záměru + `import_status` created|unchanged
+     */
+    public function importPredecessorStart(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $intentFrom,
+        int $osszCode,
+        string $acceptedOn,
+        string $predecessorSource,
+        string $predecessorReference,
+        int $createdBy,
+    ): array {
+        $this->assertDate($acceptedOn);
+        $existing = $this->intents->findByScope($supplierId, $environment, $employmentId, $intentFrom);
+        if ($existing !== null) {
+            if (($existing['predecessor_source'] ?? null) === $predecessorSource
+                && (string) $existing['accepted_on'] === $acceptedOn
+            ) {
+                return $this->describe(
+                    $existing,
+                    $this->registrationSubmittedOn($supplierId, $environment, $employmentId),
+                ) + ['import_status' => 'unchanged'];
+            }
+            throw new OzuspojException(
+                'ozuspoj_import_intent_exists',
+                'K tomuto pracovnímu vztahu je od ' . $intentFrom . ' už evidovaný jiný záměr. '
+                    . 'Převzetí by ho přepsalo; ověřte, který z nich ČSSZ skutečně přijala.',
+            );
+        }
+        $context = $this->requireContext($supplierId, $employmentId, $intentFrom);
+        $reason = SocialPartTimeDiscountReason::tryFrom(
+            is_string($context['social_part_time_discount_reason'] ?? null)
+                ? $context['social_part_time_discount_reason']
+                : '',
+        );
+        if ($reason === null) {
+            throw new OzuspojException(
+                'ozuspoj_discount_reason_missing',
+                'Pracovní vztah nemá ke dni ' . $intentFrom . ' vyplněný důvod slevy podle § 7a odst. 1. Doplňte ho v kartě vztahu a záměr převezměte znovu.',
+            );
+        }
+        $employmentStart = $this->employmentStart($context);
+        $endDate = $context['end_date'] ?? null;
+        if ($intentFrom < $employmentStart
+            || (is_string($endDate) && $endDate !== '' && $intentFrom > $endDate)
+        ) {
+            throw new OzuspojException(
+                'ozuspoj_intent_outside_employment',
+                'Den, od kterého záměr platí, leží mimo trvání pracovního vztahu.',
+            );
+        }
+        $employeeId = (int) $context['employee_id'];
+        if ($this->intents->overlappingForEmployee(
+            $supplierId,
+            $environment,
+            $employeeId,
+            $intentFrom,
+            null,
+        ) !== []) {
+            throw new OzuspojException(
+                'ozuspoj_intent_overlaps',
+                'Za tuhle osobu už je na překrývající se období evidovaný záměr. Slevu lze podle § 7a odst. 2 uplatnit jen z jednoho zaměstnání u téhož zaměstnavatele.',
+            );
+        }
+        if ($osszCode < 100 || $osszCode > 999) {
+            throw new OzuspojException(
+                'ozuspoj_ossz_code_missing',
+                'Převzaté oznámení nemá platný kód OSSZ.',
+            );
+        }
+        if ($acceptedOn > $this->today()) {
+            throw new OzuspojException(
+                'ozuspoj_accepted_on_in_future',
+                'Den doručení oznámení nemůže být v budoucnosti.',
+            );
+        }
+        $registeredOn = $this->registrationSubmittedOn($supplierId, $environment, $employmentId);
+        $this->assertAcceptedOnNotTooEarly($intentFrom, $acceptedOn, $registeredOn);
+        $id = $this->intents->insertPredecessorAccepted(
+            $supplierId,
+            $environment,
+            $employeeId,
+            $employmentId,
+            $reason->value,
+            $intentFrom,
+            $osszCode,
+            $acceptedOn,
+            $predecessorSource,
+            $predecessorReference,
+            $createdBy,
+        );
+
+        return $this->describe(
+            $this->requireIntent($supplierId, $environment, $id),
+            $registeredOn,
+        ) + ['import_status' => 'created'];
+    }
+
+    /**
+     * Převzetí oznámení o skončení uplatňování slevy (OZUSPOJ23 typ 2), které
+     * ČSSZ přijala od předchozího programu: přijatý záměr vztahu platný ke dni
+     * skončení se uzavře k tomuto dni s dnem doručení z protokolu.
+     *
+     * @return array<string,mixed>
+     */
+    public function importPredecessorEnd(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $intentTo,
+        string $acceptedOn,
+    ): array {
+        $this->assertDate($intentTo);
+        $this->assertDate($acceptedOn);
+        $candidates = $this->intents->acceptedCovering($supplierId, $environment, $employmentId, $intentTo);
+        if (count($candidates) !== 1) {
+            throw new OzuspojException(
+                'ozuspoj_import_end_without_intent',
+                $candidates === []
+                    ? 'K pracovnímu vztahu není ke dni ' . $intentTo . ' žádný přijatý záměr, který by oznámení o skončení uzavřelo. Převezměte nejdřív oznámení o zahájení.'
+                    : 'K pracovnímu vztahu je ke dni ' . $intentTo . ' víc přijatých záměrů; oznámení o skončení nejde jednoznačně přiřadit.',
+            );
+        }
+        $row = $candidates[0];
+        if ($intentTo < (string) $row['intent_from']) {
+            throw new OzuspojException(
+                'ozuspoj_intent_period_invalid',
+                'Den skončení záměru nesmí předcházet dni jeho zahájení.',
+            );
+        }
+        if (!$this->intents->update(
+            $supplierId,
+            $environment,
+            (int) $row['id'],
+            (int) $row['row_version'],
+            ['intent_to' => $intentTo, 'status' => 'ended', 'ended_accepted_on' => $acceptedOn],
+        )) {
+            throw new OzuspojException(
+                'ozuspoj_intent_conflict',
+                'Záměr mezitím někdo změnil. Načtěte ho znovu a akci zopakujte.',
+            );
+        }
+
+        return $this->describe(
+            $this->requireIntent($supplierId, $environment, (int) $row['id']),
+            $this->registrationSubmittedOn($supplierId, $environment, $employmentId),
+        ) + ['import_status' => 'ended'];
     }
 
     /**
@@ -150,8 +342,13 @@ final readonly class OzuspojIntentService
         $row = $this->requireIntent($supplierId, $environment, $intentId);
         $status = OzuspojIntentStatus::from((string) $row['status']);
         $rowVersion = (int) $row['row_version'];
+        $registeredOn = $this->registrationSubmittedOn(
+            $supplierId,
+            $environment,
+            (int) $row['employment_id'],
+        );
         $changes = match ($outcome) {
-            'accepted' => $this->acceptanceChanges($row, $status, $acceptedOn),
+            'accepted' => $this->acceptanceChanges($row, $status, $acceptedOn, $registeredOn),
             'rejected' => $this->rejectionChanges($status, $reason),
             'ended' => $this->endChanges($row, $status, $acceptedOn),
             'cancelled' => $this->cancellationChanges($status),
@@ -175,6 +372,7 @@ final readonly class OzuspojIntentService
 
         return $this->describe(
             $this->requireIntent($supplierId, $environment, $intentId),
+            $registeredOn,
         );
     }
 
@@ -222,6 +420,7 @@ final readonly class OzuspojIntentService
 
         return $this->describe(
             $this->requireIntent($supplierId, $environment, $intentId),
+            $this->registrationSubmittedOn($supplierId, $environment, (int) $row['employment_id']),
         );
     }
 
@@ -307,6 +506,7 @@ final readonly class OzuspojIntentService
         array $row,
         OzuspojIntentStatus $status,
         ?string $acceptedOn,
+        ?string $registeredOn,
     ): array {
         if ($status !== OzuspojIntentStatus::Submitted) {
             throw new OzuspojException(
@@ -327,17 +527,37 @@ final readonly class OzuspojIntentService
                 'Den doručení oznámení nemůže být v budoucnosti.',
             );
         }
-        $intentFrom = (string) $row['intent_from'];
-        $earliest = $this->deadlines->forIntentStart($intentFrom)
-            ->earliestNotificationOn;
-        if ($acceptedOn < $earliest) {
-            throw new OzuspojException(
-                'ozuspoj_accepted_on_too_early',
-                'Podle § 7a odst. 5 lze záměr oznámit nejdříve měsíc přede dnem, od kterého se sleva uplatní. Dřívější doručení ČSSZ nezaeviduje.',
-            );
-        }
+        $this->assertAcceptedOnNotTooEarly(
+            (string) $row['intent_from'],
+            $acceptedOn,
+            $registeredOn,
+        );
 
         return ['status' => 'accepted', 'accepted_on' => $acceptedOn];
+    }
+
+    /**
+     * § 7a odst. 5 věta druhá: záměr lze oznámit nejdříve měsíc přede dnem,
+     * od kterého se sleva uplatní, a ne dříve než dnem podání přihlášky
+     * zaměstnance. Doručení před přihláškou ČSSZ sice potvrdí, ale slevu může
+     * později doměřit jako dluh na pojistném (§ 7c odst. 3).
+     */
+    private function assertAcceptedOnNotTooEarly(
+        string $intentFrom,
+        string $acceptedOn,
+        ?string $registeredOn,
+    ): void {
+        $earliest = $this->deadlines->forIntentStart($intentFrom, $registeredOn)
+            ->earliestNotificationOn;
+        if ($acceptedOn >= $earliest) {
+            return;
+        }
+        throw new OzuspojException(
+            'ozuspoj_accepted_on_too_early',
+            $registeredOn !== null && $acceptedOn < $registeredOn
+                ? "Záměr byl doručen dřív ({$acceptedOn}), než byla podána přihláška zaměstnance ({$registeredOn}). Podle § 7a odst. 5 věty druhé ho nelze oznámit dříve než dnem podání oznámení o nástupu, takže na takové doručení slevu uplatnit nelze."
+                : 'Podle § 7a odst. 5 lze záměr oznámit nejdříve měsíc přede dnem, od kterého se sleva uplatní. Dřívější doručení ČSSZ nezaeviduje.',
+        );
     }
 
     /** @return array<string,mixed> */
@@ -423,11 +643,22 @@ final readonly class OzuspojIntentService
      * @param array<string,mixed> $row
      * @return array<string,mixed>
      */
-    private function describe(array $row): array
+    private function describe(array $row, ?string $registeredOn): array
     {
         $status = OzuspojIntentStatus::from((string) $row['status']);
         $intentFrom = (string) $row['intent_from'];
-        $window = $this->deadlines->forIntentStart($intentFrom);
+        // Přehled nesmí spadnout na záměru, jehož přihláška přišla až po
+        // lhůtě oznámení; okno se pak ukáže bez ní a obrazovka to označí.
+        $registrationLate = false;
+        try {
+            $window = $this->deadlines->forIntentStart($intentFrom, $registeredOn);
+        } catch (OzuspojException $exception) {
+            if ($exception->validationCode !== 'ozuspoj_registration_after_notification_due') {
+                throw $exception;
+            }
+            $registrationLate = true;
+            $window = $this->deadlines->forIntentStart($intentFrom);
+        }
         $periodStart = substr($intentFrom, 0, 7) . '-01';
 
         return [
@@ -451,6 +682,11 @@ final readonly class OzuspojIntentService
             'notification_due_on' => $window->dueOn,
             'transitional_q1_2026' =>
                 $this->claimDeadlines->isTransitionalQ12026($periodStart),
+            // Bez známé přihlášky nejde ověřit dolní mez § 7a odst. 5 věty
+            // druhé; obrazovka na to upozorní, místo aby mlčela.
+            'registration_submitted_on' => $registeredOn,
+            'registration_after_notification_due' => $registrationLate,
+            'predecessor_source' => $row['predecessor_source'] ?? null,
         ];
     }
 

@@ -70,6 +70,16 @@ final class OzuspojDeadlinePolicy
         $due = CzechWorkingDays::shiftToWorkingDay(
             $from->modify('first day of next month')->modify('+19 days'),
         );
+        if ($registrationSubmittedOn !== null && $due < $earliest) {
+            throw new OzuspojException(
+                'ozuspoj_registration_after_notification_due',
+                'Přihláška zaměstnance byla podána až ' . $earliest->format('Y-m-d')
+                    . ', tedy po lhůtě pro oznámení záměru od ' . $intentFrom . ' ('
+                    . $due->format('Y-m-d') . '). Záměr nelze oznámit dřív než přihlášku '
+                    . '(§ 7a odst. 5 věta druhá), takže slevu od tohoto dne uplatnit nejde; '
+                    . 'zvolte pozdější den, od kterého se sleva uplatní.',
+            );
+        }
         if ($due < $earliest) {
             // Nemůže nastat u dat, která projdou kontrolou výš, ale kdyby se
             // pravidla někdy rozešla, nesmí vzniknout okno, které končí dřív,

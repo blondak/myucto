@@ -119,6 +119,37 @@ describe('PayrollDiscountIntentsPanel', () => {
       .toBe(true)
   })
 
+  /**
+   * § 7a odst. 5 věta druhá: záměr nelze oznámit dřív než přihlášku. Když
+   * aplikace den podání přihlášky nezná, musí to říct dřív, než se podá.
+   */
+  it('upozorní, že den podání přihlášky není známý', async () => {
+    m.list.mockResolvedValue([intent({ status: 'draft', registration_submitted_on: null })])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="discount-intent-registration-missing-1"]').exists())
+      .toBe(true)
+  })
+
+  it('převzatý záměr předchozího programu označí a o přihlášce nevaruje', async () => {
+    m.list.mockResolvedValue([intent({
+      status: 'accepted',
+      accepted_on: '2026-08-20',
+      evidences_discount: true,
+      registration_submitted_on: null,
+      predecessor_source: 'ozuspoj_xml',
+    })])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="discount-intent-predecessor-1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="discount-intent-registration-missing-1"]').exists())
+      .toBe(false)
+  })
+
   it('u přijatého záměru varování o neuplatnění nezobrazuje', async () => {
     m.list.mockResolvedValue([intent({
       status: 'accepted',

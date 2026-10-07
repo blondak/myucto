@@ -61,7 +61,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  *   v § 38, stojí lhůta **3 kalendářní roky**. Do listu se proto nezapisuje:
  *   uchovávací lhůty modul drží na jednom místě, v retenčním katalogu
  *   (kategorie `PENSION_EVIDENCE_SHEETS`), ne v jednotlivých sestavovačích.
- * - **Odečítané doby** (10375, 10462–10469) — nula je podmíněná výslovným
+ * - **Odečítané doby** (10375, 10462–10469): nula je podmíněná výslovným
  *   potvrzením mzdové účetní, ne výpočtem.
  *
  * ## Důchodové údaje zaměstnance: výslovné potvrzení
@@ -1571,7 +1571,7 @@ final class EldpAnnualStatementBuilder
 
     /**
      * Den, od kterého nese činnost kód D: dovršení důchodového věku, nebo
-     * přiznání předčasného starobního důchodu — co nastalo dřív.
+     * přiznání předčasného starobního důchodu, podle toho, co nastalo dřív.
      *
      * @param array{pension_age_reached_on:?string,early_pension_from:?string} $pension
      */

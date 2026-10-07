@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import TakeoverEstimatedStartList from './TakeoverEstimatedStartList.vue'
 import TakeoverGapList from './TakeoverGapList.vue'
@@ -17,9 +18,11 @@ const props = defineProps<{ check: TakeoverCheck }>()
 const { t } = useI18n()
 
 const estimatedStarts = computed(() => props.check.estimated_starts ?? [])
+const missingDiscountIntents = computed(() => props.check.missing_discount_intents ?? [])
 
 const hasFindings = computed(() => props.check.missing_openings.length > 0
   || estimatedStarts.value.length > 0
+  || missingDiscountIntents.value.length > 0
   || props.check.differences.length > 0
   || props.check.opening_only.length > 0
   || props.check.takeover_only.length > 0)
@@ -58,6 +61,27 @@ const hasFindings = computed(() => props.check.missing_openings.length > 0
       <p class="font-medium">{{ t('payroll.takeover_check.estimated_starts_title') }}</p>
       <p class="mt-0.5 text-xs">{{ t('payroll.takeover_check.estimated_starts_hint') }}</p>
       <TakeoverEstimatedStartList class="mt-2" :rows="estimatedStarts" />
+    </div>
+
+    <div
+      v-if="missingDiscountIntents.length > 0"
+      class="mt-3 rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800"
+      data-test="takeover-check-discount-intents"
+    >
+      <p class="font-medium">{{ t('payroll.takeover_check.discount_intents_title') }}</p>
+      <p class="mt-0.5 text-xs">{{ t('payroll.takeover_check.discount_intents_hint') }}</p>
+      <ul class="mt-2 list-disc space-y-0.5 pl-5 text-xs">
+        <li v-for="row in missingDiscountIntents" :key="row.employment_id">
+          <RouterLink
+            to="/payroll/submissions/discount_intents"
+            class="underline"
+            :data-test="`takeover-discount-intent-link-${row.employment_id}`"
+          >
+            {{ row.employee_name }}
+          </RouterLink>
+          ({{ row.employment_code }}): {{ t('payroll.discountIntents.reasons.' + row.discount_reason) }}
+        </li>
+      </ul>
     </div>
 
     <TakeoverLayerFindings

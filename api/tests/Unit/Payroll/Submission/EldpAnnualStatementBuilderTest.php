@@ -266,7 +266,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
 
     /**
      * Ověřená sleva pracujícího důchodce dokládá, že zaměstnanec pobírá
-     * starobní důchod. Potvrzení, které žádný důchod neuvádí, s ní neprojde —
+     * starobní důchod. Potvrzení, které žádný důchod neuvádí, s ní neprojde;
      * dřív z toho vznikl list s kódem „++" za celý rok.
      */
     public function testWorkingPensionerWithoutDeclaredPensionIsBlocked(): void

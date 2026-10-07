@@ -43,6 +43,15 @@ export interface PayrollDiscountIntent {
   notification_due_on: string
   /** Období 01–03/2026 mají vlastní hranici 30. 6. 2026 (kontrola 333). */
   transitional_q1_2026: boolean
+  /**
+   * Den podání přihlášky zaměstnance (PREZEC/REGZEC). Dřív záměr oznámit
+   * nelze (§ 7a odst. 5 věta druhá); `null` = o přihlášce aplikace neví.
+   */
+  registration_submitted_on?: string | null
+  /** Přihláška přišla až po lhůtě oznámení záměru od `intent_from`. */
+  registration_after_notification_due?: boolean
+  /** Záměr převzatý z přijatého podání předchozího programu. */
+  predecessor_source?: string | null
 }
 
 export interface PayrollDiscountIntentPreview {

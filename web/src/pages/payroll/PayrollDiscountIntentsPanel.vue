@@ -541,6 +541,27 @@ onMounted(async () => {
           {{ t('payroll.discountIntents.notEvidenced') }}
         </p>
         <p
+          v-if="item.predecessor_source"
+          class="mt-2 rounded-lg bg-neutral-50 p-2 text-xs text-neutral-700"
+          :data-test="`discount-intent-predecessor-${item.id}`"
+        >
+          {{ t('payroll.discountIntents.predecessor') }}
+        </p>
+        <p
+          v-else-if="item.registration_after_notification_due"
+          class="mt-2 rounded-lg bg-danger-50 p-2 text-xs text-danger-700"
+          :data-test="`discount-intent-registration-late-${item.id}`"
+        >
+          {{ t('payroll.discountIntents.registrationLate', { date: formatDate(item.registration_submitted_on) }) }}
+        </p>
+        <p
+          v-else-if="item.registration_submitted_on === null && (item.status === 'draft' || item.status === 'submitted')"
+          class="mt-2 rounded-lg bg-warning-50 p-2 text-xs text-warning-800"
+          :data-test="`discount-intent-registration-missing-${item.id}`"
+        >
+          {{ t('payroll.discountIntents.registrationMissing') }}
+        </p>
+        <p
           v-if="item.rejection_reason"
           class="mt-2 rounded-lg bg-danger-50 p-2 text-xs text-danger-700"
         >
