@@ -602,6 +602,52 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     }
 
     /**
+     * NEMPRI25-lhuta-8: u DPP nese oznámení započitatelný příjem z měsíce
+     * události (`prijemMalyRozsah`) a podává se až po skončení toho měsíce.
+     */
+    public function testAgreementToPerformWorkNeedsEventMonthIncomeAndWaitsForMonthEnd(): void
+    {
+        [, $employmentId] = $this->employee();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpp" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-02-09',
+                'decision_number' => 'E1234567',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01']),
+            ],
+            $this->userId,
+        );
+        $submissions = $this->service(SicknessSubmissionService::class);
+        try {
+            $submissions->preview($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::Nempri);
+            self::fail('Oznámení z DPP bez příjmu z měsíce události nesmí projít.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_small_scope_income_missing', $exception->validationCode);
+        }
+
+        $case = $cases->update(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            (int) $case['row_version'],
+            ['small_scope_income_minor' => 900000],
+        );
+        $preview = $submissions->preview($this->supplierId, 'test', (int) $case['id'], SicknessDocumentKind::Nempri);
+        self::assertStringContainsString('<prijemMalyRozsah>9000</prijemMalyRozsah>', (string) $preview['xml']);
+        // 15. den neschopnosti je 23. 2., příjem za únor je ale znám až po jeho
+        // skončení: nejdřív 1. 3. (neděle), termín pondělí 2. 3.
+        self::assertSame('2026-03-01', $preview['window']['earliest_notification_on']);
+        self::assertSame('2026-03-02', $preview['window']['due_on']);
+    }
+
+    /**
      * @param list<string> $periods
      * @return list<array{period:string,income_minor:int,excluded_days:int}>
      */

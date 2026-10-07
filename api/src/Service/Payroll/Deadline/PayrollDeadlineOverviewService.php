@@ -1124,10 +1124,13 @@ final readonly class PayrollDeadlineOverviewService
             $incapacityTo = $row['incapacity_to'] === null
                 ? null
                 : (string) $row['incapacity_to'];
-            // § 26 odst. 3: odpracovaná celá směna v den vzniku posouvá první
-            // den neschopnosti, a tím okno 14 dnů i lhůtu NEMPRI.
-            $workedFirstDay = $kind === SicknessBenefitKind::Nem
+            // Odpracovaná celá směna v den vzniku posouvá první den neschopnosti
+            // (§ 26 odst. 3) i počátek podpůrčí doby ošetřovného (§ 40 odst. 1).
+            $workedFirstDay = SicknessDeadlinePolicy::firstDayShiftDefersSupport($kind)
                 && SicknessCaseService::firstDayFullyWorked($row);
+            $employmentEnd = ($row['employment_end_date'] ?? null) === null
+                ? null
+                : (string) $row['employment_end_date'];
             // Neschopnost do 14 dnů celou kryje náhrada mzdy (§ 26 odst. 1
             // zák. č. 187/2006 Sb.) — dávka z ní neplyne, NEMPRI ani HZUPN
             // se nepodávají a hlídač by strašil lhůtou, která neexistuje.
@@ -1148,10 +1151,16 @@ final readonly class PayrollDeadlineOverviewService
                     'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::Nempri),
                 ],
             ];
-            // HZUPN hlásí nástup po skončení neschopnosti — jen u nemocenského.
-            // Dřív se lhůta HZUPN vypisovala i u ošetřovného nebo mateřské,
-            // tedy povinnost, která neexistuje.
-            if ($kind->hasEndOfIncapacityReport()) {
+            // HZUPN hlásí nástup po skončení neschopnosti — jen u nemocenského
+            // a ne, když zaměstnání skončilo v jejím průběhu nebo vznikla až
+            // v ochranné lhůtě. Totéž pravidlo jako při přípravě hlášení.
+            if ($this->sicknessDeadlines->hzupnNotRequired(
+                $kind,
+                $incapacityFrom,
+                $incapacityTo,
+                $employmentEnd,
+                $workedFirstDay,
+            ) === null) {
                 $documents['hzupn'] = [
                     'agenda' => 'HZUPN',
                     'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::Hzupn),
@@ -1172,6 +1181,10 @@ final readonly class PayrollDeadlineOverviewService
                                 : (string) $row['payroll_payment_date'],
                             (bool) ($row['lone_caregiver'] ?? false),
                             $workedFirstDay,
+                            SicknessDeadlinePolicy::awaitsEventMonthIncome(
+                                ['relation_type' => $row['employment_relation_type'] ?? null],
+                                $row,
+                            ),
                         )
                         : $this->sicknessDeadlines->forHzupn(
                             $incapacityFrom,

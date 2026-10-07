@@ -1816,7 +1816,18 @@ ve spodní liště a tyto sekce:
   den neschopnosti i pracovní dobu (0 a 0, když zaměstnanec nepracoval;
   je-li pracovní doba větší než 0, nesmí být odpracováno 0). HZUPN hlásí nástup do zaměstnání, a proto se jeho lhůta („neprodleně",
   § 97 odst. 3 zákona č. 187/2006 Sb.) počítá ode dne nástupu: od zapsaného
-  dne návratu, jinak od dne po skončení neschopnosti.
+  dne návratu, jinak od dne po skončení neschopnosti. HZUPN se nepodává
+  a hlídač ho nehlídá u neschopnosti do 14 dnů (nemocenské z ní nevzniká),
+  když zaměstnání skončilo v průběhu neschopnosti a když neschopnost vznikla
+  až v ochranné lhůtě; vyzve-li k němu OSSZ, podejte ho podle její výzvy.
+
+**Lhůta NEMPRI u malého rozsahu a DPP.** U zaměstnání malého rozsahu
+a u dohody o provedení práce se oznámení podává až po skončení měsíce,
+v němž událost vznikla: teprve pak je znám započitatelný příjem, který
+oznámení nese. U DPP ho proto vyplňte vždy, jinak se oznámení nepřipraví.
+Odpracoval-li zaměstnanec v den vzniku potřeby ošetřování celou směnu,
+podpůrčí doba ošetřovného, a tím i lhůta oznámení, začíná až následujícím
+dnem, stejně jako první den neschopnosti u nemocenského.
 
 **Ochranná lhůta.** Vznikne-li neschopnost nebo karanténa až po skončení
 zaměstnání, nemocenské náleží jen v ochranné lhůtě 7 kalendářních dnů

@@ -238,6 +238,15 @@ final class PayrollSicknessFullFlowTest extends TestCase
         } catch (SicknessException $exception) {
             self::assertSame('nempri_within_wage_compensation_window', $exception->validationCode);
         }
+        // HZUPN20-CRIT-WEB-1: HZUPN zasílá zaměstnavatel jen u DPN delší než
+        // 14 dnů, stejně jako NEMPRI.
+        try {
+            $this->service(SicknessSubmissionService::class)
+                ->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn);
+            self::fail('HZUPN k neschopnosti do 14 dnů nevzniká.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_within_wage_compensation_window', $exception->validationCode);
+        }
     }
 
     /**

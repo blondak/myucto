@@ -216,11 +216,17 @@ final readonly class PayrollSicknessCaseRepository
                     sickness.worked_on_decisive_day,
                     sickness.hours_worked,
                     sickness.daily_working_hours,
-                    employee.full_name
+                    sickness.small_scope_income_minor,
+                    employee.full_name,
+                    employment.end_date AS employment_end_date,
+                    employment.relation_type AS employment_relation_type
                FROM payroll_sickness_cases sickness
                JOIN payroll_employees employee
                  ON employee.supplier_id = sickness.supplier_id
                 AND employee.id = sickness.employee_id
+          LEFT JOIN payroll_employments employment
+                 ON employment.supplier_id = sickness.supplier_id
+                AND employment.id = sickness.employment_id
               WHERE sickness.supplier_id = ?
                 AND sickness.environment = ?
                 AND sickness.cancelled = 0

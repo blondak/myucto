@@ -596,7 +596,7 @@ final readonly class SicknessCaseFromAbsenceService
                     $case['incapacity_to'] === null ? null : (string) $case['incapacity_to'],
                     null,
                     (bool) ($case['lone_caregiver'] ?? false),
-                    $kind === SicknessBenefitKind::Nem && SicknessCaseService::firstDayFullyWorked($case),
+                    SicknessCaseService::firstDayFullyWorked($case),
                 )->dueOn;
             } catch (SicknessException) {
                 $due = null;
