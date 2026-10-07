@@ -83,7 +83,7 @@ final class PayrollEmploymentRepository
      *
      * @var list<string>
      */
-    public const FOLLOW_UP_ITEMS = ['takeover_deductions_review'];
+    public const FOLLOW_UP_ITEMS = ['takeover_deductions_review', 'takeover_sickness_review'];
 
     private const CHECKLIST_EXCEPTIONS = [
         'partner_dependent' => ['employment_contract'],

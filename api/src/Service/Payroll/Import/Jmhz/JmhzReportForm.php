@@ -22,6 +22,10 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
  *    a součty dnů přes sekce (10240, 10356); vyloučené dny jsou úhrn 10357, a když ho
  *    program nevyplnil, součet podpoložek (nemoc, PPM, ošetřovné, otcovská, omluvená
  *    nepřítomnost, dávky — 10358–10536, 10473–10475); `null`, když formulář seznam ELDP nemá.
+ *    `sickness_excluded_days` jsou vyloučené dny § 18 odst. 7 zák. č. 187/2006 Sb. (10366,
+ *    jinak 10473 + 10474 + 10475), `null` když je hlášení nevydalo; `absence_days` dny nemoci,
+ *    PPM, ošetřovného a výplaty dávek po prvcích (10358–10360, 10474, 10475),
+ *  - `uninsuredIncome`: příjem včetně nepojištěné činnosti (10476).
  *
  * Údaje z bloků, které měkký režim čtení smí přejít (pojištění do, pojistné, čistá mzda,
  * zdravotní pojištění, neodpracované hodiny, ELDP), se čtou tolerantně: nečitelná hodnota

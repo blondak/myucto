@@ -36,6 +36,7 @@ final class PayrollChecklistEvidenceSql
         'health_insurance_deregistration' => 'health_end_obligation',
         'enforcement_insolvency_review' => 'enforcement_termination_notice',
         'takeover_deductions_review' => 'deduction_record',
+        'takeover_sickness_review' => 'sickness_absence_start',
     ];
 
     private const DONE = "obligation.status IN ('submitted', 'fulfilled')
@@ -176,6 +177,21 @@ final class PayrollChecklistEvidenceSql
                       AND agreement.status <> 'cancelled'
                  )
                )
+          )
+          -- Převzaté hlášení vykazuje nemoc, PPM nebo ošetřovné: splněno, jakmile
+          -- je u vztahu schválená taková nepřítomnost se skutečným dnem vzniku
+          -- před prvním měsícem v MyÚčtu (termín úkolu), nebo pokračující
+          -- neschopnost se započtenými dny okna náhrady mzdy. Nepřítomnost
+          -- zadaná od prvního dne v MyÚčtu bez započtených dnů úkol nesplní:
+          -- přesně ta by otevřela druhé okno náhrady mzdy.
+          WHEN 'takeover_sickness_review' THEN EXISTS (
+            SELECT 1 FROM payroll_absences sickness_absence
+             WHERE sickness_absence.supplier_id = item.supplier_id
+               AND sickness_absence.employment_id = item.employment_id
+               AND sickness_absence.status = 'approved'
+               AND sickness_absence.absence_type IN ('dpn', 'quarantine', 'ppm', 'ocr', 'long_term_care')
+               AND (sickness_absence.date_from < item.due_date
+                    OR sickness_absence.sickness_window_carried_days > 0)
           )
           ELSE 0
         END";

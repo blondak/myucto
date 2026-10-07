@@ -320,6 +320,10 @@ final class PayrollTakeoverManualEntryService
                     deductionsMinor: $row['deductions_minor'],
                     netPayableMinor: $row['net_payable_minor'],
                     payoutDate: $row['payout_date'],
+                    // Ruční formulář tyhle veličiny nevede; převzaté z hlášení
+                    // se úpravou měsíce nesmí tiše ztratit.
+                    sicknessExcludedDays: $current?->sicknessExcludedDays,
+                    uninsuredIncomeMinor: $current?->uninsuredIncomeMinor,
                 ),
             );
             $month = $row['month'];

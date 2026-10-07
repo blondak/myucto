@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 /**
- * `CtRozhodneObdobi` — rozhodné období s měsíci, které nepokrývá jednotné
- * měsíční hlášení podané z MyÚčta, a případně pravděpodobný příjem.
+ * `CtRozhodneObdobi` — rozhodné období do NEMPRI.
  *
- * Součty (`zapocitatelnyPrijemCelkem`, `vylouceneDnyCelkem`) se posílají JEN
- * tehdy, když seznam měsíců pokrývá celé rozhodné období (`$complete`). Jinak
- * by součet částečného seznamu vypadal jako součet celého období a ÚSSZ by
- * z něj spočítala nižší denní vyměřovací základ.
+ * Dvě podoby, nikdy obě naráz (logické kontroly NEMPRI25 č. 7, 8 a 16):
+ *
+ *  - **úplný seznam měsíců** (`$complete = true`): každý měsíc rozhodného
+ *    období se započitatelným příjmem v celých Kč a vyloučenými dny; věta
+ *    k nim nese i oba součty,
+ *  - **pravděpodobná výše příjmu** (`$probableIncomeCzk`): jen hranice
+ *    období, `$months = []`, `$complete = false`.
  */
 final readonly class NempriDecisivePeriod
 {
@@ -25,4 +27,22 @@ final readonly class NempriDecisivePeriod
         public bool $complete,
         public ?int $probableIncomeCzk = null,
     ) {}
+
+    /** Započitatelný příjem celého období v haléřích. */
+    public function incomeMinor(): int
+    {
+        return array_sum(array_map(
+            static fn (NempriDecisiveMonth $month): int => $month->countableIncomeMinor,
+            $this->months,
+        ));
+    }
+
+    /** Vyloučené dny celého období. */
+    public function excludedDays(): int
+    {
+        return array_sum(array_map(
+            static fn (NempriDecisiveMonth $month): int => $month->excludedDays,
+            $this->months,
+        ));
+    }
 }

@@ -7,11 +7,14 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 /**
  * Jeden měsíc rozhodného období (`CtPolozkaRozhodnehoObdobi`).
  *
- * Příjem je v haléřích; do věty jde v Kč. `source` říká, odkud měsíc je
- * (`takeover` = převzaté mzdy, `manual` = ruční doplnění u případu).
+ * Příjem je v haléřích zaokrouhlených na celé koruny (NEMPRI přijímá jen
+ * celé Kč); do věty jde v Kč. `source` říká, odkud měsíc je (`payroll` =
+ * schválený mzdový běh MyÚčta, `takeover` = převzaté mzdy, `manual` = ruční
+ * doplnění u případu).
  */
 final readonly class NempriDecisiveMonth
 {
+    public const SOURCE_PAYROLL = 'payroll';
     public const SOURCE_TAKEOVER = 'takeover';
     public const SOURCE_MANUAL = 'manual';
 
