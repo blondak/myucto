@@ -674,6 +674,17 @@ přiložte ho tlačítkem **Přiložit zdůvodnění**, bez přílohy storno ulo
 U takového storna aplikace ukáže jen milník 20. dne následujícího měsíce: do
 něj jde stornovat i měsíční hlášení, později se podává opravné hlášení.
 
+**Ukončení předregistrace (PREZEC P2).** Nenastoupil-li zaměstnanec, kterého
+jste přihlásili částečně (PREZEC P1), označte vztah jako nenastoupený a
+připravte podání: aplikace nabídne **Ukončení předregistrace (PREZEC P2)**.
+P2 musí odkazovat na GUID formuláře původní přijaté P1, jinak ji ČSSZ
+nezpracuje a předregistrace zůstane otevřená. Aplikace proto GUID bere z
+protokolu ČSSZ, kterým byla P1 přijata, a do P2 ho opíše; ukončení se
+připraví až po načtení tohoto protokolu. V P2 jsou jen variabilní symbol,
+rodné číslo, GUID P1 a datum vyhotovení, žádné další osobní údaje. Podává se
+do osmi dnů od předpokládaného dne nástupu. Byl-li zaměstnanec přihlášen
+plnou registrací (REGZEC A1), použijte storno A8.
+
 **Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
 postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
 podle druhu vztahu a doby určité (1111 a 1112 pracovní poměr na dobu neurčitou
@@ -1069,24 +1080,47 @@ a neposouvá se na pracovní den.
 u návrhu, který datová věta skutečně unese. Neptá se na důvod ani na potvrzení:
 obsah je celý odvozený z porovnání, není co doplňovat. Před založením události
 se stav ještě jednou přepočítá, aby se neohlásilo něco, co už mezitím někdo
-vrátil zpátky. Rozhodným datem je **den detekce**, protože lhůta běží ode dne,
-kdy se zaměstnavatel o změně dozvěděl.
+vrátil zpátky.
+
+**Platnost změny a lhůta jsou dvě různá data.** Lhůta osmi dnů běží ode dne
+detekce, tedy ode dne, kdy se zaměstnavatel o změně dozvěděl. Platnost změny
+(do podání jde jako „platnost od") je den, od kterého nový údaj platí. U
+návrhu proto najdete pole **Změna platí od**. Mění-li se jen jméno nebo
+občanství, aplikace předvyplní začátek nové verze identity osoby, u ostatních
+údajů (adresy, pojišťovna a další) předvyplní den zjištění. Datum před
+ohlášením přepište, platí-li změna od jiného dne; lhůta se tím nemění. Změna,
+která teprve nastane, se předem schválit nedá, schválí se až v den její
+platnosti. Při ruční změně (A3) zadáte stejná dvě data: **platnost od** a
+nepovinné **datum, kdy jste se o změně dozvěděli**; bez druhého platí lhůta
+od platnosti.
 
 Schválením ale **nic neodchází**. Vznikne registrační událost; podání se z ní
 připravuje samostatným krokem a odeslání na ČSSZ je krok další. Postup
 odesílání je stejný jako u prvotní registrace.
 
-Jedním kliknutím se ohlásí **titul před jménem, adresa trvalého pobytu,
-doručovací adresa, daňová rezidence, kód zdravotní pojišťovny, nejvyšší
-dosažené vzdělání, přístup cizince na trh práce a pracovní údaje** — postavení
-v zaměstnání, režim práce, nepřetržitý provoz, místo výkonu práce, profese,
-požadované vzdělání a pozice. Změní-li se kterýkoli pracovní údaj, odejde celý
-pracovní blok v aktuální podobě. Změna jména, důchodu a dalších údajů se ohlásí
-větou „Tenhle údaj datová věta A3 v aplikaci
-nenese - podejte ho jinou cestou a návrh pak uzavřete ručně." Nález se
-nezahazuje: povinnost i lhůta existují dál a zůstávají vidět. Jedním kliknutím
-nelze podat ani vymazání hodnoty, ani neúplnou doručovací adresu, ani vznik či
-zánik příslušnosti k cizím předpisům, který má vlastní akci.
+Jedním kliknutím se ohlásí **jméno a příjmení (s dřívějším příjmením z
+historie osoby), státní občanství, titul před jménem, adresa trvalého pobytu,
+adresa pobytu v ČR, doručovací adresa, daňová rezidence, doklad totožnosti,
+důchod, průkaz ZTP a zdravotní omezení, kód zdravotní pojišťovny, nejvyšší
+dosažené vzdělání, přístup cizince na trh práce, stát při trvající příslušnosti
+k cizím předpisům a pracovní údaje** — postavení v zaměstnání, režim práce,
+nepřetržitý provoz, místo výkonu práce, profese, požadované vzdělání a pozice.
+Změní-li se kterýkoli pracovní údaj, odejde celý pracovní blok v aktuální
+podobě; změní-li se jméno nebo příjmení, odejde celé jméno. Datum narození,
+pohlaví a rodné příjmení se přes A3 neopravují (jde o opravu A4). Ostatní údaje
+se ohlásí větou „Tenhle údaj datová věta A3 v aplikaci nenese - podejte ho
+jinou cestou a návrh pak uzavřete ručně." Nález se nezahazuje: povinnost i
+lhůta existují dál a zůstávají vidět. Jedním kliknutím nelze podat ani
+vymazání hodnoty (zánik důchodu, zdravotního omezení), ani víc zdravotních
+omezení najednou, ani neúplnou adresu, ani vznik či zánik příslušnosti k cizím
+předpisům, který má vlastní akci.
+
+**Daňová rezidence v jiném státě než ČR** se hlásí vždy s adresou bydliště
+v tom státě a s druhem a číslem daňového identifikátoru, je-li vyplněn
+(jednoznakový kód druhu). Bez adresy ČSSZ změnu odmítne, proto aplikace
+návrh neslíbí a pošle vás doplnit adresu do profilu A1. Stejné pravidlo platí
+pro přihlášku A1 i pro ruční změnu. PSČ se v podání zapisuje bez mezer
+(„110 00" odejde jako 11000); české PSČ musí mít pět číslic.
 
 Ruční změnu založíte v části **Registrace vztahu na ČSSZ** tlačítkem **Nová
 událost A2–A8**, druh **A3 · změna údajů** a rozsah **Změna jednoho údaje**.

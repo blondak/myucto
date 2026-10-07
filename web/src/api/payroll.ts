@@ -4668,6 +4668,8 @@ export interface PayrollRegistrationChangeProposal {
   action_code: number | null
   status: string
   detected_on: string
+  /** Navržená platnost změny (začátek nové verze jména, jinak den zjištění). */
+  effective_on?: string
   due_on: string
   deadline_source: string
   deadline_ruleset_id: string
@@ -4774,6 +4776,8 @@ export interface PayrollRegistrationEventInput {
   changes?: Record<string, unknown>
   corrections?: Record<string, unknown>
   discovered_on?: string
+  /** A3: den, kdy se zaměstnavatel o změně dozvěděl (začátek osmidenní lhůty). */
+  learned_on?: string
   source_submission_id?: number
   new_variable_symbol?: string
   foreign_insurance?: {
@@ -8551,13 +8555,21 @@ export const payrollApi = {
     `/payroll/submissions/registration/${employmentId}/changes`,
     { environment },
   ).then(response => response.data),
+  /**
+   * Ohlásí navrženou změnu. `effectiveOn` (volitelné) přepíše navrženou
+   * platnost změny; osmidenní lhůta tím nehne, běží ode dne zjištění.
+   */
   fileEmploymentRegistrationChange: (
     employmentId: number,
     proposalId: number,
     environment: PayrollJmhzTransportEnvironment = 'production',
+    effectiveOn?: string | null,
   ) => api.post<{ event: PayrollRegistrationEvent; proposal_id: number }>(
     `/payroll/submissions/registration/${employmentId}/changes/${proposalId}/file`,
-    { environment },
+    {
+      environment,
+      ...(effectiveOn ? { effective_on: effectiveOn } : {}),
+    },
   ).then(response => response.data),
   dismissEmploymentRegistrationChange: (
     employmentId: number,

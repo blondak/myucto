@@ -88,6 +88,43 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Dřívější příjmení osoby ke dni `$onDate` do atributu `name/@ona`
+     * (ID 10064): příjmení z dřívějších verzí identity, která se liší od
+     * platného, oddělená čárkou. `null`, když osoba dřívější příjmení nemá.
+     * Atribut má nejvýš 100 znaků; při přetečení se zahodí nejstarší jména.
+     */
+    public function previousSurnames(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?string {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->date($onDate, 'Rozhodné datum');
+        $names = $this->repository->surnamesUpTo($supplierId, $employeeId, $onDate);
+        if ($names === []) {
+            return null;
+        }
+        $current = $names[array_key_last($names)];
+        $previous = [];
+        foreach (array_slice($names, 0, -1) as $name) {
+            if ($name !== $current && !in_array($name, $previous, true)) {
+                $previous[] = $name;
+            }
+        }
+        if ($previous === []) {
+            return null;
+        }
+        while (count($previous) > 1
+            && mb_strlen(implode(', ', $previous), 'UTF-8') > 100
+        ) {
+            array_shift($previous);
+        }
+
+        return mb_substr(implode(', ', $previous), 0, 100, 'UTF-8');
+    }
+
+    /**
      * Uložený profil plus NÁVRH složený z kmenových dat. Návrh je jen
      * předvyplnění formuláře — uložit ho může výhradně saveA1Profile, a to
      * zase jen do payroll_registration_a1_profiles.

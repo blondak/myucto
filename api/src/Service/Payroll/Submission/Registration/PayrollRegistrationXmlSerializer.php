@@ -956,7 +956,7 @@ final class PayrollRegistrationXmlSerializer
             (string) $payload->interaction->actionCode,
         );
         if ($prezec) {
-            $employee->setAttribute('idform', $payload->formGuid);
+            $employee->setAttribute('idform', $this->prezecFormGuid($payload));
         }
         $employee->setAttribute('dat', $payload->preparedOn);
         if ($prezec && $payload->interaction->actionCode === 9) {
@@ -965,6 +965,32 @@ final class PayrollRegistrationXmlSerializer
                 (string) $payload->expectedStartOn,
             );
         }
+    }
+
+    /**
+     * P1 nese vlastní GUID, P2 musí nést GUID původní přijaté P1 (PREZEC
+     * Předregistrace 1.4, body 9 a 11, atribut 10012). P2 s čerstvým GUID
+     * ČSSZ nespáruje a předregistrace zůstane otevřená, proto bez reference
+     * soubor nevznikne.
+     */
+    private function prezecFormGuid(PayrollRegistrationXmlPayload $payload): string
+    {
+        if ($payload->interaction->actionCode !== 10) {
+            return $payload->formGuid;
+        }
+        if ($payload->referencedFormGuid === null
+            || $payload->referencedFormGuid === ''
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_prezec_p1_guid_missing',
+                'Oznámení o nenastoupení (PREZEC P2) musí odkazovat na GUID '
+                    . 'původního přijatého částečného přihlášení (P1). Bez '
+                    . 'něj ho ČSSZ nezpracuje a předregistrace zůstane '
+                    . 'otevřená.',
+            );
+        }
+
+        return $payload->referencedFormGuid;
     }
 
     /** @param array<string,mixed> $source @return array<string,mixed> */

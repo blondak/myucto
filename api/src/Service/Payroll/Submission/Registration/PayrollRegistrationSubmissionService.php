@@ -625,12 +625,19 @@ final readonly class PayrollRegistrationSubmissionService
             $snapshot,
             $interactionContext,
         );
+        $referencedGuid = $this->referencedPreRegistrationGuid(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $interaction,
+        );
         $payload = $this->payload(
             $snapshot,
             $interaction,
             $context,
             $effectiveOn,
             $event,
+            $referencedGuid,
         );
         $xml = $this->serializer->serialize($payload);
         // Validátor si XML serializuje znovu a porovná bajty; volá se i tady,
@@ -642,11 +649,19 @@ final readonly class PayrollRegistrationSubmissionService
             'interaction' => $interaction,
             'snapshot' => $snapshot,
             'xml' => $xml,
+            // Ukončení předregistrace (P2) staví na týchž údajích osoby jako
+            // P1, takže bez rozlišení by obě podání měla stejný idempotenční
+            // klíč a P2 by skončila konfliktem se zmrazenou P1. Rozlišuje se
+            // jen P2 (a GUID P1, na kterou se odkazuje); otisk P1 a A1 zůstává
+            // beze změny, aby se už zmrazená podání dál poznala jako opakování.
             'source_hash' => $event === null
                 ? hash('sha256', CanonicalJson::encode([
                     'identity' => $snapshot->toArray(),
                     'event_fingerprint' => null,
-                ]))
+                ] + ($referencedGuid === null ? [] : [
+                    'interaction' => $interaction->interaction,
+                    'referenced_form_guid' => $referencedGuid,
+                ])))
                 : $this->eventFingerprint($event),
             'schema_version' => $interaction->documentType,
             'deadline' => $this->deadlineFor(
@@ -780,6 +795,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $context,
         string $effectiveOn,
         ?array $event,
+        ?string $referencedFormGuid = null,
     ): PayrollRegistrationXmlPayload {
         $eventEmployer = is_array($event['employer'] ?? null)
             ? $event['employer']
@@ -856,7 +872,45 @@ final readonly class PayrollRegistrationSubmissionService
                     ?? $context['cssz_workplace_code'])
                 : null,
             eventSnapshot: $event,
+            referencedFormGuid: $referencedFormGuid,
         );
+    }
+
+    /**
+     * GUID přijaté PREZEC P1 pro ukončení předregistrace (P2), jinak null.
+     * Bez doložené reference se P2 nesestaví: ČSSZ by ji nespárovala s P1
+     * a předregistrace by zůstala otevřená (PREZEC 1.4, atribut 10012).
+     */
+    private function referencedPreRegistrationGuid(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        PayrollRegistrationInteraction $interaction,
+    ): ?string {
+        if ($interaction->documentType !== self::AGENDA_PREZEC
+            || $interaction->actionCode !== 10
+        ) {
+            return null;
+        }
+        $guid = $this->registrations->acceptedPreRegistrationGuid(
+            $supplierId,
+            $environment,
+            $employmentId,
+            self::AGENDA_PREZEC,
+        );
+        if ($guid === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_prezec_p1_guid_missing',
+                'Oznámení o nenastoupení (PREZEC P2) se musí odkázat na GUID '
+                    . 'původního částečného přihlášení (P1), ale v protokolu '
+                    . 'ČSSZ k přijaté P1 se GUID formuláře nenašel. Načtěte '
+                    . 'nejdřív protokol k P1 (Podání, odpověď ČSSZ); bez '
+                    . 'správného GUID ČSSZ ukončení předregistrace '
+                    . 'nezpracuje.',
+            );
+        }
+
+        return $guid;
     }
 
     /**

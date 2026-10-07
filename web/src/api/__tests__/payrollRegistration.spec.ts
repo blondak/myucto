@@ -125,6 +125,23 @@ describe('payroll REGZEC event API', () => {
     )
   })
 
+  /** Platnost změny se přepíše jen výslovně, jinak v těle není. */
+  it('sends the overridden validity date only when it is given', async () => {
+    m.post.mockResolvedValue({ data: { event: { id: 42 }, proposal_id: 7 } })
+
+    await payrollApi.fileEmploymentRegistrationChange(5, 7, 'test', '2026-09-01')
+    expect(m.post).toHaveBeenLastCalledWith(
+      '/payroll/submissions/registration/5/changes/7/file',
+      { environment: 'test', effective_on: '2026-09-01' },
+    )
+
+    await payrollApi.fileEmploymentRegistrationChange(5, 7, 'test', null)
+    expect(m.post).toHaveBeenLastCalledWith(
+      '/payroll/submissions/registration/5/changes/7/file',
+      { environment: 'test' },
+    )
+  })
+
   /**
    * Ruční vyřízení vyžaduje důvod: nesplněná zákonná lhůta, která zmizí
    * bez vysvětlení, je horší než nesplněná lhůta, která je vidět.

@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   searchMunicipalities: vi.fn(),
   searchCzIsco: vi.fn(),
   detectChanges: vi.fn(),
+  fileChange: vi.fn(),
   current: vi.fn(),
   locale: 'cs',
 }))
@@ -27,6 +28,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     detectEmploymentRegistrationChanges: m.detectChanges,
+    fileEmploymentRegistrationChange: m.fileChange,
     previewEmploymentRegistration: m.preview,
     prepareEmploymentRegistration: m.prepare,
     currentEmploymentRegistration: m.current,
@@ -1128,6 +1130,43 @@ describe('EmploymentRegistrationPanel', () => {
     ).trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-a1-field="permanent_address.house_number"]').exists()).toBe(true)
+  })
+
+  it('files a detected change with the suggested validity date', async () => {
+    m.detectChanges.mockResolvedValue({
+      as_of: '2026-11-20',
+      reason_code: null,
+      without_baseline: {},
+      proposals: [{
+        id: 52,
+        duty_kind: 'regzec_change',
+        action_code: 3,
+        status: 'open',
+        detected_on: '2026-11-20',
+        effective_on: '2026-11-01',
+        due_on: '2026-11-28',
+        deadline_source: '§ 19 odst. 5 zákona č. 323/2025 Sb.',
+        deadline_ruleset_id: 'cz-regzec-follow-up-2026-04.v1',
+        findings: [{ path: 'identity.last_name', group: 'identity', action_code: 3, sensitive: false, from: 'Registrační', to: 'Nová' }],
+        changes: { identity: { first_name: 'Petra', last_name: 'Nová' } },
+        unsupported: [],
+        fileable: true,
+        created: true,
+      }],
+    })
+    m.fileChange.mockResolvedValue({ event: { id: 9 }, proposal_id: 52 })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-change-effective"]').exists()).toBe(true)
+    const file = wrapper.findAll('button').find(
+      button => button.text() === 'payroll.people.registration.changes.file',
+    )
+    expect(file).toBeDefined()
+    await file!.trigger('click')
+    await flushPromises()
+
+    expect(m.fileChange).toHaveBeenCalledWith(5, 52, 'production', '2026-11-01')
   })
 
   it('sends the explicit ONZ identifier verification with the A2 deregistration', async () => {

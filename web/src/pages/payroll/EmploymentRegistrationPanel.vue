@@ -105,6 +105,8 @@ const changeError = ref('')
 const proposalBusy = ref<number | null>(null)
 const dismissOpenFor = ref<number | null>(null)
 const dismissNotes = ref<Record<number, string>>({})
+/** Platnost změny podle návrhu; účetní ji před ohlášením smí přepsat. */
+const fileEffectiveOn = ref<Record<number, string>>({})
 const events = ref<PayrollRegistrationEvent[]>([])
 const eventsBusy = ref(false)
 const eventSaving = ref(false)
@@ -116,6 +118,8 @@ const effectiveOn = ref('')
 const sourceReference = ref('')
 const sourceSubmissionId = ref<number | null>(null)
 const discoveredOn = ref('')
+/** A3: den, kdy se zaměstnavatel o změně dozvěděl; prázdné = den platnosti. */
+const learnedOn = ref('')
 const newVariableSymbol = ref('')
 const deltaField = ref('title_prefix')
 const deltaValue = ref('')
@@ -1459,6 +1463,7 @@ function resetEventForm(): void {
   sourceReference.value = ''
   sourceSubmissionId.value = null
   discoveredOn.value = ''
+  learnedOn.value = ''
   newVariableSymbol.value = ''
   deltaField.value = eventInteraction.value === 'correction'
     ? 'title_prefix'
@@ -1699,7 +1704,10 @@ function eventPayload(): PayrollRegistrationEventInput {
     // dne vrátí tutéž událost místo duplicity.
     payload.source_reference = `dohlaseni:${changeScope.value}:${effectiveOn.value}`
     payload.completion = changeScope.value as 'full' | 'minimal'
-  } else if (eventInteraction.value === 'change') payload.changes = deltaPayload()
+  } else if (eventInteraction.value === 'change') {
+    payload.changes = deltaPayload()
+    if (learnedOn.value !== '') payload.learned_on = learnedOn.value
+  }
   if (eventInteraction.value === 'correction') {
     payload.corrections = deltaPayload()
     payload.discovered_on = discoveredOn.value
@@ -1772,6 +1780,11 @@ async function loadChangeDetection(): Promise<void> {
       props.employmentId,
       environment.value,
     )
+    for (const proposal of changeDetection.value.proposals) {
+      if (proposal.effective_on && fileEffectiveOn.value[proposal.id] === undefined) {
+        fileEffectiveOn.value[proposal.id] = proposal.effective_on
+      }
+    }
   } catch (exception) {
     changeError.value = serverErrorMessage(
       exception,
@@ -1790,6 +1803,7 @@ async function fileProposal(proposalId: number): Promise<void> {
       props.employmentId,
       proposalId,
       environment.value,
+      fileEffectiveOn.value[proposalId] ?? null,
     )
     await Promise.all([loadChangeDetection(), loadEvents()])
   } catch (exception) {
@@ -1852,6 +1866,9 @@ function proposalSummary(proposal: PayrollRegistrationChangeProposal): string {
 const PROFILE_GAP_FIELDS: Record<string, string> = {
   registration_change_permanent_address_incomplete: 'permanent_address.house_number',
   registration_change_foreign_permit_incomplete: 'foreign_worker.permit_identifier',
+  registration_change_czech_residence_address_incomplete: 'czech_residence_address.house_number',
+  registration_change_tax_residence_address_incomplete: 'tax_residency.residence_address.house_number',
+  registration_change_proof_identity_incomplete: 'proof_identity.number',
 }
 
 function proposalProfileGaps(
@@ -4077,6 +4094,28 @@ async function copyXml(): Promise<void> {
             {{ proposal.deadline_source }}
           </p>
           <div
+            v-if="proposal.fileable && fileEffectiveOn[proposal.id] !== undefined"
+            class="mt-2 flex flex-wrap items-center gap-2"
+            data-test="registration-change-effective"
+          >
+            <label
+              class="text-xs font-medium text-neutral-700"
+              :for="`registration-change-effective-on-${proposal.id}`"
+            >
+              {{ t('payroll.people.registration.changes.effective_on') }}
+            </label>
+            <DateInput
+              :input-id="`registration-change-effective-on-${proposal.id}`"
+              v-model="fileEffectiveOn[proposal.id]"
+              class="rounded-md border border-neutral-300 bg-surface px-2 py-1.5 text-sm text-neutral-900"
+              :data-test="`registration-change-effective-on-${proposal.id}`" />
+            <span class="text-xs text-neutral-500">
+              {{ t('payroll.people.registration.changes.effective_hint', {
+                date: formatDate(proposal.detected_on),
+              }) }}
+            </span>
+          </div>
+          <div
             v-if="proposal.duty_kind === 'health_insurer_change'"
             class="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-700"
             data-test="registration-change-health-hoz"
@@ -4418,6 +4457,10 @@ async function copyXml(): Promise<void> {
               <DateInput v-model="discoveredOn" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" />
             </label>
           </div>
+          <label v-if="eventInteraction === 'change'" class="block text-xs font-medium text-neutral-700 sm:max-w-md">
+            {{ t('payroll.people.registration.event.learned_on') }}
+            <DateInput v-model="learnedOn" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-event-learned-on" />
+          </label>
           <label class="block text-xs font-medium text-neutral-700">
             {{ t('payroll.people.registration.event.delta_field') }}
             <select v-model="deltaField" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 sm:max-w-md">

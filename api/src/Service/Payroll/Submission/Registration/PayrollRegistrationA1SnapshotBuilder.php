@@ -281,8 +281,9 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
 
         if ($taxResidency !== null
-            && $taxResidency['country_code'] !== ''
-            && $taxResidency['country_code'] !== 'CZ'
+            && PayrollRegistrationTaxResidencyRule::requiresResidenceAddress(
+                $taxResidency['country_code'],
+            )
             && $taxResidency['residence_address'] === null
         ) {
             $this->invalid(

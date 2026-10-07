@@ -125,6 +125,74 @@ final class PayrollRegistrationSubmissionRepository
     }
 
     /**
+     * GUID formuláře přijaté PREZEC P1, na který se PREZEC P2 odkazuje
+     * (atribut 10012; bez správné reference ČSSZ ukončení nezpracuje).
+     *
+     * Bere se z doloženého výsledku formuláře v důvěryhodném protokolu, tedy
+     * z toho, co ČSSZ skutečně přijala, ne z čerstvě vygenerované hodnoty.
+     * Hledá se NEJSTARŠÍ přijatý PREZEC vztahu: P2 vzniká vždy až po přijaté
+     * P1 a druhou P1 resolver nepustí, takže pozdější přijaté podání téhož
+     * vztahu je už samo ukončení. Prázdný výsledek znamená „GUID nedoložen"
+     * a P2 se v tom případě nepodává.
+     */
+    public function acceptedPreRegistrationGuid(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $agendaCode,
+    ): ?string {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT outcome.form_guid
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_submission_receipts receipt
+                 ON receipt.supplier_id = submission.supplier_id
+                AND receipt.environment = submission.environment
+                AND receipt.submission_id = submission.id
+                AND receipt.verification_status = \'trusted\'
+                AND receipt.remote_status = \'accepted\'
+               JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.submission_id = receipt.submission_id
+                AND outcome.receipt_id = receipt.id
+                AND (
+                    outcome.part_id = part.id
+                    OR (
+                        outcome.part_id IS NULL
+                        AND 1 = (
+                            SELECT COUNT(*)
+                              FROM payroll_submission_parts receipt_part
+                             WHERE receipt_part.supplier_id = submission.supplier_id
+                               AND receipt_part.environment = submission.environment
+                               AND receipt_part.submission_id = submission.id
+                        )
+                    )
+                )
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.agenda_code = ?
+                AND part.subject_reference = ?
+                AND submission.status = \'accepted\'
+                AND outcome.remote_status = \'accepted\'
+              ORDER BY submission.id ASC, outcome.id ASC
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            self::employmentReference($employmentId),
+        ]);
+        $guid = $statement->fetchColumn();
+
+        return is_string($guid) && $guid !== '' ? $guid : null;
+    }
+
+    /**
      * Nejnovější registrační podání pro vztah — podklad pro UI i pro rozhodnutí,
      * jestli se má vůbec něco zakládat.
      *

@@ -1097,8 +1097,43 @@ final readonly class PayrollRegistrationEventService
                     ),
             );
         }
+        $this->assertTaxResidencyAddress($data['delta']);
 
         return $data;
+    }
+
+    /**
+     * Rezidence v jiném státě než ČR musí nést adresu bydliště (`rdr`, zásady
+     * REGZEC 10519 až 10524). Pravidlo je totéž jako u přihlášky A1, proto ho
+     * drží {@see PayrollRegistrationTaxResidencyRule}.
+     *
+     * @param array<string,mixed> $delta
+     */
+    private function assertTaxResidencyAddress(array $delta): void
+    {
+        $residency = $delta['tax_residency'] ?? null;
+        if (!is_array($residency)
+            || !PayrollRegistrationTaxResidencyRule::requiresResidenceAddress(
+                is_string($residency['country_code'] ?? null)
+                    ? $residency['country_code']
+                    : null,
+            )
+            || is_array($residency['residence_address'] ?? null)
+        ) {
+            return;
+        }
+
+        throw new PayrollRegistrationXmlException(
+            'registration_tax_residence_address_missing',
+            'Při změně daňové rezidence na jiný stát než ČR musí podání nést'
+                . ' i adresu bydliště v tom státě: ČSSZ ji u daňového'
+                . ' rezidenta jiného státu vyžaduje. Vyplňte ji v profilu'
+                . ' registrace A1 a změnu ohlaste z návrhu v bloku Změny'
+                . ' k ohlášení.'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'tax_residency.residence_address',
+                ),
+        );
     }
 
     /**
@@ -1212,6 +1247,8 @@ final readonly class PayrollRegistrationEventService
                 'relationship_detail_code', 'health_insurance_code',
                 'highest_education_code', 'employment',
                 'permanent_address', 'foreign_worker',
+                'identity', 'pension', 'facts', 'czech_residence_address',
+                'proof_identity', 'foreign_legislation',
             ];
         $this->onlyKeys(
             $raw,
@@ -1247,6 +1284,12 @@ final readonly class PayrollRegistrationEventService
                 'permanent_address' => $this->permanentAddress($value),
                 'foreign_worker' => $this->foreignWorkerChange($value),
                 'employment' => $this->employmentChange($value),
+                'identity' => $this->identityChange($value),
+                'pension' => $this->pensionChange($value),
+                'facts' => $this->factsChange($value),
+                'czech_residence_address' => $this->czechResidenceAddress($value),
+                'proof_identity' => $this->proofIdentityChange($value),
+                'foreign_legislation' => $this->foreignLegislationChange($value),
                 // Interní kontrakt: klíče už prošly onlyKeys() výš, sem se
                 // uživatelský vstup nedostane. Zůstává technická — akce ji
                 // nechytá, protože jde o chybu programu.
@@ -1298,6 +1341,7 @@ final readonly class PayrollRegistrationEventService
         );
         $data = $this->delta($input, true);
         $delta = $data['delta'];
+        $this->assertTaxResidencyAddress($delta);
         if (array_key_exists('relationship_detail_code', $delta)) {
             $sourceActivity = $frozenSource['activity_code'];
             if (!is_string($sourceActivity) || $sourceActivity === '') {
@@ -1629,6 +1673,17 @@ final readonly class PayrollRegistrationEventService
             }
             return $discoveredOn;
         }
+        if ($interaction === 'change' && ($input['learned_on'] ?? null) !== null) {
+            // Platnost změny (`effective_on`, atribut 10009) a začátek osmidenní
+            // lhůty (§ 19 odst. 5 zákona č. 323/2025 Sb.: ode dne, kdy se
+            // zaměstnavatel o změně dozvěděl) jsou dvě různá data. Změna
+            // zjištěná zpětně se hlásí s platností od skutečného dne a lhůta
+            // běží od zjištění; změna, o které se ví předem, se nehlásí dřív,
+            // než nastane.
+            $learnedOn = $this->date($input['learned_on'], 'learned_on');
+
+            return max($effectiveOn, $learnedOn);
+        }
         if ($interaction === 'cancellation'
             && ($input['not_started'] ?? null) !== false
         ) {
@@ -1729,11 +1784,16 @@ final readonly class PayrollRegistrationEventService
         ];
     }
 
-    /** @return array<string,string> */
+    /**
+     * Daňová rezidence v A3/A4 (element `taxidrezid`) s volitelným daňovým
+     * identifikátorem a adresou bydliště ve státě rezidence (`rdr`).
+     *
+     * @return array<string,mixed>
+     */
     private function taxResidency(mixed $value): array
     {
         $raw = $this->object($value, 'tax_residency');
-        return [
+        $result = [
             'country_code' => $this->country(
                 $raw['country_code'] ?? null,
                 'tax_residency.country_code',
@@ -1741,6 +1801,356 @@ final readonly class PayrollRegistrationEventService
             'changed_on' => $this->date(
                 $raw['changed_on'] ?? null,
                 'tax_residency.changed_on',
+            ),
+        ];
+        $hasType = ($raw['identifier_type'] ?? null) !== null;
+        $hasIdentifier = ($raw['identifier'] ?? null) !== null;
+        if ($hasType !== $hasIdentifier) {
+            throw new \InvalidArgumentException($this->say(
+                $hasType ? 'tax_residency.identifier' : 'tax_residency.identifier_type',
+                'chybí. Daňový identifikátor se uvádí vždy s druhem, oba'
+                    . ' údaje najednou.',
+            ));
+        }
+        if ($hasType) {
+            // Druh identifikátoru je v schématu jednoznakový kód (`type`).
+            $result['identifier_type'] = $this->requiredText(
+                $raw['identifier_type'],
+                'tax_residency.identifier_type',
+                1,
+            );
+            $result['identifier'] = $this->requiredText(
+                $raw['identifier'],
+                'tax_residency.identifier',
+                64,
+            );
+        }
+        if (($raw['residence_address'] ?? null) !== null) {
+            $result['residence_address'] = $this->residenceAddress(
+                $raw['residence_address'],
+            );
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Adresa bydliště ve státě daňové rezidence (`rdr`): číslo domu, PSČ,
+     * obec a stát jsou povinné, ulice a orientační číslo ne.
+     *
+     * @return array<string,string>
+     */
+    private function residenceAddress(mixed $value): array
+    {
+        $path = 'tax_residency.residence_address';
+        $raw = $this->object($value, $path);
+        $this->onlyKeys($raw, [
+            'street', 'house_number', 'orientation_number', 'postal_code',
+            'city', 'country_code', 'ruian_point',
+        ], $path . '.', 'v adrese bydliště ve státě rezidence');
+        $country = $this->country($raw['country_code'] ?? null, $path . '.country_code');
+        $result = [
+            'house_number' => $this->requiredText(
+                $raw['house_number'] ?? null,
+                $path . '.house_number',
+                12,
+            ),
+            'postal_code' => $this->postalCode(
+                $raw['postal_code'] ?? null,
+                $country,
+                $path . '.postal_code',
+            ),
+            'city' => $this->requiredText($raw['city'] ?? null, $path . '.city', 50),
+            'country_code' => $country,
+        ];
+        foreach (['street' => 50, 'orientation_number' => 12, 'ruian_point' => 12] as $key => $max) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->requiredText($raw[$key], $path . '.' . $key, $max);
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * PSČ v adrese datové věty. Mezery se odstraní (schéma je nepřipouští)
+     * a tvar se ověří podle státu; chybné PSČ vrací větu, ne hlášku XSD.
+     */
+    private function postalCode(mixed $value, string $country, string $path): string
+    {
+        $text = $this->requiredText($value, $path, 20);
+        $normalized = PayrollRegistrationPostalCode::valid($text, $country);
+        if ($normalized === null) {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                $country === 'CZ'
+                    ? "musí mít u české adresy pět číslic, například 11000 (mezery se při podání odstraní), teď je „{$text}“."
+                    : "obsahuje znak, který datová věta ČSSZ nepřipouští (mezery se odstraní, povolená jsou písmena, číslice a - , . + ' /), teď je „{$text}“.",
+            ));
+        }
+        if (mb_strlen($normalized, 'UTF-8') > 11) {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'smí mít po odstranění mezer nejvýš 11 znaků, teď má '
+                    . mb_strlen($normalized, 'UTF-8') . '.',
+            ));
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Jméno, příjmení a státní občanství v A3 (elementy `name` a `stat`).
+     * `previous_surnames` jsou dřívější příjmení oddělená čárkou; serializér
+     * z nich skládá `name/@ona` (ID 10064).
+     *
+     * @return array<string,string>
+     */
+    private function identityChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'identity');
+        $this->onlyKeys($raw, [
+            'last_name', 'first_name', 'citizenship_country_code',
+            'previous_surnames',
+        ], 'identity.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [];
+        foreach (['last_name' => 50, 'first_name' => 50] as $key => $max) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->requiredText($raw[$key], 'identity.' . $key, $max);
+            }
+        }
+        if (($raw['citizenship_country_code'] ?? null) !== null) {
+            $result['citizenship_country_code'] = $this->country(
+                $raw['citizenship_country_code'],
+                'identity.citizenship_country_code',
+            );
+        }
+        if ($result === []) {
+            throw new \InvalidArgumentException($this->note(
+                'identity',
+                'je prázdná. Vyberte jméno, příjmení nebo státní občanství,'
+                    . ' které se mění.',
+            ));
+        }
+        if (($raw['previous_surnames'] ?? null) !== null) {
+            $result['previous_surnames'] = $this->requiredText(
+                $raw['previous_surnames'],
+                'identity.previous_surnames',
+                100,
+            );
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Důchod v A3 (element `pens`): druh a datum přiznání jdou vždy spolu.
+     *
+     * @return array<string,string|bool>
+     */
+    private function pensionChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'pension');
+        $this->onlyKeys($raw, [
+            'type_code', 'received_from', 'early_retirement',
+            'reduced_retirement_age',
+        ], 'pension.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [
+            'type_code' => $this->requiredText($raw['type_code'] ?? null, 'pension.type_code', 3),
+            'received_from' => $this->date($raw['received_from'] ?? null, 'pension.received_from'),
+        ];
+        foreach (['early_retirement', 'reduced_retirement_age'] as $key) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->bool($raw[$key], 'pension.' . $key);
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Zdravotní stav v A3 (element `fact`): průkaz ZTP a zdravotní omezení.
+     * Schéma připouští nejvýš jedno omezení (`healtrest`). Nejvyšší vzdělání
+     * se posílá samostatným klíčem `highest_education_code`.
+     *
+     * @return array<string,mixed>
+     */
+    private function factsChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'facts');
+        $this->onlyKeys($raw, [
+            'disability_card', 'health_restrictions',
+        ], 'facts.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [];
+        if (($raw['disability_card'] ?? null) !== null) {
+            $result['disability_card'] = $this->bool(
+                $raw['disability_card'],
+                'facts.disability_card',
+            );
+        }
+        if (($raw['health_restrictions'] ?? null) !== null) {
+            $restrictions = $raw['health_restrictions'];
+            if (!is_array($restrictions) || !array_is_list($restrictions)
+                || $restrictions === []
+            ) {
+                throw new \InvalidArgumentException($this->say(
+                    'facts.health_restrictions',
+                    'chybí. Vyplňte zdravotní omezení s druhem a datem od.',
+                ));
+            }
+            if (count($restrictions) > 1) {
+                throw new \InvalidArgumentException($this->say(
+                    'facts.health_restrictions',
+                    'smí mít v jednom podání jediné omezení, ČSSZ jich v jedné'
+                        . ' větě víc nepřijímá.',
+                ));
+            }
+            $row = $this->object($restrictions[0], 'facts.health_restrictions[]');
+            $item = [
+                'type_code' => $this->requiredText(
+                    $row['type_code'] ?? null,
+                    'facts.health_restrictions[].type_code',
+                    3,
+                ),
+                'from' => $this->date(
+                    $row['from'] ?? null,
+                    'facts.health_restrictions[].from',
+                ),
+            ];
+            if (($row['to'] ?? null) !== null) {
+                $item['to'] = $this->date($row['to'], 'facts.health_restrictions[].to');
+            }
+            $result['health_restrictions'] = [$item];
+        }
+        if ($result === []) {
+            throw new \InvalidArgumentException($this->note(
+                'facts',
+                'je prázdný. Vyberte průkaz ZTP nebo zdravotní omezení,'
+                    . ' které se mění.',
+            ));
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Adresa pobytu v ČR u cizince s trvalým pobytem v zahraničí (element
+     * `fdr`, bez státu): číslo domu, PSČ a obec jsou povinné.
+     *
+     * @return array<string,string>
+     */
+    private function czechResidenceAddress(mixed $value): array
+    {
+        $raw = $this->object($value, 'czech_residence_address');
+        $this->onlyKeys($raw, [
+            'street', 'house_number', 'orientation_number', 'postal_code',
+            'city', 'ruian_point',
+        ], 'czech_residence_address.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [
+            'house_number' => $this->requiredText(
+                $raw['house_number'] ?? null,
+                'czech_residence_address.house_number',
+                12,
+            ),
+            'postal_code' => $this->postalCode(
+                $raw['postal_code'] ?? null,
+                'CZ',
+                'czech_residence_address.postal_code',
+            ),
+            'city' => $this->requiredText(
+                $raw['city'] ?? null,
+                'czech_residence_address.city',
+                50,
+            ),
+        ];
+        foreach (['street' => 50, 'orientation_number' => 12, 'ruian_point' => 12] as $key => $max) {
+            if (($raw[$key] ?? null) !== null) {
+                $result[$key] = $this->requiredText(
+                    $raw[$key],
+                    'czech_residence_address.' . $key,
+                    $max,
+                );
+            }
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Doklad totožnosti cizince v A3 (element `proofid`).
+     *
+     * @return array<string,string>
+     */
+    private function proofIdentityChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'proof_identity');
+        $this->onlyKeys($raw, [
+            'type_code', 'number', 'foreign_issuer', 'country_code',
+        ], 'proof_identity.', 'v podání „' . $this->actionName(3) . '“');
+        $result = [
+            'type_code' => $this->requiredText(
+                $raw['type_code'] ?? null,
+                'proof_identity.type_code',
+                3,
+            ),
+            'number' => $this->requiredText(
+                $raw['number'] ?? null,
+                'proof_identity.number',
+                64,
+            ),
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'proof_identity.country_code',
+            ),
+        ];
+        if (($raw['foreign_issuer'] ?? null) !== null) {
+            $result['foreign_issuer'] = $this->requiredText(
+                $raw['foreign_issuer'],
+                'proof_identity.foreign_issuer',
+                255,
+            );
+        }
+        ksort($result, SORT_STRING);
+
+        return $result;
+    }
+
+    /**
+     * Změna státu při trvající příslušnosti k cizím předpisům (element
+     * `forinreg`). Vznik a skončení příslušnosti jdou akcemi A6 a A7.
+     *
+     * @return array<string,string|bool>
+     */
+    private function foreignLegislationChange(mixed $value): array
+    {
+        $raw = $this->object($value, 'foreign_legislation');
+        $this->onlyKeys($raw, [
+            'applies', 'country_code',
+        ], 'foreign_legislation.', 'v podání „' . $this->actionName(3) . '“');
+        if ($this->bool($raw['applies'] ?? null, 'foreign_legislation.applies') !== true) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_foreign_legislation_requires_other_action',
+                'Skončení příslušnosti k cizím předpisům se přes '
+                    . $this->actionName(3)
+                    . ' nehlásí. Použijte oznámení o skončení příslušnosti'
+                    . ' (REGZEC A7).'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'foreign_legislation.applies',
+                    ),
+            );
+        }
+
+        return [
+            'applies' => true,
+            'country_code' => $this->country(
+                $raw['country_code'] ?? null,
+                'foreign_legislation.country_code',
             ),
         ];
     }
@@ -1805,26 +2215,27 @@ final readonly class PayrollRegistrationEventService
             'street', 'house_number', 'orientation_number', 'postal_code',
             'city', 'country_code', 'ruian_point',
         ], 'permanent_address.', 'v podání „' . $this->actionName(3) . '“');
+        $country = $this->country(
+            $raw['country_code'] ?? null,
+            'permanent_address.country_code',
+        );
         $result = [
             'house_number' => $this->requiredText(
                 $raw['house_number'] ?? null,
                 'permanent_address.house_number',
                 12,
             ),
-            'postal_code' => $this->requiredText(
+            'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,
+                $country,
                 'permanent_address.postal_code',
-                11,
             ),
             'city' => $this->requiredText(
                 $raw['city'] ?? null,
                 'permanent_address.city',
                 50,
             ),
-            'country_code' => $this->country(
-                $raw['country_code'] ?? null,
-                'permanent_address.country_code',
-            ),
+            'country_code' => $country,
         ];
         foreach (['street' => 50, 'orientation_number' => 12, 'ruian_point' => 12] as $key => $max) {
             if (($raw[$key] ?? null) !== null) {
@@ -1899,6 +2310,10 @@ final readonly class PayrollRegistrationEventService
     private function contactAddress(mixed $value): array
     {
         $raw = $this->object($value, 'contact_address');
+        $country = $this->country(
+            $raw['country_code'] ?? null,
+            'contact_address.country_code',
+        );
         $result = [
             'street' => $this->requiredText(
                 $raw['street'] ?? null,
@@ -1910,20 +2325,17 @@ final readonly class PayrollRegistrationEventService
                 'contact_address.house_number',
                 12,
             ),
-            'postal_code' => $this->requiredText(
+            'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,
+                $country,
                 'contact_address.postal_code',
-                11,
             ),
             'city' => $this->requiredText(
                 $raw['city'] ?? null,
                 'contact_address.city',
                 50,
             ),
-            'country_code' => $this->country(
-                $raw['country_code'] ?? null,
-                'contact_address.country_code',
-            ),
+            'country_code' => $country,
         ];
         foreach (['orientation_number', 'ruian_point'] as $key) {
             if (array_key_exists($key, $raw)) {
