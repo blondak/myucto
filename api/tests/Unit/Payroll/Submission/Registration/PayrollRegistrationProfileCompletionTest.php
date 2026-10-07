@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlExce
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlValidator;
+use MyInvoice\Tests\Unit\Payroll\Import\Registration\RegistrationXmlFixtures;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -92,6 +93,19 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         self::assertStringContainsString(' to="2026-06-30"', $xml);
     }
 
+    /** Karta osoby vede rodné číslo s lomítkem; XSD pustí jen 9 až 10 číslic. */
+    public function testBirthNumberFromThePersonCardIsSentWithoutSlash(): void
+    {
+        $digits = RegistrationXmlFixtures::birthNumber('1991-02-03', 'female', 7);
+        $xml = self::serialize(
+            PayrollRegistrationProfileCompletion::MINIMAL,
+            null,
+            substr($digits, 0, 6) . '/' . substr($digits, 6),
+        );
+
+        self::assertStringContainsString(' bno="' . $digits . '"', $xml);
+    }
+
     public function testCompletionIsOfferedOnlyForTheStandardVariant(): void
     {
         $a1 = (new PayrollRegistrationA1SnapshotBuilder())->build(
@@ -109,13 +123,13 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         );
     }
 
-    private static function serialize(string $mode, ?string $endOn): string
+    private static function serialize(string $mode, ?string $endOn, string $birthNumber = '9152031234'): string
     {
         $a1 = self::a1();
         $delta = PayrollRegistrationProfileCompletion::delta(
             $a1,
             PayrollRegistrationA1SnapshotBuilderTest::identity(),
-            ['birth_number' => '9152031234', 'ecp' => null, 'vcp' => null],
+            ['birth_number' => $birthNumber, 'ecp' => null, 'vcp' => null],
             $mode,
             $endOn,
         );

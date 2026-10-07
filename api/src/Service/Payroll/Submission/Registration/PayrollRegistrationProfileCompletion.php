@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\CzechBirthNumber;
+
 /**
  * Dohlášení údajů zaměstnance akcí REGZEC A3 („Změna").
  *
@@ -87,7 +89,7 @@ final class PayrollRegistrationProfileCompletion
         }
         $taxResidency = $a1->taxResidency ?? [];
         $delta = [
-            'birth_number' => self::text($identifiers['birth_number'] ?? null)
+            'birth_number' => CzechBirthNumber::forSubmission(self::text($identifiers['birth_number'] ?? null))
                 ?? self::text($identifiers['ecp'] ?? null),
             'employment' => $employment,
             'facts' => self::pick(
