@@ -524,6 +524,11 @@ final class JmhzScenario1DocumentResolver
                         $employment['scenario_resolution'] ?? null,
                         $employmentId,
                         $blockers,
+                        count(array_filter(
+                            $employments,
+                            fn (mixed $row): bool => is_array($row)
+                                && ($this->object($row['insurance'] ?? null)['kind'] ?? null) === 'employment',
+                        )),
                     ),
                     'primary' => $employmentSource['is_primary'] ?? null,
                     // 10535 za TENTO vztah; viz relationshipTaxableIncomeCzk().
@@ -2020,6 +2025,7 @@ final class JmhzScenario1DocumentResolver
         mixed $scenarioResolution,
         ?int $employmentId,
         array &$blockers,
+        int $employmentRelationships,
     ): ?array {
         $relationship = $this->object($insurance);
         if (($relationship['part_time_employer_discount'] ?? null) !== 'verified'
@@ -2057,7 +2063,17 @@ final class JmhzScenario1DocumentResolver
         }
         $weeklyCentihours = null;
         if ($reason->requiresShorterWorkingTime()) {
-            $millihours = $relationship['agreed_weekly_working_millihours'] ?? null;
+            /*
+             * 10373 je týdenní doba ze všech pracovních poměrů osoby
+             * u zaměstnavatele dohromady (Pokyny k vyplnění MH kap. 3.6.9),
+             * tedy úhrn, nad kterým výpočet pojistného posoudil § 7a odst. 2.
+             * Výsledek zmrazený dřív úhrn nenese; vlastní sjednaná doba se
+             * z něj smí vzít jen tehdy, když je pracovní poměr osoby jediný.
+             */
+            $millihours = $relationship['part_time_discount_weekly_working_millihours_total']
+                ?? ($employmentRelationships === 1
+                    ? ($relationship['agreed_weekly_working_millihours'] ?? null)
+                    : null);
             // 10373 je `cislo4_2Type`, tedy nejvýše 99,99 hodiny na dvě
             // desetinná místa. Tisícina hodiny se do něj nevejde a zaokrouhlit
             // ji potichu by znamenalo vykázat jiný úvazek, než jaký je sjednaný.

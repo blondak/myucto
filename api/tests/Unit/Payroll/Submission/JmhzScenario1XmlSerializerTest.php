@@ -1560,6 +1560,61 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * 10373 je týdenní doba ze všech pracovních poměrů osoby u zaměstnavatele
+     * dohromady (Pokyny k vyplnění MH kap. 3.6.9). Má-li osoba vedle vztahu se
+     * slevou (20 h) ještě druhý pracovní poměr (8 h), vykazuje se 28 h, tedy
+     * úhrn, který výsledek pojistného nese u vztahu se slevou.
+     */
+    public function testShorterWorkingTimeIsTheTotalOfAllEmploymentsOfThePerson(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $payload['people'][0]['employments'][0]['insurance']
+            ['part_time_discount_weekly_working_millihours_total'] = 28_000;
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload, $this->discountPvpoj()),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertStringContainsString(
+            '<form:pracovniDobaKratsi>28.00</form:pracovniDobaKratsi>',
+            $xml,
+        );
+    }
+
+    /**
+     * Výsledek zmrazený dřív úhrn nenese. Vlastní sjednanou dobu lze vzít jen
+     * u osoby s jediným pracovním poměrem; s druhým by hlášení vykázalo
+     * kratší rozsah, než jaký zaměstnanec u zaměstnavatele má.
+     */
+    public function testLegacyResultWithoutTotalIsRefusedForMoreEmployments(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $second = $payload['people'][0]['employments'][0];
+        $second['employment_id'] = 102;
+        $second['insurance'] = [
+            'relationship_id' => 'employment:102',
+            'kind' => 'employment',
+        ] + $second['insurance'];
+        unset(
+            $second['insurance']['part_time_employer_discount'],
+            $second['insurance']['part_time_employer_discount_outcome'],
+            $second['insurance']['part_time_employer_discount_reason'],
+        );
+        $payload['people'][0]['employments'][] = $second;
+
+        $resolution = $this->resolutionFor($payload, $this->discountPvpoj());
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_working_time_unresolved',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
      * Osvobozené příjmy (10289) jsou PODMNOŽINOU zúčtovaného příjmu (10286),
      * ne veličina vedle něj — kontrola 97 ČSSZ zní „(10289) =< (10286)".
      *

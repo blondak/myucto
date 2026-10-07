@@ -573,6 +573,68 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
     }
 
     /**
+     * 10373 je týdenní doba ze všech pracovních poměrů osoby dohromady,
+     * i z těch, ze kterých se sleva neuplatňuje. Výsledek ji nese u vztahu,
+     * ze kterého se sleva uplatňuje, jako týž úhrn, nad kterým rozhodl § 7a
+     * odst. 2; DPČ do něj nepatří.
+     */
+    public function testClaimedRelationshipCarriesTheWeeklyTimeOfAllEmployments(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship(
+                    'hpp-1',
+                    SocialEmploymentKind::Employment,
+                    450_000,
+                    1_000_000,
+                    partTimeDiscount: SocialDiscountEvidence::Verified,
+                    allocationOrder: 1,
+                    assessableMillihours: 50_000,
+                    weeklyMillihours: 20_000,
+                ),
+                $this->relationship(
+                    'hpp-2',
+                    SocialEmploymentKind::Employment,
+                    450_000,
+                    500_000,
+                    allocationOrder: 2,
+                    assessableMillihours: 20_000,
+                    weeklyMillihours: 8_000,
+                ),
+                $this->relationship(
+                    'dpc',
+                    SocialEmploymentKind::Dpc,
+                    450_000,
+                    500_000,
+                    allocationOrder: 3,
+                    weeklyMillihours: 10_000,
+                ),
+            ]),
+        ]);
+
+        self::assertSame(SocialCalculationStatus::Calculated, $result->status, implode(', ', $result->issues));
+        $byId = [];
+        foreach ($result->people[0]->relationships as $relationship) {
+            $byId[$relationship->relationshipId] = $relationship;
+        }
+        $claimed = $byId['hpp-1'];
+        $other = $byId['hpp-2'];
+        self::assertSame(
+            SocialPartTimeDiscountOutcome::Applied,
+            $claimed->partTimeEmployerDiscountOutcome,
+        );
+        self::assertSame(
+            28_000,
+            $claimed->jsonSerialize()['part_time_discount_weekly_working_millihours_total'],
+        );
+        self::assertSame(20_000, $claimed->jsonSerialize()['agreed_weekly_working_millihours']);
+        self::assertArrayNotHasKey(
+            'part_time_discount_weekly_working_millihours_total',
+            $other->jsonSerialize(),
+        );
+    }
+
+    /**
      * Chybějící odpracované hodiny nesmí slevu tiše přiznat: § 7c odst. 3 dělá
      * z přeplacené slevy dluh na pojistném, kdežto neuplatněná sleva žádný
      * nedoplatek nezakládá. Bez podkladu proto měsíc končí ručním posouzením.

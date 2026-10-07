@@ -635,8 +635,12 @@ final class SocialInsuranceMonthCalculator
      * Sazba se pak podle § 7b odst. 2 počítá jen z vyměřovacího základu toho
      * zaměstnání, ze kterého se sleva uplatňuje.
      *
+     * Vedle výsledku vrací i úhrn sjednané týdenní doby, nad kterým se
+     * rozhodlo: týž úhrn vykazuje měsíční hlášení jako rozsah kratší pracovní
+     * doby (10373), takže se nesmí počítat podruhé jinde.
+     *
      * @param list<SocialRelationshipFacts> $facts
-     * @return array<string,SocialPartTimeDiscountOutcome>
+     * @return array<string,array{outcome:SocialPartTimeDiscountOutcome,weekly_millihours:int}>
      */
     private function partTimeDiscountOutcomes(
         PayrollRulesetVersion $ruleset,
@@ -711,7 +715,10 @@ final class SocialInsuranceMonthCalculator
             $outcome = SocialPartTimeDiscountOutcome::WorkedHoursAboveLimit;
         }
 
-        return [$claim->relationship->relationshipId => $outcome];
+        return [$claim->relationship->relationshipId => [
+            'outcome' => $outcome,
+            'weekly_millihours' => $weeklyMillihours,
+        ]];
     }
 
     /**
@@ -891,7 +898,7 @@ final class SocialInsuranceMonthCalculator
      * @param list<SocialRelationshipFacts> $facts
      * @param array<string, SocialParticipationDecision> $decisions
      * @param array<string,int> $allocations
-     * @param array<string,SocialPartTimeDiscountOutcome> $discountOutcomes
+     * @param array<string,array{outcome:SocialPartTimeDiscountOutcome,weekly_millihours:int}> $discountOutcomes
      * @param array<string,array{before:int,discount:int,contribution_step:?CalculationStep,discount_step:?CalculationStep}> $contributions
      * @return list<SocialRelationshipResult>
      */
@@ -911,6 +918,7 @@ final class SocialInsuranceMonthCalculator
             ): SocialRelationshipResult {
                 $relationship = $fact->relationship;
                 $contribution = $contributions[$relationship->relationshipId] ?? null;
+                $discountOutcome = $discountOutcomes[$relationship->relationshipId] ?? null;
 
                 return new SocialRelationshipResult(
                     $relationship->relationshipId,
@@ -928,12 +936,13 @@ final class SocialInsuranceMonthCalculator
                     $relationship->partTimeEmployerDiscountEvidenceReference,
                     $relationship->employerRateCategoryEvidenceReference,
                     $relationship->partTimeEmployerDiscountReason,
-                    $discountOutcomes[$relationship->relationshipId] ?? null,
+                    $discountOutcome['outcome'] ?? null,
                     $relationship->agreedWeeklyWorkingMillihours,
                     $contribution['before'] ?? null,
                     $contribution === null ? null : $contribution['discount'],
                     $contribution['contribution_step'] ?? null,
                     $contribution['discount_step'] ?? null,
+                    $discountOutcome['weekly_millihours'] ?? null,
                 );
             },
             $facts,

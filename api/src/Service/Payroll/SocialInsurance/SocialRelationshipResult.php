@@ -37,6 +37,7 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public ?int $workingPensionerDiscountMinorUnits = null,
         public ?CalculationStep $employeeContributionStep = null,
         public ?CalculationStep $employeeDiscountStep = null,
+        public ?int $partTimeDiscountWeeklyWorkingMillihoursTotal = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -77,6 +78,18 @@ final readonly class SocialRelationshipResult implements JsonSerializable
              * ČSSZ odhalí až na protokolu.
              */
             'agreed_weekly_working_millihours' => $this->agreedWeeklyWorkingMillihours,
+            /*
+             * Rozsah kratší pracovní doby (10373) je týdenní doba ze VŠECH
+             * pracovních poměrů osoby u zaměstnavatele dohromady, včetně těch,
+             * ze kterých se sleva neuplatňuje (datový slovník JMHZ 1.4.1.6,
+             * Pokyny k vyplnění MH kap. 3.6.9). Je to týž úhrn, nad kterým
+             * posouzení § 7a odst. 2 rozhodlo, a nese ho jen vztah, ze kterého
+             * se sleva uplatňuje.
+             */
+            ...($this->partTimeDiscountWeeklyWorkingMillihoursTotal === null
+                ? []
+                : ['part_time_discount_weekly_working_millihours_total' =>
+                    $this->partTimeDiscountWeeklyWorkingMillihoursTotal]),
             /*
              * Pojistné zaměstnance a sleva pracujícího důchodce TOHOTO vztahu.
              * Měsíční hlášení je vykazuje po formulářích (10370, 10491) a
