@@ -1927,11 +1927,15 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
-     * Věta `zmenaZamestance` pro jednu povinnost. Adresa se do věty NEPŘIDÁVÁ
-     * — schéma ji má volitelnou a evidence osoby drží jen spojenou
-     * `street_line`, ne odděleně ulici a číslo popisné jako
-     * {@see HealthEmployerIdentification}; rozdělovat ji odhadem by znamenalo
-     * poslat adresu, která nikdy takhle nebyla zapsaná.
+     * Věta `zmenaZamestance` pro jednu povinnost.
+     *
+     * Adresa trvalého pobytu (u cizince místa pobytu) se do věty dává z karty
+     * osoby, protože ji zaměstnavatel pojišťovně sděluje ze zákona (§ 10 odst. 1
+     * zákona č. 48/1997 Sb.), i když ji schéma činí volitelnou. Karta drží ulici
+     * s číslem v jednom poli `street_line`, což je přesně to, co chce prvek
+     * `ulice`; nic se tedy nedělí odhadem. Osoba bez adresy v ČR se pošle bez
+     * ní: sdělit nejde, co evidence nezná, a zdržet kvůli tomu oznámení
+     * s lhůtou by bylo horší než ho podat bez volitelného prvku.
      */
     private function changeForDuty(
         int $supplierId,
@@ -1998,6 +2002,11 @@ final readonly class HealthInsuranceSubmissionService
                 ),
             firstName: $firstName,
             lastName: $lastName,
+            address: $this->residenceAddressFor(
+                $supplierId,
+                $duty->employeeId,
+                $duty->occurredOn,
+            ),
         );
         // Věta se validuje hned tady, kde je znám zaměstnanec: stejná vada
         // zjištěná až při serializaci celého oznámení neřekne, u koho je.
@@ -2020,6 +2029,35 @@ final readonly class HealthInsuranceSubmissionService
         }
 
         return $change;
+    }
+
+    /**
+     * Adresa trvalého pobytu pro větu HOZ, nebo `null`, když ji osoba v ČR
+     * nemá zapsanou. Adresa v cizině se neposílá: prvek `adresa` je určený pro
+     * adresu pobytu na území ČR a PSČ je v něm pětimístné.
+     */
+    private function residenceAddressFor(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?HealthNotificationAddress {
+        $address = $this->identities->residenceAddressAt($supplierId, $employeeId, $onDate);
+        if ($address === null) {
+            return null;
+        }
+        $country = strtoupper(trim($address['country_code']));
+        if ($country !== '' && $country !== 'CZ') {
+            return null;
+        }
+        if (trim($address['street_line']) === '' && trim($address['city']) === '') {
+            return null;
+        }
+
+        return HealthNotificationAddress::fromStreetLine(
+            trim($address['street_line']),
+            trim($address['postal_code']),
+            trim($address['city']),
+        );
     }
 
     /**
@@ -2055,7 +2093,11 @@ final readonly class HealthInsuranceSubmissionService
             }
         }
 
-        return $this->codes->employmentStartCode($citizenship, $hasInsuranceNumber);
+        return $this->codes->employmentStartCode(
+            $citizenship,
+            $hasInsuranceNumber,
+            $duty->insurerCode,
+        );
     }
 
     /**
@@ -2248,13 +2290,11 @@ final readonly class HealthInsuranceSubmissionService
                 'Firma podání nebyla nalezena.',
             );
         }
-        if ($row['business_id'] === null) {
-            throw new HealthNotificationException(
-                'zp_payer_business_id_missing',
-                'Firma nemá vyplněné IČO. Doplňte ho v nastavení firmy — '
-                . 'bez něj nelze sestavit identifikační číslo plátce.',
-            );
-        }
+        // Číslo plátce se z IČO nepočítá, bere se z VS účtu pojišťovny. Zaměstnavatel
+        // bez IČO (nebo s víc než 99 účtárnami) dostává od VZP zvláštní číslo plátce
+        // NNNNNNNN99 a to se do VS zadává stejně jako běžné. Chybějící IČO proto
+        // podání zastaví jen tehdy, když číslo plátce z VS nelze převzít.
+        $missingBusinessId = $row['business_id'] === null;
 
         $identifiers = $this->institutionAccounts->findEffectivePaymentIdentifiers(
             $supplierId,
@@ -2270,6 +2310,9 @@ final readonly class HealthInsuranceSubmissionService
         $insurer = $this->describeInsurer($supplierId, $insurerCode);
         $effectiveLabel = self::czechDate($effectiveOn);
         if ($identifiers === null) {
+            if ($missingBusinessId) {
+                throw $this->businessIdMissing();
+            }
             throw new HealthNotificationException(
                 'zp_payer_account_missing',
                 sprintf(
@@ -2288,6 +2331,9 @@ final readonly class HealthInsuranceSubmissionService
             (string) ($identifiers['variable_symbol'] ?? ''),
         );
         if (preg_match('/^[0-9]{10}$/', $payerNumber) !== 1) {
+            if ($missingBusinessId) {
+                throw $this->businessIdMissing();
+            }
             throw new HealthNotificationException(
                 'zp_payer_number_missing',
                 sprintf(
@@ -2309,6 +2355,18 @@ final readonly class HealthInsuranceSubmissionService
             postalCode: (string) ($row['postal_code'] ?? ''),
             city: (string) ($row['city'] ?? ''),
             phone: (string) ($row['phone'] ?? ''),
+        );
+    }
+
+    private function businessIdMissing(): HealthNotificationException
+    {
+        return new HealthNotificationException(
+            'zp_payer_business_id_missing',
+            'Firma nemá vyplněné IČO a u pojišťovny není evidované ani číslo plátce. Doplňte IČO '
+            . 'v nastavení firmy, nebo - nemá-li firma IČO či má víc než 99 účtáren - zadejte '
+            . 'zvláštní číslo plátce ve tvaru NNNNNNNN99, které přidělila VZP, do pole VS '
+            . 'zaměstnavatele u platebního účtu pojišťovny (Mzdy → Nastavení zaměstnavatele → '
+            . 'Platební účty institucí).',
         );
     }
 

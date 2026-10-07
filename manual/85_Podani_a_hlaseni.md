@@ -1583,6 +1583,15 @@ Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
   kódem `E`; cizinec ze třetí země bez čísla kódem `C`. U prvního přihlášení se
   místo čísla pojištěnce uvede pohlaví a datum narození (`M05071980`,
   `Z12101982`), takže je musí mít karta osoby vyplněné.
+  U **ZP MV ČR (211)** se kódy `E` a `C` nepoužívají: zaměstnanec musí být
+  u ní předem zaregistrovaný pod přiděleným číslem pojištěnce a nástup se hlásí
+  kódem `P` nebo `A`. Bez čísla pojištěnce aplikace větu nesestaví a vyzve
+  k registraci a opsání čísla na kartu osoby.
+- **Adresa trvalého pobytu** zaměstnance (u cizince adresa místa pobytu v ČR)
+  se do věty dává z karty osoby, protože ji zaměstnavatel pojišťovně sděluje ze
+  zákona (§ 10 zákona č. 48/1997 Sb.). Ulice s číslem se posílají tak, jak jsou
+  zapsané. Osoba bez adresy v ČR se ohlásí bez ní; adresa s neplatným PSČ nebo
+  delší než 60 znaků větu zastaví a hláška řekne, u koho ji opravit.
 - **Číslo pojištěnce** ve větě je číslo pojištěnce ZP z karty osoby, a když
   není vyplněné, rodné číslo. EČP se nepoužívá: je to evidenční číslo ČSSZ.
   Cizinec, kterého pojišťovna už přihlásila, potřebuje na kartě číslo
@@ -1621,6 +1630,12 @@ Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
   měsíc jen od bývalých zaměstnanců, datová věta přehled neumí (počet nula
   nepřijme) a aplikace vyzve k podání na tiskopisu pojišťovny. Nesoulad
   u jedné pojišťovny nebrání sestavit přehled pro ostatní.
+- **Číslo plátce** (`identifikacniCisloPlatce`) se nepočítá z IČO, bere se
+  z pole **VS zaměstnavatele** u platebního účtu pojišťovny (deset číslic).
+  Zaměstnavatel bez IČO nebo s víc než 99 účtárnami dostává od VZP zvláštní
+  číslo plátce ve tvaru `NNNNNNNN99`; zadá se do téhož pole a přehled i HOZ pak
+  vzniknou i bez vyplněného IČO. Chybějící IČO zastaví podání jen tehdy, když
+  číslo plátce z účtu pojišťovny převzít nejde.
 
 ### 85.14.1 Kdy vyjde úřední tiskopis a kdy vlastní sestava
 

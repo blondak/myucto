@@ -248,6 +248,9 @@ final class HealthNotificationCodeCatalog
      * vztahuje stejně, takže v českém zdravotním pojištění mají postavení
      * občana EU, ne „cizince ze zemí mimo EU" (kód „C").
      */
+    /** Kód pojišťovny ZP MV ČR v číselníku zdravotních pojišťoven. */
+    public const INSURER_MV = '211';
+
     private const EU_COORDINATION_COUNTRIES =
         \MyInvoice\Service\Payroll\PayrollEuFreeMovementCountries::CODES;
 
@@ -271,12 +274,20 @@ final class HealthNotificationCodeCatalog
      * zdravotní pojišťovny není, takže cizinec jen s EČP se hlásí jako první
      * přihlášení.
      *
+     * ZP MV ČR (kód pojišťovny 211) kódy „E" a „C" nepoužívá: zaměstnanec musí
+     * být u ní předem zaregistrovaný pod přiděleným číslem pojištěnce a
+     * zaměstnavatel pak použije „P" nebo „A" (Poučení ZP MV ČR 1/2026 k HOZ,
+     * bod 2). Bez přiděleného čísla se tu proto první přihlášení nehlásí, ale
+     * zastaví se s výzvou k registraci - kód „E"/„C" by pojišťovna odmítla.
+     *
      * @param string|null $citizenshipCountryCode ISO 3166-1 alfa-2; `null` nebo
      *        `CZ` = občan ČR, u kterého se kód neodvozuje od cizinecké větve
+     * @param string|null $insurerCode kód zdravotní pojišťovny, které se podání adresuje
      */
     public function employmentStartCode(
         ?string $citizenshipCountryCode,
         bool $hasAssignedInsuranceNumber,
+        ?string $insurerCode = null,
     ): string {
         $country = $citizenshipCountryCode === null
             ? null
@@ -287,6 +298,15 @@ final class HealthNotificationCodeCatalog
         $eu = in_array($country, self::EU_COORDINATION_COUNTRIES, true);
         if ($hasAssignedInsuranceNumber) {
             return $eu ? 'A' : 'P';
+        }
+        if ($insurerCode === self::INSURER_MV) {
+            throw new HealthNotificationException(
+                'zp_mv_registration_required',
+                'Zaměstnanec je cizinec a nemá přidělené číslo pojištěnce. U ZP MV ČR (211) se kódy „E" a „C" '
+                . 'nepoužívají: zaměstnanec musí být nejdřív zaregistrovaný u ZP MV ČR a přidělené číslo '
+                . 'pojištěnce se opíše do jeho karty osoby (oddíl Identifikátory, typ „Číslo pojištěnce ZP"). '
+                . 'Teprve pak lze nástup ohlásit kódem „P" nebo „A".',
+            );
         }
 
         return $eu ? 'E' : 'C';
