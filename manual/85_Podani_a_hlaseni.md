@@ -1502,7 +1502,16 @@ Případ vzniká i z **převodu mezd** z předchozího programu, a to k událost
 která trvá aspoň do prvního měsíce vedeného v MyÚčtu. Podání, jehož lhůta
 začala běžet ještě v době předchozího programu, je v případu vedené jako
 podané předchozím programem a MyÚčto ho nepřipravuje; zbývající podání
-(typicky HZUPN k návratu do práce) hlídá MyÚčto.
+(typicky HZUPN k návratu do práce) hlídá MyÚčto. Nepodal-li předchozí
+program takové podání ve skutečnosti, vraťte ho u případu tlačítkem
+**Předchozí program NEMPRI nepodal** (HZUPN); MyÚčto ho pak připraví a jeho
+lhůtu hlídá.
+
+Schválíte-li v Nepřítomnostech zpětně neschopnost z doby, kdy mzdy vedl
+předchozí program, MyÚčto za ni nic nepředpokládá: podání zůstane nedoručené
+a hlídač termínů ho vede, dokud o něm nerozhodnete. Hláška po schválení na to
+upozorní. Podal-li ho předchozí program, zapište to u případu tlačítkem
+**NEMPRI podal předchozí program** (HZUPN), jinak ho připravte a podejte.
 
 Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
 zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
@@ -1530,8 +1539,10 @@ Vyřízené podání zamkne jen svoje údaje — údaje přijatého NEMPRI se u�
 nemění, údaje pro HZUPN ano. Opravit vyřízené podání jde jen opravným
 podáním: zaškrtněte **Opravné podání**, upravte údaje, podání znovu
 připravte a jeho přijetí zapište. Odmítnuté podání se vrací do hlídače
-a připravíte ho znovu. U případu převzatého z předchozího programu jde
-zapsat, že podání podal předchozí program (den doručení je nepovinný).
+a připravíte ho znovu. U případu k události z doby předchozího programu jde
+zapsat, že podání podal předchozí program (den doručení je nepovinný), a
+takový zápis zase vrátit tlačítkem **Předchozí program NEMPRI nepodal**
+(HZUPN).
 Společný stav případu se z obou podání jen odvozuje: **Částečně vyřízeno**
 znamená, že jedno podání je vyřízené a druhé čeká, **Vše vyřízeno**, že
 čekat není na co.

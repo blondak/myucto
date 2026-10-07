@@ -571,6 +571,11 @@ final readonly class SicknessCaseService
      * - `rejected` vyžaduje důvod; vyřízené podání odmítnout nejde.
      * - `predecessor` jen u převzatého případu: podání podal předchozí program,
      *   den doručení je nepovinný.
+     * - `pending` vrací podání vedené jako podané předchozím programem zpět
+     *   k podání z MyÚčta. Převod ho tak označí podle lhůty, ne podle toho, co
+     *   předchozí program skutečně odeslal; když to nesedí, povinnost se jinak
+     *   přestane hlídat a podání nejde připravit. Zrušení případu cestou není:
+     *   nový případ téže události by narazil na jedinečný klíč.
      * - `cancelled` zruší celý případ ({@see self::cancel()}).
      *
      * @return array<string,mixed>
@@ -679,9 +684,26 @@ final readonly class SicknessCaseService
                     'rejection_reason' => null,
                 ];
             })(),
+            'pending' => (function () use ($row, $current, $label): array {
+                if (($row['source'] ?? self::SOURCE_MYUCTO) !== self::SOURCE_PREDECESSOR
+                    || $current !== SicknessDocumentStatus::Predecessor
+                ) {
+                    throw new SicknessException(
+                        'sickness_receipt_reopen_not_predecessor',
+                        'Zpět k podání jde vrátit jen ' . $label . ' vedené jako podané předchozím '
+                        . 'programem. Výsledek podání z MyÚčta se opravuje opravným podáním.',
+                    );
+                }
+
+                return [
+                    'status' => SicknessDocumentStatus::Pending->value,
+                    'accepted_on' => null,
+                    'rejection_reason' => null,
+                ];
+            })(),
             default => throw new SicknessException(
                 'sickness_receipt_outcome_invalid',
-                'Výsledek podání musí být accepted, rejected, predecessor nebo cancelled.',
+                'Výsledek podání musí být accepted, rejected, predecessor, pending nebo cancelled.',
             ),
         };
         if (!$this->cases->update(

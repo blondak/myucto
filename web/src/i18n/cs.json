@@ -10578,7 +10578,8 @@
       },
       "receipt": {
         "title": "Výsledek {document} z protokolu ČSSZ",
-        "predecessorHint": "Případ je převzatý z předchozího mzdového programu. Podal-li toto podání on, zapište to tlačítkem Podal předchozí program; den doručení je nepovinný."
+        "predecessorHint": "Událost spadá do doby, kdy mzdy vedl předchozí mzdový program. Podal-li toto podání on, zapište to tlačítkem Podal předchozí program; den doručení je nepovinný.",
+        "reopenHint": "{document} je vedené jako podané předchozím programem, MyÚčto ho nepřipravuje a jeho lhůtu nehlídá. Nepodal-li ho předchozí program, vraťte ho tlačítkem Předchozí program nepodal."
       },
       "actions": {
         "create": "Založit případ",
@@ -10599,6 +10600,8 @@
         "recordAcceptedHzupn": "Zapsat přijetí HZUPN",
         "recordRejectedHzupn": "Zapsat odmítnutí HZUPN",
         "recordPredecessorHzupn": "HZUPN podal předchozí program",
+        "reopenPredecessorNempri": "Předchozí program NEMPRI nepodal",
+        "reopenPredecessorHzupn": "Předchozí program HZUPN nepodal",
         "addWorkInterval": "Přidat interval",
         "removeWorkInterval": "Odebrat",
         "addCareInterval": "Přidat dny péče",
@@ -10789,7 +10792,7 @@
       "origin": {
         "fromAbsence": "Založeno ze schválené nepřítomnosti. Lhůta NEMPRI se hlídá ode dne události.",
         "openAbsences": "Otevřít nepřítomnosti",
-        "predecessor": "Převzato z předchozího mzdového programu. Podání, jehož lhůta začala před prvním měsícem vedení mezd v MyÚčtu, podal předchozí program; MyÚčto hlídá jen to, co zbývá."
+        "predecessor": "Událost z doby předchozího mzdového programu. Převod vede podání, jehož lhůta začala před prvním měsícem vedení mezd v MyÚčtu, jako podané předchozím programem; u schválené nepřítomnosti to zapíšete sami. Co předchozí program nepodal, vraťte tlačítkem Předchozí program nepodal a MyÚčto to pohlídá."
       },
       "longTermCare": {
         "title": "Rozhodnutí zaměstnavatele o dlouhodobé péči",
@@ -10811,6 +10814,7 @@
         "skipped": "Případ dávky nevznikl: {message}",
         "shortened": "Zrušená nepřítomnost zkrátila případ dávky ({kind}) na den před sebou.",
         "incomplete": "Případ dávky ({kind}) je potřeba doplnit: {message}",
+        "predecessorPeriod": "Případ dávky ({kind}) čeká na rozhodnutí: {message}",
         "open": "Otevřít případy dávek"
       }
     },
@@ -11693,6 +11697,8 @@
       "sickness_receipt_already_settled": "Podání je už vyřízené, odmítnutí ani vyřízení předchozím programem k němu zapsat nejde.",
       "sickness_receipt_predecessor": "Toto podání podal předchozí mzdový program, přijetí se zapisuje jen k podání odeslanému z MyÚčta.",
       "sickness_receipt_predecessor_not_takeover": "Vyřízení předchozím programem jde zapsat jen u případu převzatého z předchozího mzdového programu.",
+      "sickness_receipt_reopen_not_predecessor": "Zpět k podání jde vrátit jen podání vedené jako podané předchozím programem. Výsledek podání z MyÚčta se opravuje opravným podáním.",
+      "sickness_case_predecessor_period": "Lhůta podání začala běžet ještě v době předchozího mzdového programu. Podal-li ho on, zapište to u případu tlačítkem Podal předchozí program; jinak ho připravte a podejte z MyÚčta.",
       "sickness_document_handled_by_predecessor": "Toto podání k události podal předchozí mzdový program, MyÚčto ho znovu nepodává.",
       "sickness_transfer_reason_invalid": "Důvod převedení na jinou práci musí být těhotenství, mateřství, nebo kojení.",
       "sickness_transfer_reason_without_transfer": "Důvod převedení se vyplňuje jen u převedení na jinou práci. Zaškrtněte převedení a doplňte jeho den.",

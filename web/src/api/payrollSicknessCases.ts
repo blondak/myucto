@@ -376,13 +376,14 @@ export const payrollSicknessCasesApi = {
 
   /**
    * Výsledek JEDNOHO podání z protokolu ČSSZ (`document`), nebo zrušení celého
-   * případu (`outcome: 'cancelled'`). `predecessor` jen u převzatého případu.
+   * případu (`outcome: 'cancelled'`). `predecessor` jen u převzatého případu,
+   * `pending` vrací podání vedené jako podané předchozím programem zpět.
    */
   recordReceipt: (
     environment: PayrollRegzelEnvironment,
     caseId: number,
     payload: {
-      outcome: 'accepted' | 'rejected' | 'predecessor' | 'cancelled'
+      outcome: 'accepted' | 'rejected' | 'predecessor' | 'pending' | 'cancelled'
       document?: PayrollSicknessDocumentKind
       accepted_on?: string | null
       reason?: string | null

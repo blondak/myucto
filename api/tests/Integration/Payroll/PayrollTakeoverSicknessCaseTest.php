@@ -113,6 +113,51 @@ final class PayrollTakeoverSicknessCaseTest extends TestCase
     }
 
     /**
+     * Převod označí NEMPRI za podané předchozím programem podle lhůty, ne podle
+     * toho, co předchozí program skutečně odeslal. Nepodal-li ho, musí jít
+     * podání vrátit: dřív zůstalo vyřízené natrvalo, povinnost se nehlídala
+     * a NEMPRI nešlo připravit. Zrušením případu to obejít nejde, nový případ
+     * téže události narazí na jedinečný klíč.
+     */
+    public function testPredecessorMarkedNempriCanBeReturnedToMyUcto(): void
+    {
+        $person = $this->createEmployment($this->officeId, 'Klára Vrácená', 23, 'hpp', 'employment', 40, 10_000);
+        $this->writer(PohodaPayrollSicknessWriter::class)->write(
+            $this->supplierId,
+            $this->actors[0],
+            $this->pamicaResult('FLOW-23', '2026-08-03', '2026-10-14'),
+            new ImportProtocol('import'),
+            'payroll_sickness',
+        );
+        $caseId = (int) $this->casesOf($person['employment_id'])[0]['id'];
+        $cases = $this->container->get(SicknessCaseService::class);
+
+        $case = $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'pending', null, null);
+
+        self::assertSame('pending', $case['nempri_status']);
+        self::assertNull($case['nempri_accepted_on']);
+        self::assertSame('predecessor', $case['source']);
+        self::assertSame(['HZUPN' => '2026-10-15', 'NEMPRI' => '2026-08-17'], $this->watched($caseId));
+        try {
+            $this->container->get(SicknessSubmissionService::class)
+                ->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri);
+        } catch (SicknessException $exception) {
+            self::assertNotSame('sickness_document_handled_by_predecessor', $exception->validationCode, $exception->getMessage());
+        } catch (\DomainException) {
+            // Syntetická osoba nemá identitu pro větu; brána předchozího
+            // programu je ale už za námi.
+        }
+
+        // Vrátit jde jen podání vedené jako podané předchozím programem.
+        try {
+            $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn, 'pending', null, null);
+            self::fail('HZUPN čeká na podání z MyÚčta, není co vracet.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_receipt_reopen_not_predecessor', $exception->validationCode);
+        }
+    }
+
+    /**
      * Obecný převod (JMHZ, PREMIER, POHODA): nepřítomnost přes hranici prvního
      * měsíce vedení mezd založí případ; dřív skončená ne — tu vyřídil celou
      * předchozí program.

@@ -620,6 +620,34 @@ describe('PayrollSicknessCasesPanel', () => {
     })
   })
 
+  /**
+   * NEMPRI vedené jako podané předchozím programem jde vrátit k podání
+   * z MyÚčta; jinak by se povinnost přestala hlídat a nešla by připravit.
+   */
+  it('u NEMPRI předchozího programu nabídne vrácení k podání', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({
+      source: 'predecessor',
+      nempri_status: 'predecessor',
+      incapacity_to: '2026-08-20',
+    })]))
+    m.recordReceipt.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-test="sickness-case-reopen-hint-7-nempri"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-accepted-on-7-nempri"]').exists()).toBe(false)
+    expect(actionsOf(wrapper, 'accept-nempri')?.show).toBe(false)
+    expect(actionsOf(wrapper, 'reopen-hzupn')?.show).toBe(false)
+    actionsOf(wrapper, 'reopen-nempri')!.run!()
+    await flushPromises()
+
+    expect(m.recordReceipt).toHaveBeenCalledWith('production', 7, {
+      outcome: 'pending',
+      document: 'nempri',
+      accepted_on: null,
+      reason: null,
+    })
+  })
+
   /** NX-03: podklady pro výplatu DLO se ukládají s případem. */
   it('u DLO uloží pracovní volno a rozvrh směn', async () => {
     m.list.mockResolvedValue(listResponse([sicknessCase({

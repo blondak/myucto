@@ -751,7 +751,7 @@ function receiptKey(item: PayrollSicknessCase, document: PayrollSicknessDocument
 async function recordReceipt(
   item: PayrollSicknessCase,
   document: PayrollSicknessDocumentKind,
-  outcome: 'accepted' | 'rejected' | 'predecessor',
+  outcome: 'accepted' | 'rejected' | 'predecessor' | 'pending',
 ): Promise<void> {
   const key = receiptKey(item, document)
   busyId.value = item.id
@@ -872,6 +872,18 @@ function receiptActions(item: PayrollSicknessCase, document: PayrollSicknessDocu
       disabled: !canWrite.value,
       disabledReason: t('payroll.sicknessCases.hints.readOnly'),
       run: () => void recordReceipt(item, document, 'predecessor'),
+    },
+    {
+      // Převod i účetní mohly podání předchozímu programu přisoudit omylem;
+      // bez vrácení by se povinnost přestala hlídat a nešla by připravit.
+      key: `reopen-${document}`,
+      label: t(`payroll.sicknessCases.actions.reopenPredecessor${suffix}`),
+      icon: 'uturn',
+      variant: 'warning',
+      show: open && status === 'predecessor',
+      disabled: !canWrite.value,
+      disabledReason: t('payroll.sicknessCases.hints.readOnly'),
+      run: () => void recordReceipt(item, document, 'pending'),
     },
   ]
 }
@@ -1827,14 +1839,21 @@ onMounted(() => void load())
         <div v-else-if="item.status !== 'cancelled'" class="mt-3 space-y-3">
           <template v-for="document in documentsFor(item)" :key="document">
             <div
-              v-if="!documentSettled(item, document) || item.correction"
+              v-if="!documentSettled(item, document) || item.correction || documentStatus(item, document) === 'predecessor'"
               class="rounded-lg border border-neutral-200 p-3"
               :data-test="`sickness-case-receipt-${item.id}-${document}`"
             >
               <p class="mb-2 text-xs font-semibold uppercase text-neutral-500">
                 {{ t('payroll.sicknessCases.receipt.title', { document: t(`payroll.sicknessCases.documents.${document}`) }) }}
               </p>
-              <div class="grid gap-3 md:grid-cols-2">
+              <p
+                v-if="documentStatus(item, document) === 'predecessor'"
+                class="text-xs text-neutral-500"
+                :data-test="`sickness-case-reopen-hint-${item.id}-${document}`"
+              >
+                {{ t('payroll.sicknessCases.receipt.reopenHint', { document: t(`payroll.sicknessCases.documents.${document}`) }) }}
+              </p>
+              <div v-else class="grid gap-3 md:grid-cols-2">
                 <label class="block text-sm">
                   <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.acceptedOn') }}</span>
                   <DateInput

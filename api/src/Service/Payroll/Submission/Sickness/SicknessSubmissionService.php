@@ -356,7 +356,8 @@ final readonly class SicknessSubmissionService
             throw new SicknessException(
                 'sickness_document_handled_by_predecessor',
                 $document->agendaCode() . ' k této události podal předchozí mzdový program, '
-                . 'MyÚčto ho znovu nepodává. Druhé podání téže věci by ČSSZ odmítla.',
+                . 'MyÚčto ho znovu nepodává. Druhé podání téže věci by ČSSZ odmítla. Nepodal-li '
+                . 'ho předchozí program, vraťte ho u případu tlačítkem Předchozí program nepodal.',
             );
         }
         $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);

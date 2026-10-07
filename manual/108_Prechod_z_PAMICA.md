@@ -412,9 +412,11 @@ z PAMICA. Oznámení NEMPRI, jehož lhůta začala běžet před prvním měsíc
 vedeným v MyÚčtu, je v případu vedené jako podané předchozím programem a
 MyÚčto ho znovu nepřipraví. Připadá-li patnáctý den neschopnosti až na první
 měsíc v MyÚčtu, hlídá NEMPRI MyÚčto; podala-li ho přesto PAMICA, zapište to
-u případu tlačítkem **NEMPRI podal předchozí program**. Hlášení HZUPN
-k návratu do práce podává už MyÚčto a hlídač termínů ho hlídá. Opakovaný
-převod případ nezdvojí.
+u případu tlačítkem **NEMPRI podal předchozí program**. Naopak když PAMICA
+NEMPRI vedené jako její ve skutečnosti nepodala, vraťte ho tlačítkem
+**Předchozí program NEMPRI nepodal**; MyÚčto ho pak připraví a lhůtu hlídá.
+Hlášení HZUPN k návratu do práce podává už MyÚčto a hlídač termínů ho hlídá.
+Opakovaný převod případ nezdvojí.
 
 ## 108.8 Přechod uprostřed roku
 

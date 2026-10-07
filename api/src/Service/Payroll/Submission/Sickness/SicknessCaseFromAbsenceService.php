@@ -38,9 +38,12 @@ use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
  * ## Co patří předchozímu programu
  *
  * Podání, jehož lhůta začala běžet před prvním měsícem vedení mezd v MyÚčtu
- * (`payroll_module_state.start_period`), podával předchozí program. Případ ho
- * nese jako vyřízené předchozím programem a MyÚčto ho nepřipravuje; hlídá jen
- * to, co připadá na dobu, kdy mzdy vede MyÚčto.
+ * (`payroll_module_state.start_period`), podával předchozí program. Převzatý
+ * případ ho nese jako vyřízené předchozím programem a MyÚčto ho nepřipravuje;
+ * hlídá jen to, co připadá na dobu, kdy mzdy vede MyÚčto. U schválené absence
+ * se to jen nabídne ({@see self::documentsDueBefore()}), a kdyby převod
+ * odhadl špatně, vrací se podání zpět výsledkem `pending`
+ * ({@see SicknessCaseService::recordReceipt()}).
  *
  * ## Co se nesmí stát
  *
@@ -458,12 +461,21 @@ final readonly class SicknessCaseFromAbsenceService
             }
         }
 
-        $system = $this->predecessorAttribution($supplierId, $kind, $eventFrom, $to, $loneCarer, $workedFirstDay === true);
+        $startDay = $this->startDay($supplierId);
+        $beforeStart = $startDay === null
+            ? []
+            : $this->documentsDueBefore($startDay, $kind, $eventFrom, $to, $loneCarer, $workedFirstDay === true);
+        $system = [];
         if ($takenOver) {
-            $system['source'] = SicknessCaseService::SOURCE_PREDECESSOR;
+            foreach ($beforeStart as $document) {
+                $system[$document->statusColumn()] = SicknessDocumentStatus::Predecessor->value;
+            }
             if ($externalReference !== null && trim($externalReference) !== '') {
                 $system['external_reference'] = $externalReference;
             }
+        }
+        if ($takenOver || $beforeStart !== [] || ($startDay !== null && $eventFrom < $startDay)) {
+            $system['source'] = SicknessCaseService::SOURCE_PREDECESSOR;
         }
         $created = $this->caseService->create(
             $supplierId,
@@ -483,38 +495,66 @@ final readonly class SicknessCaseFromAbsenceService
         );
 
         $result = $this->result('created', $created, $kind);
+        $messages = [];
+        if (!$takenOver && $beforeStart !== []) {
+            $result['reason_code'] = 'sickness_case_predecessor_period';
+            $labels = implode(' a ', array_map(
+                static fn (SicknessDocumentKind $document): string => $document->agendaCode(),
+                $beforeStart,
+            ));
+            $messages[] = 'Lhůta ' . $labels . ' začala běžet před prvním měsícem vedení mezd v MyÚčtu, '
+                . 'kdy mzdy vedl předchozí program. Podal-li je on, zapište to u případu tlačítkem '
+                . '„podal předchozí program“. Jinak je připravte a podejte z MyÚčta; do té doby je '
+                . 'hlídač termínů vede jako nepodané.';
+        }
         if ($hoursMissing) {
-            $result['reason_code'] = 'nempri_worked_hours_missing';
-            $result['message'] = 'Zaměstnanec v den vzniku neschopnosti odpracoval celou směnu, ale směna '
+            $result['reason_code'] ??= 'nempri_worked_hours_missing';
+            $messages[] = 'Zaměstnanec v den vzniku neschopnosti odpracoval celou směnu, ale směna '
                 . 'ani týdenní rozvrh ten den nejsou zapsané. Případ zůstal v konceptu: doplňte u něj '
                 . 'pracovní dobu a odpracované hodiny, bez nich NEMPRI neprojde.';
+        }
+        if ($messages !== []) {
+            $result['message'] = implode(' ', $messages);
         }
 
         return $result;
     }
 
+    /** První den vedení mezd v MyÚčtu, nebo `null`, když modul začátek nemá. */
+    private function startDay(int $supplierId): ?string
+    {
+        $startPeriod = $this->moduleState->get($supplierId)['start_period'] ?? null;
+        if (!is_string($startPeriod) || $startPeriod === '') {
+            return null;
+        }
+
+        return substr($startPeriod, 0, 7) . '-01';
+    }
+
     /**
-     * Podání, jehož lhůta začala běžet před prvním měsícem vedení mezd
-     * v MyÚčtu, podával předchozí program. Případ k události z té doby nese
-     * `source = predecessor`, takže u něj jde vyřízení předchozím programem
-     * zapsat i ručně.
+     * Podání, jejichž lhůta začala běžet před prvním měsícem vedení mezd
+     * v MyÚčtu — v době, kdy mzdy vedl předchozí program.
      *
-     * @return array<string,string>
+     * Jako podané předchozím programem je případ nese jen u PŘEVODU
+     * ({@see self::onTakenOver()}): událost tehdy vedl předchozí program a z něj
+     * pochází. Schválení absence v Nepřítomnostech nic takového nedokládá —
+     * účetní mohla zpětně zapsat neschopnost, kterou předchozí program nikdy
+     * nepodal. Tam případ jen nese `source = predecessor`, takže vyřízení
+     * předchozím programem jde zapsat jedním krokem, ale povinnost zůstává
+     * hlídaná, dokud to účetní neudělá. Lepší připomínka navíc než tiše
+     * zmizelá povinnost.
+     *
+     * @return list<SicknessDocumentKind>
      */
-    private function predecessorAttribution(
-        int $supplierId,
+    private function documentsDueBefore(
+        string $startDay,
         SicknessBenefitKind $kind,
         string $eventFrom,
         string $to,
         bool $loneCarer,
         bool $workedFirstDay,
     ): array {
-        $startPeriod = $this->moduleState->get($supplierId)['start_period'] ?? null;
-        if (!is_string($startPeriod) || $startPeriod === '') {
-            return [];
-        }
-        $startDay = substr($startPeriod, 0, 7) . '-01';
-        $system = [];
+        $documents = [];
         try {
             $earliest = $this->deadlines->forNempri(
                 $kind,
@@ -525,7 +565,7 @@ final readonly class SicknessCaseFromAbsenceService
                 $workedFirstDay,
             )->earliestNotificationOn;
             if ($earliest < $startDay) {
-                $system[SicknessDocumentKind::Nempri->statusColumn()] = SicknessDocumentStatus::Predecessor->value;
+                $documents[] = SicknessDocumentKind::Nempri;
             }
         } catch (SicknessException) {
             // Lhůta nejde spočítat (VPM bez výplatního dne) — rozhodne účetní.
@@ -533,13 +573,10 @@ final readonly class SicknessCaseFromAbsenceService
         if ($kind->hasEndOfIncapacityReport()
             && (new \DateTimeImmutable($to))->modify('+1 day')->format('Y-m-d') < $startDay
         ) {
-            $system[SicknessDocumentKind::Hzupn->statusColumn()] = SicknessDocumentStatus::Predecessor->value;
-        }
-        if ($system !== [] || $eventFrom < $startDay) {
-            $system['source'] = SicknessCaseService::SOURCE_PREDECESSOR;
+            $documents[] = SicknessDocumentKind::Hzupn;
         }
 
-        return $system;
+        return $documents;
     }
 
     /**

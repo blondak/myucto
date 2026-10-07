@@ -10578,7 +10578,8 @@
       },
       "receipt": {
         "title": "{document} outcome from the ČSSZ protocol",
-        "predecessorHint": "The case was taken over from the previous payroll program. If that program filed this submission, record it with Filed by the previous program; the delivery date is optional."
+        "predecessorHint": "The event falls into the time when payroll was run by the previous payroll program. If that program filed this submission, record it with Filed by the previous program; the delivery date is optional.",
+        "reopenHint": "{document} is recorded as filed by the previous program, so MyÚčto does not prepare it or monitor its deadline. If the previous program did not file it, return it with Not filed by the previous program."
       },
       "actions": {
         "create": "Create case",
@@ -10599,6 +10600,8 @@
         "recordAcceptedHzupn": "Record HZUPN acceptance",
         "recordRejectedHzupn": "Record HZUPN rejection",
         "recordPredecessorHzupn": "HZUPN filed by the previous program",
+        "reopenPredecessorNempri": "NEMPRI not filed by the previous program",
+        "reopenPredecessorHzupn": "HZUPN not filed by the previous program",
         "addWorkInterval": "Add interval",
         "removeWorkInterval": "Remove",
         "addCareInterval": "Add care days",
@@ -10789,7 +10792,7 @@
       "origin": {
         "fromAbsence": "Created from the approved absence. The NEMPRI deadline is monitored from the day of the event.",
         "openAbsences": "Open absences",
-        "predecessor": "Taken over from the previous payroll program. A submission whose deadline began before the first payroll month in MyÚčto was filed by the previous program; MyÚčto monitors only what remains."
+        "predecessor": "Event from the time of the previous payroll program. A takeover records a submission whose deadline began before the first payroll month in MyÚčto as filed by the previous program; for an approved absence you record it yourself. Return anything the previous program did not file with Not filed by the previous program and MyÚčto will monitor it."
       },
       "longTermCare": {
         "title": "Employer decision on long-term care",
@@ -10811,6 +10814,7 @@
         "skipped": "No sickness benefit case was created: {message}",
         "shortened": "The cancelled absence shortened the sickness benefit case ({kind}) to the day before it.",
         "incomplete": "The sickness benefit case ({kind}) needs completing: {message}",
+        "predecessorPeriod": "The sickness benefit case ({kind}) needs your decision: {message}",
         "open": "Open benefit cases"
       }
     },
@@ -11693,6 +11697,8 @@
       "sickness_receipt_already_settled": "The submission is already settled; a rejection or filing by the previous program cannot be recorded for it.",
       "sickness_receipt_predecessor": "This submission was filed by the previous payroll program; acceptance is recorded only for submissions sent from MyÚčto.",
       "sickness_receipt_predecessor_not_takeover": "Filing by the previous program can only be recorded on a case taken over from the previous payroll program.",
+      "sickness_receipt_reopen_not_predecessor": "Only a submission recorded as filed by the previous program can be returned for filing. An outcome of a submission from MyÚčto is corrected by a corrective submission.",
+      "sickness_case_predecessor_period": "The submission deadline began while payroll was run by the previous payroll program. If that program filed it, record it on the case with Filed by the previous program; otherwise prepare and file it from MyÚčto.",
       "sickness_document_handled_by_predecessor": "The previous payroll program filed this submission for the event, so MyÚčto does not file it again.",
       "sickness_transfer_reason_invalid": "The reason for transfer to other work must be pregnancy, maternity or breastfeeding.",
       "sickness_transfer_reason_without_transfer": "The transfer reason is filled in only for a transfer to other work. Tick the transfer and fill in its date.",

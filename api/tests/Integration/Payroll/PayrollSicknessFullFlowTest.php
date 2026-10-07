@@ -501,6 +501,51 @@ final class PayrollSicknessFullFlowTest extends TestCase
     }
 
     /**
+     * Schválení zpětně zapsané neschopnosti z doby před prvním měsícem vedení
+     * mezd v MyÚčtu nedokládá, že ji předchozí program podal. Dřív ji případ
+     * rovnou vedl jako podanou předchozím programem, povinnost se přestala
+     * hlídat a NEMPRI nešlo připravit. Teď je podání hlídané a vyřízení
+     * předchozím programem se jen nabídne; zapsané jde i vrátit.
+     */
+    public function testApprovedAbsenceBeforeStartPeriodOnlyOffersPredecessor(): void
+    {
+        $person = $this->sicknessPerson(16, 'Věra Zpětná');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state SET start_period = "2026-07-01" WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
+
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-26', (int) $average['id'], $dpn);
+        $outcome = $approved['sickness_case'];
+        self::assertSame('created', $outcome['outcome'], json_encode($outcome) ?: '');
+        self::assertSame('sickness_case_predecessor_period', $outcome['reason_code']);
+        self::assertSame('2026-06-22', $outcome['nempri_due_on']);
+        $caseId = (int) $outcome['case_id'];
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('predecessor', $case['source']);
+        self::assertSame('pending', $case['nempri_status']);
+        self::assertSame('pending', $case['hzupn_status']);
+
+        $case = $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'predecessor', null, null);
+        self::assertSame('predecessor', $case['nempri_status']);
+
+        $reopened = $this->recordReceiptViaApi($caseId, ['outcome' => 'pending', 'document' => 'nempri']);
+        self::assertSame(200, $reopened->getStatusCode(), (string) $reopened->getBody());
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('pending', $case['nempri_status']);
+        $watched = [];
+        foreach ($this->service(PayrollDeadlineOverviewService::class)->overview($this->supplierId, self::ENVIRONMENT, 400)['items'] as $item) {
+            if (($item['case_id'] ?? null) === $caseId) {
+                $watched[] = $item['title'];
+            }
+        }
+        self::assertContains('NEMPRI', $watched);
+    }
+
+    /**
      * DPN-05: převzatá neschopnost s 10 dny okna u předchozího plátce. Den
      * vzniku je 1. 6., ne první den v MyÚčtu, a lhůta NEMPRI běží od 15. 6.
      */
