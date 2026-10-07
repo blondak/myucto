@@ -386,6 +386,98 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertSame(JmhzControlOutcome::Passed, $this->finding($complete, 126)->outcome);
     }
 
+    /**
+     * Kontrola 7 — 10023 je součet 10478 (u `cinnostKS` a pěstouna 10477)
+     * přes součásti. Propustná (cJMHZ), takže nesoulad je varování.
+     */
+    public function testEmployerBaseMustMatchTheSumOfAffectedForms(): void
+    {
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($this->validate(JmhzXmlSample::minimal()), 7)->outcome,
+        );
+
+        $twoForms = $this->validate(JmhzXmlSample::twoForms());
+        self::assertContains(7, $this->failedIds($twoForms));
+        self::assertSame(JmhzControlPassability::Passable, $this->finding($twoForms, 7)->passability);
+
+        $statutory = str_replace(
+            ['<form:bezPriznaku>', '</form:bezPriznaku>'],
+            ['<form:cinnostKS>', '</form:cinnostKS>'],
+            preg_replace(
+                '~\s*<form:vymerovaciZakladParagraf5>.*?</form:vymerovaciZakladParagraf5>~s',
+                '',
+                JmhzXmlSample::minimal(),
+            ) ?? '',
+        );
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($this->validate($statutory), 7)->outcome,
+        );
+    }
+
+    /**
+     * Kontrola 59 — vyměřovací základ ELDP podle kódu a dob. Dřív stála mezi
+     * nevyhodnotitelnými s odůvodněním, že první profil nevykazuje vyloučené
+     * doby, přestože je serializér vykazuje.
+     */
+    public function testEldpAssessmentBaseFollowsTheCodeAndDays(): void
+    {
+        $section = static fn (
+            string $code,
+            string $from,
+            string $to,
+            int $days,
+            ?int $base,
+            string $tail = '',
+        ): string => '<form:eldp><form:kod>' . $code . '</form:kod>'
+            . '<form:platnostOd>' . $from . '</form:platnostOd>'
+            . '<form:platnostDo>' . $to . '</form:platnostDo>'
+            . '<form:pocetDnu>' . $days . '</form:pocetDnu>'
+            . ($base === null ? '' : '<form:vymerovaciZaklad>' . $base . '</form:vymerovaciZaklad>')
+            . $tail . '</form:eldp>';
+        $report = fn (string $sections): JmhzControlEvaluationReport => $this->validate(
+            JmhzXmlSample::document(JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                eldp: $sections,
+            )),
+        );
+
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($report($section('1++', '2026-07-01', '2026-07-31', 31, 1000)), 59)->outcome,
+        );
+
+        $withoutBase = $report($section('1P+', '2026-07-01', '2026-07-31', 0, null));
+        self::assertContains(59, $this->failedIds($withoutBase));
+        self::assertStringContainsString('1. část', $this->finding($withoutBase, 59)->message);
+
+        $wholeMonthExcluded = $report($section(
+            '1++',
+            '2026-07-01',
+            '2026-07-31',
+            31,
+            1000,
+            '<form:vylouceneDny><form:vylouceneDobyCelkem>31</form:vylouceneDobyCelkem>'
+                . '<form:docasNeschopnost>31</form:docasNeschopnost></form:vylouceneDny>',
+        ));
+        self::assertStringContainsString('2. část', $this->finding($wholeMonthExcluded, 59)->message);
+
+        $zeroDays = $report($section('1++', '2026-07-01', '2026-07-31', 0, 500));
+        self::assertStringContainsString('5. část', $this->finding($zeroDays, 59)->message);
+
+        $pensionAge = static fn (int $before, int $after): string
+            => $section('1++', '2026-07-01', '2026-07-15', 15, $before)
+                . $section('1D+', '2026-07-16', '2026-07-31', 16, $after);
+        $split = $report($pensionAge(500, 500));
+        self::assertStringContainsString('3. část', $this->finding($split, 59)->message);
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($report($pensionAge(0, 1000)), 59)->outcome,
+        );
+    }
+
     public function testPersonIdentifierChecksumIsEnforced(): void
     {
         $report = $this->validate(str_replace(

@@ -61,8 +61,6 @@ final class JmhzScenario1ControlEvaluator
         22 => 'Jedinečnost GUID podání vůči variabilnímu symbolu, období a už'
             . ' přijatému řádnému či stornovacímu podání rozhoduje evidence'
             . ' ČSSZ, ne obsah jednoho XML.',
-        7 =>'Úhrn se skládá z vyměřovacích základů zaměstnance (10477, 10478)'
-            . ' rozlišených druhem činnosti (10239), které první profil nevykazuje.',
         // Okruh, ve kterém sleva podle § 7a náleží, se v hotovém XML nedá
         // přečíst: rozhoduje o něm druh činnosti (10239) a bližší určení
         // pracovněprávního vztahu (10502), a první profil ani jeden z nich
@@ -71,9 +69,6 @@ final class JmhzScenario1ControlEvaluator
         42 => 'Okruh slevy stojí na druhu činnosti (10239) a bližším určení'
             . ' pracovněprávního vztahu (10502), které první profil nevykazuje;'
             . ' podmínka se vynucuje před serializací, z podání ji ověřit nelze.',
-        59 => 'Podmínky vyměřovacího základu se opírají o vyloučené a odečtené'
-            . ' doby (10357, 10375), které první profil nevykazuje; předpoklad'
-            . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
         // 10243 „Zaměstnání malého rozsahu" nemá ve slovníku 1.4.1.6 mapování
         // na XSD, takže se z vyrobeného XML nedá přečíst vůbec. Vydávat
         // kontrolu za splněnou by znamenalo tvrdit, že prošla podmínka, na
@@ -219,8 +214,8 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
-            60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
+            1, 3, 4, 7, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
+            59, 60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 126, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 214, 215,
@@ -392,6 +387,8 @@ final class JmhzScenario1ControlEvaluator
             312 => $this->annualChildOrdersAreContinuous($projection),
             310 => $this->annualResultForbiddenWhenNotPerformed($projection),
             207 => $this->employerDiscountBaseMatchesForms($projection),
+            7 => $this->employerBaseMatchesForms($projection),
+            59 => $this->eldpAssessmentBaseConditions($projection),
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
             9 => $this->employerPartialBaseMatchesForms($projection, '10025', '10479'),
             142 => $this->employerPartialBaseMatchesForms($projection, '10483', '10480'),
@@ -3933,6 +3930,54 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /**
+     * Kontrola 7 — úhrn vyměřovacích základů zaměstnanců mimo rizikové
+     * zaměstnání, záchranáře a HZS podniku (10023) je součet základů dotčených
+     * zaměstnanců. Katalog sčítá podle datového scénáře: činnosti K až S
+     * (včetně „1 až 9" se specifickou skupinou, které mají týž formulář)
+     * a pěstoun (M) přes 10477, ostatní scénáře přes 10478.
+     *
+     * Druh činnosti (10239) ani bližší určení vztahu (10502) se v prvním
+     * profilu nevykazují, scénář ale v XML jednoznačně nese zvolený typ
+     * formuláře součásti: `cinnostKS` a `pestoun` jsou právě scénáře, pro
+     * které katalog předepisuje 10477. Neuvedený základ je nula ze stejného
+     * důvodu jako u kontrol 9 a 142.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerBaseMatchesForms(JmhzAttributeProjection $projection): array
+    {
+        $total = $projection->pvpoj()->integer('10023');
+        $sum = 0;
+        $seen = 0;
+        foreach ($projection->forms() as $form) {
+            $partId = array_intersect($form->bodies(), ['cinnostKS', 'pestoun']) !== []
+                ? '10477'
+                : '10478';
+            $part = $form->integer($partId);
+            if ($part === null) {
+                continue;
+            }
+            ++$seen;
+            $sum += $part;
+        }
+        if ($total === null && $seen === 0) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        $reported = $total ?? 0;
+        if ($reported !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Úhrn vyměřovacích základů 10023 = {$reported} Kč neodpovídá součtu"
+                    . " základů dotčených zaměstnanců (10478, u činností K až S a pěstounů"
+                    . " 10477) {$sum} Kč.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
      * Tolerance úhrnu slev proti procentu z vyměřovacích základů. Stejná úvaha
      * jako u kontroly 168: sleva se počítá a zaokrouhluje u každého zaměstnance
      * zvlášť, takže úhrn nikdy nesedí na procento z celku přesně.
@@ -4537,6 +4582,93 @@ final class JmhzScenario1ControlEvaluator
                         return "Kód ELDP {$code} vyžaduje započtené dny rovné intervalu"
                             . " zmenšenému o odečtené doby ({$expected}), uvedeno {$days}.";
                     }
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 59 — vyměřovací základ ELDP sekce (10245) podle kódu a dob.
+     *
+     * 1. Druhá pozice kódu P: základ musí být uveden.
+     * 2. Započtené dny rovné vyloučeným dobám (10356 = 10357) mimo D: základ 0.
+     * 3. Dovršení důchodového věku uvnitř téhož druhu činnosti: sekce D se
+     *    započtenými dny a sekce téže činnosti, která na ni bezprostředně
+     *    navazuje (10242 + 1 den = 10241 sekce D), nese základ 0 — celý základ
+     *    měsíce patří sekci D.
+     * 4. D, nula započtených dnů a odečtené doby rovné vyloučeným: základ 0.
+     * 5. Druhá pozice mimo D a P a nula započtených dnů: základ 0. Katalog
+     *    píše „≠ D nebo ≠ P", což by doslova platilo vždy a u P by zakázalo
+     *    základ, který pravidlo 1 vyžaduje; čte se proto jako „ani D, ani P".
+     *
+     * Pravidla 2 až 5 předepisují hodnotu uvedeného základu. Sekce bez kódu se
+     * neposuzuje — základ v ní zakazuje kontrola 307 — a neuvedený základ hlídá
+     * jen pravidlo 1, které jako jediné mluví o tom, že „musí být uveden".
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function eldpAssessmentBaseConditions(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $sections = $form->groupedBy(
+                ['10240', '10241', '10242', '10245', '10356', '10357', '10375'],
+                self::ELDP_SECTION_DEPTH,
+            );
+            $number = static fn (array $section, string $attributeId): ?int
+                => isset($section[$attributeId]) ? (int) $section[$attributeId] : null;
+            foreach ($sections as $section) {
+                $code = $section['10240'] ?? null;
+                if ($code === null) {
+                    continue;
+                }
+                $second = self::eldpPosition($code, 2);
+                $base = $number($section, '10245');
+                $days = $number($section, '10356');
+                $excluded = $number($section, '10357');
+                $deducted = $number($section, '10375');
+                $nonZeroBase = $base !== null && $base !== 0;
+                if ($second === 'P' && $base === null) {
+                    return "Kód ELDP {$code} vyžaduje uvedený vyměřovací základ (1. část kontroly).";
+                }
+                if ($second !== 'D' && $nonZeroBase
+                    && $days !== null && $excluded !== null && $days === $excluded
+                ) {
+                    return "Kód ELDP {$code} má započtené dny rovné vyloučeným dobám,"
+                        . " vyměřovací základ proto musí být 0, uvedeno {$base} (2. část kontroly).";
+                }
+                if ($second === 'D' && $nonZeroBase && $days === 0
+                    && $deducted !== null && $excluded !== null && $deducted === $excluded
+                ) {
+                    return "Kód ELDP {$code} bez započtených dnů s odečtenými dobami rovnými"
+                        . " vyloučeným vyžaduje vyměřovací základ 0, uvedeno {$base} (4. část kontroly).";
+                }
+                if ($second !== 'D' && $second !== 'P' && $nonZeroBase && $days === 0) {
+                    return "Kód ELDP {$code} bez započtených dnů vyžaduje vyměřovací základ 0,"
+                        . " uvedeno {$base} (5. část kontroly).";
+                }
+                if ($second !== 'D' || $days === null || $days === 0) {
+                    continue;
+                }
+                $pensionFrom = self::calendarDay($section['10241'] ?? null);
+                foreach ($sections as $preceding) {
+                    $precedingCode = $preceding['10240'] ?? null;
+                    $precedingTo = self::calendarDay($preceding['10242'] ?? null);
+                    $precedingBase = $number($preceding, '10245');
+                    if ($precedingCode === null
+                        || self::eldpPosition($precedingCode, 2) === 'D'
+                        || self::eldpPosition($precedingCode, 1) !== self::eldpPosition($code, 1)
+                        || $pensionFrom === null || $precedingTo === null
+                        || $precedingTo->modify('+1 day') != $pensionFrom
+                        || $precedingBase === null || $precedingBase === 0
+                    ) {
+                        continue;
+                    }
+
+                    return "Doba pojištění před dovršením důchodového věku (kód {$precedingCode})"
+                        . " navazuje na sekci {$code}, její vyměřovací základ proto musí být 0,"
+                        . " uvedeno {$precedingBase} (3. část kontroly).";
                 }
             }
 
