@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPackageSplitter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
@@ -526,6 +527,107 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $xml,
         );
         self::assertSame([], $this->failedControls($xml, [78]));
+    }
+
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 3: opravné hlášení nad limit součástí
+     * balíku se dělí do dílčích podání. Souhrn a pojistnou část nese jen první
+     * balík, všechny nesou GUID řádného podání a úhrn formulářů celkem.
+     * Limit je tu snížený na 1, aby šly dva balíky postavit ze dvou vztahů.
+     */
+    public function testContentCorrectionAboveThePackageLimitIsSplit(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $secondPerson = $payload['people'][0];
+        $secondPerson['employee_id'] = 12;
+        $secondPerson['employments'][0]['employment_id'] = 102;
+        $payload['people'][] = $secondPerson;
+
+        $result = (new JmhzScenario1XmlValidator(
+            serializer: new JmhzScenario1XmlSerializer(new JmhzPackageSplitter(1)),
+        ))->dryRunCorrectionPackages(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [
+                    101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    102 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDE',
+                ],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+                JmhzContentCorrectionForm::amendAccepted(
+                    102,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDE',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+            ]),
+        );
+
+        self::assertCount(2, $result['packages']);
+        [$first, $second] = array_column($result['packages'], 'xml');
+        foreach ([$first, $second] as $xml) {
+            self::assertStringContainsString('<idPodani>AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB</idPodani>', $xml);
+            self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $xml);
+            self::assertSame(1, substr_count($xml, '<formularOsoby'));
+        }
+        self::assertStringContainsString('<balikPoradi>1</balikPoradi>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $first);
+        self::assertStringContainsString('<so:souhrn', $first);
+        self::assertStringContainsString('<pvpoj:PVPOJ', $first);
+        self::assertStringContainsString('<balikPoradi>2</balikPoradi>', $second);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
+        self::assertStringNotContainsString('<so:souhrn', $second);
+        self::assertStringNotContainsString('<pvpoj:PVPOJ', $second);
+    }
+
+    /**
+     * Limit balíku se poměřuje s opravovanými součástmi, ne s celou přípravou:
+     * oprava jediného vztahu ve firmě s 1 501 zaměstnanci je jeden balík.
+     */
+    public function testCorrectionOfOneFormInALargePreparationIsOnePackage(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $template = $payload['people'][0];
+        for ($index = 1; $index <= 1500; ++$index) {
+            $person = $template;
+            $person['employee_id'] = 10_000 + $index;
+            $person['employments'][0]['employment_id'] = 20_000 + $index;
+            $payload['people'][] = $person;
+        }
+
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: false,
+                    affectsPvpoj: false,
+                ),
+            ]),
+        );
+
+        self::assertSame(1, substr_count($result['xml'], '<formularOsoby'));
+        self::assertStringContainsString('<formularePocetCelkem>1</formularePocetCelkem>', $result['xml']);
     }
 
     public function testCorrectionAggregatesComeFromTheWholePreparationNotSelectedForms(): void

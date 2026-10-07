@@ -135,6 +135,51 @@ final readonly class JmhzScenario1XmlValidator
     }
 
     /**
+     * Obsahová oprava jako dílčí balíky. Do 1500 opravených součástí jediný
+     * balík, bajtově shodný s {@see self::dryRunCorrection()}; nad 1500 každý
+     * balík zvlášť ověřený XSD.
+     *
+     * @return array{packages:list<array{ordinal:int,xml:string,sha256:string}>,schema:array<string,string>}
+     */
+    public function dryRunCorrectionPackages(
+        JmhzScenario1Resolution $resolution,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): array {
+        if ($resolution->status() !== 'resolved' || $resolution->blockers !== []) {
+            throw new JmhzXmlException(
+                'jmhz_xml_resolution_blocked',
+                'Blokovaný dokument nelze serializovat do obsahové opravy.',
+            );
+        }
+        $document = $resolution->requireResolvedDocument();
+        $packages = $this->serializer->serializeCorrectionPackages($document, $envelope, $plan);
+        $repeated = $this->serializer->serializeCorrectionPackages($document, $envelope, $plan);
+        $schema = $this->schemas->entryPoint();
+        $result = [];
+        foreach ($packages as $index => $xml) {
+            if (!hash_equals(hash('sha256', $repeated[$index] ?? ''), hash('sha256', $xml))) {
+                throw new JmhzXmlException(
+                    'jmhz_xml_not_byte_stable',
+                    'Serializace téže obsahové opravy nevrátila shodné bajty.',
+                );
+            }
+            $this->assertSchemaValid($xml, $schema['path']);
+            $result[] = ['ordinal' => $index + 1, 'xml' => $xml, 'sha256' => hash('sha256', $xml)];
+        }
+
+        return [
+            'packages' => $result,
+            'schema' => [
+                'package_key' => $schema['package_key'],
+                'data_version' => $schema['data_version'],
+                'bundle_sha256' => $schema['bundle_sha256'],
+                'document_sha256' => $document->sha256(),
+            ],
+        ];
+    }
+
+    /**
      * Ověření HOTOVÉ datové věty proti připnutému XSD, bez serializace. Pro
      * znovu zmrazené podání, u kterého se měnily jen GUIDy a čas vyplnění.
      *

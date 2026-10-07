@@ -268,9 +268,11 @@ final readonly class JmhzCorrectiveSubmissionService
                 self::PRODUCT_NAME,
                 EpoEnvelope::appVersion() ?? '0',
             );
-            $xml = $components === []
-                ? $this->cancellations->serialize($request, $envelope)
-                : $this->componentCancellations->serialize($request, $components, $envelope);
+            // Nad 1500 stornovaných součástí se opravné hlášení dělí do dílčích
+            // balíků (Pravidla podání JMHZ 1.4.5, kap. 3).
+            $packages = $components === []
+                ? [$this->cancellations->serialize($request, $envelope)]
+                : $this->componentCancellations->serializePackages($request, $components, $envelope);
 
             // Platforma vyžaduje, aby druh podání odpovídal druhu povinnosti —
             // storno tedy nemůže viset pod povinností řádného hlášení. Vlastní
@@ -308,36 +310,59 @@ final readonly class JmhzCorrectiveSubmissionService
                 );
             }
 
-            $part = $this->submissions->addPart(
-                $supplierId,
-                $submission['id'],
-                $submission['row_version'],
-                "jmhz25-{$referencePrefix}:{$originalSubmissionId}",
-                JmhzSubmissionBridgeService::AGENDA_CODE,
-                $obligation['subject_reference'],
-                'jmhz_submission',
-                "jmhz_submission:{$originalSubmissionId}",
-                $snapshotHash,
-            );
-            $artifact = $this->submissions->storeArtifact(
-                $supplierId,
-                $submission['id'],
-                $part['submission_row_version'],
-                $part['id'],
-                'outbound_xml',
-                'outbound',
-                'application/xml',
-                $xml,
-                JmhzSchemaCatalog::PACKAGE_KEY,
-                JmhzControlSourceCatalog::CATALOG_KEY,
-                self::CHANNEL,
-                $keys['artifact'],
-                $createdBy,
-            );
+            $split = count($packages) > 1;
+            $rowVersion = $submission['row_version'];
+            $part = null;
+            $artifact = null;
+            foreach ($packages as $index => $xml) {
+                $ordinal = $index + 1;
+                $packagePart = $this->submissions->addPart(
+                    $supplierId,
+                    $submission['id'],
+                    $rowVersion,
+                    $split
+                        ? JmhzSubmissionBridgeService::packageArtifactKey(
+                            "jmhz25-{$referencePrefix}:{$originalSubmissionId}",
+                            $ordinal,
+                        )
+                        : "jmhz25-{$referencePrefix}:{$originalSubmissionId}",
+                    JmhzSubmissionBridgeService::AGENDA_CODE,
+                    $obligation['subject_reference'],
+                    'jmhz_submission',
+                    "jmhz_submission:{$originalSubmissionId}",
+                    $snapshotHash,
+                );
+                $packageArtifact = $this->submissions->storeArtifact(
+                    $supplierId,
+                    $submission['id'],
+                    $packagePart['submission_row_version'],
+                    $packagePart['id'],
+                    'outbound_xml',
+                    'outbound',
+                    'application/xml',
+                    $xml,
+                    JmhzSchemaCatalog::PACKAGE_KEY,
+                    JmhzControlSourceCatalog::CATALOG_KEY,
+                    self::CHANNEL,
+                    $split
+                        ? JmhzSubmissionBridgeService::packageArtifactKey($keys['artifact'], $ordinal)
+                        : $keys['artifact'],
+                    $createdBy,
+                );
+                $rowVersion = $packageArtifact['submission_row_version'];
+                $part ??= $packagePart;
+                $artifact ??= $packageArtifact;
+            }
+            if ($part === null || $artifact === null) {
+                throw new JmhzXmlException(
+                    'jmhz_amendment_without_components',
+                    'Opravné podání nevytvořilo žádný balík.',
+                );
+            }
             $validated = $this->submissions->transition(
                 $supplierId,
                 $submission['id'],
-                $artifact['submission_row_version'],
+                $rowVersion,
                 'validated',
             );
             $ready = $this->submissions->transition(
@@ -391,9 +416,14 @@ final readonly class JmhzCorrectiveSubmissionService
         JmhzFrozenSubmissionIdentity $identity,
         int $originalSubmissionId,
     ): array {
+        // Rozdělené opravné podání má artefakt za každý balík; zastupuje ho první.
         $artifact = $this->repository->findArtifactByIdempotencyForUpdate(
             $supplierId,
             hash('sha256', $artifactKey, true),
+            $environment,
+        ) ?? $this->repository->findArtifactByIdempotencyForUpdate(
+            $supplierId,
+            hash('sha256', JmhzSubmissionBridgeService::packageArtifactKey($artifactKey, 1), true),
             $environment,
         );
         if ($artifact === null

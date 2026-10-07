@@ -752,6 +752,68 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertStringNotContainsString('<form:idPpv>2000000000000000000001</form:idPpv>', $xml);
     }
 
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 3: obsahová oprava víc součástí, než
+     * pojme balík, se zmrazí jako dílčí balíky jednoho podání se souhrnem
+     * a pojistnou částí jen v prvním. Limit je snížený na 1, aby šly dva
+     * balíky postavit ze dvou vztahů.
+     */
+    public function testContentCorrectionAboveThePackageLimitIsFrozenAsPackages(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalGuid = $this->firstFormGuid($this->submissions->artifactBytes(
+            $this->supplierId,
+            $original['artifact_id'],
+        ));
+        $this->acceptWithFormOutcome($original, $originalGuid, 'accepted');
+
+        $service = $this->contentCorrections($this->resolutionWithSecondPerson(), 1);
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertCount(2, $candidates['forms']);
+
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            array_map(
+                static fn (array $form): string => (string) $form['employment_external_identifier'],
+                $candidates['forms'],
+            ),
+            $this->userId,
+        );
+
+        $packages = $this->submissionRepository->listPackageOutboundXmlArtifacts(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $correction['submission_id'],
+        );
+        self::assertSame([1, 2], array_column($packages, 'ordinal'));
+        self::assertSame($packages[0]['artifact_id'], $correction['artifact_id']);
+        $first = $this->submissions->artifactBytes($this->supplierId, $packages[0]['artifact_id']);
+        $second = $this->submissions->artifactBytes($this->supplierId, $packages[1]['artifact_id']);
+        foreach ([$first, $second] as $xml) {
+            self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+            self::assertStringContainsString('<balikyPocet>2</balikyPocet>', $xml);
+            self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $xml);
+        }
+        self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $first);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $first);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $second);
+        self::assertStringNotContainsString('<pvpoj:PVPOJ>', $second);
+    }
+
     public function testDecemberCorrectionObligationUsesFollowingJanuaryDueYear(): void
     {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
@@ -2155,8 +2217,10 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame($status, $result['submission_status']);
     }
 
-    private function contentCorrections(JmhzScenario1Resolution $resolution): JmhzContentCorrectionSubmissionService
-    {
+    private function contentCorrections(
+        JmhzScenario1Resolution $resolution,
+        ?int $packageFormLimit = null,
+    ): JmhzContentCorrectionSubmissionService {
         $documents = $this->createMock(JmhzScenario1DocumentService::class);
         $documents->expects(self::exactly(2))->method('resolveForCorrection')->willReturn($resolution);
         $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
@@ -2164,7 +2228,13 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
         return new JmhzContentCorrectionSubmissionService(
             $documents,
-            new JmhzScenario1XmlValidator(),
+            new JmhzScenario1XmlValidator(
+                serializer: new JmhzScenario1XmlSerializer(
+                    $packageFormLimit === null
+                        ? new JmhzPackageSplitter()
+                        : new JmhzPackageSplitter($packageFormLimit),
+                ),
+            ),
             JmhzScenario1ControlValidator::create(
                 CzechPayrollRulesets2026::provider(),
             ),
