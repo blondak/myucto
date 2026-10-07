@@ -125,7 +125,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
     {
         $payload = $this->payload(
             SicknessBenefitKind::Ose,
-            $this->careApplication(careReason: NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED, schoolName: 'Základní škola Testov'),
+            $this->careApplication(careReason: NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED, schoolName: 'Základní škola Testov', schoolBusinessId: '12345678'),
         );
         $xml = $this->serializer->serialize($payload);
 
@@ -146,6 +146,8 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             paternityReason: 'OTC',
             plannedShifts: false,
             shiftHoursLastDay: '8',
+            hoursWorkedLastDay: '4',
+            returnedOn: '2026-09-18',
         );
         $payload = $this->payload(SicknessBenefitKind::Opp, $application, [
             'decisionNumber' => null,
@@ -178,7 +180,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             fromDate: '2026-09-01',
             person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
             childOrder: 1,
-        ), ['decisionNumber' => null, 'unpaidLeave' => false, 'unpaidLeaveFrom' => null, 'unpaidLeaveTo' => null]);
+        ), ['decisionNumber' => '1234567M', 'unpaidLeave' => false, 'unpaidLeaveFrom' => null, 'unpaidLeaveTo' => null]);
         $this->validator->validateNempri($ppm, $this->serializer->serialize($ppm));
 
         $dlo = $this->payload(SicknessBenefitKind::Dlo, new NempriBenefitApplication(
@@ -303,7 +305,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
     {
         $months = [
             new NempriDecisiveMonth(2025, 11, 3_000_000, 0, NempriDecisiveMonth::SOURCE_TAKEOVER),
-            new NempriDecisiveMonth(2025, 12, 3_100_050, 4, NempriDecisiveMonth::SOURCE_MANUAL),
+            new NempriDecisiveMonth(2025, 12, 3_100_000, 4, NempriDecisiveMonth::SOURCE_MANUAL),
         ];
         $complete = $this->payload(SicknessBenefitKind::Nem, null, [
             'decisivePeriod' => new NempriDecisivePeriod('2025-11-01', '2025-12-31', $months, true),
@@ -312,20 +314,19 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         $this->validator->validateNempri($complete, $xml);
 
         self::assertStringContainsString('<zapocitatelnyPrijem>30000</zapocitatelnyPrijem>', $xml);
-        self::assertStringContainsString('<zapocitatelnyPrijem>31000.50</zapocitatelnyPrijem>', $xml);
-        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>61000.50</zapocitatelnyPrijemCelkem>', $xml);
+        self::assertStringContainsString('<zapocitatelnyPrijem>31000</zapocitatelnyPrijem>', $xml);
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>61000</zapocitatelnyPrijemCelkem>', $xml);
         self::assertStringContainsString('<vylouceneDnyCelkem>4</vylouceneDnyCelkem>', $xml);
         // Rozhodné období leží mezi zaměstnáním a dávkou.
         self::assertLessThan(strpos($xml, '<davka>'), strpos($xml, '<rozhodneObdobi>'));
         self::assertGreaterThan(strpos($xml, '</zamestnani>'), strpos($xml, '<rozhodneObdobi>'));
 
+        // Částečný seznam ČSSZ nepřijme (kontrola 8): bez součtů a bez
+        // pravděpodobné výše musí měsíce pokrýt celé období.
         $partial = $this->payload(SicknessBenefitKind::Nem, null, [
             'decisivePeriod' => new NempriDecisivePeriod('2025-11-01', '2026-10-31', $months, false),
         ]);
-        $xml = $this->serializer->serialize($partial);
-        $this->validator->validateNempri($partial, $xml);
-
-        self::assertStringNotContainsString('Celkem>', $xml);
+        $this->expectRejected('nempri_decisive_period_incomplete', $partial);
     }
 
     public function testProbableIncomeIsSentForShortDecisivePeriod(): void
@@ -404,6 +405,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         ?string $careReason = NempriBenefitApplication::CARE_REASON_ILL,
         ?string $schoolName = null,
         string $relationshipCode = 'PL',
+        ?string $schoolBusinessId = null,
     ): NempriBenefitApplication {
         return new NempriBenefitApplication(
             actionStart: $actionStart,
@@ -414,6 +416,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             person: $person ? new NempriPerson('Dítě', 'Testovací', '1501010007', null) : null,
             careReason: $careReason,
             schoolName: $schoolName,
+            schoolBusinessId: $schoolBusinessId,
             sharedHousehold: true,
             loneCaregiver: false,
             childUnder16: true,
@@ -438,7 +441,12 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             'benefitKind' => $kind,
             'osszCode' => 115,
             'correction' => false,
-            'decisionNumber' => 'A1234567',
+            'decisionNumber' => match ($kind) {
+                SicknessBenefitKind::Nem => 'A1234567',
+                SicknessBenefitKind::Ose => '1234567N',
+                SicknessBenefitKind::Dlo => '1234567L',
+                default => null,
+            },
             'foreignCase' => false,
             'insuredFirstName' => 'Jan',
             'insuredLastName' => 'Testovací',
@@ -453,7 +461,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             'activityCode' => '1',
             'workedOnDecisiveDay' => false,
             'hoursWorked' => null,
-            'dailyWorkingHours' => '8',
+            'dailyWorkingHours' => null,
             'smallScopeIncomeMinor' => null,
             'receivesPension' => false,
             'pensionKind' => null,
@@ -474,13 +482,34 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             'productVersion' => '1.0',
             'payloadVersion' => '1.0',
             'application' => $application,
-            'decisivePeriod' => $kind === SicknessBenefitKind::Ose
-                ? new NempriDecisivePeriod('2025-09-01', '2026-08-31', [
-                    new NempriDecisiveMonth(2025, 9, 3_000_000, 0, NempriDecisiveMonth::SOURCE_TAKEOVER),
-                ], false)
-                : null,
+            'decisivePeriod' => self::fullPeriod(),
+            'paymentConnection' => $kind->hasActions() && !($application?->actionStart ?? true)
+                ? null
+                : new NempriPaymentConnection(
+                    NempriPaymentConnection::KIND_ACCOUNT_CZ,
+                    accountPrefix: '19',
+                    accountNumber: '1000000005',
+                    bankCode: '0100',
+                ),
         ];
 
         return new NempriXmlPayload(...[...$values, ...$overrides]);
+    }
+
+    /** Úplné rozhodné období: 12 kalendářních měsíců se součty. */
+    private static function fullPeriod(): NempriDecisivePeriod
+    {
+        $months = [];
+        foreach (['2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'] as $period) {
+            $months[] = new NempriDecisiveMonth(
+                (int) substr($period, 0, 4),
+                (int) substr($period, 5, 2),
+                3_000_000,
+                0,
+                NempriDecisiveMonth::SOURCE_TAKEOVER,
+            );
+        }
+
+        return new NempriDecisivePeriod('2025-09-01', '2026-08-31', $months, true);
     }
 }

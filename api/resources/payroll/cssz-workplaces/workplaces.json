@@ -1,0 +1,5 @@
+{
+  "source": "ČSSZ, číselník CIS_PRACOVIST (kód pracoviště a název)",
+  "note": "Číselník v repozitáři není. Doplňte dvojice kód -> název (nejvýš 30 znaků, jako HZUPN dokument/nazevOSSZ) z oficiálního číselníku ČSSZ. Dokud kód v seznamu chybí, prvek nazevOSSZ se nevysílá (je nepovinný).",
+  "workplaces": {}
+}

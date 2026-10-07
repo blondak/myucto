@@ -7,6 +7,9 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisiveMonth;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisivePeriod;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
@@ -56,9 +59,8 @@ final class SicknessXmlBuilderTest extends TestCase
             strpos($xml, '<pobiraDuchod>'),
             strpos($xml, '<pracoval>'),
         );
-        // Bez měsíců mimo měsíční hlášení a bez pravděpodobného příjmu nemá
-        // věta rozhodné období co nést.
-        self::assertStringNotContainsString('rozhodneObdobi', $xml);
+        // Rozhodné období je u nemocenského povinné vždy a nese součty.
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>360000</zapocitatelnyPrijemCelkem>', $xml);
     }
 
     /**
@@ -80,6 +82,7 @@ final class SicknessXmlBuilderTest extends TestCase
     {
         $payload = $this->nempriPayload([
             'benefitKind' => SicknessBenefitKind::Vpm,
+            'decisionNumber' => null,
             'unpaidLeave' => false,
             'unpaidLeaveFrom' => null,
             'unpaidLeaveTo' => null,
@@ -131,16 +134,15 @@ final class SicknessXmlBuilderTest extends TestCase
     }
 
     /**
-     * „Nevrátil se do práce“ s důvodem a datem (nástup na PPM, skončení
-     * zaměstnání) ČSSZ přijímá. Validátor datum bez příznaku návratu dřív
-     * zakazoval, takže takové hlášení nešlo sestavit.
+     * „Nevrátil se do práce“ nese důvod (nástup na PPM, skončení zaměstnání),
+     * ale ne datum návratu: DV HZUPN20 datum zakazuje při „N“.
      */
     public function testHzupnAcceptsNoReturnWithReasonAndDate(): void
     {
         $payload = $this->hzupnPayload([
             'returnedToWork' => false,
             'returnReason' => 'skončení zaměstnání',
-            'returnedOn' => '2026-08-20',
+            'returnedOn' => null,
             'hoursWorkedLastDay' => null,
             'shiftHoursLastDay' => null,
             'workIntervals' => [],
@@ -150,7 +152,7 @@ final class SicknessXmlBuilderTest extends TestCase
         $this->validator->validateHzupn($payload, $xml, '2026-08-03');
 
         self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', $xml);
-        self::assertStringContainsString('<datumNavratDoPrace>2026-08-20</datumNavratDoPrace>', $xml);
+        self::assertStringNotContainsString('datumNavratDoPrace', $xml);
         self::assertStringContainsString('<duvodNavratDoPrace>skončení zaměstnání</duvodNavratDoPrace>', $xml);
     }
 
@@ -160,6 +162,8 @@ final class SicknessXmlBuilderTest extends TestCase
             'returnedToWork' => false,
             'returnReason' => null,
             'returnedOn' => null,
+            'hoursWorkedLastDay' => null,
+            'shiftHoursLastDay' => null,
         ]);
 
         try {
@@ -368,9 +372,34 @@ final class SicknessXmlBuilderTest extends TestCase
             'productName' => 'MyUcto',
             'productVersion' => '1.0',
             'payloadVersion' => '1.0',
+            'decisivePeriod' => self::fullPeriod(),
+            'paymentConnection' => new NempriPaymentConnection(
+                NempriPaymentConnection::KIND_ACCOUNT_CZ,
+                accountPrefix: '19',
+                accountNumber: '1000000005',
+                bankCode: '0100',
+            ),
         ];
 
         return new NempriXmlPayload(...[...$values, ...$overrides]);
+    }
+
+    /** Úplné rozhodné období 2025-09 až 2026-08, každý měsíc 30 000 Kč. */
+    private static function fullPeriod(): NempriDecisivePeriod
+    {
+        $months = [];
+        for ($i = 0; $i < 12; $i++) {
+            $date = (new \DateTimeImmutable('2025-09-01'))->modify('+' . $i . ' months');
+            $months[] = new NempriDecisiveMonth(
+                (int) $date->format('Y'),
+                (int) $date->format('n'),
+                3_000_000,
+                0,
+                NempriDecisiveMonth::SOURCE_TAKEOVER,
+            );
+        }
+
+        return new NempriDecisivePeriod('2025-09-01', '2026-08-31', $months, true);
     }
 
     /** @param array<string,mixed> $overrides */

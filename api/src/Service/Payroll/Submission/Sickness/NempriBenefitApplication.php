@@ -47,6 +47,8 @@ final readonly class NempriBenefitApplication
     /**
      * @param list<array{from:string,to:string}> $careDays `pecovalVeDnech`
      * @param list<array{from:string,to:string}> $workDays `seznamPraceVeDnech`
+     * @param list<array{from:string,to:string}> $leavePeriods DLO `pracovniVolno`
+     * @param list<array{from:string,to:string}> $shiftSchedule DLO `seznamRozvrhuSmen`
      */
     public function __construct(
         public bool $actionStart = true,
@@ -78,5 +80,20 @@ final readonly class NempriBenefitApplication
         public ?bool $plannedShiftsWorked = null,
         public ?string $returnedOn = null,
         public array $workDays = [],
+        public ?bool $hasLeave = null,
+        public array $leavePeriods = [],
+        public array $shiftSchedule = [],
     ) {}
+
+    /** Prvky, které DV NEMPRI25 připouští jen u akce vznik. */
+    public function carriesStart(): bool
+    {
+        return $this->actionStart;
+    }
+
+    /** Prvky povinné pro trvání nebo ukončení, u samotného vzniku zakázané. */
+    public function carriesDuration(): bool
+    {
+        return $this->actionContinuation || $this->actionEnd;
+    }
 }

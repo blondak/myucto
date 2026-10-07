@@ -278,6 +278,7 @@ function message(err: unknown): string {
 /** Chyby, které se opravují na kartě osoby (identita, účet, adresa, vyživovaná osoba). */
 const PERSON_CARD_ERRORS = [
   'nempri_payment_connection_missing',
+  'nempri_payment_connection_required',
   'nempri_payment_connection_invalid',
   'nempri_payment_address_invalid',
   'nempri_birth_number_missing',

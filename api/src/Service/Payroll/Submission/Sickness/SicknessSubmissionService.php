@@ -80,6 +80,7 @@ final readonly class SicknessSubmissionService
         private PayrollTakeoverReader $takeover,
         private PayrollHistoricalPeriodService $historical,
         private PayrollSensitiveData $sensitiveData,
+        private SicknessInsuredContactReader $insuredContacts,
     ) {}
 
     /**
@@ -514,6 +515,7 @@ final readonly class SicknessSubmissionService
                 ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context)
                 : null,
             $this->paymentConnection($supplierId, $employeeId, $eventOn),
+            $this->insuredContacts->forEmployee($supplierId, $employeeId),
         );
     }
 

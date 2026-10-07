@@ -191,7 +191,9 @@ final class HzupnXmlSerializer
                 $payload->returnedToWork,
             );
         }
-        if ($payload->returnReason !== null) {
+        // DV HZUPN20: důvod patří jen k „nevrátil se“, datum a hodiny jen
+        // k „vrátil se“.
+        if ($payload->returnedToWork !== true && $payload->returnReason !== null) {
             $this->text(
                 $document,
                 $namespace,
@@ -200,7 +202,7 @@ final class HzupnXmlSerializer
                 $payload->returnReason,
             );
         }
-        if ($payload->returnedOn !== null) {
+        if ($payload->returnedToWork === true && $payload->returnedOn !== null) {
             $this->text(
                 $document,
                 $namespace,
@@ -209,7 +211,7 @@ final class HzupnXmlSerializer
                 $payload->returnedOn,
             );
         }
-        if ($payload->hoursWorkedLastDay !== null) {
+        if ($payload->returnedToWork === true && $payload->hoursWorkedLastDay !== null) {
             $this->text(
                 $document,
                 $namespace,
@@ -218,7 +220,7 @@ final class HzupnXmlSerializer
                 $payload->hoursWorkedLastDay,
             );
         }
-        if ($payload->shiftHoursLastDay !== null) {
+        if ($payload->returnedToWork === true && $payload->shiftHoursLastDay !== null) {
             $this->text(
                 $document,
                 $namespace,

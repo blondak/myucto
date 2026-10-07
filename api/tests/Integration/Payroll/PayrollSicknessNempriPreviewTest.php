@@ -90,10 +90,11 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             [
                 'incapacity_from' => '2026-02-09',
                 'incapacity_to' => '2026-02-13',
-                'decision_number' => 'A1234567',
+                'decision_number' => '1234567N',
                 'daily_working_hours' => '8',
                 'action_start' => true,
                 'action_end' => true,
+                'worked_last_day' => false,
                 'cared_dependant_id' => $dependantId,
                 'care_reason' => 'ill',
                 'shared_household' => true,
@@ -198,7 +199,10 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         );
 
         self::assertStringContainsString('<navratDoPrace>N</navratDoPrace>', (string) $preview['xml']);
-        self::assertStringContainsString('<datumNavratDoPrace>2026-03-16</datumNavratDoPrace>', (string) $preview['xml']);
+        self::assertStringContainsString('<duvodNavratDoPrace>skončení zaměstnání</duvodNavratDoPrace>', (string) $preview['xml']);
+        // DV HZUPN20: datum návratu patří jen k odpovědi „ano“; řádek případu
+        // ho drží kvůli lhůtě, ve větě být nesmí.
+        self::assertStringNotContainsString('datumNavratDoPrace', (string) $preview['xml']);
     }
 
     /**

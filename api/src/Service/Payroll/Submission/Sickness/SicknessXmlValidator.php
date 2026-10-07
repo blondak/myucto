@@ -78,17 +78,7 @@ final readonly class SicknessXmlValidator
                 . 'zpracovala jako nové podání.',
             );
         }
-        if ($payload->benefitKind->requiresDecisionNumber()
-            && !$payload->foreignCase
-            && $payload->decisionNumber === null
-        ) {
-            $this->invalid(
-                'nempri_decision_number_missing',
-                'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
-                . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
-                . 'Výjimkou je jen zahraniční případ.',
-            );
-        }
+        $this->decisionNumber($payload);
         if ($payload->benefitKind->hasUnpaidLeaveSection()) {
             $this->unpaidLeave($payload);
         } elseif ($payload->unpaidLeave
@@ -101,10 +91,13 @@ final readonly class SicknessXmlValidator
                 . 'bez náhrady příjmu nemá; vyplněné volno by datovou větu shodilo.',
             );
         }
+        $this->employerConfirmation($payload);
         $this->application($payload);
+        $this->decisivePeriodRequirement($payload);
         if ($payload->decisivePeriod !== null) {
             $this->decisivePeriod($payload->decisivePeriod);
         }
+        $this->paymentConnectionRequirement($payload);
         if ($payload->paymentConnection !== null) {
             $this->paymentConnection($payload->paymentConnection);
         }
@@ -208,26 +201,13 @@ final readonly class SicknessXmlValidator
                 . 'zahraniční případ.',
             );
         }
-        if ($payload->returnedToWork === true && $payload->returnedOn === null) {
+        $this->hzupnEmployerConfirmation($payload);
+        if ($payload->osszName !== null
+            && mb_strlen($payload->osszName, 'UTF-8') > CsszWorkplaceCatalog::MAX_NAME_LENGTH
+        ) {
             $this->invalid(
-                'hzupn_return_date_missing',
-                'Návrat do práce musí mít datum; z něj ČSSZ počítá poslední dávku.',
-            );
-        }
-        if ($payload->returnedToWork === null && $payload->returnedOn !== null) {
-            $this->invalid(
-                'hzupn_return_date_without_return',
-                'Datum návratu do práce nesmí být vyplněné bez odpovědi, zda se '
-                . 'zaměstnanec do práce vrátil.',
-            );
-        }
-        // „Ne“ nese důvod (nástup na PPM, skončení zaměstnání) a smí nést
-        // i datum, ke kterému důvod nastal — takové hlášení ČSSZ přijímá.
-        if ($payload->returnedToWork === false && $payload->returnReason === null) {
-            $this->invalid(
-                'hzupn_return_reason_missing',
-                'Když se zaměstnanec do práce nevrátil, hlášení musí uvést důvod '
-                . '(například nástup na peněžitou pomoc v mateřství nebo skončení zaměstnání).',
+                'hzupn_ossz_name_too_long',
+                'Název pracoviště ČSSZ smí mít nejvýš ' . CsszWorkplaceCatalog::MAX_NAME_LENGTH . ' znaků.',
             );
         }
         $this->exactDate($payload->issuedOn, 'hzupn_date_invalid');
@@ -320,11 +300,21 @@ final readonly class SicknessXmlValidator
                 'Žádost musí uvést den, od kterého zaměstnanec o dávku žádá.',
             );
         }
-        if ($kind->hasActions() && $application->actionEnd && $application->toDate === null) {
-            $this->invalid(
-                'nempri_application_to_missing',
-                'Při ukončení péče musí žádost uvést den, do kterého zaměstnanec o dávku žádá.',
-            );
+        if ($kind->hasActions() && $application->carriesDuration()) {
+            if ($application->toDate === null) {
+                $this->invalid(
+                    'nempri_application_to_missing',
+                    'Při trvání nebo ukončení péče musí žádost uvést den, do kterého '
+                    . 'zaměstnanec o dávku žádá (doDne).',
+                );
+            }
+            $this->careDuration($kind, $application);
+        }
+        if ($kind->hasActions() && $application->carriesStart()) {
+            $this->careStart($kind, $application);
+        }
+        if ($kind === SicknessBenefitKind::Opp) {
+            $this->paternitySupport($application);
         }
         foreach ([$application->fromDate, $application->toDate, $application->returnedOn] as $date) {
             if ($date !== null) {
@@ -378,13 +368,22 @@ final readonly class SicknessXmlValidator
                 'Důvod péče není z nabízeného seznamu.',
             );
         }
-        if ($application->careReason === NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED
-            && ($application->schoolName === null || trim($application->schoolName) === '')
+        if ($application->carriesStart()
+            && $application->careReason === NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED
         ) {
-            $this->invalid(
-                'nempri_school_name_missing',
-                'U uzavřené školy nebo zařízení musí žádost uvést jeho název.',
-            );
+            if ($application->schoolName === null || trim($application->schoolName) === '') {
+                $this->invalid(
+                    'nempri_school_name_missing',
+                    'U uzavřené školy nebo zařízení musí žádost uvést jeho název.',
+                );
+            }
+            if ($application->schoolBusinessId === null || trim($application->schoolBusinessId) === '') {
+                $this->invalid(
+                    'nempri_school_business_id_missing',
+                    'U uzavřené školy nebo zařízení musí žádost uvést jeho IČ '
+                    . '(ICZarizeniSkoly je podle DV NEMPRI25 povinné).',
+                );
+            }
         }
         // XSD má u všech tří prvků jen `StCiselnik`, takže kód mimo číselník
         // projde schématem a odmítne ho až územní správa.
@@ -419,7 +418,12 @@ final readonly class SicknessXmlValidator
                 'Pořadí dítěte musí být 1 až 10.',
             );
         }
-        foreach ([$application->careDays, $application->workDays] as $periods) {
+        foreach ([
+            $application->careDays,
+            $application->workDays,
+            $application->leavePeriods,
+            $application->shiftSchedule,
+        ] as $periods) {
             foreach ($periods as $period) {
                 $this->exactDate($period['from'], 'nempri_date_invalid');
                 $this->exactDate($period['to'], 'nempri_date_invalid');
@@ -431,6 +435,407 @@ final readonly class SicknessXmlValidator
                 }
             }
         }
+    }
+
+    /**
+     * Číslo rozhodnutí podle druhu dávky (logické kontroly NEMPRI25 č. 2 a 3):
+     * povinnost, zákaz i tvar. Zahraniční případ číslo z českého systému mít
+     * nemusí, a tak se pro něj tvar nehlídá.
+     */
+    private function decisionNumber(NempriXmlPayload $payload): void
+    {
+        $kind = $payload->benefitKind;
+        $hasCareReason = $payload->application?->maternityCareReason !== null;
+        $requirement = $kind->decisionNumberRequirement($hasCareReason);
+        $number = $payload->decisionNumber;
+        if ($requirement === SicknessBenefitKind::DECISION_FORBIDDEN) {
+            // PPM s důvodem převzetí řeší application() vlastním kódem.
+            if ($number !== null && $kind !== SicknessBenefitKind::Ppm) {
+                $this->invalid(
+                    'nempri_decision_number_forbidden',
+                    'U tohoto druhu dávky se číslo rozhodnutí nevyplňuje. Smažte ho v případu dávky.',
+                );
+            }
+
+            return;
+        }
+        if ($number === null) {
+            if ($requirement === SicknessBenefitKind::DECISION_REQUIRED && !$payload->foreignCase) {
+                $this->invalid(
+                    'nempri_decision_number_missing',
+                    'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
+                    . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
+                    . 'Výjimkou je jen zahraniční případ.',
+                );
+            }
+
+            return;
+        }
+        if (!$payload->foreignCase && preg_match($kind->decisionNumberPattern(), $number) !== 1) {
+            $this->invalid(
+                'nempri_decision_number_format_invalid',
+                'Číslo rozhodnutí nemá tvar, který ČSSZ u dávky ' . $kind->value . ' kontroluje '
+                . '(NEM: písmeno a 6 až 7 číslic nebo 10 číslic; PPM končí písmenem M, OSE N nebo Z, '
+                . 'OPP T, DLO L, vždy se sedmimístným číslem a volitelnou předponou ICPE).',
+            );
+        }
+    }
+
+    /**
+     * Podmíněné prvky potvrzení zaměstnavatele (DV NEMPRI25, kontroly 12 až 14):
+     * každý nese vlastní nadřazený příznak a bez něj nesmí být.
+     */
+    private function employerConfirmation(NempriXmlPayload $payload): void
+    {
+        $kind = $payload->benefitKind;
+        $hours = self::number($payload->hoursWorked);
+        $workTime = self::number($payload->dailyWorkingHours);
+        if ($payload->workedOnDecisiveDay) {
+            if ($hours === null || $workTime === null) {
+                $this->invalid(
+                    'nempri_worked_hours_missing',
+                    'Zaměstnanec v den sociální události pracoval, takže potvrzení musí nést '
+                    . 'počet odpracovaných hodin i pracovní dobu. Doplňte je v případu dávky.',
+                );
+            }
+            if ($hours > $workTime) {
+                $this->invalid(
+                    'nempri_worked_hours_exceed_working_time',
+                    'Počet odpracovaných hodin nesmí být vyšší než pracovní doba.',
+                );
+            }
+        } elseif ($hours !== null || $workTime !== null) {
+            $this->invalid(
+                'nempri_hours_without_worked',
+                'Odpracované hodiny a pracovní doba se uvádějí jen tehdy, když zaměstnanec '
+                . 'v den sociální události pracoval. Zaškrtněte „pracoval“, nebo hodiny smažte.',
+            );
+        }
+        if ($kind->hasStudentSection()) {
+            if ($payload->isStudent && $payload->withinSchoolHolidays === null) {
+                $this->invalid(
+                    'nempri_school_holidays_missing',
+                    'Zaměstnanec je student, takže potvrzení musí říct, zda událost spadá do prázdnin.',
+                );
+            }
+            if (!$payload->isStudent && $payload->withinSchoolHolidays !== null) {
+                $this->invalid(
+                    'nempri_school_holidays_without_student',
+                    'Prázdniny se uvádějí jen u studenta.',
+                );
+            }
+        }
+        if ($kind === SicknessBenefitKind::Nem
+            || $kind === SicknessBenefitKind::Vpm
+            || $kind === SicknessBenefitKind::Ppm
+        ) {
+            if ($payload->receivesPension && $payload->pensionKind === null) {
+                $this->invalid(
+                    'nempri_pension_kind_missing',
+                    'Zaměstnanec pobírá důchod, takže potvrzení musí nést druh důchodu.',
+                );
+            }
+            if (!$payload->receivesPension && $payload->pensionKind !== null) {
+                $this->invalid(
+                    'nempri_pension_kind_without_pension',
+                    'Druh důchodu se uvádí jen u zaměstnance, který důchod pobírá.',
+                );
+            }
+            if ($payload->startsMaternity === true && $payload->childBirthDate === null) {
+                $this->invalid(
+                    'nempri_child_birth_missing',
+                    'Zaměstnankyně nastupuje na peněžitou pomoc v mateřství, takže potvrzení '
+                    . 'musí nést datum narození dítěte.',
+                );
+            }
+            if ($payload->startsMaternity !== true && $payload->childBirthDate !== null) {
+                $this->invalid(
+                    'nempri_child_birth_without_maternity',
+                    'Datum narození dítěte se uvádí jen při nástupu na peněžitou pomoc v mateřství.',
+                );
+            }
+        }
+    }
+
+    /** Prvky žádosti o ošetřovné, které patří jen k akci vznik. */
+    private function careStart(SicknessBenefitKind $kind, NempriBenefitApplication $application): void
+    {
+        if ($application->otherMaternityClaim === true) {
+            $missing = $kind === SicknessBenefitKind::Ose
+                ? ($application->otherParentalClaim === null || $application->otherPersonS57 === null)
+                : $application->otherPersonS57 === null;
+            if ($missing) {
+                $this->invalid(
+                    'nempri_other_claim_details_missing',
+                    'Je-li uvedeno, že na dávku má nárok jiná osoba, musí žádost nést i nárok '
+                    . 'na rodičovský příspěvek a údaj o jiné fyzické osobě podle § 57.',
+                );
+            }
+        }
+    }
+
+    /**
+     * Prvky trvání a ukončení péče: u samotného vzniku zakázané, jinak povinné
+     * (`pecovalOsobne`, `planovaneSmeny`, podklady pro výplatu).
+     */
+    private function careDuration(SicknessBenefitKind $kind, NempriBenefitApplication $application): void
+    {
+        if ($application->caredPersonally === null) {
+            $this->invalid(
+                'nempri_cared_personally_missing',
+                'Při trvání nebo ukončení péče musí žádost říct, zda zaměstnanec pečoval osobně.',
+            );
+        }
+        if ($application->plannedShifts === null) {
+            $this->invalid(
+                'nempri_planned_shifts_missing',
+                'Při trvání nebo ukončení péče musí podklady říct, zda měl zaměstnanec plánované směny.',
+            );
+        }
+        if ($application->plannedShifts === true) {
+            if ($kind === SicknessBenefitKind::Ose && $application->plannedShiftsWorked === null) {
+                $this->invalid(
+                    'nempri_planned_shifts_worked_missing',
+                    'Při plánovaných směnách musí podklady říct, zda je zaměstnanec odpracoval.',
+                );
+            }
+            if ($kind === SicknessBenefitKind::Dlo && $application->shiftSchedule === []) {
+                $this->invalid(
+                    'nempri_shift_schedule_missing',
+                    'Při plánovaných směnách musí podklady nést rozvrh směn.',
+                );
+            }
+        }
+        if ($kind === SicknessBenefitKind::Dlo) {
+            if ($application->hasLeave === null) {
+                $this->invalid(
+                    'nempri_leave_flag_missing',
+                    'U dlouhodobého ošetřovného musí podklady říct, zda měl zaměstnanec pracovní volno.',
+                );
+            }
+            if ($application->hasLeave === true && $application->leavePeriods === []) {
+                $this->invalid(
+                    'nempri_leave_periods_missing',
+                    'Měl-li zaměstnanec pracovní volno, musí podklady nést jeho období.',
+                );
+            }
+        }
+        if ($kind === SicknessBenefitKind::Ose && $application->actionEnd) {
+            if ($application->workedLastDay === null) {
+                $this->invalid(
+                    'nempri_worked_last_day_missing',
+                    'Při ukončení péče musí podklady říct, zda zaměstnanec pracoval poslední den péče.',
+                );
+            }
+            if ($application->workedLastDay === true) {
+                $this->lastDayHours($application);
+            }
+        }
+    }
+
+    /** Otcovská: hodiny posledního dne, datum návratu a plánované směny jsou svázané. */
+    private function paternitySupport(NempriBenefitApplication $application): void
+    {
+        $anyHours = $application->shiftHoursLastDay !== null
+            || $application->hoursWorkedLastDay !== null;
+        if ($application->returnedOn !== null || $anyHours) {
+            if ($application->returnedOn === null) {
+                $this->invalid(
+                    'nempri_return_date_missing',
+                    'Jsou-li vyplněny hodiny posledního dne, musí podklady nést i datum návratu do práce.',
+                );
+            }
+            $this->lastDayHours($application);
+        }
+        if ($application->plannedShifts === true && $application->plannedShiftsWorked === null) {
+            $this->invalid(
+                'nempri_planned_shifts_worked_missing',
+                'Při plánovaných směnách musí podklady říct, zda je zaměstnanec odpracoval.',
+            );
+        }
+    }
+
+    private function lastDayHours(NempriBenefitApplication $application): void
+    {
+        $shift = self::number($application->shiftHoursLastDay);
+        $worked = self::number($application->hoursWorkedLastDay);
+        if ($shift === null || $worked === null) {
+            $this->invalid(
+                'nempri_last_day_hours_missing',
+                'Podklady musí nést pracovní dobu i počet odpracovaných hodin posledního dne.',
+            );
+        }
+        if ($worked > $shift) {
+            $this->invalid(
+                'nempri_last_day_hours_exceed',
+                'Počet odpracovaných hodin posledního dne nesmí být vyšší než pracovní doba.',
+            );
+        }
+    }
+
+    /**
+     * Rozhodné období je u NEM, VPM, OPP, PPM a u OSE/DLO s akcí vznik
+     * „povinné vždy“ (DV NEMPRI25). Buď nese úplný seznam měsíců se součty,
+     * nebo jen pravděpodobnou výši; obojí najednou ne (kontroly 7, 8, 16).
+     */
+    private function decisivePeriodRequirement(NempriXmlPayload $payload): void
+    {
+        if (!NempriXmlSerializer::carriesStartSection($payload)) {
+            return;
+        }
+        $period = $payload->decisivePeriod;
+        if ($period === null) {
+            $this->invalid(
+                'nempri_decisive_period_missing',
+                'Věta musí nést rozhodné období (DV NEMPRI25 ho vyžaduje vždy). '
+                . 'Doplňte měsíce rozhodného období, nebo pravděpodobnou výši příjmu.',
+            );
+        }
+        $hasProbable = $period->probableIncomeCzk !== null;
+        $hasMonths = $period->months !== [];
+        if ($hasProbable && $hasMonths) {
+            $this->invalid(
+                'nempri_decisive_period_probable_with_months',
+                'Rozhodné období nese buď měsíce, nebo pravděpodobnou výši příjmu, nikdy obojí.',
+            );
+        }
+        if (!$hasProbable && !$hasMonths) {
+            $this->invalid(
+                'nempri_decisive_period_empty',
+                'Rozhodné období nenese ani měsíce, ani pravděpodobnou výši příjmu.',
+            );
+        }
+        if ($hasProbable) {
+            return;
+        }
+        $expected = [];
+        $cursor = new \DateTimeImmutable(substr($period->from, 0, 7) . '-01');
+        $last = substr($period->to, 0, 7);
+        while ($cursor->format('Y-m') <= $last) {
+            $expected[] = $cursor->format('Y-m');
+            $cursor = $cursor->modify('+1 month');
+        }
+        $actual = array_map(
+            static fn (NempriDecisiveMonth $month): string => $month->period(),
+            $period->months,
+        );
+        sort($actual, SORT_STRING);
+        if (!$period->complete || $actual !== $expected) {
+            $this->invalid(
+                'nempri_decisive_period_incomplete',
+                'Seznam měsíců rozhodného období musí pokrýt celé období ' . $period->from . ' až '
+                . $period->to . ' (každý kalendářní měsíc právě jednou), jinak ÚSSZ nespočítá '
+                . 'denní vyměřovací základ.',
+            );
+        }
+        $total = 0;
+        foreach ($period->months as $month) {
+            $total += $month->countableIncomeMinor;
+        }
+        if ($total <= 0) {
+            $this->invalid(
+                'nempri_decisive_income_zero',
+                'Započitatelný příjem za rozhodné období je nulový. Uveďte místo měsíců '
+                . 'pravděpodobnou výši příjmu.',
+            );
+        }
+    }
+
+    /**
+     * Platební spojení: u OSE/DLO povinné při vzniku a bez vzniku zakázané,
+     * u ostatních druhů povinné (NEM jen pro elektronické číslo rozhodnutí).
+     */
+    private function paymentConnectionRequirement(NempriXmlPayload $payload): void
+    {
+        $startsClaim = NempriXmlSerializer::carriesStartSection($payload);
+        $requirement = $payload->benefitKind
+            ->paymentConnectionRequirement($startsClaim, $payload->decisionNumber);
+        if ($requirement === SicknessBenefitKind::DECISION_FORBIDDEN
+            && $payload->paymentConnection !== null
+        ) {
+            $this->invalid(
+                'nempri_payment_connection_forbidden',
+                'Platební spojení patří jen k akci vznik. U trvání a ukončení ošetřovného '
+                . 'ho věta nesmí nést.',
+            );
+        }
+        if ($requirement === SicknessBenefitKind::DECISION_REQUIRED
+            && $payload->paymentConnection === null
+        ) {
+            $this->invalid(
+                'nempri_payment_connection_required',
+                'Věta musí nést platební spojení (způsob výplaty mzdy). Zaměstnanec nemá ve výplatním '
+                . 'profilu účet ani adresu, na kterou by šlo dávku vyplatit; mzda vyplácená přes '
+                . 'partnera spojení nenahrazuje. Doplňte účet nebo adresu na kartě osoby.',
+            );
+        }
+    }
+
+    /**
+     * Potvrzení zaměstnavatele v HZUPN (DV HZUPN20 v1.12): návrat „ano“ nese
+     * datum a hodiny, „ne“ nese důvod, a naopak nic z toho nesmí být navíc.
+     */
+    private function hzupnEmployerConfirmation(HzupnXmlPayload $payload): void
+    {
+        $hours = self::number($payload->hoursWorkedLastDay);
+        $shift = self::number($payload->shiftHoursLastDay);
+        if ($payload->returnedToWork === true) {
+            if ($payload->returnedOn === null) {
+                $this->invalid(
+                    'hzupn_return_date_missing',
+                    'Návrat do práce musí mít datum; z něj ČSSZ počítá poslední dávku.',
+                );
+            }
+            if ($hours === null || $shift === null) {
+                $this->invalid(
+                    'hzupn_hours_missing',
+                    'Návrat do práce musí nést počet odpracovaných hodin i pracovní dobu '
+                    . 'posledního dne neschopnosti (u zaměstnance, který nepracoval, 0).',
+                );
+            }
+            if ($shift > 0 && $hours <= 0) {
+                $this->invalid(
+                    'hzupn_worked_hours_zero_with_shift',
+                    'Je-li pracovní doba posledního dne větší než 0, nesmí být počet odpracovaných '
+                    . 'hodin 0 ani prázdný, ČSSZ takové hlášení zamítne.',
+                );
+            }
+            if ($payload->returnReason !== null) {
+                $this->invalid(
+                    'hzupn_return_reason_with_return',
+                    'Důvod nenávratu se uvádí jen tehdy, když se zaměstnanec do práce nevrátil.',
+                );
+            }
+
+            return;
+        }
+        if ($payload->returnedOn !== null) {
+            $this->invalid(
+                $payload->returnedToWork === null
+                    ? 'hzupn_return_date_without_return'
+                    : 'hzupn_return_date_with_no_return',
+                'Datum návratu do práce se uvádí jen tehdy, když se zaměstnanec do práce vrátil '
+                . '(DV HZUPN20).',
+            );
+        }
+        if ($hours !== null || $shift !== null) {
+            $this->invalid(
+                'hzupn_hours_without_return',
+                'Hodiny posledního dne se uvádějí jen tehdy, když se zaměstnanec do práce vrátil.',
+            );
+        }
+        if ($payload->returnedToWork === false && $payload->returnReason === null) {
+            $this->invalid(
+                'hzupn_return_reason_missing',
+                'Když se zaměstnanec do práce nevrátil, hlášení musí uvést důvod '
+                . '(například nástup na peněžitou pomoc v mateřství nebo skončení zaměstnání).',
+            );
+        }
+    }
+
+    private static function number(?string $value): ?float
+    {
+        return $value === null || !is_numeric($value) ? null : (float) $value;
     }
 
     private function person(NempriPerson $person): void
@@ -478,7 +883,16 @@ final readonly class SicknessXmlValidator
             );
         }
         foreach ($period->months as $month) {
-            if ($month->excludedDays < 0 || $month->excludedDays > 31
+            if ($month->countableIncomeMinor % 100 !== 0) {
+                $this->invalid(
+                    'nempri_decisive_amount_not_whole_czk',
+                    'Měsíc rozhodného období ' . $month->period() . ' nese příjem v haléřích. '
+                    . 'NEMPRI25 přijímá jen celé koruny; zaokrouhlete příjem na celé Kč.',
+                );
+            }
+            $daysInMonth = (int) (new \DateTimeImmutable(sprintf('%04d-%02d-01', $month->year, $month->month)))
+                ->format('t');
+            if ($month->excludedDays < 0 || $month->excludedDays > $daysInMonth
                 || $month->countableIncomeMinor < 0
             ) {
                 $this->invalid(
@@ -524,6 +938,12 @@ final readonly class SicknessXmlValidator
                 'nempri_unpaid_leave_period_missing',
                 'Pracovní volno bez náhrady příjmu musí mít den, od kterého trvalo — '
                 . 'z něj se posuzují vyloučené dny.',
+            );
+        }
+        if ($payload->unpaidLeave && $payload->unpaidLeaveTo === null) {
+            $this->invalid(
+                'nempri_unpaid_leave_end_missing',
+                'Pracovní volno bez náhrady příjmu musí mít i den, do kterého trvalo.',
             );
         }
         if (!$payload->unpaidLeave

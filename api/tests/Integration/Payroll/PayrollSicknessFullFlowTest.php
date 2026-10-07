@@ -255,10 +255,12 @@ final class PayrollSicknessFullFlowTest extends TestCase
         }
 
         $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
-            'decision_number' => 'B1234567',
+            'decision_number' => '1234567N',
             'daily_working_hours' => '8',
             'action_start' => true,
             'action_end' => true,
+            'worked_last_day' => false,
+            'planned_shifts_worked' => false,
             'cared_first_name' => 'Dítě',
             'cared_last_name' => 'Syntetické',
             'cared_birth_date' => '2018-05-05',
@@ -285,7 +287,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $cases = $this->service(SicknessCaseService::class);
         $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'DLO', [
             'incapacity_from' => '2026-06-08',
-            'decision_number' => 'C1234567',
+            'decision_number' => '1234567L',
             'daily_working_hours' => '8',
             'action_start' => true,
             'cared_first_name' => 'Rodič',

@@ -1,0 +1,933 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Payroll\Submission;
+
+use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
+use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlPayload;
+use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisiveMonth;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisivePeriod;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriPerson;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlPayload;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessInsuredContactReader;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessPayloadFactory;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessXmlValidator;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Maticová pravidla DV NEMPRI25 a HZUPN20, která XSD neumí vyjádřit
+ * (všechno je v něm `minOccurs=0`): akce ošetřovného, podmíněné prvky
+ * potvrzení, číslo rozhodnutí, rozhodné období, platební spojení a HZUPN.
+ *
+ * Zelené XSD nic nedokazuje, proto testy kontrolují přítomnost a pořadí
+ * prvků v XML a kódy odmítnutí. Všechna data jsou syntetická.
+ */
+final class NempriMatrixAndValidationTest extends TestCase
+{
+    private SicknessXmlValidator $validator;
+    private NempriXmlSerializer $serializer;
+    private HzupnXmlSerializer $hzupn;
+
+    protected function setUp(): void
+    {
+        $this->serializer = new NempriXmlSerializer();
+        $this->hzupn = new HzupnXmlSerializer();
+        $this->validator = new SicknessXmlValidator(
+            new CsszSchemaCatalog(),
+            $this->serializer,
+            $this->hzupn,
+        );
+    }
+
+    // ---- NX-01: matice akcí OSE a DLO -------------------------------------
+
+    public function testCareStartOnlyOmitsDurationElementsEvenWhenCaseHasEndDate(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Ose, $this->care(
+            actionStart: true,
+            actionEnd: false,
+            toDate: '2026-09-11',
+        ));
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        foreach (['doDne', 'pecovalOsobne', 'pecovalVeDnech', 'podkladyProVyplatDavky', 'pracovalPoslDenPD', 'planovaneSmeny', 'seznamPraceVeDnech'] as $element) {
+            self::assertStringNotContainsString('<' . $element, $xml, $element);
+        }
+        self::assertStringContainsString('<odeDne>2026-09-07</odeDne>', $xml);
+        self::assertStringContainsString('<osetrovanaOsoba>', $xml);
+        self::assertStringContainsString('<platebniSpojeni>', $xml);
+    }
+
+    public function testCareEndOnlyCarriesDurationElementsAndNoStartElements(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Ose, $this->care(actionStart: false, actionEnd: true));
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        foreach (['odeDne', 'osetrovanaOsoba', 'onemocnela', 'spolecnaDomacnost', 'jeOsamely', 'vPeciDiteDo16Let', 'narokNaPPMjinouOsobou', 'kodRodVztah', 'potvrzeniZamestnavatele', 'rozhodneObdobi', 'platebniSpojeni'] as $element) {
+            self::assertStringNotContainsString('<' . $element, $xml, $element);
+        }
+        foreach (['doDne', 'pecovalOsobne', 'pecovalVeDnech', 'pracovalPoslDenPD', 'planovaneSmeny', 'planovaneSmenyOdpracoval', 'seznamPraceVeDnech'] as $element) {
+            self::assertStringContainsString('<' . $element, $xml, $element);
+        }
+        self::assertStringContainsString('<oseUkonceni>true</oseUkonceni>', $xml);
+        self::assertStringContainsString('<oseVznik>false</oseVznik>', $xml);
+    }
+
+    public function testCareContinuationDoesNotCarryLastDayElements(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Ose, $this->care(
+            actionStart: false,
+            actionContinuation: true,
+            actionEnd: false,
+        ));
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        self::assertStringContainsString('<doDne>', $xml);
+        self::assertStringNotContainsString('pracovalPoslDenPD', $xml);
+        self::assertStringNotContainsString('pracovniDobaPoslDenPD', $xml);
+    }
+
+    public function testOtherClaimDetailsAreSentOnlyWhenOtherPersonClaims(): void
+    {
+        $without = $this->payload(SicknessBenefitKind::Ose, $this->care(otherMaternityClaim: false));
+        $xml = $this->serializer->serialize($without);
+        $this->validator->validateNempri($without, $xml);
+        self::assertStringNotContainsString('narokNaRPjinaOsobaNecerpaVolnoNeboOSVC', $xml);
+        self::assertStringNotContainsString('jinaFOParagraf57', $xml);
+
+        $with = $this->payload(SicknessBenefitKind::Ose, $this->care(
+            otherMaternityClaim: true,
+            otherParentalClaim: false,
+            otherPersonS57: false,
+        ));
+        $xml = $this->serializer->serialize($with);
+        $this->validator->validateNempri($with, $xml);
+        self::assertStringContainsString('<narokNaRPjinaOsobaNecerpaVolnoNeboOSVC>false<', $xml);
+        self::assertStringContainsString('<jinaFOParagraf57>false<', $xml);
+
+        $this->expectRejected('nempri_other_claim_details_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(otherMaternityClaim: true),
+        ));
+    }
+
+    public function testCareDurationRequiresEndDateLastDayAndShiftFlags(): void
+    {
+        $this->expectRejected('nempri_application_to_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionContinuation: true, actionEnd: false, toDate: null),
+        ));
+        $this->expectRejected('nempri_worked_last_day_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, workedLastDay: null),
+        ));
+        $this->expectRejected('nempri_planned_shifts_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, plannedShifts: null),
+        ));
+        $this->expectRejected('nempri_planned_shifts_worked_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, plannedShifts: true, plannedShiftsWorked: null),
+        ));
+        $this->expectRejected('nempri_cared_personally_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, caredPersonally: null),
+        ));
+        // Pracoval-li poslední den, musí nést hodiny; odpracováno nesmí přesáhnout pracovní dobu.
+        $this->expectRejected('nempri_last_day_hours_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, workedLastDay: true, shiftHoursLastDay: null, hoursWorkedLastDay: null),
+        ));
+        $this->expectRejected('nempri_last_day_hours_exceed', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, workedLastDay: true, shiftHoursLastDay: '4', hoursWorkedLastDay: '8'),
+        ));
+    }
+
+    public function testSchoolClosureNeedsBusinessId(): void
+    {
+        $this->expectRejected('nempri_school_business_id_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(careReason: NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED, schoolName: 'Základní škola Testov'),
+        ));
+    }
+
+    // ---- NX-02: platební spojení ------------------------------------------
+
+    public function testPaymentConnectionCarriesAllFourFlags(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Nem, null);
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        self::assertStringContainsString('<vyplatitUcetCR>true</vyplatitUcetCR>', $xml);
+        self::assertStringContainsString('<vyplatitUcetCizina>false</vyplatitUcetCizina>', $xml);
+        self::assertStringContainsString('<vyplatitAdresa>false</vyplatitAdresa>', $xml);
+        self::assertStringContainsString('<vyplatitHotovost>false</vyplatitHotovost>', $xml);
+        self::assertLessThan(strpos($xml, '<ucetCZ>'), strpos($xml, '<vyplatitHotovost>'));
+    }
+
+    public function testPaymentConnectionIsForbiddenWithoutCareStartAndRequiredWithIt(): void
+    {
+        $withConnection = $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true),
+            ['paymentConnection' => $this->account()],
+        );
+        $this->expectRejected('nempri_payment_connection_forbidden', $withConnection);
+
+        $startWithout = $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(),
+            ['paymentConnection' => null],
+        );
+        $this->expectRejected('nempri_payment_connection_required', $startWithout);
+    }
+
+    public function testPaymentConnectionIsRequiredForElectronicSicknessNumber(): void
+    {
+        $this->expectRejected('nempri_payment_connection_required', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisionNumber' => '2601011234', 'paymentConnection' => null],
+        ));
+        // Papírové číslo (písmeno a číslice) spojení nevyžaduje.
+        $legacy = $this->payload(SicknessBenefitKind::Nem, null, ['paymentConnection' => null]);
+        $this->validator->validateNempri($legacy, $this->serializer->serialize($legacy));
+        self::assertTrue(true);
+    }
+
+    public function testPaymentConnectionIsRequiredForOtherBenefitKinds(): void
+    {
+        $this->expectRejected('nempri_payment_connection_required', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(
+                fromDate: '2026-09-14',
+                person: new NempriPerson('Dítě', 'Testovací', null, '2026-09-10'),
+                paternityReason: 'OTC',
+                plannedShifts: false,
+            ),
+            ['paymentConnection' => null],
+        ));
+    }
+
+    // ---- NX-03: DLO podklady ----------------------------------------------
+
+    public function testDloEndCarriesShiftScheduleAndLeaveInSchemaOrder(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Dlo, $this->dlo(actionStart: false, actionEnd: true));
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        $order = ['<pracovniDobaPoslDenPD>', '<pocetOdpracHodinPoslDenPD>', '<datumNavratDoPrace>', '<planovaneSmeny>', '<seznamRozvrhuSmen>', '<seznamPraceVeDnech>', '<maVolno>', '<pracovniVolno>'];
+        $previous = -1;
+        foreach ($order as $element) {
+            $position = strpos($xml, $element);
+            self::assertNotFalse($position, $element);
+            self::assertGreaterThan($previous, $position, $element);
+            $previous = $position;
+        }
+        self::assertStringContainsString('<maVolno>true</maVolno>', $xml);
+    }
+
+    public function testDloStartHasNoPaymentFreeSectionsAndNoSupportData(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Dlo, $this->dlo());
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        foreach (['podkladyProVyplatDavky', 'maVolno', 'seznamRozvrhuSmen', 'pracovniVolno', 'doDne'] as $element) {
+            self::assertStringNotContainsString('<' . $element, $xml, $element);
+        }
+    }
+
+    public function testDloEndRequiresLeaveFlagAndSchedules(): void
+    {
+        $this->expectRejected('nempri_leave_flag_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, hasLeave: null),
+        ));
+        $this->expectRejected('nempri_leave_periods_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, leavePeriods: []),
+        ));
+        $this->expectRejected('nempri_shift_schedule_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, shiftSchedule: []),
+        ));
+    }
+
+    // ---- NX-04: potvrzení zaměstnavatele ----------------------------------
+
+    public function testEmployerConfirmationConditionalElements(): void
+    {
+        $cases = [
+            'nempri_worked_hours_missing' => ['workedOnDecisiveDay' => true, 'hoursWorked' => null, 'dailyWorkingHours' => '8'],
+            'nempri_hours_without_worked' => ['workedOnDecisiveDay' => false, 'hoursWorked' => '4', 'dailyWorkingHours' => null],
+            'nempri_worked_hours_exceed_working_time' => ['workedOnDecisiveDay' => true, 'hoursWorked' => '9', 'dailyWorkingHours' => '8'],
+            'nempri_school_holidays_missing' => ['isStudent' => true, 'withinSchoolHolidays' => null],
+            'nempri_school_holidays_without_student' => ['isStudent' => false, 'withinSchoolHolidays' => true],
+            'nempri_pension_kind_missing' => ['receivesPension' => true, 'pensionKind' => null],
+            'nempri_pension_kind_without_pension' => ['receivesPension' => false, 'pensionKind' => 'SD'],
+            'nempri_child_birth_missing' => ['startsMaternity' => true, 'childBirthDate' => null],
+            'nempri_child_birth_without_maternity' => ['startsMaternity' => false, 'childBirthDate' => '2026-08-01'],
+            'nempri_unpaid_leave_end_missing' => ['unpaidLeave' => true, 'unpaidLeaveFrom' => '2026-08-01', 'unpaidLeaveTo' => null],
+        ];
+        foreach ($cases as $code => $overrides) {
+            $this->expectRejected($code, $this->payload(SicknessBenefitKind::Nem, null, $overrides));
+        }
+        $this->expectRejected('nempri_child_birth_missing', $this->payload(
+            SicknessBenefitKind::Ppm,
+            new NempriBenefitApplication(fromDate: '2026-09-01', person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20')),
+            ['decisionNumber' => '1234567M', 'startsMaternity' => true, 'childBirthDate' => null],
+        ));
+    }
+
+    public function testEmployerConfirmationOmitsChildElementsWithoutParentFlag(): void
+    {
+        // Zbylé hodnoty bez nadřazeného příznaku (validátor je odmítne) se do věty nedostanou.
+        $stale = $this->payload(SicknessBenefitKind::Nem, null, [
+            'workedOnDecisiveDay' => false,
+            'hoursWorked' => '4',
+            'dailyWorkingHours' => '8',
+            'receivesPension' => false,
+            'pensionKind' => 'SD',
+            'isStudent' => false,
+            'withinSchoolHolidays' => true,
+            'unpaidLeave' => false,
+            'unpaidLeaveFrom' => '2026-08-01',
+            'unpaidLeaveTo' => '2026-08-05',
+            'startsMaternity' => false,
+            'childBirthDate' => '2026-08-01',
+        ]);
+        $staleXml = $this->serializer->serialize($stale);
+        foreach (['pocetOdpracovanychHodin', '<pracovniDoba>', 'druhDuchodu', 'spadaDoPrazdnin', 'volnoBezNahradyOd', 'volnoBezNahradyDo', 'narozeniDitete'] as $element) {
+            self::assertStringNotContainsString($element, $staleXml, $element);
+        }
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, [
+            'workedOnDecisiveDay' => false,
+            'hoursWorked' => null,
+            'dailyWorkingHours' => null,
+        ]);
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        $student = $this->payload(SicknessBenefitKind::Nem, null, [
+            'isStudent' => true,
+            'withinSchoolHolidays' => true,
+            'unpaidLeave' => true,
+            'unpaidLeaveFrom' => '2026-08-01',
+            'unpaidLeaveTo' => '2026-08-05',
+        ]);
+        $xml = $this->serializer->serialize($student);
+        $this->validator->validateNempri($student, $xml);
+        self::assertStringContainsString('<spadaDoPrazdnin>true</spadaDoPrazdnin>', $xml);
+        self::assertStringContainsString('<volnoBezNahradyDo>2026-08-05</volnoBezNahradyDo>', $xml);
+    }
+
+    public function testFactoryDropsDailyWorkingHoursWhenEmployeeDidNotWork(): void
+    {
+        $payload = (new SicknessPayloadFactory())->nempri(
+            $this->caseRow(['worked_on_decisive_day' => 0, 'daily_working_hours' => '8.00']),
+            SicknessBenefitKind::Nem,
+            $this->context(),
+            $this->identity(),
+            '1.0',
+            'MyUcto',
+            '1.0',
+        );
+        self::assertNull($payload->dailyWorkingHours);
+
+        $worked = (new SicknessPayloadFactory())->nempri(
+            $this->caseRow(['worked_on_decisive_day' => 1, 'daily_working_hours' => '8.00', 'hours_worked' => '4.00']),
+            SicknessBenefitKind::Nem,
+            $this->context(),
+            $this->identity(),
+            '1.0',
+            'MyUcto',
+            '1.0',
+        );
+        self::assertSame('8.00', $worked->dailyWorkingHours);
+    }
+
+    // ---- NX-05: HZUPN ------------------------------------------------------
+
+    public function testHzupnReturnRules(): void
+    {
+        $cases = [
+            'hzupn_hours_missing' => ['returnedToWork' => true, 'hoursWorkedLastDay' => null, 'shiftHoursLastDay' => null],
+            'hzupn_worked_hours_zero_with_shift' => ['returnedToWork' => true, 'hoursWorkedLastDay' => '0', 'shiftHoursLastDay' => '8'],
+            'hzupn_return_reason_with_return' => ['returnedToWork' => true, 'returnReason' => 'jiný důvod'],
+            'hzupn_return_date_with_no_return' => ['returnedToWork' => false, 'returnReason' => 'konec', 'returnedOn' => '2026-08-24', 'hoursWorkedLastDay' => null, 'shiftHoursLastDay' => null],
+            'hzupn_hours_without_return' => ['returnedToWork' => false, 'returnReason' => 'konec', 'returnedOn' => null],
+        ];
+        foreach ($cases as $code => $overrides) {
+            $payload = $this->hzupnPayload($overrides);
+            try {
+                $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+                self::fail($code);
+            } catch (SicknessException $exception) {
+                self::assertSame($code, $exception->validationCode);
+            }
+        }
+    }
+
+    public function testHzupnAcceptsReturnWithZeroHoursAndNoShift(): void
+    {
+        // Referenční hlášení jiných programů nesou „A“ s 0/0.
+        $payload = $this->hzupnPayload(['hoursWorkedLastDay' => '0', 'shiftHoursLastDay' => '0']);
+        $xml = $this->hzupn->serialize($payload);
+        $this->validator->validateHzupn($payload, $xml, '2026-08-03');
+        self::assertStringContainsString('<pracovniDobaPoslDenPD>0</pracovniDobaPoslDenPD>', $xml);
+    }
+
+    public function testHzupnSerializerDropsElementsThatDoNotBelongToTheAnswer(): void
+    {
+        $payload = $this->hzupnPayload([
+            'returnedToWork' => false,
+            'returnReason' => 'konec',
+            'returnedOn' => '2026-08-24',
+        ]);
+        $xml = $this->hzupn->serialize($payload);
+        self::assertStringNotContainsString('datumNavratDoPrace', $xml);
+        self::assertStringNotContainsString('pocetOdpracHodinPoslDenPD', $xml);
+        self::assertStringContainsString('<duvodNavratDoPrace>konec</duvodNavratDoPrace>', $xml);
+    }
+
+    public function testHzupnFactoryKeepsDateAndHoursOnlyForReturn(): void
+    {
+        $row = $this->caseRow([
+            'issued_on' => '2026-08-24',
+            'returned_to_work' => 0,
+            'return_reason' => 'konec',
+            'returned_on' => '2026-08-24',
+            'hours_worked_last_day' => '4.00',
+            'shift_hours_last_day' => '8.00',
+        ]);
+        $no = (new SicknessPayloadFactory())->hzupn($row, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0');
+        self::assertNull($no->returnedOn);
+        self::assertNull($no->hoursWorkedLastDay);
+        self::assertSame('konec', $no->returnReason);
+
+        $yes = (new SicknessPayloadFactory())->hzupn(
+            [...$row, 'returned_to_work' => 1],
+            $this->context(),
+            $this->identity(),
+            '1.0',
+            'MyUcto',
+            '1.0',
+        );
+        self::assertSame('2026-08-24', $yes->returnedOn);
+        self::assertNull($yes->returnReason);
+    }
+
+    // ---- NX-06: číslo rozhodnutí ------------------------------------------
+
+    public function testDecisionNumberPerBenefitKind(): void
+    {
+        $partial = new NempriBenefitApplication(fromDate: '2026-09-01', person: new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'));
+        $this->expectRejected('nempri_decision_number_missing', $this->payload(SicknessBenefitKind::Ppm, $partial, ['decisionNumber' => null]));
+        $this->expectRejected('nempri_decision_number_forbidden', $this->payload(SicknessBenefitKind::Vpm, null, ['decisionNumber' => 'A1234567']));
+        $this->expectRejected('nempri_decision_number_format_invalid', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(),
+            ['decisionNumber' => 'A1234567'],
+        ));
+        $this->expectRejected('nempri_decision_number_format_invalid', $this->payload(SicknessBenefitKind::Nem, null, ['decisionNumber' => '12345']));
+
+        foreach (['1234567N', '1234567Z'] as $number) {
+            $payload = $this->payload(SicknessBenefitKind::Ose, $this->care(), ['decisionNumber' => $number]);
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        $icpe = $this->payload(SicknessBenefitKind::Ose, $this->care(), ['decisionNumber' => '123456789012345N']);
+        $this->validator->validateNempri($icpe, $this->serializer->serialize($icpe));
+        $ppm = $this->payload(SicknessBenefitKind::Ppm, $partial, ['decisionNumber' => '1234567M']);
+        $this->validator->validateNempri($ppm, $this->serializer->serialize($ppm));
+        $electronic = $this->payload(SicknessBenefitKind::Nem, null, ['decisionNumber' => '2601011234']);
+        $this->validator->validateNempri($electronic, $this->serializer->serialize($electronic));
+        self::assertTrue(true);
+    }
+
+    public function testForeignCaseSkipsDecisionNumberFormat(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, ['decisionNumber' => 'SK-77/2026', 'foreignCase' => true]);
+        $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        self::assertTrue(true);
+    }
+
+    // ---- NX-07: OPP podklady ----------------------------------------------
+
+    public function testPaternityLastDayHoursAndReturnDateGoTogether(): void
+    {
+        $base = ['fromDate' => '2026-09-14', 'paternityReason' => 'OTC', 'plannedShifts' => false];
+        $child = new NempriPerson('Dítě', 'Testovací', null, '2026-09-10');
+
+        $this->expectRejected('nempri_last_day_hours_missing', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(...[...$base, 'person' => $child, 'returnedOn' => '2026-09-18']),
+        ));
+        $this->expectRejected('nempri_return_date_missing', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(...[...$base, 'person' => $child, 'shiftHoursLastDay' => '8', 'hoursWorkedLastDay' => '4']),
+        ));
+        $this->expectRejected('nempri_last_day_hours_exceed', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(...[...$base, 'person' => $child, 'shiftHoursLastDay' => '4', 'hoursWorkedLastDay' => '8', 'returnedOn' => '2026-09-18']),
+        ));
+        $this->expectRejected('nempri_planned_shifts_worked_missing', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(...[...$base, 'person' => $child, 'plannedShifts' => true]),
+        ));
+
+        $valid = $this->payload(SicknessBenefitKind::Opp, new NempriBenefitApplication(
+            ...[...$base, 'person' => $child, 'plannedShifts' => true, 'plannedShiftsWorked' => false, 'shiftHoursLastDay' => '8', 'hoursWorkedLastDay' => '4', 'returnedOn' => '2026-09-18'],
+        ));
+        $xml = $this->serializer->serialize($valid);
+        $this->validator->validateNempri($valid, $xml);
+        self::assertStringContainsString('<planovaneSmenyOdpracoval>false<', $xml);
+    }
+
+    // ---- NRO-01 / NRO-05: rozhodné období ---------------------------------
+
+    public function testDecisivePeriodIsMandatoryAndCoherent(): void
+    {
+        $this->expectRejected('nempri_decisive_period_missing', $this->payload(SicknessBenefitKind::Nem, null, ['decisivePeriod' => null]));
+        $this->expectRejected('nempri_decisive_period_empty', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod('2026-05-01', '2026-05-31', [], false)],
+        ));
+
+        $months = self::months('2025-09', 12);
+        $this->expectRejected('nempri_decisive_period_probable_with_months', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod('2025-09-01', '2026-08-31', $months, true, 42_000)],
+        ));
+        $this->expectRejected('nempri_decisive_period_incomplete', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod('2025-09-01', '2026-08-31', array_slice($months, 0, 3), false)],
+        ));
+        $this->expectRejected('nempri_decisive_period_incomplete', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod('2025-09-01', '2026-08-31', array_slice($months, 0, 3), true)],
+        ));
+        $this->expectRejected('nempri_decisive_income_zero', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod(
+                '2025-09-01',
+                '2025-09-30',
+                [new NempriDecisiveMonth(2025, 9, 0, 0, NempriDecisiveMonth::SOURCE_MANUAL)],
+                true,
+            )],
+        ));
+    }
+
+    public function testDecisivePeriodWithProbableIncomeOnlyIsValid(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, [
+            'decisivePeriod' => new NempriDecisivePeriod('2026-05-20', '2026-05-31', [], false, 42_000),
+        ]);
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+        self::assertStringContainsString('<pravdepodobnaVysePrijmu>42000<', $xml);
+        self::assertStringNotContainsString('Celkem', $xml);
+    }
+
+    public function testDecisivePeriodRefusesCentsAndExcessExcludedDays(): void
+    {
+        $this->expectRejected('nempri_decisive_amount_not_whole_czk', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod(
+                '2025-09-01',
+                '2025-09-30',
+                [new NempriDecisiveMonth(2025, 9, 2_560_645, 0, NempriDecisiveMonth::SOURCE_MANUAL)],
+                true,
+            )],
+        ));
+        $this->expectRejected('nempri_decisive_month_invalid', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisivePeriod' => new NempriDecisivePeriod(
+                '2026-02-01',
+                '2026-02-28',
+                [new NempriDecisiveMonth(2026, 2, 3_000_000, 29, NempriDecisiveMonth::SOURCE_MANUAL)],
+                true,
+            )],
+        ));
+    }
+
+    public function testCareContinuationDoesNotNeedDecisivePeriod(): void
+    {
+        $payload = $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionContinuation: true, actionEnd: false),
+            ['decisivePeriod' => null],
+        );
+        $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        self::assertTrue(true);
+    }
+
+    // ---- K2: kontakt pojištěnce a název OSSZ ------------------------------
+
+    public function testInsuredContactComesFromPersonCardAndFollowsSchemaOrder(): void
+    {
+        $payload = (new SicknessPayloadFactory())->nempri(
+            $this->caseRow(['worked_on_decisive_day' => 0]),
+            SicknessBenefitKind::Nem,
+            $this->context(),
+            $this->identity(),
+            '1.0',
+            'MyUcto',
+            '1.0',
+            null,
+            self::fullPeriod(),
+            $this->account(),
+            ['phone' => '+420 600 000 000', 'email' => 'jan@example.test'],
+        );
+        self::assertSame('+420 600 000 000', $payload->insuredPhone);
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+
+        self::assertStringContainsString('<kontakt>', $xml);
+        self::assertLessThan(strpos($xml, '<email>'), strpos($xml, '<telefon>'));
+        self::assertLessThan(strpos($xml, '<zamestnani>'), strpos($xml, '<kontakt>'));
+    }
+
+    public function testContactNormalisationFollowsSchemaPatterns(): void
+    {
+        self::assertSame('+420 600 000 000', SicknessInsuredContactReader::phone('+420 (600) 000  000'));
+        self::assertNull(SicknessInsuredContactReader::phone('žádný telefon!'));
+        self::assertNull(SicknessInsuredContactReader::phone(str_repeat('1', 34)));
+        self::assertSame('jan@example.test', SicknessInsuredContactReader::email(' jan@example.test '));
+        self::assertNull(SicknessInsuredContactReader::email('neplatny@bezteckyvdomene'));
+        self::assertNull(SicknessInsuredContactReader::email(null));
+    }
+
+    public function testHzupnCarriesOsszNameWhenKnownAndNeverInventsOne(): void
+    {
+        $payload = $this->hzupnPayload(['osszName' => 'Testovací pracoviště']);
+        $xml = $this->hzupn->serialize($payload);
+        $this->validator->validateHzupn($payload, $xml, '2026-08-03');
+        self::assertStringContainsString('<nazevOSSZ>Testovací pracoviště</nazevOSSZ>', $xml);
+        self::assertLessThan(strpos($xml, '<datumVystaveni>'), strpos($xml, '<nazevOSSZ>'));
+
+        // Kód mimo číselník v repozitáři název nedostane.
+        self::assertNull(CsszWorkplaceCatalog::nameFor(999));
+        $tooLong = $this->hzupnPayload(['osszName' => str_repeat('x', 31)]);
+        try {
+            $this->validator->validateHzupn($tooLong, $this->hzupn->serialize($tooLong), '2026-08-03');
+            self::fail('Název delší než 30 znaků.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_ossz_name_too_long', $exception->validationCode);
+        }
+    }
+
+    // ---- factory: DLO pole, výchozí „ne“ podle akce -------------------------
+
+    public function testFactoryMapsDloSupportColumnsAndDefaultsByAction(): void
+    {
+        $factory = new SicknessPayloadFactory();
+        $dlo = $factory->application([
+            'action_start' => 0,
+            'action_end' => 1,
+            'dlo_has_leave' => 1,
+            'dlo_leave_periods' => '[{"from":"2026-09-02","to":"2026-09-04"}]',
+            'dlo_shift_schedule' => [['from' => '2026-09-07', 'to' => '2026-09-11']],
+        ], null, SicknessBenefitKind::Dlo);
+        self::assertTrue($dlo->hasLeave);
+        self::assertSame([['from' => '2026-09-02', 'to' => '2026-09-04']], $dlo->leavePeriods);
+        self::assertSame([['from' => '2026-09-07', 'to' => '2026-09-11']], $dlo->shiftSchedule);
+
+        // Sloupce před migrací: bez nich se nic nerozbije.
+        $legacy = $factory->application(['action_start' => 1], null, SicknessBenefitKind::Dlo);
+        self::assertNull($legacy->hasLeave);
+        self::assertSame([], $legacy->leavePeriods);
+
+        // Ošetřovné: u vzniku „ne“ jen pro prohlášení vzniku, u ukončení jen pro osobní péči.
+        $start = $factory->application(['action_start' => 1, 'action_end' => 0], null, SicknessBenefitKind::Ose);
+        self::assertFalse($start->sharedHousehold);
+        self::assertNull($start->caredPersonally);
+        $end = $factory->application(['action_start' => 0, 'action_end' => 1], null, SicknessBenefitKind::Ose);
+        self::assertNull($end->sharedHousehold);
+        self::assertFalse($end->caredPersonally);
+        $claim = $factory->application(['action_start' => 1, 'other_maternity_claim' => 1], null, SicknessBenefitKind::Ose);
+        self::assertTrue($claim->otherMaternityClaim);
+        self::assertFalse($claim->otherParentalClaim);
+        self::assertFalse($claim->otherPersonS57);
+    }
+
+    // ---- helpery ------------------------------------------------------------
+
+    private function expectRejected(string $code, NempriXmlPayload $payload): void
+    {
+        try {
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+            self::fail('Validace měla odmítnout větu s kódem ' . $code . '.');
+        } catch (SicknessException $exception) {
+            self::assertSame($code, $exception->validationCode);
+        }
+    }
+
+    private function account(): NempriPaymentConnection
+    {
+        return new NempriPaymentConnection(
+            NempriPaymentConnection::KIND_ACCOUNT_CZ,
+            accountPrefix: '19',
+            accountNumber: '1000000005',
+            bankCode: '0100',
+        );
+    }
+
+    /** @return list<NempriDecisiveMonth> */
+    private static function months(string $from, int $count): array
+    {
+        $months = [];
+        for ($i = 0; $i < $count; $i++) {
+            $date = (new \DateTimeImmutable($from . '-01'))->modify('+' . $i . ' months');
+            $months[] = new NempriDecisiveMonth(
+                (int) $date->format('Y'),
+                (int) $date->format('n'),
+                3_000_000,
+                0,
+                NempriDecisiveMonth::SOURCE_TAKEOVER,
+            );
+        }
+
+        return $months;
+    }
+
+    private static function fullPeriod(): NempriDecisivePeriod
+    {
+        return new NempriDecisivePeriod('2025-09-01', '2026-08-31', self::months('2025-09', 12), true);
+    }
+
+    private function care(
+        bool $actionStart = true,
+        bool $actionContinuation = false,
+        bool $actionEnd = false,
+        ?string $toDate = '2026-09-11',
+        ?string $careReason = NempriBenefitApplication::CARE_REASON_ILL,
+        ?string $schoolName = null,
+        ?bool $otherMaternityClaim = false,
+        ?bool $otherParentalClaim = null,
+        ?bool $otherPersonS57 = null,
+        ?bool $caredPersonally = true,
+        ?bool $workedLastDay = false,
+        ?bool $plannedShifts = true,
+        ?bool $plannedShiftsWorked = false,
+        ?string $shiftHoursLastDay = '8',
+        ?string $hoursWorkedLastDay = null,
+    ): NempriBenefitApplication {
+        return new NempriBenefitApplication(
+            actionStart: $actionStart,
+            actionContinuation: $actionContinuation,
+            actionEnd: $actionEnd,
+            fromDate: '2026-09-07',
+            toDate: $toDate,
+            person: new NempriPerson('Dítě', 'Testovací', '1501010007', null),
+            careReason: $careReason,
+            schoolName: $schoolName,
+            sharedHousehold: true,
+            loneCaregiver: false,
+            childUnder16: true,
+            otherMaternityClaim: $otherMaternityClaim,
+            otherParentalClaim: $otherParentalClaim,
+            otherPersonS57: $otherPersonS57,
+            caredPersonally: $caredPersonally,
+            careDays: [['from' => '2026-09-07', 'to' => '2026-09-11']],
+            relationshipCode: 'PL',
+            workedLastDay: $workedLastDay,
+            shiftHoursLastDay: $shiftHoursLastDay,
+            hoursWorkedLastDay: $hoursWorkedLastDay,
+            plannedShifts: $plannedShifts,
+            plannedShiftsWorked: $plannedShiftsWorked,
+            workDays: [['from' => '2026-09-08', 'to' => '2026-09-08']],
+        );
+    }
+
+    /**
+     * @param list<array{from:string,to:string}> $leavePeriods
+     * @param list<array{from:string,to:string}> $shiftSchedule
+     */
+    private function dlo(
+        bool $actionStart = true,
+        bool $actionEnd = false,
+        ?bool $hasLeave = true,
+        array $leavePeriods = [['from' => '2026-09-02', 'to' => '2026-09-04']],
+        array $shiftSchedule = [['from' => '2026-09-07', 'to' => '2026-09-11']],
+    ): NempriBenefitApplication {
+        return new NempriBenefitApplication(
+            actionStart: $actionStart,
+            actionEnd: $actionEnd,
+            fromDate: '2026-09-01',
+            toDate: '2026-09-30',
+            person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
+            caredPersonally: true,
+            careDays: [['from' => '2026-09-01', 'to' => '2026-09-30']],
+            relationshipCode: '3',
+            alternation: false,
+            shiftHoursLastDay: '8',
+            hoursWorkedLastDay: '0',
+            plannedShifts: true,
+            returnedOn: '2026-10-01',
+            workDays: [['from' => '2026-09-14', 'to' => '2026-09-14']],
+            hasLeave: $hasLeave,
+            leavePeriods: $leavePeriods,
+            shiftSchedule: $shiftSchedule,
+        );
+    }
+
+    /** @param array<string,mixed> $overrides */
+    private function payload(
+        SicknessBenefitKind $kind,
+        ?NempriBenefitApplication $application,
+        array $overrides = [],
+    ): NempriXmlPayload {
+        $starts = !$kind->hasActions() || ($application?->actionStart ?? true);
+        $values = [
+            'benefitKind' => $kind,
+            'osszCode' => 115,
+            'correction' => false,
+            'decisionNumber' => match ($kind) {
+                SicknessBenefitKind::Nem => 'A1234567',
+                SicknessBenefitKind::Ose => '1234567N',
+                SicknessBenefitKind::Dlo => '1234567L',
+                default => null,
+            },
+            'foreignCase' => false,
+            'insuredFirstName' => 'Jan',
+            'insuredLastName' => 'Testovací',
+            'insuredBirthNumber' => '8001010008',
+            'insuredPhone' => null,
+            'insuredEmail' => null,
+            'employerVariableSymbol' => '1234567890',
+            'employerIdentificationNumber' => '12345678',
+            'employerName' => 'Testovací zaměstnavatel s.r.o.',
+            'employmentFrom' => '2020-01-01',
+            'employmentTo' => null,
+            'activityCode' => '1',
+            'workedOnDecisiveDay' => false,
+            'hoursWorked' => null,
+            'dailyWorkingHours' => null,
+            'smallScopeIncomeMinor' => null,
+            'receivesPension' => false,
+            'pensionKind' => null,
+            'isStudent' => false,
+            'withinSchoolHolidays' => null,
+            'firstEmploymentFreeTime' => false,
+            'unpaidLeave' => false,
+            'unpaidLeaveFrom' => null,
+            'unpaidLeaveTo' => null,
+            'startsMaternity' => null,
+            'childBirthDate' => null,
+            'transferredOtherWork' => false,
+            'transferredOn' => null,
+            'enforcement' => false,
+            'insolvency' => false,
+            'additionalNote' => null,
+            'productName' => 'MyUcto',
+            'productVersion' => '1.0',
+            'payloadVersion' => '1.0',
+            'application' => $application,
+            'decisivePeriod' => self::fullPeriod(),
+            'paymentConnection' => $starts ? $this->account() : null,
+        ];
+
+        return new NempriXmlPayload(...[...$values, ...$overrides]);
+    }
+
+    /** @param array<string,mixed> $overrides */
+    private function hzupnPayload(array $overrides = []): HzupnXmlPayload
+    {
+        $values = [
+            'employerReport' => true,
+            'personReport' => false,
+            'foreignCase' => false,
+            'confirmationNumber' => 'A1234567',
+            'osszCode' => 115,
+            'osszName' => null,
+            'issuedOn' => '2026-08-24',
+            'correction' => false,
+            'insuredFirstName' => 'Jan',
+            'insuredLastName' => 'Testovací',
+            'insuredTitle' => null,
+            'insuredBirthNumber' => '8001010008',
+            'insuredBirthDate' => '1980-01-01',
+            'employerName' => 'Testovací zaměstnavatel s.r.o.',
+            'employerIdentificationNumber' => '12345678',
+            'employerVariableSymbol' => '1234567890',
+            'returnedToWork' => true,
+            'returnReason' => null,
+            'returnedOn' => '2026-08-24',
+            'hoursWorkedLastDay' => '4',
+            'shiftHoursLastDay' => '8',
+            'workIntervals' => [],
+            'productName' => 'MyUcto',
+            'productVersion' => '1.0',
+            'payloadVersion' => '20201.01',
+        ];
+
+        return new HzupnXmlPayload(...[...$values, ...$overrides]);
+    }
+
+    /** @param array<string,mixed> $overrides @return array<string,mixed> */
+    private function caseRow(array $overrides = []): array
+    {
+        return [...[
+            'ossz_code' => 115,
+            'correction' => 0,
+            'decision_number' => 'a1234567',
+            'foreign_case' => 0,
+            'worked_on_decisive_day' => 0,
+            'hours_worked' => null,
+            'daily_working_hours' => null,
+            'small_scope_income_minor' => null,
+            'receives_pension' => 0,
+            'is_student' => 0,
+            'first_employment_free_time' => 0,
+            'unpaid_leave' => 0,
+            'transferred_other_work' => 0,
+            'enforcement' => 0,
+            'insolvency' => 0,
+            'work_days' => [],
+        ], ...$overrides];
+    }
+
+    /** @return array<string,mixed> */
+    private function context(): array
+    {
+        return [
+            'start_date' => '2020-01-01',
+            'end_date' => null,
+            'employer_business_id' => '12345678',
+            'employer_name' => 'Testovací zaměstnavatel s.r.o.',
+            'employer_variable_symbol' => '1234567890',
+            'activity_code' => '1',
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function identity(): array
+    {
+        return [
+            'identity' => ['first_name' => 'Jan', 'last_name' => 'Testovací', 'birth_date' => '1980-01-01'],
+            'identifiers' => ['birth_number' => '8001010008', 'ecp' => null],
+        ];
+    }
+}
