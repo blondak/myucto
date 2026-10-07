@@ -55,4 +55,28 @@ enum SicknessDocumentKind: string
             self::Hzupn => 'Hlášení zaměstnavatele při ukončení pracovní neschopnosti',
         };
     }
+
+    /** Sloupec případu se stavem tohoto podání ({@see SicknessDocumentStatus}). */
+    public function statusColumn(): string
+    {
+        return $this->value . '_status';
+    }
+
+    /** Sloupec případu s dnem doručení podání územní správě. */
+    public function acceptedOnColumn(): string
+    {
+        return $this->value . '_accepted_on';
+    }
+
+    /** Sloupec případu s důvodem odmítnutí z protokolu ČSSZ. */
+    public function rejectionReasonColumn(): string
+    {
+        return $this->value . '_rejection_reason';
+    }
+
+    /** Sloupec případu s vazbou na připravené podání. */
+    public function submissionColumn(): string
+    {
+        return $this->value . '_submission_id';
+    }
 }

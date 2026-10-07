@@ -766,6 +766,10 @@ final class PayrollDeletionApiTest extends TestCase
         ]);
     }
 
+    /**
+     * Společný stav případu se odvozuje ze stavů podání, takže se zapisuje
+     * přes ně: `submitted` = NEMPRI doručené ČSSZ, `cancelled` = zrušený případ.
+     */
     private function insertSicknessCase(
         int $employmentId,
         string $status,
@@ -774,14 +778,17 @@ final class PayrollDeletionApiTest extends TestCase
         $this->db->pdo()->prepare(
             "INSERT INTO payroll_sickness_cases
                 (supplier_id, environment, employee_id, employment_id, benefit_kind,
-                 ossz_code, incapacity_from, status, created_by)
-             VALUES (?, 'production', ?, ?, 'NEM', 111, ?, ?, ?)"
+                 ossz_code, incapacity_from, nempri_status, nempri_accepted_on,
+                 cancelled, created_by)
+             VALUES (?, 'production', ?, ?, 'NEM', 111, ?, ?, ?, ?, ?)"
         )->execute([
             $this->supplierId,
             $this->employeeId,
             $employmentId,
             $incapacityFrom,
-            $status,
+            $status === 'submitted' ? 'accepted' : 'pending',
+            $status === 'submitted' ? '2026-03-20' : null,
+            $status === 'cancelled' ? 1 : 0,
             $this->userId,
         ]);
     }

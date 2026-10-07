@@ -352,6 +352,13 @@ final readonly class SicknessSubmissionService
                 'Ze zrušeného případu se podání nepřipravuje.',
             );
         }
+        if (SicknessCaseService::documentStatus($row, $document) === SicknessDocumentStatus::Predecessor) {
+            throw new SicknessException(
+                'sickness_document_handled_by_predecessor',
+                $document->agendaCode() . ' k této události podal předchozí mzdový program, '
+                . 'MyÚčto ho znovu nepodává. Druhé podání téže věci by ČSSZ odmítla.',
+            );
+        }
         $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);
         $employmentId = (int) $row['employment_id'];
         $incapacityFrom = (string) $row['incapacity_from'];
@@ -715,14 +722,13 @@ final readonly class SicknessSubmissionService
         int $submissionId,
     ): void {
         $row = $this->caseService->requireCase($supplierId, $environment, $caseId);
-        $column = $document === SicknessDocumentKind::Nempri
-            ? 'nempri_submission_id'
-            : 'hzupn_submission_id';
-        $changes = [$column => $submissionId];
-        if (SicknessCaseStatus::from((string) $row['status'])
-            === SicknessCaseStatus::Draft
-        ) {
-            $changes['status'] = SicknessCaseStatus::Prepared->value;
+        // Společný stav případu se odvozuje (`prepared` z vazby na podání),
+        // takže se tu nezapisuje. Nové podání po odmítnutí vrací tiskopis do
+        // stavu „čeká na doručení".
+        $changes = [$document->submissionColumn() => $submissionId];
+        if (SicknessCaseService::documentStatus($row, $document) === SicknessDocumentStatus::Rejected) {
+            $changes[$document->statusColumn()] = SicknessDocumentStatus::Pending->value;
+            $changes[$document->rejectionReasonColumn()] = null;
         }
         if (!$this->cases->update(
             $supplierId,

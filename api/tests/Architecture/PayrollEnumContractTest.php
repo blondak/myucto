@@ -482,6 +482,16 @@ final class PayrollEnumContractTest extends TestCase
         // Rozhodnutí zaměstnavatele o dlouhodobé péči (§ 191a ZP).
         'payrollSicknessCases.ts::PayrollLongTermCareConsent'
             => 'const:MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService::LONG_TERM_CARE_CONSENTS',
+        // Stav jednoho podání (NEMPRI, HZUPN). Přijetí NEMPRI nesmí zamknout
+        // HZUPN, proto má každé podání vlastní stav a akce.
+        'payrollSicknessCases.ts::PayrollSicknessDocumentStatus'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentStatus',
+        // Původ případu: MyÚčto, nebo předchozí mzdový program.
+        'payrollSicknessCases.ts::PayrollSicknessCaseSource'
+            => 'const:MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService::SOURCES',
+        // Důvod převedení na jinou práci (§ 19 odst. 6 zák. č. 187/2006 Sb.).
+        'payrollSicknessCases.ts::PayrollSicknessTransferReason'
+            => 'const:MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService::TRANSFER_REASONS',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',

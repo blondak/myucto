@@ -159,7 +159,7 @@ final readonly class PayrollSicknessCaseRepository
                 AND environment = ?
                 AND employment_id = ?
                 AND benefit_kind = ?
-                AND status <> "cancelled"
+                AND cancelled = 0
                 AND (incapacity_to IS NULL OR incapacity_to >= ?)
                 AND (? IS NULL OR incapacity_from <= ?)';
         $params = [
@@ -183,11 +183,14 @@ final readonly class PayrollSicknessCaseRepository
     }
 
     /**
-     * Nesplněné případy s termínem v okně — podklad hlídače termínů.
+     * Případy, u kterých aspoň jedno podání ještě čeká — podklad hlídače termínů.
      *
      * Vrací i případy, ze kterých ještě nikdo podání nepřipravil. To je celý
      * smysl: lhůta podle § 97 odst. 2 běží od 15. dne neschopnosti bez ohledu
      * na to, jestli si toho někdo všiml.
+     *
+     * Rozhoduje se PO PODÁNÍCH: přijaté NEMPRI případ neuzavře, dokud čeká
+     * HZUPN (§ 97 odst. 3). HZUPN existuje jen u nemocenského.
      *
      * @return list<array<string,mixed>>
      */
@@ -203,11 +206,16 @@ final readonly class PayrollSicknessCaseRepository
                     sickness.incapacity_from,
                     sickness.incapacity_to,
                     sickness.status,
+                    sickness.nempri_status,
+                    sickness.hzupn_status,
                     sickness.nempri_submission_id,
                     sickness.hzupn_submission_id,
                     sickness.returned_on,
                     sickness.lone_caregiver,
                     sickness.payroll_payment_date,
+                    sickness.worked_on_decisive_day,
+                    sickness.hours_worked,
+                    sickness.daily_working_hours,
                     employee.full_name
                FROM payroll_sickness_cases sickness
                JOIN payroll_employees employee
@@ -215,12 +223,127 @@ final readonly class PayrollSicknessCaseRepository
                 AND employee.id = sickness.employee_id
               WHERE sickness.supplier_id = ?
                 AND sickness.environment = ?
-                AND sickness.status IN ("draft", "prepared", "submitted", "rejected")
+                AND sickness.cancelled = 0
+                AND (sickness.nempri_status IN ("pending", "rejected")
+                     OR (sickness.benefit_kind = "NEM"
+                         AND sickness.hzupn_status IN ("pending", "rejected")))
               ORDER BY sickness.incapacity_from, sickness.id'
         );
         $statement->execute([$supplierId, $environment]);
 
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Případ podle jeho přirozeného klíče (vztah, druh dávky, den vzniku).
+     * Tentýž klíč drží unikátní index, takže převod spuštěný podruhé případ
+     * nezdvojí.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findByScope(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $benefitKind,
+        string $incapacityFrom,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND benefit_kind = ?
+                AND incapacity_from = ?
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $benefitKind, $incapacityFrom]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Nezrušený případ, jehož konec tvoří zadaná nepřítomnost: končí týmž dnem
+     * a začal dřív. Navazující nepřítomnost případ jen prodloužila, takže vazbu
+     * `absence_id` nemá; po jejím zrušení se konec případu musí vrátit zpět.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function caseEndingWith(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $benefitKind,
+        string $absenceFrom,
+        string $absenceTo,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_sickness_cases
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND benefit_kind = ?
+                AND cancelled = 0
+                AND incapacity_to = ?
+                AND incapacity_from < ?
+              ORDER BY incapacity_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $benefitKind, $absenceTo, $absenceFrom]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Délka zveřejněné směny v den vzniku události, v minutách bez přestávky.
+     * Den se určuje v časovém pásmu směny, stejně jako u výpočtu náhrady mzdy.
+     * `null` = ten den žádnou zveřejněnou směnu nemá.
+     */
+    public function publishedShiftMinutesOn(
+        int $supplierId,
+        int $employmentId,
+        string $date,
+    ): ?int {
+        if (!$this->db->hasTable('payroll_shifts')) {
+            return null;
+        }
+        $day = new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone('UTC'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT starts_at_utc, ends_at_utc, timezone_name, break_minutes
+               FROM payroll_shifts
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND status = 'published'
+                AND starts_at_utc < ?
+                AND ends_at_utc > ?
+              ORDER BY starts_at_utc, id"
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $day->modify('+2 days')->format('Y-m-d H:i:s'),
+            $day->modify('-1 day')->format('Y-m-d H:i:s'),
+        ]);
+        $minutes = null;
+        $utc = new \DateTimeZone('UTC');
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $shift) {
+            $start = new \DateTimeImmutable((string) $shift['starts_at_utc'], $utc);
+            $end = new \DateTimeImmutable((string) $shift['ends_at_utc'], $utc);
+            $local = $start->setTimezone(new \DateTimeZone((string) $shift['timezone_name']))->format('Y-m-d');
+            if ($local !== $date) {
+                continue;
+            }
+            $length = intdiv($end->getTimestamp() - $start->getTimestamp(), 60) - (int) $shift['break_minutes'];
+            if ($length > 0) {
+                $minutes = ($minutes ?? 0) + $length;
+            }
+        }
+
+        return $minutes;
     }
 
     /**
@@ -253,6 +376,11 @@ final readonly class PayrollSicknessCaseRepository
      * zapsaná po měsících je JEDNA sociální událost; navazující absence proto
      * prodlužuje tentýž případ, dokud z něj nikdo nepodal hlášení o skončení.
      *
+     * U nemocenského rozhoduje jen HZUPN: přijaté NEMPRI událost neukončuje,
+     * takže prodloužení po něm patří do téhož případu (jinak by se jedna
+     * neschopnost rozpadla na dva případy). U ostatních dávek se navazuje,
+     * dokud NEMPRI není vyřízené.
+     *
      * @return array<string,mixed>|null
      */
     public function contiguousOpenCase(
@@ -269,8 +397,10 @@ final readonly class PayrollSicknessCaseRepository
                 AND environment = ?
                 AND employment_id = ?
                 AND benefit_kind = ?
-                AND status IN ("draft", "prepared", "submitted", "rejected")
+                AND cancelled = 0
                 AND hzupn_submission_id IS NULL
+                AND ((benefit_kind = "NEM" AND hzupn_status IN ("pending", "rejected"))
+                     OR (benefit_kind <> "NEM" AND nempri_status IN ("pending", "rejected")))
                 AND incapacity_to = DATE_SUB(?, INTERVAL 1 DAY)
               ORDER BY incapacity_from DESC, id DESC
               LIMIT 1'

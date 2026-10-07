@@ -174,6 +174,52 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame('/payroll/submissions/sickness', $byKey['NEM:HZUPN']['path']);
     }
 
+    /**
+     * PRE-01: NEMPRI a HZUPN jsou dvě podání (§ 97 odst. 1–3). Zapsané přijetí
+     * NEMPRI dřív případ uzavřelo celý a lhůta HZUPN z hlídače zmizela.
+     */
+    public function testPendingHzupnStaysWatchedAfterNempriAccepted(): void
+    {
+        $this->sicknessCase('NEM', '2026-08-01', '2026-08-18', '2026-08-19');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_sickness_cases
+                SET nempri_status = "accepted", nempri_accepted_on = "2026-08-17"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $titles = array_map(
+            static fn (array $item): string => $item['title'] . ':' . $item['document_status'],
+            array_values(array_filter(
+                $overview['items'],
+                static fn (array $item): bool => $item['source'] === 'sickness_case',
+            )),
+        );
+
+        self::assertSame(['HZUPN:pending'], $titles);
+    }
+
+    /** Odmítnuté podání hlídač ukazuje dál a říká, že je odmítnuté. */
+    public function testRejectedNempriStaysWatchedWithItsStatus(): void
+    {
+        $this->sicknessCase('OSE', '2026-08-03', '2026-08-05', null);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_sickness_cases
+                SET nempri_status = "rejected", nempri_rejection_reason = "Syntetický důvod"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $items = array_values(array_filter(
+            $overview['items'],
+            static fn (array $item): bool => $item['source'] === 'sickness_case',
+        ));
+
+        self::assertCount(1, $items);
+        self::assertSame('rejected', $items[0]['document_status']);
+        self::assertSame('rejected', $items[0]['status']);
+    }
+
     private function sicknessCase(string $kind, string $from, string $to, ?string $returnedOn): void
     {
         $pdo = $this->db->pdo();

@@ -15,7 +15,10 @@ use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentStatus;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
 use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
 use Psr\Clock\ClockInterface;
@@ -1121,20 +1124,28 @@ final readonly class PayrollDeadlineOverviewService
             $incapacityTo = $row['incapacity_to'] === null
                 ? null
                 : (string) $row['incapacity_to'];
+            // § 26 odst. 3: odpracovaná celá směna v den vzniku posouvá první
+            // den neschopnosti, a tím okno 14 dnů i lhůtu NEMPRI.
+            $workedFirstDay = $kind === SicknessBenefitKind::Nem
+                && SicknessCaseService::firstDayFullyWorked($row);
             // Neschopnost do 14 dnů celou kryje náhrada mzdy (§ 26 odst. 1
             // zák. č. 187/2006 Sb.) — dávka z ní neplyne, NEMPRI ani HZUPN
             // se nepodávají a hlídač by strašil lhůtou, která neexistuje.
             try {
-                if (!$this->sicknessDeadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo)) {
+                if (!$this->sicknessDeadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo, 0, $workedFirstDay)) {
                     continue;
                 }
             } catch (SicknessException) {
                 continue;
             }
+            // Každé podání má vlastní stav: přijaté NEMPRI neschová čekající
+            // HZUPN. Vyřízené (přijaté, podané předchozím programem) se
+            // nehlídá, připravené čeká na odeslání ve frontě; odmítnuté se
+            // vrací do hlídače, i když k němu podání existuje.
             $documents = [
                 'nempri' => [
                     'agenda' => 'NEMPRI',
-                    'submitted' => $row['nempri_submission_id'] !== null,
+                    'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::Nempri),
                 ],
             ];
             // HZUPN hlásí nástup po skončení neschopnosti — jen u nemocenského.
@@ -1143,7 +1154,7 @@ final readonly class PayrollDeadlineOverviewService
             if ($kind->hasEndOfIncapacityReport()) {
                 $documents['hzupn'] = [
                     'agenda' => 'HZUPN',
-                    'submitted' => $row['hzupn_submission_id'] !== null,
+                    'submitted' => $this->sicknessDocumentDone($row, SicknessDocumentKind::Hzupn),
                 ];
             }
             foreach ($documents as $document => $meta) {
@@ -1160,6 +1171,7 @@ final readonly class PayrollDeadlineOverviewService
                                 ? null
                                 : (string) $row['payroll_payment_date'],
                             (bool) ($row['lone_caregiver'] ?? false),
+                            $workedFirstDay,
                         )
                         : $this->sicknessDeadlines->forHzupn(
                             $incapacityFrom,
@@ -1190,6 +1202,10 @@ final readonly class PayrollDeadlineOverviewService
                     'employment_id' => (int) $row['employment_id'],
                     'employee_id' => (int) $row['employee_id'],
                     'status' => (string) $row['status'],
+                    'document_status' => SicknessCaseService::documentStatus(
+                        $row,
+                        $document === 'nempri' ? SicknessDocumentKind::Nempri : SicknessDocumentKind::Hzupn,
+                    )->value,
                     'deadline_source' => $window->legalReference,
                     'deadline_source_status' => $window->sourceStatus,
                     'deadline_ruleset_id' => $window->rulesetId,
@@ -1201,6 +1217,23 @@ final readonly class PayrollDeadlineOverviewService
         }
 
         return $items;
+    }
+
+    /**
+     * Je podání případu za hlídačem? Vyřízené ano; připravené jen tehdy, když
+     * ho ČSSZ neodmítla — odmítnuté se musí podat znovu.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function sicknessDocumentDone(array $row, SicknessDocumentKind $document): bool
+    {
+        $status = SicknessCaseService::documentStatus($row, $document);
+        if ($status->isSettled()) {
+            return true;
+        }
+
+        return $status !== SicknessDocumentStatus::Rejected
+            && ($row[$document->submissionColumn()] ?? null) !== null;
     }
 
     /**

@@ -18,8 +18,9 @@ import type { PayrollRegzelEnvironment } from './payroll'
 export type PayrollSicknessBenefitKind = 'NEM' | 'VPM' | 'OPP' | 'PPM' | 'OSE' | 'DLO'
 
 /**
- * Stav případu v evidenci. NENÍ to stav podání: `prepared` znamená
- * „XML je zmrazené", povinnost splní až předání ČSSZ.
+ * Společný stav případu, odvozený ze stavů obou podání. NENÍ to stav podání:
+ * `prepared` znamená „XML je zmrazené", povinnost splní až předání ČSSZ;
+ * `submitted` = část podání vyřízena, další čeká; `accepted` = vše vyřízeno.
  */
 export type PayrollSicknessCaseStatus =
   | 'draft'
@@ -31,6 +32,19 @@ export type PayrollSicknessCaseStatus =
 
 /** Který ze dvou tiskopisů se z případu staví. */
 export type PayrollSicknessDocumentKind = 'nempri' | 'hzupn'
+
+/**
+ * Stav jednoho podání. NEMPRI a HZUPN mají vlastní lhůty (§ 97 odst. 1–3),
+ * takže přijaté NEMPRI neuzavře čekající HZUPN. `predecessor` = podal
+ * předchozí mzdový program.
+ */
+export type PayrollSicknessDocumentStatus = 'pending' | 'accepted' | 'rejected' | 'predecessor'
+
+/** Odkud případ je: z MyÚčta, nebo převzatý z předchozího mzdového programu. */
+export type PayrollSicknessCaseSource = 'myucto' | 'predecessor'
+
+/** Důvod převedení na jinou práci (§ 19 odst. 6 zák. č. 187/2006 Sb.). */
+export type PayrollSicknessTransferReason = 'pregnancy' | 'maternity' | 'breastfeeding'
 
 export interface PayrollSicknessWorkInterval {
   from: string
@@ -81,6 +95,7 @@ export interface PayrollSicknessCase {
   child_birth_date: string | null
   transferred_other_work: number
   transferred_on: string | null
+  transfer_reason?: PayrollSicknessTransferReason | null
   enforcement: number
   insolvency: number
   returned_to_work: number | null
@@ -90,9 +105,18 @@ export interface PayrollSicknessCase {
   shift_hours_last_day: string | null
   additional_note: string | null
   status: PayrollSicknessCaseStatus
-  /** Den DORUČENÍ podání ČSSZ z protokolu, ne den přípravy. */
-  accepted_on: string | null
-  rejection_reason: string | null
+  nempri_status: PayrollSicknessDocumentStatus
+  /** Den DORUČENÍ NEMPRI ČSSZ z protokolu, ne den přípravy. */
+  nempri_accepted_on: string | null
+  nempri_rejection_reason: string | null
+  hzupn_status: PayrollSicknessDocumentStatus
+  /** Den DORUČENÍ HZUPN ČSSZ z protokolu. */
+  hzupn_accepted_on: string | null
+  hzupn_rejection_reason: string | null
+  cancelled: number
+  source: PayrollSicknessCaseSource
+  /** Odkaz na převzatý záznam předchozího programu. */
+  external_reference: string | null
   nempri_submission_id: number | null
   hzupn_submission_id: number | null
   row_version: number
@@ -126,6 +150,13 @@ export interface PayrollSicknessCase {
   worked_last_day: number | null
   planned_shifts: number | null
   planned_shifts_worked: number | null
+  // ── podklady pro výplatu DLO (trvání a ukončení) ──
+  /** `maVolno` — měl zaměstnanec v období dávky pracovní volno. */
+  dlo_has_leave?: number | null
+  /** `pracovniVolno` — období pracovního volna. */
+  dlo_leave_periods?: PayrollSicknessWorkInterval[] | null
+  /** `seznamRozvrhuSmen` — rozvrh plánovaných směn. */
+  dlo_shift_schedule?: PayrollSicknessWorkInterval[] | null
   // ── rozhodné období a kontakt ──
   probable_income_czk: number | null
   /** Návrh pravděpodobného příjmu: sjednaná měsíční hrubá mzda v haléřích. */
@@ -161,7 +192,8 @@ export interface PayrollSicknessProtectionPeriod {
  * `null` = z nepřítomnosti žádná dávka neplyne.
  */
 export interface PayrollAbsenceSicknessCaseOutcome {
-  outcome: 'created' | 'extended' | 'linked' | 'cancelled' | 'kept' | 'skipped'
+  /** `shortened` = zrušená navazující nepřítomnost vrátila konec případu zpět. */
+  outcome: 'created' | 'extended' | 'linked' | 'cancelled' | 'kept' | 'skipped' | 'shortened'
   case_id: number | null
   benefit_kind: PayrollSicknessBenefitKind | null
   nempri_due_on: string | null
@@ -255,8 +287,15 @@ export type PayrollSicknessCaseInput = Partial<
     | 'employee_id'
     | 'full_name'
     | 'status'
-    | 'accepted_on'
-    | 'rejection_reason'
+    | 'nempri_status'
+    | 'nempri_accepted_on'
+    | 'nempri_rejection_reason'
+    | 'hzupn_status'
+    | 'hzupn_accepted_on'
+    | 'hzupn_rejection_reason'
+    | 'cancelled'
+    | 'source'
+    | 'external_reference'
     | 'nempri_submission_id'
     | 'hzupn_submission_id'
     | 'row_version'
@@ -335,10 +374,19 @@ export const payrollSicknessCasesApi = {
       { environment, document },
     ).then(response => response.data),
 
+  /**
+   * Výsledek JEDNOHO podání z protokolu ČSSZ (`document`), nebo zrušení celého
+   * případu (`outcome: 'cancelled'`). `predecessor` jen u převzatého případu.
+   */
   recordReceipt: (
     environment: PayrollRegzelEnvironment,
     caseId: number,
-    payload: { outcome: 'accepted' | 'rejected' | 'cancelled'; accepted_on?: string | null; reason?: string | null },
+    payload: {
+      outcome: 'accepted' | 'rejected' | 'predecessor' | 'cancelled'
+      document?: PayrollSicknessDocumentKind
+      accepted_on?: string | null
+      reason?: string | null
+    },
   ) =>
     api.post<PayrollSicknessCase>(
       `/payroll/submissions/sickness-cases/${caseId}/receipt`,

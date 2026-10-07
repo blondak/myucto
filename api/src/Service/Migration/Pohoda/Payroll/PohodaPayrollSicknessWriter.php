@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 
 /**
  * Zápis rozpracovaných případů nemocenské z PAMICA ({@see PohodaPayrollSickness}).
@@ -34,6 +35,11 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  * případu, která spadá do MyÚčta, ve stavu „požadováno“ - schválení patří účetní, protože
  * konec neschopnosti z jiného programu není potvrzením ošetřujícího lékaře. Opakovaný
  * převod proto nic nezdvojí: podruhé už nepřítomnost existuje a vyčerpané dny sedí.
+ *
+ * **Případ dávky.** K rozběhnutému případu se založí i případ dávky nemocenského
+ * pojištění ({@see SicknessCaseFromAbsenceService::onTakenOver()}) se skutečným dnem
+ * vzniku z PAMICA: NEMPRI, jehož lhůta uplynula před prvním měsícem vedení mezd,
+ * podala PAMICA, HZUPN k návratu do práce podá už MyÚčto a hlídač termínů ho hlídá.
  */
 final class PohodaPayrollSicknessWriter
 {
@@ -45,6 +51,8 @@ final class PohodaPayrollSicknessWriter
     private int $windowWritten = 0;
     private int $compensationFromAbsence = 0;
     private int $withoutCompensation = 0;
+    /** @var list<string> */
+    private array $sicknessCaseSkipped = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -53,6 +61,7 @@ final class PohodaPayrollSicknessWriter
         private readonly PayrollModuleStateRepository $moduleState,
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollAverageEarningRepository $averages,
+        private readonly SicknessCaseFromAbsenceService $sicknessCases,
     ) {}
 
     /** První měsíc vedení mezd, podle kterého se pozná rozpracovaný případ. */
@@ -77,6 +86,7 @@ final class PohodaPayrollSicknessWriter
         $this->windowWritten = 0;
         $this->compensationFromAbsence = 0;
         $this->withoutCompensation = 0;
+        $this->sicknessCaseSkipped = [];
 
         $startPeriod = $result['start_period'];
         $inProgress = array_values(array_filter(
@@ -118,6 +128,15 @@ final class PohodaPayrollSicknessWriter
                 . 'kolik kalendářních dnů okna podle § 192 ZP padlo ještě u předchozího plátce, '
                 . 'takže MyÚčto vyplatí jen zbytek okna, ne celých čtrnáct dnů znovu.',
                 $this->windowWritten,
+            ));
+        }
+        if ($this->sicknessCaseSkipped !== []) {
+            $protocol->warn($step, 'sickness_benefit_case_skipped', sprintf(
+                'Případ dávky nemocenského pojištění se nezaložil u %d rozpracovaných případů, '
+                . 'takže jejich lhůtu HZUPN MyÚčto nehlídá. Založte je ručně v Mzdy → Podání → '
+                . 'Dávky nemocenského. Důvod u prvního: %s',
+                count($this->sicknessCaseSkipped),
+                $this->sicknessCaseSkipped[0],
             ));
         }
         $this->summary($protocol, $step, $result);
@@ -186,6 +205,25 @@ final class PohodaPayrollSicknessWriter
             $this->absences->setSicknessWindowCarriedDays($supplierId, (int) $existing['id'], $carried);
             $this->windowWritten++;
             $counts['sickness_window_carried'] = 1;
+        }
+        // Případ dávky: NEMPRI k rozběhnuté neschopnosti zpravidla podala PAMICA,
+        // HZUPN k návratu do práce podá už MyÚčto (§ 97 odst. 3). Den vzniku je
+        // skutečný začátek případu v PAMICA, ne první den v MyÚčtu.
+        $sicknessCase = $this->sicknessCases->onTakenOver(
+            $supplierId,
+            $this->absences->find($supplierId, (int) $existing['id']) ?? $existing,
+            $userId,
+            $startPeriod,
+            $from,
+            'pamica:' . ($case['personal_number'] ?? $case['person_key']) . ':' . $type . ':' . $from,
+        );
+        if ($sicknessCase !== null) {
+            if ($sicknessCase['outcome'] === 'created') {
+                $counts['sickness_benefit_cases'] = 1;
+            } elseif ($sicknessCase['outcome'] === 'skipped') {
+                $counts['sickness_benefit_cases_skipped'] = 1;
+                $this->sicknessCaseSkipped[] = (string) $sicknessCase['message'];
+            }
         }
         if ($case['compensation_minor'] === null) {
             $this->withoutCompensation++;
@@ -288,9 +326,12 @@ final class PohodaPayrollSicknessWriter
         }
         if ($result['benefit_rows'] > 0) {
             $protocol->warn($step, 'sickness_benefits_skipped', sprintf(
-                'Dávek nemocenského pojištění v exportu (`MZdavky`): %d. Nepřevádějí se - od roku 2009 '
-                . 'je nevyplácí zaměstnavatel, ale ČSSZ, takže MyÚčto pro ně evidenci nemá. '
-                . 'Rozpracované dávky dořešte s příslušnou OSSZ.',
+                'Dávek nemocenského pojištění v exportu (`MZdavky`): %d. Vyplacené dávky se nepřevádějí - '
+                . 'od roku 2009 je nevyplácí zaměstnavatel, ale ČSSZ. Rozpracovaná neschopnost, '
+                . 'ošetřování nebo mateřská z nepřítomností se převádí jako případ dávky '
+                . '(Mzdy → Podání → Dávky nemocenského): NEMPRI, jehož lhůta uplynula před prvním '
+                . 'měsícem vedení mezd v MyÚčtu, je vedené jako podané z PAMICA a MyÚčto hlídá '
+                . 'HZUPN k návratu do práce. Zkontrolujte převzaté případy proti podáním z PAMICA.',
                 $result['benefit_rows'],
             ));
         }

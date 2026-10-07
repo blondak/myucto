@@ -102,12 +102,18 @@ final class SicknessDeadlinePolicy
      * je tatáž hodnota jako okno náhrady mzdy ({@see AbsenceRuleset::sicknessWindowCalendarDays()}).
      * `$carriedCalendarDays` jsou dny téže neschopnosti před `$incapacityFrom`
      * (převzatá z jiného mzdového programu), které se do trvání počítají.
+     *
+     * `$workedFirstDay`: odpracoval-li zaměstnanec v den vzniku neschopnosti
+     * celou směnu, považuje se podle § 26 odst. 3 za první den neschopnosti
+     * následující kalendářní den. Okno 14 dnů se pak počítá od něj — stejně
+     * jako okno náhrady mzdy v `PayrollWageProrationService`.
      */
     public function nempriRequired(
         SicknessBenefitKind $kind,
         string $incapacityFrom,
         ?string $incapacityTo,
         int $carriedCalendarDays = 0,
+        bool $workedFirstDay = false,
     ): bool {
         if ($kind !== SicknessBenefitKind::Nem || $incapacityTo === null) {
             return true;
@@ -116,6 +122,9 @@ final class SicknessDeadlinePolicy
             $incapacityFrom,
             'Den vzniku sociální události musí být datum ve tvaru RRRR-MM-DD.',
         );
+        if ($workedFirstDay) {
+            $from = $from->modify('+1 day');
+        }
         $to = $this->exactDate(
             $incapacityTo,
             'Den skončení sociální události musí být datum ve tvaru RRRR-MM-DD.',
@@ -136,6 +145,8 @@ final class SicknessDeadlinePolicy
      *                                         a platů; povinný jen u VPM.
      * @param bool        $loneCarer           Osamělý pojištěnec podle
      *                                         § 40 odst. 1 písm. b).
+     * @param bool        $workedFirstDay      V den vzniku neschopnosti odpracoval
+     *                                         celou směnu (§ 26 odst. 3); jen NEM.
      */
     public function forNempri(
         SicknessBenefitKind $kind,
@@ -143,6 +154,7 @@ final class SicknessDeadlinePolicy
         ?string $incapacityTo = null,
         ?string $payrollPaymentDate = null,
         bool $loneCarer = false,
+        bool $workedFirstDay = false,
     ): SicknessNotificationWindow {
         $from = $this->exactDate(
             $incapacityFrom,
@@ -185,9 +197,12 @@ final class SicknessDeadlinePolicy
         [$earliest, $reference] = match ($kind) {
             // § 97 odst. 2 věta druhá: neprodleně PO UPLYNUTÍ prvních 14 dnů,
             // tedy nejdřív 15. kalendářní den trvání DPN (§ 26 odst. 1). Tatáž
-            // hodnota jako u náhrady mzdy podle § 192 ZP.
+            // hodnota jako u náhrady mzdy podle § 192 ZP. Odpracovaná celá
+            // směna v den vzniku posouvá první den neschopnosti (§ 26 odst. 3).
             SicknessBenefitKind::Nem => [
-                $from->modify('+' . $absence->sicknessWindowCalendarDays() . ' days'),
+                $from->modify('+' . (
+                    $absence->sicknessWindowCalendarDays() + ($workedFirstDay ? 1 : 0)
+                ) . ' days'),
                 '§ 97 odst. 2 věta druhá zákona č. 187/2006 Sb.',
             ],
             // § 97 odst. 1 věta čtvrtá + § 38b odst. 1.
@@ -198,7 +213,8 @@ final class SicknessDeadlinePolicy
             // § 97 odst. 1 věta čtvrtá + § 40 odst. 1. Skončila-li potřeba
             // ošetřování dřív, než podpůrčí doba doběhla, běží lhůta od
             // skutečného skončení — podpůrčí doba je HORNÍ mez, ne pevná délka
-            // („nejdéle 9 kalendářních dnů").
+            // („nejdéle 9 kalendářních dnů"). Předává se PO skončení péče, tedy
+            // nejdřív následující den, stejně jako po uplynutí podpůrčí doby.
             SicknessBenefitKind::Ose => [
                 $this->earlier(
                     $from->modify('+' . (
@@ -206,7 +222,7 @@ final class SicknessDeadlinePolicy
                             ? $absence->careSupportDaysLoneCarer()
                             : $absence->careSupportDays()
                     ) . ' days'),
-                    $end,
+                    $end?->modify('+1 day'),
                 ),
                 '§ 97 odst. 1 věta čtvrtá a § 40 odst. 1 zákona č. 187/2006 Sb.',
             ],
@@ -362,6 +378,8 @@ final class SicknessDeadlinePolicy
             'vpm_due' => 'next_working_day_after_payday',
             'immediacy_due' => 'next_czech_working_day_from_earliest',
             'hzupn_earliest' => 'return_to_work_day',
+            'ose_earliest_after_care_end' => 'next_day',
+            'nem_first_day_fully_worked' => 'next_day',
             'sources' => self::SOURCES,
         ]));
     }
