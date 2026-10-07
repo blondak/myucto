@@ -474,7 +474,6 @@ final class EldpStatementServiceTest extends TestCase
             'test',
             [
                 'excluded_days_confirmed' => true,
-                'deducted_days_none' => true,
                 'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
                 'requested_by_authority' => false,
                 'note' => 'Syntetický evidenční list pro integrační test.',
@@ -562,7 +561,56 @@ final class EldpStatementServiceTest extends TestCase
         return (string) ($payload['error']['code'] ?? '');
     }
 
-    private function source(PDO $pdo): int
+    /**
+     * § 38 odst. 4 písm. h) zákona č. 582/1991 Sb.: list s kódem D nese
+     * odečtené doby, které mohou převýšit dny pojištění (říjen bez příjmu kvůli
+     * neplacenému volnu je celý odečtený). Dřív CHECK tabulky „odečtené doby
+     * <= dny pojištění" takový list uložit nedovolil.
+     */
+    public function testPensionAgeStatementWithDeductedDaysIsStored(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->supplierId = $this->createIsolatedSupplier(
+            $pdo,
+            (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn(),
+        );
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
+            ->execute([$this->supplierId]);
+        $this->employmentId = $this->source($pdo, [
+            ['2025-10-01', '2025-11-10', [[
+                'id' => 9101, 'absence_type' => 'unpaid_leave',
+                'date_from' => '2025-10-01', 'date_to' => '2025-10-31',
+            ]], 0],
+            ['2025-11-01', '2025-12-10', [[
+                'id' => 9102, 'absence_type' => 'dpn',
+                'date_from' => '2025-11-03', 'date_to' => '2025-11-07',
+            ]], 1_000_000],
+        ]);
+
+        $result = $this->service->prepare(
+            $this->supplierId,
+            $this->employmentId,
+            2025,
+            'test',
+            [
+                'excluded_days_confirmed' => true,
+                'pension_status' => ['pension_age_reached_on' => '2025-10-01', 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'requested_by_authority' => false,
+                'note' => 'Syntetický evidenční list s kódem D pro integrační test.',
+            ],
+            'synthetic-eldp-pension-age',
+            $this->createdBy,
+        );
+
+        self::assertSame(15, $result['insurance_days']);
+        self::assertSame(5, $result['excluded_days_total']);
+        $stored = $pdo->prepare('SELECT deducted_days_total FROM payroll_eldp_statements WHERE supplier_id = ? AND id = ?');
+        $stored->execute([$this->supplierId, $result['statement_id']]);
+        self::assertSame(36, (int) $stored->fetchColumn());
+    }
+
+    /** @param list<array{0:string,1:string,2:list<array<string,mixed>>,3:int}>|null $months */
+    private function source(PDO $pdo, ?array $months = null): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_employees
@@ -582,15 +630,15 @@ final class EldpStatementServiceTest extends TestCase
         )->execute([$this->supplierId, $employeeId]);
         $employmentId = (int) $pdo->lastInsertId();
 
-        foreach ([
-            ['2025-10-01', '2025-11-10', []],
+        foreach ($months ?? [
+            ['2025-10-01', '2025-11-10', [], 1_000_000],
             ['2025-11-01', '2025-12-10', [[
                 'id' => 9001,
                 'absence_type' => 'dpn',
                 'date_from' => '2025-11-03',
                 'date_to' => '2025-11-07',
-            ]]],
-        ] as [$periodStart, $paymentDate, $absences]) {
+            ]], 1_000_000],
+        ] as [$periodStart, $paymentDate, $absences, $baseMinor]) {
             $this->revision(
                 $pdo,
                 $employeeId,
@@ -599,6 +647,7 @@ final class EldpStatementServiceTest extends TestCase
                 $paymentDate,
                 $absences,
                 $periodStart === '2025-11-01' ? 'correction' : 'regular',
+                $baseMinor,
             );
         }
 

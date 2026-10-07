@@ -157,6 +157,44 @@ final class PayrollMigrationReconciliationRepository
     }
 
     /**
+     * Schválené nepřítomnosti pracovního vztahu, které zasahují do roku, ve
+     * tvaru zmrazeného vstupu mzdového běhu (jen klíče, které čte odvození
+     * vyloučených dob evidenčního listu).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function approvedAbsences(int $supplierId, int $employmentId, int $year): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            "SELECT id, absence_type, date_from, date_to, expected_childbirth_date, childbirth_date,
+                    lone_carer, partial_first_minutes
+               FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'
+                AND date_from <= ? AND date_to >= ?
+              ORDER BY date_from, id",
+        );
+        $statement->execute([$supplierId, $employmentId, sprintf('%04d-12-31', $year), sprintf('%04d-01-01', $year)]);
+        $absences = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $type = (string) $row['absence_type'];
+            $absences[] = [
+                ...($type === 'ppm' ? [
+                    'expected_childbirth_date' => $row['expected_childbirth_date'] === null ? null : (string) $row['expected_childbirth_date'],
+                    'childbirth_date' => $row['childbirth_date'] === null ? null : (string) $row['childbirth_date'],
+                ] : []),
+                ...($type === 'ocr' ? ['lone_carer' => (int) ($row['lone_carer'] ?? 0) === 1] : []),
+                'id' => (int) $row['id'],
+                'absence_type' => $type,
+                'date_from' => (string) $row['date_from'],
+                'date_to' => (string) $row['date_to'],
+                'partial_first_minutes' => $row['partial_first_minutes'] === null ? null : (int) $row['partial_first_minutes'],
+            ];
+        }
+
+        return $absences;
+    }
+
+    /**
      * Období roku, za která MyÚčto samo počítalo mzdu.
      *
      * Čte se AKTUÁLNÍ revize, ne jen schválená — stejně jako

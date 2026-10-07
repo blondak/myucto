@@ -1378,7 +1378,26 @@ rozsahu), **dohodu o pracovní činnosti** i **dohodu o provedení práce**. Kó
 řádku se skládá z druhu činnosti ČSSZ (např. `1++`, `A++`, `T++`). U dohod se
 do doby pojištění počítají jen měsíce, ve kterých se dohoda účastnila
 pojištění; ostatní měsíce řádku se vyznačí „X". Dohoda, která se v roce
-neúčastnila ani jednou, evidenční list nemá.
+neúčastnila ani jednou, evidenční list nemá. Nemoc, karanténa nebo mateřství
+v měsíci bez účasti se zapíše jako vyloučená doba (a započte do dnů), jen
+pokud událost vznikla v měsíci s účastí, nebo vztah byl účasten pojištění
+ve třech měsících bezprostředně před ní (§ 15a zákona č. 187/2006 Sb.). Leží-li
+tyto měsíce v předchozím roce, aplikace nárok neposoudí a list nesestaví.
+
+**Vyloučené doby** (nemoc, karanténa, ošetřování v podpůrčí době, doba před
+porodem, otcovská) se odvozují z evidovaných nepřítomností. Kryje-li je příjem,
+do listu se nezapíšou: nemoc po celý měsíc s odměnou zúčtovanou v témže měsíci,
+den nemoci, ve kterém zaměstnanec odpracoval část směny, a dny, kdy měl příjem
+souběžný pracovní vztah u téhož zaměstnavatele bez vlastní nepřítomnosti.
+Netrvá-li nemoc celý měsíc, zapíše se i v měsíci s mzdou.
+
+**Vyměřovací základ** se zapisuje v plné výši, i když v roce přesáhl maximální
+vyměřovací základ pro pojistné; měsíce po dosažení maxima jsou dobou pojištění.
+
+Skončí-li vztah a zaměstnanec u vás ve stejném roce do tří měsíců znovu
+nastoupí, evidenční list se neuzavírá a pokračuje dalšími řádky. Aplikace vede
+list za pracovní vztah a oba vztahy do jednoho listu nespojí; v takovém případě
+přípravu zastaví a list podejte mimo aplikaci.
 
 ### Důchodové údaje zaměstnance
 
@@ -1391,6 +1410,14 @@ nic z toho nenastalo (prázdné pole znamená „nenastalo"):
   kódu `D` (například `1D+`, `AD+`); řádek se k tomuto dni rozdělí na dvě
   sekce. Připadne-li den doprostřed měsíce, aplikace list nesestaví, protože
   vyměřovací základ za část měsíce nevede; takový list podejte mimo aplikaci.
+  Řádek s kódem `D` nese **odečtené doby**, které aplikace odvodí
+  z nepřítomností: neplacené volno, neomluvenou absenci, nemoc a další omluvné
+  důvody, ošetřování za podpůrčí dobou a celé měsíce bez účasti („X"). Dny
+  pojištění řádku jsou pak interval „Od"–„Do" minus odečtené doby. Vyměřovací
+  základ navazujícího řádku před dovršením věku se uvede úhrnem v řádku `D`;
+  je-li celé období po dovršení věku odečtené, naopak v řádku před ním.
+  Převzatý měsíc z jiného mzdového programu odečtené doby doložit neumí, takže
+  kód `D` nad ním přípravu zastaví.
 - **První měsíc výplaty starobního důchodu v plné výši.** Od roku 2025 se za
   poživatele plného starobního důchodu evidenční list nevede (§ 38 odst. 1
   věta druhá zákona č. 582/1991 Sb.). Měsíce od tohoto měsíce se z listu
@@ -1408,14 +1435,24 @@ v dalším měsíci) se zapíše samostatným řádkem s kódem `1P+` (u dohody
 o pracovní činnosti `AP+`) — jen vyměřovacím základem, bez údajů „Od", „Do"
 a bez dnů. Měsíc po skončení bez vyměřovacího základu se do listu nezapisuje.
 Skončilo-li zaměstnání už v předchozím roce, vznikne list jen s tímto řádkem.
+U zaměstnání malého rozsahu a dohody o provedení práce se řádek „P+"
+nepoužívá: příjem po skončení patří do měsíce skončení a může v něm zpětně
+založit účast. Aplikace takový list nesestaví; přepočtěte měsíc skončení,
+nebo opravný list podejte mimo aplikaci.
 
 Pod souhrnem je přehled **Údaje tiskopisu k opisu**: typ evidenčního listu
-(`01` za rok nebo na výzvu, `02` při skončení zaměstnání, `51` a `52` opravný),
-„zaměstnán od", datum vyhotovení a u každého řádku měsíce „X". Kontrolní XML
-tyto údaje nenese, proto je opište spolu s řádky listu. **Datum vyhotovení**
-můžete zadat; nesmí předcházet údaji „Do" žádného řádku, jinak by ČSSZ list
-odmítla chybou 251 a aplikace ho proto nesestaví. Když datum nezadáte, použije
-se konec posledního zúčtovaného měsíce.
+(`01` činnost trvá, `02` činnost v roce skončila, i k 31. prosinci, `03`
+v souvislosti s úmrtím, `51` až `53` opravný), „zaměstnán od", datum
+vyhotovení a u každého řádku měsíce „X". Kontrolní XML tyto údaje nenese,
+proto je opište spolu s řádky listu. **Datum vyhotovení** můžete zadat;
+nesmí předcházet údaji „Do" žádného řádku, jinak by ČSSZ list odmítla chybou
+251, a nesmí být v budoucnosti, protože ČSSZ nepřijme list vyhotovený později
+než v den přijetí. Když datum nezadáte, použije se konec posledního
+zúčtovaného měsíce; leží-li v budoucnosti, zadejte datum ručně.
+
+Při **úmrtí zaměstnance** vyplňte **datum úmrtí**. List pak dostane typ `03`
+a lhůtu tří měsíců od úmrtí (§ 39 odst. 4 písm. b) zákona č. 582/1991 Sb.
+ve znění do 31. 12. 2025).
 
 Přijde-li výzva ještě v průběhu vykazovaného roku a pracovní vztah trvá,
 aplikace sestaví list jen do posledního měsíce, za který existuje aktuální
@@ -1454,10 +1491,14 @@ Platí přitom tři pravidla:
   nenahradí.** Nejdřív revizi schvalte, nebo rozpracovaný běh zrušte.
 - **Nic se nedopočítává.** Chybí-li převzatému měsíci druh činnosti ČSSZ, dny
   účasti, vyměřovací základ nebo souhlasné trvání vztahu, příprava zůstane
-  zablokovaná a hláška řekne, který měsíc a který údaj doplnit. Má-li převzatý
-  měsíc vyloučené doby jen jako součet, bez rozpadu podle § 16 odst. 4 zákona
-  č. 155/1995 Sb., nelze jej do listu zapsat — zaevidujte odpovídající
-  nepřítomnosti, nebo evidenční list za dotčený měsíc podejte mimo aplikaci.
+  zablokovaná a hláška řekne, který měsíc a který údaj doplnit. Převzatý měsíc
+  nese vyloučené doby jen jako součet; jejich rozpad podle § 16 odst. 4 zákona
+  č. 155/1995 Sb. aplikace vezme z nepřítomností s daty, které převod
+  zaevidoval, a součet z nich se musí shodovat s převzatým. Nesouhlasí-li, nebo
+  nepřítomnosti chybí, opravte je, nebo evidenční list za dotčený měsíc podejte
+  mimo aplikaci. Z nepřítomností se rozhoduje i převzatý měsíc bez
+  vyměřovacího základu: celý v nemoci zůstává dobou pojištění, celý
+  v rodičovské nebo neplaceném volnu je měsícem „X".
 
 Trvání pracovního vztahu drží zmrazená revize: zná-li vztah aspoň jedna
 schválená revize roku, převzatá data se proti ní jen kontrolují. Revize za
@@ -1468,7 +1509,10 @@ schválíte mzdy za další měsíce.
 Skončil-li vztah ještě v době, kterou vedl původní program, žádná revize roku
 ho nezná. Trvání listu se pak vezme z převzatých měsíců, ale jen doložené:
 datum nástupu i skončení musí být vyplněné aspoň u jednoho převzatého měsíce
-a všechny vyplněné údaje se musí shodovat. Prázdné datum skončení může
+a všechny vyplněné údaje se musí shodovat. Výjimkou je datum, které původní
+program později opravil: převzatý měsíc nese trvání vztahu, jak ho program
+znal při jeho zpracování, a pozdější měsíc s opraveným datem skončení platí
+(dny dřívějšího měsíce se podle opravy přepočtou). Prázdné datum skončení může
 znamenat, že vztah trvá, i že ho původní program nevydal, proto takový list
 zůstane zablokovaný, dokud datum v **Kontrole převodu mezd** nedoplníte.
 Stejně zablokovaný zůstane převzatý měsíc, který nese vyměřovací základ až po

@@ -107,6 +107,7 @@ final class EldpDeadlinePolicy
         'cz-eldp-deadlines.authority-request.pre-2026.v1';
     public const AUTHORITY_REQUEST_STATED_RULESET =
         'cz-eldp-deadlines.authority-request.stated-due.v1';
+    public const DEATH_RULESET = 'cz-eldp-deadlines.death.v1';
 
     private const SOURCES = [
         'law' => '582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 až 4',
@@ -229,6 +230,40 @@ final class EldpDeadlinePolicy
                 . 'příjem zúčtovaný po skončení zaměstnání se do evidenčního listu '
                 . 'zapisuje do jednoho měsíce po konečném vyúčtování příjmů, '
                 . 'nejpozději do 31. ledna následujícího roku.',
+        );
+    }
+
+    /**
+     * Evidenční list v souvislosti s úmrtím občana (typ 03, opravný 53).
+     *
+     * § 39 odst. 4 písm. b) zákona č. 582/1991 Sb. ve znění účinném do
+     * 31. 12. 2025: nebyl-li list vyžádán, předkládá se do 3 měsíců od úmrtí.
+     * Vyžádaný list má vlastní okno ({@see self::forAuthorityRequest()}).
+     */
+    public function forDeath(int $year, string $deathOn): EldpDeadlineWindow
+    {
+        self::assertYear($year);
+        $death = self::date($deathOn, 'Datum úmrtí');
+        if ((int) $death->format('Y') < $year) {
+            throw new \InvalidArgumentException('Úmrtí nemůže předcházet vykazovanému roku.');
+        }
+        // Den se shodným označením o tři měsíce později, chybí-li, poslední den měsíce.
+        $target = $death->modify('first day of +3 months');
+        $due = $target->setDate(
+            (int) $target->format('Y'),
+            (int) $target->format('m'),
+            min((int) $death->format('d'), (int) $target->format('t')),
+        );
+
+        return $this->window(
+            $death->format('Y-m-d'),
+            $due->format('Y-m-d'),
+            self::DEATH_RULESET,
+            'death_within_3_months',
+            'termination',
+            'Zákon č. 582/1991 Sb., § 39 odst. 4 písm. b) ve znění účinném do 31. 12. 2025 — '
+                . 'evidenční list občana, který zemřel, se předkládá do 3 měsíců od úmrtí, '
+                . 'nebyl-li vyžádán orgánem sociálního zabezpečení.',
         );
     }
 

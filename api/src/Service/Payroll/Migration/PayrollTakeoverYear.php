@@ -74,7 +74,30 @@ final readonly class PayrollTakeoverYear
          * protože měsíc neskončil, takže prázdný měsíc není díra. `null` = bez hranice.
          */
         public ?string $currentPeriod = null,
+        /**
+         * Schválené nepřítomnosti s daty od–do podle pracovního vztahu
+         * (`employment_id` => seznam ve tvaru zmrazeného vstupu mzdového běhu),
+         * které zasahují do roku. Plní je jen {@see PayrollTakeoverReader::forEmployment()};
+         * evidenční list z nich odvozuje rozpad vyloučených dob převzatého měsíce.
+         *
+         * @var array<int,list<array<string,mixed>>>
+         */
+        public array $absences = [],
     ) {}
+
+    /**
+     * Nepřítomnosti vztahu, které zasahují do intervalu `[$from, $to]`.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function absencesFor(int $employmentId, string $from, string $to): array
+    {
+        return array_values(array_filter(
+            $this->absences[$employmentId] ?? [],
+            static fn (array $absence): bool => (string) ($absence['date_from'] ?? '') <= $to
+                && (string) ($absence['date_to'] ?? '') >= $from,
+        ));
+    }
 
     /** @return list<string> období s převzatým měsícem, vzestupně a bez opakování */
     public function takeoverPeriods(): array

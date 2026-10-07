@@ -8732,7 +8732,7 @@ export const payrollApi = {
     year: number
     environment: PayrollRegzelEnvironment
     excluded_days_confirmed: boolean
-    deducted_days_none: boolean
+    death_on?: string | null
     requested_by_authority: boolean
     authority_request_received_on: string | null
     /** Lhůta uvedená ve výzvě; od roku 2027 ji neurčuje zákon, ale výzva. */

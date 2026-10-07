@@ -131,8 +131,9 @@ final class PayrollEldpAction
                 [
                     'excluded_days_confirmed' =>
                         $this->bool($body, 'excluded_days_confirmed'),
-                    'deducted_days_none' =>
-                        $this->bool($body, 'deducted_days_none'),
+                    // Odečtené doby sestavovač odvozuje z nepřítomností;
+                    // datum úmrtí je volitelné (list typu 03).
+                    'death_on' => $this->nullableString($body, 'death_on'),
                     'requested_by_authority' =>
                         $this->bool($body, 'requested_by_authority'),
                     'authority_request_received_on' =>

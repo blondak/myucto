@@ -836,9 +836,14 @@ final readonly class EldpStatementService
         if (array_key_exists('pension_status', $confirmation)) {
             $optional['pension_status'] = $confirmation['pension_status'];
         }
+        if (is_string($confirmation['death_on'] ?? null) && $confirmation['death_on'] !== '') {
+            $optional['death_on'] = $confirmation['death_on'];
+        }
 
         return $optional + [
             'excluded_days_confirmed' => $confirmation['excluded_days_confirmed'] ?? null,
+            // Klíč zůstává kvůli otisku dřívějších požadavků; odečtené doby
+            // se dnes odvozují a potvrzení se nevyžaduje.
             'deducted_days_none' => $confirmation['deducted_days_none'] ?? null,
             'requested_by_authority' => $confirmation['requested_by_authority'] ?? null,
             'authority_request_received_on' =>

@@ -952,7 +952,8 @@
         "1968_payroll_health_insurance_number_identifier.sql",
         "1969_payroll_eldp_pension_status.sql",
         "1970_payroll_discount_intent_predecessor.sql",
-        "1971_payroll_sickness_case_slovak.sql"
+        "1971_payroll_sickness_case_slovak.sql",
+        "19XX_payroll_eldp_deducted_days.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9347,7 +9348,7 @@
                 "chk_payroll_eldp_statement_builder": "`builder_version` in ('eldp-annual-statement.v1','eldp-annual-statement.v2','eldp-annual-statement.v3','eldp-annual-statement.v4')",
                 "chk_payroll_eldp_statement_ciphertext": "`statement_ciphertext` like 'enc:v2:%'",
                 "chk_payroll_eldp_statement_correction": "`statement_sequence` = 1 and `corrects_statement_id` is null or `statement_sequence` > 1 and `corrects_statement_id` is not null",
-                "chk_payroll_eldp_statement_days": "`insurance_days` between 0 and 366 and `excluded_days_total` <= `insurance_days` and `deducted_days_total` <= `insurance_days`",
+                "chk_payroll_eldp_statement_days": "`insurance_days` between 0 and 366 and `deducted_days_total` between 0 and 366 and `excluded_days_total` <= `insurance_days` + `deducted_days_total`",
                 "chk_payroll_eldp_statement_deadline": "`due_on` >= `earliest_submission_on`",
                 "chk_payroll_eldp_statement_hashes": "`deadline_ruleset_hash` regexp '^[0-9a-f]{64}$' and `xsd_bundle_sha256` regexp '^[0-9a-f]{64}$' and `xml_sha256` regexp '^[0-9a-f]{64}$' and `source_manifest_sha256` regexp '^[0-9a-f]{64}$' and `statement_fingerprint` regexp '^[0-9a-f]{64}$' and `request_fingerprint` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_eldp_statement_period": "`period_to` >= `period_from` and year(`period_from`) = `statement_year` and year(`period_to`) = `statement_year`",

@@ -176,8 +176,43 @@ final class EldpTerminatedEmploymentSourceTest extends TestCase
         }
     }
 
-    /** Dvě různá data skončení v převzatých měsících se nesjednocují. */
-    public function testTakeoverOnlyEmploymentWithConflictingEndDatesStaysBlocked(): void
+    /**
+     * Původní program skončení vztahu dodatečně opravil (23. 1. → 31. 1.):
+     * lednový převzatý řádek nese staré datum a 23 dnů, pozdější řádek nové
+     * datum. Platí poslední verze (týž vzor jako původní a opravný evidenční
+     * list s rozdílným koncem vztahu v reálném převodu): list 1. 1.–31. 1.,
+     * 31 dnů, základ ledna. Dřív rozporná data list zablokovala.
+     */
+    public function testTakeoverOnlyEmploymentWithLaterCorrectedEndDateTakesTheLatestRow(): void
+    {
+        $statement = $this->build(
+            2026,
+            [],
+            $this->takeoverYear(2026, '2026-09', [
+                $this->takeoverMonth(2026, 1, [
+                    'relationship_end_date' => '2026-01-23',
+                    'insurance_days' => 23,
+                ]),
+                $this->takeoverMonth(2026, 3, [
+                    'relationship_end_date' => '2026-01-31',
+                    'insurance_days' => 0,
+                    'social_base_minor' => 0,
+                ]),
+            ], []),
+        );
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame('2026-01-01', $sections[0]['valid_from']);
+        self::assertSame('2026-01-31', $sections[0]['valid_to']);
+        self::assertSame(31, $sections[0]['insurance_days']);
+        self::assertSame(10_000, $sections[0]['assessment_base_czk']);
+        self::assertTrue($statement->payload['source_takeovers'][0]['dates_superseded_by_later_row']);
+        self::assertSame('02', $statement->payload['form']['eldp_type']);
+    }
+
+    /** Pozdější řádek bez data skončení opravou není: „trvá" i „nevydáno". */
+    public function testTakeoverOnlyEmploymentWithLatestRowWithoutEndStaysBlocked(): void
     {
         try {
             $this->build(
@@ -185,23 +220,24 @@ final class EldpTerminatedEmploymentSourceTest extends TestCase
                 [],
                 $this->takeoverYear(2026, '2026-09', [
                     $this->takeoverMonth(2026, 1, [
-                        'relationship_end_date' => '2026-01-27',
-                        'insurance_days' => 27,
+                        'relationship_end_date' => '2026-01-23',
+                        'insurance_days' => 23,
                     ]),
                     $this->takeoverMonth(2026, 2, [
-                        'relationship_end_date' => '2026-01-31',
-                        'insurance_days' => 0,
-                        'social_base_minor' => 0,
+                        'relationship_end_date' => '2026-02-20',
+                        'insurance_days' => 20,
+                    ]),
+                    $this->takeoverMonth(2026, 3, [
+                        'relationship_end_date' => null,
+                        'relationship_start_date' => '2025-01-01',
+                        'insurance_days' => 31,
                     ]),
                 ], []),
             );
-            self::fail('Rozporná data skončení musí blokovat.');
+            self::fail('Rozporná data bez doloženého posledního skončení musí blokovat.');
         } catch (EldpValidationException $exception) {
             $blocker = $this->blocker($exception, 'eldp_takeover_employment_dates_ambiguous');
-            self::assertSame(
-                ['2026-01-27', '2026-01-31'],
-                $blocker['detail']['takeover_end_dates'],
-            );
+            self::assertSame(['2026-01-23', '2026-02-20'], $blocker['detail']['takeover_end_dates']);
         }
     }
 

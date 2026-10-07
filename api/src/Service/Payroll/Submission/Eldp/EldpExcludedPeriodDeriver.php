@@ -75,14 +75,41 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * zaměstnance" (§ 40 odst. 1 zákona č. 187/2006 Sb.), u dlouhodobého
  * ošetřovného nejdéle 90 dnů (§ 41e odst. 1). Viz {@see careSupportEnd()}.
  *
+ * ## Krytí vyloučené doby příjmem (Příloha č. 3 Všeobecných zásad ELDP)
+ *
+ * § 16 odst. 4 věta třetí zákona č. 155/1995 Sb. bere za vyloučenou dobu jen
+ * dobu, která se nekryje s dobou pojištění s příjmy zahrnovanými do
+ * vyměřovacího základu. Metodická pomůcka ČSSZ k ELDP to rozvádí příklady,
+ * které {@see derive()} plní doslova:
+ *
+ * - a) omluvný důvod trvá celý měsíc (celý interval vztahu v měsíci) a v měsíci
+ *   je zúčtován příjem: dny se do vyloučených dob nezahrnou (př. 19, 23, květen),
+ * - b) omluvný důvod netrvá celý měsíc: ke krytí nedochází a vykážou se dny
+ *   jeho trvání (př. 20, 22),
+ * - c) nemoc začala dnem, ve kterém zaměstnanec odpracoval část směny
+ *   (`partial_first_minutes`): vyloučená doba až od následujícího dne (př. 23),
+ * - e) souběžný vztah u téhož zaměstnavatele s příjmem v měsíci kryje omluvné
+ *   dny vztahu, ve kterých souběžný vztah sám omluvný důvod neměl (př. 39, 40).
+ *   Které dny to jsou, určuje volající ({@see derive()} parametr
+ *   `$concurrentIncomeDays`), protože zná ostatní vztahy osoby.
+ *
+ * Bod d) (dorovnání nemocenské zaměstnavatelem nad zákonný nárok) modul nemá
+ * jak poznat: aplikace takovou složku mzdy nevede, náhrada mzdy podle § 192 ZP
+ * do vyměřovacího základu nevstupuje a dobu nekryje.
+ *
+ * ## Odečtené doby (údaj 40 ELDP, JMHZ 10375 a 10462–10469)
+ *
+ * Týkají se jen sekcí s kódem „D" (výdělečná činnost po dovršení důchodového
+ * věku bez plného starobního důchodu). Odvozuje je {@see deriveDeducted()} ze
+ * stejných nepřítomností: omluvné důvody podle § 16 odst. 4 písm. a) (po krytí
+ * příjmem), ošetřování za podpůrčí dobou, neplacené volno, neomluvená absence
+ * a všechny dny měsíce bez účasti („X"). Všeobecné zásady ELDP, údaj Doby
+ * odečtené; Pokyny MPSV k vyplnění MH, ID 10375 až 10469.
+ *
  * ## Co se z principu nevyplňuje
  *
  * - **10536** (§ 16 odst. 4 písm. j)) — modul pro něj nemá žádný vstup,
  *   drží se na nule a je to vidět v součtovém pravidle.
- * - **Odečítané doby (10375 a 10462–10469)** se týkají výhradně dob po
- *   dosažení důchodového věku. Modul důchodový věk nezná — nepočítá ho ani
- *   ho neeviduje — takže odečítané doby nedopočítává. Nula na řádku je proto
- *   podmíněná výslovným lidským potvrzením, ne odvozením.
  */
 final class EldpExcludedPeriodDeriver
 {
@@ -293,6 +320,33 @@ final class EldpExcludedPeriodDeriver
     ];
 
     /**
+     * Složky odečtených dob v pořadí `odecitaneDnyType` (ID 10462–10469; 10467
+     * datový slovník nemá). Den měsíce bez účasti („X") se do 10375 počítá, ale
+     * vlastní složku nemá (Pokyny MPSV k 10375).
+     */
+    public const DEDUCTED_COMPONENTS = [
+        'pracovniNeschopnost',
+        'materstvi',
+        'osetrovaniSNarokem',
+        'osetrovaniBezNaroku',
+        'otcovska',
+        'neplaceneVolno',
+        'neomluveneAbsence',
+    ];
+
+    /** Vyloučená doba → složka odečtené doby téže nepřítomnosti. */
+    private const DEDUCTED_FROM_EXCLUDED = [
+        'docasNeschopnost' => 'pracovniNeschopnost',
+        'penezitaPomocMaterstvi' => 'materstvi',
+        'osetrovaniClenaRodiny' => 'osetrovaniSNarokem',
+        'otcovska' => 'otcovska',
+    ];
+
+    public const COVERED_WHOLE_MONTH_INCOME = 'whole_month_income';
+    public const COVERED_CONCURRENT_INCOME = 'concurrent_income';
+    public const COVERED_PARTIAL_FIRST_DAY = 'partial_first_day';
+
+    /**
      * Složky vyloučených dnů podle § 18 odst. 7 zákona č. 187/2006 Sb.
      *
      * Jiná veličina než {@see COMPONENTS}: ty jsou vyloučenými DOBAMI pro
@@ -374,13 +428,31 @@ final class EldpExcludedPeriodDeriver
     ];
 
     /**
+     * Vyloučené doby jednoho měsíce (intervalu vztahu v měsíci) včetně krytí
+     * příjmem podle Přílohy č. 3 Všeobecných zásad ELDP.
+     *
+     * `$incomeMinor` je příjem započitatelný do vyměřovacího základu, zúčtovaný
+     * vztahu v měsíci; `null` = volající ho nezná a krytí podle bodu a) se
+     * nehodnotí (převzatý měsíc bez výpočtu). `$concurrentIncomeDays` jsou dny
+     * intervalu, ve kterých souběžný vztah téže osoby u téhož zaměstnavatele
+     * zúčtoval příjem a sám omluvný důvod neměl (bod e)).
+     *
+     * Dny, které krytí z vyloučených dob vyřadí, vrací `covered` s důvodem:
+     * měsíční hlášení je potřebuje, aby hodiny nemoci v pracovním souhrnu
+     * nepovažovalo za nedoložené.
+     *
      * @param list<array<string,mixed>> $absences absence ze zmrazeného snapshotu
+     * @param array<string,true> $concurrentIncomeDays
      * @return array{
      *   components:array<string,int>,
      *   total:int,
      *   provenance:list<array{
      *     absence_id:int,absence_type:string,attribute:string,
      *     absence_from:string,absence_to:string,
+     *     counted_from:string,counted_to:string,days:int
+     *   }>,
+     *   covered:list<array{
+     *     absence_id:int,absence_type:string,attribute:string,reason:string,
      *     counted_from:string,counted_to:string,days:int
      *   }>,
      *   blockers:list<array{code:string,message:string,detail:array<string,mixed>}>
@@ -391,11 +463,16 @@ final class EldpExcludedPeriodDeriver
         string $intervalFrom,
         string $intervalTo,
         string $periodLabel,
+        ?int $incomeMinor = null,
+        array $concurrentIncomeDays = [],
     ): array {
         $components = array_fill_keys(self::COMPONENTS, 0);
         $provenance = [];
+        $covered = [];
         $blockers = [];
         $claimedDays = [];
+        /** @var array<string,true> $excusedDays dny s omluvným důvodem (vyloučené i kryté souběhem) */
+        $excusedDays = [];
 
         foreach ($absences as $absence) {
             $absenceId = $absence['id'] ?? null;
@@ -494,17 +571,72 @@ final class EldpExcludedPeriodDeriver
                 ];
                 continue;
             }
-            $components[$attribute] += $days;
-            $provenance[] = [
-                'absence_id' => $absenceId,
-                'absence_type' => $type,
-                'attribute' => $attribute,
-                'absence_from' => $from,
-                'absence_to' => $to,
-                'counted_from' => $countedFrom,
-                'counted_to' => $countedTo,
-                'days' => $days,
-            ];
+            /*
+             * Bod c) Přílohy č. 3: nemoc ode dne, ve kterém zaměstnanec odpracoval
+             * část směny (zameškané minuty prvního dne), je vyloučenou dobou až od
+             * následujícího dne — za odpracovanou část náleží mzda.
+             */
+            if (in_array($type, self::SICKNESS_TYPES, true)
+                && $countedFrom === $from
+                && is_int($absence['partial_first_minutes'] ?? null)
+                && $absence['partial_first_minutes'] > 0
+            ) {
+                $covered[] = self::coveredEntry($absenceId, $type, $attribute, self::COVERED_PARTIAL_FIRST_DAY, $countedFrom, $countedFrom);
+                $countedFrom = self::nextDay($countedFrom);
+                if ($countedFrom > $countedTo) {
+                    continue;
+                }
+            }
+            $excluded = [];
+            $concurrent = [];
+            for ($day = $countedFrom; $day <= $countedTo; $day = self::nextDay($day)) {
+                $excusedDays[$day] = true;
+                if (isset($concurrentIncomeDays[$day])) {
+                    $concurrent[] = $day;
+                } else {
+                    $excluded[] = $day;
+                }
+            }
+            foreach (self::runs($concurrent) as [$runFrom, $runTo]) {
+                $covered[] = self::coveredEntry($absenceId, $type, $attribute, self::COVERED_CONCURRENT_INCOME, $runFrom, $runTo);
+            }
+            foreach (self::runs($excluded) as [$runFrom, $runTo]) {
+                $runDays = self::inclusiveDays($runFrom, $runTo);
+                $components[$attribute] += $runDays;
+                $provenance[] = [
+                    'absence_id' => $absenceId,
+                    'absence_type' => $type,
+                    'attribute' => $attribute,
+                    'absence_from' => $from,
+                    'absence_to' => $to,
+                    'counted_from' => $runFrom,
+                    'counted_to' => $runTo,
+                    'days' => $runDays,
+                ];
+            }
+        }
+
+        /*
+         * Bod a) Přílohy č. 3: omluvný důvod po celý měsíc (celý interval vztahu
+         * v měsíci) a v měsíci zúčtovaný příjem — dny se do vyloučených dob
+         * nezahrnou vůbec. Netrvá-li omluvný důvod celý měsíc, ke krytí
+         * nedochází (bod b), př. 20 a 22 Metodické pomůcky ČSSZ).
+         */
+        if ($blockers === [] && $provenance !== [] && $incomeMinor !== null && $incomeMinor > 0
+            && count($excusedDays) === self::inclusiveDays($intervalFrom, $intervalTo)
+        ) {
+            foreach ($provenance as $item) {
+                $covered[] = self::coveredEntry(
+                    $item['absence_id'],
+                    $item['absence_type'],
+                    $item['attribute'],
+                    self::COVERED_WHOLE_MONTH_INCOME,
+                    $item['counted_from'],
+                    $item['counted_to'],
+                );
+            }
+            $components = array_fill_keys(self::COMPONENTS, 0);
+            $provenance = [];
         }
 
         usort(
@@ -513,13 +645,230 @@ final class EldpExcludedPeriodDeriver
                 [$left['counted_from'], $left['absence_id']]
                 <=> [$right['counted_from'], $right['absence_id']],
         );
+        usort(
+            $covered,
+            static fn (array $left, array $right): int =>
+                [$left['counted_from'], $left['absence_id'], $left['reason']]
+                <=> [$right['counted_from'], $right['absence_id'], $right['reason']],
+        );
 
         return [
             'components' => $components,
             'total' => array_sum($components),
             'provenance' => $provenance,
+            'covered' => $covered,
             'blockers' => $blockers,
         ];
+    }
+
+    /**
+     * Odečtené doby měsíce po dovršení důchodového věku (údaj 40 ELDP,
+     * JMHZ 10375 a rozpad 10462–10469).
+     *
+     * Všeobecné zásady ELDP, údaj Doby odečtené: „počet kalendářních dnů, kdy
+     * pojištěnec čerpal pracovní volno bez náhrady příjmů, měl neomluvenou
+     * nepřítomnost; odečítají se i doby trvání omluvných důvodů [§ 16 odst. 4
+     * písm. a)] a dny měsíce označeného X". Dny započtené jsou pak interval
+     * Od–Do minus doby odečtené, takže vyloučené doby leží vždy uvnitř odečtených
+     * (logické testy ELDP12 č. 39 a 48).
+     *
+     * Omluvné důvody se berou z výsledku {@see derive()} téhož intervalu, tedy
+     * po krytí příjmem — den, který krytí z vyloučených dob vyřadilo, je den
+     * s příjmem, ne den bez výdělečné činnosti. Každý den se počítá jednou;
+     * složka připadne první nepřítomnosti v pořadí omluvné důvody, ošetřování
+     * bez nároku, neplacené volno, neomluvená absence. Měsíc X odečítá celý
+     * interval a dny bez nepřítomnosti složku nemají (Pokyny MPSV k 10375).
+     *
+     * @param list<array<string,mixed>> $absences
+     * @param array{provenance:list<array<string,mixed>>} $excluded výsledek derive() téhož intervalu
+     * @return array{components:array<string,int>,total:int}
+     */
+    public function deriveDeducted(
+        array $absences,
+        string $intervalFrom,
+        string $intervalTo,
+        array $excluded,
+        bool $monthOutsideInsurance,
+    ): array {
+        $components = array_fill_keys(self::DEDUCTED_COMPONENTS, 0);
+        $claimed = [];
+        $assign = static function (string $component, string $from, string $to) use (&$components, &$claimed, $intervalFrom, $intervalTo): void {
+            $from = max($from, $intervalFrom);
+            $to = min($to, $intervalTo);
+            for ($day = $from; $day <= $to; $day = self::nextDay($day)) {
+                if (isset($claimed[$day])) {
+                    continue;
+                }
+                $claimed[$day] = true;
+                ++$components[$component];
+            }
+        };
+        foreach ($excluded['provenance'] as $item) {
+            $component = self::DEDUCTED_FROM_EXCLUDED[(string) $item['attribute']] ?? null;
+            if ($component !== null) {
+                $assign($component, (string) $item['counted_from'], (string) $item['counted_to']);
+            }
+        }
+        foreach ($absences as $absence) {
+            $type = $absence['absence_type'] ?? null;
+            $from = self::date($absence['date_from'] ?? null);
+            $to = self::date($absence['date_to'] ?? null);
+            if (!is_string($type) || $from === null || $to === null || $from > $to) {
+                continue;
+            }
+            if (in_array($type, self::CARE_TYPES, true)) {
+                $supportEnd = self::careSupportEnd($absence, $from);
+                if ($to > $supportEnd) {
+                    $assign('osetrovaniBezNaroku', self::nextDay($supportEnd), $to);
+                }
+                continue;
+            }
+            if (in_array($type, self::UNPAID_EXCUSED_TYPES, true)) {
+                $assign('neplaceneVolno', $from, $to);
+            } elseif ($type === 'unexcused') {
+                $assign('neomluveneAbsence', $from, $to);
+            }
+        }
+        $total = $monthOutsideInsurance
+            ? self::inclusiveDays($intervalFrom, $intervalTo)
+            : count($claimed);
+
+        return ['components' => $components, 'total' => $total];
+    }
+
+    /**
+     * Dny intervalu, které kryje příjem souběžného vztahu (bod e) Přílohy č. 3).
+     *
+     * Vykonává-li zaměstnanec u téhož zaměstnavatele souběžně další vztah,
+     * který má v měsíci zúčtovaný příjem započitatelný do vyměřovacího
+     * základu, kryje tento příjem omluvné dny prvního vztahu — zúčtovacím
+     * obdobím je celý kalendářní měsíc (§ 6 zákona č. 589/1992 Sb.; Metodická
+     * pomůcka ČSSZ k ELDP, př. 40). Den, ve kterém měl omluvný důvod i souběžný
+     * vztah, kryt není a vyloučenou dobu nese každý vztah zvlášť (př. 39).
+     * Souběžný vztah kryje jen dny, kdy trval.
+     *
+     * Čte oba zmrazené snapshoty revize (vstup s nepřítomnostmi a trváním
+     * vztahů osoby, výsledek s vyměřovacími základy), stejně pro měsíční
+     * hlášení i roční evidenční list.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $result
+     * @return array<string,true>
+     */
+    public static function concurrentIncomeDays(
+        array $input,
+        array $result,
+        int $employeeId,
+        int $employmentId,
+        string $intervalFrom,
+        string $intervalTo,
+    ): array {
+        $withIncome = [];
+        foreach ((array) ($result['people'] ?? []) as $person) {
+            if (!is_array($person) || ($person['employee_id'] ?? null) !== $employeeId) {
+                continue;
+            }
+            $social = (($person['statutory'] ?? [])['social_insurance'] ?? []);
+            foreach ((array) (is_array($social) ? ($social['relationships'] ?? []) : []) as $relationship) {
+                $id = is_array($relationship) ? ($relationship['relationship_id'] ?? null) : null;
+                if (!is_string($id) || preg_match('/^employment:(\d+)$/D', $id, $match) !== 1) {
+                    continue;
+                }
+                $base = $relationship['assessment_base_minor_units'] ?? null;
+                $status = is_array($relationship['participation'] ?? null)
+                    ? ($relationship['participation']['status'] ?? null)
+                    : null;
+                if (is_int($base) && $base > 0 && $status === 'participates'
+                    && (int) $match[1] !== $employmentId
+                ) {
+                    $withIncome[(int) $match[1]] = true;
+                }
+            }
+        }
+        if ($withIncome === []) {
+            return [];
+        }
+        $days = [];
+        foreach ((array) ($input['people'] ?? []) as $person) {
+            if (!is_array($person) || (($person['employee'] ?? [])['id'] ?? null) !== $employeeId) {
+                continue;
+            }
+            foreach ((array) ($person['employments'] ?? []) as $entry) {
+                $other = is_array($entry) ? ($entry['employment'] ?? null) : null;
+                if (!is_array($other) || !isset($withIncome[(int) ($other['id'] ?? 0)])) {
+                    continue;
+                }
+                $start = self::date($other['actual_start_date'] ?? $other['start_date'] ?? null);
+                $end = self::date($other['end_date'] ?? null);
+                $from = max($intervalFrom, $start ?? $intervalFrom);
+                $to = $end === null ? $intervalTo : min($intervalTo, $end);
+                $excused = [];
+                foreach ((array) ($entry['absences'] ?? []) as $absence) {
+                    if (!is_array($absence) || !array_key_exists((string) ($absence['absence_type'] ?? ''), self::EXCLUDED_ATTRIBUTES)) {
+                        continue;
+                    }
+                    $absenceFrom = self::date($absence['date_from'] ?? null);
+                    $absenceTo = self::date($absence['date_to'] ?? null);
+                    if ($absenceFrom === null || $absenceTo === null) {
+                        continue;
+                    }
+                    for ($day = max($absenceFrom, $from); $day <= min($absenceTo, $to); $day = self::nextDay($day)) {
+                        $excused[$day] = true;
+                    }
+                }
+                for ($day = $from; $day <= $to; $day = self::nextDay($day)) {
+                    if (!isset($excused[$day])) {
+                        $days[$day] = true;
+                    }
+                }
+            }
+        }
+
+        return $days;
+    }
+
+    /**
+     * @return array{absence_id:int,absence_type:string,attribute:string,reason:string,
+     *     counted_from:string,counted_to:string,days:int}
+     */
+    private static function coveredEntry(
+        int $absenceId,
+        string $type,
+        string $attribute,
+        string $reason,
+        string $from,
+        string $to,
+    ): array {
+        return [
+            'absence_id' => $absenceId,
+            'absence_type' => $type,
+            'attribute' => $attribute,
+            'reason' => $reason,
+            'counted_from' => $from,
+            'counted_to' => $to,
+            'days' => self::inclusiveDays($from, $to),
+        ];
+    }
+
+    /**
+     * Souvislé úseky seřazených dnů.
+     *
+     * @param list<string> $days
+     * @return list<array{0:string,1:string}>
+     */
+    private static function runs(array $days): array
+    {
+        $runs = [];
+        foreach ($days as $day) {
+            $last = array_key_last($runs);
+            if ($last !== null && self::nextDay($runs[$last][1]) === $day) {
+                $runs[$last][1] = $day;
+                continue;
+            }
+            $runs[] = [$day, $day];
+        }
+
+        return $runs;
     }
 
     /**
