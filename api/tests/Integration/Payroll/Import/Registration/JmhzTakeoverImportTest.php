@@ -341,6 +341,63 @@ final class JmhzTakeoverImportTest extends TestCase
         self::assertSame(3, $this->rowCount('payroll_migration_reference_totals'));
     }
 
+    /**
+     * PRE-04, NRO-02, NRO-04: poslední převzaté hlášení (březen) vykazuje
+     * nemoc. Převzetí založí na vztahu úkol ověřit rozběhnutou neschopnost
+     * a převzatý měsíc nese vyloučené dny § 18 odst. 7 (10366) zvlášť od
+     * vyloučených dob 10357 i příjem z nepojištěné činnosti (10476).
+     */
+    public function testSicknessInLastMonthCreatesFollowUp(): void
+    {
+        $person = fn (): array => JmhzReportFixtures::person([
+            'employment_id' => 201,
+            'id_ppv' => self::PPV_A,
+            'oic' => RegistrationXmlFixtures::oic(21),
+            'children' => [],
+        ]);
+        $files = [];
+        foreach ([1, 2, 3] as $month) {
+            $xml = JmhzReportFixtures::report([$person()], 2026, $month, ['guid_seed' => 60 + $month]);
+            if ($month === 2) {
+                $xml = JmhzReportFixtures::withExcludedDays($xml, self::PPV_A, [
+                    'vylouceneDobyCelkem' => 0, 'vyloucenePar18' => 28, 'omluvenaNepritomnost' => 28,
+                ], 0, 0);
+            }
+            if ($month === 3) {
+                $xml = JmhzReportFixtures::withExcludedDays($xml, self::PPV_A, [
+                    'vylouceneDobyCelkem' => 4, 'docasNeschopnost' => 4, 'vyloucenePar18' => 14,
+                    'pracovniNeschopnost' => 10, 'vyplaceniDavek' => 4,
+                ]);
+            }
+            $files[] = $this->file("jmhz-{$month}.xml", $xml);
+        }
+
+        $result = $this->apply($files, $this->selectable($this->imports->preview($this->supplierId, 'test', $files)));
+
+        self::assertSame(0, $result['summary']['failed'], $this->dump($result['results']));
+        $employment = $this->employmentByPpv(self::PPV_A);
+        self::assertSame(1, $this->rowCount(
+            'payroll_employment_checklist_items',
+            "item_key = 'takeover_sickness_review' AND employment_id = " . $employment,
+        ));
+        self::assertSame(
+            [0, 28, 0],
+            array_map('intval', array_values((array) $this->db->pdo()->query(
+                "SELECT excluded_days, sickness_excluded_days, uninsured_income_minor
+                   FROM payroll_migration_reference_totals
+                  WHERE employment_id = {$employment} AND period_start = '2026-02-01'",
+            )?->fetch(\PDO::FETCH_ASSOC))),
+        );
+        self::assertSame(
+            [4, 14],
+            array_map('intval', array_values((array) $this->db->pdo()->query(
+                "SELECT excluded_days, sickness_excluded_days
+                   FROM payroll_migration_reference_totals
+                  WHERE employment_id = {$employment} AND period_start = '2026-03-01'",
+            )?->fetch(\PDO::FETCH_ASSOC))),
+        );
+    }
+
     public function testReportOfAnotherEmployerIsRejected(): void
     {
         $xml = str_replace(

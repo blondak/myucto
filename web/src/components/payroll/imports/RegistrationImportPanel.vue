@@ -838,6 +838,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                     <td class="px-3 py-2">
                       <RouterLink :to="{ name: 'payroll-person', params: { id: relation.employee_id } }" class="font-medium text-payroll-600 hover:underline">{{ relation.label }}</RouterLink>
                       <p v-if="relation.deductions_recorded" class="mt-0.5 text-[11px] text-warning-700" :data-testid="`takeover-deductions-${relation.employment_id}`">{{ t('payroll_imports.registration.takeover.deductions_recorded') }}</p>
+                      <p v-if="relation.sickness_review" class="mt-0.5 text-[11px] text-warning-700" :data-testid="`takeover-sickness-${relation.employment_id}`">{{ t('payroll_imports.registration.takeover.sickness_review') }}</p>
                     </td>
                     <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.start_on) }}</td>
                     <td class="whitespace-nowrap px-3 py-2">{{ dateText(relation.end_on) }}</td>
@@ -859,6 +860,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                 <p v-if="relation.average_quarters.length" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.averages') }}: {{ relation.average_quarters.join(', ') }}</p>
                 <p v-if="relation.leave_minutes > 0" class="text-xs text-neutral-600">{{ t('payroll_imports.registration.takeover.wage_columns.leave') }}: {{ t('payroll_imports.registration.takeover.leave_hours', { hours: formatHours(minutesToHours(relation.leave_minutes), locale) }) }}</p>
                 <p v-if="relation.deductions_recorded" class="mt-1 text-xs text-warning-700">{{ t('payroll_imports.registration.takeover.deductions_recorded') }}</p>
+                <p v-if="relation.sickness_review" class="mt-1 text-xs text-warning-700">{{ t('payroll_imports.registration.takeover.sickness_review') }}</p>
               </article>
             </div>
           </div>

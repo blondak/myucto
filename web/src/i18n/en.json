@@ -5596,6 +5596,7 @@
       "checklist_all_done": "Done",
       "checklist_predecessor_handled": "Handled by the previous payroll software (before payroll started in MyÚčto)",
       "checklist_deductions_open": "Record deductions",
+      "checklist_sickness_open": "Check absences",
       "start_estimated": {
         "title": "Start date {start} is only estimated from the earliest taken-over report",
         "hint": "A JMHZ report without a start date yields the insurance start in the earliest reported month. The employment may have started earlier, and the taken-over wages for the earlier months of the year would then be missing for the annual tax settlement and the tax statement. It does not block the payroll run or the monthly report. Check the start date against the contract: if the employment started earlier, import the reports for the missing months (the start moves automatically) or correct the start in the employment terms; if it is correct, confirm it.",
@@ -6104,7 +6105,8 @@
         "later_income_review": "Later-payment review",
         "eldp_submission": "Pension insurance record (ELDP)",
         "taxable_income_confirmation": "Confirmation of taxable income",
-        "takeover_deductions_review": "Record wage deductions (the taken-over report shows them)"
+        "takeover_deductions_review": "Record wage deductions (the taken-over report shows them)",
+        "takeover_sickness_review": "Verify an ongoing sickness, maternity or care leave (the taken-over report shows it)"
       },
       "event": {
         "created": "Relationship created",
@@ -6164,7 +6166,8 @@
         "later_income_review": "Later payment",
         "eldp_submission": "ELDP",
         "taxable_income_confirmation": "Taxable income confirmation",
-        "takeover_deductions_review": "Deductions from taken-over report"
+        "takeover_deductions_review": "Deductions from taken-over report",
+        "takeover_sickness_review": "Sickness from taken-over report"
       },
       "termination": {
         "title": "Termination",
@@ -11543,13 +11546,17 @@
       "nempri_care_reason_invalid": "The care reason must be illness, quarantine, inability to care for the child, or closure of a school or facility.",
       "nempri_cared_person_not_found": "The selected person is not a dependant of this employee. Select them again on the case.",
       "nempri_codebook_value_invalid": "A ČSSZ code list value has 1 to 3 characters 0-9 and A-Z.",
-      "nempri_decisive_month_missing": "The decisive period contains months with neither a MyÚčto monthly report nor taken-over wages. Add them in the payroll takeover check, or enter them manually on the case.",
+      "nempri_decisive_month_missing": "The submission must carry every month of the decisive period and some have no source. Calculate and approve the months MyÚčto calculates; add taken-over wages in the payroll takeover check. You can also enter the months manually on the case.",
       "nempri_decisive_months_invalid": "Each month of the decisive period needs a month (YYYY-MM), non-negative countable income and 0 to 31 excluded days.",
+      "nempri_decisive_excluded_days_unknown": "Excluded days under section 18(7) of the Sickness Insurance Act cannot be determined for some months of the decisive period. Zero would lower the daily assessment base. Enter these months manually on the case.",
+      "nempri_capped_base_unsupported": "The taken-over assessment base is capped by the annual maximum and the report does not carry the part above it. The decisive period needs the full amount. Enter these months manually on the case.",
+      "nempri_decisive_payroll_source_invalid": "A frozen payroll revision does not match its fingerprint, so the decisive period cannot be built from it. Contact support.",
+      "nempri_payment_connection_partner_settlement": "The wage is paid through a partner, so MyÚčto does not know the account or address for paying the benefit, which NEMPRI requires. Correct the payout method in the person's payout profile, or submit the notification outside the application.",
       "nempri_payment_address_invalid": "The address for paying the benefit needs a municipality, a house number and a postal code. Correct it on the person card.",
       "nempri_payment_connection_invalid": "The employee's payout account is neither a valid Czech account nor an IBAN, so it cannot be written to NEMPRI. Correct it on the person card.",
       "nempri_payment_connection_missing": "The employee's payout profile has no account the wage is paid to. Without it ČSSZ will request the payment method and the benefit will be delayed. Add the account on the person card.",
       "nempri_periods_invalid": "Care days must be a list of from–to periods.",
-      "nempri_probable_income_missing": "The decisive period is shorter than 30 days, so ÚSSZ uses the probable income. Enter it on the case; the suggestion is the monthly gross wage from the contract.",
+      "nempri_probable_income_missing": "The decisive period has no assessment base or fewer than 30 non-excluded days, so ÚSSZ uses the probable income. Enter it on the case; the suggestion is the monthly gross wage from the contract, for agreements and small-scale employment the income in the month of the event.",
       "registration_a2_termination_record_mismatch": "The deregistration does not match the termination recorded on the employment card (reason for the labour office or termination by death). Use Prefill from termination, or correct the termination on the employment card.",
       "registration_a3_completion_mode_invalid": "The scope of completing data must be the whole profile, or only the data the ONZ registration did not carry. Choose one of the options in the form.",
       "registration_a3_completion_profile_incomplete": "The registration profile (A1) is incomplete, so the completion cannot be built from it. Complete it in the employment registration.",
@@ -30577,6 +30584,7 @@
         "wage_from": "from {date}",
         "leave_hours": "{hours} h",
         "deductions_recorded": "The report shows wage deductions — the takeover creates a task on the employment to record them (Payroll → Deductions and enforcement).",
+        "sickness_review": "The last taken-over report shows sickness, maternity or care leave. The takeover creates a task on the employment: enter a continuing absence with its real start date, otherwise the wage compensation window opens again.",
         "health_missing": "JMHZ reports do not carry the health insurer. Without it the health insurance calculation fails: {count} people do not have one yet.",
         "health_missing_action": "Assign insurers in bulk",
         "apply_wages": "Take over wages and employment details"
