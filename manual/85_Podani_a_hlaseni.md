@@ -1457,9 +1457,21 @@ Platí přitom tři pravidla:
   č. 155/1995 Sb., nelze jej do listu zapsat — zaevidujte odpovídající
   nepřítomnosti, nebo evidenční list za dotčený měsíc podejte mimo aplikaci.
 
-Trvání pracovního vztahu se z převzatých dat neodvozuje: rozsah listu drží
-zmrazená revize a převzatá data se proti ní jen kontrolují. Rok, ve kterém
-v MyÚčtu neexistuje ani jedna schválená revize, proto sestavit nelze.
+Trvání pracovního vztahu drží zmrazená revize: zná-li vztah aspoň jedna
+schválená revize roku, převzatá data se proti ní jen kontrolují. Revize za
+měsíce před nástupem nebo po skončení vztahu, ve kterých vztah už není,
+přípravu neblokují, takže list za vztah ukončený v lednu sestavíte i poté, co
+schválíte mzdy za další měsíce.
+
+Skončil-li vztah ještě v době, kterou vedl původní program, žádná revize roku
+ho nezná. Trvání listu se pak vezme z převzatých měsíců, ale jen doložené:
+datum nástupu i skončení musí být vyplněné aspoň u jednoho převzatého měsíce
+a všechny vyplněné údaje se musí shodovat. Prázdné datum skončení může
+znamenat, že vztah trvá, i že ho původní program nevydal, proto takový list
+zůstane zablokovaný, dokud datum v **Kontrole převodu mezd** nedoplníte.
+Stejně zablokovaný zůstane převzatý měsíc, který nese vyměřovací základ až po
+skončení vztahu: dodatečně zúčtovaný příjem (řádek „P+") z převzatých dat
+aplikace nedoloží a list s ním podejte mimo aplikaci.
 
 Vygenerované XML slouží pouze ke kontrole údajů. Není to transportní datová
 věta a MyÚčto je neodesílá ani nevkládá do datové schránky. ELDP dokončete

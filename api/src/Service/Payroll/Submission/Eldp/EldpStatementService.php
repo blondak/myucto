@@ -257,6 +257,9 @@ final readonly class EldpStatementService
                     array_map(strval(...), $overridden),
                 );
             }
+            if (($statement->payload['employment_dates_source'] ?? null) === 'takeover') {
+                $manifest['employment_dates_source'] = 'takeover';
+            }
             $manifestJson = CanonicalJson::encode($manifest);
             $manifestHash = hash('sha256', $manifestJson);
             $requestFingerprint = hash('sha256', CanonicalJson::encode([
