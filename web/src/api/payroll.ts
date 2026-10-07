@@ -4391,6 +4391,15 @@ export interface PayrollRegistrationMissingItem {
 /** `full` = plná registrace A1 před nástupem místo výchozího P1. */
 export type PayrollRegistrationMode = 'auto' | 'full'
 
+/**
+ * Doplňující volby registrace. `startNotKnownInAdvance`: zaměstnanec začal
+ * pracovat bez předchozího ohlášení, lhůta je osm dnů od prvního plnění
+ * (§ 19 odst. 1 písm. b) zákona č. 323/2025 Sb.).
+ */
+export interface PayrollRegistrationOptions {
+  startNotKnownInAdvance?: boolean
+}
+
 export interface PayrollRegistrationCurrent {
   submission_id: number
   agenda_code: string
@@ -8475,6 +8484,7 @@ export const payrollApi = {
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
     mode: PayrollRegistrationMode = 'auto',
+    options: PayrollRegistrationOptions = {},
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
     {
@@ -8482,6 +8492,7 @@ export const payrollApi = {
         environment,
         ...(eventId == null ? {} : { event_id: eventId }),
         ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+        ...(options.startNotKnownInAdvance === true ? { start_not_known_in_advance: true } : {}),
       },
     },
   ).then(response => response.data),
@@ -8498,12 +8509,14 @@ export const payrollApi = {
     environment: 'test' | 'production' = 'production',
     eventId?: number | null,
     mode: PayrollRegistrationMode = 'auto',
+    options: PayrollRegistrationOptions = {},
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
     {
       environment,
       ...(eventId == null ? {} : { event_id: eventId }),
       ...(mode === 'full' ? { registration_mode: 'full' } : {}),
+      ...(options.startNotKnownInAdvance === true ? { start_not_known_in_advance: true } : {}),
     },
   ).then(response => response.data),
   employmentRegistrationA1Profile: (

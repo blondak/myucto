@@ -183,6 +183,9 @@ final class Bootstrap
                 \DI\autowire()->constructorParameter(
                     'external',
                     \DI\get(\MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore::class),
+                )->constructorParameter(
+                    'registrationSettlement',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement::class),
                 ),
             // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
             // jednotkovým testům přehledů, v aplikaci se předává výslovně.

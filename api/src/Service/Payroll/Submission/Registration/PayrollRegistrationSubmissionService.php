@@ -67,6 +67,9 @@ final readonly class PayrollRegistrationSubmissionService
     ];
     private const SUBJECT_TYPE = 'employment';
 
+    /** Důvod náhradní lhůty: nástup nebyl předem znám (§ 19 odst. 1 písm. b). */
+    private const DEADLINE_BASIS_UNKNOWN_START = 'start_not_known_in_advance';
+
     /**
      * Lhůta zaměstnavatele počítá české pracovní dny; slovník povinností zná
      * jen `calendar_days` a `business_days`. Mapuje se tady, jednou a viditelně
@@ -117,6 +120,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         ?int $eventId = null,
         bool $fullRegistrationRequested = false,
+        bool $startNotKnownInAdvance = false,
     ): array {
         $resolved = $this->resolve(
             $supplierId,
@@ -125,6 +129,7 @@ final readonly class PayrollRegistrationSubmissionService
             0,
             $eventId,
             $fullRegistrationRequested,
+            $startNotKnownInAdvance,
         );
 
         $variableSymbolWarning = EmployerVariableSymbolPlausibility::warning(
@@ -143,9 +148,15 @@ final readonly class PayrollRegistrationSubmissionService
             'employer_registration' => $resolved['employer_deadline'],
             // Neblokuje, jen upozorní: náhled je poslední místo, kde účetní
             // XML vidí dřív, než odejde.
-            'warnings' => $variableSymbolWarning === null
-                ? []
-                : [$variableSymbolWarning],
+            'warnings' => array_values(array_filter([
+                $variableSymbolWarning,
+                $this->pairingReminder(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $resolved['interaction'],
+                ),
+            ])),
             'official_submission' => [
                 'supported' => false,
                 'reason' => 'Tohle je jen náhled: podání se nezakládá '
@@ -222,6 +233,7 @@ final readonly class PayrollRegistrationSubmissionService
         ?int $createdBy = null,
         ?int $eventId = null,
         bool $fullRegistrationRequested = false,
+        bool $startNotKnownInAdvance = false,
     ): array {
         // Povinnost a lhůta vznikají mimo transakci podání a nezávisle na tom,
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
@@ -246,6 +258,7 @@ final readonly class PayrollRegistrationSubmissionService
             0,
             $eventId,
             $fullRegistrationRequested,
+            $startNotKnownInAdvance,
         );
         $variableSymbolWarning = EmployerVariableSymbolPlausibility::warning(
             $probe['employer_variable_symbol'],
@@ -255,6 +268,19 @@ final readonly class PayrollRegistrationSubmissionService
                 'field' => $variableSymbolWarning['field'],
                 'code' => $variableSymbolWarning['code'],
                 'message' => $variableSymbolWarning['message'],
+            ];
+        }
+        $pairing = $this->pairingReminder(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $probe['interaction'],
+        );
+        if ($pairing !== null) {
+            $problems[] = [
+                'field' => $pairing['field'],
+                'code' => $pairing['code'],
+                'message' => $pairing['message'],
             ];
         }
         $obligation = $this->registerObligation(
@@ -275,6 +301,7 @@ final readonly class PayrollRegistrationSubmissionService
             $eventId,
             $problems,
             $fullRegistrationRequested,
+            $startNotKnownInAdvance,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 // Výjimka zůstává: chybí firma, za kterou by se podávalo,
@@ -349,6 +376,7 @@ final readonly class PayrollRegistrationSubmissionService
                 (int) $submission['id'],
                 $eventId,
                 $fullRegistrationRequested,
+                $startNotKnownInAdvance,
             );
             $part = $this->submissions->addPart(
                 $supplierId,
@@ -498,7 +526,8 @@ final readonly class PayrollRegistrationSubmissionService
      *   deadline:PayrollEmployeeRegistrationDeadlineWindow,
      *   employer_deadline:?array<string,string>,
      *   event_effective_on:?string,source_event_reference:string,
-     *   employer_variable_symbol:string,before_start_choice:bool
+     *   employer_variable_symbol:string,before_start_choice:bool,
+     *   deadline_basis:?string
      * }
      */
     private function resolve(
@@ -508,6 +537,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $submissionId,
         ?int $eventId = null,
         bool $fullRegistrationRequested = false,
+        bool $startNotKnownInAdvance = false,
     ): array {
         $context = $this->requireContext($supplierId, $employmentId);
         $event = $eventId === null
@@ -631,6 +661,33 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
             $interaction,
         );
+        $preRegistration = $this->acceptedPreRegistrationFiling(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $interaction,
+        );
+        if ($preRegistration !== null
+            && $interaction->interaction === 'full_registration_after_p1'
+            && $preRegistration->startIsTooLate($effectiveOn)
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a1_after_p1_start_too_late',
+                'Zaměstnanec nastoupil ' . $effectiveOn . ', tedy později než '
+                    . 'osm dnů po předpokládaném dni nástupu uvedeném v přijatém '
+                    . 'částečném přihlášení (' . $preRegistration->expectedStartOn
+                    . '). Plnou registraci A1 se skutečným datem nástupu už dohlásit '
+                    . 'nejde: podejte oznámení o nenastoupení (PREZEC P2) a nové '
+                    . 'přihlášení (P1 nebo A1) s novým předpokládaným dnem nástupu.'
+                    . PayrollRegistrationFieldVocabulary::reference('planned_start_on'),
+            );
+        }
+        $deadlineBasis = $this->deadlineBasis(
+            $startNotKnownInAdvance,
+            $interaction,
+            $event,
+            $effectiveOn,
+        );
         $payload = $this->payload(
             $snapshot,
             $interaction,
@@ -638,6 +695,9 @@ final readonly class PayrollRegistrationSubmissionService
             $effectiveOn,
             $event,
             $referencedGuid,
+            $interaction->interaction === 'pre_registration_no_show'
+                ? $preRegistration?->variableSymbol
+                : null,
         );
         $xml = $this->serializer->serialize($payload);
         // Validátor si XML serializuje znovu a porovná bajty; volá se i tady,
@@ -671,7 +731,9 @@ final readonly class PayrollRegistrationSubmissionService
                     ? $effectiveOn
                     : (string) ($event['notification_trigger_on'] ?? ''),
                 $event,
+                $deadlineBasis,
             ),
+            'deadline_basis' => $deadlineBasis,
             'employer_deadline' => $event === null
                 ? $this->employerDeadline($context)
                 : null,
@@ -754,6 +816,18 @@ final readonly class PayrollRegistrationSubmissionService
                 . 'sociálního zabezpečení".',
             );
         }
+        if ($agenda === self::AGENDA_REGZEC
+            && is_string($workplaceCode)
+            && $workplaceCode !== ''
+            && !PayrollCsszDistrictCodebook::contains($workplaceCode)
+        ) {
+            $problems[] = PayrollRegistrationIdentityRequirements::employerProblem(
+                'cssz_workplace_code',
+                '(' . $workplaceCode . ') není v číselníku okresních správ ČSSZ, '
+                . 'takže ho ČSSZ odmítne; v nastavení se položka jmenuje '
+                . '„Kód správy sociálního zabezpečení".',
+            );
+        }
         if ($problems === []) {
             return;
         }
@@ -806,11 +880,16 @@ final readonly class PayrollRegistrationSubmissionService
         string $effectiveOn,
         ?array $event,
         ?string $referencedFormGuid = null,
+        ?string $preRegistrationVariableSymbol = null,
     ): PayrollRegistrationXmlPayload {
         $eventEmployer = is_array($event['employer'] ?? null)
             ? $event['employer']
             : null;
-        $variableSymbol = $eventEmployer['variable_symbol']
+        // PREZEC P2 nese stejný variabilní symbol jako přijatá P1 (PREZEC
+        // Předregistrace 1.4, atribut 10221), ne ten, který zaměstnavatel
+        // eviduje dnes.
+        $variableSymbol = $preRegistrationVariableSymbol
+            ?? $eventEmployer['variable_symbol']
             ?? $context['employer_variable_symbol'];
         if (!is_string($variableSymbol) || $variableSymbol === '') {
             // Výjimka zůstává, přestože jde o neúplný vstup: tahle metoda
@@ -924,6 +1003,139 @@ final readonly class PayrollRegistrationSubmissionService
     }
 
     /**
+     * Přijatá P1 přečtená z archivu, ale jen tam, kde se na ni navazuje
+     * (P2 a plná registrace po P1). Bez čitelného archivu se podání nesestaví:
+     * variabilní symbol P2 a okno pro A1 nejde doložit.
+     */
+    private function acceptedPreRegistrationFiling(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        PayrollRegistrationInteraction $interaction,
+    ): ?PayrollPreRegistrationFiling {
+        if (!in_array($interaction->interaction, [
+            'pre_registration_no_show',
+            'full_registration_after_p1',
+        ], true)) {
+            return null;
+        }
+        $artifactId = $this->registrations->acceptedFilingArtifactId(
+            $supplierId,
+            $environment,
+            $employmentId,
+            self::AGENDA_PREZEC,
+        );
+        $filing = $artifactId === null
+            ? null
+            : PayrollPreRegistrationFiling::fromXml(
+                $this->submissions->artifactBytes($supplierId, $artifactId),
+            );
+        if ($filing === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_prezec_p1_archive_unreadable',
+                'Z archivu přijatého částečného přihlášení (PREZEC P1) se '
+                    . 'nepodařilo přečíst variabilní symbol a předpokládaný '
+                    . 'den nástupu, na které navazující podání musí odkazovat. '
+                    . 'Zkontrolujte u vztahu odeslané podání P1.',
+            );
+        }
+
+        return $filing;
+    }
+
+    /**
+     * Náhradní lhůta "nástup nebyl předem znám" se týká jen přímé plné
+     * registrace A1 po nástupu; jinde (P1, A1 po P1, události) nedává smysl.
+     *
+     * @param array<string,mixed>|null $event
+     */
+    private function deadlineBasis(
+        bool $startNotKnownInAdvance,
+        PayrollRegistrationInteraction $interaction,
+        ?array $event,
+        string $startOn,
+    ): ?string {
+        if (!$startNotKnownInAdvance) {
+            return null;
+        }
+        if ($event !== null || $interaction->interaction !== 'direct_full_registration') {
+            throw new PayrollRegistrationXmlException(
+                'registration_unknown_start_not_applicable',
+                'Náhradní lhůta pro zaměstnance, jehož nástup nebyl předem '
+                    . 'znám, se týká jen přímé plné registrace (REGZEC A1) '
+                    . 'bez předchozího částečného přihlášení. U tohoto podání '
+                    . 'ji nevolte.',
+            );
+        }
+        if ($startOn > $this->today()) {
+            throw new PayrollRegistrationXmlException(
+                'registration_unknown_start_in_future',
+                'Nástup ' . $startOn . ' teprve nastane, takže byl předem '
+                    . 'znám - náhradní lhůta (osm dnů od prvního plnění) se '
+                    . 'volí jen u zaměstnance, který už začal pracovat bez '
+                    . 'ohlášení. Přihlaste ho před nástupem.',
+            );
+        }
+
+        return self::DEADLINE_BASIS_UNKNOWN_START;
+    }
+
+    /**
+     * Upozornění na dvojici podání, která u nenastoupivšího zaměstnance patří
+     * k sobě: podal-li zaměstnavatel P1 i A1, musí podat P2 i A8 (A1 předregistraci
+     * neuzavírá, P2 registraci nestornuje). Neblokuje, jen připomíná.
+     *
+     * @return array{code:string,field:string,message:string,target:string}|null
+     */
+    private function pairingReminder(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        PayrollRegistrationInteraction $interaction,
+    ): ?array {
+        if ($interaction->interaction === 'pre_registration_no_show'
+            && $this->registrations->hasAcceptedPreRegistration(
+                $supplierId,
+                $environment,
+                $employmentId,
+                self::AGENDA_REGZEC,
+            )
+        ) {
+            return [
+                'code' => 'registration_no_show_needs_cancellation',
+                'field' => 'planned_start_on',
+                'message' => 'U tohoto vztahu je přijatá i plná registrace '
+                    . '(REGZEC A1), která předregistraci neuzavírá: kromě '
+                    . 'oznámení o nenastoupení (P2) je potřeba podat také '
+                    . 'storno přihlášení (REGZEC A8) s důvodem "zaměstnanec '
+                    . 'nenastoupil".',
+                'target' => PayrollRegistrationIdentityRequirements::TARGET_PERSON,
+            ];
+        }
+        if ($interaction->documentType === self::AGENDA_REGZEC
+            && $interaction->actionCode === 8
+            && $this->registrations->acceptedFilingCount(
+                $supplierId,
+                $environment,
+                $employmentId,
+                self::AGENDA_PREZEC,
+            ) === 1
+        ) {
+            return [
+                'code' => 'registration_cancellation_needs_no_show',
+                'field' => 'planned_start_on',
+                'message' => 'U tohoto vztahu je přijaté i částečné přihlášení '
+                    . '(PREZEC P1), které storno A8 neuzavírá: nenastoupil-li '
+                    . 'zaměstnanec, je potřeba podat také oznámení o '
+                    . 'nenastoupení (PREZEC P2).',
+                'target' => PayrollRegistrationIdentityRequirements::TARGET_PERSON,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Fakta pro resolver. `full_registration_data` potvrzuje jen základní
      * metadata zaměstnavatele, nikoli právní úplnost A1; úplnou variantní
      * sadu samostatně hlídá business matice a profil A1.
@@ -996,6 +1208,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $context,
         ?string $effectiveOn = null,
         ?array $event = null,
+        ?string $deadlineBasis = null,
     ): PayrollEmployeeRegistrationDeadlineWindow {
         if ($interaction->documentType === self::AGENDA_REGZEC
             && $interaction->actionCode === 8
@@ -1017,6 +1230,9 @@ final readonly class PayrollRegistrationSubmissionService
             );
         }
         $startOn = $this->effectiveDate($context);
+        if ($deadlineBasis === self::DEADLINE_BASIS_UNKNOWN_START) {
+            return $this->deadlines->forUnknownStart($startOn);
+        }
 
         return match ($interaction->interaction) {
             'pre_registration_no_show' => $this->deadlines->forNoShow($startOn),
@@ -1089,7 +1305,9 @@ final readonly class PayrollRegistrationSubmissionService
             'interaction' => $interaction->interaction,
             'effective_on' => $resolved['event_effective_on']
                 ?? $this->effectiveDate($context),
-        ]));
+        ] + (($resolved['deadline_basis'] ?? null) === null
+            ? []
+            : ['deadline_basis' => $resolved['deadline_basis']])));
 
         return $this->obligations->register(
             $supplierId,

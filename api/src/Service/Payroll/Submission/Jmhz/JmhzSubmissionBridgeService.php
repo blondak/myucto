@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement;
 use MyInvoice\Service\Report\EpoEnvelope;
 use Psr\Clock\ClockInterface;
 
@@ -84,6 +85,11 @@ final readonly class JmhzSubmissionBridgeService
          * platformy: testy mostu ji stavět nemusí a bez ní se nic nekontroluje.
          */
         private ?JmhzExternalSubmissionStore $external = null,
+        /**
+         * Odstup 48 hodin po přijaté změně údajů zaměstnance (REGZEC A3).
+         * Volitelný stejně jako historie podání předchozím programem.
+         */
+        private ?PayrollRegistrationChangeSettlement $registrationSettlement = null,
     ) {}
 
     /**
@@ -117,6 +123,45 @@ final readonly class JmhzSubmissionBridgeService
                 $when,
             ),
         );
+    }
+
+    /**
+     * Hlášení odeslané dřív než 48 hodin po přijaté změně údajů zaměstnance
+     * (REGZEC A3) ČSSZ může zamítnout (FAQ ČSSZ, chyba 243), proto se
+     * nezmrazí; hláška říká, od kdy to jde.
+     */
+    private function assertRegistrationChangesSettled(
+        int $supplierId,
+        string $environment,
+        JmhzScenario1NormalizedDocument $document,
+    ): void {
+        if ($this->registrationSettlement === null) {
+            return;
+        }
+        $employmentIds = [];
+        foreach ((array) ($document->payload['people'] ?? []) as $person) {
+            foreach ((array) (is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
+                $id = is_array($employment) ? ($employment['employment_id'] ?? null) : null;
+                if (is_int($id) && $id > 0) {
+                    $employmentIds[] = $id;
+                }
+            }
+        }
+        $pending = $this->registrationSettlement->pendingUntil(
+            $supplierId,
+            $environment,
+            $employmentIds,
+            \DateTimeImmutable::createFromInterface($this->clock->now()),
+        );
+        if ($pending !== null) {
+            throw new JmhzXmlException(
+                'jmhz_registration_change_settling',
+                PayrollRegistrationChangeSettlement::message(
+                    $pending['until'],
+                    count($pending['employment_ids']),
+                ),
+            );
+        }
     }
 
     /**
@@ -249,6 +294,7 @@ final readonly class JmhzSubmissionBridgeService
             // Až za opakováním: už zmrazené podání se vrací beze změny, nové řádné
             // za měsíc podaný předchozím programem nevznikne (výjimka vrátí transakci).
             $this->assertNotSubmittedExternally($supplierId, $environment, $periodStart);
+            $this->assertRegistrationChangesSettled($supplierId, $environment, $document);
 
             // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
             $envelope = JmhzSubmissionEnvelope::create(

@@ -406,6 +406,35 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
   })
 
+  it('offers the unknown-start deadline for a direct A1 after start and sends the choice', async () => {
+    m.preview.mockResolvedValue({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+      action_code: 1,
+      before_start_choice: false,
+    })
+    m.prepare.mockResolvedValue({
+      ...preparedSubmission('production'),
+      agenda_code: 'REGZEC25',
+      interaction: 'direct_full_registration',
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-unknown-start"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-unknown-start"]').setValue(true)
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production', null, 'auto', { startNotKnownInAdvance: true })
+
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+    expect(m.prepare).toHaveBeenCalledWith(5, 'production', null, 'auto', { startNotKnownInAdvance: true })
+  })
+
   it('offers full A1 registration before start and sends the chosen mode', async () => {
     m.preview.mockResolvedValueOnce({ ...preview, before_start_choice: true })
     m.preview.mockResolvedValueOnce({

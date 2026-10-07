@@ -37,6 +37,9 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         'cz-regzec-follow-up-2026-04.v1';
     private const AFTER_PRE_REGISTRATION_RULESET_ID =
         'cz-regzec-after-prezec-2026-07.v1';
+    private const UNKNOWN_START_RULESET_ID =
+        'cz-employee-registration-unknown-start-2026-07.v1';
+    private const UNKNOWN_START_DAYS = 8;
 
     /**
      * Storno A8 má vlastní rulesety. Dřív spadalo pod
@@ -153,6 +156,38 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
                 'earliest_days_before_start' =>
                     self::EARLIEST_DAYS_BEFORE_START,
                 'due_on' => 'employment_start_date',
+            ]),
+        );
+    }
+
+    /**
+     * Lhůta pro přihlášení zaměstnance, jehož nástup nebyl předem znám.
+     *
+     * § 19 odst. 1 písm. b) zákona č. 323/2025 Sb. (znění od 1. 7. 2026): nelze-li
+     * použít lhůtu "před nástupem", přihlásí se do osmi dnů ode dne, kdy
+     * zaměstnavateli vznikla povinnost poskytovat zaměstnanci plnění, nebo kdy
+     * plnění poprvé poskytl. Takový den je den skutečného nástupu, od něj běží
+     * osm kalendářních dnů a okno se otevírá tímtéž dnem.
+     */
+    public function forUnknownStart(
+        string $startOn,
+    ): PayrollEmployeeRegistrationDeadlineWindow {
+        $transitional = $this->transitional($startOn);
+        if ($transitional !== null) {
+            return $transitional;
+        }
+        $start = $this->supportedDate($startOn);
+        $due = $start->modify('+' . self::UNKNOWN_START_DAYS . ' days');
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $start->format('Y-m-d'),
+            $due->format('Y-m-d'),
+            'calendar_days',
+            self::UNKNOWN_START_RULESET_ID,
+            $this->rulesetHash(self::UNKNOWN_START_RULESET_ID, [
+                'due_calendar_days_after_start' => self::UNKNOWN_START_DAYS,
+                'due_on' => 'first_performance_date_plus_days',
+                'legal_basis' => '§ 19 odst. 1 písm. b) zákona č. 323/2025 Sb.',
             ]),
         );
     }

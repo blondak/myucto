@@ -86,6 +86,12 @@ const errorProblems = ref<PayrollRegistrationMissingItem[]>([])
  */
 const registrationMode = ref<PayrollRegistrationMode>('auto')
 const beforeStartChoice = ref(false)
+/**
+ * Zaměstnanec začal pracovat bez ohlášení: lhůta přihlášení je osm dnů od
+ * prvního plnění (§ 19 odst. 1 písm. b) zákona č. 323/2025 Sb.). Volba se
+ * nabídne až u přímé plné registrace po nástupu.
+ */
+const startNotKnownInAdvance = ref(false)
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
@@ -1923,6 +1929,12 @@ function proposalActions(
 
 watch(selectedEventId, resetPreparedFiling)
 watch(registrationMode, resetPreparedFiling)
+watch(startNotKnownInAdvance, resetPreparedFiling)
+const unknownStartApplicable = computed(() =>
+  selectedEventId.value === null
+  && (startNotKnownInAdvance.value
+    || (preview.value?.interaction === 'direct_full_registration'
+      && preview.value.before_start_choice !== true)))
 watch(eventInteraction, () => {
   resetEventForm()
   deltaField.value = deltaFieldOptions.value[0] ?? 'title_prefix'
@@ -2009,17 +2021,25 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
       transport.value = null
       transportMessage.value = ''
       preview.value = selectedEventId.value === null
-        ? await (registrationMode.value === 'full'
+        ? await (startNotKnownInAdvance.value
           ? payrollApi.previewEmploymentRegistration(
               props.employmentId,
               environment.value,
               null,
-              'full',
+              registrationMode.value,
+              { startNotKnownInAdvance: true },
             )
-          : payrollApi.previewEmploymentRegistration(
-              props.employmentId,
-              environment.value,
-            ))
+          : registrationMode.value === 'full'
+            ? payrollApi.previewEmploymentRegistration(
+                props.employmentId,
+                environment.value,
+                null,
+                'full',
+              )
+            : payrollApi.previewEmploymentRegistration(
+                props.employmentId,
+                environment.value,
+              ))
         : await payrollApi.previewEmploymentRegistration(
             props.employmentId,
             environment.value,
@@ -2028,17 +2048,25 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
       if (preview.value.before_start_choice === true) beforeStartChoice.value = true
     } else {
       submission.value = selectedEventId.value === null
-        ? await (registrationMode.value === 'full'
+        ? await (startNotKnownInAdvance.value
           ? payrollApi.prepareEmploymentRegistration(
               props.employmentId,
               environment.value,
               null,
-              'full',
+              registrationMode.value,
+              { startNotKnownInAdvance: true },
             )
-          : payrollApi.prepareEmploymentRegistration(
-              props.employmentId,
-              environment.value,
-            ))
+          : registrationMode.value === 'full'
+            ? payrollApi.prepareEmploymentRegistration(
+                props.employmentId,
+                environment.value,
+                null,
+                'full',
+              )
+            : payrollApi.prepareEmploymentRegistration(
+                props.employmentId,
+                environment.value,
+              ))
         : await payrollApi.prepareEmploymentRegistration(
             props.employmentId,
             environment.value,
@@ -2204,6 +2232,20 @@ async function copyXml(): Promise<void> {
             <option value="auto">{{ t('payroll.people.registration.before_start.partial') }}</option>
             <option value="full">{{ t('payroll.people.registration.before_start.full') }}</option>
           </select>
+        </label>
+        <label
+          v-if="unknownStartApplicable"
+          class="flex items-center gap-2 text-xs text-neutral-600"
+          :title="t('payroll.people.registration.unknown_start.hint')"
+        >
+          <input
+            v-model="startNotKnownInAdvance"
+            type="checkbox"
+            class="rounded border-neutral-300 text-primary-600 focus:ring-primary-500/30"
+            :disabled="busy || submission !== null"
+            data-test="registration-unknown-start"
+          >
+          <span>{{ t('payroll.people.registration.unknown_start.label') }}</span>
         </label>
         <!--
           Náhled a příprava jsou dvě samostatná tlačítka na stálém místě (UI-27):

@@ -177,6 +177,29 @@ final readonly class PayrollRegistrationXmlValidator
                             . 'plnou registraci REGZEC.',
                     );
                 }
+                // EDV 1.4.0.6, kontrola "Rodné číslo x Předpokládané datum
+                // nástupu": zaměstnanec mladší 14 let k předpokládanému nástupu
+                // se na vstupu zamítá. Datum narození plyne z rodného čísla,
+                // u EČP z evidence osoby.
+                $birthDate = PayrollRegistrationMinimumAge::birthDateFromBirthNumber(
+                    $payload->identity->identifiers['birth_number'] ?? null,
+                ) ?? $payload->identity->identity['birth_date'] ?? null;
+                if (is_string($birthDate)
+                    && PayrollRegistrationMinimumAge::isUnderage(
+                        $birthDate,
+                        $start->format('Y-m-d'),
+                    )
+                ) {
+                    $this->invalid(
+                        'registration_prezec_underage',
+                        'Zaměstnanci je k předpokládanému datu nástupu ('
+                            . $start->format('d.m.Y') . ') méně než '
+                            . PayrollRegistrationMinimumAge::YEARS . ' let, takže '
+                            . 'ČSSZ částečné přihlášení zamítne na vstupu. '
+                            . 'Zkontrolujte rodné číslo na kartě osoby a datum '
+                            . 'nástupu na kartě pracovního vztahu.',
+                    );
+                }
             }
         } elseif ($payload->employerName === null
             || $payload->csszWorkplaceCode === null

@@ -4583,6 +4583,272 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /** PREZEC26-vs-5: P2 nese variabilní symbol z přijaté P1. */
+    public function testPrezecP2CarriesTheVariableSymbolOfTheAcceptedP1(): void
+    {
+        $this->seedAcceptedPreRegistrationReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET social_security_variable_symbol = "9990005678"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "no_show"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($response)['submission_id']);
+        self::assertStringContainsString('act="10"', $xml);
+        self::assertStringContainsString(' vs="9990001234"', $xml);
+        self::assertStringNotContainsString('9990005678', $xml);
+    }
+
+    /** PREZEC26-predat-5: zaměstnanec mladší 14 let k nástupu se do P1 nedostane. */
+    public function testPrezecP1RejectsAnEmployeeYoungerThanFourteenAtStart(): void
+    {
+        $this->identities->saveIdentityFacts(
+            $this->supplierId,
+            $this->employeeId,
+            $this->identityId,
+            2,
+            [
+                'title_prefix' => 'Ing.',
+                'birth_date' => '2015-02-03',
+                'birth_place' => 'Testov',
+                'birth_country_code' => 'CZ',
+                'citizenship_country_code' => 'CZ',
+                'sex' => 'female',
+            ],
+        );
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_prezec_underage', $this->json($response)['error']['code']);
+        self::assertSame(0, $this->countSubmissions());
+    }
+
+    /** PREZEC26-DEADLINE-10: A1 po P1 se skutečným nástupem pozdě po předpokládaném dni nejde. */
+    public function testFullRegistrationAfterP1IsRefusedWhenTheStartIsLateByMoreThanEightDays(): void
+    {
+        $this->seedAcceptedPreRegistrationReceipt();
+        $lateStart = '2026-09-05';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$lateStart, $lateStart, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $lateStart, null, null, true);
+        $this->saveA1ProfileFor($lateStart, '1', '1');
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a1_after_p1_start_too_late',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testFullRegistrationAfterP1IsAcceptedWithinEightDaysOfTheExpectedStart(): void
+    {
+        $this->seedAcceptedPreRegistrationReceipt();
+        $start = '2026-08-25';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$start, $start, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $start, null, null, true);
+        $this->saveA1ProfileFor($start, '1', '1');
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('full_registration_after_p1', $this->json($response)['interaction']);
+    }
+
+    /** PREZEC26-DEADLINE-6: po P1 i A1 musí nenastoupení nést P2 i A8. */
+    public function testNoShowAfterP1AndA1RemindsTheCancellation(): void
+    {
+        $this->seedAcceptedPreRegistrationReceipt();
+        $start = '2026-08-25';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$start, $start, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $start, null, null, true);
+        $this->saveA1ProfileFor($start, '1', '1');
+        $a1 = $this->json($this->post());
+        $this->markRegistrationAccepted((int) $a1['submission_id']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "no_show", actual_start_date = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('pre_registration_no_show', $body['interaction']);
+        self::assertContains(
+            'registration_no_show_needs_cancellation',
+            array_column($body['problems'], 'code'),
+        );
+    }
+
+    public function testNoShowOfAP1AloneDoesNotRemindTheCancellation(): void
+    {
+        $this->seedAcceptedPreRegistrationReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "no_show"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $body = $this->json($this->post());
+
+        self::assertNotContains(
+            'registration_no_show_needs_cancellation',
+            array_column($body['problems'], 'code'),
+        );
+    }
+
+    /** REGZEC25-DEADLINE.A1.fallback-01: nástup nebyl předem znám, lhůta je osm dnů od prvního plnění. */
+    public function testA1WithUnknownStartHasEightDaysFromTheFirstPerformance(): void
+    {
+        $started = '2026-08-12';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$started, $started, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', $started, null, null, true);
+        $this->saveA1ProfileFor($started, '1', '1');
+
+        $default = $this->json(($this->action)->preview(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        self::assertSame($started, $default['deadline']['due_on']);
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'start_not_known_in_advance' => true,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame('2026-08-20', $body['deadline']['due_on']);
+        self::assertSame(
+            'cz-employee-registration-unknown-start-2026-07.v1',
+            $body['deadline']['ruleset_id'],
+        );
+    }
+
+    public function testUnknownStartIsRefusedForAFutureStart(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+                'start_not_known_in_advance' => true,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_unknown_start_in_future', $this->json($response)['error']['code']);
+    }
+
+    /** REGZEC25-employee.dep-04: kód správy mimo číselník C_COKR blokuje přihlášku. */
+    public function testA1IsBlockedByAWorkplaceCodeOutsideTheDistrictCodebook(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employer_settings SET social_security_office_code = "999"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_data_incomplete', $error['code']);
+        self::assertSame(['cssz_workplace_code'], array_column($error['problems'], 'field'));
+        self::assertStringContainsString('okresních správ ČSSZ', $error['problems'][0]['message']);
+    }
+
+    /** REGZEC25-DEADLINE.A3.wait48-01: 48 hodin po přijaté A3 čeká jen dotčený vztah. */
+    public function testAcceptedA3HoldsTheMonthlyReportOfThatEmploymentForFortyEightHours(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        $approved = $this->approveA3(
+            ['permanent_address' => [
+                'street' => 'Krátká',
+                'house_number' => '3',
+                'postal_code' => '11000',
+                'city' => 'Praha',
+                'country_code' => 'CZ',
+            ]],
+            'synthetic-wait48',
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $settlement = new \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement(
+            new \MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository($this->db),
+        );
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+
+        self::assertNull(
+            $settlement->pendingUntil($this->supplierId, 'test', [$this->employmentId], $now),
+            'Podání A3, které ČSSZ ještě nepřijala, nic nezdržuje.',
+        );
+
+        $this->markRegistrationAccepted((int) $prepared['submission_id']);
+
+        $pending = $settlement->pendingUntil($this->supplierId, 'test', [$this->employmentId], $now);
+        self::assertNotNull($pending);
+        self::assertSame([$this->employmentId], $pending['employment_ids']);
+        self::assertGreaterThan($now->modify('+47 hours'), $pending['until']);
+        self::assertNull($settlement->pendingUntil($this->supplierId, 'test', [$this->employmentId + 1000], $now));
+        self::assertNull($settlement->pendingUntil(
+            $this->supplierId,
+            'test',
+            [$this->employmentId],
+            $now->modify('+49 hours'),
+        ));
+        self::assertNull($settlement->pendingUntil($this->supplierId, 'production', [$this->employmentId], $now));
+        self::assertNull($settlement->pendingUntil($this->otherSupplierId, 'test', [$this->employmentId], $now));
+    }
+
     private function employmentActiveSince(string $date): void
     {
         $this->db->pdo()->prepare(
