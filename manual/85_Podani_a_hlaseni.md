@@ -572,6 +572,15 @@ a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
 pracujícího důchodce v zákonné evidenci osoby.
 
+**Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
+důchodce: důchodové údaje (den dosažení důchodového věku, předčasný starobní
+důchod) se potvrzují jen ve formuláři evidenčního listu a měsíční hlášení je
+zatím nepřebírá. Kód ELDP v hlášení proto vyjde bez druhého znaku `D`.
+U zaměstnance, který starobní důchod nepobírá, se navíc nevykážou odečítané
+doby (10375) za nemoc, ošetřování, mateřskou, otcovskou, neplacené volno
+nebo neomluvenou absenci. Hlášení za takový vztah podejte ručně přes ePortál
+ČSSZ, nebo vztah odložte.
+
 Měsíc porodu, ve kterém zaměstnankyně pobírá peněžitou pomoc v mateřství a nemá
 žádný započitatelný příjem, se vykazuje jako měsíc účasti na pojištění, nikoli
 jako vyloučená doba.

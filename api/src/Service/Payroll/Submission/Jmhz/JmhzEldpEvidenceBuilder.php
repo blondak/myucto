@@ -654,11 +654,14 @@ final class JmhzEldpEvidenceBuilder
      * ({@see EldpPensionAgeCode}), takže se osoba v listu a v hlášení nemůže
      * rozejít.
      *
-     * Důchodové údaje nese zdroj jen tam, kde je zaměstnavatel potvrdil
-     * (`$source['pension_status']`: `pension_age_reached_on`, `early_pension_from`);
-     * bez nich zůstává „++" a zmrazené snapshoty dřívějších měsíců se tím
-     * nemění. Den, kdy kód začíná uprostřed měsíce, nejde zachytit, vyměřovací
-     * základ se v hlášení vede za celý měsíc, a měsíc se zastaví.
+     * Důchodové údaje čte z `$source['pension_status']` (`pension_age_reached_on`,
+     * `early_pension_from`); bez nich zůstává „++" a zmrazené snapshoty
+     * dřívějších měsíců se tím nemění. Zdroj řezu
+     * ({@see \MyInvoice\Repository\Payroll\JmhzEldpEvidenceSnapshotRepository::lockSource()})
+     * je zatím nenese: potvrzují se jen v ročním evidenčním listu. Kód D,
+     * dělení měsíce dovršení věku i blokace odečítaných dob se proto v provozu
+     * nespustí, dokud je nenaplní evidence osoby. Předčasný důchod uprostřed
+     * měsíce se zastaví, protože pravidla podání rozdělení základu nestanoví.
      *
      * @param array<string,mixed> $source
      */
