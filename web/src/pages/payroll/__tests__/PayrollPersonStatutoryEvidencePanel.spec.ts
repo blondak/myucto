@@ -21,6 +21,16 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+// Sdělení pojišťovny zaměstnancem (§ 12 písm. b) zákona č. 48/1997 Sb.) má vlastní
+// API a vlastní spec; tady se jen zabrání skutečnému síťovému volání.
+vi.mock('@/api/payrollHealthInsurerNotices', () => ({
+  payrollHealthInsurerNoticesApi: {
+    list: () => Promise.resolve([]),
+    record: vi.fn(),
+    confirmationUrl: () => '/payroll/people/0/health-insurer-notices/0/confirmation',
+  },
+}))
+
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: mocks.canWrite }),
 }))

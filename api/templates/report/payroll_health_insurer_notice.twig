@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 10.5pt; color: #171717; }
+    h1 { font-size: 15pt; margin: 0 0 2mm; }
+    .sub { color: #555; margin-bottom: 6mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 2.2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.label { width: 40%; color: #444; }
+    td.value { font-weight: 600; }
+    p.text { margin: 7mm 0 0; line-height: 1.5; }
+    .signature { height: 24mm; border: 0.5px solid #aaa; padding: 2mm; color: #777; }
+    .footer { margin-top: 6mm; font-size: 8pt; color: #777; }
+</style>
+</head>
+<body>
+    <h1>Potvrzení o přijetí sdělení zdravotní pojišťovny</h1>
+    <div class="sub">podle § 12 písm. b) zákona č. 48/1997 Sb., o veřejném zdravotním pojištění</div>
+
+    <table>
+        <tr><td class="label">Zaměstnavatel</td><td class="value">{{ employer_name }}{% if employer_ic %} (IČO {{ employer_ic }}){% endif %}</td></tr>
+        <tr><td class="label">Zaměstnanec</td><td class="value">{{ employee_name }}</td></tr>
+        <tr><td class="label">Zdravotní pojišťovna</td><td class="value">{{ insurer_code }}{% if insurer_name %} - {{ insurer_name }}{% endif %}</td></tr>
+        <tr><td class="label">Pojištěn u pojišťovny od</td><td class="value">{{ effective_from|cz_date }}</td></tr>
+        <tr><td class="label">Sdělení zaměstnance přijato dne</td><td class="value">{{ employee_notified_on|cz_date }}</td></tr>
+        <tr><td class="label">Potvrzení zaměstnavatele ze dne</td><td class="value">{{ confirmed_on|cz_date }}</td></tr>
+    </table>
+
+    <p class="text">
+        Zaměstnavatel tímto písemně potvrzuje, že dne {{ employee_notified_on|cz_date }} přijal od zaměstnance
+        sdělení, že je pojištěn u zdravotní pojišťovny {{ insurer_code }}{% if insurer_name %} ({{ insurer_name }}){% endif %}
+        s účinností od {{ effective_from|cz_date }}.
+    </p>
+
+    <p class="text">Podpis odpovědné osoby zaměstnavatele:</p>
+    <div class="signature">Jméno, podpis</div>
+
+    <div class="footer">Vygenerováno systémem MyÚčto.cz.</div>
+</body>
+</html>

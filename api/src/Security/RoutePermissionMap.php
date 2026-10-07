@@ -205,6 +205,10 @@ final class RoutePermissionMap
         // a vyživované osoby, ne `payroll.employment.write`.
         ['GET', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll', AccessLevel::READ],
         ['PUT', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Sdělení zdravotní pojišťovny zaměstnancem a potvrzení zaměstnavatele
+        // (§ 12 písm. b) zákona č. 48/1997 Sb.) - věta historie pojišťovny osoby.
+        ['GET', '#^/api/payroll/people/[0-9]+/health-insurer-notices(/[0-9]+/confirmation)?$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/people/[0-9]+/health-insurer-notices/[0-9]+$#', 'payroll.person.write', AccessLevel::WRITE],
         // Hromadné doplnění výchozí evidence — tentýž zápis jako PUT výše, jen
         // pro víc osob. Náhled je POST (tělo se seznamem osob) a vypisuje osobní
         // údaje celé firmy, proto stejné právo jako zápis.

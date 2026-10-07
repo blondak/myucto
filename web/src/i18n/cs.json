@@ -10500,6 +10500,28 @@
         "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
       }
     },
+    "healthInsurerNotice": {
+      "title": "Sdělení zdravotní pojišťovny zaměstnancem",
+      "intro": "Zaměstnanec je povinen sdělit zaměstnavateli, u které zdravotní pojišťovny je pojištěn, při nástupu a změnu do osmi dnů. Zaměstnavatel přijetí sdělení písemně potvrdí (§ 12 písm. b) zákona č. 48/1997 Sb.). Zapište zde den sdělení a den potvrzení a potvrzení si vytiskněte. Obsah hromadného oznámení se tím nemění.",
+      "empty": "Osoba zatím nemá zapsanou zdravotní pojišťovnu.",
+      "effectiveFrom": "Pojištěn u pojišťovny od {day}",
+      "notifiedOn": "Zaměstnanec sdělil pojišťovnu dne",
+      "confirmedOn": "Zaměstnavatel potvrdil přijetí dne",
+      "saved": "Sdělení je zapsané.",
+      "actions": {
+        "save": "Uložit sdělení",
+        "confirmation": "Potvrzení (PDF)"
+      },
+      "hints": {
+        "readOnly": "Nemáte oprávnění upravovat zákonnou evidenci osoby.",
+        "noticeRequired": "Nejdřív zapište a uložte den, kdy zaměstnanec pojišťovnu sdělil."
+      },
+      "errors": {
+        "loadFailed": "Sdělení pojišťovny se nepodařilo načíst.",
+        "saveFailed": "Sdělení se nepodařilo uložit.",
+        "downloadFailed": "Potvrzení se nepodařilo vytvořit."
+      }
+    },
     "discountIntents": {
       "title": "Záměr uplatňovat slevu na pojistném",
       "intro": "Sleva zaměstnavatele za kratší úvazky se vykazuje v měsíčním hlášení, ale nárok na ni zakládá jiné podání: oznámení záměru (OZUSPOJ). Bez něj Česká správa sociálního zabezpečení slevu neuzná a odečtené pojistné se stane dluhem. Sleva se ve výpočtu uplatní teprve u záměru, u kterého je zapsaný den doručení z protokolu ČSSZ.",

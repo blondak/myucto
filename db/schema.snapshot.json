@@ -952,7 +952,8 @@
         "1968_payroll_health_insurance_number_identifier.sql",
         "1969_payroll_eldp_pension_status.sql",
         "1970_payroll_discount_intent_predecessor.sql",
-        "1971_payroll_sickness_case_slovak.sql"
+        "1971_payroll_sickness_case_slovak.sql",
+        "1972_payroll_health_coverage_employee_notice.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -14035,6 +14036,8 @@
                 "effective_from": "date NOT NULL",
                 "effective_to": "date NULL DEFAULT NULL",
                 "employee_id": "bigint(20) unsigned NOT NULL",
+                "employee_notified_on": "date NULL DEFAULT NULL",
+                "employer_confirmed_on": "date NULL DEFAULT NULL",
                 "evidence_note": "varchar(500) NULL DEFAULT NULL",
                 "foreign_country_code": "char(2) NULL DEFAULT NULL",
                 "health_evidence_document_id": "bigint(20) unsigned NULL DEFAULT NULL",

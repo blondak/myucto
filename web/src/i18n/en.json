@@ -10500,6 +10500,28 @@
         "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
       }
     },
+    "healthInsurerNotice": {
+      "title": "Health insurer notice from the employee",
+      "intro": "The employee must tell the employer which health insurer they are insured with on starting work and within eight days of any change. The employer confirms receipt in writing (Section 12(b) of Act No. 48/1997 Coll.). Record the notice date and the confirmation date here and print the confirmation. The content of the bulk notification is not affected.",
+      "empty": "The person has no health insurer recorded yet.",
+      "effectiveFrom": "Insured with the insurer from {day}",
+      "notifiedOn": "Employee notified the insurer on",
+      "confirmedOn": "Employer confirmed receipt on",
+      "saved": "The notice has been recorded.",
+      "actions": {
+        "save": "Save notice",
+        "confirmation": "Confirmation (PDF)"
+      },
+      "hints": {
+        "readOnly": "You do not have permission to edit the person's statutory evidence.",
+        "noticeRequired": "First record and save the date the employee notified the insurer."
+      },
+      "errors": {
+        "loadFailed": "The insurer notices could not be loaded.",
+        "saveFailed": "The notice could not be saved.",
+        "downloadFailed": "The confirmation could not be created."
+      }
+    },
     "discountIntents": {
       "title": "Insurance discount intent",
       "intro": "The employer discount for short working hours is reported in the monthly report, but the entitlement comes from a different filing: the notification of intent (OZUSPOJ). Without it the Czech Social Security Administration will not recognise the discount and the deducted premium becomes a debt. The discount is applied only once the intent carries the delivery date from the CSSA protocol.",
