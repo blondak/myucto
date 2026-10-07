@@ -105,6 +105,16 @@ final readonly class RegistrationRecord
          * @var array<string,mixed>
          */
         public array $a1Profile = [],
+        /** Nový VS zaměstnavatele (`comp@nvs`, 10222) — věta o změně VS nese starý i nový. */
+        public ?string $employerNewVariableSymbol = null,
+        /** Dřívější příjmení (`name@ona`, 10064) — není rodné příjmení, import ho nepřebírá. */
+        public ?string $formerSurname = null,
+        /** Variabilní číslo pojištěnce (`client@vcp`, 10060). */
+        public ?string $vcp = null,
+        /** Vztah skončil úmrtím zaměstnance (`job@endbydeath`, 10225). */
+        public bool $endedByDeath = false,
+        /** Kód důvodu ukončení z podkladů pro úřad práce (`unemplcomp@rsnterempl`/`rsnterrel`, 10380/10381). */
+        public ?string $terminationReasonCode = null,
     ) {}
 
     public function isCsszExport(): bool

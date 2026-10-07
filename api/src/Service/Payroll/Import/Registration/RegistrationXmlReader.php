@@ -340,6 +340,8 @@ final class RegistrationXmlReader
         $birth = $this->child($xpath, $employee, 'r:client/r:birth');
         $stat = $this->child($xpath, $employee, 'r:client/r:stat');
         $job = $this->child($xpath, $employee, 'r:job');
+        $comp = $this->child($xpath, $employee, 'r:comp');
+        $unemployment = $this->child($xpath, $employee, 'r:unemplcomp');
 
         return new RegistrationRecord(
             documentType: $documentType,
@@ -381,6 +383,13 @@ final class RegistrationXmlReader
             highestEducationCode: $this->attribute($this->child($xpath, $employee, 'r:fact'), 'highedu'),
             taxResidency: $this->taxResidency($xpath, $employee),
             a1Profile: $documentType === 'REGZEC25' ? $this->a1Profile($xpath, $employee) : [],
+            employerVariableSymbol: $this->attribute($comp, 'vs'),
+            employerNewVariableSymbol: $this->attribute($comp, 'nvs'),
+            formerSurname: $this->attribute($name, 'ona'),
+            vcp: $this->attribute($client, 'vcp'),
+            endedByDeath: $this->attribute($job, 'endbydeath') === 'A',
+            terminationReasonCode: $this->attribute($unemployment, 'rsnterempl')
+                ?? $this->attribute($unemployment, 'rsnterrel'),
         );
     }
 

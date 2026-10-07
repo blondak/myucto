@@ -10,6 +10,7 @@ use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\PayrollVcp;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationFieldVocabulary;
@@ -51,6 +52,8 @@ final class RegistrationImportPlanner
         string $fileSha256,
         ?string $relationTypeChoice = null,
         bool $terminationConfirmed = false,
+        bool $deferActivation = false,
+        bool $registrationInBatch = false,
     ): array {
         [$birthNumber, $ecp] = $this->birthNumber($record);
         $birthDate = $record->birthDate
@@ -112,6 +115,11 @@ final class RegistrationImportPlanner
             '_record' => $record,
             '_file_sha256' => $fileSha256,
             '_terminate_confirmed' => $terminationConfirmed,
+            // Přihláška, kterou v téže dávce ruší hlášení o nenastoupení: vztah
+            // se jen založí a zůstane plánovaný, aby ho nenastoupení mohlo zrušit.
+            '_defer_activation' => $deferActivation,
+            // Nenastoupení, jehož přihlášku (vztah) založí vybraná věta téže dávky.
+            '_registration_in_batch' => $registrationInBatch,
             '_supplier_id' => $supplierId,
             '_employee_id' => null,
             '_employment_id' => null,
@@ -130,9 +138,11 @@ final class RegistrationImportPlanner
                 'ecp' => null,
                 'name' => null,
                 'birth_number' => null,
+                'vcp' => null,
                 'tax_residence' => null,
                 'foreign_tax_identifier' => null,
                 'a1_profile' => null,
+                'termination_reason' => null,
             ],
         ];
         if ($record->insuredPersonNumber !== null && $record->birthNumber === null) {
@@ -164,11 +174,16 @@ final class RegistrationImportPlanner
             return $this->finish($plan, $plan['action_label'] . ' import neumí zapsat automaticky. '
                 . 'Zpracujte oznámení ručně na kartě pracovního vztahu.');
         }
-        if ($record->isCsszExport() || $record->isJmhzDerived()) {
-            $foreign = $this->foreignEmployerBlocker($supplierId, $record);
-            if ($foreign !== null) {
-                return $this->finish($plan, $foreign);
-            }
+        $foreign = $this->foreignEmployerBlocker($supplierId, $record, $plan['warnings']);
+        if ($foreign !== null) {
+            return $this->finish($plan, $foreign);
+        }
+        if ($record->vcp !== null && $this->validVcp($record) === null) {
+            $plan['warnings'][] = 'VČP ve větě není platné (devět číslic začínajících šestkou), nepřebírá se.';
+        }
+        if ($record->formerSurname !== null) {
+            $plan['warnings'][] = "Věta uvádí dřívější příjmení „{$record->formerSurname}“ (ona). Není to rodné příjmení, "
+                . 'proto ho import nepřebírá; zkontrolujte historii jména na kartě osoby.';
         }
 
         $person = $this->matchPerson($supplierId, $environment, $record, $birthNumber, $ecp);
@@ -192,6 +207,7 @@ final class RegistrationImportPlanner
             'employee_id' => $employeeId,
             'employee_name' => $this->lookup->employeeName($supplierId, $employeeId),
         ]);
+        $this->warnOnIdentifierMismatch($supplierId, $plan, $employeeId, $birthNumber, $ecp, $record);
 
         $employment = $this->matchEmployment($supplierId, $employeeId, $record, $relationType, $person['id_ppv_employment_id']);
         if ($employment['blocker'] !== null) {
@@ -201,9 +217,12 @@ final class RegistrationImportPlanner
             return $this->finish($plan, $employment['blocker']);
         }
         $row = $employment['row'];
-        // Odvozená věta nese ID PPV, které evidence nezná. Vztah osoby, který
-        // už má JINÉ ID PPV, je jiný vztah (souběh) — k němu věta nepatří.
-        if ($row !== null && $record->isJmhzDerived() && $record->employmentIdentifier !== null
+        // Přihláška A1 a odvozená věta nesou ID PPV, které evidence nezná. Vztah
+        // osoby, který už má JINÉ ID PPV, je jiný vztah (souběh) — k němu věta
+        // nepatří, jinak by se druhý vztah téhož druhu slil s prvním. A2 a A3
+        // se tím neřídí: ty ID PPV jen dokládají a hledají existující vztah.
+        if ($row !== null && ($record->isJmhzDerived() || ($record->documentType === 'REGZEC25' && $record->actionCode === 1))
+            && $record->employmentIdentifier !== null
             && $person['id_ppv_employment_id'] === null
             && $this->registrations->activeExternalId($supplierId, (int) $row['id'], $environment, 'id_ppv') !== null
         ) {
@@ -244,6 +263,9 @@ final class RegistrationImportPlanner
             || ($record->documentType === 'PREZEC26' && $record->actionCode === 9)
             || ($record->isJmhzDerived() && $record->actionCode === 1)
             || $record->isCsszExport();
+        if (!$creates && $plan['_registration_in_batch'] === true && in_array($record->actionCode, [8, 10], true)) {
+            return $this->planNoShow((int) ($plan['_supplier_id'] ?? 0), '', $plan, $record, null);
+        }
         if (!$creates) {
             $plan['operation'] = $record->actionCode === 2 ? 'terminate' : 'update';
 
@@ -307,8 +329,13 @@ final class RegistrationImportPlanner
             // najde. Dřív se jen ohlásilo „doplňte ručně".
             $plan['_steps']['ecp'] = $ecp;
             $this->change($plan, 'ecp', 'Evidenční číslo pojištěnce (EČP)', null, $this->maskedBirthNumber($ecp));
-        } elseif ($birthNumber === null) {
+        } elseif ($birthNumber === null && $this->validVcp($record) === null) {
             $plan['warnings'][] = 'Rodné číslo se z věty nepřevezme — doplňte ho na kartě osoby.';
+        }
+        $vcp = $this->validVcp($record);
+        if ($vcp !== null) {
+            $plan['_steps']['vcp'] = $vcp;
+            $this->change($plan, 'vcp', 'Variabilní číslo pojištěnce (VČP)', null, $this->maskedBirthNumber($vcp));
         }
 
         $facts = $this->identityFacts($record);
@@ -328,8 +355,12 @@ final class RegistrationImportPlanner
         if ($record->documentType === 'REGZEC25' || $record->isCsszExport() || $record->isJmhzDerived()) {
             $this->newEmploymentTerms($plan, $record, $relationType);
             if ($start <= date('Y-m-d')) {
-                $plan['_steps']['activate_on'] = $start;
-                $this->change($plan, 'status', 'Stav vztahu', null, 'active');
+                if ($plan['_defer_activation'] === true) {
+                    $this->deferredActivationWarning($plan);
+                } else {
+                    $plan['_steps']['activate_on'] = $start;
+                    $this->change($plan, 'status', 'Stav vztahu', null, 'active');
+                }
             }
         }
         if ($record->isCsszExport()) {
@@ -474,8 +505,12 @@ final class RegistrationImportPlanner
                 $start = $row['start_date'] ?? $plan['employment']['start_on'];
                 $notStarted = $row === null || in_array($row['status'], self::NOT_STARTED_STATUSES, true);
                 if ($notStarted && is_string($start) && $start <= date('Y-m-d')) {
-                    $plan['_steps']['activate_on'] = $start;
-                    $this->change($plan, 'status', 'Stav vztahu', $row['status'] ?? null, 'active');
+                    if ($plan['_defer_activation'] === true) {
+                        $this->deferredActivationWarning($plan);
+                    } else {
+                        $plan['_steps']['activate_on'] = $start;
+                        $this->change($plan, 'status', 'Stav vztahu', $row['status'] ?? null, 'active');
+                    }
                 }
             }
             $this->educationInfo($plan, $record, $employeeId);
@@ -502,6 +537,7 @@ final class RegistrationImportPlanner
             || $steps['ecp'] !== null
             || $steps['name'] !== null
             || $steps['birth_number'] !== null
+            || $steps['vcp'] !== null
             || $steps['tax_residence'] !== null
             || $steps['foreign_tax_identifier'] !== null
             || $steps['a1_profile'] !== null;
@@ -546,10 +582,14 @@ final class RegistrationImportPlanner
             if ($row['end_date'] === $end) {
                 $plan['operation'] = 'none';
                 $this->planIdentifiers($supplierId, $environment, $plan, $record, (int) $plan['_employee_id'], $row);
+                $this->planTerminationDetails($supplierId, $plan, $record, (int) $row['id']);
                 if ($plan['_steps']['identifiers']['person'] !== null
                     || $plan['_steps']['identifiers']['employment'] !== null
                 ) {
                     $plan['operation'] = 'assign_identifiers';
+                }
+                if ($plan['_steps']['termination_reason'] !== null) {
+                    $plan['operation'] = 'update';
                 }
 
                 return $this->finish($plan, $plan['blocker']);
@@ -571,9 +611,37 @@ final class RegistrationImportPlanner
         }
         $plan['_steps']['terminate'] = ['target' => 'ended', 'on' => $end];
         $this->change($plan, 'end_date', 'Skončení vztahu', $row['end_date'], $end);
+        $this->planTerminationDetails($supplierId, $plan, $record, (int) $row['id']);
         $this->planIdentifiers($supplierId, $environment, $plan, $record, (int) $plan['_employee_id'], $row);
 
         return $this->finish($plan, $plan['blocker']);
+    }
+
+    /**
+     * Úmrtí (`job@endbydeath`) se zapíše jako způsob skončení, pokud ho vztah
+     * ještě nemá; kód důvodu ukončení pro úřad práce (`unemplcomp`) se do
+     * evidence nepřebírá (vede se jako způsob a zákonný důvod skončení), jen se
+     * na něj upozorní.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function planTerminationDetails(int $supplierId, array &$plan, RegistrationRecord $record, int $employmentId): void
+    {
+        if ($record->endedByDeath) {
+            if ($this->lookup->hasTerminationRecord($supplierId, $employmentId)) {
+                $plan['warnings'][] = 'Věta hlásí skončení vztahu úmrtím zaměstnance; způsob skončení je na kartě '
+                    . 'vztahu už vyplněný, import ho nemění.';
+            } else {
+                $plan['_steps']['termination_reason'] = 'death';
+                $this->change($plan, 'termination_method', 'Způsob skončení', null, 'death');
+                $plan['warnings'][] = 'Věta hlásí skončení vztahu úmrtím zaměstnance, způsob skončení se zapíše '
+                    . 'jako úmrtí. Vypořádání (mzda do dne úmrtí, daň) zkontrolujte na kartě vztahu.';
+            }
+        }
+        if ($record->terminationReasonCode !== null) {
+            $plan['warnings'][] = "Věta nese kód důvodu ukončení {$record->terminationReasonCode} z podkladů pro úřad "
+                . 'práce. Import ho nepřebírá; způsob a důvod skončení doplňte na kartě vztahu v části Skončení vztahu.';
+        }
     }
 
     /**
@@ -589,6 +657,15 @@ final class RegistrationImportPlanner
         ?array $row,
     ): array {
         $plan['operation'] = 'terminate';
+        if ($row === null && $plan['_registration_in_batch'] === true) {
+            // Vztah teprve vznikne přihláškou z téže dávky; při zápisu se věta plánuje
+            // znovu nad stavem po ní, takže vztah už najde.
+            $plan['warnings'][] = 'Vztah, ke kterému věta hlásí nenastoupení, založí přihláška z téže dávky. '
+                . 'Vyberte obě věty - přihlášený vztah zůstane plánovaný a hned se označí jako nenastoupený.';
+            $this->change($plan, 'status', 'Stav vztahu', null, 'no_show');
+
+            return $this->finish($plan, null);
+        }
         if ($row === null) {
             return $this->finish($plan, 'Pracovní vztah, ke kterému věta hlásí nenastoupení, se nepodařilo '
                 . 'určit. Zapište to ručně na kartě osoby.');
@@ -607,6 +684,13 @@ final class RegistrationImportPlanner
         $this->change($plan, 'status', 'Stav vztahu', (string) $row['status'], 'no_show');
 
         return $this->finish($plan, null);
+    }
+
+    /** @param array<string,mixed> $plan */
+    private function deferredActivationWarning(array &$plan): void
+    {
+        $plan['warnings'][] = 'V dávce je i hlášení o nenastoupení téže osoby, proto vztah zůstane plánovaný a '
+            . 'neaktivuje se; nenastoupení ho uzavře.';
     }
 
     /** @param array<string,mixed> $plan */
@@ -703,6 +787,59 @@ final class RegistrationImportPlanner
         ) {
             $plan['_steps']['ecp'] = $ecp;
             $this->change($plan, 'ecp', 'Evidenční číslo pojištěnce (EČP)', null, $this->maskedBirthNumber($ecp));
+        }
+        $vcp = $this->validVcp($record);
+        if ($vcp !== null && !$this->lookup->hasPersonIdentifier($supplierId, $employeeId, 'vcp')) {
+            $plan['_steps']['vcp'] = $vcp;
+            $this->change($plan, 'vcp', 'Variabilní číslo pojištěnce (VČP)', null, $this->maskedBirthNumber($vcp));
+        }
+    }
+
+    /** VČP z věty ve tvaru, který karta osoby přijme; `null`, když věta žádné nenese nebo je vadné. */
+    private function validVcp(RegistrationRecord $record): ?string
+    {
+        if ($record->vcp === null) {
+            return null;
+        }
+        $value = (string) preg_replace('/\s+/', '', $record->vcp);
+
+        return PayrollVcp::isValid($value) ? $value : null;
+    }
+
+    /**
+     * Osoba se našla podle jiného údaje (OIČ, ID PPV, VČP) a věta nese rodné číslo
+     * či EČP, které karta vede jinak. Import vedený identifikátor nepřepisuje, ale
+     * účetní se musí dozvědět, že věta možná patří někomu jinému.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function warnOnIdentifierMismatch(
+        int $supplierId,
+        array &$plan,
+        int $employeeId,
+        ?string $birthNumber,
+        ?string $ecp,
+        RegistrationRecord $record,
+    ): void {
+        $checks = [];
+        if ($birthNumber !== null) {
+            $checks[] = ['birth_number', $birthNumber, 'Rodné číslo'];
+        } elseif ($ecp !== null) {
+            $checks[] = ['ecp', $ecp, 'Evidenční číslo pojištěnce (EČP)'];
+        }
+        $vcp = $this->validVcp($record);
+        if ($vcp !== null) {
+            $checks[] = ['vcp', $vcp, 'VČP'];
+        }
+        foreach ($checks as [$type, $value, $label]) {
+            if (!$this->lookup->hasPersonIdentifier($supplierId, $employeeId, $type)) {
+                continue;
+            }
+            $hash = $this->sensitiveData->lookupHash($value, PayrollSensitiveField::PERSONAL_IDENTIFIER, $supplierId);
+            if (!in_array($employeeId, $this->lookup->employeesByIdentifierHash($supplierId, $type, $hash), true)) {
+                $plan['warnings'][] = "{$label} ve větě se liší od údaje vedeného u osoby (osoba se našla podle jiného "
+                    . 'identifikátoru). Ověřte, že věta patří této osobě; import vedené číslo nepřepisuje.';
+            }
         }
     }
 
@@ -847,8 +984,18 @@ final class RegistrationImportPlanner
         if ($imported === null) {
             return;
         }
-        $current = $this->lookup->healthInsurerAt($supplierId, $employeeId, substr($decisive, 0, 7) . '-01');
+        $monthStart = substr($decisive, 0, 7) . '-01';
+        $current = $this->lookup->healthInsurerAt($supplierId, $employeeId, $monthStart);
         if ($current === $imported) {
+            return;
+        }
+        // Stará věta by uzavřela dnešní otevřenou verzi pojišťovny a protáhla
+        // svou hodnotu dopředu. Má-li evidence verzi pozdější než věta, věta
+        // je starší než evidence a nepíše se (jako u podmínek vztahu).
+        if ($this->lookup->hasHealthCoverageAfter($supplierId, $employeeId, $monthStart)) {
+            $plan['warnings'][] = "Věta ({$decisive}) je starší než evidence: pojišťovna osoby se po tomto dni už "
+                . 'měnila, proto se z věty nezapíše. Zkontrolujte pojišťovnu na kartě osoby (Zákonná evidence).';
+
             return;
         }
         $plan['_steps']['health_insurer'] = ['code' => $imported, 'on' => $decisive];
@@ -867,6 +1014,12 @@ final class RegistrationImportPlanner
             $current = $this->lookup->addressAt($supplierId, $employeeId, $type, $decisive);
             $currentText = $current === null ? null : $this->addressText($current);
             if ($current !== null && self::sameAddress($current, $address)) {
+                continue;
+            }
+            // Adresa platná až po dni věty znamená, že věta je starší než evidence.
+            if ($this->lookup->hasAddressAfter($supplierId, $employeeId, $type, $decisive)) {
+                $plan['warnings'][] = "Věta ({$decisive}) je starší než evidence: " . mb_strtolower($this->addressLabel($type))
+                    . ' osoby se po tomto dni už měnila, proto se z věty nezapíše. Zkontrolujte ji na kartě osoby.';
                 continue;
             }
             $plan['_steps']['addresses'][$type] = $address + ['on' => $decisive];
@@ -940,6 +1093,17 @@ final class RegistrationImportPlanner
             if (!PayrollEmploymentJmhzActivityFamily::matches($relationType, $record->activityCode, $detail)
                 && PayrollEmploymentJmhzActivityFamily::matches($relationType, $record->activityCode, $defaultDetail)
             ) {
+                // Evidence vede bližší určení vztahu jen jako 1 (u dohod vůbec). Věta
+                // s jiným určením u pracovního poměru (2-9) se zapíše s výchozím
+                // a účetní se to musí dozvědět. Cizí programy posílají u dohod
+                // relDetail 1, to není nesoulad.
+                if ($defaultDetail !== null && $record->relationshipDetailCode !== null
+                    && $record->relationshipDetailCode !== $defaultDetail
+                ) {
+                    $plan['warnings'][] = "Bližší určení vztahu „{$record->relationshipDetailCode}“ (relDetail) ve větě "
+                        . "evidence nevede, zapíše se „{$defaultDetail}“. Zkontrolujte, že odpovídá smlouvě, a případně "
+                        . 'podejte změnu u ČSSZ.';
+                }
                 $detail = $defaultDetail;
             }
             if (PayrollEmploymentJmhzActivityFamily::matches($relationType, $record->activityCode, $detail)) {
@@ -1117,6 +1281,13 @@ final class RegistrationImportPlanner
                 $found[$id] ??= 'birth_number';
             }
         }
+        $vcp = $this->validVcp($record);
+        if ($vcp !== null) {
+            $hash = $this->sensitiveData->lookupHash($vcp, PayrollSensitiveField::PERSONAL_IDENTIFIER, $supplierId);
+            foreach ($this->lookup->employeesByIdentifierHash($supplierId, 'vcp', $hash) as $id) {
+                $found[$id] ??= 'vcp';
+            }
+        }
         $idPpvEmploymentId = null;
         if ($record->employmentIdentifier !== null) {
             $hit = $this->registrations->employmentByExternalIdValueHash(
@@ -1164,7 +1335,7 @@ final class RegistrationImportPlanner
                 'employee_id' => null,
                 'matched_by' => null,
                 'id_ppv_employment_id' => null,
-                'blocker' => 'Údaje ve větě (rodné číslo, OIČ, ID PPV) ukazují na různé osoby v evidenci. '
+                'blocker' => 'Údaje ve větě (rodné číslo, VČP, OIČ, ID PPV) ukazují na různé osoby v evidenci. '
                     . 'Nejspíš jde o duplicitní kartu nebo překlep — vyjasněte to ručně a import zopakujte.',
                 'candidates' => $candidates,
             ];
@@ -1215,10 +1386,19 @@ final class RegistrationImportPlanner
 
         // Částečné přihlášení se podává PŘED nástupem, k už běžícímu vztahu tedy patřit nemůže.
         $statuses = $record->documentType === 'PREZEC26' ? self::NOT_STARTED_STATUSES : self::OPEN_STATUSES;
+        // Odhláška, změna a nenastoupení `job@sme` obvykle nenesou, takže kód 1-9
+        // bez příznaku patří pracovnímu poměru i zaměstnání malého rozsahu.
+        // Víc shod pak skončí jako nejednoznačný vztah, ne jako nenalezený.
+        $types = $relationType === null ? null : [$relationType];
+        if ($relationType === 'employment' && $record->documentType === 'REGZEC25'
+            && in_array($record->actionCode, [2, 3, 4, 8], true)
+        ) {
+            $types = ['employment', 'small_scale_employment'];
+        }
         $open = array_values(array_filter(
             $rows,
             static fn (array $row): bool => in_array($row['status'], $statuses, true)
-                && ($relationType === null || $row['relation_type'] === $relationType),
+                && ($types === null || in_array($row['relation_type'], $types, true)),
         ));
         // Export vztah jen ověřuje: druh vztahu, který v evidenci nesedí, je
         // důvod k varování, ne k založení druhého vztahu vedle existujícího.
@@ -1232,7 +1412,7 @@ final class RegistrationImportPlanner
             $open = array_values(array_filter(
                 $rows,
                 static fn (array $row): bool => $row['status'] === 'ended' && $row['end_date'] === $record->endOn
-                    && ($relationType === null || $row['relation_type'] === $relationType),
+                    && ($types === null || in_array($row['relation_type'], $types, true)),
             ));
         }
         if (count($open) > 1) {
@@ -1425,20 +1605,43 @@ final class RegistrationImportPlanner
      * VS zaměstnavatele ve větě exportu musí patřit některé mzdové účtárně
      * firmy. Když firma žádný VS nevede, kontrola se přeskočí.
      */
-    private function foreignEmployerBlocker(int $supplierId, RegistrationRecord $record): ?string
+    /**
+     * Věta nese VS starý (`vs`) i nový (`nvs`, věta o změně VS); stačí, aby
+     * některý patřil firmě. Firma bez jediného VS se ověřit nedá: věta se
+     * nechá projít a REGZEC/PREZEC jen dostane varování, jako hlášení JMHZ.
+     *
+     * @param list<string> $warnings
+     */
+    private function foreignEmployerBlocker(int $supplierId, RegistrationRecord $record, array &$warnings): ?string
     {
-        if ($record->employerVariableSymbol === null) {
+        $symbols = [];
+        foreach ([$record->employerVariableSymbol, $record->employerNewVariableSymbol] as $value) {
+            $symbol = $value === null ? null : RegistrationImportLookup::variableSymbol($value);
+            if ($symbol !== null) {
+                $symbols[$symbol] = $value;
+            }
+        }
+        if ($symbols === []) {
             return null;
         }
         $known = $this->lookup->variableSymbols($supplierId);
-        $symbol = RegistrationImportLookup::variableSymbol($record->employerVariableSymbol);
-        if ($known === [] || $symbol === null || in_array($symbol, $known, true)) {
+        if ($known === []) {
+            if (in_array($record->documentType, ['REGZEC25', 'PREZEC26'], true)) {
+                $warnings[] = 'Firma nemá vyplněný VS mzdové účtárny, takže nejde ověřit, že věta (VS '
+                    . $record->employerVariableSymbol . ') patří jí. Doplňte VS v nastavení mzdové účtárny.';
+            }
+
             return null;
         }
+        foreach (array_keys($symbols) as $symbol) {
+            if (in_array((string) $symbol, $known, true)) {
+                return null;
+            }
+        }
 
-        return "Věta nese variabilní symbol zaměstnavatele {$record->employerVariableSymbol}, který nepatří žádné "
-            . 'mzdové účtárně této firmy. Soubor je nejspíš jiného zaměstnavatele — nahrajte soubor stažený '
-            . 'pod správným VS, nebo VS doplňte v nastavení mzdové účtárny.';
+        return 'Věta nese variabilní symbol zaměstnavatele ' . implode(' / ', array_values($symbols))
+            . ', který nepatří žádné mzdové účtárně této firmy. Soubor je nejspíš jiného zaměstnavatele - nahrajte '
+            . 'soubor stažený pod správným VS, nebo VS doplňte v nastavení mzdové účtárny.';
     }
 
     private static function exportWithoutStartBlocker(string $prefix): string

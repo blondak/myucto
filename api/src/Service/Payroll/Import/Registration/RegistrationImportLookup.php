@@ -195,6 +195,46 @@ final class RegistrationImportLookup
         ];
     }
 
+    /** Má osoba adresu daného druhu, která začíná až po daném dni? */
+    public function hasAddressAfter(int $supplierId, int $employeeId, string $addressType, string $onDate): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id = ? AND address_type = ? AND effective_from > ?
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $addressType, $onDate]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /** Má osoba verzi zdravotní pojišťovny, která začíná až po daném dni? */
+    public function hasHealthCoverageAfter(int $supplierId, int $employeeId, string $onDate): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ? AND employee_id = ? AND effective_from > ?
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /** Má vztah vyplněný záznam o způsobu skončení? */
+    public function hasTerminationRecord(int $supplierId, int $employmentId): bool
+    {
+        if (!$this->db->hasTable('payroll_employment_terminations')) {
+            return false;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_employment_terminations WHERE supplier_id = ? AND employment_id = ? LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employmentId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
     public function hasAddressType(int $supplierId, int $employeeId, string $addressType): bool
     {
         $statement = $this->db->pdo()->prepare(

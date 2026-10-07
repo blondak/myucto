@@ -79,6 +79,7 @@ final class RegistrationImportService
         $read = $this->read($supplierId, $files);
         $records = [];
         $registrationPlans = [];
+        $pairs = self::noShowPairs($read['registrations'], null);
         foreach ($read['registrations'] as $item) {
             $key = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
             $plan = $this->planner->plan(
@@ -89,6 +90,8 @@ final class RegistrationImportService
                 $item['sha256'],
                 $relationTypeMap[$key] ?? null,
                 isset($terminationKeys[$key]),
+                isset($pairs['defer'][$key]),
+                isset($pairs['follow'][$key]),
             );
             $registrationPlans[] = $plan;
             // Odvozená věta vztahu, který evidence už vede beze změny, by náhled
@@ -201,16 +204,26 @@ final class RegistrationImportService
                 $ordered[] = $byKey[$key];
             }
         }
+        // Nenastoupení musí jít po přihlášce téže osoby, i když má dřívější datum.
+        $pairs = self::noShowPairs($read['registrations'], $selected);
+        $sortDate = static function (array $item) use ($pairs): string {
+            $key = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
+            $date = $item['record']->decisiveDate() ?? '9999-12-31';
+
+            return isset($pairs['after'][$key]) && $pairs['after'][$key] > $date ? $pairs['after'][$key] : $date;
+        };
         // Přihlášení musí jít před změnou a odhlášením téže osoby, i když
         // leží v souborech v jiném pořadí.
         usort($ordered, static fn (array $a, array $b): int => [
-            $a['record']->decisiveDate() ?? '9999-12-31',
+            $sortDate($a),
             $a['record']->documentType === 'PREZEC26' ? 0 : 1,
+            isset($pairs['after'][RegistrationImportPlanner::key($a['sha256'], $a['record']->position)]) ? 1 : 0,
             $a['file_index'],
             $a['record']->position,
         ] <=> [
-            $b['record']->decisiveDate() ?? '9999-12-31',
+            $sortDate($b),
             $b['record']->documentType === 'PREZEC26' ? 0 : 1,
+            isset($pairs['after'][RegistrationImportPlanner::key($b['sha256'], $b['record']->position)]) ? 1 : 0,
             $b['file_index'],
             $b['record']->position,
         ]);
@@ -224,7 +237,20 @@ final class RegistrationImportService
             }
         }
         foreach ($ordered as $item) {
-            $result = $this->applyRegistration($supplierId, $environment, $item, $officeId, $userId, $ip, $userAgent, $relationTypeMap, $terminationKeys);
+            $recordKey = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
+            $result = $this->applyRegistration(
+                $supplierId,
+                $environment,
+                $item,
+                $officeId,
+                $userId,
+                $ip,
+                $userAgent,
+                $relationTypeMap,
+                $terminationKeys,
+                isset($pairs['defer'][$recordKey]),
+                isset($pairs['follow'][$recordKey]),
+            );
             $results[(string) $result['key']] = $result;
         }
 
@@ -322,6 +348,27 @@ final class RegistrationImportService
             }
         }
         $unresolved = self::unresolvedForms($settled);
+        // Přihláška, jejíž aktivaci jsme odložili kvůli nenastoupení z téže dávky,
+        // nesmí vypadat jako hotová, když se nenastoupení nezapsalo: vztah zůstal plánovaný.
+        foreach ($pairs['defer'] as $registrationKey => $noShowKey) {
+            $registration = $results[$registrationKey] ?? null;
+            if ($registration === null || ($registration['status'] ?? null) !== 'applied') {
+                continue;
+            }
+            $noShow = $results[$noShowKey] ?? null;
+            if (($noShow['status'] ?? null) === 'applied') {
+                continue;
+            }
+            $unresolved[] = [
+                'key' => $registrationKey,
+                'file' => (string) ($byKey[$registrationKey]['file'] ?? ''),
+                'period' => '',
+                'label' => (string) ($byKey[$registrationKey]['record']->fullName() ?? ''),
+                'reason' => 'Přihláška se zapsala, ale vztah zůstal plánovaný, protože ho má uzavřít hlášení '
+                    . 'o nenastoupení z téže dávky, a to se nezapsalo'
+                    . (isset($noShow['message']) && is_string($noShow['message']) ? ': ' . $noShow['message'] : '.'),
+            ];
+        }
 
         return [
             'results' => $list,
@@ -333,6 +380,86 @@ final class RegistrationImportService
             'outcome' => $summary['failed'] === 0 && $unresolved === [] ? 'complete' : 'incomplete',
             'unresolved' => $unresolved,
         ];
+    }
+
+    /**
+     * Přihlášky, které v téže dávce ruší hlášení o nenastoupení (REGZEC A1 + A8 téže
+     * osoby), a částečná přihlášení s ukončením předregistrace (PREZEC P1 + P2).
+     *
+     * Každá věta se jinak plánuje nad stavem evidence PŘED dávkou: A1 s datem nástupu
+     * v minulosti by vztah aktivovala a nenastoupení by pak narazilo na „vztah už
+     * začal". Dvojice se proto pozná předem: přihláška vztah jen založí (zůstane
+     * plánovaný) a nenastoupení ho uzavře. Páruje se jen jednoznačně (jedna přihláška
+     * a jedno nenastoupení se shodným rodným číslem, OIČ nebo ID PPV); jinak se věty
+     * plánují po staru a nenastoupení případně narazí na blokaci.
+     *
+     * @param list<array{record:RegistrationRecord,file:string,sha256:string,file_index:int}> $items
+     * @param array<string,true>|null $selected vybrané klíče vět; `null` = všechny (náhled)
+     * @return array{defer:array<string,string>,follow:array<string,string>,after:array<string,string>}
+     *   `defer` přihláška => nenastoupení, `follow` nenastoupení => přihláška, `after` nenastoupení => nejdřív zpracovat po dni
+     */
+    private static function noShowPairs(array $items, ?array $selected): array
+    {
+        $starts = [];
+        $endings = [];
+        foreach ($items as $item) {
+            $record = $item['record'];
+            $key = RegistrationImportPlanner::key($item['sha256'], $record->position);
+            if ($selected !== null && !isset($selected[$key])) {
+                continue;
+            }
+            $identity = [];
+            if ($record->birthNumber !== null) {
+                $identity[] = 'bno:' . preg_replace('/\D/', '', $record->birthNumber);
+            }
+            if ($record->personIdentifier !== null) {
+                $identity[] = 'oic:' . $record->personIdentifier;
+            }
+            if ($record->employmentIdentifier !== null) {
+                $identity[] = 'ppv:' . $record->employmentIdentifier;
+            }
+            if ($identity === []) {
+                continue;
+            }
+            if (($record->documentType === 'REGZEC25' && $record->actionCode === 1)
+                || ($record->documentType === 'PREZEC26' && $record->actionCode === 9)
+            ) {
+                $starts[$key] = ['type' => $record->documentType, 'identity' => $identity, 'date' => $record->decisiveDate()];
+            } elseif (($record->documentType === 'REGZEC25' && $record->actionCode === 8)
+                || ($record->documentType === 'PREZEC26' && $record->actionCode === 10)
+            ) {
+                $endings[$key] = ['type' => $record->documentType, 'identity' => $identity];
+            }
+        }
+        $result = ['defer' => [], 'follow' => [], 'after' => []];
+        foreach ($endings as $endingKey => $ending) {
+            $matches = array_keys(array_filter(
+                $starts,
+                static fn (array $start): bool => $start['type'] === $ending['type']
+                    && array_intersect($start['identity'], $ending['identity']) !== [],
+            ));
+            if (count($matches) !== 1) {
+                continue;
+            }
+            $startKey = (string) $matches[0];
+            $reverse = array_filter(
+                $endings,
+                static fn (array $other): bool => $other['type'] === $starts[$startKey]['type']
+                    && array_intersect($starts[$startKey]['identity'], $other['identity']) !== [],
+            );
+            if (count($reverse) !== 1) {
+                continue;
+            }
+            $result['follow'][$endingKey] = $startKey;
+            if ($ending['type'] === 'REGZEC25') {
+                $result['defer'][$startKey] = $endingKey;
+            }
+            if ($starts[$startKey]['date'] !== null) {
+                $result['after'][$endingKey] = (string) $starts[$startKey]['date'];
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -384,6 +511,8 @@ final class RegistrationImportService
         ?string $userAgent,
         array $relationTypeMap = [],
         array $terminationKeys = [],
+        bool $deferActivation = false,
+        bool $registrationInBatch = false,
     ): array {
         $recordKey = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
         $plan = $this->planner->plan(
@@ -394,6 +523,8 @@ final class RegistrationImportService
             $item['sha256'],
             $relationTypeMap[$recordKey] ?? null,
             isset($terminationKeys[$recordKey]),
+            $deferActivation,
+            $registrationInBatch,
         );
         $key = (string) $plan['key'];
         if ($plan['blocker'] !== null) {
@@ -530,7 +661,12 @@ final class RegistrationImportService
         $stornos = [];
         $hasJmhz = false;
         $reports = [];
-        foreach (ImportFiles::fromRequest($files, ['xml']) as $index => $file) {
+        foreach (ImportFiles::fromRequest(
+            $files,
+            ['xml'],
+            ImportFiles::XML_MAX_FILE_BYTES,
+            ImportFiles::XML_MAX_TOTAL_BYTES,
+        ) as $index => $file) {
             if (JmhzReportReader::isJmhz($file['content'])) {
                 $hasJmhz = true;
                 try {
