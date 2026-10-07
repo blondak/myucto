@@ -48,11 +48,25 @@ export interface TakeoverEstimatedStart {
   possible_months: number[]
 }
 
+/**
+ * Převzatý pracovní poměr s důvodem slevy na pojistném, ke kterému chybí
+ * přijatý záměr OZUSPOJ; sleva se bez něj neuplatní (§ 7a odst. 5).
+ */
+export interface TakeoverMissingDiscountIntent {
+  employee_id: number
+  employee_name: string
+  employment_id: number
+  employment_code: string
+  discount_reason: string
+}
+
 export interface TakeoverCheck {
   takeover_months: number[]
   missing_openings: TakeoverGap[]
   /** Volitelné kvůli starší odpovědi bez klíče. */
   estimated_starts?: TakeoverEstimatedStart[]
+  /** Volitelné kvůli starší odpovědi bez klíče. */
+  missing_discount_intents?: TakeoverMissingDiscountIntent[]
   differences: TakeoverLayerDifference[]
   opening_only: TakeoverLayerOneSided[]
   takeover_only: TakeoverLayerOneSided[]

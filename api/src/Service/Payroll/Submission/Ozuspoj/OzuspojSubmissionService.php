@@ -292,7 +292,14 @@ final readonly class OzuspojSubmissionService
         $this->validator->validate($payload, $xml);
         $window = $kind === OzuspojSubmissionKind::End
             ? $this->deadlines->forIntentEnd((string) $intentTo)
-            : $this->deadlines->forIntentStart($intentFrom);
+            : $this->deadlines->forIntentStart(
+                $intentFrom,
+                $this->intentService->registrationSubmittedOn(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                ),
+            );
 
         return [
             'xml' => $xml,

@@ -265,17 +265,218 @@ final class EldpAnnualStatementBuilderTest extends TestCase
     }
 
     /**
-     * Pracující důchodce: roční evidenční list (znění do 31. 12. 2025) se
-     * za něj sestavuje dál. Metodická pomůcka ČSSZ k ELDP, příklad 8: po
-     * přiznání starobního důchodu zaměstnavatel „musí založit nový ELDP na
-     * období po odeslání ELDP přiloženého k žádosti o důchod". Doba pojištění
-     * při pobírání důchodu zvyšuje důchod. Měsíční hlášení JMHZ třídu ELDP
-     * u poživatele důchodu neuvádí (metodika MPSV k JMHZ), to je ale jiný
-     * režim; test hlídá, aby se oba nesjednotily.
+     * Ověřená sleva pracujícího důchodce dokládá, že zaměstnanec pobírá
+     * starobní důchod. Potvrzení, které žádný důchod neuvádí, s ní neprojde;
+     * dřív z toho vznikl list s kódem „++" za celý rok.
      */
-    public function testWorkingPensionerStillGetsAnnualStatementUnderTheOldLaw(): void
+    public function testWorkingPensionerWithoutDeclaredPensionIsBlocked(): void
     {
-        $revisions = array_map(function (array $revision): array {
+        try {
+            $this->build($this->withWorkingPensionerDiscount($this->wholeYear(2025)));
+            self::fail('Sleva pracujícího důchodce bez potvrzeného důchodu musí blokovat.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame(
+                ['eldp_pension_status_conflict'],
+                array_column($exception->blockers, 'code'),
+            );
+        }
+    }
+
+    /**
+     * § 38 odst. 1 věta druhá zákona č. 582/1991 Sb. ve znění od 1. 1. 2025:
+     * za poživatele starobního důchodu v plné výši, který není účasten
+     * pojištění v cizině, se evidenční list nevede.
+     */
+    public function testFullOldAgePensionerForWholeYear2025HasNoStatement(): void
+    {
+        try {
+            $this->build(
+                $this->withWorkingPensionerDiscount($this->wholeYear(2025)),
+                confirmation: $this->confirmation(pension: ['full_pension_paid_from' => '2025-01']),
+            );
+            self::fail('Za plného starobního důchodce se list za rok 2025 nevede.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_not_kept_full_old_age_pension', $exception->validationCode);
+        }
+    }
+
+    public function testFullOldAgePensionFromJuly2025KeepsOnlyJanuaryToJune(): void
+    {
+        $statement = $this->build(
+            $this->wholeYear(2025),
+            confirmation: $this->confirmation(pension: ['full_pension_paid_from' => '2025-07']),
+        );
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame('1++', $sections[0]['code']);
+        self::assertSame('2025-01-01', $sections[0]['valid_from']);
+        self::assertSame('2025-06-30', $sections[0]['valid_to']);
+        self::assertSame(181, $sections[0]['insurance_days']);
+        self::assertSame(60_000, $sections[0]['assessment_base_czk']);
+        self::assertCount(6, $statement->payload['source_revisions']);
+        self::assertSame('2025-07-01', $statement->payload['pension']['not_kept_from']);
+    }
+
+    public function testFullOldAgePensionerInsuredAbroadKeepsTheWholeYear(): void
+    {
+        $sections = $this->build(
+            $this->withWorkingPensionerDiscount($this->wholeYear(2025)),
+            confirmation: $this->confirmation(pension: [
+                'full_pension_paid_from' => '2025-01',
+                'foreign_insurance' => true,
+            ]),
+        )->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+    }
+
+    /**
+     * Do roku 2024 se list za pracujícího důchodce vedl dál (Metodická pomůcka
+     * ČSSZ k ELDP, příklad 8): pravidlo plného důchodu platí až od roku 2025.
+     */
+    public function testFullOldAgePensionerBefore2025StillGetsStatement(): void
+    {
+        $sections = $this->build(
+            $this->wholeYear(2024),
+            2024,
+            $this->confirmation(pension: ['full_pension_paid_from' => '2024-01']),
+        )->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame(366, $sections[0]['insurance_days']);
+    }
+
+    /**
+     * Číselník kódů ELDP: druhý znak „D" = výdělečná činnost po dovršení
+     * důchodového věku. Dřív vznikal vždy kód „++".
+     */
+    public function testPensionAgeReachedSplitsTheYearIntoCodeD(): void
+    {
+        $statement = $this->build(
+            $this->wholeYear(2025),
+            confirmation: $this->confirmation(pension: ['pension_age_reached_on' => '2025-04-01']),
+        );
+
+        $sections = $statement->sections();
+        self::assertSame(['1++', '1D+'], array_column($sections, 'code'));
+        self::assertSame('2025-03-31', $sections[0]['valid_to']);
+        self::assertSame(90, $sections[0]['insurance_days']);
+        self::assertSame('2025-04-01', $sections[1]['valid_from']);
+        self::assertSame('2025-12-31', $sections[1]['valid_to']);
+        self::assertSame(275, $sections[1]['insurance_days']);
+        self::assertSame(90_000, $sections[1]['assessment_base_czk']);
+
+        $xml = (new EldpXmlSerializer())->serialize($statement);
+        self::assertStringContainsString('<kod>1D+</kod>', $xml);
+        (new EldpXmlValidator())->validate($statement, $xml);
+    }
+
+    /**
+     * Den uprostřed měsíce by vyžadoval rozdělit měsíční vyměřovací základ,
+     * který výpočet za část měsíce nevede. Místo vymyšleného rozdělení blokátor.
+     */
+    public function testPensionAgeReachedMidMonthBlocks(): void
+    {
+        try {
+            $this->build(
+                $this->wholeYear(2025),
+                confirmation: $this->confirmation(pension: ['pension_age_reached_on' => '2025-03-15']),
+            );
+            self::fail('Kód D od poloviny měsíce nesmí vymyslet rozdělení základu.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame(
+                ['eldp_pension_age_mid_month_unsupported'],
+                array_column($exception->blockers, 'code'),
+            );
+            self::assertSame('2025-03-01', $exception->blockers[0]['detail']['period_start']);
+        }
+    }
+
+    /** Poživatel předčasného starobního důchodu: list se vede, s kódem D. */
+    public function testEarlyOldAgePensionerKeepsStatementWithCodeD(): void
+    {
+        $sections = $this->build(
+            $this->withWorkingPensionerDiscount($this->wholeYear(2025)),
+            confirmation: $this->confirmation(pension: ['early_pension_from' => '2024-09-01']),
+        )->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame('1D+', $sections[0]['code']);
+        self::assertSame(365, $sections[0]['insurance_days']);
+    }
+
+    public function testPensionStatusMustBeConfirmedExplicitly(): void
+    {
+        $confirmation = $this->confirmation();
+        unset($confirmation['pension_status']);
+
+        try {
+            $this->build($this->wholeYear(2025), confirmation: $confirmation);
+            self::fail('Bez potvrzení důchodových údajů se list nesestaví.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_pension_status_not_confirmed', $exception->validationCode);
+        }
+    }
+
+    /**
+     * Od roku 2027 žádné přechodné ustanovení nedopadá: termín určuje výzva
+     * a list necituje přechodné ustanovení „za rok 2026".
+     */
+    public function testAuthorityRequestAfter2026TakesTheDueDateFromTheRequest(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2027-09-10';
+        $confirmation['authority_request_due_on'] = '2027-09-30';
+
+        $deadline = $this->build($this->months(2027, 1, 8), 2027, $confirmation)
+            ->payload['deadline'];
+
+        self::assertSame('cz-eldp-deadlines.authority-request.stated-due.v1', $deadline['ruleset_id']);
+        self::assertSame('2027-09-30', $deadline['due_on']);
+        self::assertStringNotContainsString('rok 2026', $deadline['legal_basis']);
+        self::assertStringContainsString('§ 38a odst. 1 a 2', $deadline['legal_basis']);
+    }
+
+    public function testAuthorityRequestAfter2026WithoutDueDateIsRefused(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2027-09-10';
+
+        try {
+            $this->build($this->months(2027, 1, 8), 2027, $confirmation);
+            self::fail('Bez lhůty z výzvy se termín za rok 2027 nevymýšlí.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_authority_request_due_on_missing', $exception->validationCode);
+        }
+    }
+
+    /** List za rok 2025 na výzvu cituje § 39 odst. 3 starého znění, ne rok 2026. */
+    public function testAuthorityRequestFor2025CitesTheOldWording(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2026-02-10';
+
+        $deadline = $this->build($this->wholeYear(2025), 2025, $confirmation)
+            ->payload['deadline'];
+
+        self::assertSame('cz-eldp-deadlines.authority-request.pre-2026.v1', $deadline['ruleset_id']);
+        self::assertSame('2026-02-18', $deadline['due_on']);
+        self::assertStringContainsString('§ 39 odst. 3', $deadline['legal_basis']);
+        self::assertStringNotContainsString('rok 2026', $deadline['legal_basis']);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $revisions
+     * @return list<array<string,mixed>>
+     */
+    private function withWorkingPensionerDiscount(array $revisions): array
+    {
+        return array_map(function (array $revision): array {
             $input = json_decode($revision['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
             $input['people'][0]['statutory_evidence'] = [
                 'social' => ['working_pensioner_discount' => ['status' => 'verified']],
@@ -292,12 +493,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
                 'result_snapshot_json' => $resultJson,
                 'result_snapshot_hash' => hash('sha256', $resultJson),
             ];
-        }, $this->wholeYear(2025));
-
-        $sections = $this->build($revisions)->sections();
-
-        self::assertCount(1, $sections);
-        self::assertSame(365, $sections[0]['insurance_days']);
+        }, $revisions);
     }
 
     /** @return list<array<string,mixed>> */
@@ -720,24 +916,34 @@ final class EldpAnnualStatementBuilderTest extends TestCase
             ->submissionSchema();
     }
 
-    /** @param list<array<string,mixed>> $revisions */
-    private function build(array $revisions, int $year = 2025): EldpAnnualStatement
-    {
+    /**
+     * @param list<array<string,mixed>> $revisions
+     * @param array<string,mixed>|null $confirmation
+     */
+    private function build(
+        array $revisions,
+        int $year = 2025,
+        ?array $confirmation = null,
+    ): EldpAnnualStatement {
         return (new EldpAnnualStatementBuilder())->build(
             self::SUPPLIER_ID,
             self::EMPLOYMENT_ID,
             $year,
             $revisions,
-            $this->confirmation(),
+            $confirmation ?? $this->confirmation(),
         );
     }
 
-    /** @return array<string,mixed> */
-    private function confirmation(): array
+    /**
+     * @param array<string,mixed> $pension
+     * @return array<string,mixed>
+     */
+    private function confirmation(array $pension = []): array
     {
         return [
             'excluded_days_confirmed' => true,
             'deducted_days_none' => true,
+            'pension_status' => $pension + ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
             'requested_by_authority' => false,
             'note' => 'Syntetický evidenční list pro test, žádná reálná data.',
         ];

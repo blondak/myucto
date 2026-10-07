@@ -94,7 +94,6 @@ final readonly class PayrollDiscountIntentRepository
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    employment.effective_status,
                     employee.full_name,
                     terms.social_part_time_discount_reason,
                     terms.social_part_time_discount_evidence,
@@ -168,6 +167,88 @@ final readonly class PayrollDiscountIntentRepository
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /**
+     * Den podání přihlášky zaměstnance (PREZEC P1 nebo REGZEC A1) podle
+     * vztahu, dolní mez oznámení záměru podle § 7a odst. 5 věty druhé
+     * zákona č. 589/1992 Sb. („ne však dříve než dnem podání oznámení
+     * o nástupu").
+     *
+     * Bere se nejdřívější doložené podání: vlastní základní registrace
+     * s vyplněným `submitted_at` (zamítnutá, nahrazená ani včas zrušená se
+     * nepočítá) a přihláška podaná předchozím programem, převzatá s dnem
+     * podání. Vztah bez obojího ve výsledku chybí: nevíme, ne „nebylo".
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string> `employment_id` => `YYYY-MM-DD`
+     */
+    public function registrationSubmittedOn(
+        int $supplierId,
+        string $environment,
+        array $employmentIds,
+    ): array {
+        $ids = array_values(array_unique(array_filter(
+            $employmentIds,
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $references = array_map(
+            static fn (int $id): string => 'payroll_employment:' . $id,
+            $ids,
+        );
+        $statement = $this->db->pdo()->prepare(
+            'WITH registrations AS (
+                SELECT CAST(SUBSTRING(part.subject_reference, 20) AS UNSIGNED) AS employment_id,
+                       DATE(submission.submitted_at) AS submitted_on
+                  FROM payroll_submission_parts part
+                  JOIN payroll_submissions submission
+                    ON submission.supplier_id = part.supplier_id
+                   AND submission.environment = part.environment
+                   AND submission.id = part.submission_id
+                 WHERE part.supplier_id = ?
+                   AND part.environment = ?
+                   AND part.source_entity_type = "payroll_employment"
+                   AND part.agenda_code IN ("PREZEC26", "REGZEC25")
+                   AND part.subject_reference IN (' . $placeholders . ')
+                   AND submission.submitted_at IS NOT NULL
+                   AND submission.status NOT IN ("rejected", "superseded", "cancelled_in_time")
+                UNION ALL
+                SELECT form.employment_id,
+                       DATE(external.submitted_at) AS submitted_on
+                  FROM payroll_external_jmhz_submissions external
+                  JOIN payroll_external_jmhz_submission_forms form
+                    ON form.supplier_id = external.supplier_id
+                   AND form.submission_id = external.id
+                 WHERE external.supplier_id = ?
+                   AND external.environment = ?
+                   AND external.document_kind = "registration"
+                   AND external.status = "sent"
+                   AND external.submitted_at IS NOT NULL
+                   AND form.form_type = "A1"
+                   AND form.employment_id IN (' . $placeholders . ')
+            )
+            SELECT employment_id, MIN(submitted_on) AS submitted_on
+              FROM registrations
+             GROUP BY employment_id'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            ...$references,
+            $supplierId,
+            $environment,
+            ...$ids,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['employment_id']] = (string) $row['submitted_on'];
+        }
+
+        return $result;
+    }
+
     public function insert(
         int $supplierId,
         string $environment,
@@ -199,6 +280,100 @@ final readonly class PayrollDiscountIntentRepository
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * Záměr přijatý ČSSZ od předchozího mzdového programu. Zakládá se rovnou
+     * jako `accepted` s dnem doručení z protokolu. Podání z MyÚčta k němu
+     * nevzniká, takže ani povinnost s lhůtou oznámení.
+     */
+    public function insertPredecessorAccepted(
+        int $supplierId,
+        string $environment,
+        int $employeeId,
+        int $employmentId,
+        string $discountReason,
+        string $intentFrom,
+        int $osszCode,
+        string $acceptedOn,
+        string $predecessorSource,
+        string $predecessorReference,
+        int $createdBy,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_discount_intents
+                 (supplier_id, environment, employee_id, employment_id,
+                  discount_reason, intent_from, status, accepted_on, ossz_code,
+                  predecessor_source, predecessor_reference, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, "accepted", ?, ?, ?, ?, ?)'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $employeeId,
+            $employmentId,
+            $discountReason,
+            $intentFrom,
+            $acceptedOn,
+            $osszCode,
+            $predecessorSource,
+            mb_substr($predecessorReference, 0, 190),
+            $createdBy,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findByScope(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $intentFrom,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT intent.*, employee.full_name
+               FROM payroll_discount_intents intent
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = intent.supplier_id
+                AND employee.id = intent.employee_id
+              WHERE intent.supplier_id = ?
+                AND intent.environment = ?
+                AND intent.employment_id = ?
+                AND intent.intent_from = ?'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $intentFrom]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Přijatý záměr vztahu, který platil ke dni `onDate`, protějšek oznámení
+     * o skončení (typ 2), které den zahájení nenese.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function acceptedCovering(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $onDate,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_discount_intents
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND employment_id = ?
+                AND status = "accepted"
+                AND intent_from <= ?
+                AND (intent_to IS NULL OR intent_to >= ?)
+              ORDER BY intent_from, id'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId, $onDate, $onDate]);
+
+        return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**

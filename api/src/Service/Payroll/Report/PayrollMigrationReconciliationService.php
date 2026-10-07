@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Report;
 use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDiscountIntentCheck;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 
@@ -26,6 +27,7 @@ final class PayrollMigrationReconciliationService
         private readonly PayrollTakeoverCoverage $coverage,
         private readonly PayrollTakeoverLayerCheck $layers,
         private readonly PayrollHistoricalPeriodService $historical,
+        private readonly PayrollTakeoverDiscountIntentCheck $discountIntents,
         ?PayrollMigrationReconciliationBuilder $builder = null,
     ) {
         $this->builder = $builder ?? new PayrollMigrationReconciliationBuilder();
@@ -71,6 +73,9 @@ final class PayrollMigrationReconciliationService
             'takeover_months' => $this->coverage->takeoverMonths($supplierId, $year),
             'missing_openings' => $this->coverage->gaps($supplierId, $year),
             'estimated_starts' => $this->coverage->estimatedStartGaps($supplierId, $year),
+            // Sleva na pojistném bez přijatého záměru OZUSPOJ se neuplatní; po
+            // převodu záměr předchozího programu chybí, dokud se nepřevezme.
+            'missing_discount_intents' => $this->discountIntents->missingIntents($supplierId, $year),
             ...$this->layers->check($supplierId, $year),
         ];
 

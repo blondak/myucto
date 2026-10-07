@@ -194,6 +194,7 @@ describe('PayrollEldpPanel', () => {
     const blockers = wrapper.get('[data-test="eldp-prepare-blockers"]').text()
     expect(blockers).toContain('payroll.eldp.blockers.excluded')
     expect(blockers).toContain('payroll.eldp.blockers.deducted')
+    expect(blockers).toContain('payroll.eldp.blockers.pension')
     expect(blockers).not.toContain('payroll.eldp.blockers.note')
 
     await fillConfirmation(wrapper)
@@ -218,6 +219,7 @@ describe('PayrollEldpPanel', () => {
 
     await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
     await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
+    await wrapper.get('[data-test="eldp-pension-confirm"]').setValue(true)
     await wrapper.get('[data-test="eldp-note"]').setValue('')
     await flushPromises()
 
@@ -336,6 +338,31 @@ describe('PayrollEldpPanel', () => {
     expect(m.prepareEldp).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-test="eldp-success"]').text())
       .toContain('payroll.eldp.preparedCreated')
+  })
+
+  /*
+   * Kód D a to, zda se list za poživatele plného starobního důchodu vůbec
+   * vede, stojí na důchodových údajích. Posílají se vždy všechny, prázdné
+   * jako null, aby „nenastalo" nebylo totéž co „nezadáno".
+   */
+  it('pošle výslovně potvrzené důchodové údaje', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+    await wrapper.get('[data-test="eldp-pension-age"]').setValue('2025-04-01')
+    await wrapper.get('[data-test="eldp-pension-full"]').setValue('2025-10')
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareEldp).toHaveBeenCalledWith(expect.objectContaining({
+      pension_status: {
+        pension_age_reached_on: '2025-04-01',
+        early_pension_from: null,
+        full_pension_paid_from: '2025-10',
+        foreign_insurance: false,
+      },
+    }))
   })
 
   it('nabídne pouze stažení kontrolního XML a nikdy odeslání', async () => {
@@ -542,6 +569,7 @@ async function fillConfirmation(
   await flushPromises()
   await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
   await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
+  await wrapper.get('[data-test="eldp-pension-confirm"]').setValue(true)
   await wrapper.get('[data-test="eldp-note"]')
     .setValue('Syntetické potvrzení evidenčního listu.')
   await flushPromises()

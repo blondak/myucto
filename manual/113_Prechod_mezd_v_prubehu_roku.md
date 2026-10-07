@@ -158,6 +158,14 @@ Kontrola za rok vypíše:
   nástup opravit, nebo potvrdit tlačítkem **Nástup je správně**. Import hlášení
   za chybějící měsíce posune nástup dřív sám. Mzdový běh ani měsíční hlášení
   to neblokuje; vyúčtování daně a uzávěrka roku na to upozorní.
+- **Sleva na pojistném bez přijatého záměru:** převzatý pracovní poměr má
+  vyplněný důvod slevy na pojistném (§ 7a zákona č. 589/1992 Sb.), ale
+  v evidenci chybí záměr OZUSPOJ, který ČSSZ přijala. Bez něj se sleva
+  neuplatní. Záměr, který oznámil předchozí program, se převezme z jeho datové
+  věty OZUSPOJ23 spolu s dnem doručení z protokolu ČSSZ: vznikne rovnou jako
+  přijatý, označený jako převzatý, a nevzniká k němu povinnost ani lhůta
+  oznámení. Z měsíčního hlášení se záměr neodvozuje, protože hlášení neříká,
+  kdy ho ČSSZ přijala.
 
 Hlášení JMHZ nese u srážek ze mzdy jen příznak, ne jejich druh ani výši.
 Vykazuje-li je poslední převzaté hlášení, převzetí založí na vztahu úkol

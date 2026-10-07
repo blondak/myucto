@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 
 /**
@@ -60,25 +61,49 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  *   v § 38, stojí lhůta **3 kalendářní roky**. Do listu se proto nezapisuje:
  *   uchovávací lhůty modul drží na jednom místě, v retenčním katalogu
  *   (kategorie `PENSION_EVIDENCE_SHEETS`), ne v jednotlivých sestavovačích.
- * - **Odečítané doby** (10375, 10462–10469) — týkají se dob po dosažení
- *   důchodového věku, který modul nezná. Nula je proto podmíněná výslovným
+ * - **Odečítané doby** (10375, 10462–10469): nula je podmíněná výslovným
  *   potvrzením mzdové účetní, ne výpočtem.
  *
- * ## Pracující důchodce: vědomě jinak než měsíční hlášení
+ * ## Důchodové údaje zaměstnance: výslovné potvrzení
  *
- * Měsíční hlášení JMHZ u poživatele starobního důchodu třídu ELDP neuvádí
- * (JmhzEldpEvidenceBuilder::workingPensioner(), metodika MPSV k JMHZ). Tenhle
- * samostatný list se ale sestavuje podle znění zákona č. 582/1991 Sb. účinného
- * do 31. 12. 2025 (rok před 2026, přechod skončení před 1. 4. 2026, výzva
- * ČSSZ/ÚSSZ), a v tom se za pracujícího důchodce vede dál: Metodická pomůcka
- * ČSSZ k ELDP, příklad 8 — po přiznání důchodu zaměstnavatel „musí založit
- * nový ELDP na období po odeslání ELDP přiloženého k žádosti o důchod",
- * protože doba pojištění při pobírání důchodu důchod zvyšuje. Sjednotit obě
- * pravidla by pracujícímu důchodci vzalo zvýšení důchodu za rok 2025.
+ * Kód ELDP i to, zda se list vůbec vede, závisí na údajích, které zmrazená
+ * revize nenese: den dosažení důchodového věku, předčasný starobní důchod,
+ * první měsíc výplaty starobního důchodu v plné výši a účast na důchodovém
+ * pojištění v cizině. Účetní je proto potvrzuje výslovně
+ * (`confirmation.pension_status`, i když žádné nejsou); bez nich se list
+ * nesestaví. Ověřená sleva pracujícího důchodce ze zákonné evidence
+ * ({@see JmhzEldpEvidenceBuilder::workingPensioner()}) slouží jako kontrola:
+ * potvrzení, které žádný starobní důchod neuvádí, s ní nesmí projít.
+ *
+ * - **Plný starobní důchod (§ 38 odst. 1 věta druhá, od roku 2025).** Ve znění
+ *   účinném od 1. 1. 2025 se evidenční list nevede za občana, který má nárok na
+ *   výplatu starobního důchodu v plné výši, nebyl-li nebo není-li účasten
+ *   důchodového pojištění v cizině; novela č. 360/2025 Sb. podmínku převzala
+ *   („Věta první se nepoužije"). Měsíce od prvního měsíce výplaty se proto
+ *   z listu vypustí, a nezbude-li žádný, list se nesestaví
+ *   (`eldp_not_kept_full_old_age_pension`). Za roky do 2024 se list za
+ *   pracujícího důchodce vedl dál (Metodická pomůcka ČSSZ k ELDP, příklad 8).
+ * - **Kód D** (číselník kódů ELDP, druhý znak): výdělečná činnost po dovršení
+ *   důchodového věku nebo poživatel předčasného starobního důchodu. Sekce se
+ *   dělí ke dni, od kterého kód platí. Den uprostřed měsíce by vyžadoval
+ *   rozdělit měsíční vyměřovací základ, který výpočet za část měsíce nevede,
+ *   a proto blokuje (`eldp_pension_age_mid_month_unsupported`).
+ *
+ * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí
+ * a kód sestavuje vždy s druhým znakem „+" ({@see JmhzEldpEvidenceBuilder});
+ * kód D tam zatím chybí a je to vědomě otevřený rozdíl, ne vzor pro tenhle list.
  */
 final class EldpAnnualStatementBuilder
 {
-    public const BUILDER_VERSION = 'eldp-annual-statement.v3';
+    public const BUILDER_VERSION = 'eldp-annual-statement.v4';
+
+    /**
+     * První rok, za který se evidenční list za poživatele starobního důchodu
+     * v plné výši nevede (§ 38 odst. 1 věta druhá zákona č. 582/1991 Sb. ve
+     * znění účinném od 1. 1. 2025, po novele č. 360/2025 Sb. „Věta první se
+     * nepoužije").
+     */
+    public const FULL_PENSION_EXCLUSION_FROM_YEAR = 2025;
 
     private const MONTH_NAMES = [
         1 => 'leden', 2 => 'únor', 3 => 'březen', 4 => 'duben',
@@ -142,6 +167,20 @@ final class EldpAnnualStatementBuilder
                 );
             }
         }
+        $authorityRequestDueOn = $requestedByAuthority
+            ? ($confirmation['authority_request_due_on'] ?? null)
+            : null;
+        if ($authorityRequestDueOn === '') {
+            $authorityRequestDueOn = null;
+        }
+        if ($authorityRequestDueOn !== null
+            && (!is_string($authorityRequestDueOn) || !self::isDate($authorityRequestDueOn))
+        ) {
+            throw new EldpValidationException(
+                'eldp_authority_request_due_on_invalid',
+                'Lhůta uvedená ve výzvě ČSSZ/ÚSSZ musí být platné datum RRRR-MM-DD.',
+            );
+        }
         if (($confirmation['excluded_days_confirmed'] ?? null) !== true) {
             throw new EldpValidationException(
                 'eldp_excluded_days_not_confirmed',
@@ -155,6 +194,7 @@ final class EldpAnnualStatementBuilder
                     . 'evidenční list lze sestavit jen s výslovným potvrzením, že žádné nejsou.',
             );
         }
+        $pension = self::pensionStatus($confirmation['pension_status'] ?? null);
         // Poznámka je NAŠE pole, ne položka evidenčního listu — ČSSZ ji nikde
         // nepřijímá ani nečte, do XML se nedostane a slouží jen jako interní
         // stopa, proč byl list sestaven. Vyžadovat ji jako podmínku sestavení
@@ -193,6 +233,13 @@ final class EldpAnnualStatementBuilder
         ksort($months, SORT_STRING);
 
         $employment = $this->resolveEmployment($months, $employmentId, $blockers);
+        $this->assertPensionStatusMatchesEvidence(
+            $months,
+            $employment['employee_id'],
+            $employmentId,
+            $pension,
+            $blockers,
+        );
         $reportingEnd = $employment['end'];
         // Všeobecné zásady ČSSZ k ELDP určují pro výzvu během roku jako
         // datum „Do“ konec posledního měsíce se zúčtovaným příjmem. Schválená
@@ -212,6 +259,27 @@ final class EldpAnnualStatementBuilder
             $employment['start'],
             $reportingEnd,
         );
+        $notKeptFrom = self::fullPensionNotKeptFrom($year, $pension);
+        if ($notKeptFrom !== null) {
+            $requiredMonths = array_values(array_filter(
+                $requiredMonths,
+                static fn (string $periodStart): bool => $periodStart < $notKeptFrom,
+            ));
+            foreach (array_keys($months) as $periodStart) {
+                if ((string) $periodStart >= $notKeptFrom) {
+                    unset($months[$periodStart]);
+                }
+            }
+            if ($requiredMonths === [] && $months === []) {
+                throw new EldpValidationException(
+                    'eldp_not_kept_full_old_age_pension',
+                    "Za rok {$year} se evidenční list nevede: zaměstnanec má od "
+                        . self::monthLabel($notKeptFrom) . ' nárok na výplatu starobního '
+                        . 'důchodu v plné výši a není účasten důchodového pojištění v cizině '
+                        . '(§ 38 odst. 1 věta druhá zákona č. 582/1991 Sb.).',
+                );
+            }
+        }
         /*
          * Druhý zdroj měsíců se zapíná jen tehdy, když k tomuhle vztahu opravdu
          * nějaký převzatý měsíc leží. Firma, která vede mzdy v MyÚčtu celý rok,
@@ -315,6 +383,15 @@ final class EldpAnnualStatementBuilder
                 $lines[] = $line;
             }
         }
+        $pensionAgeCodeFrom = self::pensionAgeCodeFrom($pension);
+        if ($pensionAgeCodeFrom !== null) {
+            $lines = $this->applyPensionAgeCode(
+                $lines,
+                $pensionAgeCodeFrom,
+                $employmentId,
+                $blockers,
+            );
+        }
         if ($blockers !== []) {
             throw EldpValidationException::blocked($blockers);
         }
@@ -373,6 +450,8 @@ final class EldpAnnualStatementBuilder
         if ($requestedByAuthority) {
             $window = $this->deadlines->forAuthorityRequest(
                 (string) $authorityRequestReceivedOn,
+                $year,
+                is_string($authorityRequestDueOn) ? $authorityRequestDueOn : null,
             );
         } elseif ($participationEnd !== null
             && $participationEnd < sprintf('%04d-01-01', $year)
@@ -495,11 +574,17 @@ final class EldpAnnualStatementBuilder
                 $lines,
             ),
             'eldp_sections' => $sections,
+            'pension' => [
+                'not_kept_from' => $notKeptFrom,
+                'code_d_from' => $pensionAgeCodeFrom,
+            ],
             'confirmation' => [
                 'excluded_days_confirmed' => true,
                 'deducted_days_none' => true,
                 'requested_by_authority' => $requestedByAuthority,
                 'authority_request_received_on' => $authorityRequestReceivedOn,
+                'authority_request_due_on' => $authorityRequestDueOn,
+                'pension_status' => $pension,
                 'note' => trim($note),
             ],
         ];
@@ -1352,6 +1437,200 @@ final class EldpAnnualStatementBuilder
                 'provenance' => [],
             ],
         ];
+    }
+
+    /**
+     * Výslovně potvrzené důchodové údaje zaměstnance.
+     *
+     * Všechny čtyři klíče musí přijít, i když jsou prázdné: „nic se nezadalo"
+     * a „zaměstnanec důchod nepobírá" se jinak nedají rozlišit, a právě na tom
+     * stojí kód ELDP i to, zda se list vůbec vede.
+     *
+     * @return array{
+     *   pension_age_reached_on:?string,early_pension_from:?string,
+     *   full_pension_paid_from:?string,foreign_insurance:bool
+     * }
+     */
+    private static function pensionStatus(mixed $value): array
+    {
+        $keys = [
+            'pension_age_reached_on',
+            'early_pension_from',
+            'full_pension_paid_from',
+            'foreign_insurance',
+        ];
+        if (!is_array($value)
+            || array_diff($keys, array_keys($value)) !== []
+        ) {
+            throw new EldpValidationException(
+                'eldp_pension_status_not_confirmed',
+                'Potvrďte důchodové údaje zaměstnance: zda a kdy ve vykazovaném roce '
+                    . 'dosáhl důchodového věku, zda pobírá předčasný starobní důchod, '
+                    . 'od kterého měsíce mu náleží výplata starobního důchodu v plné výši '
+                    . 'a zda je účasten důchodového pojištění v cizině. Na těchto údajích '
+                    . 'závisí kód ELDP i to, zda se evidenční list vůbec vede.',
+            );
+        }
+        foreach (['pension_age_reached_on', 'early_pension_from'] as $key) {
+            $date = $value[$key];
+            if ($date !== null && (!is_string($date) || !self::isDate($date))) {
+                throw new EldpValidationException(
+                    'eldp_pension_status_invalid',
+                    'Den dosažení důchodového věku a den přiznání předčasného starobního '
+                        . 'důchodu musí být prázdné, nebo platné datum RRRR-MM-DD.',
+                );
+            }
+        }
+        $paidFrom = $value['full_pension_paid_from'];
+        if ($paidFrom !== null
+            && (!is_string($paidFrom)
+                || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $paidFrom) !== 1)
+        ) {
+            throw new EldpValidationException(
+                'eldp_pension_status_invalid',
+                'První měsíc výplaty starobního důchodu v plné výši musí být prázdný, '
+                    . 'nebo měsíc ve tvaru RRRR-MM.',
+            );
+        }
+        if (!is_bool($value['foreign_insurance'])) {
+            throw new EldpValidationException(
+                'eldp_pension_status_invalid',
+                'Účast na důchodovém pojištění v cizině musí být výslovně ano, nebo ne.',
+            );
+        }
+
+        return [
+            'pension_age_reached_on' => $value['pension_age_reached_on'],
+            'early_pension_from' => $value['early_pension_from'],
+            'full_pension_paid_from' => $paidFrom,
+            'foreign_insurance' => $value['foreign_insurance'],
+        ];
+    }
+
+    /**
+     * Ověřená sleva pracujícího důchodce (§ 7d zákona č. 589/1992 Sb.) náleží
+     * jen poživateli starobního důchodu. Potvrzení, které v témž roce žádný
+     * starobní důchod neuvádí, si s ní odporuje: list by vyšel s kódem „++"
+     * a za měsíce, za které se nevede.
+     *
+     * @param array<string,array<string,mixed>> $months
+     * @param array{early_pension_from:?string,full_pension_paid_from:?string} $pension
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     */
+    private function assertPensionStatusMatchesEvidence(
+        array $months,
+        int $employeeId,
+        int $employmentId,
+        array $pension,
+        array &$blockers,
+    ): void {
+        if ($pension['early_pension_from'] !== null
+            || $pension['full_pension_paid_from'] !== null
+        ) {
+            return;
+        }
+        foreach ($months as $periodStart => $month) {
+            $input = $month['input'] ?? null;
+            if (is_array($input)
+                && JmhzEldpEvidenceBuilder::workingPensioner($input, $employeeId)
+            ) {
+                $blockers[] = [
+                    'code' => 'eldp_pension_status_conflict',
+                    'message' => 'Zákonná evidence má za ' . self::monthLabel((string) $periodStart)
+                        . ' ověřenou slevu pracujícího důchodce, ale potvrzení evidenčního '
+                        . 'listu neuvádí žádný starobní důchod. Doplňte první měsíc výplaty '
+                        . 'starobního důchodu, nebo den přiznání předčasného důchodu.',
+                    'detail' => [
+                        'period_start' => (string) $periodStart,
+                        'employment_id' => $employmentId,
+                    ],
+                ];
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * Od kterého měsíce se list za poživatele starobního důchodu v plné výši
+     * nevede; `null`, když se pravidlo na rok nebo osobu nevztahuje.
+     *
+     * @param array{full_pension_paid_from:?string,foreign_insurance:bool} $pension
+     */
+    private static function fullPensionNotKeptFrom(int $year, array $pension): ?string
+    {
+        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR
+            || $pension['full_pension_paid_from'] === null
+            || $pension['foreign_insurance']
+        ) {
+            return null;
+        }
+
+        return $pension['full_pension_paid_from'] . '-01';
+    }
+
+    /**
+     * Den, od kterého nese činnost kód D: dovršení důchodového věku, nebo
+     * přiznání předčasného starobního důchodu, podle toho, co nastalo dřív.
+     *
+     * @param array{pension_age_reached_on:?string,early_pension_from:?string} $pension
+     */
+    private static function pensionAgeCodeFrom(array $pension): ?string
+    {
+        $dates = array_filter(
+            [$pension['pension_age_reached_on'], $pension['early_pension_from']],
+            static fn (?string $date): bool => $date !== null,
+        );
+
+        return $dates === [] ? null : min($dates);
+    }
+
+    /**
+     * Druhý znak kódu ELDP „D" pro dobu od dovršení důchodového věku nebo od
+     * přiznání předčasného starobního důchodu (číselník kódů ELDP, ID 10240).
+     *
+     * Měsíc, uvnitř kterého kód začíná, se nerozděluje: výpočet vede
+     * vyměřovací základ jen za celý měsíc a rozdělit ho na dvě sekce by byl
+     * vymyšlený údaj v zákonné evidenci.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @return list<array<string,mixed>>
+     */
+    private function applyPensionAgeCode(
+        array $lines,
+        string $codeFrom,
+        int $employmentId,
+        array &$blockers,
+    ): array {
+        foreach ($lines as $index => $line) {
+            $from = $line['insurance_from'];
+            $to = $line['insurance_to'];
+            if ($line['post_termination'] === true || !is_string($from) || !is_string($to)) {
+                continue;
+            }
+            if ($from >= $codeFrom) {
+                $lines[$index]['code'] = substr((string) $line['code'], 0, 1) . 'D+';
+                continue;
+            }
+            if ($to >= $codeFrom) {
+                $label = self::monthLabel((string) $line['period_start']);
+                $blockers[] = [
+                    'code' => 'eldp_pension_age_mid_month_unsupported',
+                    'message' => "Kód ELDP se mění uprostřed měsíce {$label} (od {$codeFrom}: "
+                        . 'dovršení důchodového věku nebo předčasný starobní důchod). '
+                        . 'Vyměřovací základ za část měsíce výpočet nevede, takže měsíc nejde '
+                        . 'rozdělit na dvě sekce; evidenční list podejte mimo aplikaci.',
+                    'detail' => [
+                        'period_start' => (string) $line['period_start'],
+                        'employment_id' => $employmentId,
+                        'code_from' => $codeFrom,
+                    ],
+                ];
+            }
+        }
+
+        return $lines;
     }
 
     private static function missingMonthMessage(

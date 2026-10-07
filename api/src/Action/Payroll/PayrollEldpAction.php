@@ -93,9 +93,12 @@ final class PayrollEldpAction
                 'evidence_schema' => 'jmhz-1.4.3.6 eldpType',
                 'submission_schema_available' => false,
                 'stops_at_status' => 'prepared',
-                'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 '
-                    . 'až 4, ve znění účinném do 31. 12. 2025, § 38a odst. 2 a 3 '
+                'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 1 a 4 a § 39 odst. 2 '
+                    . 'až 4, ve znění účinném do 31. 12. 2025, § 38a odst. 1 až 3 '
                     . 'a čl. V bod 8 zákona č. 360/2025 Sb.',
+                // Lhůtu z výzvy obrazovka chce jen tam, kde ji neurčuje zákon.
+                'authority_request_due_on_required_from_year' =>
+                    EldpDeadlinePolicy::LAST_ANNUAL_YEAR + 2,
                 // Od roku 2026 už zaměstnavatel roční evidenční list nevede;
                 // agenda zůstává jen pro vyjmenované výjimky.
                 'annual_employer_duty' => false,
@@ -104,6 +107,8 @@ final class PayrollEldpAction
                     EldpDeadlinePolicy::ANNUAL_RULESET,
                     EldpDeadlinePolicy::TERMINATION_RULESET,
                     EldpDeadlinePolicy::AUTHORITY_REQUEST_RULESET,
+                    EldpDeadlinePolicy::AUTHORITY_REQUEST_PRE_2026_RULESET,
+                    EldpDeadlinePolicy::AUTHORITY_REQUEST_STATED_RULESET,
                 ],
             ],
         ]);
@@ -132,6 +137,13 @@ final class PayrollEldpAction
                         $this->bool($body, 'requested_by_authority'),
                     'authority_request_received_on' =>
                         $this->nullableString($body, 'authority_request_received_on'),
+                    'authority_request_due_on' =>
+                        $this->nullableString($body, 'authority_request_due_on'),
+                    // Důchodové údaje ověřuje sestavovač; chybí-li, list se
+                    // nesestaví a obsluha dostane srozumitelný důvod.
+                    'pension_status' => is_array($body['pension_status'] ?? null)
+                        ? $body['pension_status']
+                        : null,
                     'note' => $this->string($body, 'note'),
                     // Opravný list a datum vyhotovení jsou volitelné: klient,
                     // který je neposílá, sestaví řádný list jako dřív.
