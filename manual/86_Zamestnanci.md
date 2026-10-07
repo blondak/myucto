@@ -566,6 +566,12 @@ po skončení odmítne a z kontroly vás pošle přímo sem. Ostatní druhy odlo
 měsíce trvajícího vztahu) a odložený příjem z dohod podejte opravným hlášením
 na ePortálu ČSSZ.
 
+U vztahu, jehož účast na pojištění stojí na výši příjmu (dohoda, zaměstnání
+malého rozsahu, člen orgánu), běh odložený příjem nepřijme ani po potvrzení. Spolu s příjmem posledního měsíce výkonu může zpětně založit účast
+na pojištění a pak je nutné opravit hlášení za ten měsíc; opravu kvůli
+nemocenskému pojištění je třeba zaslat vždy. Kontrola běhu proto řekne, že
+měsíční hlášení i opravu za tento vztah podáte ručně přes ePortál ČSSZ.
+
 Oznamovací povinnosti vůči zdravotní pojišťovně se odvozují od **skutečného**
 nástupu, je-li vyplněný; teprve když není, použije se plánovaný. Vztah označený
 jako **Nenastoupil** ani archivovaný vztah už žádnou oznamovací povinnost
