@@ -85,6 +85,9 @@ final class PayrollRunReadinessImpact
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_transitional_window' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Věková hranice důvodu slevy (§ 7a odst. 1 a, d, g) vstupuje do zmrazeného
+        // snímku jako odvozený výrok, takže oprava po zamknutí vstupů je revize.
+        'part_time_discount_age_condition' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // Poučení zaměstnance (§ 23d odst. 2) se zapisuje u záměru, do zmrazeného
         // snímku nevstupuje, takže se doplní kdykoli a nic to nestojí.
         'part_time_discount_employee_not_informed' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

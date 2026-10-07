@@ -519,6 +519,41 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
     }
 
     /**
+     * OZUSPOJ-LAW-7a-3 / § 7a odst. 3 písm. d): zaměstnanec s postižením
+     * (odst. 1 písm. f) u zaměstnavatele na chráněném trhu práce slevu nemá.
+     */
+    public function testDisabledEmployeeOfAProtectedLaborMarketEmployerGetsNoDiscount(): void
+    {
+        $result = $this->discountedPerson(
+            1_000_000,
+            reason: SocialPartTimeDiscountReason::DisabledPerson,
+            protectedLaborMarket: true,
+        );
+
+        self::assertSame(0, $result->partTimeDiscountMinorUnits);
+        self::assertSame(
+            SocialPartTimeDiscountOutcome::ProtectedLaborMarket,
+            $result->people[0]->relationships[0]->partTimeEmployerDiscountOutcome,
+        );
+    }
+
+    public function testProtectedLaborMarketDoesNotTouchOtherReasonsOrOrdinaryEmployers(): void
+    {
+        $ordinary = $this->discountedPerson(
+            1_000_000,
+            reason: SocialPartTimeDiscountReason::DisabledPerson,
+        );
+        self::assertSame(50_000, $ordinary->partTimeDiscountMinorUnits);
+
+        $otherReason = $this->discountedPerson(
+            1_000_000,
+            reason: SocialPartTimeDiscountReason::Age55Plus,
+            protectedLaborMarket: true,
+        );
+        self::assertSame(50_000, $otherReason->partTimeDiscountMinorUnits);
+    }
+
+    /**
      * Sjednaná týdenní doba není jen vstup posouzení § 7a odst. 2 — je to
      * jediný pramen položky 10373 měsíčního hlášení. Když ji výsledek nenese,
      * musela by ji příprava podání dopočítat odjinud.
@@ -1132,6 +1167,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         ?int $weeklyMillihours = null,
         ?int $employmentDays = null,
         ?SocialPartTimeDiscountReason $reason = null,
+        bool $protectedLaborMarket = false,
     ): \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult {
         return $this->calculate([
             $this->person('person-1', [
@@ -1145,6 +1181,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                     assessableMillihours: $assessableMillihours,
                     weeklyMillihours: $weeklyMillihours,
                     employmentDays: $employmentDays,
+                    protectedLaborMarket: $protectedLaborMarket,
                 ),
             ]),
         ]);
@@ -1166,6 +1203,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         ?int $employmentDays = null,
         ?int $monthDays = null,
         bool $workedHoursMissing = false,
+        bool $protectedLaborMarket = false,
     ): SocialInsuranceRelationshipInput {
         return new SocialInsuranceRelationshipInput(
             $id,
@@ -1200,6 +1238,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
             $kind === SocialEmploymentKind::Employment
                 ? ($weeklyMillihours ?? 20_000)
                 : $weeklyMillihours,
+            $protectedLaborMarket,
         );
     }
 

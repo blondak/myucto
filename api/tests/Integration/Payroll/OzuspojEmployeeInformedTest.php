@@ -141,6 +141,67 @@ final class OzuspojEmployeeInformedTest extends TestCase
         }
     }
 
+    /** OZUSPOJ-formularOzuspoj-6: důvod 55+ nejde založit u zaměstnance, kterému 55 let nebylo. */
+    public function testIntentIsRefusedWhenTheBirthDateContradictsTheReason(): void
+    {
+        $person = $this->discountEmployment();
+        $this->setBirthDate($person['employee_id'], '1990-03-01');
+
+        try {
+            $this->service('2026-12-01')->create(
+                $this->supplierId,
+                'production',
+                $person['employment_id'],
+                '2026-11-01',
+                null,
+                $this->actors[0],
+            );
+            self::fail('Záměr s důvodem 55+ u osoby narozené 1990 se nesmí založit.');
+        } catch (OzuspojException $exception) {
+            self::assertSame('ozuspoj_discount_reason_age_not_met', $exception->validationCode);
+        }
+    }
+
+    public function testIntentIsCreatedWhenTheBirthDateMatchesTheReason(): void
+    {
+        $person = $this->discountEmployment();
+        $this->setBirthDate($person['employee_id'], '1965-03-01');
+        $created = $this->service('2026-12-01')->create(
+            $this->supplierId,
+            'production',
+            $person['employment_id'],
+            '2026-11-01',
+            null,
+            $this->actors[0],
+        );
+
+        self::assertSame('draft', $created['status']);
+    }
+
+    /** Chybějící datum narození záměr nezastaví; slevu pak neuplatní až mzdový běh. */
+    public function testIntentIsCreatedWhenTheBirthDateIsUnknown(): void
+    {
+        $person = $this->discountEmployment();
+        $this->setBirthDate($person['employee_id'], null);
+        $created = $this->service('2026-12-01')->create(
+            $this->supplierId,
+            'production',
+            $person['employment_id'],
+            '2026-11-01',
+            null,
+            $this->actors[0],
+        );
+
+        self::assertSame('draft', $created['status']);
+    }
+
+    private function setBirthDate(int $employeeId, ?string $birthDate): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employees SET birth_date = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$birthDate, $this->supplierId, $employeeId]);
+    }
+
     /** @return array{employee_id:int,employment_id:int,name:string} */
     private function discountEmployment(): array
     {

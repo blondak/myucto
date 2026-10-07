@@ -78,6 +78,22 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertSame('/payroll/people?person=11&employment=22&panel=employment_terms&field=social_part_time_discount_reason', $transition[0]->remediationPath);
     }
 
+    /** OZUSPOJ-formularOzuspoj-6: věková hranice důvodu slevy proti datu narození. */
+    public function testAgeBoundDiscountReasonWarnsWhenTheBirthDateContradictsOrIsMissing(): void
+    {
+        $codes = static fn (array $row): array => array_map(
+            static fn ($item) => $item->code,
+            self::invoke(PayrollRunSnapshotBuilder::class, 'discountValidations', [
+                $row + ['social_part_time_discount_reason' => 'age_55_plus', 'start_date' => '2020-01-01', 'actual_start_date' => null, 'end_date' => null],
+                null, 22, 11, '2026-06-01',
+            ]),
+        );
+
+        self::assertContains('part_time_discount_age_condition', $codes(['employee_birth_date' => '1990-01-01']));
+        self::assertContains('part_time_discount_age_condition', $codes(['employee_birth_date' => null]));
+        self::assertNotContains('part_time_discount_age_condition', $codes(['employee_birth_date' => '1960-01-01']));
+    }
+
     /** OZUSPOJ-formularOzuspoj-5: § 23d odst. 2, poučení zaměstnance před prvním uplatněním slevy. */
     public function testAcceptedIntentWithoutEmployeeInformationWarns(): void
     {

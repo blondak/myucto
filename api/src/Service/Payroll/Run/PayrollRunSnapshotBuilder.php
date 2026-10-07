@@ -22,6 +22,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
@@ -578,6 +579,16 @@ final class PayrollRunSnapshotBuilder
                     // a NA JAKÉ OBDOBÍ platí.
                     'social_part_time_discount_intent' =>
                         $discountIntentRows[$employmentId] ?? null,
+                    // Výsledek věkové podmínky důvodu slevy (§ 7a odst. 1
+                    // písm. a, d, g). Do snímku jde jen odvozený výrok, ne
+                    // datum narození - snímek se ukládá nešifrovaně.
+                    'social_part_time_discount_age_condition' =>
+                        $this->discountAgeCondition($row, $periodStart, $periodEnd),
+                    // Zaměstnavatel na chráněném trhu práce (REGZEL ID 10211):
+                    // zaměstnanci s postižením u něj sleva nenáleží (§ 7a odst. 3
+                    // písm. d). Bez profilu REGZEL se bere „ne" jako jinde v mzdách.
+                    'employer_protected_labor_market' =>
+                        (int) ($row['employer_protected_labor_market'] ?? 0) === 1,
                     'foreign_legislation_country_code' =>
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
@@ -1160,6 +1171,11 @@ final class PayrollRunSnapshotBuilder
                     COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
                       AS monthly_gross_minor,
                     employee.full_name,
+                    employee.birth_date AS employee_birth_date,
+                    (SELECT regzel_profile.protected_labor_market
+                       FROM payroll_regzel_employer_profiles regzel_profile
+                      WHERE regzel_profile.supplier_id = employment.supplier_id)
+                      AS employer_protected_labor_market,
                     employee.is_active AS employee_active,
                     profile.profile_status,
                     term.id AS term_id,
@@ -1635,6 +1651,31 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Věková podmínka důvodu slevy (§ 7a odst. 1 písm. a, d, g) pro tenhle
+     * vztah a měsíc - viz {@see SocialPartTimeDiscountAgeCondition}.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function discountAgeCondition(
+        array $row,
+        string $periodStart,
+        string $periodEnd,
+    ): string {
+        $from = $row['actual_start_date'] ?? $row['start_date'] ?? null;
+        $to = $row['end_date'] ?? null;
+        $birthDate = $row['employee_birth_date'] ?? null;
+
+        return SocialPartTimeDiscountAgeCondition::forMonth(
+            $row['social_part_time_discount_reason'] ?? null,
+            is_string($birthDate) && $birthDate !== '' ? $birthDate : null,
+            $periodStart,
+            $periodEnd,
+            is_string($from) && $from !== '' ? $from : null,
+            is_string($to) && $to !== '' ? $to : null,
+        );
+    }
+
+    /**
      * Nálezy ke slevě zaměstnavatele podle § 7a. Jdou do VALIDACÍ, ne do
      * `$data` — kanonický snapshot a tím i `input_hash` proto zůstávají beze
      * změny a přepočet starší revize dá bit po bitu tentýž vstup jako předtím.
@@ -1710,6 +1751,26 @@ final class PayrollRunSnapshotBuilder
                     false,
                 );
             }
+        }
+        $ageCondition = $this->discountAgeCondition(
+            $row,
+            $periodStart,
+            date('Y-m-t', (int) strtotime($periodStart)),
+        );
+        if ($ageCondition === SocialPartTimeDiscountAgeCondition::NOT_MET
+            || $ageCondition === SocialPartTimeDiscountAgeCondition::UNKNOWN
+        ) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'part_time_discount_age_condition',
+                'employment',
+                $employmentId,
+                $ageCondition === SocialPartTimeDiscountAgeCondition::UNKNOWN
+                    ? 'Důvod slevy na pojistném má věkovou hranici (§ 7a odst. 1 písm. a, d nebo g), ale zaměstnanec nemá vyplněné datum narození, takže ji nejde ověřit. Sleva se proto neuplatnila.'
+                    : 'Zaměstnanec za tenhle měsíc nesplňuje věkovou podmínku zvoleného důvodu slevy na pojistném (§ 7a odst. 1 písm. a, d nebo g; podle § 7b odst. 4 musí platit po celou dobu zaměstnání v měsíci). Sleva se neuplatnila.',
+                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms&field=social_part_time_discount_reason",
+                false,
+            );
         }
         if ((new OzuspojClaimDeadlinePolicy())->isTransitionalQ12026($periodStart)) {
             $validations[] = new PayrollRunValidation(

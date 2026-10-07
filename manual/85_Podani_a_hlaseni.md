@@ -1031,6 +1031,36 @@ přihlášky, záměr na to v záložce záměrů slevy upozorní; byla-li přih
 podána až po lhůtě oznámení, záměr od zvoleného dne oznámit nelze a hláška
 vyzve ke zvolení pozdějšího dne.
 
+**Co aplikace u záměru hlídá.**
+
+- **Lhůta oznámení o skončení.** Skončení uplatňování slevy se oznamuje do
+  osmi dnů po skončení kalendářního měsíce, ve kterém se sleva uplatnila
+  naposledy (§ 23e odst. 2). Lhůta se počítá podle § 23 zákona č. 589/1992 Sb.,
+  takže osmý den, který vyjde na sobotu, neděli nebo svátek, se posune na
+  nejbližší pracovní den. Končí-li záměr uprostřed měsíce, je posledním měsícem
+  uplatnění měsíc předchozí, protože sleva za neúplně pokrytý měsíc nenáleží.
+- **Kód OSSZ.** Kód místně příslušné OSSZ musí být v číselníku okresů ČSSZ
+  pro e-podání; kód 101 (ústředí) se pro e-podání nepoužívá. Chybný kód aplikace
+  odmítne při zakládání záměru i při přípravě oznámení.
+- **Rodné číslo a jméno.** Oznámení musí nést rodné číslo, případně evidenční
+  číslo pojištěnce. Bez něj ho aplikace nepřipraví. Jméno a příjmení smí mít
+  jen znaky, které datová věta ČSSZ připouští (latinka, pomlčka, čárka, tečka,
+  apostrof a mezera); jinak aplikace vypíše, které znaky vadí a kde je opravit.
+- **Poučení zaměstnance.** Zaměstnavatel musí zaměstnance písemně informovat
+  před prvním uplatněním slevy (§ 23d odst. 2). Den poučení se zapisuje u záměru,
+  při zakládání i dodatečně tlačítkem **Zapsat poučení**. Chybí-li, nebo je
+  pozdější než první měsíc uplatnění, upozorní na to mzdový běh. U záměru
+  převzatého z předchozího programu se poučení nehlídá.
+- **Věk a důvod slevy.** Důvody „věk alespoň 55 let", „studium a věk do 26 let"
+  a „věk do 21 let" se porovnávají s datem narození zaměstnance. Podmínky musí
+  platit po celou dobu zaměstnání v měsíci (§ 7b odst. 4), takže v měsíci, kdy
+  zaměstnanec hranici protne, sleva nenáleží. Záměr s prokazatelným rozporem se
+  nezaloží. Chybí-li datum narození, mzdový běh slevu neuplatní a upozorní, že
+  ho je třeba doplnit.
+- **Zaměstnavatel na chráněném trhu práce.** Zaměstnanci s postižením u
+  zaměstnavatele uznaného na chráněném trhu práce sleva nenáleží (§ 7a odst. 3
+  písm. d). Příznak se bere z profilu REGZEL zaměstnavatele.
+
 ### 85.11.2 Hlášení změn do registru pojištěnců (A3)
 
 Změní-li se u přihlášené osoby nebo u jejího pracovního vztahu údaj, který

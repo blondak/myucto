@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use Psr\Clock\ClockInterface;
@@ -101,6 +102,7 @@ final readonly class OzuspojIntentService
                 'Pracovní vztah nemá k tomuhle dni vyplněný důvod slevy podle § 7a odst. 1. Doplňte ho v kartě vztahu a záměr založte znovu.',
             );
         }
+        $this->assertAgeConditionNotViolated($reason, $context, $intentFrom);
         $employmentStart = $this->employmentStart($context);
         if ($intentFrom < $employmentStart) {
             throw new OzuspojException(
@@ -505,6 +507,33 @@ final readonly class OzuspojIntentService
         }
 
         return $context;
+    }
+
+    /**
+     * Věková hranice důvodu (§ 7a odst. 1 písm. a, d, g) proti datu narození.
+     * Zamítá se jen prokazatelný rozpor - chybějící datum narození záměr
+     * nezastaví, ale mzdový běh pak slevu neuplatní, dokud se nedoplní.
+     *
+     * @param array<string,mixed> $context
+     */
+    private function assertAgeConditionNotViolated(
+        SocialPartTimeDiscountReason $reason,
+        array $context,
+        string $intentFrom,
+    ): void {
+        $birthDate = $context['employee_birth_date'] ?? null;
+        $verdict = SocialPartTimeDiscountAgeCondition::assess(
+            $reason,
+            is_string($birthDate) && $birthDate !== '' ? $birthDate : null,
+            $intentFrom,
+            $intentFrom,
+        );
+        if ($verdict === SocialPartTimeDiscountAgeCondition::NOT_MET) {
+            throw new OzuspojException(
+                'ozuspoj_discount_reason_age_not_met',
+                'Podle data narození zaměstnanec k tomuto dni nesplňuje věkovou podmínku zvoleného důvodu slevy (§ 7a odst. 1 písm. ' . $reason->paragraph7aLetter() . '). Opravte důvod slevy v kartě vztahu nebo den, od kterého se sleva uplatní.',
+            );
+        }
     }
 
     /** @param array<string,mixed> $context */
