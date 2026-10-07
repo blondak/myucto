@@ -10666,7 +10666,7 @@
         "workedLastDay": "Worked on the last day before the care",
         "plannedShifts": "Had shifts scheduled on the benefit days",
         "plannedShiftsWorked": "Worked the scheduled shifts",
-        "decisivePeriodHint": "Months for which MyÚčto filed the monthly report are taken from it by the authority. The other months of the decisive period (before 2026 and before payroll started in MyÚčto) are taken from the imported payroll. If an imported wage is missing for a month, add the month here manually.",
+        "decisivePeriodHint": "The notification always carries the whole decisive period. Months come from approved payroll in MyÚčto, older ones from the imported payroll. A manually entered month takes precedence; add here a month with no source, one capped by the annual maximum, or one whose excluded days cannot be determined.",
         "probableIncome": "Probable monthly income (CZK)",
         "probableIncomeHint": "Fill in when the decisive period is shorter than 30 days (illness shortly after starting). The suggestion is based on the agreed monthly gross wage.",
         "decisiveMonth": "Month",

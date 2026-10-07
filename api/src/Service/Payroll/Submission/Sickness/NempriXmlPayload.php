@@ -9,13 +9,10 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  *
  * ## Rozhodné období
  *
- * § 97 odst. 4 zák. č. 187/2006 Sb. ukládá sdělovat vyměřovací základy
- * a vyloučené dny jednotným měsíčním hlášením. To ale pokrývá jen měsíce, za
- * které hlášení z MyÚčta skutečně odešlo. Měsíce rozhodného období před rokem
- * 2026 a před začátkem vedení mezd v MyÚčtu v žádném hlášení z MyÚčta nejsou;
- * bez nich by ÚSSZ neměla z čeho denní vyměřovací základ spočítat. Věta je
- * proto nese v `rozhodneObdobi` — výklad a pravidla jsou
- * v {@see NempriDecisivePeriodResolver}.
+ * DV NEMPRI25 vede rozhodné období u dávek s akcí vznik jako povinné vždy,
+ * a to úplné: všechny měsíce se součty, nebo jen pravděpodobnou výši příjmu.
+ * Výjimku pro měsíce pokryté jednotným měsíčním hlášením norma nezná. Výklad
+ * a pravidla jsou v {@see NempriDecisivePeriodResolver}.
  *
  * ## Platební spojení
  *

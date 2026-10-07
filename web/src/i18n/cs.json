@@ -10666,7 +10666,7 @@
         "workedLastDay": "V poslední den před péčí pracoval",
         "plannedShifts": "Měl na dny dávky rozvržené směny",
         "plannedShiftsWorked": "Rozvržené směny odpracoval",
-        "decisivePeriodHint": "Měsíce, za které MyÚčto podalo měsíční hlášení, si ČSSZ vezme z něj. Ostatní měsíce rozhodného období (před rokem 2026 a před začátkem vedení mezd v MyÚčtu) se berou z převzatých mezd. Chybí-li k měsíci převzatá mzda, doplňte ho tady ručně.",
+        "decisivePeriodHint": "Oznámení nese rozhodné období vždy celé. Měsíce se berou ze schválených mezd v MyÚčtu, starší z převzatých mezd. Ručně zadaný měsíc má přednost; doplňte tady ten, ke kterému podklad chybí, je krácený ročním maximem, nebo u něj nejde zjistit vyloučené dny.",
         "probableIncome": "Pravděpodobný měsíční příjem (Kč)",
         "probableIncomeHint": "Vyplňte, když je rozhodné období kratší než 30 dnů (onemocnění krátce po nástupu). Návrh vychází ze sjednané měsíční hrubé mzdy.",
         "decisiveMonth": "Měsíc",
