@@ -61,6 +61,14 @@ final readonly class PayrollMigrationTakeoverFacts
         public int $netPayableMinor = 0,
         /** Výplatní termín původního systému, `YYYY-MM-DD`. */
         public ?string $payoutDate = null,
+        /**
+         * Vyloučené dny § 18 odst. 7 zák. č. 187/2006 Sb. (rozhodné období
+         * nemocenských dávek). Jiná veličina než `$excludedDays` (§ 16 odst. 4
+         * zák. č. 155/1995 Sb.); `null` = zdroj ji nevydal.
+         */
+        public ?int $sicknessExcludedDays = null,
+        /** Příjem včetně nepojištěné činnosti (JMHZ 10476) v haléřích; `null` = zdroj ho nevydal. */
+        public ?int $uninsuredIncomeMinor = null,
     ) {
         foreach ([
             'relationship_start_date' => $relationshipStartDate,
@@ -91,6 +99,12 @@ final readonly class PayrollMigrationTakeoverFacts
         }
         if ($excludedDays < 0 || $excludedDays > 31) {
             throw new \InvalidArgumentException('Vyloučené doby musí být 0 až 31.');
+        }
+        if ($sicknessExcludedDays !== null && ($sicknessExcludedDays < 0 || $sicknessExcludedDays > 31)) {
+            throw new \InvalidArgumentException('Vyloučené dny podle § 18 odst. 7 musí být 0 až 31.');
+        }
+        if ($uninsuredIncomeMinor !== null && $uninsuredIncomeMinor < 0) {
+            throw new \InvalidArgumentException('Příjem z nepojištěné činnosti nesmí být záporný.');
         }
         if ($workedDaysHundredths < 0 || $workedMinutes < 0) {
             throw new \InvalidArgumentException('Odpracovaná doba nesmí být záporná.');
@@ -203,6 +217,8 @@ final readonly class PayrollMigrationTakeoverFacts
             'deductions_minor' => $this->deductionsMinor,
             'net_payable_minor' => $this->netPayableMinor,
             'payout_date' => $this->payoutDate,
+            'sickness_excluded_days' => $this->sicknessExcludedDays,
+            'uninsured_income_minor' => $this->uninsuredIncomeMinor,
         ];
     }
 

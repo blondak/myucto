@@ -138,6 +138,8 @@ export interface RegistrationTakeoverRelation {
   leave_minutes: number
   /** Poslední převzaté hlášení vykazuje srážky ze mzdy — převzetí založí úkol na vztahu. */
   deductions_recorded?: boolean
+  /** Poslední převzaté hlášení vykazuje nemoc, PPM nebo ošetřovné — převzetí založí úkol ověřit je. */
+  sickness_review?: boolean
 }
 
 /** Převzetí historie mezd z hlášení (společná vrstva převzatých mezd). */

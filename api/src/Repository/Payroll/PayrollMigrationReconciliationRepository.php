@@ -127,7 +127,8 @@ final class PayrollMigrationReconciliationRepository
                        employee_social_minor, employee_health_minor,
                        employer_social_minor, employer_health_minor,
                        advance_tax_minor, withholding_tax_minor, tax_bonus_minor,
-                       payout_date, import_reference
+                       payout_date, import_reference,
+                       sickness_excluded_days, uninsured_income_minor
                   FROM payroll_migration_reference_totals
                  WHERE supplier_id = ?
                    AND period_start >= ?

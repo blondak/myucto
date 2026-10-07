@@ -54,6 +54,14 @@ final readonly class PayrollTakeoverMonth
         public int $taxBonusMinor,
         public ?string $payoutDate,
         public ?string $importReference,
+        /**
+         * Vyloučené dny § 18 odst. 7 zák. č. 187/2006 Sb.; `null` = zdroj je
+         * nevydal. `$excludedDays` jsou vyloučené DOBY § 16 odst. 4
+         * zák. č. 155/1995 Sb. pro důchodové pojištění.
+         */
+        public ?int $sicknessExcludedDays = null,
+        /** Příjem včetně nepojištěné činnosti (JMHZ 10476); `null` = zdroj ho nevydal. */
+        public ?int $uninsuredIncomeMinor = null,
     ) {}
 
     /** @param array<string,mixed> $row řádek `payroll_migration_reference_totals` */
@@ -90,6 +98,8 @@ final readonly class PayrollTakeoverMonth
             self::int($row, 'tax_bonus_minor'),
             self::text($row, 'payout_date'),
             self::text($row, 'import_reference'),
+            self::nullableInt($row, 'sickness_excluded_days'),
+            self::nullableInt($row, 'uninsured_income_minor'),
         );
     }
 
@@ -194,6 +204,14 @@ final readonly class PayrollTakeoverMonth
         $value = $row[$key] ?? null;
 
         return is_numeric($value) ? (int) $value : 0;
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function nullableInt(array $row, string $key): ?int
+    {
+        $value = $row[$key] ?? null;
+
+        return is_numeric($value) ? (int) $value : null;
     }
 
     /** @param array<string,mixed> $row */

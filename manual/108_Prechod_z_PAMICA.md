@@ -384,7 +384,9 @@ se zůstatek nepřevede a protokol na to upozorní.
   z průměrného výdělku a rozvržených směn. Vnucená cizí částka by ten výpočet
   obešla.
 - **Přílohy k žádosti o dávku (`NEMPRIpol`).** Rozhodné období a vyloučené dny
-  z nich MyÚčto v případu dávky nevede.
+  z nich MyÚčto v případu dávky nevede. Převzaté měsíce nenesou vyloučené dny
+  podle § 18 odst. 7 zákona č. 187/2006 Sb.; měsíc bez příjmu proto NEMPRI
+  vyžádá zadat u případu ručně (kapitola 85.15.2).
 - **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
   účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
   zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého

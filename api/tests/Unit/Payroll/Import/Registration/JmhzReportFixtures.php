@@ -335,6 +335,56 @@ final class JmhzReportFixtures
     }
 
     /**
+     * Vyloučené dny první sekce ELDP formuláře přepíše na zadané prvky (v pořadí
+     * XSD) a volitelně vyměřovací základ 10477 a příjem 10476.
+     *
+     * @param array<string,int> $excluded prvek `vylouceneDny` => dny
+     */
+    public static function withExcludedDays(
+        string $xml,
+        string $idPpv,
+        array $excluded,
+        ?int $socialBase = null,
+        ?int $uninsuredIncome = null,
+    ): string {
+        return self::editForm($xml, $idPpv, static function (\DOMXPath $xpath, \DOMElement $body) use ($excluded, $socialBase, $uninsuredIncome): void {
+            $f = JmhzSchemaCatalog::NS_FORM;
+            $eldp = $xpath->query('f:pojisteni/f:eldpSeznam/f:eldp', $body)?->item(0);
+            if (!$eldp instanceof \DOMElement) {
+                throw new \LogicException('Formulář nemá sekci ELDP.');
+            }
+            foreach ($xpath->query('f:vylouceneDny|f:odecitaneDny', $eldp) ?: [] as $node) {
+                $node->parentNode?->removeChild($node);
+            }
+            $block = $eldp->ownerDocument->createElementNS($f, 'form:vylouceneDny');
+            foreach ([
+                'vylouceneDobyCelkem', 'docasNeschopnost', 'penezitaPomocMaterstvi',
+                'osetrovaniClenaRodiny', 'otcovska', 'vyloucenePar16', 'vyloucenePar18',
+                'omluvenaNepritomnost', 'pracovniNeschopnost', 'vyplaceniDavek',
+            ] as $name) {
+                if (array_key_exists($name, $excluded)) {
+                    $block->appendChild($eldp->ownerDocument->createElementNS($f, 'form:' . $name, (string) $excluded[$name]));
+                }
+            }
+            $eldp->appendChild($block);
+            if ($socialBase !== null) {
+                foreach ($xpath->query('f:pojisteni/f:vymerovaciZaklad/f:castkaOdvodPojistneho', $body) ?: [] as $node) {
+                    $node->textContent = (string) $socialBase;
+                }
+            }
+            if ($uninsuredIncome !== null) {
+                $base = $xpath->query('f:pojisteni/f:vymerovaciZaklad', $body)?->item(0);
+                if ($base instanceof \DOMElement) {
+                    foreach ($xpath->query('f:prijemNepojistenaCinnost', $base) ?: [] as $node) {
+                        $node->parentNode?->removeChild($node);
+                    }
+                    $base->appendChild($base->ownerDocument->createElementNS($f, 'form:prijemNepojistenaCinnost', (string) $uninsuredIncome));
+                }
+            }
+        });
+    }
+
+    /**
      * @param callable(\DOMXPath,\DOMElement):void $edit
      * @param array<string,string> $replace
      */

@@ -34,8 +34,8 @@ namespace MyInvoice\Service\Payroll;
  * | změna       | den účinnosti při zakládání; u uložené položky její termín (den změny se neukládá) |
  *
  * Výjimky: `legacy_start_date` není povinnost vůči úřadu, ale chybějící údaj
- * v evidenci, a `takeover_deductions_review` je úkol pro první mzdu v MyÚčtu —
- * relevantní jsou vždy. Potvrzení o zdanitelných příjmech má lhůtu
+ * v evidenci, a `takeover_deductions_review` i `takeover_sickness_review` jsou
+ * úkoly pro první mzdu v MyÚčtu — relevantní jsou vždy. Potvrzení o zdanitelných příjmech má lhůtu
  * od ŽÁDOSTI zaměstnance; jakmile je žádost zapsaná (položka má termín),
  * rozhoduje termín, protože žádost mohla přijít až za MyÚčta.
  *
@@ -61,7 +61,11 @@ final class PayrollPredecessorObligationScope
     private const ONZ_LAST_DAY = '2026-03-31';
 
     /** @var list<string> */
-    private const ALWAYS_RELEVANT = ['legacy_start_date', 'takeover_deductions_review'];
+    private const ALWAYS_RELEVANT = [
+        'legacy_start_date',
+        'takeover_deductions_review',
+        'takeover_sickness_review',
+    ];
 
     /** @var list<string> */
     private const REQUEST_ANCHORED = ['taxable_income_confirmation'];

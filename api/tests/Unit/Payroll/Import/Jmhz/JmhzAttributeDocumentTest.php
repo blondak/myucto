@@ -60,7 +60,7 @@ final class JmhzAttributeDocumentTest extends TestCase
         $form = (new JmhzReportReader())->formFromDocument($document, 7);
         self::assertSame(7, $form->position);
         self::assertSame('cinnostKS', $form->variant);
-        self::assertSame(['code' => '1', 'insurance_days' => 28, 'excluded_days' => 3], $form->eldp);
+        self::assertSame(['code' => '1', 'insurance_days' => 28, 'excluded_days' => 3, 'sickness_excluded_days' => null, 'absence_days' => ['docasNeschopnost' => 0, 'penezitaPomocMaterstvi' => 0, 'osetrovaniClenaRodiny' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 0]], $form->eldp);
     }
 
     public function testSecondRepeatedElementTakesSecondOrder(): void

@@ -109,6 +109,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
                     ['period' => '2025-10', 'income_minor' => 2_600_000, 'excluded_days' => 0],
                     ['period' => '2025-11', 'income_minor' => 3_000_000, 'excluded_days' => 2],
                     ['period' => '2025-12', 'income_minor' => 3_100_000, 'excluded_days' => 0],
+                    ['period' => '2026-01', 'income_minor' => 3_000_000, 'excluded_days' => 0],
                 ],
             ],
             $this->userId,
@@ -131,10 +132,14 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         // Dítě z evidence vyživovaných osob i s odhaleným rodným číslem.
         self::assertStringContainsString('<rodneCislo>1501010007</rodneCislo>', $xml);
         self::assertStringContainsString('<jmeno>Dítě</jmeno>', $xml);
-        // Rozhodné období: měsíce 2025 ručně, leden 2026 kryje měsíční hlášení.
+        // Rozhodné období nese všechny měsíce (i leden 2026, který pokrylo
+        // měsíční hlášení) a oba součty — DV NEMPRI25, kontroly 7 a 8.
         self::assertStringContainsString('<rozhodneObdobiOd>2025-10-06</rozhodneObdobiOd>', $xml);
-        self::assertSame(3, substr_count($xml, '<obdobi>') - 1);
-        self::assertStringNotContainsString('zapocitatelnyPrijemCelkem', $xml);
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-01-31</rozhodneObdobiDo>', $xml);
+        self::assertSame(4, substr_count($xml, '<zapocitatelnyPrijem>'));
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>117000</zapocitatelnyPrijemCelkem>', $xml);
+        self::assertStringContainsString('<vylouceneDnyCelkem>2</vylouceneDnyCelkem>', $xml);
+        self::assertStringNotContainsString('pravdepodobnaVysePrijmu', $xml);
         // Výplatní účet mzdy.
         self::assertStringContainsString('<vyplatitUcetCR>true</vyplatitUcetCR>', $xml);
         self::assertStringContainsString('<ucetCislo>1000000005</ucetCislo>', $xml);
@@ -372,8 +377,137 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         return $service;
     }
 
+    /**
+     * NX-02: ošetřovné jen s akcí ukončení nenese rozhodné období ani
+     * platební spojení (DV NEMPRI25 je bez vzniku zakazuje). Zaměstnanec
+     * bez výplatního účtu proto podání nezablokuje; dřív náhled spadl
+     * na `nempri_payment_connection_missing`.
+     */
+    public function testCareContinuationWithoutStartNeedsNoPaymentConnection(): void
+    {
+        [$employeeId, $employmentId] = $this->employee(withAccount: false);
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'OSE',
+            [
+                'incapacity_from' => '2026-02-09',
+                'incapacity_to' => '2026-02-13',
+                'decision_number' => 'A1234567',
+                'daily_working_hours' => '8',
+                'action_start' => false,
+                'action_end' => true,
+                'cared_dependant_id' => $this->dependant($employeeId),
+                'care_reason' => 'ill',
+                'care_days' => [['from' => '2026-02-09', 'to' => '2026-02-13']],
+                'relationship_code' => 'PL',
+            ],
+            $this->userId,
+        );
+
+        $xml = (string) $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+        )['xml'];
+
+        self::assertStringContainsString('<druhDavky>OSE</druhDavky>', $xml);
+        self::assertStringNotContainsString('platebniSpojeni', $xml);
+        self::assertStringNotContainsString('rozhodneObdobi', $xml);
+    }
+
+    /**
+     * NX-02: mzda vyplácená přes partnera — účet ani adresu pro výplatu dávky
+     * nevymýšlíme a větu bez platebního spojení neposíláme.
+     */
+    public function testPartnerSettlementStopsThePreviewWithClearReason(): void
+    {
+        [$employeeId, $employmentId] = $this->employee();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employee_profiles SET payout_method = "partner_settlement"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $employeeId]);
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-02-09',
+                'decision_number' => 'A1234567',
+                'daily_working_hours' => '8',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01']),
+            ],
+            $this->userId,
+        );
+
+        try {
+            $this->service(SicknessSubmissionService::class)->preview(
+                $this->supplierId,
+                'test',
+                (int) $case['id'],
+                SicknessDocumentKind::Nempri,
+            );
+            self::fail('Věta bez platebního spojení se nesmí sestavit.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_payment_connection_partner_settlement', $exception->validationCode);
+        }
+    }
+
+    /**
+     * NRO-03 (§ 19 odst. 11): zaměstnání skončilo 27. 3., neschopnost 2. 4.
+     * v ochranné lhůtě. Rozhodný den je 28. 3., takže období končí únorem
+     * — ne březnem, jak by vyšlo ze dne vzniku neschopnosti.
+     */
+    public function testProtectionPeriodDecisivePeriodEndsBeforeTheEmploymentEndMonth(): void
+    {
+        [, $employmentId] = $this->employee();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-03-27", status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-04-02',
+                'decision_number' => 'A1234567',
+                'daily_working_hours' => '8',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01', '2026-02']),
+            ],
+            $this->userId,
+        );
+
+        $xml = (string) $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+        )['xml'];
+
+        self::assertStringContainsString('<rozhodneObdobiOd>2025-10-06</rozhodneObdobiOd>', $xml);
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-02-28</rozhodneObdobiDo>', $xml);
+        self::assertSame(5, substr_count($xml, '<zapocitatelnyPrijem>'));
+    }
+
+    /**
+     * @param list<string> $periods
+     * @return list<array{period:string,income_minor:int,excluded_days:int}>
+     */
+    private static function months(array $periods): array
+    {
+        return array_map(
+            static fn (string $period): array => ['period' => $period, 'income_minor' => 3_000_000, 'excluded_days' => 0],
+            $periods,
+        );
+    }
+
     /** @return array{0:int,1:int} */
-    private function employee(): array
+    private function employee(bool $withAccount = true): array
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -407,19 +541,21 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             '8001010008',
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
         );
-        $this->sealed(
-            'INSERT INTO payroll_person_accounts
-                (supplier_id, employee_id, label, bank_account_ciphertext,
-                 bank_account_hash, bank_account_masked, effective_from)
-             VALUES (?, ?, "Mzda", "enc:v2:pending", ?, "", "2020-01-01")',
-            'UPDATE payroll_person_accounts
-                SET bank_account_ciphertext = ?, bank_account_hash = ?,
-                    bank_account_masked = ?
-              WHERE supplier_id = ? AND id = ?',
-            [$this->supplierId, $employeeId, random_bytes(32)],
-            '1000000005/0100',
-            PayrollSensitiveField::BANK_ACCOUNT,
-        );
+        if ($withAccount) {
+            $this->sealed(
+                'INSERT INTO payroll_person_accounts
+                    (supplier_id, employee_id, label, bank_account_ciphertext,
+                     bank_account_hash, bank_account_masked, effective_from)
+                 VALUES (?, ?, "Mzda", "enc:v2:pending", ?, "", "2020-01-01")',
+                'UPDATE payroll_person_accounts
+                    SET bank_account_ciphertext = ?, bank_account_hash = ?,
+                        bank_account_masked = ?
+                  WHERE supplier_id = ? AND id = ?',
+                [$this->supplierId, $employeeId, random_bytes(32)],
+                '1000000005/0100',
+                PayrollSensitiveField::BANK_ACCOUNT,
+            );
+        }
         $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, office_id, code, relation_type, status,

@@ -121,7 +121,7 @@ final class PohodaPayrollJmhzReportsTest extends TestCase
         self::assertSame([43000, 40000], [$jana->wage, $jana->tariff]);
         self::assertSame(250000, $jana->averageHourlyMilli);
         self::assertSame('2025-03-01', $jana->insuranceFrom);
-        self::assertSame(['code' => '1', 'insurance_days' => 31, 'excluded_days' => 0], $jana->eldp);
+        self::assertSame(['code' => '1', 'insurance_days' => 31, 'excluded_days' => 0, 'sickness_excluded_days' => null, 'absence_days' => ['docasNeschopnost' => 0, 'penezitaPomocMaterstvi' => 0, 'osetrovaniClenaRodiny' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 0]], $jana->eldp);
         self::assertSame([43000, 3053, 10664], [$jana->socialBase, $jana->employeeSocial, $jana->employerSocial]);
         self::assertSame([1935, 3870, 33000], [$jana->employeeHealth, $jana->employerHealth, $jana->netWage]);
         self::assertSame([false, false, false], [$jana->socialDiscount, $jana->orchardDiscount, $jana->deductionsRecorded]);

@@ -16,9 +16,14 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
  *  - mzda na účet (i částečně) → účet, na který mzda chodí; český účet jako
  *    `ucetCZ`, zahraniční IBAN jako `ucetZahranicni`,
  *  - mzda v hotovosti → adresa bydliště (`vyplatitAdresa`),
- *  - mzda vyplácená přes partnera (vyrovnání s jiným subjektem) → údaj se
- *    NEVYPLŇUJE: zaměstnavatel nezná účet, na který mzda doopravdy dojde,
- *    a vymyslet ho nesmí.
+ *  - mzda vyplácená přes partnera (vyrovnání s jiným subjektem) → podání se
+ *    ZASTAVÍ: DV NEMPRI25 vyžaduje platební spojení u každé věty s akcí vznik,
+ *    zaměstnavatel nezná účet, na který mzda doopravdy dojde, a vymyslet ho
+ *    nesmí. Pravidlo „dávka jde tam, kam mzda" na partnera nepasuje, takže
+ *    účet nebo adresu pro výplatu dávky musí doplnit účetní.
+ *
+ * Volající resolver nevolá u ošetřovného a dlouhodobého ošetřovného bez akce
+ * vznik — tam DV platební spojení zakazuje.
  *
  * Třída je čistá: plaintext účtu i adresu dostane hotové.
  */
@@ -35,9 +40,16 @@ final readonly class NempriPaymentConnectionResolver
         ?string $payoutMethod,
         ?string $accountPlaintext,
         ?array $address,
-    ): ?NempriPaymentConnection {
+    ): NempriPaymentConnection {
         if ($payoutMethod === 'partner_settlement') {
-            return null;
+            throw new SicknessException(
+                'nempri_payment_connection_partner_settlement',
+                'Mzda zaměstnance se vyplácí přes partnera, takže MyÚčto nezná účet ani adresu, '
+                . 'kam má ČSSZ poslat dávku. NEMPRI platební spojení vyžaduje (§ 97 odst. 2 zákona '
+                . 'o nemocenském pojištění) a vymyslet ho nelze. Je-li mzda ve skutečnosti '
+                . 'vyplácena na účet nebo v hotovosti, opravte způsob výplaty ve výplatním profilu '
+                . 'osoby; jinak oznámení podejte mimo aplikaci.',
+            );
         }
         if ($payoutMethod === 'cash') {
             return $this->fromAddress($address);

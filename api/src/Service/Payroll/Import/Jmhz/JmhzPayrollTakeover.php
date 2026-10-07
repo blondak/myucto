@@ -38,6 +38,9 @@ final class JmhzPayrollTakeover
     /** Úkol na vztahu, když poslední převzaté hlášení vykazuje srážky ze mzdy. */
     public const DEDUCTIONS_FOLLOW_UP = 'takeover_deductions_review';
 
+    /** Úkol na vztahu, když poslední převzaté hlášení vykazuje nemoc, PPM nebo ošetřovné. */
+    public const SICKNESS_FOLLOW_UP = 'takeover_sickness_review';
+
     public static function policy(): PayrollTakeoverPolicy
     {
         return new PayrollTakeoverPolicy(
@@ -105,14 +108,39 @@ final class JmhzPayrollTakeover
                 oic: $identity['oic'],
                 idPpv: $identity['id_ppv'],
                 leaveTaken: self::leaveTaken($months),
-                // Výši ani druh srážek hlášení nenese, jen příznak. Poslední
-                // převzatý měsíc se srážkami = srážka nejspíš trvá a první mzda
-                // v MyÚčtu ji musí znát.
-                followUps: $latest !== null && $latest->form->deductionsRecorded === true
-                    ? [self::DEDUCTIONS_FOLLOW_UP]
-                    : [],
+                followUps: self::followUps($latest),
             ),
         );
+    }
+
+    /**
+     * Úkoly z posledního převzatého měsíce.
+     *
+     * - Výši ani druh srážek hlášení nenese, jen příznak. Poslední převzatý
+     *   měsíc se srážkami = srážka nejspíš trvá a první mzda v MyÚčtu ji musí
+     *   znát.
+     * - Nemoc, PPM nebo ošetřovné v posledním převzatém měsíci mohou trvat
+     *   dál. Hlášení nenese den jejich vzniku, a pokračující neschopnost
+     *   zadaná od prvního dne v MyÚčtu by otevřela nové okno náhrady mzdy
+     *   (§ 192 odst. 1 ZP) — zaměstnavatel by náhradu vyplatil podruhé. Úkol
+     *   jen upozorní; den vzniku ani započtené dny se nepředvyplňují.
+     *
+     * @return list<string>
+     */
+    private static function followUps(?JmhzBatchItem $latest): array
+    {
+        if ($latest === null) {
+            return [];
+        }
+        $followUps = [];
+        if ($latest->form->deductionsRecorded === true) {
+            $followUps[] = self::DEDUCTIONS_FOLLOW_UP;
+        }
+        if (self::reportsOngoingAbsence($latest->form)) {
+            $followUps[] = self::SICKNESS_FOLLOW_UP;
+        }
+
+        return $followUps;
     }
 
     /**
@@ -184,8 +212,28 @@ final class JmhzPayrollTakeover
                 workedDaysHundredths: ($form->workedDays ?? 0) * 100,
                 workedMinutes: self::minutes($form->workedMillihours),
                 netPayableMinor: $form->hasSummary && $form->deductionsRecorded === false ? $net : 0,
+                sicknessExcludedDays: ($form->eldp['sickness_excluded_days'] ?? null) === null
+                    ? null
+                    : min(31, (int) $form->eldp['sickness_excluded_days']),
+                uninsuredIncomeMinor: $form->uninsuredIncome === null ? null : $czk($form->uninsuredIncome),
             ),
         );
+    }
+
+    /**
+     * Vykazuje měsíc nepřítomnost, která mohla trvat i do prvního měsíce
+     * v MyÚčtu? Nemoc s náhradou mzdy nebo s nemocenským, peněžitá pomoc
+     * v mateřství, ošetřovné nebo jiná výplata dávek.
+     */
+    public static function reportsOngoingAbsence(JmhzReportForm $form): bool
+    {
+        foreach ($form->eldp['absence_days'] ?? [] as $days) {
+            if ($days > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

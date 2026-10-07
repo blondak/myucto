@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
+use MyInvoice\Repository\Payroll\EldpStatementRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
@@ -80,6 +81,8 @@ final readonly class SicknessSubmissionService
         private PayrollTakeoverReader $takeover,
         private PayrollHistoricalPeriodService $historical,
         private PayrollSensitiveData $sensitiveData,
+        private NempriPayrollMonthReader $payrollMonths,
+        private EldpStatementRepository $revisions,
     ) {}
 
     /**
@@ -497,6 +500,10 @@ final readonly class SicknessSubmissionService
         $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::NEMPRI25);
         $employeeId = (int) $row['employee_id'];
         $eventOn = (string) $row['incapacity_from'];
+        // Ošetřovné a dlouhodobé ošetřovné bez akce vznik (jen trvání nebo
+        // ukončení) rozhodné období ani platební spojení nenesou: DV NEMPRI25
+        // je u nich zakazuje. Způsob výplaty se proto ani nezjišťuje — dřív
+        // podání zaměstnance bez účtu spadlo na údaji, který věta nesmí mít.
         $startsClaim = !$kind->hasActions() || (bool) ($row['action_start'] ?? true);
 
         return $this->payloads->nempri(
@@ -513,7 +520,9 @@ final readonly class SicknessSubmissionService
             $startsClaim
                 ? $this->decisivePeriod($supplierId, $environment, $caseId, $row, $context)
                 : null,
-            $this->paymentConnection($supplierId, $employeeId, $eventOn),
+            $startsClaim
+                ? $this->paymentConnection($supplierId, $employeeId, $eventOn)
+                : null,
         );
     }
 
@@ -592,6 +601,12 @@ final readonly class SicknessSubmissionService
     }
 
     /**
+     * Rozhodné období věty. Rozhodný den je den vzniku sociální události,
+     * u události v ochranné lhůtě den po skončení zaměstnání (§ 19 odst. 11)
+     * a u převedené těhotné, matky nebo kojící zaměstnankyně také den
+     * převedení, je-li to výhodnější (§ 19 odst. 6). Platební spojení se
+     * dál řídí dnem události.
+     *
      * @param array<string,mixed> $row
      * @param array<string,mixed> $context
      */
@@ -601,30 +616,45 @@ final readonly class SicknessSubmissionService
         int $caseId,
         array $row,
         array $context,
-    ): ?NempriDecisivePeriod {
-        $eventOn = (string) $row['incapacity_from'];
+    ): NempriDecisivePeriod {
         $employmentStart = SicknessPayloadFactory::employmentFrom($context);
-        [$from, $to] = NempriDecisivePeriodResolver::bounds($eventOn, $employmentStart);
-        $takeover = [];
-        if ($from <= $to) {
-            $employmentId = (int) $row['employment_id'];
-            for ($year = (int) substr($from, 0, 4); $year <= (int) substr($to, 0, 4); $year++) {
+        $decisiveDate = NempriDecisivePeriodResolver::decisiveDate(
+            (string) $row['incapacity_from'],
+            $this->nullableText($context['end_date'] ?? null),
+        );
+        $employmentId = (int) $row['employment_id'];
+        $sources = new NempriDecisiveSources(
+            function (int $year) use ($supplierId, $employmentId): array {
+                $months = [];
                 foreach ($this->takeover->forEmployment($supplierId, $employmentId, $year)->months as $month) {
                     if ($month->employmentId === $employmentId) {
-                        $takeover[] = $month;
+                        $months[] = $month;
                     }
                 }
-            }
-        }
+
+                return $months;
+            },
+            fn (int $year): array => $this->payrollMonths->months(
+                $supplierId,
+                $employmentId,
+                $this->revisions->revisionsForYear($supplierId, $year),
+            ),
+            $this->cases->decisiveMonths($supplierId, $environment, $caseId),
+        );
         $probable = $row['probable_income_czk'] ?? null;
+        $transferredOn = in_array(
+            $row['transfer_reason'] ?? null,
+            NempriDecisivePeriodResolver::TRANSFER_REASONS,
+            true,
+        ) ? $this->nullableText($row['transferred_on'] ?? null) : null;
 
         return $this->decisivePeriods->resolve(
-            $eventOn,
+            $decisiveDate,
             $employmentStart,
             $this->historical->startPeriod($supplierId),
-            $takeover,
-            $this->cases->decisiveMonths($supplierId, $environment, $caseId),
+            $sources,
             $probable === null || $probable === '' ? null : (int) $probable,
+            $transferredOn,
         );
     }
 
