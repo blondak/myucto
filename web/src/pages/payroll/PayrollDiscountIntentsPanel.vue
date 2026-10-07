@@ -57,6 +57,7 @@ const intentFrom = ref('')
 const employeeInformedOn = ref('')
 const acceptedOn = ref<Record<number, string>>({})
 const endOn = ref<Record<number, string>>({})
+const informedOn = ref<Record<number, string>>({})
 const rejectionReason = ref<Record<number, string>>({})
 const previewXml = ref<{ id: number, xml: string } | null>(null)
 const error = ref('')
@@ -217,6 +218,19 @@ async function requestEnd(item: PayrollDiscountIntent): Promise<void> {
   busyId.value = null
 }
 
+async function recordInformed(item: PayrollDiscountIntent): Promise<void> {
+  busyId.value = item.id
+  await run(
+    () => payrollDiscountIntentsApi.recordEmployeeInformed(
+      item.id,
+      environment.value,
+      informedOn.value[item.id] ?? '',
+    ),
+    t('payroll.discountIntents.informedRecorded'),
+  )
+  busyId.value = null
+}
+
 async function confirmEnd(item: PayrollDiscountIntent): Promise<void> {
   busyId.value = item.id
   await run(
@@ -240,6 +254,19 @@ async function confirmEnd(item: PayrollDiscountIntent): Promise<void> {
 function blockedReason(missingFieldKey: string, missing: boolean): string | undefined {
   if (!canWrite.value) return t('payroll.discountIntents.hints.readOnly')
   return missing && missingFieldKey !== '' ? t(missingFieldKey) : undefined
+}
+
+/*
+ * Poučení zaměstnance (§ 23d odst. 2) lze doplnit i dodatečně, jinak by
+ * upozornění v mzdovém běhu nešlo odstranit. U záměru převzatého z předchozího
+ * programu se nevede (poučení evidoval ten program), u zrušeného a odmítnutého
+ * nemá smysl.
+ */
+function canRecordInformed(item: PayrollDiscountIntent): boolean {
+  return !item.predecessor_source
+    && !item.employee_informed_on
+    && item.status !== 'cancelled'
+    && item.status !== 'rejected'
 }
 
 function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
@@ -338,6 +365,21 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
       ),
       show: item.status === 'accepted' && item.intent_to !== null,
       run: () => void confirmEnd(item),
+    },
+    {
+      key: 'inform',
+      label: t('payroll.discountIntents.actions.recordInformed'),
+      icon: 'calendar',
+      tier: 'secondary',
+      variant: 'neutral',
+      loading: busy,
+      disabled: !canWrite || !(informedOn.value[item.id] ?? ''),
+      disabledReason: blockedReason(
+        'payroll.discountIntents.hints.informedOnRequired',
+        !(informedOn.value[item.id] ?? ''),
+      ),
+      show: canRecordInformed(item),
+      run: () => void recordInformed(item),
     },
     {
       key: 'cancel',
@@ -514,7 +556,7 @@ onMounted(async () => {
           </span>
         </div>
 
-        <dl class="mt-3 grid gap-2 sm:grid-cols-4">
+        <dl class="mt-3 grid gap-2 sm:grid-cols-5">
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.intentFrom') }}</dt>
             <dd class="font-medium">{{ formatDate(item.intent_from) }}</dd>
@@ -530,6 +572,12 @@ onMounted(async () => {
           <div>
             <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.dueOn') }}</dt>
             <dd class="font-medium">{{ formatDate(item.notification_due_on) }}</dd>
+          </div>
+          <div v-if="!item.predecessor_source">
+            <dt class="text-xs text-neutral-500">{{ t('payroll.discountIntents.employeeInformedOn') }}</dt>
+            <dd class="font-medium" :data-test="`discount-intent-informed-${item.id}`">
+              {{ item.employee_informed_on ? formatDate(item.employee_informed_on) : '—' }}
+            </dd>
           </div>
         </dl>
 
@@ -589,6 +637,15 @@ onMounted(async () => {
               class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
               :data-test="`discount-intent-reason-${item.id}`"
             >
+          </label>
+          <label v-if="canRecordInformed(item)" class="block text-xs">
+            <span class="mb-1 block font-medium text-neutral-700">
+              {{ t('payroll.discountIntents.informedOnInput') }}
+            </span>
+            <DateInput
+              v-model="informedOn[item.id]"
+              class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
+              :data-test="`discount-intent-informed-on-${item.id}`" />
           </label>
           <label v-if="item.status === 'accepted' && item.intent_to === null" class="block text-xs">
             <span class="mb-1 block font-medium text-neutral-700">

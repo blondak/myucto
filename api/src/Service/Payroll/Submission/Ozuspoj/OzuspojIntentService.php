@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -424,6 +425,46 @@ final readonly class OzuspojIntentService
         );
     }
 
+    /**
+     * Zapíše den, kdy zaměstnavatel zaměstnance písemně poučil o uplatňování
+     * slevy (§ 23d odst. 2). Poučení se dá doplnit i dodatečně, aby upozornění
+     * na jeho absenci v mzdovém běhu šlo vůbec odstranit.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordEmployeeInformed(
+        int $supplierId,
+        string $environment,
+        int $intentId,
+        string $informedOn,
+    ): array {
+        $row = $this->requireIntent($supplierId, $environment, $intentId);
+        $this->assertDate($informedOn);
+        if ($informedOn > $this->today()) {
+            throw new OzuspojException(
+                'ozuspoj_informed_on_in_future',
+                'Den poučení zaměstnance nemůže být v budoucnosti.',
+            );
+        }
+        if (!$this->intents->update(
+            $supplierId,
+            $environment,
+            $intentId,
+            (int) $row['row_version'],
+            ['employee_informed_on' => $informedOn],
+        )) {
+            throw new OzuspojException(
+                'ozuspoj_intent_conflict',
+                'Záměr mezitím někdo změnil. Načtěte ho znovu a akci zopakujte.',
+            );
+        }
+
+        return $this->describe(
+            $this->requireIntent($supplierId, $environment, $intentId),
+            $this->registrationSubmittedOn($supplierId, $environment, (int) $row['employment_id']),
+        );
+    }
+
     /** @return array<string,mixed> */
     public function requireIntent(
         int $supplierId,
@@ -476,6 +517,12 @@ final readonly class OzuspojIntentService
             throw new OzuspojException(
                 'ozuspoj_ossz_code_missing',
                 'Zaměstnavatel nemá vyplněný kód místně příslušné OSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel a oznámení podejte znovu.',
+            );
+        }
+        if (!CsszWorkplaceCatalog::isEpodaniDistrict($code)) {
+            throw new OzuspojException(
+                'ozuspoj_ossz_code_not_in_codebook',
+                'Kód OSSZ ' . $code . ' není v číselníku okresů ČSSZ pro e-podání (kód 101, ústředí, se pro e-podání nepoužívá). Opravte ho v Nastavení mezd → Zaměstnavatel na kód místně příslušné OSSZ.',
             );
         }
 

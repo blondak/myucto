@@ -18,6 +18,9 @@ final class CsszWorkplaceCatalog
     /** @var array<int,string>|null */
     private static ?array $names = null;
 
+    /** @var array{districts:array<int,string>,not_for_epodani:list<int>}|null */
+    private static ?array $epodaniDistricts = null;
+
     public static function nameFor(int $code): ?string
     {
         $name = self::names()[$code] ?? null;
@@ -27,6 +30,50 @@ final class CsszWorkplaceCatalog
         $name = trim($name);
 
         return $name === '' || mb_strlen($name, 'UTF-8') > self::MAX_NAME_LENGTH ? null : $name;
+    }
+
+    /**
+     * Je kód pracoviště v číselníku okresů pro e-podání (C_COKR)? Kód 101
+     * (ústředí) je v číselníku výslovně označený „Nepoužívat pro e-podání",
+     * takže tu neprojde. Prázdný (nenačtený) číselník nic nezamítá, ať chybějící
+     * soubor nezablokuje podání, která dosud procházela.
+     */
+    public static function isEpodaniDistrict(int $code): bool
+    {
+        $catalog = self::epodaniDistricts();
+        if ($catalog['districts'] === []) {
+            return true;
+        }
+
+        return isset($catalog['districts'][$code])
+            && !in_array($code, $catalog['not_for_epodani'], true);
+    }
+
+    /** @return array{districts:array<int,string>,not_for_epodani:list<int>} */
+    private static function epodaniDistricts(): array
+    {
+        if (self::$epodaniDistricts !== null) {
+            return self::$epodaniDistricts;
+        }
+        $path = dirname(__DIR__, 5) . '/resources/payroll/cssz-workplaces/epodani-districts.json';
+        $districts = [];
+        $excluded = [];
+        $raw = is_file($path) ? file_get_contents($path) : false;
+        $decoded = $raw === false ? null : json_decode($raw, true);
+        if (is_array($decoded)) {
+            foreach (is_array($decoded['districts'] ?? null) ? $decoded['districts'] : [] as $code => $name) {
+                if (is_string($name) && ctype_digit((string) $code)) {
+                    $districts[(int) $code] = $name;
+                }
+            }
+            foreach (is_array($decoded['not_for_epodani'] ?? null) ? $decoded['not_for_epodani'] : [] as $code) {
+                if (is_int($code)) {
+                    $excluded[] = $code;
+                }
+            }
+        }
+
+        return self::$epodaniDistricts = ['districts' => $districts, 'not_for_epodani' => $excluded];
     }
 
     /** @return array<int,string> */

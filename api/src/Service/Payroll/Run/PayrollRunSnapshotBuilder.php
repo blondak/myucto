@@ -201,11 +201,15 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodEnd,
         );
-        $discountIntentRows = $this->batch->discountIntents(
+        $discountIntentRecords = $this->batch->discountIntentRecords(
             $supplierId,
             $employmentIds,
             $periodStart,
             $periodEnd,
+        );
+        $discountIntentRows = array_map(
+            PayrollRunSnapshotBatchLoader::snapshotDiscountIntent(...),
+            $discountIntentRecords,
         );
         $enforcementEvidence = $this->enforcement === null
             ? []
@@ -455,6 +459,7 @@ final class PayrollRunSnapshotBuilder
                 $employmentId,
                 $employeeId,
                 $periodStart,
+                $discountIntentRecords[$employmentId] ?? null,
             ) as $validation) {
                 $validations[] = $validation;
             }
@@ -1634,7 +1639,7 @@ final class PayrollRunSnapshotBuilder
      * `$data` — kanonický snapshot a tím i `input_hash` proto zůstávají beze
      * změny a přepočet starší revize dá bit po bitu tentýž vstup jako předtím.
      *
-     * Dvě věci, o kterých se uživatel jinak nedozví:
+     * Tři věci, o kterých se uživatel jinak nedozví:
      *
      * 1. **Chybějící přijatý záměr.** Sleva se bez něj podle § 7a odst. 5
      *    neuplatní. Ve výsledku běhu je to jen „nedoložený nárok"; odsud se
@@ -1644,8 +1649,17 @@ final class PayrollRunSnapshotBuilder
      *    `NotEvaluable`, protože potřebují datum přijetí podání od ČSSZ.
      *    Uživatel tedy z kontrol nedostane varování žádné.
      *
+     * 3. **Neevidované poučení zaměstnance.** § 23d odst. 2 ukládá zaměstnavateli
+     *    informovat zaměstnance písemně PŘED prvním uplatněním slevy; porušení
+     *    je přestupek (§ 25d odst. 1 písm. j). Datum poučení je u záměru
+     *    nepovinné, takže bez tohoto upozornění by chybějící poučení nikdo
+     *    nezaznamenal. U záměru převzatého z předchozího programu se nehlásí:
+     *    poučení tehdy evidoval ten program a MyÚčto o něm nemá co vědět.
+     *
      * @param array<string,mixed> $row
      * @param array<string,mixed>|null $intent
+     * @param array<string,mixed>|null $information `intent_from`,
+     *     `employee_informed_on` a `predecessor_source` téhož záměru
      * @return list<PayrollRunValidation>
      */
     private function discountValidations(
@@ -1654,6 +1668,7 @@ final class PayrollRunSnapshotBuilder
         int $employmentId,
         int $employeeId,
         string $periodStart,
+        ?array $information = null,
     ): array {
         $reason = $row['social_part_time_discount_reason'] ?? 'none';
         if (!is_string($reason) || $reason === 'none') {
@@ -1670,6 +1685,31 @@ final class PayrollRunSnapshotBuilder
                 '/payroll/submissions',
                 true,
             );
+        }
+        if ($intent !== null && $information !== null
+            && ($information['predecessor_source'] ?? null) === null
+        ) {
+            $informedOn = $information['employee_informed_on'] ?? null;
+            $intentFrom = (string) ($information['intent_from'] ?? '');
+            $firstMonthEnd = preg_match('/^\d{4}-\d{2}-\d{2}$/D', $intentFrom) === 1
+                ? date('Y-m-t', (int) strtotime($intentFrom))
+                : null;
+            $missing = !is_string($informedOn) || $informedOn === '';
+            if ($firstMonthEnd !== null
+                && ($missing || (string) $informedOn > $firstMonthEnd)
+            ) {
+                $validations[] = new PayrollRunValidation(
+                    'warning',
+                    'part_time_discount_employee_not_informed',
+                    'employment',
+                    $employmentId,
+                    $missing
+                        ? 'U záměru uplatňovat slevu na pojistném není zapsané písemné poučení zaměstnance. Zaměstnavatel ho musí informovat před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.), jinak se dopouští přestupku (§ 25d odst. 1 písm. j).'
+                        : 'Zaměstnanec byl o uplatňování slevy na pojistném poučen až po prvním měsíci jejího uplatnění. Zaměstnavatel ho musí informovat písemně před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.).',
+                    '/payroll/submissions',
+                    false,
+                );
+            }
         }
         if ((new OzuspojClaimDeadlinePolicy())->isTransitionalQ12026($periodStart)) {
             $validations[] = new PayrollRunValidation(

@@ -2030,6 +2030,10 @@ final class Routes
                 '/submissions/discount-intents/{intentId:[0-9]+}/receipt',
                 [PayrollDiscountIntentAction::class, 'receipt'],
             );
+            $g->post(
+                '/submissions/discount-intents/{intentId:[0-9]+}/employee-informed',
+                [PayrollDiscountIntentAction::class, 'employeeInformed'],
+            );
             $g->get(
                 '/submissions/signing-profile',
                 [PayrollJmhzSigningProfileAction::class, 'show'],

@@ -10512,6 +10512,7 @@
       "acceptedOnInput": "Delivery date from the protocol",
       "endOnInput": "Last day of application",
       "rejectionReason": "Rejection reason from the protocol",
+      "informedOnInput": "Date the employee was informed in writing",
       "dueOn": "Notify no later than",
       "employeeInformedOn": "Employee informed in writing",
       "employeeInformedHint": "Section 23d(2) requires informing the employee in writing before the discount is first applied.",
@@ -10526,6 +10527,7 @@
       "accepted": "Acceptance recorded; the discount applies from the given date.",
       "rejected": "Rejection recorded. The discount will not be applied.",
       "endRequested": "End date recorded. Prepare the end notification.",
+      "informedRecorded": "The date the employee was informed has been recorded.",
       "ended": "The end of the discount application has been recorded.",
       "actions": {
         "create": "Create intent",
@@ -10536,6 +10538,7 @@
         "end": "Set end date",
         "prepareEnd": "Prepare end notification",
         "confirmEnd": "Record the end",
+        "recordInformed": "Record information given",
         "cancel": "Prepare cancellation"
       },
       "hints": {
@@ -10543,7 +10546,8 @@
         "readOnly": "You do not have write access to payroll submissions.",
         "acceptedOnRequired": "First copy the delivery date from the CSSA protocol - the entitlement rests on it.",
         "rejectionReasonRequired": "First copy the rejection reason from the CSSA protocol.",
-        "endOnRequired": "First enter the last day the discount is applied."
+        "endOnRequired": "First enter the last day the discount is applied.",
+        "informedOnRequired": "Enter the date the employee was informed in writing first."
       },
       "statuses": {
         "draft": "Draft",

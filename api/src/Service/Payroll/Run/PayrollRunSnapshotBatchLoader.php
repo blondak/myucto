@@ -398,6 +398,15 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Sloupce záměru, které se zmrazují do snímku vstupů běhu. Cokoli dalšího
+     * z {@see self::discountIntentRecords()} slouží jen validacím — přidat to do
+     * snímku by změnilo `input_hash` všech dosavadních revizí.
+     */
+    private const DISCOUNT_INTENT_SNAPSHOT_KEYS = [
+        'status', 'intent_from', 'intent_to', 'accepted_on', 'discount_reason',
+    ];
+
+    /**
      * Doložený záměr uplatňovat slevu na pojistném (OZUSPOJ) podle vztahu.
      *
      * Vrací JEN stavy, které záměr skutečně dokládají — `accepted` a `ended`.
@@ -418,9 +427,30 @@ final class PayrollRunSnapshotBatchLoader
         string $periodStart,
         string $periodEnd,
     ): array {
+        return array_map(
+            self::snapshotDiscountIntent(...),
+            $this->discountIntentRecords($supplierId, $employmentIds, $periodStart, $periodEnd),
+        );
+    }
+
+    /**
+     * Totéž co {@see self::discountIntents()}, ale včetně údajů, které do
+     * snímku nepatří (`employee_informed_on` a `predecessor_source` pro
+     * validaci poučení zaměstnance podle § 23d odst. 2). Jediný dotaz, ať se
+     * počet round-tripů snímku nezvýší.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function discountIntentRecords(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
         return $this->single($this->fetch(
             'SELECT status, intent_from, intent_to, accepted_on,
-                    discount_reason,
+                    discount_reason, employee_informed_on, predecessor_source,
                     employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_discount_intents
               WHERE supplier_id = ?
@@ -434,6 +464,15 @@ final class PayrollRunSnapshotBatchLoader
             $employmentIds,
             [$periodEnd, $periodStart],
         ));
+    }
+
+    /**
+     * @param array<string,mixed> $record
+     * @return array<string,mixed>
+     */
+    public static function snapshotDiscountIntent(array $record): array
+    {
+        return array_intersect_key($record, array_flip(self::DISCOUNT_INTENT_SNAPSHOT_KEYS));
     }
 
     /**

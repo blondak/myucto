@@ -10512,6 +10512,7 @@
       "acceptedOnInput": "Den doručení z protokolu",
       "endOnInput": "Poslední den uplatňování",
       "rejectionReason": "Důvod odmítnutí z protokolu",
+      "informedOnInput": "Den písemného poučení zaměstnance",
       "dueOn": "Oznámit nejpozději",
       "employeeInformedOn": "Zaměstnanec písemně informován",
       "employeeInformedHint": "§ 23d odst. 2 ukládá informovat zaměstnance písemně před prvním uplatněním slevy.",
@@ -10526,6 +10527,7 @@
       "accepted": "Přijetí záměru je zapsané, sleva se od uvedeného dne uplatní.",
       "rejected": "Odmítnutí je zapsané. Sleva se neuplatní.",
       "endRequested": "Den skončení je zapsaný. Připravte oznámení o skončení.",
+      "informedRecorded": "Den poučení zaměstnance je zapsaný.",
       "ended": "Skončení uplatňování slevy je zapsané.",
       "actions": {
         "create": "Založit záměr",
@@ -10536,6 +10538,7 @@
         "end": "Zadat den skončení",
         "prepareEnd": "Připravit oznámení o skončení",
         "confirmEnd": "Zapsat skončení",
+        "recordInformed": "Zapsat poučení",
         "cancel": "Připravit storno"
       },
       "hints": {
@@ -10543,7 +10546,8 @@
         "readOnly": "Nemáte oprávnění zapisovat do mzdových podání.",
         "acceptedOnRequired": "Nejdřív opište den doručení z protokolu ČSSZ — na něm stojí nárok na slevu.",
         "rejectionReasonRequired": "Nejdřív opište důvod odmítnutí z protokolu ČSSZ.",
-        "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje."
+        "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje.",
+        "informedOnRequired": "Nejdřív zadejte den, kdy byl zaměstnanec písemně poučen."
       },
       "statuses": {
         "draft": "Rozpracováno",
