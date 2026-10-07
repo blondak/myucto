@@ -526,6 +526,7 @@ final class SicknessDocumentXmlReader
             caseFields: $fields,
             workDays: $workDays,
             personReport: $personReport,
+            incapacityToDerived: $incapacityTo !== null,
         );
     }
 

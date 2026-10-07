@@ -181,10 +181,6 @@ final class RegistrationImportPlanner
         if ($record->vcp !== null && $this->validVcp($record) === null) {
             $plan['warnings'][] = 'VČP ve větě není platné (devět číslic začínajících šestkou), nepřebírá se.';
         }
-        if ($record->formerSurname !== null) {
-            $plan['warnings'][] = "Věta uvádí dřívější příjmení „{$record->formerSurname}“ (ona). Není to rodné příjmení, "
-                . 'proto ho import nepřebírá; zkontrolujte historii jména na kartě osoby.';
-        }
 
         $person = $this->matchPerson($supplierId, $environment, $record, $birthNumber, $ecp);
         if ($person['blocker'] !== null) {
@@ -197,6 +193,8 @@ final class RegistrationImportPlanner
         }
         $employeeId = $person['employee_id'];
         if ($employeeId === null) {
+            $this->warnFormerSurname($supplierId, $plan, $record, null, '');
+
             return $this->planWithoutPerson($plan, $record, $relationType, $birthNumber, $birthDate, $ecp);
         }
 
@@ -430,6 +428,7 @@ final class RegistrationImportPlanner
         }
 
         $this->planPersonFacts($supplierId, $plan, $record, $employeeId, $decisive);
+        $this->warnFormerSurname($supplierId, $plan, $record, $employeeId, $decisive);
         $this->planPersonIdentifier($supplierId, $plan, $record, $employeeId);
 
         if ($record->isCsszExport()) {
@@ -691,6 +690,84 @@ final class RegistrationImportPlanner
     {
         $plan['warnings'][] = 'V dávce je i hlášení o nenastoupení téže osoby, proto vztah zůstane plánovaný a '
             . 'neaktivuje se; nenastoupení ho uzavře.';
+    }
+
+    /**
+     * Dřívější příjmení z věty (`name@ona`, ID 10064) se do evidence ZÁMĚRNĚ
+     * nezapisuje: historie jména vede každé příjmení s datem platnosti od-do
+     * (`effective_from` je povinné, intervaly se nesmí překrývat) a věta datum
+     * změny příjmení nenese. Vymyšlené datum by se objevilo na kartě osoby
+     * jako doložená skutečnost, posunulo by hranici verzí identity, ze které
+     * se detekují změny příjmení, a určovalo by pořadí příjmení v dalších
+     * podáních. Příjmení se proto jen porovná s tím, co evidence už vede:
+     * vede-li ho, mlčí se; jinak import řekne, co a kde doplnit ručně.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function warnFormerSurname(
+        int $supplierId,
+        array &$plan,
+        RegistrationRecord $record,
+        ?int $employeeId,
+        string $decisive,
+    ): void {
+        $stated = self::surnameList($record->formerSurname);
+        if ($stated === []) {
+            return;
+        }
+        $label = implode(', ', $stated);
+        $manual = 'Doplňte je s datem změny na kartě osoby v historii jména (Identita a adresy → Historie jména), '
+            . 'aby je další podání REGZEC nesla.';
+        $known = [];
+        if ($employeeId !== null) {
+            try {
+                $today = date('Y-m-d');
+                $onDate = min($decisive === '' ? $today : $decisive, $today);
+                $identity = $this->registrations->identityAt($supplierId, $employeeId, $onDate)
+                    ?? $this->registrations->identityAt($supplierId, $employeeId, $today);
+                $current = trim((string) ($identity['last_name'] ?? ''));
+                if ($current !== '') {
+                    $known = self::surnameList($this->registrations->previousSurnames(
+                        $supplierId,
+                        $employeeId,
+                        $onDate,
+                        $current,
+                    ));
+                }
+            } catch (\DomainException) {
+                $known = [];
+            }
+        }
+        $missing = array_values(array_filter(
+            $stated,
+            static fn (string $name): bool => !in_array(mb_strtolower($name), array_map('mb_strtolower', $known), true),
+        ));
+        if ($missing === []) {
+            return;
+        }
+        $plan['warnings'][] = $known === []
+            ? "Věta uvádí dřívější příjmení „{$label}“ (ona), evidence žádné dřívější příjmení osoby nevede. "
+                . 'Import ho nezapisuje, protože věta nenese datum, od kdy a do kdy platilo. ' . $manual
+            : 'Věta uvádí dřívější příjmení „' . implode(', ', $missing) . '“ (ona), které historie jména osoby '
+                . 'nevede (vede: ' . implode(', ', $known) . '). Import ho nezapisuje, protože věta nenese datum '
+                . 'změny. ' . $manual;
+    }
+
+    /** @return list<string> */
+    private static function surnameList(?string $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        $names = [];
+        foreach (preg_split('/[,;]/u', $value) ?: [] as $part) {
+            $name = trim($part);
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
     }
 
     /** @param array<string,mixed> $plan */

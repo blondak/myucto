@@ -338,7 +338,11 @@ souboru nic nezaloží podruhé. Soubor XML smí mít nejvýše 20 MB (celá dá
 - **VČP.** Variabilní číslo pojištěnce (devět číslic začínajících šestkou)
   slouží k nalezení osoby a zapíše se na kartu, kde chybí.
 - **Dřívější příjmení.** Příjmení z atributu *dřívější příjmení* není rodné
-  příjmení. Import ho jen ukáže jako upozornění a nezapisuje.
+  příjmení. Import ho nezapisuje, protože věta nenese datum, od kdy a do kdy
+  příjmení platilo, a historie jména tyto údaje vyžaduje. Vede-li historie
+  jména osoby příjmení už, náhled mlčí; jinak upozorní, které příjmení a kde
+  doplnit (karta osoby, Historie jména, s datem změny). Doplněné příjmení pak
+  nese i další přihláška a dohlášení.
 - **Skončení úmrtím.** Odhláška s příznakem úmrtí zapíše u vztahu způsob
   skončení *úmrtí*, pokud ještě není vyplněný. Kód důvodu ukončení pro úřad
   práce se nepřebírá, náhled na něj upozorní; způsob a důvod skončení doplňte
@@ -540,6 +544,16 @@ podruhé.
   podání předchozí program nevyřídí; přijetí takového podání zapíšete dnem
   doručení z protokolu ČSSZ. Den doručení můžete u věty vyplnit, u NEMPRI a
   HZUPN je nepovinný.
+- **Oprávnění.** Náhled těchto vět uvidí každý, kdo smí import otevřít. Zápis
+  NEMPRI, HZUPN a OZUSPOJ ale vyžaduje i právo ke správě mzdových podání, tedy
+  stejné právo, které chrání tato podání v Podání → Dávky. Bez něj se věty
+  přeskočí s upozorněním a ostatní věty dávky (registrace, hlášení) se zapíší.
+- **Poslední den neschopnosti.** HZUPN nese jen datum návratu do práce, proto
+  se poslední den neschopnosti odvozuje jako den před ním. Vrací-li se
+  zaměstnanec v pondělí, je to neděle, ale neschopnost mohla skončit v pátek.
+  Import proto při hledání případu a nepřítomnosti počítá s víkendem a konec
+  vedený v evidenci (pátek) nepřepisuje ani nehlásí jako rozpor. Konec se
+  přepíše jen tehdy, když leží mimo tuto dobu.
 - **Hlídač termínů.** Rozběhnutá neschopnost, ke které import převzal jen
   NEMPRI, zůstává v hlídači lhůt: HZUPN k návratu do práce se podává, až
   neschopnost skončí. Po převzetí HZUPN a při vyřízeném NEMPRI případ

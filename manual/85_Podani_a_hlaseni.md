@@ -712,7 +712,9 @@ se pole ve formuláři vůbec neukáže a do podání nejde.
 
 Tlačítko **Kontrola** v profilu hlídá i osobní údaje, které přihláška nese —
 jméno, příjmení, rodné příjmení, datum, místo a stát narození a pohlaví. U každé
-vady je tlačítko, které otevře kartu osoby přímo u chybějícího údaje. Má-li
+vady je tlačítko, které otevře kartu osoby přímo u chybějícího údaje. Odhláška
+a dohlášení údajů rodné příjmení, místo a stát narození do věty nepřenášejí,
+takže jejich chybění podání dalších akcí nebrání. Má-li
 zaměstnanec u firmy další vztah se stejným druhem činnosti a stejným příznakem
 zaměstnání malého rozsahu, který se s tímto časově překrývá, ukáže profil žluté
 **Upozornění před podáním**: ČSSZ by přihlášku odmítla (chyba 603 nebo 604).
