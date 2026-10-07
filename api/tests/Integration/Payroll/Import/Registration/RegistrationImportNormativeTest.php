@@ -209,6 +209,48 @@ final class RegistrationImportNormativeTest extends TestCase
         self::assertSame('no_show', $this->lookup->employment($this->supplierId, $employmentId)['status'] ?? null);
     }
 
+    /** IMP-04: nezapsané nenastoupení nenechá výsledek vypadat jako hotový, vztah zůstane plánovaný. */
+    public function testResultIsIncompleteWhenNoShowOfTheBatchIsNotWritten(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1);
+        $noShow = str_replace('vs="1234567890"', 'vs="9999999999"', RegistrationXmlFixtures::regzecA8($birthNumber));
+        $files = [
+            $this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $birthNumber])),
+            $this->file('a8.xml', $noShow),
+        ];
+        [$registration, $cancellation] = $this->imports->preview($this->supplierId, 'test', $files)['records'];
+        self::assertNotNull($cancellation['blocker']);
+
+        $applied = $this->apply($files, [$registration['key'], $cancellation['key']]);
+
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        self::assertSame('skipped', $applied['results'][1]['status']);
+        self::assertSame('incomplete', $applied['outcome']);
+        self::assertSame([$registration['key']], array_column($applied['unresolved'], 'key'));
+        self::assertSame('planned', $this->lookup->employment($this->supplierId, (int) $applied['results'][0]['employment_id'])['status'] ?? null);
+    }
+
+    /** IMP-04: částečné přihlášení (P1) + ukončení předregistrace (P2) v jedné dávce. */
+    public function testPreRegistrationAndItsCancellationInOneBatch(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1985-03-04', 'female', 2);
+        $files = [
+            $this->file('p1.xml', RegistrationXmlFixtures::prezecP1($birthNumber, 'Petra', 'Nováková', '2026-12-01')),
+            $this->file('p2.xml', RegistrationXmlFixtures::prezecP2($birthNumber)),
+        ];
+
+        $records = $this->imports->preview($this->supplierId, 'test', $files)['records'];
+        self::assertSame([9, 10], array_column($records, 'action_code'));
+        self::assertNull($records[1]['blocker'], json_encode($records[1], JSON_UNESCAPED_UNICODE));
+        self::assertTrue($records[1]['selectable']);
+
+        $applied = $this->apply($files, [$records[0]['key'], $records[1]['key']]);
+        foreach ($applied['results'] as $result) {
+            self::assertSame('applied', $result['status'], (string) $result['message']);
+        }
+        self::assertSame('no_show', $this->lookup->employment($this->supplierId, (int) $applied['results'][0]['employment_id'])['status'] ?? null);
+    }
+
     /** IMP-04: když vybereme jen přihlášku, aktivuje se jako dřív. */
     public function testRegistrationAloneStillActivates(): void
     {

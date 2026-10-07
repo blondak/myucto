@@ -302,7 +302,49 @@ zaměstnání. Podle výsledku aplikace navrhne:
 Věty, které nejde jednoznačně přiřadit, jsou označené a vybrat je nelze.
 Před použitím potvrďte, že jste údaje porovnali s podáním, které ČSSZ přijala;
 identifikátory se ukládají jako ověřený ruční opis. Opakovaný import téhož
-souboru nic nezaloží podruhé.
+souboru nic nezaloží podruhé. Soubor XML smí mít nejvýše 20 MB (celá dávka
+20 MB), takže se vejde i balík měsíčního hlášení JMHZ s tisíci formuláři.
+
+**Kontroly vět REGZEC a PREZEC.** Náhled u každé věty hlídá:
+
+- **Zaměstnavatele.** Variabilní symbol věty (u změny VS starý i nový) se
+  porovná s variabilními symboly vašich mzdových účtáren. Věta jiného
+  zaměstnavatele je zablokovaná. Firma bez vyplněného variabilního symbolu
+  může větu použít, náhled ale upozorní, že nejde ověřit, komu patří.
+- **Souběžný vztah.** Přihláška A1 s jiným ID zaměstnání, než má aktivní vztah
+  téže osoby, založí druhý vztah. Nesloučí se s prvním.
+- **Změnu podmínek vztahu.** Změna z věty se do sjednaných podmínek nezapíše
+  zpětně. Platí od prvního dne měsíce, ve kterém věta nabývá účinnosti, jako
+  nová verze podmínek; dřívější verze zůstane. Povinnosti ke změně na kartě
+  vztahu vzniknou stejně jako u ruční změny. Je-li od toho měsíce zaúčtovaná
+  nebo vyplacená mzda, změna podmínek se nezapíše a výsledek použití to ohlásí.
+- **Starší věty než evidence.** Věta, po jejímž dni se už pojišťovna nebo
+  adresa osoby změnila, tyto údaje nepřepíše; náhled napíše, že věta je starší
+  než evidence.
+- **Přihlášku a nenastoupení v jedné dávce.** Vyberete-li přihlášku A1
+  i hlášení o nenastoupení (A8) téže osoby, vztah se založí jako plánovaný a
+  nenastoupení ho uzavře. Totéž platí pro částečné přihlášení PREZEC a
+  ukončení předregistrace. Nezapíše-li se nenastoupení, výsledek je
+  **Import není úplný** a vztah zůstane plánovaný.
+- **Odhlášku, změnu a nenastoupení bez příznaku zaměstnání malého rozsahu.**
+  Kód činnosti 1 až 9 bez příznaku najde pracovní poměr i zaměstnání malého
+  rozsahu; je-li shod víc, věta je zablokovaná jako nejednoznačná.
+- **Bližší určení vztahu.** Evidence vede u pracovního poměru jen určení 1;
+  věta s určením 2 až 9 se zapíše jako 1 a náhled na to upozorní.
+- **Rodné číslo.** Osoba nalezená podle OIČ, ID zaměstnání nebo VČP, jejíž
+  rodné číslo (EČP) na kartě se liší od věty, dostane upozornění. Vedené číslo
+  import nepřepisuje.
+- **VČP.** Variabilní číslo pojištěnce (devět číslic začínajících šestkou)
+  slouží k nalezení osoby a zapíše se na kartu, kde chybí.
+- **Dřívější příjmení.** Příjmení z atributu *dřívější příjmení* není rodné
+  příjmení. Import ho jen ukáže jako upozornění a nezapisuje.
+- **Skončení úmrtím.** Odhláška s příznakem úmrtí zapíše u vztahu způsob
+  skončení *úmrtí*, pokud ještě není vyplněný. Kód důvodu ukončení pro úřad
+  práce se nepřebírá, náhled na něj upozorní; způsob a důvod skončení doplňte
+  na kartě vztahu.
+
+OIČ a ID zaměstnání z věty platí od začátku vztahu, ne až od data účinnosti
+věty.
 
 **Export zaměstnanců z ePortálu ČSSZ.** Záložka přijme i soubor, který
 stáhnete na ePortálu ČSSZ jako přehled zaměstnanců (kořen `ExportZamestnancu`).

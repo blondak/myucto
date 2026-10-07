@@ -30483,6 +30483,7 @@
       },
       "matched_by": {
         "birth_number": "by birth number",
+        "vcp": "by VČP",
         "oic": "by OIČ",
         "id_ppv": "by ID PPV",
         "name_birth_date": "by name and date of birth",

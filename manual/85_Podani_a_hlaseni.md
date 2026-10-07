@@ -415,6 +415,13 @@ kontrol), proto se ani nepřipraví: příprava skončí hláškou, který progr
 a kdy hlášení podal, a odkazem na tento oddíl. Opravu takového měsíce pošlete
 jako opravné podání z programu, který řádné hlášení podal.
 
+**Zrušené a zamítnuté hlášení měsíc nepodalo.** Řádné nebo opravné hlášení, které
+zrušilo nahrané stornující podání téhož programu (storno nese GUID rušeného
+hlášení), a hlášení, které podle načteného protokolu ČSSZ zamítla nebo nepřijala,
+se za podané nepočítá. MyÚčto pak za měsíc nové řádné hlášení s novým GUID
+připraví a měsíc se v oddílu i v hlídači termínů znovu hlásí jako nepodaný, dokud
+ho nikdo nepodá.
+
 **Neodeslaný měsíc je upozornění.** Když předchozí program hlášení za měsíc
 připravil, ale neodeslal, oddíl na to upozorní: ČSSZ ho nemá a je potřeba ho
 podat.

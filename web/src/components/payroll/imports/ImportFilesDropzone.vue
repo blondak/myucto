@@ -8,6 +8,7 @@ import {
   IMPORT_MAX_TOTAL_BYTES,
   formatBytes,
   mergeImportFiles,
+  type ImportFileLimits,
   type ImportFileRejection,
 } from './importHelpers'
 
@@ -18,9 +19,16 @@ const props = withDefaults(defineProps<{
   dropHint: string
   disabled?: boolean
   testId?: string
+  /** Vlastní limity souborů; bez nich platí obecné limity importů. */
+  limits?: ImportFileLimits
 }>(), {
   disabled: false,
   testId: undefined,
+  limits: () => ({
+    maxFiles: IMPORT_MAX_FILES,
+    maxFileBytes: IMPORT_MAX_FILE_BYTES,
+    maxTotalBytes: IMPORT_MAX_TOTAL_BYTES,
+  }),
 })
 
 const emit = defineEmits<{
@@ -39,16 +47,16 @@ const isDragging = computed(() => dragDepth.value > 0 && !props.disabled)
 const totalBytes = computed(() => props.files.reduce((sum, file) => sum + file.size, 0))
 const limitText = computed(() => t('payroll_imports.files.limits', {
   extensions: props.allowedExtensions.join(', '),
-  count: IMPORT_MAX_FILES,
-  size: formatBytes(IMPORT_MAX_FILE_BYTES, locale.value),
-  total: formatBytes(IMPORT_MAX_TOTAL_BYTES, locale.value),
+  count: props.limits.maxFiles,
+  size: formatBytes(props.limits.maxFileBytes, locale.value),
+  total: formatBytes(props.limits.maxTotalBytes, locale.value),
 }))
 
 function addFiles(list: FileList | File[] | null | undefined) {
   const incoming = list ? Array.from(list) : []
   noFile.value = incoming.length === 0
   if (incoming.length === 0) return
-  const result = mergeImportFiles(props.files, incoming, props.allowedExtensions)
+  const result = mergeImportFiles(props.files, incoming, props.allowedExtensions, props.limits)
   rejected.value = result.rejected
   if (result.files.length !== props.files.length) emit('update:files', result.files)
 }

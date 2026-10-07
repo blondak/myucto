@@ -45,6 +45,7 @@ import {
   emptyRuleDraft,
   formatHours,
   guessRelationType,
+  IMPORT_XML_LIMITS,
   isValidPeriod,
   mergeImportFiles,
   moveItem,
@@ -168,6 +169,14 @@ describe('soubory importu', () => {
     )
     expect(result.files.map(item => item.name)).toEqual(['a.xml', 'c.xml'])
     expect(result.rejected.map(item => item.reason)).toEqual(['file_too_large', 'total_too_large', 'too_many_files'])
+  })
+
+  it('XML registrací a hlášení připustí balík JMHZ do 20 MB, obecný limit zůstává 5 MB', () => {
+    const bundle = file('jmhz-1500.xml', 9_000_000)
+    expect(mergeImportFiles([], [bundle], ['xml']).rejected).toEqual([{ name: 'jmhz-1500.xml', reason: 'file_too_large' }])
+    const result = mergeImportFiles([], [bundle, file('obri.xml', 20_000_001)], ['xml'], IMPORT_XML_LIMITS)
+    expect(result.files.map(item => item.name)).toEqual(['jmhz-1500.xml'])
+    expect(result.rejected).toEqual([{ name: 'obri.xml', reason: 'file_too_large' }])
   })
 
   it('převede data URL i soubor na holé base64', async () => {

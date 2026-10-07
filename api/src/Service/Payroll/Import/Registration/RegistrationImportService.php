@@ -362,7 +362,7 @@ final class RegistrationImportService
             $unresolved[] = [
                 'key' => $registrationKey,
                 'file' => (string) ($byKey[$registrationKey]['file'] ?? ''),
-                'period' => '',
+                'period' => substr((string) ($byKey[$registrationKey]['record']->startOn ?? ''), 0, 7),
                 'label' => (string) ($byKey[$registrationKey]['record']->fullName() ?? ''),
                 'reason' => 'Přihláška se zapsala, ale vztah zůstal plánovaný, protože ho má uzavřít hlášení '
                     . 'o nenastoupení z téže dávky, a to se nezapsalo'

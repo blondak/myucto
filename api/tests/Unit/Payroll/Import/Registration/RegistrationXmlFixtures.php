@@ -174,6 +174,22 @@ final class RegistrationXmlFixtures
             XML;
     }
 
+    /** Ukončení předregistrace (P2) k částečnému přihlášení {@see prezecP1()}. */
+    public static function prezecP2(string $birthNumber, string $date = '2026-09-20'): string
+    {
+        return <<<XML
+            <?xml version="1.0" encoding="UTF-8"?>
+            <PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026" version="1.2" partialAccept="A">
+              <employees>
+                <employee sqnr="1" act="10" idform="0F8A3C2E-1B2D-4C5E-8F9A-0123456789AB" dat="{$date}">
+                  <client bno="{$birthNumber}"/>
+                  <comp vs="1234567890"/>
+                </employee>
+              </employees>
+            </PREZEC>
+            XML;
+    }
+
     /**
      * Export zaměstnanců z ePortálu ČSSZ (kořen `ExportZamestnancu` bez jmenného
      * prostoru, s BOM jako originál). Hodnota `null` element vynechá; elementy

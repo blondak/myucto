@@ -22,7 +22,7 @@ export type RegistrationRelationType =
   | 'dpp'
   | 'statutory_body'
 export type RegistrationMatchStatus = 'new' | 'matched' | 'ambiguous' | 'not_found'
-export type RegistrationMatchedBy = 'birth_number' | 'oic' | 'id_ppv' | 'name_birth_date' | 'manual'
+export type RegistrationMatchedBy = 'birth_number' | 'vcp' | 'oic' | 'id_ppv' | 'name_birth_date' | 'manual'
 export type RegistrationOperation =
   | 'create_person'
   | 'create_employment'
