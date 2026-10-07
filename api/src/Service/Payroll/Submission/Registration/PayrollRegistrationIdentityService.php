@@ -1175,6 +1175,21 @@ final readonly class PayrollRegistrationIdentityService
             );
         }
 
+        // Dřívější příjmení (ID 10064) se skládají z historie jména; klíč se
+        // do identity přidává jen při nalezení, ať se snímky osob bez změny
+        // příjmení nemění.
+        $previousSurnames = $this->repository->previousSurnames(
+            $supplierId,
+            $employeeId,
+            $onDate,
+            (string) $identity['last_name'],
+            $this->nullableText($identity['birth_surname'] ?? null),
+            $forUpdate,
+        );
+        if ($previousSurnames !== null) {
+            $identity['previous_surnames'] = $previousSurnames;
+        }
+
         $identifiers = [
             'birth_number' => null,
             'ecp' => null,
@@ -2678,7 +2693,7 @@ final readonly class PayrollRegistrationIdentityService
             'work_mode_code' => 'text:2',
             'continuous_operation' => 'bool',
             'prevailing_workplace_code' => 'text:2',
-            'expected_workplaces' => 'text:255',
+            'expected_workplaces' => 'text:500',
             'contract_workplace' => 'text:255',
             'workplace_city' => 'text:255',
             'workplace_municipality_code' => 'text:12',
@@ -2716,6 +2731,25 @@ final readonly class PayrollRegistrationIdentityService
             'permit_from' => 'text:10',
             'permit_to' => 'text:10',
         ],
+    ];
+
+    /**
+     * Cizozemský nositel pojištění (`forin`). Do konceptu se zapisuje jen
+     * vyplněný oddíl, aby koncepty bez něj zůstaly beze změny.
+     *
+     * @var array<string,string>
+     */
+    private const A1_DRAFT_FOREIGN_INSURANCE = [
+        'current' => 'text:16',
+        'name' => 'text:255',
+        'street' => 'text:255',
+        'house_number' => 'text:32',
+        'orientation_number' => 'text:32',
+        'postal_code' => 'text:32',
+        'city' => 'text:255',
+        'country_code' => 'text:2',
+        'identifier' => 'text:64',
+        'sector' => 'text:2',
     ];
 
     /** @var array<string,string> */
@@ -2770,6 +2804,15 @@ final readonly class PayrollRegistrationIdentityService
             self::A1_DRAFT_ATTACHMENT,
             9,
         );
+        $foreignInsurance = $this->a1DraftValue(
+            $input['foreign_insurance'] ?? null,
+            self::A1_DRAFT_FOREIGN_INSURANCE,
+        );
+        if (is_array($foreignInsurance)
+            && array_filter($foreignInsurance, static fn (mixed $item): bool => $item !== null) !== []
+        ) {
+            $draft['foreign_insurance'] = $foreignInsurance;
+        }
 
         return $draft;
     }
@@ -2839,7 +2882,9 @@ final readonly class PayrollRegistrationIdentityService
             'czech_residence_address' => $snapshot->czechResidenceAddress,
             'contact_address' => $snapshot->contactAddress,
             'attachments' => $snapshot->attachments,
-        ];
+        ] + ($snapshot->foreignInsurance === null
+            ? []
+            : ['foreign_insurance' => $snapshot->foreignInsurance]);
     }
 
     /**

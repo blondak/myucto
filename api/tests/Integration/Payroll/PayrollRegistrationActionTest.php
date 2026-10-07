@@ -2026,6 +2026,73 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * EDV 1.4.0.6, ID 10092 a 10099: u druhu činnosti "N" musí A1 nést
+     * cizozemského nositele pojištění. Profil bez něj zůstane rozpracovaný,
+     * s ním se uloží, vrátí a podání ho zapíše mezi `job` a `pens`.
+     */
+    public function testActivityNProfileKeepsForeignInsurerAndFilesItInTheRegistration(): void
+    {
+        $this->seedRegistrationEventPrerequisites('N', '1', self::START_ON, null, null, true);
+        $payload = $this->completeA1Payload();
+        $payload['employment']['activity_code'] = 'N';
+        $payload['employment']['relationship_detail_code'] = '1';
+
+        $draft = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $draft->getStatusCode(), (string) $draft->getBody());
+        $draftProfile = $this->json($draft)['profile'];
+        self::assertSame('draft', $draftProfile['status']);
+        self::assertContains(
+            'foreign_insurance.current',
+            array_column($draftProfile['problems'], 'field'),
+        );
+
+        $payload['row_version'] = $draftProfile['row_version'];
+        $payload['foreign_insurance'] = [
+            'current' => 'S',
+            'name' => 'Syntetická pojišťovna',
+            'street' => null,
+            'house_number' => null,
+            'orientation_number' => null,
+            'postal_code' => null,
+            'city' => null,
+            'country_code' => 'DE',
+            'identifier' => 'SYN-1',
+            'sector' => null,
+        ];
+        $saved = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $profile = $this->json($saved)['profile'];
+        self::assertSame(
+            'verified',
+            $profile['status'],
+            json_encode($profile['problems'] ?? [], JSON_UNESCAPED_UNICODE) ?: '',
+        );
+        self::assertSame('S', $profile['foreign_insurance']['current']);
+        self::assertSame('DE', $profile['foreign_insurance']['country_code']);
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($response)['submission_id']);
+        self::assertStringContainsString('<forin cur="S" nam="Syntetická pojišťovna" cnt="DE" id="SYN-1"/>', $xml);
+        self::assertLessThan(strpos($xml, '<pens'), strpos($xml, '<forin'));
+    }
+
+    /**
      * Cizinec se přihlašuje VŽDY plnou registrací a VŽDY před nástupem.
      * Hláška validátoru mu to radila, přitom podání A1 před nástupem padalo
      * na „nemá vyplněné všechny povinné údaje".
@@ -2048,10 +2115,13 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
         $payload = $this->completeA1Payload();
+        // EDV 1.4.0.6 (ID 10071, 10526, 10248): u cizince povinné.
+        $payload['employment']['expected_workplaces'] = 'Sídlo zaměstnavatele';
+        $payload['employment']['required_education_code'] = 'T';
         $payload['proof_identity'] = [
             'type_code' => 'P',
             'number' => 'SYN000001',
-            'foreign_issuer' => null,
+            'foreign_issuer' => 'Municipal office, Testov',
             'country_code' => 'SK',
         ];
         $payload['foreign_worker'] = [

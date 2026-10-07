@@ -21,6 +21,7 @@ const SECTIONS = new Set([
   'employment',
   'pension',
   'foreign_legislation',
+  'foreign_insurance',
   'proof_identity',
   'foreign_worker',
   'attachments',
@@ -61,6 +62,10 @@ const GROUP_LEAVES: Record<string, ReadonlySet<string>> = {
   facts: new Set(['highest_education_code', 'disability_card', 'health_restrictions']),
   pension: new Set(['type_code', 'received_from', 'early_retirement', 'reduced_retirement_age']),
   foreign_legislation: new Set(['applies', 'country_code']),
+  foreign_insurance: new Set([
+    'current', 'name', 'street', 'house_number', 'orientation_number',
+    'postal_code', 'city', 'country_code', 'identifier', 'sector',
+  ]),
   proof_identity: new Set(['type_code', 'number', 'foreign_issuer', 'country_code']),
   foreign_worker: new Set([
     'free_access', 'free_access_reason_code', 'permit_type_code',

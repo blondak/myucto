@@ -346,9 +346,20 @@ final class PayrollRegistrationFieldVocabulary
         ],
         'foreign_insurance.identifier' => ['číslo zahraničního pojištění', null],
         'foreign_insurance.sector' => [
-            'část obce nebo správní oblast zahraničního nositele',
+            'sektor (účel) zahraničního pojištění',
             null,
         ],
+        'foreign_insurance.street' => ['ulice zahraničního nositele pojištění', null],
+        'foreign_insurance.house_number' => [
+            'číslo popisné zahraničního nositele pojištění',
+            null,
+        ],
+        'foreign_insurance.orientation_number' => [
+            'číslo orientační zahraničního nositele pojištění',
+            null,
+        ],
+        'foreign_insurance.postal_code' => ['PSČ zahraničního nositele pojištění', null],
+        'foreign_insurance.city' => ['obec zahraničního nositele pojištění', null],
     ];
 
     /**

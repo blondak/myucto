@@ -49,7 +49,7 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
             ' cont="N"',
             ' contractplace="Testov"',
             ' municode="554782"',
-            '<prof clas="24110" edu="T"/>',
+            '<prof clas="24110"/>',
             '<position name="Účetní" lead="N"/>',
             '<insh cnr="111"/>',
             ' highedu="T"',
@@ -57,6 +57,11 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
         ] as $expected) {
             self::assertStringContainsString($expected, $xml, $expected);
         }
+        // EDV 1.4.0.6, ID 10248 a 10526: vzdělání požadované pro profesi a
+        // předpokládaná místa výkonu práce jsou u občana ČR zakázané, i když je
+        // zdroj profilu nese.
+        self::assertStringNotContainsString(' edu=', $xml);
+        self::assertStringNotContainsString(' preplace=', $xml);
         // A3 nesmí nést údaje o narození kromě data (EDV: rodné příjmení,
         // místo a stát narození jsou u akce 3 zakázané) ani příznak ZMR.
         self::assertStringNotContainsString(' nam="Nováková"', $xml);

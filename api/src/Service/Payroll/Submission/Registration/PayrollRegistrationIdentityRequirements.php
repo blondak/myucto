@@ -91,6 +91,13 @@ final class PayrollRegistrationIdentityRequirements
         ) {
             $missing[] = self::identityProblem('sex');
         }
+        // PREZEC nemá atribut pro stát narození; mimo ČR se stát píše za obec
+        // do `birth/@cit` (ID 10066), takže bez státu nejde místo sestavit.
+        if ($agenda === self::AGENDA_PREZEC
+            && !self::filled($identity['birth_country_code'] ?? null)
+        ) {
+            $missing[] = self::identityProblem('birth_country_code');
+        }
 
         $hasBno = self::filled($identifiers['birth_number'] ?? null)
             || self::filled($identifiers['ecp'] ?? null);

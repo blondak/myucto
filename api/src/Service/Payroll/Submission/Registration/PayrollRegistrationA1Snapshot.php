@@ -21,6 +21,8 @@ final readonly class PayrollRegistrationA1Snapshot
      * @param array<string,mixed>|null $czechResidenceAddress
      * @param array<string,mixed>|null $contactAddress
      * @param list<array<string,mixed>> $attachments
+     * @param array<string,mixed>|null $foreignInsurance cizozemský nositel
+     *        pojištění (`forin`); povinný u druhu činnosti „N", jinak nepovinný
      */
     public function __construct(
         public string $variant,
@@ -37,6 +39,7 @@ final readonly class PayrollRegistrationA1Snapshot
         public ?array $czechResidenceAddress,
         public ?array $contactAddress,
         public array $attachments,
+        public ?array $foreignInsurance = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -58,6 +61,10 @@ final readonly class PayrollRegistrationA1Snapshot
             'czech_residence_address' => $this->czechResidenceAddress,
             'contact_address' => $this->contactAddress,
             'attachments' => $this->attachments,
-        ];
+            // Klíč se zapisuje jen u vyplněného oddílu: snímky bez cizozemského
+            // nositele zůstávají bajtově stejné jako před zavedením oddílu.
+        ] + ($this->foreignInsurance === null
+            ? []
+            : ['foreign_insurance' => $this->foreignInsurance]);
     }
 }

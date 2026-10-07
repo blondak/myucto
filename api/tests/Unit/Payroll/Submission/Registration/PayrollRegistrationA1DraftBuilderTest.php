@@ -176,6 +176,99 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
         self::assertContains('proof_identity.number', $missing);
     }
 
+    /**
+     * EDV 1.4.0.6 (ID 10071, 10526, 10248, 10061/10062): u cizince jsou tyhle
+     * údaje povinné a aplikace je nevede, návrh je musí vyjmenovat. U občana ČR
+     * se nehlásí nic.
+     */
+    public function testForeignerGapsIncludeTheConditionallyRequiredAttributes(): void
+    {
+        $sources = self::sources();
+        $sources['tax_residence'] = ['residence' => 'non-resident', 'country_code' => 'UA'];
+        $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+            $sources,
+            ['citizenship_country_code' => 'UA'],
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+        $missing = self::missingFields($draft);
+
+        foreach ([
+            'proof_identity.foreign_issuer',
+            'employment.expected_workplaces',
+            'employment.required_education_code',
+            'tax_residency.identifier',
+            'foreign_worker.issuing_labour_office_code',
+        ] as $field) {
+            self::assertContains($field, $missing, $field);
+        }
+
+        $czech = self::missingFields((new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        ));
+        foreach (['employment.expected_workplaces', 'employment.required_education_code'] as $field) {
+            self::assertNotContains($field, $czech, $field);
+        }
+    }
+
+    /** PSČ jde na ČSSZ bez mezer, návrh ho nabízí ve stejném tvaru jako uložený profil. */
+    public function testPostalCodeIsSuggestedWithoutSpaces(): void
+    {
+        $sources = self::sources();
+        $sources['permanent_address']['postal_code'] = '602 00';
+        $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+            $sources,
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+
+        self::assertSame('60200', $draft['suggested']['permanent_address']['postal_code']);
+    }
+
+    public function testActivityNDraftOffersTheForeignInsurerSection(): void
+    {
+        $sources = self::sources();
+        $sources['terms']['activity_code'] = 'N';
+        $sources['terms']['relationship_detail_code'] = '1';
+        $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+            $sources,
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+
+        self::assertContains('foreign_insurance.current', self::missingFields($draft));
+        self::assertArrayHasKey('foreign_insurance', $draft['suggested']);
+        self::assertNull($draft['suggested']['foreign_insurance']['country_code']);
+
+        $plain = (new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+        self::assertNotContains('foreign_insurance.current', self::missingFields($plain));
+    }
+
     public function testUnverifiedEvidenceIsReportedRatherThanAssumed(): void
     {
         $sources = self::sources();

@@ -703,6 +703,41 @@ U navazujícího vztahu nejdřív odhlaste ten předchozí, jinak změňte druh
 Navazující vztahy se od 1. 4. 2026 hlásí každý zvlášť — odhláškou prvního
 a přihláškou druhého.
 
+**Údaje, které se mění podle občanství.** U zaměstnance bez českého státního
+občanství je povinný orgán, který vydal doklad totožnosti v zahraničí (název
+a obec úřadu, například „Municipal office, Preston"; není-li obec známa, stát),
+předpokládaná místa výkonu práce (sídlo zaměstnavatele, provozovna, obec) a u
+varianty OST také vzdělání požadované pro výkon profese. Krajská pobočka ÚP ČR
+je povinná, jen když je druhem pracovního oprávnění povolení k zaměstnání; u
+zaměstnanecké karty, modré karty a karty vnitropodnikově převedeného
+zaměstnance se neuvádí. U daňového rezidenta jiného státu než ČR je povinný typ
+i hodnota zahraničního daňového identifikátoru. U občana ČR se předpokládaná
+místa, požadované vzdělání ani daňový identifikátor do přihlášky neposílají,
+i kdyby je profil obsahoval: ČSSZ je u českého občana odmítá.
+
+**Cizozemský nositel pojištění.** U druhu činnosti N (smluvní zaměstnanec) musí
+přihláška nést oddíl **Cizozemský nositel pojištění** se specifikací P (poslední
+nositel) nebo S (současný nositel) a státem; bez něj profil zůstane
+rozpracovaný a podání se nepřipraví. U ostatních druhů činnosti varianty OST je
+oddíl nepovinný a vyplňuje se, jen když byl zaměstnanec pojištěn v cizině a
+firma je jeho prvním zaměstnavatelem po skončení tohoto pojištění. Vyplníte-li
+kteroukoli část adresy nositele, jsou povinné i číslo popisné, PSČ a obec.
+
+**PSČ a zdravotní omezení.** PSČ se při uložení profilu zapíše bez mezer
+(„602 00" se uloží jako 60200), protože ČSSZ mezery v PSČ nepřijímá. U adresy
+pobytu v ČR musí mít PSČ přesně pět číslic. Přihláška unese nejvýš jedno
+zdravotní omezení; zadáte-li víc, kontrola řekne, že má zůstat omezení platné
+ke dni nástupu.
+
+**Jméno v podání.** Tituly před i za jménem se v přihlášce posílají v jednom
+poli (nejvýš 30 znaků, například „Ing. Ph.D."). Dřívější příjmení aplikace
+skládá z předchozích verzí jména na kartě osoby, bez aktuálního a rodného
+příjmení, od nejnovějšího, oddělená čárkou (nejvýš 100 znaků; příjmení, která se
+nevejdou, se vynechají od nejstaršího). **Částečné přihlášení PREZEC** nemá pole
+pro stát narození, proto se u osoby narozené mimo ČR píše stát za název obce
+(„Bratislava, Slovensko"); k tomu je potřeba mít na kartě osoby vyplněný stát
+narození. Místo narození smí mít i se státem nejvýš 50 znaků.
+
 Úplný podklad zadáte na kartě pracovního vztahu v části **Registrace vztahu na
 ČSSZ → Autoritativní profil REGZEC A1**, tlačítkem **Doplnit profil**. Profil
 obsahuje rozhodné datum a druh činnosti, trvalou adresu, variantní údaje
@@ -716,12 +751,12 @@ podání nezmění.
 
 Profil se vyplňuje **formulářem rozděleným do sekcí** (trvalý pobyt, adresa
 pobytu v ČR, kontaktní adresa, daňová rezidence, pracovní vztah, zdravotní
-pojištění, důchod, zahraniční legislativa, doklad totožnosti, přístup na trh
-práce a přílohy). Které sekce se zobrazí, určuje varianta podání a občanství:
-u varianty 10 odpadá daňová rezidence, zdravotní pojišťovna i doplňující
-skutečnosti, u varianty OST naopak přibývá kontaktní adresa, důchod, zahraniční
-legislativa a vzdělání, a u cizince navíc doklad totožnosti a přístup na trh
-práce. Občanu EU, EHP nebo Švýcarska aplikace přístup na trh práce předvyplní
+pojištění, důchod, zahraniční legislativa, cizozemský nositel pojištění, doklad
+totožnosti, přístup na trh práce a přílohy). Které sekce se zobrazí, určuje
+varianta podání a občanství: u varianty 10 odpadá daňová rezidence, zdravotní
+pojišťovna i doplňující skutečnosti, u varianty OST naopak přibývá kontaktní
+adresa, důchod, zahraniční legislativa, cizozemský nositel pojištění a
+vzdělání, a u cizince navíc doklad totožnosti a přístup na trh práce. Občanu EU, EHP nebo Švýcarska aplikace přístup na trh práce předvyplní
 jako volný (důvod 1 — § 87 zákona o zaměstnanosti) a povolení k zaměstnání po
 něm nechce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
 napíše ji nad formulář; ručně se nevolí. Úplný JSON zůstal dostupný jako

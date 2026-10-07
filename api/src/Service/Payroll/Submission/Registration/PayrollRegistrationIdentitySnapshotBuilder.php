@@ -239,6 +239,12 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             );
         }
 
+        $previousSurnames = $this->nullableText(
+            $source['previous_surnames'] ?? null,
+            100,
+            'identity.previous_surnames',
+        );
+
         return [
             'first_name' => $firstName,
             'last_name' => $lastName,
@@ -273,7 +279,11 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             ),
             'source_effective_from' => $effectiveFrom,
             'source_effective_to' => $effectiveTo,
-        ];
+            // Klíč jen při nalezení dřívějšího příjmení: snímky osob bez změny
+            // příjmení zůstávají bajtově stejné.
+        ] + ($previousSurnames === null
+            ? []
+            : ['previous_surnames' => $previousSurnames]);
     }
 
     /**

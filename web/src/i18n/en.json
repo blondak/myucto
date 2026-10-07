@@ -6643,7 +6643,11 @@
             "date": "{field} must be a date in the format YYYY-MM-DD, for example 2026-08-05.",
             "status_for_activity": "{field}: for activity type “{activity}” only {allowed} is allowed, it is now “{value}”.",
             "status_format": "{field} must be a four-digit code from the NKPZ classification, it is now “{value}”.",
-            "status_unknown": "{field} is not in the NKPZ classification, it is now “{value}”. Pick a code from the list."
+            "status_unknown": "{field} is not in the NKPZ classification, it is now “{value}”. Pick a code from the list.",
+            "postal_code_cz": "{field} must have exactly five digits for an address in the Czech Republic (for example 60200), it is now “{value}”.",
+            "health_restrictions_max": "{field} may contain a single restriction, it has {count} now. Keep the one valid on the start date.",
+            "foreign_insurance_current": "{field} must be P (last carrier) or S (current carrier), it is now “{value}”.",
+            "foreign_insurance_sector": "{field} must be a code from the Sector codebook (01 to 08), it is now “{value}”."
           },
           "gap_open": "Fill in →",
           "gap_unreachable": "Could not locate {field} on screen. Please report it - this is a navigation bug.",
@@ -6696,6 +6700,7 @@
             "health_and_facts": "Health insurance and facts",
             "pension": "Pension",
             "foreign_legislation": "Foreign legislation",
+            "foreign_insurance": "Foreign insurance carrier",
             "proof_identity": "Identity document",
             "foreign_worker": "Labour market access",
             "attachments": "Attachments"
@@ -6753,6 +6758,31 @@
           "foreign_legislation": {
             "applies": "Subject to foreign legislation",
             "country_code": "Legislation country"
+          },
+          "foreign_insurance": {
+            "hint": "Mandatory for activity type “N” (contract employee): choose the specification and the country. Otherwise fill it in only if the employee was insured abroad and you are the first employer after that insurance ended. If you fill in any part of the address, the house number, postal code and municipality are required.",
+            "current": "Carrier specification",
+            "current_last": "P (last carrier)",
+            "current_present": "S (current carrier)",
+            "country_code": "Carrier country",
+            "name": "Carrier name",
+            "identifier": "Foreign insurance number",
+            "sector": "Sector (purpose of insurance)",
+            "sector_option": {
+              "01": "Accidents at work and occupational diseases",
+              "02": "Family benefits",
+              "03": "All",
+              "04": "Pensions",
+              "05": "Recovery and set-offs",
+              "06": "Sickness",
+              "07": "Unemployment benefits",
+              "08": "Other"
+            },
+            "street": "Street",
+            "house_number": "House number",
+            "orientation_number": "Orientation number",
+            "postal_code": "Postal code",
+            "city": "Municipality"
           },
           "proof_identity": {
             "type_code": "Document type",
@@ -11623,7 +11653,8 @@
       "registration_interaction_unsupported": "This combination cannot be filed - the application only supports filings from the menu on the employment record. Select the filing type again from the menu.",
       "registration_jurisdiction_direction_mismatch": "The selected filing type does not match the current direction of cross-border insurance jurisdiction. Choose the opposite of the offered events.",
       "registration_prezec_identifier_required": "Neither the birth number nor the insured person's registration number is filled in. The pre-start partial registration (PREZEC) cannot be filed without one of them - fill it in on the person's record, or if the employee has neither, file a full REGZEC registration instead.",
-      "registration_regzec_a1_profile_conflict": "Someone else saved the registration profile in the meantime. Your draft changes will be lost, but they will not overwrite someone else's work.",
+      "registration_regzec_a1_foreign_insurance_missing": "The registration of an employee with activity type “N” (contract employee) must carry the foreign insurance carrier, otherwise ČSSZ will not accept it. Fill in the Foreign insurance carrier section of the registration profile (specification and country) and save it.",
+      "registration_regzec_a1_profile_conflict":"Someone else saved the registration profile in the meantime. Your draft changes will be lost, but they will not overwrite someone else's work.",
       "registration_regzec_a1_source_scope_mismatch": "The start date changed on the employment record in the meantime, so the open form was pointing at a different day than the one the registration is being frozen to. Draft changes will be saved to the correct day.",
       "registration_regzec_a1_variant_data_incomplete": "The employee registration (REGZEC A1) does not yet have all the data ČSSZ requires for this activity type. A draft profile can be saved, but it can only be filed once completed - the Check button shows what is missing.",
       "registration_regzec_action_variant_unsupported": "The selected filing type cannot be submitted for this activity type - ČSSZ does not allow it. Check the activity type on the employment record, or choose a different notification type.",

@@ -79,6 +79,57 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Dřívější příjmení osoby k danému dni (ID 10064): příjmení z dřívějších
+     * záznamů historie jména, bez aktuálního příjmení a bez rodného příjmení,
+     * od nejnovějšího, oddělená čárkou. `null`, když žádné nejsou.
+     *
+     * Atribut má v REGZEC25 nejvýš 100 znaků; vejdou se jen celá příjmení,
+     * nejstarší případně vypadnou (nikdy se příjmení neuřízne).
+     */
+    public function previousSurnames(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+        string $currentSurname,
+        ?string $birthSurname,
+        bool $forUpdate = false,
+    ): ?string {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT last_name
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND effective_from <= ?
+                AND last_name IS NOT NULL
+              ORDER BY effective_from DESC, id DESC'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate]);
+        $excluded = [mb_strtolower(trim($currentSurname))];
+        if ($birthSurname !== null && trim($birthSurname) !== '') {
+            $excluded[] = mb_strtolower(trim($birthSurname));
+        }
+        $names = [];
+        $length = 0;
+        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+            $name = trim((string) $raw);
+            $key = mb_strtolower($name);
+            if ($name === '' || in_array($key, $excluded, true)) {
+                continue;
+            }
+            $excluded[] = $key;
+            $added = mb_strlen($name) + ($names === [] ? 0 : 2);
+            if ($length + $added > 100) {
+                break;
+            }
+            $names[] = $name;
+            $length += $added;
+        }
+
+        return $names === [] ? null : implode(', ', $names);
+    }
+
+    /**
      * @return list<array{
      *   id:int,identifier_type:string,value_ciphertext:string,
      *   value_hash:string,value_masked:string,row_version:int
