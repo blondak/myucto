@@ -83,6 +83,7 @@ final readonly class SicknessSubmissionService
         private PayrollSensitiveData $sensitiveData,
         private NempriPayrollMonthReader $payrollMonths,
         private EldpStatementRepository $revisions,
+        private SicknessInsuredContactReader $insuredContacts,
     ) {}
 
     /**
@@ -523,6 +524,7 @@ final readonly class SicknessSubmissionService
             $startsClaim
                 ? $this->paymentConnection($supplierId, $employeeId, $eventOn)
                 : null,
+            $this->insuredContacts->forEmployee($supplierId, $employeeId),
         );
     }
 

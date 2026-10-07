@@ -189,7 +189,11 @@ final class NempriPaymentAndPayloadTest extends TestCase
     {
         $factory = new SicknessPayloadFactory();
 
-        $care = $factory->application($this->row(), null, SicknessBenefitKind::Ose);
+        $care = $factory->application(
+            [...$this->row(), 'action_start' => 1, 'action_end' => 1],
+            null,
+            SicknessBenefitKind::Ose,
+        );
         self::assertFalse($care->sharedHousehold);
         self::assertFalse($care->loneCaregiver);
         self::assertFalse($care->caredPersonally);

@@ -30,18 +30,21 @@ final readonly class SicknessPayloadFactory
         ?NempriPerson $person = null,
         ?NempriDecisivePeriod $decisivePeriod = null,
         ?NempriPaymentConnection $paymentConnection = null,
+        ?array $insuredContact = null,
     ): NempriXmlPayload {
+        $worked = (bool) $row['worked_on_decisive_day'];
+
         return new NempriXmlPayload(
             benefitKind: $kind,
             osszCode: (int) $row['ossz_code'],
             correction: (bool) $row['correction'],
-            decisionNumber: self::nullableText($row['decision_number'] ?? null),
+            decisionNumber: self::decisionNumber($row['decision_number'] ?? null),
             foreignCase: (bool) $row['foreign_case'],
             insuredFirstName: self::requiredIdentity($identity, 'first_name'),
             insuredLastName: self::requiredIdentity($identity, 'last_name'),
             insuredBirthNumber: self::requireBirthNumber($identity),
-            insuredPhone: null,
-            insuredEmail: null,
+            insuredPhone: self::nullableText($insuredContact['phone'] ?? null),
+            insuredEmail: self::nullableText($insuredContact['email'] ?? null),
             employerVariableSymbol: self::variableSymbol($context),
             employerIdentificationNumber: self::nullableText(
                 $context['employer_business_id'] ?? null,
@@ -50,9 +53,13 @@ final readonly class SicknessPayloadFactory
             employmentFrom: self::employmentFrom($context),
             employmentTo: self::nullableText($context['end_date'] ?? null),
             activityCode: self::activityCode($context),
-            workedOnDecisiveDay: (bool) $row['worked_on_decisive_day'],
+            workedOnDecisiveDay: $worked,
             hoursWorked: self::decimal($row['hours_worked'] ?? null),
-            dailyWorkingHours: self::decimal($row['daily_working_hours'] ?? null),
+            // Pracovní doba patří k potvrzení jen s `pracoval=true`; u případu
+            // ji drží řádek vždy (předvyplnění), do věty ale nepatří.
+            dailyWorkingHours: $worked
+                ? self::decimal($row['daily_working_hours'] ?? null)
+                : null,
             smallScopeIncomeMinor: ($row['small_scope_income_minor'] ?? null) === null
                 ? null
                 : (int) $row['small_scope_income_minor'],
@@ -108,9 +115,16 @@ final readonly class SicknessPayloadFactory
         ?SicknessBenefitKind $kind = null,
     ): NempriBenefitApplication {
         $order = $row['child_order'] ?? null;
-        $declared = static fn (string $key): ?bool => $kind === SicknessBenefitKind::Ose
-            ? (self::nullableBool($row[$key] ?? null) ?? false)
+        $start = (bool) ($row['action_start'] ?? true);
+        $duration = (bool) ($row['action_continuation'] ?? false)
+            || (bool) ($row['action_end'] ?? false);
+        // Neučiněné prohlášení je u ošetřovného „NE“, ale jen u prvků, které
+        // DV NEMPRI25 pro danou akci vyžaduje: prohlášení vzniku při vzniku,
+        // `pecovalOsobne` při trvání nebo ukončení.
+        $declared = static fn (string $key, bool $applies): ?bool => $kind === SicknessBenefitKind::Ose
+            ? ($applies ? (self::nullableBool($row[$key] ?? null) ?? false) : null)
             : self::nullableBool($row[$key] ?? null);
+        $otherClaim = $declared('other_maternity_claim', $start);
 
         return new NempriBenefitApplication(
             actionStart: (bool) ($row['action_start'] ?? true),
@@ -126,13 +140,17 @@ final readonly class SicknessPayloadFactory
             careReason: self::nullableText($row['care_reason'] ?? null),
             schoolName: self::nullableText($row['school_name'] ?? null),
             schoolBusinessId: self::nullableText($row['school_business_id'] ?? null),
-            sharedHousehold: $declared('shared_household'),
-            loneCaregiver: $declared('lone_caregiver'),
-            childUnder16: $declared('child_under_16'),
-            otherMaternityClaim: $declared('other_maternity_claim'),
-            otherParentalClaim: self::nullableBool($row['other_parental_claim'] ?? null),
-            otherPersonS57: self::nullableBool($row['other_person_s57'] ?? null),
-            caredPersonally: $declared('cared_personally'),
+            sharedHousehold: $declared('shared_household', $start),
+            loneCaregiver: $declared('lone_caregiver', $start),
+            childUnder16: $declared('child_under_16', $start),
+            otherMaternityClaim: $otherClaim,
+            otherParentalClaim: $kind === SicknessBenefitKind::Ose && $otherClaim === true
+                ? (self::nullableBool($row['other_parental_claim'] ?? null) ?? false)
+                : self::nullableBool($row['other_parental_claim'] ?? null),
+            otherPersonS57: $kind === SicknessBenefitKind::Ose && $otherClaim === true
+                ? (self::nullableBool($row['other_person_s57'] ?? null) ?? false)
+                : self::nullableBool($row['other_person_s57'] ?? null),
+            caredPersonally: $declared('cared_personally', $duration),
             careDays: self::periods($row['care_days'] ?? null),
             relationshipCode: self::code($row['relationship_code'] ?? null),
             alternation: self::nullableBool($row['alternation'] ?? null),
@@ -146,6 +164,9 @@ final readonly class SicknessPayloadFactory
             plannedShiftsWorked: self::nullableBool($row['planned_shifts_worked'] ?? null),
             returnedOn: self::nullableText($row['returned_on'] ?? null),
             workDays: self::periods($row['work_days'] ?? null),
+            hasLeave: self::nullableBool($row['dlo_has_leave'] ?? null),
+            leavePeriods: self::periods($row['dlo_leave_periods'] ?? null),
+            shiftSchedule: self::periods($row['dlo_shift_schedule'] ?? null),
         );
     }
 
@@ -162,6 +183,7 @@ final readonly class SicknessPayloadFactory
         string $productName,
         string $productVersion,
     ): HzupnXmlPayload {
+        $returnedToWork = self::nullableBool($row['returned_to_work'] ?? null);
         $issuedOn = self::nullableText($row['issued_on'] ?? null);
         if ($issuedOn === null) {
             throw new SicknessException(
@@ -179,7 +201,7 @@ final readonly class SicknessPayloadFactory
             foreignCase: (bool) $row['foreign_case'],
             confirmationNumber: self::nullableText($row['decision_number'] ?? null),
             osszCode: (int) $row['ossz_code'],
-            osszName: null,
+            osszName: CsszWorkplaceCatalog::nameFor((int) $row['ossz_code']),
             issuedOn: $issuedOn,
             correction: (bool) $row['correction'],
             insuredFirstName: self::requiredIdentity($identity, 'first_name'),
@@ -198,11 +220,22 @@ final readonly class SicknessPayloadFactory
                 $context['employer_business_id'] ?? null,
             ),
             employerVariableSymbol: self::variableSymbol($context),
-            returnedToWork: self::nullableBool($row['returned_to_work'] ?? null),
-            returnReason: self::nullableText($row['return_reason'] ?? null),
-            returnedOn: self::nullableText($row['returned_on'] ?? null),
-            hoursWorkedLastDay: self::decimal($row['hours_worked_last_day'] ?? null),
-            shiftHoursLastDay: self::decimal($row['shift_hours_last_day'] ?? null),
+            returnedToWork: $returnedToWork,
+            returnReason: $returnedToWork === true
+                ? null
+                : self::nullableText($row['return_reason'] ?? null),
+            // Datum a hodiny posledního dne patří podle DV HZUPN20 jen
+            // k návratu do práce. Řádek případu `returned_on` drží i u „ne“
+            // (z něj běží lhůta hlášení), do věty ale nejde.
+            returnedOn: $returnedToWork === true
+                ? self::nullableText($row['returned_on'] ?? null)
+                : null,
+            hoursWorkedLastDay: $returnedToWork === true
+                ? self::decimal($row['hours_worked_last_day'] ?? null)
+                : null,
+            shiftHoursLastDay: $returnedToWork === true
+                ? self::decimal($row['shift_hours_last_day'] ?? null)
+                : null,
             workIntervals: self::periods($row['work_days'] ?? null),
             productName: $productName,
             productVersion: $productVersion,
@@ -312,6 +345,14 @@ final readonly class SicknessPayloadFactory
         }
 
         return $periods;
+    }
+
+    /** Písmena v čísle rozhodnutí (N, Z, M, T, L) jsou velká. */
+    private static function decisionNumber(mixed $value): ?string
+    {
+        $text = self::nullableText($value);
+
+        return $text === null ? null : strtoupper($text);
     }
 
     private static function code(mixed $value): ?string

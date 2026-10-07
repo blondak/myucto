@@ -1523,10 +1523,15 @@ ve spodní liště a tyto sekce:
   pomoc v mateřství). Zaměstnavatel žádost přijímá a předává ČSSZ, údaje proto
   opisujete ze žádosti, kterou vám zaměstnanec předal. U ošetřovného
   zaškrtněte **akce** Vznik, Trvání nebo Ukončení — alespoň jednu. Potvrzení
-  zaměstnavatele, rozhodné období a den, od kterého se o dávku žádá, se
+  zaměstnavatele, rozhodné období, platební spojení, ošetřovaná osoba, důvod
+  péče, prohlášení zaměstnance a den, od kterého se o dávku žádá, se
   posílají jen s akcí Vznik; u samotného trvání nebo ukončení je ČSSZ
-  odmítá. Při střídání ošetřujících osob první osoba péči ukončí a druhá podá
-  vlastní žádost se vznikem. Dítě nebo ošetřovanou osobu vyberte z
+  odmítá. Naopak den, do kterého se žádá, údaj o osobní péči, dny péče
+  a podklady pro výplatu (plánované směny, dny práce) se posílají jen
+  s akcí Trvání nebo Ukončení, a poslední den péče (zda zaměstnanec
+  pracoval, jeho hodiny) jen s akcí Ukončení. U dlouhodobého ošetřovného
+  podklady nesou i rozvrh směn a pracovní volno. Při střídání ošetřujících
+  osob první osoba péči ukončí a druhá podá vlastní žádost se vznikem. Dítě nebo ošetřovanou osobu vyberte z
   vyživovaných osob na kartě zaměstnance — rodné číslo se doplní samo; osobu
   mimo evidenci zadejte jménem, příjmením a datem narození. Dále vyplňte
   důvod péče, vztah k ošetřované osobě (u otcovské důvod otcovské, u mateřské
@@ -1536,7 +1541,20 @@ ve spodní liště a tyto sekce:
   CIS_RODVZTAH (PL, MA, RP, SDO, SO, TCH, JIN), u dlouhodobého ošetřovného
   CIS_VZTAH (1 až 29), důvod otcovské OTC, ZEM nebo PEC a důvod převzetí do
   péče CIS_DUVPREVZETI (DOH, ONE, ROZ, UMR). S důvodem převzetí se číslo
-  rozhodnutí nevyplňuje. Starší ručně zapsaný kód mimo číselník je v nabídce
+  rozhodnutí nevyplňuje. Číslo rozhodnutí musí mít tvar podle druhu dávky:
+  u nemocenského písmeno a 6 až 7 číslic nebo 10 číslic, u mateřské
+  s příponou M, u ošetřovného N nebo Z, u otcovské T a u dlouhodobého
+  ošetřovného L (vždy sedmimístné číslo, případně s předponou ICPE). Mateřská
+  bez důvodu převzetí číslo nese, vyrovnávací příspěvek ne. U uzavřené školy
+  uveďte i její IČ.
+- **Potvrzení zaměstnavatele** — hodiny a pracovní doba se vyplňují jen
+  tehdy, když zaměstnanec v den události pracoval (a pak oba údaje, hodiny
+  nejvýš do výše pracovní doby). Prázdniny patří jen ke studentovi, druh
+  důchodu jen k pobíranému důchodu, datum narození dítěte jen k nástupu na
+  mateřskou a pracovní volno bez náhrady příjmu musí mít začátek i konec.
+  Podání s rozporem se nepřipraví a hlásí, který údaj chybí nebo přebývá.
+- **Otcovská** — hodiny posledního dne a datum návratu do práce patří k sobě
+  (jedno bez druhého nejde) a odpracované hodiny nesmí převýšit pracovní dobu. Starší ručně zapsaný kód mimo číselník je v nabídce
   označený a podání s ním neprojde, dokud ho nevyberete znovu.
 - **Rozhodnutí zaměstnavatele o dlouhodobé péči** (jen dlouhodobé
   ošetřovné) — podle § 191a zákoníku práce musí zaměstnavatel nepřítomnosti
@@ -1553,8 +1571,11 @@ ve spodní liště a tyto sekce:
   obrátí.
 - **Ukončení neschopnosti** (jen nemocenské, pro HZUPN) — zda se zaměstnanec
   vrátil do práce. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
-  skončení zaměstnání), zvolte **Ne**, uveďte důvod a den, ke kterému nastal.
-  HZUPN hlásí nástup do zaměstnání, a proto se jeho lhůta („neprodleně",
+  skončení zaměstnání), zvolte **Ne** a uveďte důvod; do hlášení jde jen
+  důvod, datum návratu a hodiny posledního dne se u odpovědi „Ne“ neposílají.
+  Odpovíte-li **Ano**, uveďte datum návratu a hodiny odpracované v poslední
+  den neschopnosti i pracovní dobu (0 a 0, když zaměstnanec nepracoval;
+  je-li pracovní doba větší než 0, nesmí být odpracováno 0). HZUPN hlásí nástup do zaměstnání, a proto se jeho lhůta („neprodleně",
   § 97 odst. 3 zákona č. 187/2006 Sb.) počítá ode dne nástupu: od zapsaného
   dne návratu, jinak od dne po skončení neschopnosti.
 
@@ -1572,13 +1593,24 @@ jako by událost vznikla den po skončení zaměstnání (§ 19 odst. 11 zákona
 
 **Způsob výplaty mzdy** se do NEMPRI doplní sám z výplatního profilu
 zaměstnance: účet, na který chodí mzda, zahraniční IBAN, nebo adresa bydliště,
-když se mzda vyplácí v hotovosti. Ošetřovné a dlouhodobé ošetřovné jen
-s akcí Trvání nebo Ukončení platební spojení nenese, a proto ho ani
-nevyžaduje. Chybí-li účet nebo nejde-li adresu rozložit na ulici, číslo
-popisné a PSČ, příprava se zastaví a pod chybou je odkaz na kartu osoby.
-Stejně se zastaví výplata přes partnera: MyÚčto nezná účet ani adresu,
-kam má ČSSZ dávku poslat. Opravte způsob výplaty ve výplatním profilu osoby,
-nebo oznámení podejte mimo aplikaci.
+když se mzda vyplácí v hotovosti. Platební spojení se posílá jen s akcí Vznik
+(u ošetřovného bez vzniku je zakázané) a u ostatních dávek vždy; u nemocenského
+jen s elektronickým číslem rozhodnutí (10 číslic). Chybí-li účet nebo
+nejde-li adresu rozložit na ulici, číslo popisné a PSČ, příprava se zastaví
+a pod chybou je odkaz na kartu osoby. Stejně se zastaví výplata přes partnera:
+MyÚčto nezná účet ani adresu, kam má ČSSZ dávku poslat. Opravte způsob výplaty
+ve výplatním profilu osoby, nebo oznámení podejte mimo aplikaci.
+Ve větě jsou vždy všechny čtyři volby způsobu výplaty (účet v ČR, účet
+v zahraničí, adresa, hotovost), vybraná jako „ano“ a ostatní jako „ne“.
+
+**Kontakt pojištěnce** (telefon a e-mail) se do NEMPRI doplní z karty osoby.
+Bere se primární aktivní kontakt, a když primární není, jediný aktivní;
+při více kandidátech se kontakt nevysílá.
+
+**Částky v rozhodném období** se do NEMPRI posílají v celých korunách a
+vyloučené dny nesmí převýšit počet dnů měsíce. Rozhodné období je u všech
+dávek (u ošetřovného s akcí Vznik) povinné a buď nese úplný seznam měsíců se
+součty, nebo jen pravděpodobnou výši příjmu, nikdy obojí.
 
 ### 85.15.2 Rozhodné období a pravděpodobný příjem
 

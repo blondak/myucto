@@ -88,7 +88,7 @@ final class NempriXmlSerializer
         if ($worker !== null) {
             $record->appendChild($worker);
         }
-        if ($payload->paymentConnection !== null) {
+        if ($payload->paymentConnection !== null && self::carriesStartSection($payload)) {
             $record->appendChild($this->platebniSpojeni(
                 $document,
                 $namespace,
@@ -370,7 +370,9 @@ final class NempriXmlSerializer
     ): DOMElement {
         $node = $document->createElementNS($namespace, 'potvrzeniZamestnavatele');
         $this->bool($document, $namespace, $node, 'pracoval', $payload->workedOnDecisiveDay);
-        if ($payload->hoursWorked !== null) {
+        // Hodiny a pracovní doba patří k potvrzení právě tehdy, když zaměstnanec
+        // v den sociální události pracoval (DV NEMPRI25).
+        if ($payload->workedOnDecisiveDay && $payload->hoursWorked !== null) {
             $this->text(
                 $document,
                 $namespace,
@@ -379,7 +381,7 @@ final class NempriXmlSerializer
                 $payload->hoursWorked,
             );
         }
-        if ($payload->dailyWorkingHours !== null) {
+        if ($payload->workedOnDecisiveDay && $payload->dailyWorkingHours !== null) {
             $this->text(
                 $document,
                 $namespace,
@@ -475,7 +477,7 @@ final class NempriXmlSerializer
         NempriXmlPayload $payload,
     ): void {
         $this->bool($document, $namespace, $node, 'pobiraDuchod', $payload->receivesPension);
-        if ($payload->pensionKind !== null) {
+        if ($payload->receivesPension && $payload->pensionKind !== null) {
             $this->text($document, $namespace, $node, 'druhDuchodu', $payload->pensionKind);
         }
     }
@@ -487,7 +489,7 @@ final class NempriXmlSerializer
         NempriXmlPayload $payload,
     ): void {
         $this->bool($document, $namespace, $node, 'jeStudentem', $payload->isStudent);
-        if ($payload->withinSchoolHolidays !== null) {
+        if ($payload->isStudent && $payload->withinSchoolHolidays !== null) {
             $this->bool(
                 $document,
                 $namespace,
@@ -505,10 +507,10 @@ final class NempriXmlSerializer
         NempriXmlPayload $payload,
     ): void {
         $this->bool($document, $namespace, $node, 'volnoBezNahrady', $payload->unpaidLeave);
-        if ($payload->unpaidLeaveFrom !== null) {
+        if ($payload->unpaidLeave && $payload->unpaidLeaveFrom !== null) {
             $this->text($document, $namespace, $node, 'volnoBezNahradyOd', $payload->unpaidLeaveFrom);
         }
-        if ($payload->unpaidLeaveTo !== null) {
+        if ($payload->unpaidLeave && $payload->unpaidLeaveTo !== null) {
             $this->text($document, $namespace, $node, 'volnoBezNahradyDo', $payload->unpaidLeaveTo);
         }
     }
@@ -522,7 +524,7 @@ final class NempriXmlSerializer
         if ($payload->startsMaternity !== null) {
             $this->bool($document, $namespace, $node, 'nastupujePPM', $payload->startsMaternity);
         }
-        if ($payload->childBirthDate !== null) {
+        if ($payload->startsMaternity === true && $payload->childBirthDate !== null) {
             $this->text($document, $namespace, $node, 'narozeniDitete', $payload->childBirthDate);
         }
     }
@@ -540,7 +542,7 @@ final class NempriXmlSerializer
             'prevedenaNaJinouPraci',
             $payload->transferredOtherWork,
         );
-        if ($payload->transferredOn !== null) {
+        if ($payload->transferredOtherWork && $payload->transferredOn !== null) {
             $this->text($document, $namespace, $node, 'datumNaJinouPraci', $payload->transferredOn);
         }
     }
@@ -571,7 +573,9 @@ final class NempriXmlSerializer
         $node = $document->createElementNS($namespace, 'podkladyProVyplatDavky');
         $this->lastDayHours($document, $namespace, $node, $application);
         $this->bool($document, $namespace, $node, 'planovaneSmeny', $application->plannedShifts ?? false);
-        $this->optionalBool($document, $namespace, $node, 'planovaneSmenyOdpracoval', $application->plannedShiftsWorked);
+        if ($application->plannedShifts === true) {
+            $this->optionalBool($document, $namespace, $node, 'planovaneSmenyOdpracoval', $application->plannedShiftsWorked);
+        }
         if ($application->returnedOn !== null) {
             $this->text($document, $namespace, $node, 'datumNavratDoPrace', $application->returnedOn);
         }
@@ -607,50 +611,68 @@ final class NempriXmlSerializer
         return $node;
     }
 
+    /**
+     * Žádost o ošetřovné podle akce (DV NEMPRI25): prvky vzniku jen při akci
+     * vznik, prvky trvání a ukončení jen při trvání nebo ukončení. Pořadí
+     * prvků určuje XSD, ne logické členění.
+     */
     private function zadostOse(
         DOMDocument $document,
         string $namespace,
         NempriBenefitApplication $application,
     ): DOMElement {
         $node = $document->createElementNS($namespace, 'zadostODavku');
-        $this->applicationPeriod($document, $namespace, $node, $application);
-        if ($application->person !== null) {
-            $node->appendChild($this->osoba($document, $namespace, 'osetrovanaOsoba', $application->person));
+        $start = $application->carriesStart();
+        $duration = $application->carriesDuration();
+        if ($start && $application->fromDate !== null) {
+            $this->text($document, $namespace, $node, 'odeDne', $application->fromDate);
         }
-        switch ($application->careReason) {
-            case NempriBenefitApplication::CARE_REASON_ILL:
-                $this->bool($document, $namespace, $node, 'onemocnela', true);
-                break;
-            case NempriBenefitApplication::CARE_REASON_QUARANTINE:
-                $this->bool($document, $namespace, $node, 'narizenaKarantena', true);
-                break;
-            case NempriBenefitApplication::CARE_REASON_CANNOT_CARE:
-                $this->bool($document, $namespace, $node, 'nemuzePecovatODite', true);
-                break;
-            case NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED:
-                $school = $document->createElementNS($namespace, 'uzavrenaSkola');
-                $this->text($document, $namespace, $school, 'nazevZarizeniSkoly', (string) $application->schoolName);
-                if ($application->schoolBusinessId !== null) {
-                    $this->text($document, $namespace, $school, 'ICZarizeniSkoly', $application->schoolBusinessId);
-                }
-                $node->appendChild($school);
-                break;
+        if ($duration && $application->toDate !== null) {
+            $this->text($document, $namespace, $node, 'doDne', $application->toDate);
         }
-        $this->optionalBool($document, $namespace, $node, 'spolecnaDomacnost', $application->sharedHousehold);
-        $this->optionalBool($document, $namespace, $node, 'jeOsamely', $application->loneCaregiver);
-        $this->optionalBool($document, $namespace, $node, 'vPeciDiteDo16Let', $application->childUnder16);
-        $this->optionalBool($document, $namespace, $node, 'narokNaPPMjinouOsobou', $application->otherMaternityClaim);
-        $this->optionalBool(
-            $document,
-            $namespace,
-            $node,
-            'narokNaRPjinaOsobaNecerpaVolnoNeboOSVC',
-            $application->otherParentalClaim,
-        );
-        $this->optionalBool($document, $namespace, $node, 'jinaFOParagraf57', $application->otherPersonS57);
-        $this->optionalBool($document, $namespace, $node, 'pecovalOsobne', $application->caredPersonally);
-        $this->periods($document, $namespace, $node, 'pecovalVeDnech', $application->careDays);
-        if ($application->relationshipCode !== null) {
+        if ($start) {
+            if ($application->person !== null) {
+                $node->appendChild($this->osoba($document, $namespace, 'osetrovanaOsoba', $application->person));
+            }
+            switch ($application->careReason) {
+                case NempriBenefitApplication::CARE_REASON_ILL:
+                    $this->bool($document, $namespace, $node, 'onemocnela', true);
+                    break;
+                case NempriBenefitApplication::CARE_REASON_QUARANTINE:
+                    $this->bool($document, $namespace, $node, 'narizenaKarantena', true);
+                    break;
+                case NempriBenefitApplication::CARE_REASON_CANNOT_CARE:
+                    $this->bool($document, $namespace, $node, 'nemuzePecovatODite', true);
+                    break;
+                case NempriBenefitApplication::CARE_REASON_SCHOOL_CLOSED:
+                    $school = $document->createElementNS($namespace, 'uzavrenaSkola');
+                    $this->text($document, $namespace, $school, 'nazevZarizeniSkoly', (string) $application->schoolName);
+                    if ($application->schoolBusinessId !== null) {
+                        $this->text($document, $namespace, $school, 'ICZarizeniSkoly', $application->schoolBusinessId);
+                    }
+                    $node->appendChild($school);
+                    break;
+            }
+            $this->optionalBool($document, $namespace, $node, 'spolecnaDomacnost', $application->sharedHousehold);
+            $this->optionalBool($document, $namespace, $node, 'jeOsamely', $application->loneCaregiver);
+            $this->optionalBool($document, $namespace, $node, 'vPeciDiteDo16Let', $application->childUnder16);
+            $this->optionalBool($document, $namespace, $node, 'narokNaPPMjinouOsobou', $application->otherMaternityClaim);
+            if ($application->otherMaternityClaim === true) {
+                $this->optionalBool(
+                    $document,
+                    $namespace,
+                    $node,
+                    'narokNaRPjinaOsobaNecerpaVolnoNeboOSVC',
+                    $application->otherParentalClaim,
+                );
+                $this->optionalBool($document, $namespace, $node, 'jinaFOParagraf57', $application->otherPersonS57);
+            }
+        }
+        if ($duration) {
+            $this->optionalBool($document, $namespace, $node, 'pecovalOsobne', $application->caredPersonally);
+            $this->periods($document, $namespace, $node, 'pecovalVeDnech', $application->careDays);
+        }
+        if ($start && $application->relationshipCode !== null) {
             $this->text($document, $namespace, $node, 'kodRodVztah', $application->relationshipCode);
         }
 
@@ -663,68 +685,90 @@ final class NempriXmlSerializer
         NempriBenefitApplication $application,
     ): DOMElement {
         $node = $document->createElementNS($namespace, 'zadostODavku');
-        $this->applicationPeriod($document, $namespace, $node, $application);
-        if ($application->person !== null) {
-            $node->appendChild($this->osoba($document, $namespace, 'osetrovanaOsoba', $application->person));
+        $start = $application->carriesStart();
+        $duration = $application->carriesDuration();
+        if ($start && $application->fromDate !== null) {
+            $this->text($document, $namespace, $node, 'odeDne', $application->fromDate);
         }
-        if ($application->relationshipCode !== null) {
-            $this->text($document, $namespace, $node, 'kodVztah', $application->relationshipCode);
+        if ($duration && $application->toDate !== null) {
+            $this->text($document, $namespace, $node, 'doDne', $application->toDate);
         }
-        $this->optionalBool($document, $namespace, $node, 'jeStridani', $application->alternation);
-        $this->optionalBool($document, $namespace, $node, 'narokNaPPMjinouOsobou', $application->otherMaternityClaim);
-        $this->optionalBool($document, $namespace, $node, 'jinaFOParagraf57', $application->otherPersonS57);
-        $this->optionalBool($document, $namespace, $node, 'spolecnaDomacnost', $application->sharedHousehold);
-        $this->optionalBool($document, $namespace, $node, 'pecovalOsobne', $application->caredPersonally);
-        $this->periods($document, $namespace, $node, 'pecovalVeDnech', $application->careDays);
+        if ($start) {
+            if ($application->person !== null) {
+                $node->appendChild($this->osoba($document, $namespace, 'osetrovanaOsoba', $application->person));
+            }
+            if ($application->relationshipCode !== null) {
+                $this->text($document, $namespace, $node, 'kodVztah', $application->relationshipCode);
+            }
+            $this->optionalBool($document, $namespace, $node, 'jeStridani', $application->alternation);
+            $this->optionalBool($document, $namespace, $node, 'narokNaPPMjinouOsobou', $application->otherMaternityClaim);
+            if ($application->otherMaternityClaim === true) {
+                $this->optionalBool($document, $namespace, $node, 'jinaFOParagraf57', $application->otherPersonS57);
+            }
+            $this->optionalBool($document, $namespace, $node, 'spolecnaDomacnost', $application->sharedHousehold);
+        }
+        if ($duration) {
+            $this->optionalBool($document, $namespace, $node, 'pecovalOsobne', $application->caredPersonally);
+            $this->periods($document, $namespace, $node, 'pecovalVeDnech', $application->careDays);
+        }
 
         return $node;
     }
 
     /**
-     * `odeDne` jen u akce vznik (ČSSZ ho jinak odmítá), `doDne` vždy, když je
-     * znám.
+     * Podklady pro výplatu ošetřovného: jen při trvání nebo ukončení.
+     * `pracovalPoslDenPD` a hodiny posledního dne patří jen k ukončení.
      */
-    private function applicationPeriod(
-        DOMDocument $document,
-        string $namespace,
-        DOMElement $node,
-        NempriBenefitApplication $application,
-    ): void {
-        if ($application->actionStart && $application->fromDate !== null) {
-            $this->text($document, $namespace, $node, 'odeDne', $application->fromDate);
-        }
-        if ($application->toDate !== null) {
-            $this->text($document, $namespace, $node, 'doDne', $application->toDate);
-        }
-    }
-
     private function podkladyOse(
         DOMDocument $document,
         string $namespace,
         NempriBenefitApplication $application,
     ): ?DOMElement {
+        if (!$application->carriesDuration()) {
+            return null;
+        }
         $node = $document->createElementNS($namespace, 'podkladyProVyplatDavky');
-        $this->optionalBool($document, $namespace, $node, 'pracovalPoslDenPD', $application->workedLastDay);
-        $this->lastDayHours($document, $namespace, $node, $application);
+        if ($application->actionEnd) {
+            $this->optionalBool($document, $namespace, $node, 'pracovalPoslDenPD', $application->workedLastDay);
+            $this->lastDayHours($document, $namespace, $node, $application);
+        }
         $this->optionalBool($document, $namespace, $node, 'planovaneSmeny', $application->plannedShifts);
-        $this->optionalBool($document, $namespace, $node, 'planovaneSmenyOdpracoval', $application->plannedShiftsWorked);
+        if ($application->plannedShifts === true) {
+            $this->optionalBool($document, $namespace, $node, 'planovaneSmenyOdpracoval', $application->plannedShiftsWorked);
+        }
         $this->periods($document, $namespace, $node, 'seznamPraceVeDnech', $application->workDays);
 
         return $node->hasChildNodes() ? $node : null;
     }
 
+    /**
+     * Podklady pro výplatu DLO (pořadí podle XSD): jen při trvání nebo
+     * ukončení; hodiny posledního dne a návrat do práce jen při ukončení.
+     */
     private function podkladyDlo(
         DOMDocument $document,
         string $namespace,
         NempriBenefitApplication $application,
     ): ?DOMElement {
+        if (!$application->carriesDuration()) {
+            return null;
+        }
         $node = $document->createElementNS($namespace, 'podkladyProVyplatDavky');
-        $this->lastDayHours($document, $namespace, $node, $application);
-        if ($application->returnedOn !== null) {
-            $this->text($document, $namespace, $node, 'datumNavratDoPrace', $application->returnedOn);
+        if ($application->actionEnd) {
+            $this->lastDayHours($document, $namespace, $node, $application);
+            if ($application->returnedOn !== null) {
+                $this->text($document, $namespace, $node, 'datumNavratDoPrace', $application->returnedOn);
+            }
         }
         $this->optionalBool($document, $namespace, $node, 'planovaneSmeny', $application->plannedShifts);
+        if ($application->plannedShifts === true) {
+            $this->periods($document, $namespace, $node, 'seznamRozvrhuSmen', $application->shiftSchedule);
+        }
         $this->periods($document, $namespace, $node, 'seznamPraceVeDnech', $application->workDays);
+        $this->optionalBool($document, $namespace, $node, 'maVolno', $application->hasLeave);
+        if ($application->hasLeave === true) {
+            $this->periods($document, $namespace, $node, 'pracovniVolno', $application->leavePeriods);
+        }
 
         return $node->hasChildNodes() ? $node : null;
     }
@@ -789,9 +833,13 @@ final class NempriXmlSerializer
         NempriPaymentConnection $connection,
     ): DOMElement {
         $node = $document->createElementNS($namespace, 'platebniSpojeni');
+        // Referenční podání nesou všechny čtyři volby, ostatní jako „false“.
+        $this->bool($document, $namespace, $node, 'vyplatitUcetCR', $connection->kind === NempriPaymentConnection::KIND_ACCOUNT_CZ);
+        $this->bool($document, $namespace, $node, 'vyplatitUcetCizina', $connection->kind === NempriPaymentConnection::KIND_ACCOUNT_FOREIGN);
+        $this->bool($document, $namespace, $node, 'vyplatitAdresa', $connection->kind === NempriPaymentConnection::KIND_ADDRESS);
+        $this->bool($document, $namespace, $node, 'vyplatitHotovost', false);
         switch ($connection->kind) {
             case NempriPaymentConnection::KIND_ACCOUNT_CZ:
-                $this->bool($document, $namespace, $node, 'vyplatitUcetCR', true);
                 $account = $document->createElementNS($namespace, 'ucetCZ');
                 if ($connection->accountPrefix !== null) {
                     $this->text($document, $namespace, $account, 'predcisli', $connection->accountPrefix);
@@ -801,14 +849,12 @@ final class NempriXmlSerializer
                 $node->appendChild($account);
                 break;
             case NempriPaymentConnection::KIND_ACCOUNT_FOREIGN:
-                $this->bool($document, $namespace, $node, 'vyplatitUcetCizina', true);
                 $account = $document->createElementNS($namespace, 'ucetZahranicni');
                 $this->text($document, $namespace, $account, 'stat', (string) $connection->countryCode);
                 $this->text($document, $namespace, $account, 'IBAN', (string) $connection->iban);
                 $node->appendChild($account);
                 break;
             case NempriPaymentConnection::KIND_ADDRESS:
-                $this->bool($document, $namespace, $node, 'vyplatitAdresa', true);
                 $address = $document->createElementNS($namespace, 'adresa');
                 $this->text($document, $namespace, $address, 'obec', (string) $connection->city);
                 if ($connection->street !== null) {

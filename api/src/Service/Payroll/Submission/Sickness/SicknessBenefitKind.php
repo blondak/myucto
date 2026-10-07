@@ -100,4 +100,67 @@ enum SicknessBenefitKind: string
     {
         return $this === self::Nem || $this === self::Ose || $this === self::Dlo;
     }
+
+    public const DECISION_REQUIRED = 'required';
+    public const DECISION_OPTIONAL = 'optional';
+    public const DECISION_FORBIDDEN = 'forbidden';
+
+    /**
+     * Povinnost čísla rozhodnutí podle logických kontrol NEMPRI25 č. 2 a 3.
+     *
+     * NEM a OSE/DLO stojí na rozhodnutí lékaře. PPM nese číslo jen tehdy, když
+     * nemá `duvodPece` (převzetí dítěte do péče); s důvodem je číslo zakázané.
+     * U VPM se číslo nevyplňuje, otcovská ho mít smí, ale nemusí.
+     *
+     * @return self::DECISION_*
+     */
+    public function decisionNumberRequirement(bool $hasCareReason = false): string
+    {
+        return match ($this) {
+            self::Nem, self::Ose, self::Dlo => self::DECISION_REQUIRED,
+            self::Ppm => $hasCareReason ? self::DECISION_FORBIDDEN : self::DECISION_REQUIRED,
+            self::Opp => self::DECISION_OPTIONAL,
+            self::Vpm => self::DECISION_FORBIDDEN,
+        };
+    }
+
+    /**
+     * Tvar čísla rozhodnutí podle kontroly č. 2. U NEM `Xnnnnnnn` (číslo
+     * z papírové neschopenky) nebo `YYMMDDNNNN`; u ostatních druhů sedmimístné
+     * pořadové číslo s písmenem druhu dávky (PPM M, OSE N nebo Z, OPP T, DLO L)
+     * a volitelnou předponou ICPE.
+     */
+    public function decisionNumberPattern(): string
+    {
+        return match ($this) {
+            self::Nem => '/^(?:[A-Z]\d{6,7}|\d{10})$/D',
+            self::Ppm => '/^(?:\d{1,10})?\d{7}M$/D',
+            self::Ose => '/^(?:\d{1,10})?\d{7}[NZ]$/D',
+            self::Opp => '/^(?:\d{1,10})?\d{7}T$/D',
+            self::Dlo => '/^(?:\d{1,10})?\d{7}L$/D',
+            self::Vpm => '/^$/D',
+        };
+    }
+
+    /**
+     * Platí se výplata dávky na základě platebního spojení i bez akce vznik?
+     * U OSE/DLO je spojení povinné při vzniku a bez vzniku zakázané; u ostatních
+     * druhů povinné vždy, u NEM jen pro číslo rozhodnutí platné od 1. 1. 2020
+     * (elektronické `YYMMDDNNNN`).
+     */
+    public function paymentConnectionRequirement(
+        bool $startsClaim,
+        ?string $decisionNumber,
+    ): string {
+        if ($this->hasActions()) {
+            return $startsClaim ? self::DECISION_REQUIRED : self::DECISION_FORBIDDEN;
+        }
+        if ($this === self::Nem) {
+            return $decisionNumber !== null && preg_match('/^\d{10}$/D', $decisionNumber) === 1
+                ? self::DECISION_REQUIRED
+                : self::DECISION_OPTIONAL;
+        }
+
+        return self::DECISION_REQUIRED;
+    }
 }

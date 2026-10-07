@@ -97,6 +97,8 @@ final class PayrollSicknessFullFlowTest extends TestCase
             'issued_on' => '2026-06-29',
             'returned_to_work' => '1',
             'returned_on' => '2026-06-29',
+            'hours_worked_last_day' => '4',
+            'shift_hours_last_day' => '8',
             // Tok nemá mzdové běhy za leden až květen; věta rozhodné období
             // nese vždy celé, takže se měsíce doplní u případu.
             'decisive_months' => self::manualMonths('2026-01', '2026-05'),
@@ -325,10 +327,12 @@ final class PayrollSicknessFullFlowTest extends TestCase
         }
 
         $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
-            'decision_number' => 'B1234567',
+            'decision_number' => '1234567N',
             'daily_working_hours' => '8',
             'action_start' => true,
             'action_end' => true,
+            'worked_last_day' => false,
+            'planned_shifts_worked' => false,
             'cared_first_name' => 'Dítě',
             'cared_last_name' => 'Syntetické',
             'cared_birth_date' => '2018-05-05',
@@ -356,7 +360,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $cases = $this->service(SicknessCaseService::class);
         $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'DLO', [
             'incapacity_from' => '2026-06-08',
-            'decision_number' => 'C1234567',
+            'decision_number' => '1234567L',
             'daily_working_hours' => '8',
             'action_start' => true,
             'cared_first_name' => 'Rodič',
