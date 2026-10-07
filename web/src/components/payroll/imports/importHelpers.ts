@@ -19,6 +19,7 @@ import type {
   RegistrationEmploymentOption,
   RegistrationOpeningBalance,
   RegistrationPair,
+  RegistrationReceivedOn,
   RegistrationRecord,
   RegistrationRelationChoice,
   RegistrationRelationType,
@@ -265,6 +266,47 @@ export function pruneRelationChoices(
     if ((byKey.get(key)?.employment.relation_type_options ?? []).includes(relationType)) next[key] = relationType
   }
   return next
+}
+
+// ─── Registrace: podání dávek a záměrů slevy předchozího programu ─────────────
+
+export type RegistrationReceivedOnMap = Record<string, string>
+
+/** Podání NEMPRI, HZUPN nebo OZUSPOJ předchozího programu (nese `benefit`). */
+export function isBenefitRecord(record: RegistrationRecord): boolean {
+  return record.benefit !== undefined && record.benefit !== null
+}
+
+/**
+ * Den doručení z protokolu ČSSZ se nabízí u podání předchozího programu, které jde
+ * zapsat; u OZUSPOJ je povinný, u NEMPRI a HZUPN jen volitelný.
+ */
+export function recordAcceptsReceivedOn(record: RegistrationRecord): boolean {
+  if (!record.benefit) return false
+  return record.benefit.needs_received_on
+    || record.operation === 'create_case'
+    || record.operation === 'update_case'
+    || record.operation === 'import_intent'
+}
+
+/** Nastaví nebo zruší (prázdná hodnota) den doručení věty. */
+export function setReceivedOn(map: RegistrationReceivedOnMap, key: string, value: string): RegistrationReceivedOnMap {
+  const next = { ...map }
+  if (value === '') delete next[key]
+  else next[key] = value
+  return next
+}
+
+export function buildReceivedOn(map: RegistrationReceivedOnMap): RegistrationReceivedOn[] {
+  return Object.entries(map)
+    .filter(([, value]) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    .map(([key, received_on]) => ({ key, received_on }))
+}
+
+/** Po novém náhledu zůstanou jen dny doručení u vět, které podání předchozího programu pořád jsou. */
+export function pruneReceivedOn(map: RegistrationReceivedOnMap, records: RegistrationRecord[]): RegistrationReceivedOnMap {
+  const keys = new Set(records.filter(isBenefitRecord).map(record => record.key))
+  return Object.fromEntries(Object.entries(map).filter(([key]) => keys.has(key)))
 }
 
 /**

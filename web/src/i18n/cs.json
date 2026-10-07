@@ -30621,7 +30621,7 @@
     },
     "registration": {
       "title": "JMHZ",
-      "hint": "Nahrajte XML registrací zaměstnanců (REGZEC, PREZEC) přijaté ČSSZ, export zaměstnanců z ePortálu ČSSZ nebo měsíční hlášení JMHZ z jiného mzdového programu. Registrace aplikace spáruje s osobami a pracovními vztahy, založí chybějící a doplní změněné údaje. Export zaměstnanců doplní OIČ a ID PPV; novou osobu z něj aplikace založí jen spolu s měsíčním hlášením, ze kterého odvodí nástup. Z měsíčních hlášení převezme prohlášení poplatníka, slevy a vyživované osoby a nabídne převzetí historie mezd. Jméno a příjmení se automaticky nemění.",
+      "hint": "Nahrajte XML registrací zaměstnanců (REGZEC, PREZEC) přijaté ČSSZ, export zaměstnanců z ePortálu ČSSZ nebo měsíční hlášení JMHZ z jiného mzdového programu. Registrace aplikace spáruje s osobami a pracovními vztahy, založí chybějící a doplní změněné údaje. Export zaměstnanců doplní OIČ a ID PPV; novou osobu z něj aplikace založí jen spolu s měsíčním hlášením, ze kterého odvodí nástup. Z měsíčních hlášení převezme prohlášení poplatníka, slevy a vyživované osoby a nabídne převzetí historie mezd. Jméno a příjmení se automaticky nemění. Podání NEMPRI, HZUPN a OZUSPOJ, která už odeslal předchozí program, se do evidence zapíšou jako jím vyřízená a nic se znovu neodesílá: NEMPRI a HZUPN se přiřadí k případu dávky (nebo ho založí), u OZUSPOJ zadáte den doručení z protokolu ČSSZ. Rozběhnutá neschopnost bez HZUPN zůstává v hlídači lhůt.",
       "no_permission": "Nemáte oprávnění upravovat osoby v mzdách. Náhled ani import registrací proto nejde spustit.",
       "environment": "Prostředí podání",
       "environments": {
@@ -30629,7 +30629,7 @@
         "test": "Testovací prostředí"
       },
       "environment_hint": "Identifikátory ČSSZ se uloží k prostředí, ze kterého registrace pochází.",
-      "drop_hint": "Přetáhněte sem XML soubory registrací, exportu zaměstnanců ČSSZ nebo měsíčních hlášení, případně je vyberte",
+      "drop_hint": "Přetáhněte sem XML soubory registrací, exportu zaměstnanců ČSSZ, měsíčních hlášení nebo podání NEMPRI, HZUPN a OZUSPOJ, případně je vyberte",
       "preview": "Načíst náhled",
       "refresh_preview": "Načíst náhled znovu",
       "preview_failed": "Náhled registrací se nepodařilo načíst.",
@@ -30790,8 +30790,18 @@
         "terminate": "Ukončit vztah",
         "assign_identifiers": "Přiřadit identifikátory",
         "pair_required": "Přiřadit vztah",
+        "create_case": "Založit případ dávky",
+        "update_case": "Zapsat vyřízení podání",
+        "import_intent": "Převzít záměr slevy",
         "none": "Beze změny",
         "unsupported": "Nepodporováno"
+      },
+      "benefit": {
+        "decision_number": "Číslo rozhodnutí {number}",
+        "period": "Událost {from} - {to}",
+        "received_on": "Den doručení (nepovinné)",
+        "received_on_required": "Den doručení podle protokolu ČSSZ",
+        "received_on_for": "Den doručení podání pro: {name}"
       },
       "no_changes": "Žádné změny údajů",
       "confirm": "Údaje jsem porovnal(a) s podáním přijatým ČSSZ",
@@ -30830,7 +30840,14 @@
         "tax_declaration": "Prohlášení poplatníka",
         "tax_credit_claims": "Slevy na dani",
         "social_discount": "Sleva na pojistném",
-        "dependants": "Vyživované osoby"
+        "dependants": "Vyživované osoby",
+        "case_created": "Založen případ dávky",
+        "case_updated": "Doplněn případ dávky",
+        "nempri_predecessor": "NEMPRI vyřízeno předchozím programem",
+        "hzupn_predecessor": "HZUPN vyřízeno předchozím programem",
+        "intent_created": "Převzat záměr slevy",
+        "intent_ended": "Převzato skončení záměru slevy",
+        "intent_unchanged": "Záměr slevy už v evidenci byl"
       },
       "result_history": {
         "title": "Převzetí historie",

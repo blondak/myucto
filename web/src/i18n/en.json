@@ -30621,7 +30621,7 @@
     },
     "registration": {
       "title": "JMHZ",
-      "hint": "Upload employee registration XML files (REGZEC, PREZEC) accepted by ČSSZ, the employee export from the ČSSZ ePortal or JMHZ monthly reports from another payroll program. Registrations are matched to people and employments, the missing ones are created and changed data is filled in. The employee export fills in OIČ and ID PPV; a new person is created from it only together with a monthly report from which the start date is derived. From monthly reports the app takes over the taxpayer declaration, tax credits and dependants and offers to take over the payroll history. First and last names are never changed automatically.",
+      "hint": "Upload employee registration XML files (REGZEC, PREZEC) accepted by ČSSZ, the employee export from the ČSSZ ePortal or JMHZ monthly reports from another payroll program. Registrations are matched to people and employments, the missing ones are created and changed data is filled in. The employee export fills in OIČ and ID PPV; a new person is created from it only together with a monthly report from which the start date is derived. From monthly reports the app takes over the taxpayer declaration, tax credits and dependants and offers to take over the payroll history. First and last names are never changed automatically. NEMPRI, HZUPN and OZUSPOJ submissions the previous program already sent are recorded as settled by it and nothing is sent again: NEMPRI and HZUPN are attached to a benefit case (or create one), for OZUSPOJ you enter the delivery day from the ČSSZ protocol. A sickness absence without HZUPN stays in the deadline watcher.",
       "no_permission": "You are not allowed to edit payroll people, so the registration preview and import cannot run.",
       "environment": "Submission environment",
       "environments": {
@@ -30629,7 +30629,7 @@
         "test": "Test environment"
       },
       "environment_hint": "ČSSZ identifiers are stored for the environment the registration comes from.",
-      "drop_hint": "Drag registration, ČSSZ employee export or monthly report XML files here or choose them",
+      "drop_hint": "Drag registration, ČSSZ employee export, monthly report or NEMPRI, HZUPN and OZUSPOJ XML files here or choose them",
       "preview": "Load preview",
       "refresh_preview": "Reload preview",
       "preview_failed": "The registration preview could not be loaded.",
@@ -30790,8 +30790,18 @@
         "terminate": "Terminate employment",
         "assign_identifiers": "Assign identifiers",
         "pair_required": "Assign employment",
+        "create_case": "Create benefit case",
+        "update_case": "Record submission as settled",
+        "import_intent": "Take over discount intent",
         "none": "No change",
         "unsupported": "Unsupported"
+      },
+      "benefit": {
+        "decision_number": "Decision number {number}",
+        "period": "Event {from} - {to}",
+        "received_on": "Delivery day (optional)",
+        "received_on_required": "Delivery day per ČSSZ protocol",
+        "received_on_for": "Submission delivery day for: {name}"
       },
       "no_changes": "No data changes",
       "confirm": "I have compared the data with the submission accepted by ČSSZ",
@@ -30830,7 +30840,14 @@
         "tax_declaration": "Taxpayer declaration",
         "tax_credit_claims": "Tax credits",
         "social_discount": "Social insurance discount",
-        "dependants": "Dependants"
+        "dependants": "Dependants",
+        "case_created": "Benefit case created",
+        "case_updated": "Benefit case updated",
+        "nempri_predecessor": "NEMPRI settled by the previous program",
+        "hzupn_predecessor": "HZUPN settled by the previous program",
+        "intent_created": "Discount intent taken over",
+        "intent_ended": "Discount intent end taken over",
+        "intent_unchanged": "Discount intent was already recorded"
       },
       "result_history": {
         "title": "History takeover",

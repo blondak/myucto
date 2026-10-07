@@ -115,8 +115,8 @@ final class RegistrationXmlReader
         if ($type === null) {
             throw new RegistrationImportFileException(
                 'Soubor není registrace zaměstnance ČSSZ (REGZEC25 ani PREZEC26), export zaměstnanců '
-                . 'z ePortálu ČSSZ ani měsíční hlášení JMHZ. Import registrací přijímá jen tyto soubory; '
-                . 'ostatní vynechte.',
+                . 'z ePortálu ČSSZ ani měsíční hlášení JMHZ, podání NEMPRI či HZUPN, ani oznámení záměru slevy '
+                . 'OZUSPOJ. Import přijímá jen tyto soubory; ostatní vynechte.',
             );
         }
 

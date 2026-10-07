@@ -21,15 +21,30 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportPlanner;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportReader;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportWriter;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzTakeoverPlanner;
+use MyInvoice\Service\Payroll\Import\Ozuspoj\OzuspojImportPlanner;
+use MyInvoice\Service\Payroll\Import\Ozuspoj\OzuspojPredecessorFile;
+use MyInvoice\Service\Payroll\Import\Ozuspoj\OzuspojPredecessorIntentImporter;
+use MyInvoice\Service\Payroll\Import\Ozuspoj\OzuspojXmlReader;
+use MyInvoice\Service\Payroll\Import\Sickness\SicknessDocumentXmlReader;
+use MyInvoice\Service\Payroll\Import\Sickness\SicknessImportPlanner;
+use MyInvoice\Service\Payroll\Import\Sickness\SicknessImportRecord;
+use MyInvoice\Service\Payroll\Import\Sickness\SicknessImportWriter;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojException;
 
 /**
  * Import registrací ČSSZ (REGZEC25, PREZEC26), exportu zaměstnanců z ePortálu
- * ČSSZ a měsíčních hlášení JMHZ jiného mzdového programu do mzdové evidence:
- * náhled a použití vybraných vět.
+ * ČSSZ, měsíčních hlášení JMHZ a podání NEMPRI, HZUPN a OZUSPOJ jiného
+ * mzdového programu do mzdové evidence: náhled a použití vybraných vět.
  *
  * Soubor se rozpozná podle kořenového elementu; v jedné dávce mohou být
  * registrace i hlášení za víc měsíců. Export zaměstnanců datum nástupu nenese,
  * dosadí se z hlášení téže dávky ({@see CsszExportStartResolver}).
+ *
+ * NEMPRI a HZUPN předchozího programu ({@see SicknessImportPlanner}) se do
+ * evidence zapíší jako podání vyřízená předchozím programem, OZUSPOJ jako
+ * převzatý záměr slevy ({@see OzuspojPredecessorIntentImporter}); nic se
+ * znovu neodesílá. Zapisují se až po registracích a hlášeních, aby viděly
+ * osoby a vztahy založené v téže dávce.
  *
  * Náhled nic nezapisuje. Použití si soubory přečte a každou vybranou větu či
  * formulář naplánuje znovu nad AKTUÁLNÍM stavem evidence těsně před zápisem —
@@ -61,6 +76,12 @@ final class RegistrationImportService
         private readonly PayrollEmploymentRepository $employments,
         private readonly RegistrationImportLookup $lookup,
         private readonly JmhzExternalSubmissionStore $externalSubmissions,
+        private readonly SicknessDocumentXmlReader $sicknessReader,
+        private readonly SicknessImportPlanner $sicknessPlanner,
+        private readonly SicknessImportWriter $sicknessWriter,
+        private readonly OzuspojXmlReader $ozuspojReader,
+        private readonly OzuspojImportPlanner $ozuspojPlanner,
+        private readonly OzuspojPredecessorIntentImporter $ozuspojImporter,
     ) {}
 
     /** @return array<string,mixed> */
@@ -71,11 +92,13 @@ final class RegistrationImportService
         mixed $pairs = null,
         mixed $relationTypes = null,
         mixed $terminations = null,
+        mixed $receivedOn = null,
     ): array {
         $this->environment($environment);
         $pairMap = $this->pairs($pairs);
         $relationTypeMap = $this->relationTypes($relationTypes);
         $terminationKeys = $this->terminations($terminations);
+        $receivedMap = $this->receivedOn($receivedOn);
         $read = $this->read($supplierId, $files);
         $records = [];
         $registrationPlans = [];
@@ -107,6 +130,32 @@ final class RegistrationImportService
             /** @var JmhzBatchItem $item */
             $item = $plan['_item'];
             $records[$this->order($item->fileIndex, $item->form->position)] = self::publicPlan($plan);
+        }
+        foreach ($read['sickness'] as $item) {
+            $key = RegistrationImportPlanner::key($item['sha256'], $item['record']->position);
+            $records[$this->order($item['file_index'], $item['record']->position)] = self::publicPlan(
+                $this->sicknessPlanner->plan(
+                    $supplierId,
+                    $environment,
+                    $item['record'],
+                    $item['file'],
+                    $item['sha256'],
+                    $receivedMap[$key] ?? null,
+                ),
+            );
+        }
+        foreach ($read['ozuspoj'] as $item) {
+            $key = RegistrationImportPlanner::key($item['sha256'], 1);
+            $records[$this->order($item['file_index'], 1)] = self::publicPlan(
+                $this->ozuspojPlanner->plan(
+                    $supplierId,
+                    $environment,
+                    $item['predecessor'],
+                    $item['file'],
+                    1,
+                    $receivedMap[$key] ?? null,
+                ),
+            );
         }
         ksort($records, SORT_STRING);
         $records = array_values($records);
@@ -165,10 +214,12 @@ final class RegistrationImportService
         bool $applyTakeover = false,
         mixed $relationTypes = null,
         mixed $terminations = null,
+        mixed $receivedOn = null,
     ): array {
         $this->environment($environment);
         $relationTypeMap = $this->relationTypes($relationTypes);
         $terminationKeys = $this->terminations($terminations);
+        $receivedMap = $this->receivedOn($receivedOn);
         if (!$evidenceConfirmed) {
             throw new \InvalidArgumentException(
                 'Potvrďte, že soubory odpovídají podáním přijatým ČSSZ. Import podle nich zapisuje '
@@ -229,9 +280,19 @@ final class RegistrationImportService
         ]);
 
         $changesSince = $autoApproveChanges ? $this->employments->databaseNow() : null;
+        $sicknessByKey = [];
+        foreach ($read['sickness'] as $item) {
+            $sicknessByKey[RegistrationImportPlanner::key($item['sha256'], $item['record']->position)] = $item;
+        }
+        $ozuspojByKey = [];
+        foreach ($read['ozuspoj'] as $item) {
+            $ozuspojByKey[RegistrationImportPlanner::key($item['sha256'], 1)] = $item;
+        }
         $results = [];
         foreach (array_keys($selected) as $key) {
-            if (!isset($byKey[$key]) && $read['batch']->item($key) === null) {
+            if (!isset($byKey[$key]) && !isset($sicknessByKey[$key]) && !isset($ozuspojByKey[$key])
+                && $read['batch']->item($key) === null
+            ) {
                 $results[$key] = $this->result($key, 'skipped', 'Věta s tímto klíčem v nahraných souborech není. '
                     . 'Nahrajte soubory znovu a obnovte náhled.');
             }
@@ -303,6 +364,28 @@ final class RegistrationImportService
                 }
             }
         });
+
+        // Podání dávek a záměry slevy předchozího programu jdou až po registracích
+        // a hlášeních: osoba a vztah, ke kterým patří, mohla vzniknout v téže dávce.
+        foreach (array_keys($selected) as $key) {
+            if (isset($sicknessByKey[$key])) {
+                $results[$key] = $this->applySickness(
+                    $supplierId,
+                    $environment,
+                    $sicknessByKey[$key],
+                    $receivedMap[$key] ?? null,
+                    $userId,
+                );
+            } elseif (isset($ozuspojByKey[$key])) {
+                $results[$key] = $this->applyOzuspoj(
+                    $supplierId,
+                    $environment,
+                    $ozuspojByKey[$key],
+                    $receivedMap[$key] ?? null,
+                    $userId,
+                );
+            }
+        }
 
         // Plány po zápisu formulářů. Historie podání, počáteční stavy ani průměry
         // párování formulářů nemění, takže stačí je spočítat znovu jen po převzetí
@@ -661,6 +744,8 @@ final class RegistrationImportService
         $stornos = [];
         $hasJmhz = false;
         $reports = [];
+        $sickness = [];
+        $ozuspoj = [];
         foreach (ImportFiles::fromRequest(
             $files,
             ['xml'],
@@ -674,6 +759,47 @@ final class RegistrationImportService
                 } catch (RegistrationImportFileException $e) {
                     $fileRows[$index] = $this->fileRow($file, 'JMHZ', 0, $e->getMessage());
                 }
+                continue;
+            }
+            if (SicknessDocumentXmlReader::looksLike($file['content'])) {
+                try {
+                    $document = $this->sicknessReader->read($file['content']);
+                } catch (RegistrationImportFileException $e) {
+                    $fileRows[$index] = $this->fileRow($file, null, 0, $e->getMessage());
+                    continue;
+                }
+                $fileRows[$index] = $this->fileRow(
+                    $file,
+                    $document['document_type'],
+                    count($document['records']),
+                    null,
+                    $document['warnings'],
+                );
+                foreach ($document['records'] as $record) {
+                    $sickness[] = [
+                        'record' => $record,
+                        'file' => $file['name'],
+                        'sha256' => $file['sha256'],
+                        'file_index' => $index,
+                    ];
+                }
+                continue;
+            }
+            if (OzuspojXmlReader::looksLike($file['content'])) {
+                try {
+                    $predecessor = $this->ozuspojReader->read($file['content']);
+                } catch (OzuspojException $e) {
+                    $fileRows[$index] = $this->fileRow($file, 'OZUSPOJ23', 0, $e->getMessage());
+                    continue;
+                }
+                $fileRows[$index] = $this->fileRow($file, 'OZUSPOJ23', 1, null);
+                $ozuspoj[] = [
+                    'predecessor' => $predecessor,
+                    'file' => $file['name'],
+                    'sha256' => $file['sha256'],
+                    'file_index' => $index,
+                    'content' => $file['content'],
+                ];
                 continue;
             }
             try {
@@ -757,7 +883,105 @@ final class RegistrationImportService
             'history' => $history,
             'has_jmhz' => $hasJmhz,
             'reports' => $accepted,
+            'sickness' => $sickness,
+            'ozuspoj' => $ozuspoj,
         ];
+    }
+
+    /**
+     * Věta NEMPRI nebo HZUPN předchozího programu: naplánuje ji nad aktuální
+     * evidencí a zapíše vyřízení podání.
+     *
+     * @param array{record:SicknessImportRecord,file:string,sha256:string,file_index:int} $item
+     * @return array<string,mixed>
+     */
+    private function applySickness(int $supplierId, string $environment, array $item, ?string $receivedOn, ?int $userId): array
+    {
+        $plan = $this->sicknessPlanner->plan($supplierId, $environment, $item['record'], $item['file'], $item['sha256'], $receivedOn);
+        $key = (string) $plan['key'];
+        if ($plan['blocker'] !== null) {
+            return $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
+        }
+        if (!$plan['selectable']) {
+            return $this->result($key, 'skipped', 'Věta nemá co zapsat - evidence už odpovídá.', $plan);
+        }
+
+        try {
+            return ['key' => $key] + $this->sicknessWriter->apply($supplierId, $environment, $plan, $userId);
+        } catch (\Exception $e) {
+            return $this->result($key, 'failed', $e->getMessage(), $plan);
+        }
+    }
+
+    /**
+     * Záměr slevy z OZUSPOJ23 předchozího programu: den doručení z protokolu
+     * zadává účetní, soubor ho nenese.
+     *
+     * @param array{predecessor:OzuspojPredecessorFile,file:string,sha256:string,file_index:int,content:string} $item
+     * @return array<string,mixed>
+     */
+    private function applyOzuspoj(int $supplierId, string $environment, array $item, ?string $receivedOn, ?int $userId): array
+    {
+        $plan = $this->ozuspojPlanner->plan($supplierId, $environment, $item['predecessor'], $item['file'], 1, $receivedOn);
+        $key = (string) $plan['key'];
+        if ($plan['blocker'] !== null) {
+            return $this->result($key, 'skipped', (string) $plan['blocker'], $plan);
+        }
+        if (!$plan['selectable'] || $receivedOn === null) {
+            return $this->result($key, 'skipped', 'Věta nemá co zapsat - evidence už odpovídá.', $plan);
+        }
+        if ($userId === null || $userId <= 0) {
+            return $this->result($key, 'failed', 'Záměr se zakládá jménem přihlášené účetní.', $plan);
+        }
+        try {
+            $imported = $this->ozuspojImporter->import($supplierId, $environment, $item['content'], $receivedOn, $userId);
+        } catch (OzuspojException $e) {
+            return $this->result($key, 'failed', $e->getMessage(), $plan);
+        }
+
+        return [
+            'key' => $key,
+            'status' => 'applied',
+            'message' => null,
+            'employee_id' => $plan['_employee_id'],
+            'employment_id' => $plan['_employment_id'],
+            'operations' => ['intent_' . (string) ($imported['import_status'] ?? 'created')],
+        ];
+    }
+
+    /**
+     * Den doručení podání podle protokolu ČSSZ: `[{key, received_on}]`. U NEMPRI
+     * a HZUPN je nepovinný (stav „podal předchozí program" ho nevyžaduje), u
+     * OZUSPOJ povinný.
+     *
+     * @return array<string,string>
+     */
+    private function receivedOn(mixed $choices): array
+    {
+        if ($choices === null) {
+            return [];
+        }
+        if (!is_array($choices) || !array_is_list($choices)) {
+            throw new \InvalidArgumentException('Dny doručení musí být seznam dvojic {key, received_on}.');
+        }
+        $result = [];
+        foreach ($choices as $choice) {
+            $key = is_array($choice) ? ($choice['key'] ?? null) : null;
+            $date = is_array($choice) ? ($choice['received_on'] ?? null) : null;
+            if (!is_string($key) || preg_match(self::KEY_PATTERN, $key) !== 1) {
+                throw new \InvalidArgumentException('Den doručení obsahuje neplatný klíč věty.');
+            }
+            if ($date === null || $date === '') {
+                continue;
+            }
+            $parsed = is_string($date) ? \DateTimeImmutable::createFromFormat('!Y-m-d', $date) : false;
+            if (!$parsed instanceof \DateTimeImmutable || $parsed->format('Y-m-d') !== $date) {
+                throw new \InvalidArgumentException('Den doručení podání musí být ve tvaru RRRR-MM-DD.');
+            }
+            $result[$key] = $date;
+        }
+
+        return $result;
     }
 
     /**
@@ -1046,8 +1270,8 @@ final class RegistrationImportService
                 continue;
             }
             $bucket = match ($plan['operation']) {
-                'create_person', 'create_employment' => 'create',
-                'update', 'assign_identifiers' => 'update',
+                'create_person', 'create_employment', 'create_case' => 'create',
+                'update', 'assign_identifiers', 'update_case', 'import_intent' => 'update',
                 'terminate' => 'terminate',
                 'pair_required' => 'pair_required',
                 default => 'none',

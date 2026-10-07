@@ -28,6 +28,7 @@ import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, 
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
 import {
   IMPORT_XML_LIMITS,
+  buildReceivedOn,
   buildRegistrationPairs,
   buildRelationChoices,
   filesFingerprint,
@@ -35,20 +36,25 @@ import {
   formatHours,
   hasReadyItem,
   hasTakeoverItem,
+  isBenefitRecord,
   isRegistrationApplicable,
   minutesToHours,
   openingBalanceTotals,
+  pruneReceivedOn,
   pruneRegistrationPairs,
   pruneRegistrationSelection,
   pruneRelationChoices,
+  recordAcceptsReceivedOn,
   recordNeedsRelationChoice,
   registrationApplyBlock,
   registrationNeedsPairSelect,
   resolveHistoryToggle,
   selectableRegistrationKeys,
+  setReceivedOn,
   setRegistrationPair,
   setRelationChoice,
   type RegistrationPairMap,
+  type RegistrationReceivedOnMap,
   type RegistrationRelationChoiceMap,
 } from './importHelpers'
 
@@ -69,6 +75,8 @@ const previewFingerprint = ref('')
 const selected = ref<string[]>([])
 const pairs = ref<RegistrationPairMap>({})
 const relationChoices = ref<RegistrationRelationChoiceMap>({})
+/** Den doručení podání předchozího programu podle protokolu ČSSZ (klíč věty => RRRR-MM-DD). */
+const receivedOn = ref<RegistrationReceivedOnMap>({})
 /** Klíče vět s potvrzeným „Ukončit vztah" podle konce pojištění z exportu. */
 const terminations = ref<string[]>([])
 const evidenceConfirmed = ref(false)
@@ -148,6 +156,7 @@ watch(fingerprint, value => {
     selected.value = []
     pairs.value = {}
     relationChoices.value = {}
+    receivedOn.value = {}
     terminations.value = []
     evidenceConfirmed.value = false
     openingsTouched.value = false
@@ -168,18 +177,21 @@ async function runPreview(options: { keepResult?: boolean; select?: string[] } =
     const current = fingerprint.value
     const pairList = buildRegistrationPairs(pairs.value)
     const choiceList = buildRelationChoices(relationChoices.value)
+    const receivedList = buildReceivedOn(receivedOn.value)
     const payload = {
       environment: environment.value,
       files: await filesToPayload(files.value),
       ...(pairList.length > 0 ? { pairs: pairList } : {}),
       ...(choiceList.length > 0 ? { relation_types: choiceList } : {}),
       ...(terminations.value.length > 0 ? { terminations: [...terminations.value] } : {}),
+      ...(receivedList.length > 0 ? { received_on: receivedList } : {}),
     }
     const response = await payrollImportsApi.previewRegistrations(payload)
     preview.value = response
     previewFingerprint.value = current
     pairs.value = pruneRegistrationPairs(pairs.value, response.records, response.employment_options ?? [])
     relationChoices.value = pruneRelationChoices(relationChoices.value, response.records)
+    receivedOn.value = pruneReceivedOn(receivedOn.value, response.records)
     terminations.value = terminations.value.filter(key => response.records.some(
       record => record.key === key && record.termination_offer,
     ))
@@ -234,6 +246,7 @@ async function runApply() {
       apply_takeover: applyTakeover.value && takeoverReady.value,
       relation_types: buildRelationChoices(relationChoices.value),
       terminations: [...terminations.value],
+      received_on: buildReceivedOn(receivedOn.value),
     })
     result.value = response
     void loadHealthMissing()
@@ -283,6 +296,25 @@ async function chooseRelation(record: RegistrationRecord, value: string) {
   relationChoices.value = setRelationChoice(relationChoices.value, record, value)
   // Druh vztahu mění plán věty (podmínky, druh činnosti) — náhled se přepočítá.
   await runPreview({ keepResult: true, select: [record.key] })
+}
+
+async function chooseReceivedOn(record: RegistrationRecord, value: string) {
+  receivedOn.value = setReceivedOn(receivedOn.value, record.key, value)
+  // Den doručení rozhoduje, zda jde OZUSPOJ zapsat, takže se náhled přepočítá.
+  await runPreview({ keepResult: true, select: value === '' ? [] : [record.key] })
+}
+
+function receivedOnValue(record: RegistrationRecord): string {
+  return receivedOn.value[record.key] ?? record.benefit?.received_on ?? ''
+}
+
+function benefitPeriod(record: RegistrationRecord): string | null {
+  const benefit = record.benefit
+  if (!benefit || (!benefit.incapacity_from && !benefit.incapacity_to)) return null
+  return t('payroll_imports.registration.benefit.period', {
+    from: dateText(benefit.incapacity_from),
+    to: dateText(benefit.incapacity_to),
+  })
 }
 
 function relationChoiceValue(record: RegistrationRecord): string {
@@ -379,9 +411,12 @@ function operationClass(operation: RegistrationOperation): string {
   switch (operation) {
     case 'create_person':
     case 'create_employment':
+    case 'create_case':
       return 'bg-primary-50 text-primary-700'
     case 'update':
     case 'assign_identifiers':
+    case 'update_case':
+    case 'import_intent':
       return 'bg-accent-50 text-accent-700'
     case 'terminate':
     case 'pair_required':
@@ -569,6 +604,11 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                   <template v-if="isJmhz(record)">
                     <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span></p>
                   </template>
+                  <template v-else-if="isBenefitRecord(record)">
+                    <p class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span></p>
+                    <p v-if="record.benefit?.decision_number" class="text-xs text-neutral-500">{{ t('payroll_imports.registration.benefit.decision_number', { number: record.benefit.decision_number }) }}</p>
+                    <p v-if="benefitPeriod(record)" class="text-xs text-neutral-500">{{ benefitPeriod(record) }}</p>
+                  </template>
                   <template v-else>
                     <p v-if="record.document_type !== 'CSSZ_EXPORT' && record.document_type !== 'JMHZ_DERIVED'" class="text-xs text-neutral-500"><span class="font-mono">{{ record.document_type }}</span> · {{ t('payroll_imports.registration.action_code', { code: record.action_code }) }}</p>
                     <p class="text-xs text-neutral-500">{{ t('payroll_imports.registration.effective_on', { date: dateText(record.effective_on) }) }}</p>
@@ -647,6 +687,13 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                 </td>
                 <td class="px-3 py-2">
                   <span class="whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium" :class="operationClass(record.operation)">{{ t(`payroll_imports.registration.operations.${record.operation}`) }}</span>
+                  <label v-if="recordAcceptsReceivedOn(record)" class="mt-1 block max-w-[11rem]">
+                    <span class="block text-[11px] font-medium text-neutral-700">{{ t(record.benefit?.needs_received_on ? 'payroll_imports.registration.benefit.received_on_required' : 'payroll_imports.registration.benefit.received_on') }}</span>
+                    <input type="date" class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100" data-testid="registration-received-on"
+                      :value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
+                      :aria-label="t('payroll_imports.registration.benefit.received_on_for', { name: record.person.full_name })"
+                      @change="chooseReceivedOn(record, ($event.target as HTMLInputElement).value)">
+                  </label>
                 </td>
                 <td class="max-w-md px-3 py-2">
                   <ul v-if="record.changes.length" class="space-y-1 text-xs">
@@ -698,6 +745,14 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                   <span v-if="record.match.matched_by === 'manual'" class="rounded-full bg-payroll-50 px-2 py-0.5 text-xs font-medium text-payroll-700">{{ t('payroll_imports.registration.manual_pair') }}</span>
                   <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="operationClass(record.operation)">{{ t(`payroll_imports.registration.operations.${record.operation}`) }}</span>
                 </div>
+                <p v-if="isBenefitRecord(record) && benefitPeriod(record)" class="mt-2 text-xs text-neutral-600">{{ benefitPeriod(record) }}</p>
+                <label v-if="recordAcceptsReceivedOn(record)" class="mt-2 block">
+                  <span class="block text-xs font-medium text-neutral-700">{{ t(record.benefit?.needs_received_on ? 'payroll_imports.registration.benefit.received_on_required' : 'payroll_imports.registration.benefit.received_on') }}</span>
+                  <input type="date" class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100"
+                    :value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
+                    :aria-label="t('payroll_imports.registration.benefit.received_on_for', { name: record.person.full_name })"
+                    @change="chooseReceivedOn(record, ($event.target as HTMLInputElement).value)">
+                </label>
                 <select v-if="needsPairSelect(record)" :class="SELECT_CLASS" class="mt-2" :value="pairValue(record)" :disabled="!canWrite || busy !== null"
                   :aria-label="t('payroll_imports.registration.pair.for', { name: record.person.full_name })"
                   @change="pairRecord(record, ($event.target as HTMLSelectElement).value)">
