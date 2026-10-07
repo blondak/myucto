@@ -862,7 +862,9 @@ final readonly class SicknessCaseService
     private function sameValue(string $type, mixed $new, mixed $old): bool
     {
         if ($new === null || $old === null) {
-            if ($type === 'bool') {
+            // Nevyplněné prohlášení a „ne" znamenají pro uložení totéž:
+            // editor posílá u nezaškrtnutého pole jednou null, jindy 0.
+            if ($type === 'bool' || $type === 'nullable_bool') {
                 return (int) ($new ?? 0) === (int) ($old ?? 0);
             }
 

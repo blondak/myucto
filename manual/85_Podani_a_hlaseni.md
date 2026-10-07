@@ -1481,13 +1481,28 @@ Neschopnost nebo karanténa do 14 kalendářních dnů případ nezaloží: celo
 kryje náhrada mzdy (§ 192 zákoníku práce) a nemocenské náleží až od 15. dne
 (§ 26 odst. 1 zákona č. 187/2006 Sb.), takže se ČSSZ nic nepředává. Případ
 vznikne, jakmile neschopnost 14. den přesáhne, i když ji tam dotáhne teprve
-navazující nepřítomnost; začíná pak prvním dnem neschopnosti. K ručně
+navazující nepřítomnost; začíná pak prvním dnem neschopnosti. Odpracoval-li
+zaměstnanec v den vzniku neschopnosti celou směnu (potvrzení při schválení),
+je prvním dnem neschopnosti až následující den (§ 26 odst. 3 zákona
+č. 187/2006 Sb.) a o den se posune i povinnost a lhůta NEMPRI; případ pak
+nese i pracovní dobu a odpracované hodiny toho dne ze zveřejněné směny nebo
+z rozvrhu. Nejsou-li zapsané, hláška vyzve k jejich doplnění u případu.
+Navazuje-li neschopnost na dny, které padly u předchozího plátce nebo
+programu (dny okna náhrady mzdy u nepřítomnosti), začíná případ skutečným
+dnem vzniku a lhůta NEMPRI se počítá od něj. K ručně
 založenému případu do 14 dnů hlídač termínů lhůtu neukáže a NEMPRI se
 nepřipraví. Nevznikne-li případ (například firma nemá kód OSSZ), hláška řekne proč
 a nepřítomnost se schválí i tak. Zrušením nepřítomnosti se zruší i případ,
 ze kterého ještě nebylo připravené podání; případ s podáním zůstává
-a vyřešíte ho opravným podáním. Případ můžete založit i ručně na záložce
+a vyřešíte ho opravným podáním. Zrušená navazující nepřítomnost vrátí konec
+případu na den před sebou. Případ můžete založit i ručně na záložce
 **Dávky nemocenského**.
+
+Případ vzniká i z **převodu mezd** z předchozího programu, a to k události,
+která trvá aspoň do prvního měsíce vedeného v MyÚčtu. Podání, jehož lhůta
+začala běžet ještě v době předchozího programu, je v případu vedené jako
+podané předchozím programem a MyÚčto ho nepřipravuje; zbývající podání
+(typicky HZUPN k návratu do práce) hlídá MyÚčto.
 
 Případ evidujte na záložce **Dávky nemocenského**. Z případu si můžete
 zobrazit náhled datové věty a tlačítkem **Připravit NEMPRI** nebo **Připravit
@@ -1504,6 +1519,23 @@ Odeslání není splnění povinnosti: tu splní až doručení územní správ�
 sociálního zabezpečení. Skutečnou doručenku nebo protokol proto uložte jako
 firemní dokument do DMS a výsledek zapište u případu.
 
+**NEMPRI a HZUPN mají každé vlastní stav.** U případu je pod hlavičkou vidět,
+v jakém stavu je které podání (nedoručeno, připraveno, přijato ČSSZ s dnem
+doručení, odmítnuto s důvodem, podal předchozí program). Výsledek z protokolu
+zapisujete ke konkrétnímu podání: vyplňte **Den doručení ČSSZ** a zvolte
+**Zapsat přijetí NEMPRI** (HZUPN), nebo vyplňte důvod a **Zapsat odmítnutí**.
+Přijaté NEMPRI případ neuzavře: dokud čeká HZUPN, případ jde upravovat,
+navazující nepřítomnost ho prodlouží a hlídač termínů lhůtu HZUPN hlídá dál.
+Vyřízené podání zamkne jen svoje údaje — údaje přijatého NEMPRI se už
+nemění, údaje pro HZUPN ano. Opravit vyřízené podání jde jen opravným
+podáním: zaškrtněte **Opravné podání**, upravte údaje, podání znovu
+připravte a jeho přijetí zapište. Odmítnuté podání se vrací do hlídače
+a připravíte ho znovu. U případu převzatého z předchozího programu jde
+zapsat, že podání podal předchozí program (den doručení je nepovinný).
+Společný stav případu se z obou podání jen odvozuje: **Částečně vyřízeno**
+znamená, že jedno podání je vyřízené a druhé čeká, **Vše vyřízeno**, že
+čekat není na co.
+
 ### 85.15.1 Co vyplnit u případu
 
 Tlačítkem **Upravit** otevřete editor případu. Má jedno společné **Uložit**
@@ -1514,11 +1546,21 @@ ve spodní liště a tyto sekce:
   (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského,
   ošetřovného a dlouhodobého ošetřovného povinné a HZUPN ho vyžaduje vždy;
   bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ.
+  Číslo rozhodnutí a Opravné podání jdou měnit i u vyřízeného podání.
   Otcovská, peněžitá pomoc v mateřství a vyrovnávací příspěvek číslo
   rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem
   rozhodnutí.
 - **Potvrzení zaměstnavatele** — mimo jiné **příjem ze zaměstnání malého
-  rozsahu** v celých korunách.
+  rozsahu** v celých korunách. Pobírá-li zaměstnanec důchod, vyplňte **druh
+  důchodu** kódem z číselníku ČSSZ Druh důchodu (stejný jako v přihlášce
+  zaměstnance: 1 starobní, 2 invalidní třetího stupně, 8 invalidní prvního
+  nebo druhého stupně). U studenta zaškrtněte, zda zaměstnání spadá výlučně do
+  školních prázdnin. Pracovní volno bez náhrady příjmu má den od i do.
+  U nemocenského, vyrovnávacího příspěvku a mateřské se vyplňuje nástup na
+  peněžitou pomoc v mateřství a den narození dítěte. Převedení na jinou práci
+  nese den převedení a důvod (těhotenství, mateřství, kojení): při převedení
+  z těchto důvodů se rozhodné období může určit ke dni převedení, je-li to
+  výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.).
 - **Žádost o dávku** (ošetřovné, dlouhodobé ošetřovné, otcovská, peněžitá
   pomoc v mateřství). Zaměstnavatel žádost přijímá a předává ČSSZ, údaje proto
   opisujete ze žádosti, kterou vám zaměstnanec předal. U ošetřovného
@@ -1531,7 +1573,9 @@ ve spodní liště a tyto sekce:
   mimo evidenci zadejte jménem, příjmením a datem narození. Dále vyplňte
   důvod péče, vztah k ošetřované osobě (u otcovské důvod otcovské, u mateřské
   případně důvod převzetí dítěte do péče), dny, kdy zaměstnanec pečoval,
-  a podklady pro výplatu (směny v posledním dni a v období dávky). Vztah
+  a podklady pro výplatu (směny v posledním dni a v období dávky; u
+  dlouhodobého ošetřovného i to, zda měl zaměstnanec pracovní volno a kdy,
+  a při rozvržených směnách jejich rozvrh). Vztah
   i důvody se vybírají ze seznamu podle číselníků ČSSZ: u ošetřovného
   CIS_RODVZTAH (PL, MA, RP, SDO, SO, TCH, JIN), u dlouhodobého ošetřovného
   CIS_VZTAH (1 až 29), důvod otcovské OTC, ZEM nebo PEC a důvod převzetí do
@@ -1563,7 +1607,9 @@ zaměstnání, nemocenské náleží jen v ochranné lhůtě 7 kalendářních d
 (nejvýš tolik dnů, kolik pojištění trvalo), peněžitá pomoc v mateřství
 nejvýš do 180 dnů u ženy, jejíž pojištění skončilo v těhotenství (§ 15
 zákona č. 187/2006 Sb.). Z dohody o provedení práce, zaměstnání malého
-rozsahu a zaměstnání studenta jen o prázdninách ochranná lhůta neplyne
+rozsahu a zaměstnání studenta jen o prázdninách ochranná lhůta neplyne,
+neplyne ani poživateli starobního důchodu a invalidního důchodu třetího
+stupně (u případu proto musí být vyplněný druh důchodu, pobírá-li ho)
 a ostatní dávky ji nemají vůbec. Případ mimo ochrannou lhůtu nejde založit
 ani připravit; u případu v ochranné lhůtě seznam ukáže, do kdy lhůta běží,
 a NEMPRI se podá se dnem skončení zaměstnání.

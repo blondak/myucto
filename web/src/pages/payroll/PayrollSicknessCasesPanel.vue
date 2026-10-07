@@ -40,7 +40,9 @@ import {
   type PayrollSicknessCaseInput,
   type PayrollSicknessDispatched,
   type PayrollSicknessDocumentKind,
+  type PayrollSicknessDocumentStatus,
   type PayrollSicknessReadySubmission,
+  type PayrollSicknessTransferReason,
   type PayrollSicknessTransport,
   type PayrollSicknessWorkInterval,
 } from '@/api/payrollSicknessCases'
@@ -102,8 +104,16 @@ const draftSmallScopeIncomeCzk = ref('')
 /** Vyživované osoby zaměstnance — z nich se vybírá dítě nebo ošetřovaná osoba. */
 const dependants = ref<PayrollDependant[]>([])
 const previewXml = ref<{ id: number, document: string, xml: string } | null>(null)
-const receiptDate = ref<Record<number, string>>({})
-const receiptReason = ref<Record<number, string>>({})
+/*
+ * Den doručení a důvod odmítnutí se zapisují ke KONKRÉTNÍMU podání
+ * (klíč `případ:tiskopis`). NEMPRI a HZUPN mají vlastní lhůty (§ 97 odst. 1–3),
+ * přijaté NEMPRI proto nesmí uzavřít HZUPN.
+ */
+const receiptDate = ref<Record<string, string>>({})
+const receiptReason = ref<Record<string, string>>({})
+/** Podklady pro výplatu DLO: období volna a rozvrh směn. */
+const draftDloLeave = ref<PayrollSicknessWorkInterval[]>([])
+const draftDloShifts = ref<PayrollSicknessWorkInterval[]>([])
 const error = ref('')
 const success = ref('')
 
@@ -138,6 +148,11 @@ const careReasons: PayrollSicknessCareReason[] = [
   'ill', 'quarantine', 'cannot_care', 'school_closed',
 ]
 
+/** Důvody převedení na jinou práci podle § 19 odst. 6 zákona o nemocenském pojištění. */
+const transferReasons: PayrollSicknessTransferReason[] = ['pregnancy', 'maternity', 'breastfeeding']
+/** Nástup na PPM a den narození nese potvrzení zaměstnavatele jen u NEM, VPM a PPM. */
+const MATERNITY_KINDS: PayrollSicknessBenefitKind[] = ['NEM', 'VPM', 'PPM']
+
 const benefitKinds: PayrollSicknessBenefitKind[] = [
   'NEM', 'VPM', 'OPP', 'PPM', 'OSE', 'DLO',
 ]
@@ -169,6 +184,14 @@ const draftHasActions = computed(() =>
   draftKind.value !== null && ACTION_KINDS.includes(draftKind.value))
 const draftHasHzupn = computed(() =>
   draftKind.value !== null && HZUPN_KINDS.includes(draftKind.value))
+/** Studium (`jeStudentem`, `spadaDoPrazdnin`) potvrzení nemá u PPM a otcovské. */
+const draftHasStudentSection = computed(() =>
+  draftKind.value !== null && draftKind.value !== 'PPM' && draftKind.value !== 'OPP')
+const draftHasMaternity = computed(() =>
+  draftKind.value !== null && MATERNITY_KINDS.includes(draftKind.value))
+/** Převedení na jinou práci potvrzení nemá jen u otcovské. */
+const draftHasTransfer = computed(() =>
+  draftKind.value !== null && draftKind.value !== 'OPP')
 
 interface CodeOption { value: string, label: string, invalid?: boolean }
 
@@ -385,12 +408,17 @@ function edit(item: PayrollSicknessCase): void {
     receives_pension: item.receives_pension,
     pension_kind: item.pension_kind,
     is_student: item.is_student,
+    within_school_holidays: item.within_school_holidays ?? 0,
     first_employment_free_time: item.first_employment_free_time,
     unpaid_leave: item.unpaid_leave,
     unpaid_leave_from: item.unpaid_leave_from,
     unpaid_leave_to: item.unpaid_leave_to,
+    starts_maternity: item.starts_maternity ?? 0,
+    child_birth_date: item.child_birth_date,
     transferred_other_work: item.transferred_other_work,
     transferred_on: item.transferred_on,
+    transfer_reason: item.transfer_reason ?? null,
+    dlo_has_leave: item.dlo_has_leave ?? 0,
     enforcement: item.enforcement,
     insolvency: item.insolvency,
     returned_to_work: item.returned_to_work,
@@ -440,6 +468,8 @@ function edit(item: PayrollSicknessCase): void {
   }
   draftWorkDays.value = item.work_days.map(interval => ({ ...interval }))
   draftCareDays.value = (item.care_days ?? []).map(interval => ({ ...interval }))
+  draftDloLeave.value = (item.dlo_leave_periods ?? []).map(interval => ({ ...interval }))
+  draftDloShifts.value = (item.dlo_shift_schedule ?? []).map(interval => ({ ...interval }))
   draftDecisiveMonths.value = (item.decisive_months ?? []).map(month => ({
     period: month.period,
     income_czk: minorToCzk(month.income_minor),
@@ -469,8 +499,18 @@ function cancelEdit(): void {
   draft.value = {}
   draftWorkDays.value = []
   draftCareDays.value = []
+  draftDloLeave.value = []
+  draftDloShifts.value = []
   draftDecisiveMonths.value = []
   draftSmallScopeIncomeCzk.value = ''
+}
+
+function addInterval(list: PayrollSicknessWorkInterval[]): void {
+  list.push({ from: '', to: '' })
+}
+
+function removeInterval(list: PayrollSicknessWorkInterval[], index: number): void {
+  list.splice(index, 1)
 }
 
 function addWorkInterval(): void {
@@ -524,6 +564,27 @@ async function save(): Promise<void> {
           ? (draft.value.long_term_care_refusal_reason ?? null)
           : null,
         small_scope_income_minor: czkToMinor(draftSmallScopeIncomeCzk.value),
+        // Podřízené údaje jdou jen s nadřazeným příznakem — jinak by věta
+        // nesla prvek, který DV NEMPRI25 bez něj zakazuje.
+        pension_kind: draft.value.receives_pension ? (draft.value.pension_kind || null) : null,
+        within_school_holidays: draft.value.is_student
+          ? (draft.value.within_school_holidays ? 1 : 0)
+          : null,
+        unpaid_leave_from: draft.value.unpaid_leave ? (draft.value.unpaid_leave_from ?? null) : null,
+        unpaid_leave_to: draft.value.unpaid_leave ? (draft.value.unpaid_leave_to ?? null) : null,
+        starts_maternity: draftHasMaternity.value && draft.value.starts_maternity ? 1 : null,
+        child_birth_date: draftHasMaternity.value && draft.value.starts_maternity
+          ? (draft.value.child_birth_date ?? null)
+          : null,
+        transferred_on: draft.value.transferred_other_work ? (draft.value.transferred_on ?? null) : null,
+        transfer_reason: draft.value.transferred_other_work ? (draft.value.transfer_reason ?? null) : null,
+        ...(draftKind.value === 'DLO'
+          ? {
+              dlo_has_leave: draft.value.dlo_has_leave ? 1 : 0,
+              dlo_leave_periods: draft.value.dlo_has_leave ? completeIntervals(draftDloLeave.value) : null,
+              dlo_shift_schedule: draft.value.planned_shifts ? completeIntervals(draftDloShifts.value) : null,
+            }
+          : { dlo_has_leave: null }),
         work_days: completeIntervals(draftWorkDays.value),
         care_days: completeIntervals(draftCareDays.value),
         decisive_months: draftDecisiveMonths.value
@@ -682,26 +743,137 @@ function transportNote(): string {
   return t('payroll.sicknessCases.dispatch.transportManual')
 }
 
+/** Klíč vstupů výsledku podání: jeden případ nese dvě samostatná podání. */
+function receiptKey(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): string {
+  return `${item.id}:${document}`
+}
+
 async function recordReceipt(
   item: PayrollSicknessCase,
-  outcome: 'accepted' | 'rejected' | 'cancelled',
+  document: PayrollSicknessDocumentKind,
+  outcome: 'accepted' | 'rejected' | 'predecessor',
 ): Promise<void> {
+  const key = receiptKey(item, document)
   busyId.value = item.id
   error.value = ''
   success.value = ''
   try {
     await payrollSicknessCasesApi.recordReceipt(environment.value, item.id, {
       outcome,
-      accepted_on: receiptDate.value[item.id] || null,
-      reason: receiptReason.value[item.id] || null,
+      document,
+      accepted_on: receiptDate.value[key] || null,
+      reason: outcome === 'rejected' ? (receiptReason.value[key] || null) : null,
     })
+    receiptDate.value = { ...receiptDate.value, [key]: '' }
+    receiptReason.value = { ...receiptReason.value, [key]: '' }
     success.value = t('payroll.sicknessCases.receiptRecorded')
     await load()
   } catch (err) {
     error.value = message(err)
+    errorCase.value = item
   } finally {
     busyId.value = null
   }
+}
+
+/** Podání, která případ nese: NEMPRI vždy, HZUPN jen u nemocenského. */
+function documentsFor(item: PayrollSicknessCase): PayrollSicknessDocumentKind[] {
+  return HZUPN_KINDS.includes(item.benefit_kind) ? ['nempri', 'hzupn'] : ['nempri']
+}
+
+function documentStatus(
+  item: PayrollSicknessCase,
+  document: PayrollSicknessDocumentKind,
+): PayrollSicknessDocumentStatus {
+  return (document === 'nempri' ? item.nempri_status : item.hzupn_status) ?? 'pending'
+}
+
+function documentSettled(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): boolean {
+  const status = documentStatus(item, document)
+  return status === 'accepted' || status === 'predecessor'
+}
+
+/** Jedna věta o stavu podání, např. „NEMPRI: přijato ČSSZ 2026-06-24". */
+function documentStatusText(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): string {
+  const status = documentStatus(item, document)
+  const label = t(`payroll.sicknessCases.documents.${document}`)
+  if (status === 'accepted') {
+    const date = document === 'nempri' ? item.nempri_accepted_on : item.hzupn_accepted_on
+    return `${label}: ${t('payroll.sicknessCases.documentStatuses.accepted', { date: date ?? '' })}`
+  }
+  if (status === 'rejected') {
+    const reason = document === 'nempri' ? item.nempri_rejection_reason : item.hzupn_rejection_reason
+    return `${label}: ${t('payroll.sicknessCases.documentStatuses.rejected', { reason: reason ?? '' })}`
+  }
+  if (status === 'pending' && submissionId(item, document) !== null) {
+    return `${label}: ${t('payroll.sicknessCases.documentStatuses.prepared')}`
+  }
+  return `${label}: ${t(`payroll.sicknessCases.documentStatuses.${status}`)}`
+}
+
+/**
+ * Připravit jde podání, které ještě není připravené, nebo to, které ČSSZ
+ * odmítla; vyřízené jen jako opravné podání. Podání předchozího programu
+ * MyÚčto nepřipravuje vůbec.
+ */
+function canPrepare(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): boolean {
+  const status = documentStatus(item, document)
+  if (status === 'predecessor' || item.status === 'cancelled') return false
+  if (status === 'rejected') return true
+  if (status === 'accepted') return Boolean(item.correction)
+  return submissionId(item, document) === null
+}
+
+function prepareDisabledReason(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): string {
+  const status = documentStatus(item, document)
+  if (!canWrite.value) return t('payroll.sicknessCases.hints.readOnly')
+  if (status === 'predecessor') return t('payroll.sicknessCases.hints.documentByPredecessor')
+  if (status === 'accepted') return t('payroll.sicknessCases.hints.documentSettled')
+  return t('payroll.sicknessCases.hints.alreadyPrepared')
+}
+
+/** Zápis výsledku jednoho podání z protokolu (přijetí, odmítnutí, předchozí program). */
+function receiptActions(item: PayrollSicknessCase, document: PayrollSicknessDocumentKind): ActionItem[] {
+  const key = receiptKey(item, document)
+  const suffix = document === 'nempri' ? 'Nempri' : 'Hzupn'
+  const status = documentStatus(item, document)
+  const open = item.status !== 'cancelled'
+  return [
+    {
+      key: `accept-${document}`,
+      label: t(`payroll.sicknessCases.actions.recordAccepted${suffix}`),
+      icon: 'check',
+      variant: 'success',
+      show: open && status !== 'predecessor' && (status !== 'accepted' || Boolean(item.correction)),
+      disabled: !canWrite.value || !receiptDate.value[key],
+      disabledReason: canWrite.value
+        ? t('payroll.sicknessCases.hints.receiptDateRequired')
+        : t('payroll.sicknessCases.hints.readOnly'),
+      run: () => void recordReceipt(item, document, 'accepted'),
+    },
+    {
+      key: `reject-${document}`,
+      label: t(`payroll.sicknessCases.actions.recordRejected${suffix}`),
+      icon: 'x',
+      variant: 'danger',
+      show: open && !documentSettled(item, document),
+      disabled: !canWrite.value || !receiptReason.value[key],
+      disabledReason: canWrite.value
+        ? t('payroll.sicknessCases.hints.rejectionReasonRequired')
+        : t('payroll.sicknessCases.hints.readOnly'),
+      run: () => void recordReceipt(item, document, 'rejected'),
+    },
+    {
+      key: `predecessor-${document}`,
+      label: t(`payroll.sicknessCases.actions.recordPredecessor${suffix}`),
+      icon: 'archive',
+      variant: 'neutral',
+      show: open && item.source === 'predecessor' && !documentSettled(item, document),
+      disabled: !canWrite.value,
+      disabledReason: t('payroll.sicknessCases.hints.readOnly'),
+      run: () => void recordReceipt(item, document, 'predecessor'),
+    },
+  ]
 }
 
 /**
@@ -739,7 +911,9 @@ function dispatchAction(
  */
 function actionsFor(item: PayrollSicknessCase): ActionItem[] {
   const hzupn = HZUPN_KINDS.includes(item.benefit_kind)
-  const open = item.status !== 'accepted' && item.status !== 'cancelled'
+  // Případ jde upravit, dokud není zrušený: vyřízené podání zamyká jen svoje
+  // údaje (server to hlídá), HZUPN se po přijetí NEMPRI teprve doplňuje.
+  const editable = item.status !== 'cancelled'
 
   return [
     {
@@ -748,7 +922,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       icon: 'edit',
       tier: 'primary',
       variant: 'primary',
-      show: open && editingId.value !== item.id,
+      show: editable && editingId.value !== item.id,
       disabled: !canWrite.value,
       disabledReason: t('payroll.sicknessCases.hints.readOnly'),
       run: () => edit(item),
@@ -757,6 +931,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'preview-nempri',
       label: t('payroll.sicknessCases.actions.previewNempri'),
       icon: 'eye',
+      show: documentStatus(item, 'nempri') !== 'predecessor',
       loading: busyId.value === item.id,
       run: () => void preview(item, 'nempri'),
     },
@@ -764,10 +939,9 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'prepare-nempri',
       label: t('payroll.sicknessCases.actions.prepareNempri'),
       icon: 'check',
-      disabled: !canWrite.value || item.nempri_submission_id !== null,
-      disabledReason: item.nempri_submission_id !== null
-        ? t('payroll.sicknessCases.hints.alreadyPrepared')
-        : t('payroll.sicknessCases.hints.readOnly'),
+      show: documentStatus(item, 'nempri') !== 'predecessor',
+      disabled: !canWrite.value || !canPrepare(item, 'nempri'),
+      disabledReason: prepareDisabledReason(item, 'nempri'),
       loading: busyId.value === item.id,
       run: () => void prepare(item, 'nempri'),
     },
@@ -776,7 +950,7 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'preview-hzupn',
       label: t('payroll.sicknessCases.actions.previewHzupn'),
       icon: 'eye',
-      show: hzupn,
+      show: hzupn && documentStatus(item, 'hzupn') !== 'predecessor',
       disabled: item.incapacity_to === null,
       disabledReason: t('payroll.sicknessCases.hints.incapacityEndRequired'),
       loading: busyId.value === item.id,
@@ -786,36 +960,17 @@ function actionsFor(item: PayrollSicknessCase): ActionItem[] {
       key: 'prepare-hzupn',
       label: t('payroll.sicknessCases.actions.prepareHzupn'),
       icon: 'check',
-      show: hzupn,
+      show: hzupn && documentStatus(item, 'hzupn') !== 'predecessor',
       disabled: !canWrite.value
         || item.incapacity_to === null
-        || item.hzupn_submission_id !== null,
-      disabledReason: item.hzupn_submission_id !== null
-        ? t('payroll.sicknessCases.hints.alreadyPrepared')
-        : t('payroll.sicknessCases.hints.incapacityEndRequired'),
+        || !canPrepare(item, 'hzupn'),
+      disabledReason: item.incapacity_to === null
+        ? t('payroll.sicknessCases.hints.incapacityEndRequired')
+        : prepareDisabledReason(item, 'hzupn'),
       loading: busyId.value === item.id,
       run: () => void prepare(item, 'hzupn'),
     },
     dispatchAction(item, 'hzupn'),
-    {
-      key: 'accept',
-      label: t('payroll.sicknessCases.actions.recordAccepted'),
-      tier: 'advanced',
-      show: open,
-      disabled: !canWrite.value || !receiptDate.value[item.id],
-      disabledReason: t('payroll.sicknessCases.hints.receiptDateRequired'),
-      run: () => void recordReceipt(item, 'accepted'),
-    },
-    {
-      key: 'reject',
-      label: t('payroll.sicknessCases.actions.recordRejected'),
-      tier: 'advanced',
-      variant: 'danger',
-      show: open,
-      disabled: !canWrite.value || !receiptReason.value[item.id],
-      disabledReason: t('payroll.sicknessCases.hints.rejectionReasonRequired'),
-      run: () => void recordReceipt(item, 'rejected'),
-    },
   ]
 }
 
@@ -1005,6 +1160,20 @@ onMounted(() => void load())
           </span>
         </div>
         <p
+          v-if="item.status !== 'cancelled'"
+          class="mt-1 text-xs text-neutral-600"
+          :data-test="`sickness-case-documents-${item.id}`"
+        >
+          {{ documentsFor(item).map(document => documentStatusText(item, document)).join(' · ') }}
+        </p>
+        <p
+          v-if="item.source === 'predecessor'"
+          class="mt-1 text-xs text-neutral-500"
+          :data-test="`sickness-case-origin-predecessor-${item.id}`"
+        >
+          {{ t('payroll.sicknessCases.origin.predecessor') }}
+        </p>
+        <p
           v-if="item.protection_period?.status === 'protection_period'"
           class="mt-2 rounded-lg bg-info-50 p-2 text-xs text-info-800"
           :data-test="`sickness-case-protection-${item.id}`"
@@ -1108,12 +1277,20 @@ onMounted(() => void load())
                 <input v-model="draft.hours_worked" type="text" inputmode="decimal" class="w-full rounded-lg border border-neutral-300 p-2 text-sm">
               </label>
               <label class="flex items-center gap-2 text-sm">
-                <input v-model.number="draft.receives_pension" type="checkbox" :true-value="1" :false-value="0">
+                <input v-model.number="draft.receives_pension" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-receives-pension">
                 {{ t('payroll.sicknessCases.receivesPension') }}
               </label>
-              <label class="flex items-center gap-2 text-sm">
-                <input v-model.number="draft.is_student" type="checkbox" :true-value="1" :false-value="0">
+              <label v-if="draft.receives_pension" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.pensionKind') }}</span>
+                <input v-model="draft.pension_kind" type="text" maxlength="2" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-pension-kind">
+              </label>
+              <label v-if="draftHasStudentSection" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.is_student" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-is-student">
                 {{ t('payroll.sicknessCases.isStudent') }}
+              </label>
+              <label v-if="draftHasStudentSection && draft.is_student" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.within_school_holidays" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-school-holidays">
+                {{ t('payroll.sicknessCases.form.withinSchoolHolidays') }}
               </label>
               <label class="flex items-center gap-2 text-sm">
                 <input v-model.number="draft.enforcement" type="checkbox" :true-value="1" :false-value="0">
@@ -1127,9 +1304,38 @@ onMounted(() => void load())
                 <input v-model.number="draft.unpaid_leave" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-unpaid-leave">
                 {{ t('payroll.sicknessCases.unpaidLeave') }}
               </label>
-              <label v-if="draftHasUnpaidLeaveSection" class="block text-sm">
+              <label v-if="draftHasUnpaidLeaveSection && draft.unpaid_leave" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.unpaidLeaveFrom') }}</span>
-                <DateInput v-model="draft.unpaid_leave_from" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" />
+                <DateInput v-model="draft.unpaid_leave_from" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-unpaid-leave-from" />
+              </label>
+              <label v-if="draftHasUnpaidLeaveSection && draft.unpaid_leave" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.unpaidLeaveTo') }}</span>
+                <DateInput v-model="draft.unpaid_leave_to" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-unpaid-leave-to" />
+              </label>
+              <label v-if="draftHasMaternity" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.starts_maternity" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-starts-maternity">
+                {{ t('payroll.sicknessCases.form.startsMaternity') }}
+              </label>
+              <label v-if="draftHasMaternity && draft.starts_maternity" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.childBirthDate') }}</span>
+                <DateInput v-model="draft.child_birth_date" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-child-birth-date" />
+              </label>
+              <label v-if="draftHasTransfer" class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.transferred_other_work" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-transferred">
+                {{ t('payroll.sicknessCases.form.transferredOtherWork') }}
+              </label>
+              <label v-if="draftHasTransfer && draft.transferred_other_work" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.transferredOn') }}</span>
+                <DateInput v-model="draft.transferred_on" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-transferred-on" />
+              </label>
+              <label v-if="draftHasTransfer && draft.transferred_other_work" class="block text-sm">
+                <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.transferReason') }}</span>
+                <select v-model="draft.transfer_reason" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-transfer-reason">
+                  <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                  <option v-for="reason in transferReasons" :key="reason" :value="reason">
+                    {{ t(`payroll.sicknessCases.form.transferReasons.${reason}`) }}
+                  </option>
+                </select>
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.smallScopeIncome') }}</span>
@@ -1138,6 +1344,12 @@ onMounted(() => void load())
             </div>
             <p class="mt-2 text-xs text-neutral-500">
               {{ t('payroll.sicknessCases.form.smallScopeIncomeHint') }}
+            </p>
+            <p v-if="draft.receives_pension" class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.pensionKindHint') }}
+            </p>
+            <p v-if="draftHasTransfer && draft.transferred_other_work" class="mt-1 text-xs text-neutral-500">
+              {{ t('payroll.sicknessCases.form.transferReasonHint') }}
             </p>
           </section>
 
@@ -1369,6 +1581,61 @@ onMounted(() => void load())
                 {{ t('payroll.sicknessCases.form.plannedShiftsWorked') }}
               </label>
             </div>
+
+            <!--
+              Podklady pro výplatu DLO (DV NEMPRI25): u trvání a ukončení
+              „má volno" a jeho období, při rozvržených směnách jejich rozvrh.
+            -->
+            <div v-if="draftKind === 'DLO'" class="mt-3 rounded-lg border border-neutral-200 p-3" data-test="sickness-case-dlo-basis">
+              <span class="mb-1 block text-sm font-medium text-neutral-800">{{ t('payroll.sicknessCases.form.dloBasisTitle') }}</span>
+              <p class="mb-2 text-xs text-neutral-500">{{ t('payroll.sicknessCases.form.dloBasisHint') }}</p>
+              <label class="mb-2 flex items-center gap-2 text-sm">
+                <input v-model.number="draft.dlo_has_leave" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-dlo-has-leave">
+                {{ t('payroll.sicknessCases.form.dloHasLeave') }}
+              </label>
+              <div v-if="draft.dlo_has_leave" class="mb-3" data-test="sickness-case-dlo-leave-periods">
+                <span class="mb-1 block text-sm text-neutral-700">{{ t('payroll.sicknessCases.form.dloLeavePeriods') }}</span>
+                <div v-for="(interval, index) in draftDloLeave" :key="index" class="mb-2 flex flex-wrap items-end gap-2">
+                  <DateInput v-model="interval.from" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                  <DateInput v-model="interval.to" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                  <ActionBar :actions="[{
+                    key: `dlo-leave-remove-${index}`,
+                    label: t('payroll.sicknessCases.actions.removeWorkInterval'),
+                    icon: 'trash',
+                    variant: 'danger',
+                    run: () => removeInterval(draftDloLeave, index),
+                  }]" />
+                </div>
+                <ActionBar :actions="[{
+                  key: 'dlo-leave-add',
+                  label: t('payroll.sicknessCases.actions.addWorkInterval'),
+                  icon: 'plus',
+                  variant: 'neutral',
+                  run: () => addInterval(draftDloLeave),
+                }]" />
+              </div>
+              <div v-if="draft.planned_shifts" data-test="sickness-case-dlo-shift-schedule">
+                <span class="mb-1 block text-sm text-neutral-700">{{ t('payroll.sicknessCases.form.dloShiftSchedule') }}</span>
+                <div v-for="(interval, index) in draftDloShifts" :key="index" class="mb-2 flex flex-wrap items-end gap-2">
+                  <DateInput v-model="interval.from" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                  <DateInput v-model="interval.to" class="rounded-lg border border-neutral-300 p-2 text-sm" />
+                  <ActionBar :actions="[{
+                    key: `dlo-shift-remove-${index}`,
+                    label: t('payroll.sicknessCases.actions.removeWorkInterval'),
+                    icon: 'trash',
+                    variant: 'danger',
+                    run: () => removeInterval(draftDloShifts, index),
+                  }]" />
+                </div>
+                <ActionBar :actions="[{
+                  key: 'dlo-shift-add',
+                  label: t('payroll.sicknessCases.actions.addWorkInterval'),
+                  icon: 'plus',
+                  variant: 'neutral',
+                  run: () => addInterval(draftDloShifts),
+                }]" />
+              </div>
+            </div>
           </section>
 
           <section data-test="sickness-case-decisive-period">
@@ -1553,24 +1820,45 @@ onMounted(() => void load())
           </div>
         </div>
 
-        <div v-else class="mt-3 grid gap-3 md:grid-cols-2">
-          <label class="block text-sm">
-            <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.acceptedOn') }}</span>
-            <DateInput
-              v-model="receiptDate[item.id]"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
-              :data-test="`sickness-case-accepted-on-${item.id}`" />
-          </label>
-          <label class="block text-sm">
-            <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.rejectionReason') }}</span>
-            <input
-              v-model="receiptReason[item.id]"
-              type="text"
-              maxlength="190"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
-              :data-test="`sickness-case-rejection-reason-${item.id}`"
+        <!--
+          Výsledek z protokolu ČSSZ se zapisuje ke každému podání zvlášť:
+          NEMPRI a HZUPN mají vlastní lhůty a přijetí jednoho neuzavírá druhé.
+        -->
+        <div v-else-if="item.status !== 'cancelled'" class="mt-3 space-y-3">
+          <template v-for="document in documentsFor(item)" :key="document">
+            <div
+              v-if="!documentSettled(item, document) || item.correction"
+              class="rounded-lg border border-neutral-200 p-3"
+              :data-test="`sickness-case-receipt-${item.id}-${document}`"
             >
-          </label>
+              <p class="mb-2 text-xs font-semibold uppercase text-neutral-500">
+                {{ t('payroll.sicknessCases.receipt.title', { document: t(`payroll.sicknessCases.documents.${document}`) }) }}
+              </p>
+              <div class="grid gap-3 md:grid-cols-2">
+                <label class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.acceptedOn') }}</span>
+                  <DateInput
+                    v-model="receiptDate[receiptKey(item, document)]"
+                    class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+                    :data-test="`sickness-case-accepted-on-${item.id}-${document}`" />
+                </label>
+                <label v-if="!documentSettled(item, document)" class="block text-sm">
+                  <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.rejectionReason') }}</span>
+                  <input
+                    v-model="receiptReason[receiptKey(item, document)]"
+                    type="text"
+                    maxlength="190"
+                    class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+                    :data-test="`sickness-case-rejection-reason-${item.id}-${document}`"
+                  >
+                </label>
+              </div>
+              <p v-if="item.source === 'predecessor' && !documentSettled(item, document)" class="mt-2 text-xs text-neutral-500">
+                {{ t('payroll.sicknessCases.receipt.predecessorHint') }}
+              </p>
+              <ActionBar class="mt-2" :actions="receiptActions(item, document)" />
+            </div>
+          </template>
         </div>
 
         <ActionBar class="mt-3" :actions="actionsFor(item)" />
