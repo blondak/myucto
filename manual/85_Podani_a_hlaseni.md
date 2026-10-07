@@ -1802,8 +1802,16 @@ ve spodní liště a tyto sekce:
   nepředává: zaměstnanec v práci nechybí a dávka mu z tohoto zaměstnání
   nenáleží.
   Prohlášení, které zaměstnanec v žádosti nevyplnil, nechte nezaškrtnuté:
-  podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží. Hranice
-  žádosti jsou předvyplněné dny případu.
+  podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží; platí to
+  u ošetřovného i u dlouhodobého ošetřovného (střídání, nárok jiné osoby,
+  společná domácnost). Hranice žádosti jsou předvyplněné dny případu. Při
+  trvání nebo ukončení péče jsou dny, kdy zaměstnanec pečoval, povinné.
+  U ošetřovného se hodiny posledního dne posílají jen tehdy, když
+  zaměstnanec poslední den pracoval; u dlouhodobého ošetřovného patří
+  k datu návratu do práce. Datum narození dítěte nebo ošetřované osoby ani
+  den převedení na jinou práci nesmí být v budoucnu. Opravné podání jde
+  podat i u dávek bez čísla rozhodnutí (vyrovnávací příspěvek, mateřská
+  s převzetím dítěte do péče, otcovská).
 - **Rozhodné období** — viz níže.
 - **Kontaktní pracovník** — jméno, telefon a e-mail osoby, na kterou se OSSZ
   obrátí.
@@ -1899,7 +1907,9 @@ rok. Teprve když takový rok není, nebo když zaměstnání trvalo méně než
 zaměstnanec onemocní v měsíci nástupu. Zadejte ji v sekci **Rozhodné
 období**; tlačítko **Navrhnout z mzdy** předvyplní sjednanou měsíční hrubou
 mzdu. Bez ní se NEMPRI v takovém případě nepřipraví. S pravděpodobnou výší
-věta jednotlivé měsíce ani součty nenese.
+věta jednotlivé měsíce ani součty nenese. Onemocní-li zaměstnanec v měsíci
+nástupu, rozhodné období se neurčuje a věta nese od dne nástupu do dne před
+vznikem události, jak to chtějí Všeobecné zásady NEMPRI.
 
 U zaměstnankyně převedené na jinou práci kvůli těhotenství, mateřství nebo
 kojení se rozhodné období spočítá i ke dni převedení a do věty jde to

@@ -730,7 +730,10 @@ final class NempriXmlSerializer
         $node = $document->createElementNS($namespace, 'podkladyProVyplatDavky');
         if ($application->actionEnd) {
             $this->optionalBool($document, $namespace, $node, 'pracovalPoslDenPD', $application->workedLastDay);
-            $this->lastDayHours($document, $namespace, $node, $application);
+            // Hodiny posledního dne jsou bez `pracovalPoslDenPD = true` zakázané.
+            if ($application->workedLastDay === true) {
+                $this->lastDayHours($document, $namespace, $node, $application);
+            }
         }
         $this->optionalBool($document, $namespace, $node, 'planovaneSmeny', $application->plannedShifts);
         if ($application->plannedShifts === true) {

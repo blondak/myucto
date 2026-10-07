@@ -77,7 +77,18 @@ final readonly class SicknessXmlValidator
                 . 'Doplňte ho v podmínkách pracovního vztahu.',
             );
         }
-        if ($payload->correction && $payload->decisionNumber === null) {
+        // Opravné podání se páruje číslem rozhodnutí jen tam, kde ho druh dávky
+        // nese povinně. VPM, PPM s převzetím dítěte do péče a otcovská bez
+        // potvrzení o hospitalizaci číslo nemají, a opravu podat musí jít i tak:
+        // Všeobecné zásady chtějí opravu odeslaných údajů vždy jako opravné
+        // podání. Zahraniční případ číslo z českého systému mít nemusí.
+        if ($payload->correction
+            && $payload->decisionNumber === null
+            && !$payload->foreignCase
+            && $payload->benefitKind->decisionNumberRequirement(
+                $payload->application?->maternityCareReason !== null,
+            ) === SicknessBenefitKind::DECISION_REQUIRED
+        ) {
             $this->invalid(
                 'nempri_correction_without_decision_number',
                 'Opravné podání se páruje podle čísla rozhodnutí. Bez něj by ho ČSSZ '
@@ -133,6 +144,10 @@ final readonly class SicknessXmlValidator
                 $this->exactDate($date, 'nempri_date_invalid');
             }
         }
+        // LK 13 (chyba DIS 08/13): narození dítěte ani převedení na jinou práci
+        // nemůže být v budoucnu.
+        $this->notInFuture($payload->childBirthDate);
+        $this->notInFuture($payload->transferredOn);
         $this->assertSnapshot(
             $this->nempri->serialize($payload),
             $xml,
@@ -299,7 +314,8 @@ final readonly class SicknessXmlValidator
      * Hlídá se jen to, bez čeho ČSSZ větu odmítne nebo nespáruje: akce,
      * den, od kterého se žádá, dítě nebo ošetřovaná osoba a u otcovské důvod.
      * Prohlášení zaměstnance (společná domácnost, osamělost …) podání
-     * neblokují — nevyplněné se podle zásad NEMPRI uvádí jako „NE“.
+     * neblokují — nevyplněné se podle zásad NEMPRI uvádí jako „NE“
+     * ({@see SicknessPayloadFactory::application()}); ve větě ale být musí.
      */
     private function application(NempriXmlPayload $payload): void
     {
@@ -564,9 +580,32 @@ final readonly class SicknessXmlValidator
         }
     }
 
-    /** Prvky žádosti o ošetřovné, které patří jen k akci vznik. */
+    /**
+     * Prvky žádosti o ošetřovné, které patří jen k akci vznik. Prohlášení
+     * vzniku jsou u OSE i DLO při vzniku povinná (DV NEMPRI25, chyba 02).
+     */
     private function careStart(SicknessBenefitKind $kind, NempriBenefitApplication $application): void
     {
+        $declarations = $kind === SicknessBenefitKind::Ose
+            ? [
+                $application->sharedHousehold,
+                $application->loneCaregiver,
+                $application->childUnder16,
+                $application->otherMaternityClaim,
+            ]
+            : [
+                $application->alternation,
+                $application->otherMaternityClaim,
+                $application->sharedHousehold,
+            ];
+        if (in_array(null, $declarations, true)) {
+            $this->invalid(
+                'nempri_care_declaration_missing',
+                'Žádost s akcí vznik musí nést všechna prohlášení zaměstnance (u ošetřovného společnou '
+                . 'domácnost, osamělost, dítě do 16 let a nárok jiné osoby; u dlouhodobého ošetřovného '
+                . 'střídání, nárok jiné osoby a společnou domácnost). Nevyplněné se uvádí jako NE.',
+            );
+        }
         if ($application->otherMaternityClaim === true) {
             $missing = $kind === SicknessBenefitKind::Ose
                 ? ($application->otherParentalClaim === null || $application->otherPersonS57 === null)
@@ -591,6 +630,13 @@ final readonly class SicknessXmlValidator
             $this->invalid(
                 'nempri_cared_personally_missing',
                 'Při trvání nebo ukončení péče musí žádost říct, zda zaměstnanec pečoval osobně.',
+            );
+        }
+        if ($application->careDays === []) {
+            $this->invalid(
+                'nempri_care_days_missing',
+                'Při trvání nebo ukončení péče musí žádost nést dny, kdy zaměstnanec pečoval '
+                . '(pecovalVeDnech je podle DV NEMPRI25 povinné). Doplňte je u případu.',
             );
         }
         if ($application->plannedShifts === null) {
@@ -626,6 +672,10 @@ final readonly class SicknessXmlValidator
                     'Měl-li zaměstnanec pracovní volno, musí podklady nést jeho období.',
                 );
             }
+            // Hodiny posledního dne a návrat do práce nese věta jen při ukončení.
+            if ($application->actionEnd) {
+                $this->returnAndLastDayHours($application);
+            }
         }
         if ($kind === SicknessBenefitKind::Ose && $application->actionEnd) {
             if ($application->workedLastDay === null) {
@@ -636,12 +686,34 @@ final readonly class SicknessXmlValidator
             }
             if ($application->workedLastDay === true) {
                 $this->lastDayHours($application);
+            } elseif ($application->shiftHoursLastDay !== null || $application->hoursWorkedLastDay !== null) {
+                $this->invalid(
+                    'nempri_last_day_hours_without_worked',
+                    'Pracovní doba a odpracované hodiny posledního dne se u ošetřovného uvádějí jen tehdy, '
+                    . 'když zaměstnanec poslední den péče pracoval.',
+                );
             }
         }
     }
 
     /** Otcovská: hodiny posledního dne, datum návratu a plánované směny jsou svázané. */
     private function paternitySupport(NempriBenefitApplication $application): void
+    {
+        $this->returnAndLastDayHours($application);
+        if ($application->plannedShifts === true && $application->plannedShiftsWorked === null) {
+            $this->invalid(
+                'nempri_planned_shifts_worked_missing',
+                'Při plánovaných směnách musí podklady říct, zda je zaměstnanec odpracoval.',
+            );
+        }
+    }
+
+    /**
+     * Otcovská a dlouhodobé ošetřovné (DV NEMPRI25): datum návratu do práce
+     * a hodiny posledního dne podpůrčí doby patří k sobě — jedno bez druhého
+     * nejde a odpracováno nesmí převýšit pracovní dobu.
+     */
+    private function returnAndLastDayHours(NempriBenefitApplication $application): void
     {
         $anyHours = $application->shiftHoursLastDay !== null
             || $application->hoursWorkedLastDay !== null;
@@ -653,12 +725,6 @@ final readonly class SicknessXmlValidator
                 );
             }
             $this->lastDayHours($application);
-        }
-        if ($application->plannedShifts === true && $application->plannedShiftsWorked === null) {
-            $this->invalid(
-                'nempri_planned_shifts_worked_missing',
-                'Při plánovaných směnách musí podklady říct, zda je zaměstnanec odpracoval.',
-            );
         }
     }
 
@@ -888,6 +954,19 @@ final readonly class SicknessXmlValidator
         }
         if ($person->birthDate !== null) {
             $this->exactDate($person->birthDate, 'nempri_date_invalid');
+            $this->notInFuture($person->birthDate);
+        }
+    }
+
+    private function notInFuture(?string $date): void
+    {
+        $today = (new \DateTimeImmutable('today', new \DateTimeZone('Europe/Prague')))->format('Y-m-d');
+        if ($date !== null && $date > $today) {
+            $this->invalid(
+                'nempri_date_in_future',
+                'Datum narození dítěte nebo ošetřované osoby ani den převedení na jinou práci nesmí '
+                . 'být pozdější než dnešek (' . $date . '). Opravte ho u případu.',
+            );
         }
     }
 
@@ -937,9 +1016,12 @@ final readonly class SicknessXmlValidator
                 && preg_match('/^\d{4}$/D', (string) $connection->bankCode) === 1
                 && ($connection->accountPrefix === null
                     || preg_match('/^\d{1,6}$/D', $connection->accountPrefix) === 1),
+            // Zahraniční účet nesmí mít stát CZ (DV NEMPRI25, ucetZahranicni/stat).
             NempriPaymentConnection::KIND_ACCOUNT_FOREIGN =>
                 preg_match('/^[A-Z]{2}[0-9A-Z]{2,32}$/D', (string) $connection->iban) === 1
-                && preg_match('/^[0-9A-Z]{1,3}$/D', (string) $connection->countryCode) === 1,
+                && preg_match('/^[0-9A-Z]{1,3}$/D', (string) $connection->countryCode) === 1
+                && $connection->countryCode !== 'CZ'
+                && !str_starts_with((string) $connection->iban, 'CZ'),
             NempriPaymentConnection::KIND_ADDRESS =>
                 trim((string) $connection->city) !== ''
                 && preg_match('/^[0-9A-Za-z]{1,4}$/D', (string) $connection->houseNumber) === 1

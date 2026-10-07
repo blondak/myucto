@@ -868,7 +868,8 @@ final readonly class SicknessCaseService
             'sickness_case_document_settled',
             $documents . ' je už vyřízené (přijaté, nebo podané předchozím programem), takže '
             . 'se jeho údaje nemění — evidence musí odpovídat tomu, co ČSSZ dostala. Opravu '
-            . 'podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí.',
+            . 'podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí, '
+            . 'nese-li ho druh dávky.',
         );
     }
 
