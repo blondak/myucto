@@ -1149,6 +1149,30 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
     }
 
     /**
+     * Kontroly 103 a 81 — uživatel dočasného přidělení identifikovaný rodným
+     * číslem (10457) je třetí přípustná identifikace a rodné číslo musí
+     * splnit modulo. Kontrola 81 dřív implementaci neměla.
+     */
+    public function testTemporaryAssignmentUserBirthNumberMustSatisfyModulo(): void
+    {
+        $xml = static fn (string $birthNumber): string => str_replace(
+            '<form:docasnePrideleniEvidovano>false</form:docasnePrideleniEvidovano>',
+            '<form:docasnePrideleniEvidovano>true</form:docasnePrideleniEvidovano>'
+                . '<form:docasnePrideleni><form:uzivatel><form:rodneCislo>' . $birthNumber
+                . '</form:rodneCislo></form:uzivatel></form:docasnePrideleni>',
+            JmhzXmlSample::minimal(),
+        );
+
+        $valid = $this->validate($xml('1504110003'));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($valid, 81)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($valid, 103)->outcome);
+
+        $invalid = $this->validate($xml('1504110004'));
+        self::assertContains(81, $this->failedIds($invalid));
+        self::assertStringNotContainsString('1504110004', $this->finding($invalid, 81)->message);
+    }
+
+    /**
      * Kontrola, jejíž vstupy v podání nejsou, se nesmí hlásit jako splněná.
      * „Prošlo" a „nebylo co číst" jsou dvě různé odpovědi.
      */

@@ -215,7 +215,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return [
             1, 3, 4, 7, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
-            59, 60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
+            59, 60, 61, 62, 72, 74, 78, 79, 81, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 126, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 214, 215,
@@ -412,6 +412,7 @@ final class JmhzScenario1ControlEvaluator
             93 => $this->packageFormCountWithinTotal($projection),
             97 => $this->atMostIncome($projection, '10289'),
             103 => $this->temporaryAssignmentIdentified($projection),
+            81 => $this->temporaryAssignmentUserBirthNumber($projection),
             98 => $this->dayCountsWithinMonth($projection),
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
@@ -1988,6 +1989,32 @@ final class JmhzScenario1ControlEvaluator
                 return $ways === 0
                     ? 'Evidované dočasné přidělení nemá uvedenou identifikaci uživatele.'
                     : 'Dočasné přidělení má uvedeno více způsobů identifikace najednou.';
+            },
+        );
+    }
+
+    /**
+     * Kontrola 81 — rodné číslo uživatele, ke kterému je zaměstnanec dočasně
+     * přidělen (10457), musí splnit modulo pro rodné číslo. Hodnota se do
+     * nálezu nevypisuje: jde o osobní údaj třetí osoby.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function temporaryAssignmentUserBirthNumber(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                foreach ($form->all('10457') as $occurrence) {
+                    try {
+                        CzechBirthNumber::normalize($occurrence->value);
+                    } catch (\InvalidArgumentException) {
+                        return 'Rodné číslo uživatele dočasného přidělení (10457) nesplňuje'
+                            . ' modulo pro rodné číslo.';
+                    }
+                }
+
+                return null;
             },
         );
     }
