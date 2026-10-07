@@ -75,6 +75,30 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
     }
 
     /**
+     * DPN bez nároku (§ 15a zák. č. 187/2006 Sb.): zaměstnavatel náhradu neposkytuje
+     * ani v okně § 192 ZP, všechny hodiny jdou do 10277 a do placených (10276) nic.
+     */
+    public function testSicknessWithoutEntitlementHasNoEmployerCompensationHours(): void
+    {
+        $absences = $this->repositoryStub();
+        $absences->method('publishedShiftSegments')
+            ->willReturn($this->segments(['2026-09-08' => 480, '2026-09-09' => 480]));
+        $absences->method('publishedShiftSegmentsBeyondSicknessWindow')
+            ->willReturn($this->segments(['2026-09-23' => 480]));
+
+        $derived = $this->derive(
+            $absences,
+            [$this->absence(5, 'dpn', '2026-09-08', '2026-09-23')],
+            eligible: false,
+        );
+
+        self::assertTrue($derived['supported']);
+        self::assertSame(0, $derived['minutes']['dpn_with_employer_compensation']);
+        self::assertSame(1_440, $derived['minutes']['dpn_without_employer_compensation']);
+        self::assertSame(0, $derived['paid']);
+    }
+
+    /**
      * Nemoc se dělí oknem náhrady mzdy podle § 192 ZP: uvnitř okna je náhrada
      * zaměstnavatele (10278), za ním dávka ČSSZ (10277). Do 10276 patří jen ta
      * placená část.
@@ -319,13 +343,15 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
         array $absences,
         bool $firstDayFullyWorked = false,
         ?int $sicknessEventAbsenceId = -1,
+        bool $eligible = true,
     ): array {
         $pdo = new PDO('sqlite::memory:', options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $pdo->exec(
             'CREATE TABLE payroll_sickness_events (
                 supplier_id INTEGER NOT NULL,
                 absence_id INTEGER NOT NULL,
-                first_day_fully_worked INTEGER NOT NULL
+                first_day_fully_worked INTEGER NOT NULL,
+                insurance_eligibility_confirmed INTEGER NOT NULL
             )'
         );
         if ($sicknessEventAbsenceId !== null) {
@@ -334,11 +360,12 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
                     continue;
                 }
                 $insert = $pdo->prepare(
-                    'INSERT INTO payroll_sickness_events VALUES (1, ?, ?)'
+                    'INSERT INTO payroll_sickness_events VALUES (1, ?, ?, ?)'
                 );
                 $insert->execute([
                     $sicknessEventAbsenceId === -1 ? $absence['id'] : $sicknessEventAbsenceId,
                     $firstDayFullyWorked ? 1 : 0,
+                    $eligible ? 1 : 0,
                 ]);
             }
         }

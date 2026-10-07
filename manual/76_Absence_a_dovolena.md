@@ -282,6 +282,38 @@ označ tuto skutečnost; čtrnáctidenní okno pak začíná následujícím dne
 Výsledek uchovává použitý průměr, redukční hranice, pravidla, zaokrouhlení
 a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
 
+**Neschopnost zapsaná po částech** (typicky po měsících nebo prodloužením) je
+jedna neschopnost s jedním čtrnáctidenním oknem. Část, která začíná den po konci
+předchozí části téhož druhu, při schválení dostane jen zbytek okna; dny, které
+předchozí části vyčerpaly, se zapíšou do **Dnů okna náhrady vyčerpaných před touto
+částí**. Za dny za oknem náhrada nevzniká, zaměstnanec za ně dostává nemocenské.
+Navazující část počítá z průměru a pravidel první části, i když začíná
+v dalším čtvrtletí, a odpracovaný první den se u ní nepotvrzuje. Schvaluj části
+popořadě: navazující část nejde schválit dřív než předchozí a předchozí nejde
+zrušit, dokud na ni navazuje schválená část. Ruční zápis vyčerpaných dnů zůstává
+jen pro dny u předchozího zaměstnavatele nebo v předchozím mzdovém programu.
+
+**DPN bez nároku.** Náhrada mzdy patří jen zaměstnanci, který je účasten
+nemocenského pojištění. U dohody o provedení práce a zaměstnání malého rozsahu
+rozhoduje účast v měsíci, kdy neschopnost vznikla (§ 15a zákona č. 187/2006 Sb.).
+Když účast není, zaškrtni **Zaměstnanec nemá nárok na náhradu (DPN bez nároku)**.
+Neschopnost se schválí bez průměru a bez náhrady: mzda se za její dny krátí jako
+za neplacenou dobu, mzdový vstup náhrady ani případ nemocenské nevznikne
+a evidenční list ji vykáže jako neschopnost bez nároku. Nezaškrtnuté potvrzení
+účasti samo o sobě schválení nepustí.
+
+**Snížení náhrady.** Vznikla-li neschopnost v případech § 31 zákona č. 187/2006 Sb.
+(rvačka, opilost, návykové látky, úmyslný trestný čin nebo přestupek), zvol
+**Na polovinu (§ 192 odst. 4 ZP)**. Při porušení režimu dočasně práce neschopného
+v prvních 14 dnech můžeš zvolit **Porušení režimu (§ 192 odst. 5 ZP)** a náhradu
+snížit o procento (100 % znamená neposkytnout) nebo o částku v Kč. Částkou jde
+snižovat jen náhradu, která leží v jednom kalendářním měsíci. Důvod je povinný.
+Snížení se počítá z přesné náhrady před zaokrouhlením na celé koruny a výpočet
+ho uchová spolu s původní výší.
+
+Náhrada se počítá nejvýš do dne skončení pracovního vztahu a nejdřív ode dne
+nástupu. Trvá-li neschopnost déle než vztah, schválení na to upozorní.
+
 Při schválení měsíce v **Mzdy → Docházka a směny** se samostatně
 potvrzuje pracovní jádro JMHZ: stanovený a sjednaný měsíční fond, stanovená
 týdenní doba, evidenční dny a skutečně odpracované hodiny. Nabídnuté hodnoty

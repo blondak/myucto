@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
+use MyInvoice\Service\Payroll\Absence\SicknessCompensationReduction;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
@@ -369,6 +370,63 @@ final class PayrollAbsenceValidator
     private static function blank(mixed $value): bool
     {
         return $value === null || (is_string($value) && trim($value) === '');
+    }
+
+    /**
+     * Snížení náhrady mzdy při DPN ze schválení (§ 192 odst. 4 a 5 ZP).
+     *
+     * `compensation_reduction`: `none` (výchozí), `half_192_4` (na polovinu, případy
+     * § 31 zák. č. 187/2006 Sb.), nebo `reduced_192_5` (porušení režimu) s právě jedním
+     * z `compensation_reduction_basis_points` (o kolik, 1–10 000, 10 000 = neposkytnout)
+     * a `compensation_reduction_minor` (o kolik haléřů). Důvod
+     * `compensation_reduction_reason` je povinný u obou snížení.
+     *
+     * @param array<string,mixed> $body
+     */
+    public function sicknessReduction(array $body): SicknessCompensationReduction
+    {
+        $kind = trim((string) ($body['compensation_reduction'] ?? ''));
+        $reason = (string) ($body['compensation_reduction_reason'] ?? '');
+        $share = $body['compensation_reduction_basis_points'] ?? null;
+        $amount = $body['compensation_reduction_minor'] ?? null;
+        if ($kind === '' || $kind === SicknessCompensationReduction::NONE) {
+            if (!self::blank($share) || !self::blank($amount)) {
+                throw new \InvalidArgumentException('Výše snížení náhrady se zadává jen spolu s druhem snížení.');
+            }
+
+            return SicknessCompensationReduction::none();
+        }
+        if ($kind === SicknessCompensationReduction::HALF) {
+            if (!self::blank($share) || !self::blank($amount)) {
+                throw new \InvalidArgumentException(
+                    'Snížení podle § 192 odst. 4 ZP je vždy na polovinu, výše se nezadává.',
+                );
+            }
+
+            return SicknessCompensationReduction::half($reason);
+        }
+        if ($kind !== SicknessCompensationReduction::DISCRETIONARY) {
+            throw new \InvalidArgumentException('Druh snížení náhrady mzdy není platný.');
+        }
+        if (self::blank($share) === self::blank($amount)) {
+            throw new \InvalidArgumentException(
+                'U snížení podle § 192 odst. 5 ZP zadejte buď procento, nebo částku, o kterou se náhrada snižuje.',
+            );
+        }
+        if (!self::blank($share)) {
+            $basisPoints = filter_var($share, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 10_000]]);
+            if ($basisPoints === false) {
+                throw new \InvalidArgumentException('Snížení náhrady musí být od 0,01 do 100 %.');
+            }
+
+            return SicknessCompensationReduction::byShare((int) $basisPoints, $reason);
+        }
+        $minor = filter_var($amount, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($minor === false) {
+            throw new \InvalidArgumentException('Snížení náhrady částkou musí být kladné.');
+        }
+
+        return SicknessCompensationReduction::byAmount((int) $minor, $reason);
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed> */

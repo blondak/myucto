@@ -516,24 +516,101 @@ final class PayrollAbsenceRepository
         if (!$this->db->hasTable('payroll_shifts')) {
             return [];
         }
-        $timezone = new \DateTimeZone((string) $absence['timezone_name']);
-        $windowFrom = new \DateTimeImmutable((string) $absence['date_from'], $timezone);
-        if ($firstDayFullyWorked) {
-            $windowFrom = $windowFrom->modify('+1 day');
-        }
-        $absenceTo = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
-        $windowTo = $absenceTo;
-        if (self::isSickness($absence)) {
-            $windowEnd = $this->sicknessWindowEnd($absence, $windowFrom);
-            if ($windowEnd < $absenceTo) {
-                $windowTo = $windowEnd;
-            }
-        }
-        if ($windowTo < $windowFrom) {
+        $bounds = $this->absenceBounds($absence, $firstDayFullyWorked);
+        if ($bounds['window_to'] < $bounds['from']) {
             return [];
         }
 
-        return $this->segmentsBetween($absence, $windowFrom, $windowTo, $holidayTreatment);
+        return $this->segmentsBetween($absence, $bounds['from'], $bounds['window_to'], $holidayTreatment);
+    }
+
+    /**
+     * Rozsah dnů nepřítomnosti, za které může vzniknout náhrada, a u nemoci okno § 192 ZP.
+     *
+     * Jediné místo, které ty hranice určuje. Čtou je směnová cesta
+     * ({@see publishedShiftSegments}, {@see publishedShiftSegmentsBeyondSicknessWindow}),
+     * kalendářní cesta krácení mzdy
+     * ({@see \MyInvoice\Service\Payroll\Absence\PayrollWageProrationService}) i uložené okno
+     * výpočtu náhrady ({@see PayrollSicknessRepository::record()}). Dřív si je každý počítal
+     * sám a stačila jedna odlišnost (vyčerpané dny, konec vztahu), aby se náhrada, krácení
+     * a hlášení rozešly.
+     *
+     * - `from`: první den, který se měří (po odpracovaném prvním dni o den později),
+     *   nejdřív ale dnem skutečného nástupu do vztahu;
+     * - `window_to`: poslední den okna náhrady, u jiných druhů konec nepřítomnosti;
+     *   menší než `from` znamená prázdné okno;
+     * - `to`: konec nepřítomnosti.
+     *
+     * `window_to` i `to` končí nejpozději dnem skončení vztahu (DPN-04): náhrada mzdy je
+     * povinnost zaměstnavatele v pracovním vztahu, po jeho skončení ji nikdo nedluží.
+     * Okno se přitom počítá od skutečného prvního dne neschopnosti, ne od oříznutého.
+     *
+     * @param array<string,mixed> $absence
+     * @return array{from:\DateTimeImmutable,window_to:\DateTimeImmutable,to:\DateTimeImmutable}
+     */
+    public function absenceBounds(array $absence, bool $firstDayFullyWorked): array
+    {
+        $timezone = new \DateTimeZone((string) ($absence['timezone_name'] ?? 'Europe/Prague'));
+        $from = new \DateTimeImmutable((string) $absence['date_from'], $timezone);
+        if ($firstDayFullyWorked) {
+            $from = $from->modify('+1 day');
+        }
+        $to = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
+        $windowTo = $to;
+        if (self::isSickness($absence)) {
+            $windowEnd = $this->sicknessWindowEnd($absence, $from);
+            if ($windowEnd < $windowTo) {
+                $windowTo = $windowEnd;
+            }
+        }
+
+        $employment = $this->employmentBounds(
+            (int) ($absence['supplier_id'] ?? 0),
+            (int) ($absence['employment_id'] ?? 0),
+        );
+        if ($employment['start'] !== null) {
+            $start = new \DateTimeImmutable($employment['start'], $timezone);
+            if ($start > $from) {
+                $from = $start;
+            }
+        }
+        if ($employment['end'] !== null) {
+            $end = new \DateTimeImmutable($employment['end'], $timezone);
+            if ($end < $to) {
+                $to = $end;
+            }
+            if ($end < $windowTo) {
+                $windowTo = $end;
+            }
+        }
+
+        return ['from' => $from, 'window_to' => $windowTo, 'to' => $to];
+    }
+
+    /**
+     * Den skutečného nástupu a den skončení pracovního vztahu (`null` = neomezeno).
+     *
+     * @return array{start:?string,end:?string}
+     */
+    public function employmentBounds(int $supplierId, int $employmentId): array
+    {
+        if ($supplierId <= 0 || $employmentId <= 0) {
+            return ['start' => null, 'end' => null];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(actual_start_date, start_date) AS start_on, end_date
+               FROM payroll_employments WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return ['start' => null, 'end' => null];
+        }
+
+        return [
+            'start' => $row['start_on'] === null ? null : (string) $row['start_on'],
+            'end' => $row['end_date'] === null ? null : (string) $row['end_date'],
+        ];
     }
 
     /**
@@ -561,24 +638,19 @@ final class PayrollAbsenceRepository
         if (!self::isSickness($absence) || !$this->db->hasTable('payroll_shifts')) {
             return [];
         }
-        $timezone = new \DateTimeZone((string) $absence['timezone_name']);
-        $windowFrom = new \DateTimeImmutable((string) $absence['date_from'], $timezone);
-        if ($firstDayFullyWorked) {
-            $windowFrom = $windowFrom->modify('+1 day');
+        $bounds = $this->absenceBounds($absence, $firstDayFullyWorked);
+        $tailFrom = $bounds['window_to']->modify('+1 day');
+        if ($tailFrom < $bounds['from']) {
+            $tailFrom = $bounds['from'];
         }
-        $absenceTo = new \DateTimeImmutable((string) $absence['date_to'], $timezone);
-        $tailFrom = $this->sicknessWindowEnd($absence, $windowFrom)->modify('+1 day');
-        if ($tailFrom < $windowFrom) {
-            $tailFrom = $windowFrom;
-        }
-        if ($tailFrom > $absenceTo) {
+        if ($tailFrom > $bounds['to']) {
             return [];
         }
 
         return $this->segmentsBetween(
             $absence,
             $tailFrom,
-            $absenceTo,
+            $bounds['to'],
             AbsenceHolidayTreatment::Ignore,
         );
     }
@@ -609,7 +681,196 @@ final class PayrollAbsenceRepository
         \DateTimeImmutable $windowFrom,
     ): \DateTimeImmutable {
         return AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
-            ->sicknessWindowEnd($windowFrom, self::carriedWindowDays($absence));
+            ->sicknessWindowEnd($windowFrom, $this->carriedFor($absence));
+    }
+
+    /**
+     * Vyčerpané dny okna i pro řádek, který sloupec nenese.
+     *
+     * Někteří čtenáři (souhrn měsíce pro JMHZ) skládají řádek nepřítomnosti z vlastního
+     * výběru sloupců. Bez sloupce by {@see carriedWindowDays()} vrátilo nulu a okno by
+     * se tiše prodloužilo na celých čtrnáct dnů.
+     *
+     * @param array<string,mixed> $absence
+     */
+    private function carriedFor(array $absence): int
+    {
+        if (array_key_exists('sickness_window_carried_days', $absence)) {
+            return self::carriedWindowDays($absence);
+        }
+        $id = (int) ($absence['id'] ?? 0);
+        $supplierId = (int) ($absence['supplier_id'] ?? 0);
+        if ($id <= 0 || $supplierId <= 0) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sickness_window_carried_days FROM payroll_absences WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? 0 : max(0, (int) $value);
+    }
+
+    /**
+     * Dny okna § 192 ZP vyčerpané před začátkem navazující části téže neschopnosti.
+     *
+     * Okno je prvních 14 kalendářních dnů TRVÁNÍ neschopnosti (§ 192 odst. 1 ZP), ne
+     * každé zapsané části zvlášť. Část, která navazuje na předchozí, má vyčerpané:
+     * dny od začátku okna řetězu do svého prvního dne plus dny, které řetěz vyčerpal
+     * ještě před svou první částí (předchozí plátce). Nejvýš celé okno.
+     *
+     * Jediný vzorec pro schválení v aplikaci ({@see sicknessChain()}) i pro převod
+     * z jiného programu ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter}).
+     *
+     * @param string $chainWindowFrom první den okna řetězu (den vzniku, po odpracovaném
+     *                                prvním dni den následující)
+     */
+    public static function continuedWindowDays(
+        string $chainWindowFrom,
+        int $chainCarriedDays,
+        string $partFrom,
+        int $windowCalendarDays,
+    ): int {
+        $elapsed = (int) (new \DateTimeImmutable($chainWindowFrom))
+            ->diff(new \DateTimeImmutable($partFrom))
+            ->format('%r%a');
+
+        return min($windowCalendarDays, max(0, $chainCarriedDays) + max(0, $elapsed));
+    }
+
+    /**
+     * Neschopnost zapsaná po částech jako jedna sociální událost (DPN-01).
+     *
+     * Vrací:
+     * - `pending_predecessor`: navazující předchozí část téhož druhu, o které se ještě
+     *   nerozhodlo — dokud není schválená, nedá se říct, kolik okna vyčerpala;
+     * - `chain_start`: první schválená část řetězu (celý řádek), `null` u samostatné
+     *   neschopnosti;
+     * - `chain_start_event`: příznaky jejího výpočtu náhrady (`first_day_fully_worked`,
+     *   `insurance_eligibility_confirmed`), `null` bez výpočtu;
+     * - `carried_days`: dny okna vyčerpané před touto částí; u části řetězu podle
+     *   {@see continuedWindowDays()}, nikdy méně než to, co už má zapsané.
+     *
+     * Řetěz tvoří jen SCHVÁLENÉ předchůdce téhož vztahu a druhu, kteří končí den před
+     * začátkem následující části — stejně jako případ NEMPRI ({@see contiguousChainStart}).
+     *
+     * @param array<string,mixed> $absence
+     * @return array{
+     *   pending_predecessor:?array{id:int,date_from:string,date_to:string},
+     *   chain_start:?array<string,mixed>,
+     *   chain_start_event:?array{first_day_fully_worked:bool,insurance_eligibility_confirmed:bool},
+     *   carried_days:int
+     * }
+     */
+    public function sicknessChain(int $supplierId, array $absence): array
+    {
+        $own = $this->carriedFor($absence);
+        $result = [
+            'pending_predecessor' => null,
+            'chain_start' => null,
+            'chain_start_event' => null,
+            'carried_days' => $own,
+        ];
+        if (!self::isSickness($absence)) {
+            return $result;
+        }
+        $previousTo = (new \DateTimeImmutable((string) $absence['date_from']))->modify('-1 day')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, date_from, date_to, status FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = ?
+                AND date_to = ? AND id <> ? AND status IN ('requested', 'approved')
+              ORDER BY status = 'approved' DESC, id LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId,
+            (int) $absence['employment_id'],
+            (string) $absence['absence_type'],
+            $previousTo,
+            (int) $absence['id'],
+        ]);
+        $previous = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($previous)) {
+            return $result;
+        }
+        if ($previous['status'] !== 'approved') {
+            $result['pending_predecessor'] = [
+                'id' => (int) $previous['id'],
+                'date_from' => (string) $previous['date_from'],
+                'date_to' => (string) $previous['date_to'],
+            ];
+
+            return $result;
+        }
+
+        $start = $this->contiguousChainStart($supplierId, (int) $absence['id']);
+        $startRow = $start === null ? null : $this->find($supplierId, $start['id']);
+        if ($startRow === null || (int) $startRow['id'] === (int) $absence['id']) {
+            return $result;
+        }
+        $event = $this->db->pdo()->prepare(
+            'SELECT first_day_fully_worked, insurance_eligibility_confirmed
+               FROM payroll_sickness_events WHERE supplier_id = ? AND absence_id = ?
+              ORDER BY id DESC LIMIT 1'
+        );
+        $event->execute([$supplierId, (int) $startRow['id']]);
+        $flags = $event->fetch(PDO::FETCH_ASSOC);
+        $startEvent = is_array($flags) ? [
+            'first_day_fully_worked' => (int) $flags['first_day_fully_worked'] === 1,
+            'insurance_eligibility_confirmed' => (int) $flags['insurance_eligibility_confirmed'] === 1,
+        ] : null;
+
+        $windowFrom = new \DateTimeImmutable((string) $startRow['date_from']);
+        if ($startEvent !== null && $startEvent['first_day_fully_worked']) {
+            $windowFrom = $windowFrom->modify('+1 day');
+        }
+        $carried = self::continuedWindowDays(
+            $windowFrom->format('Y-m-d'),
+            self::carriedWindowDays($startRow),
+            (string) $absence['date_from'],
+            AbsenceRuleset::forDate($this->rulesets, (string) $startRow['date_from'])->sicknessWindowCalendarDays(),
+        );
+
+        return [
+            'pending_predecessor' => null,
+            'chain_start' => $startRow,
+            'chain_start_event' => $startEvent,
+            'carried_days' => max($own, $carried),
+        ];
+    }
+
+    /**
+     * Schválená část téže neschopnosti, která na tuto navazuje (začíná den po jejím konci).
+     *
+     * @param array<string,mixed> $absence
+     * @return array{id:int,date_from:string,date_to:string}|null
+     */
+    public function approvedSicknessSuccessor(int $supplierId, array $absence): ?array
+    {
+        if (!self::isSickness($absence)) {
+            return null;
+        }
+        $nextFrom = (new \DateTimeImmutable((string) $absence['date_to']))->modify('+1 day')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, date_from, date_to FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = ?
+                AND date_from = ? AND id <> ? AND status = 'approved'
+              ORDER BY id LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId,
+            (int) $absence['employment_id'],
+            (string) $absence['absence_type'],
+            $nextFrom,
+            (int) $absence['id'],
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? [
+            'id' => (int) $row['id'],
+            'date_from' => (string) $row['date_from'],
+            'date_to' => (string) $row['date_to'],
+        ] : null;
     }
 
     /**

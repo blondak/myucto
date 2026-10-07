@@ -342,6 +342,15 @@ export const payrollAbsenceApi = {
     first_day_fully_worked?: boolean
     insurance_eligibility_confirmed?: boolean
     conflicting_benefit_excluded?: boolean
+    /** Výslovná volba DPN bez nároku (§ 15a zák. č. 187/2006 Sb.): nulová náhrada. */
+    insurance_eligibility?: 'confirmed' | 'not_eligible'
+    /** Snížení náhrady podle § 192 odst. 4 (polovina) nebo odst. 5 ZP (porušení režimu). */
+    compensation_reduction?: 'none' | 'half_192_4' | 'reduced_192_5'
+    /** O kolik se snižuje u § 192 odst. 5, v bazických bodech (10 000 = neposkytnout). */
+    compensation_reduction_basis_points?: number
+    /** O kolik haléřů se snižuje u § 192 odst. 5 (jen náhrada v jednom měsíci). */
+    compensation_reduction_minor?: number
+    compensation_reduction_reason?: string
     /**
      * Poskytnout dovolenou nad rámec zůstatku. Posílá se AŽ POTOM, co server
      * schválení odmítl s 409 `leave_overdraw_confirmation_required` — dopředu

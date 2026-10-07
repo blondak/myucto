@@ -5,20 +5,28 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
-use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use PDO;
 
 final class PayrollSicknessRepository
 {
     public function __construct(
         private readonly Connection $db,
-        private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollAbsenceRepository $absences,
     ) {}
 
-    /** @param array<string,mixed> $absence @return array<string,mixed> */
+    /**
+     * Uloží výpočet náhrady mzdy při DPN jako neměnný důkaz.
+     *
+     * Bez potvrzené účasti na pojištění (DPN bez nároku, § 15a zák. č. 187/2006 Sb.)
+     * se výpočet ukládá také, jen s nulovou náhradou: okno § 192 ZP z něj čte evidenční
+     * list a krácení mzdy. Vyloučení souběžné dávky se vyžaduje jen tam, kde náhrada
+     * náleží — u DPN bez nároku nemá co vylučovat.
+     *
+     * @param array<string,mixed> $absence
+     * @return array<string,mixed>
+     */
     public function record(
         array $absence,
         bool $firstDayFullyWorked,
@@ -27,36 +35,42 @@ final class PayrollSicknessRepository
         SicknessCompensationResult $result,
         ?int $userId,
     ): array {
-        if (!$insuranceEligibilityConfirmed || !$conflictingBenefitExcluded) {
+        if ($insuranceEligibilityConfirmed && !$conflictingBenefitExcluded) {
             throw new \InvalidArgumentException(
-                'DPN lze schválit až po potvrzení účasti na pojištění a vyloučení souběžné dávky.'
+                'Náhradu mzdy při DPN lze schválit až po vyloučení souběžné dávky.'
             );
         }
-        $from = new \DateTimeImmutable((string) $absence['date_from']);
-        if ($firstDayFullyWorked) {
-            $from = $from->modify('+1 day');
+        if (!$insuranceEligibilityConfirmed && $result->compensationMinor !== 0) {
+            throw new \InvalidArgumentException(
+                'DPN bez nároku na nemocenské nemá náhradu mzdy (§ 192 odst. 1 ZP).'
+            );
         }
-        // Stejné okno § 192 ZP jako v PayrollAbsenceRepository::publishedShiftSegments —
-        // jedno číslo z rulesetu a tytéž dny vyčerpané předchozím plátcem, aby se uložené
-        // okno a spočítané segmenty nerozešly.
-        $windowEnd = AbsenceRuleset::forDate($this->rulesets, (string) $absence['date_from'])
-            ->sicknessWindowEnd($from, PayrollAbsenceRepository::carriedWindowDays($absence));
-        $absenceTo = new \DateTimeImmutable((string) $absence['date_to']);
-        $to = $absenceTo < $windowEnd ? $absenceTo : $windowEnd;
+        // Stejné okno § 192 ZP jako ve směnových segmentech i v krácení mzdy — jedno
+        // místo pro vyčerpané dny i pro konec vztahu, aby se uložené okno a spočítané
+        // segmenty nerozešly. Prázdné okno se ukládá jako den před svým začátkem.
+        $bounds = $this->absences->absenceBounds($absence, $firstDayFullyWorked);
+        $from = $bounds['from'];
+        $to = $bounds['window_to'] < $from ? $from->modify('-1 day') : $bounds['window_to'];
+        $reduction = $result->reduction();
 
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_sickness_events
                 (supplier_id, absence_id, first_day_fully_worked,
                  insurance_eligibility_confirmed, conflicting_benefit_excluded,
                  average_snapshot_id, compensation_window_from, compensation_window_to,
-                 reduced_hourly_minor, compensation_minor, support_status,
+                 reduced_hourly_minor, compensation_minor, compensation_reduction,
+                 compensation_reduction_basis_points, compensation_reduction_minor,
+                 compensation_reduction_reason, support_status,
                  ruleset_id, ruleset_hash, calculation_trace, calculated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $absence['supplier_id'], $absence['id'], $firstDayFullyWorked ? 1 : 0,
-            1, 1, $absence['average_snapshot_id'], $from->format('Y-m-d'),
+            $insuranceEligibilityConfirmed ? 1 : 0, $conflictingBenefitExcluded ? 1 : 0,
+            $absence['average_snapshot_id'] ?? null,
+            $from->format('Y-m-d'),
             $to->format('Y-m-d'), $result->reducedHourlyMinor, $result->compensationMinor,
+            $reduction->kind, $reduction->basisPoints, $reduction->amountMinor, $reduction->reason,
             $result->supportStatus, $result->rulesetId, $result->rulesetHash,
             CanonicalJson::encode($result->trace), $userId,
         ]);
@@ -122,9 +136,14 @@ final class PayrollSicknessRepository
             $row['trace'] = json_decode((string) $row['trace'], true, flags: JSON_THROW_ON_ERROR);
             return $row;
         }, $segments->fetchAll(PDO::FETCH_ASSOC));
-        foreach (['id', 'supplier_id', 'absence_id', 'average_snapshot_id', 'reduced_hourly_minor',
+        foreach (['id', 'supplier_id', 'absence_id', 'reduced_hourly_minor',
             'compensation_minor', 'row_version'] as $key) {
             $event[$key] = (int) $event[$key];
+        }
+        foreach (['average_snapshot_id', 'compensation_reduction_basis_points', 'compensation_reduction_minor'] as $key) {
+            if (array_key_exists($key, $event)) {
+                $event[$key] = $event[$key] === null ? null : (int) $event[$key];
+            }
         }
         $event['first_day_fully_worked'] = (bool) $event['first_day_fully_worked'];
         $event['insurance_eligibility_confirmed'] = (bool) $event['insurance_eligibility_confirmed'];

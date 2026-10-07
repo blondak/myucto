@@ -691,7 +691,11 @@ final class EldpExcludedPeriodDeriver
             $windowFrom = self::date($absence['compensation_window_from'] ?? null);
             $windowTo = self::date($absence['compensation_window_to'] ?? null);
             $eligible = $absence['insurance_eligibility_confirmed'] ?? null;
-            if ($windowFrom === null || $windowTo === null || $windowFrom > $windowTo || !is_bool($eligible)) {
+            // Prázdné okno (navazující část neschopnosti za vyčerpaným oknem, DPN-01) se
+            // ukládá jako konec den před začátkem; všechny dny pak leží za oknem.
+            if ($windowFrom === null || $windowTo === null || !is_bool($eligible)
+                || $windowTo < (new \DateTimeImmutable($windowFrom))->modify('-1 day')->format('Y-m-d')
+            ) {
                 return null;
             }
 
