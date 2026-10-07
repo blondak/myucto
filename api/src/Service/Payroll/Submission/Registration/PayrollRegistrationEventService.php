@@ -1127,8 +1127,9 @@ final readonly class PayrollRegistrationEventService
             'registration_tax_residence_address_missing',
             'Při změně daňové rezidence na jiný stát než ČR musí podání nést'
                 . ' i adresu bydliště v tom státě: ČSSZ ji u daňového'
-                . ' rezidenta jiného státu vyžaduje. Doplňte ji do údajů'
-                . ' o rezidenci, nebo změnu ohlaste v profilu registrace.'
+                . ' rezidenta jiného státu vyžaduje. Vyplňte ji v profilu'
+                . ' registrace A1 a změnu ohlaste z návrhu v bloku Změny'
+                . ' k ohlášení.'
                 . PayrollRegistrationFieldVocabulary::reference(
                     'tax_residency.residence_address',
                 ),
