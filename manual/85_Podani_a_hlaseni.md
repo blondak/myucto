@@ -1913,7 +1913,9 @@ vznikem události, jak to chtějí Všeobecné zásady NEMPRI.
 
 U zaměstnankyně převedené na jinou práci kvůli těhotenství, mateřství nebo
 kojení se rozhodné období spočítá i ke dni převedení a do věty jde to
-výhodnější (§ 19 odst. 6).
+výhodnější (§ 19 odst. 6). Všeobecné zásady NEMPRI chtějí v tom případě
+současně i druhé oznámení s rozhodným obdobím ke dni převedení; to MyÚčto
+k případu zatím nesestaví, podejte ho přes portál ČSSZ.
 
 Do NEMPRI se zapisuje skutečný den nástupu do zaměstnání, ne sjednaný den
 ze smlouvy. HZUPN se nabízí jen u nemocenského.

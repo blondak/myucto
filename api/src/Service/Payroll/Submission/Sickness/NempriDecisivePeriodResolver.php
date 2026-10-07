@@ -46,7 +46,11 @@ use MyInvoice\Service\Tax\TaxConstants;
  *  - § 19 odst. 11: událost v ochranné lhůtě → rozhodný den je den po
  *    skončení pojištění ({@see decisiveDate()}),
  *  - § 19 odst. 6: převedená těhotná, matka nebo kojící zaměstnankyně →
- *    období ke dni převedení, je-li výhodnější.
+ *    období ke dni převedení, je-li výhodnější. Všeobecné zásady NEMPRI
+ *    chtějí v tom případě současně DRUHÉ oznámení s obdobím ke dni
+ *    převedení a výhodnější určí ÚSSZ. Případ dávky zatím nese jen jedno
+ *    oznámení NEMPRI, a tak se do něj dává výhodnější z obou období; druhé
+ *    oznámení k případu je otevřený dluh (vlastní stav podání a lhůta).
  *
  * ## Částky
  *
