@@ -95,6 +95,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         if ($normalizedScope['agenda_code'] === 'REGZEC25'
             && array_key_exists('regzec_a1', $source)
         ) {
+            $this->assertA1Identifier($identity, $identifiers);
             $regzecA1 = (new PayrollRegistrationA1SnapshotBuilder())->build(
                 $this->object($source['regzec_a1'], 'regzec_a1'),
                 $identity,
@@ -569,6 +570,39 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             'basis' => 'domestic_citizenship_country_code',
             'citizenship_country_code' => $citizenship,
         ];
+    }
+
+    /**
+     * Identifikátor v přihlášce A1 (`client/@bno`, ID 10057 a 10058): u českého
+     * státního občanství je rodné číslo nebo EČP povinné (EDV 1.4.0.6, podmínka
+     * P), datum narození a pohlaví se kontrolují proti rodnému číslu.
+     *
+     * @param array<string,mixed> $identity
+     * @param array{
+     *   birth_number:?string,ecp:?string,vcp:?string,
+     *   foreign_tax_identifier:?string
+     * } $identifiers
+     */
+    private function assertA1Identifier(array $identity, array $identifiers): void
+    {
+        if (($identity['citizenship_country_code'] ?? null) === 'CZ'
+            && $identifiers['birth_number'] === null
+            && $identifiers['ecp'] === null
+        ) {
+            $this->invalid(
+                'registration_identity_regzec_identity_incomplete',
+                'Zaměstnanec s českým státním občanstvím musí mít rodné číslo '
+                . 'nebo EČP - přihlášku REGZEC A1 ČSSZ bez nich nepřijme. '
+                . 'Doplňte je na ' . self::WHERE_IDENTIFIERS . '.',
+            );
+        }
+        $problems = PayrollRegistrationBirthNumberConsistency::problems(
+            $identity,
+            $identifiers['birth_number'],
+        );
+        if ($problems !== []) {
+            $this->invalid($problems[0]['code'], $problems[0]['message']);
+        }
     }
 
     /** @param array<string,mixed> $identity */

@@ -297,7 +297,9 @@ final readonly class PayrollRegistrationXmlValidator
             5 => preg_match(
                 '/^\d{8,10}$/D',
                 (string) ($data['new_variable_symbol'] ?? ''),
-            ) === 1,
+            ) === 1
+                && (string) $data['new_variable_symbol']
+                    !== $payload->employerVariableSymbol,
             6 => ($data['foreign_insurance']['current'] ?? null) === 'P',
             7 => ($data['foreign_insurance']['current'] ?? null) === 'S'
                 && is_string($data['foreign_insurance']['identifier'] ?? null),
@@ -307,6 +309,9 @@ final readonly class PayrollRegistrationXmlValidator
                     && is_string($data['explanation_attachment']['name'] ?? null)),
             default => false,
         };
+        if ($valid && $action === 3) {
+            $this->validateA3StartWindow($payload, $data);
+        }
         if (!$valid) {
             // Společná hláška „neobsahuje povinná pole z matice" účetní
             // neřekla, KTERÉ pole u KTERÉHO oznámení. Každá akce má jiný
@@ -386,6 +391,41 @@ final readonly class PayrollRegistrationXmlValidator
                     . $start->format('d.m.Y') . ') je ' . $days . ' dnů — '
                     . 'přihlášku připravte nejdřív '
                     . $start->modify('-8 days')->format('d.m.Y') . '.',
+            );
+        }
+    }
+
+    /**
+     * EDV 1.4.0.6, job/@fro (ID 10223): datum nástupu nesmí být o devět a víc
+     * kalendářních dnů pozdější než datum vyplnění podání (`employee/@dat`).
+     * U A1 to hlídá {@see validateA1BeforeStartWindow()}, tady nový nástup v A3.
+     *
+     * @param array<string,mixed> $data
+     */
+    private function validateA3StartWindow(
+        PayrollRegistrationXmlPayload $payload,
+        array $data,
+    ): void {
+        $start = is_array($data['delta']['employment'] ?? null)
+            ? ($data['delta']['employment']['actual_start_on'] ?? null)
+            : null;
+        if (!is_string($start)) {
+            return;
+        }
+        $startDate = $this->exactDate($start, 'Nový den nástupu');
+        $prepared = $this->exactDate(
+            $payload->preparedOn,
+            'Datum vyhotovení podání',
+        );
+        $days = (int) $prepared->diff($startDate)->format('%r%a');
+        if ($days > 8) {
+            $this->invalid(
+                'registration_a3_start_window_invalid',
+                'Nový den nástupu (' . $startDate->format('d.m.Y') . ') je '
+                    . 'o ' . $days . ' dnů později než datum vyhotovení podání ('
+                    . $prepared->format('d.m.Y') . '); ČSSZ připouští nejvýš '
+                    . 'osm dnů dopředu. Podání připravte nejdřív '
+                    . $startDate->modify('-8 days')->format('d.m.Y') . '.',
             );
         }
     }

@@ -689,16 +689,8 @@ final class PayrollRegistrationA1SnapshotBuilder
             if ($result['country_code'] === null) {
                 $this->missing('country_code');
             }
-            $addressGiven = false;
-            foreach (['street', 'house_number', 'orientation_number', 'postal_code', 'city'] as $key) {
-                $addressGiven = $addressGiven || $result[$key] !== null;
-            }
-            if ($addressGiven) {
-                foreach (['house_number', 'postal_code', 'city'] as $key) {
-                    if ($result[$key] === null) {
-                        $this->missing($key);
-                    }
-                }
+            foreach (PayrollRegistrationForeignInsurerAddress::missing($result) as $key) {
+                $this->missing($key);
             }
             if ($result['sector'] !== null
                 && preg_match('/^0[1-8]$/D', $result['sector']) !== 1

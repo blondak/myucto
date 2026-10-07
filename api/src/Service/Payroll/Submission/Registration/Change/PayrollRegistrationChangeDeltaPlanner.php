@@ -72,8 +72,11 @@ final class PayrollRegistrationChangeDeltaPlanner
     /**
      * Pracovní údaje, které A3 nese (EDV 1.4.0.6, sloupec A3-OST). Druh
      * činnosti měnit nejde a bližší určení vyžaduje přílohu, proto tu nejsou.
+     * Posun data nástupu u už registrovaného zaměstnance (ID 10223) se hlásí
+     * jako A3 (Metodika hlášení cizinců, část C bod 14).
      */
     public const EMPLOYMENT_FIELDS = [
+        'actual_start_on' => 'date',
         'contract_start_on' => 'date',
         'employment_status_code' => 'text',
         'work_mode_code' => 'text',
@@ -90,6 +93,7 @@ final class PayrollRegistrationChangeDeltaPlanner
     ];
 
     private const EMPLOYMENT_PATHS = [
+        'employment.actual_start_on',
         'employment.contract_start_on',
         'employment.employment_status_code',
         'employment.work_mode_code',
