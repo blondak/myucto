@@ -42,6 +42,7 @@ interface QuickEditForm {
   ecp: string
   vcp: string
   foreign_tax_identifier: string
+  health_insurance_number: string
   street_line: string
   city: string
   postal_code: string
@@ -82,6 +83,7 @@ const form = reactive<QuickEditForm>({
   ecp: '',
   vcp: '',
   foreign_tax_identifier: '',
+  health_insurance_number: '',
   street_line: '',
   city: '',
   postal_code: '',
@@ -243,6 +245,7 @@ function hydrate(
   form.ecp = ''
   form.vcp = ''
   form.foreign_tax_identifier = ''
+  form.health_insurance_number = ''
   form.street_line = ''
   form.city = ''
   form.postal_code = ''
@@ -463,6 +466,7 @@ function identifierPayloads(value: PayrollPersonProfile) {
     ecp: form.ecp,
     vcp: form.vcp,
     foreign_tax_identifier: form.foreign_tax_identifier,
+    health_insurance_number: form.health_insurance_number,
   }
   const existing = new Set(value.identifiers.map(row => row.identifier_type))
 
@@ -720,6 +724,7 @@ onMounted(load)
         v-model:ecp="form.ecp"
         v-model:vcp="form.vcp"
         v-model:foreign-tax-identifier="form.foreign_tax_identifier"
+        v-model:health-insurance-number="form.health_insurance_number"
         :identifiers="profile.identifiers"
         :disabled="!canWrite || saving"
       />

@@ -59,7 +59,7 @@ final class PayrollPersonSensitiveRevealService
             $identifierTypes = [];
             foreach ($profile['identifiers'] as $row) {
                 $field = match ($row['identifier_type']) {
-                    'birth_number', 'ecp', 'vcp' =>
+                    'birth_number', 'ecp', 'vcp', 'health_insurance_number' =>
                         PayrollSensitiveField::PERSONAL_IDENTIFIER,
                     'foreign_tax_identifier' =>
                         PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER,

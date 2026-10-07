@@ -436,6 +436,7 @@ const identifierTypeOptions = computed<SelectOption<PayrollPersonIdentifierType>
   { value: 'ecp', label: t('payroll.people.profile.identifier_type.ecp') },
   { value: 'vcp', label: t('payroll.people.profile.identifier_type.vcp') },
   { value: 'foreign_tax_identifier', label: t('payroll.people.profile.identifier_type.foreign_tax_identifier') },
+  { value: 'health_insurance_number', label: t('payroll.people.profile.identifier_type.health_insurance_number') },
 ])
 const sexOptions = computed<SelectOption<PayrollPersonSex>[]>(() => [
   { value: 'female', label: t('payroll.people.profile.sex.female') },

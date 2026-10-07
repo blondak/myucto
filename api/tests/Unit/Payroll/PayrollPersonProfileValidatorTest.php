@@ -351,6 +351,28 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         }
     }
 
+    /**
+     * ZP-06: číslo pojištěnce přidělené zdravotní pojišťovnou je vlastní typ
+     * identifikátoru — 9 nebo 10 číslic jako `cisloPojistenceTyp` v HOZ XSD.
+     */
+    public function testAcceptsHealthInsuranceNumberAsItsOwnIdentifier(): void
+    {
+        $normalized = $this->validator->validate($this->payload([
+            'identifiers' => [
+                ['identifier_type' => 'health_insurance_number', 'value' => '956 123 4567'],
+            ],
+        ]));
+
+        self::assertSame('health_insurance_number', $normalized['identifiers'][0]['identifier_type']);
+        self::assertSame('9561234567', $normalized['identifiers'][0]['value']);
+
+        foreach (['12345678', '12345678901', 'M05071980', 'ABC123456'] as $value) {
+            $this->expectInvalid(['identifiers' => [
+                ['identifier_type' => 'health_insurance_number', 'value' => $value],
+            ]]);
+        }
+    }
+
     public function testValidatesCzechAndIbanBankAccounts(): void
     {
         $czech = $this->validator->validate($this->payload([

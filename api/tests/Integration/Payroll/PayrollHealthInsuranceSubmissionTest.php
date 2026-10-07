@@ -1301,7 +1301,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             'DELETE FROM payroll_person_identifiers
               WHERE supplier_id = ? AND employee_id = ?',
         )->execute([$this->supplierId, $this->employeeId]);
-        $this->insertIdentifier($pdo, $this->employeeId, 'ecp', '12345');
+        $this->insertIdentifier($pdo, $this->employeeId, 'health_insurance_number', '12345');
 
         try {
             $this->service->prepareBulkNotification(
@@ -1341,7 +1341,476 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
     }
 
+    // --- ZP-01: účast pro HOZ podle pravidel zdravotního pojištění -------
+
+    /**
+     * Zaměstnání malého rozsahu je pro zdravotní pojištění zaměstnáním bez
+     * ohledu na výši příjmu (§ 5 písm. a) z. 48/1997 Sb.). Dřív se účast
+     * brala z pravidel ČSSZ a ZMR pod rozhodným příjmem se pojišťovně nehlásilo.
+     */
+    public function testSmallScaleEmploymentBelowSocialThresholdIsReportedToTheInsurer(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetická osoba ZMR');
+        $this->coverage($pdo, $employeeId);
+        $employmentId = $this->employmentOf(
+            $pdo,
+            $employeeId,
+            'ZP-ZMR',
+            'small_scale_employment',
+            '2026-07-01',
+            null,
+            300_000,
+        );
+
+        $starts = $this->periodItems('2026-07', $employmentId, 'employment_start');
+
+        self::assertCount(1, $starts);
+        self::assertSame('2026-07-01', $starts[0]['occurred_on']);
+        self::assertSame('2026-07-09', $starts[0]['deadline']['due_on']);
+    }
+
+    /** Jednatel se sjednanou odměnou pod rozhodným příjmem je pro ZP zaměstnancem. */
+    public function testStatutoryBodyWithAgreedRewardBelowThresholdIsReported(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetický jednatel');
+        $this->coverage($pdo, $employeeId);
+        $withReward = $this->employmentOf(
+            $pdo,
+            $employeeId,
+            'ZP-JED',
+            'statutory_body',
+            '2026-07-01',
+            null,
+            300_000,
+        );
+        $otherId = $this->employee($pdo, 'Syntetický jednatel bez odměny');
+        $this->coverage($pdo, $otherId);
+        $withoutReward = $this->employmentOf(
+            $pdo,
+            $otherId,
+            'ZP-JED-0',
+            'statutory_body',
+            '2026-07-01',
+            null,
+            null,
+        );
+
+        self::assertCount(1, $this->periodItems('2026-07', $withReward, 'employment_start'));
+        // Bez sjednané odměny se zaměstnancem pro ZP netvrdí.
+        self::assertSame([], $this->periodItems('2026-07', $withoutReward, 'employment_start'));
+    }
+
+    /**
+     * DPP: účast rozhoduje úhrn měsíce, který zná až mzdový běh. Dohoda, kterou
+     * schválený běh za červenec pojistil, se hlásí do 20. dne následujícího
+     * měsíce; dřív DPP nevznikla povinnost nikdy.
+     */
+    public function testAgreementInsuredByApprovedRunIsReportedByTheTwentiethOfNextMonth(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetická osoba DPP');
+        $this->coverage($pdo, $employeeId);
+        $employmentId = $this->employmentOf(
+            $pdo,
+            $employeeId,
+            'ZP-DPP',
+            'dpp',
+            '2026-07-10',
+        );
+        self::assertSame(
+            [],
+            $this->periodItems('2026-07', $employmentId, 'employment_start'),
+            'Bez schváleného běhu se účast DPP nepředpokládá.',
+        );
+
+        $this->approvedHealthRun('2026-07-01', $employeeId, $employmentId, 'participates');
+        $starts = $this->periodItems('2026-07', $employmentId, 'employment_start');
+
+        self::assertCount(1, $starts);
+        self::assertSame('2026-07-10', $starts[0]['occurred_on']);
+        self::assertSame('2026-08-20', $starts[0]['deadline']['due_on']);
+    }
+
+    /**
+     * Dohoda, která se pojistila až v pozdějším měsíci, se přihlašuje k prvnímu
+     * dni toho měsíce, ne ke dni sjednání: v měsících předtím zaměstnáním pro ZP
+     * nebyla.
+     */
+    public function testAgreementInsuredOnlyLaterIsReportedFromTheFirstInsuredMonth(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetická osoba DPP později');
+        $this->coverage($pdo, $employeeId);
+        $employmentId = $this->employmentOf(
+            $pdo,
+            $employeeId,
+            'ZP-DPP-2',
+            'dpp',
+            '2026-05-04',
+        );
+        $this->approvedHealthRun('2026-05-01', $employeeId, $employmentId, 'does_not_participate');
+        $this->approvedHealthRun('2026-07-01', $employeeId, $employmentId, 'participates');
+
+        self::assertSame([], $this->periodItems('2026-05', $employmentId, 'employment_start'));
+        $starts = $this->periodItems('2026-07', $employmentId, 'employment_start');
+        self::assertCount(1, $starts);
+        self::assertSame('2026-07-01', $starts[0]['occurred_on']);
+    }
+
+    // --- ZP-02: dávný nástup nesmí zablokovat období ----------------------
+
+    public function testEmploymentStartedBefore1997DoesNotBlockThePeriod(): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employee($pdo, 'Syntetická osoba od 1995');
+        $this->coverage($pdo, $employeeId);
+        $employmentId = $this->employmentOf(
+            $pdo,
+            $employeeId,
+            'ZP-1995',
+            'employment',
+            '1995-03-01',
+            '2026-07-31',
+        );
+
+        $result = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-07',
+        );
+
+        self::assertSame([], $result['unresolved_employments']);
+        $own = array_values(array_filter(
+            $result['items'],
+            static fn (array $item): bool => $item['employment_id'] === $employmentId,
+        ));
+        self::assertSame(['employment_end'], array_column($own, 'kind'));
+
+        $registered = $this->service->registerPeriodObligations(
+            $this->supplierId,
+            'production',
+            '2026-07',
+        );
+        self::assertSame(1, $registered['total']);
+    }
+
+    // --- ZP-05: kódy M a U -------------------------------------------------
+
+    /**
+     * Vztah skončil v době rodičovské dovolené: vedle odhlášky „O" se ke dni
+     * skončení hlásí i ukončení rodičovské „U".
+     */
+    public function testEmploymentEndingDuringParentalLeaveAlsoReportsLeaveEnd(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-08-31"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->absence('parental', '2026-05-01', '2027-12-31');
+
+        $kinds = array_column(
+            $this->periodItems('2026-08', $this->employmentId),
+            'occurred_on',
+            'kind',
+        );
+
+        self::assertSame('2026-08-31', $kinds['employment_end'] ?? null);
+        self::assertSame('2026-08-31', $kinds['maternity_or_parental_leave_end'] ?? null);
+    }
+
+    /**
+     * Rodičovská hned po mateřské je jeden řetěz nepřítomnosti: přechod
+     * nehlásí „U" ani „M". Hlásí se jen začátek a konec celého řetězu.
+     */
+    public function testParentalLeaveRightAfterMaternityIsOneChain(): void
+    {
+        $this->absence('ppm', '2026-03-02', '2026-07-20');
+        $this->absence('parental', '2026-07-21', '2027-12-31');
+
+        $july = array_column($this->periodItems('2026-07', $this->employmentId), 'kind');
+        self::assertNotContains('maternity_leave_start', $july);
+        self::assertNotContains('parental_leave_start', $july);
+        self::assertNotContains('maternity_or_parental_leave_end', $july);
+
+        $march = array_column($this->periodItems('2026-03', $this->employmentId), 'kind');
+        self::assertContains('maternity_leave_start', $march);
+    }
+
+    /** Přerušená řada (aspoň den mezi absencemi) jsou dva řetězy: „U" i „M". */
+    public function testInterruptedLeaveStillReportsEndAndNewStart(): void
+    {
+        $this->absence('ppm', '2026-03-02', '2026-07-20');
+        $this->absence('parental', '2026-07-23', '2027-12-31');
+
+        $july = array_column(
+            $this->periodItems('2026-07', $this->employmentId),
+            'occurred_on',
+            'kind',
+        );
+        self::assertSame('2026-07-20', $july['maternity_or_parental_leave_end'] ?? null);
+        self::assertSame('2026-07-23', $july['parental_leave_start'] ?? null);
+    }
+
+    // --- ZP-06: číslo pojištěnce cizince ----------------------------------
+
+    /** EČP je evidenční číslo ČSSZ, do věty HOZ se jako číslo pojištěnce neposílá. */
+    public function testEcpIsNeverSentAsInsuranceNumber(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "UA", sex = "female",
+                    birth_date = "1982-10-12"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($pdo, $this->employeeId, 'ecp', '1234567890');
+        $pdo->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-07-31"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        try {
+            $this->service->bulkNotificationDownload($this->supplierId, '2026-07', '111');
+            self::fail('EČP se do cisloPojistence posílat nesmí.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_change_insurance_number_missing', $e->errorCode);
+            self::assertStringContainsString('EČP', $e->getMessage());
+            self::assertStringContainsString(
+                '/payroll/people?person=' . $this->employeeId,
+                $e->getMessage(),
+            );
+        }
+    }
+
+    /** Číslo přidělené pojišťovnou má přednost před rodným číslem. */
+    public function testInsurerAssignedNumberIsPreferredOverBirthNumber(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->insertIdentifier($pdo, $this->employeeId, 'health_insurance_number', '1234567891');
+
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertStringContainsString(
+            '<cisloPojistence>1234567891</cisloPojistence>',
+            $artifact['bytes'],
+        );
+        self::assertStringNotContainsString('9052224321', $artifact['bytes']);
+    }
+
+    // --- ZP-07: přestup u souběžných vztahů --------------------------------
+
+    public function testInsurerChangeOfPersonWithTwoEmploymentsIsReportedOnce(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->employmentOf(
+            $pdo,
+            $this->employeeId,
+            'ZP-1B',
+            'employment',
+            '2026-04-01',
+        );
+        $pdo->prepare(
+            'UPDATE payroll_person_health_coverage_history
+                SET effective_to = "2026-06-30"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status,
+                 insurer_code, insurer_evidence_reference, effective_from)
+             VALUES (?, ?, "czech_regime_verified", "verified", "205",
+                     "synteticky-doklad-2", "2026-07-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $result = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-07',
+            ['kind' => 'insurer_change'],
+        );
+
+        self::assertSame(2, $result['total']);
+        self::assertEqualsCanonicalizing(
+            ['111:outgoing', '205:incoming'],
+            array_map(
+                static fn (array $item): string =>
+                    $item['insurer_code'] . ':' . $item['insurer_direction'],
+                $result['items'],
+            ),
+        );
+    }
+
     // --- fixtures --------------------------------------------------------
+
+    /**
+     * Položky přehledu povinností za období pro jeden vztah.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function periodItems(string $period, int $employmentId, ?string $kind = null): array
+    {
+        $result = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            $period,
+            [],
+            HealthInsuranceSubmissionService::PERIOD_MAX_LIMIT,
+        );
+        self::assertSame([], $result['unresolved_employments']);
+
+        return array_values(array_filter(
+            $result['items'],
+            static fn (array $item): bool => $item['employment_id'] === $employmentId
+                && ($kind === null || $item['kind'] === $kind),
+        ));
+    }
+
+    private function employmentOf(
+        PDO $pdo,
+        int $employeeId,
+        string $code,
+        string $relationType,
+        string $startDate,
+        ?string $endDate = null,
+        ?int $monthlyGrossMinor = null,
+    ): int {
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 is_primary, start_date, end_date, monthly_gross_minor)
+             VALUES (?, ?, ?, ?, "active", 0, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $code,
+            $relationType,
+            $startDate,
+            $endDate,
+            $monthlyGrossMinor,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function absence(string $type, string $from, string $to): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to, status, row_version)
+             VALUES (?, ?, ?, ?, ?, 'approved', 1)",
+        )->execute([$this->supplierId, $this->employmentId, $type, $from, $to]);
+    }
+
+    /**
+     * Schválený běh období se zdravotním výsledkem, ve kterém má vztah danou
+     * účast. Obsah výsledku je jen to, co čte oznamovací povinnost.
+     */
+    private function approvedHealthRun(
+        string $periodStart,
+        int $employeeId,
+        int $employmentId,
+        string $participation,
+    ): void {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status,
+                 current_revision_no)
+             VALUES (?, ?, ?, "approved", 1)',
+        )->execute([$this->supplierId, $periodStart, $periodStart]);
+        $runId = (int) $pdo->lastInsertId();
+        $input = '{"schema_version":"payroll-run-input.v2"}';
+        $result = '{"schema_version":"payroll-run-result.v2"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind, status,
+                 schema_version, ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 1, "regular", "approved",
+                     "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            str_repeat('a', 64),
+            $input,
+            hash('sha256', $input),
+            $result,
+            hash('sha256', $result),
+            hash('sha256', "synthetic-zp-run:{$this->supplierId}:{$runId}", true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, status)
+             VALUES (?, ?, ?, "calculated")',
+        )->execute([$this->supplierId, $revisionId, $employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_employments
+                (supplier_id, revision_id, period_start, employee_id,
+                 employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, ?, "{}", ?)',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $periodStart,
+            $employeeId,
+            $employmentId,
+            hash('sha256', '{}'),
+        ]);
+        $calculationDate = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')
+            ->format('Y-m-d');
+        (new PayrollStatutoryResultRepository($this->db))->store(
+            $this->supplierId,
+            $revisionId,
+            'health_insurance',
+            'payroll-health-result.v1',
+            'calculated',
+            'cz-health-2026',
+            str_repeat('b', 64),
+            ['schema_version' => 'payroll-run-input.v2'],
+            [
+                'calculation_date' => $calculationDate,
+                'status' => 'calculated',
+                'insurer_liabilities' => [],
+                'issues' => [],
+                'ruleset_id' => 'cz-health-2026',
+                'ruleset_hash' => str_repeat('b', 64),
+            ],
+            [[
+                'employee_id' => $employeeId,
+                'result_status' => 'calculated',
+                'input_snapshot' => ['employee' => ['id' => $employeeId]],
+                'result_snapshot' => [
+                    'person_id' => "employee:{$employeeId}",
+                    'status' => 'calculated',
+                ],
+                'relationships' => [[
+                    'employment_id' => $employmentId,
+                    'input_snapshot' => ['relationship_id' => "employment:{$employmentId}"],
+                    'result_snapshot' => [
+                        'relationship_id' => "employment:{$employmentId}",
+                        'kind' => 'dpp',
+                        'participation' => ['status' => $participation],
+                    ],
+                    'result_status' => 'calculated',
+                ]],
+            ]],
+            null,
+        );
+    }
 
     private function insertLegacyObligation(
         string $dueOn,

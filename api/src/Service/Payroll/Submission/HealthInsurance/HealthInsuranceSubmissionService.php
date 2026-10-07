@@ -74,6 +74,12 @@ final readonly class HealthInsuranceSubmissionService
     private const SUBJECT_RUN = 'payroll_run';
     private const SUBJECT_EMPLOYER = 'employer';
 
+    /**
+     * Identifikátory, které jsou číslem pojištěnce zdravotní pojišťovny, v pořadí
+     * přednosti. EČP mezi nimi záměrně není: je to evidenční číslo ČSSZ.
+     */
+    private const INSURANCE_NUMBER_TYPES = ['health_insurance_number', 'birth_number'];
+
     /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
     public const PERIOD_MAX_LIMIT = 200;
     public const PERIOD_DEFAULT_LIMIT = 50;
@@ -1323,13 +1329,18 @@ final readonly class HealthInsuranceSubmissionService
         $window = $this->periodBounds($period);
         $resolved = [];
         $unresolved = [];
+        $personChanges = [];
         foreach ($this->facts->listNotificationFacts(
             $supplierId,
             $window['from'],
             $window['to'],
         ) as $row) {
             try {
-                $duties = $this->resolver->resolve($this->factsFromRow($row));
+                $duties = $this->resolver->resolve(
+                    $this->factsFromRow($row),
+                    $window['from'],
+                    $window['to'],
+                );
             } catch (HealthNotificationException $exception) {
                 $unresolved[] = [
                     'employment_id' => $row['employment_id'],
@@ -1344,6 +1355,22 @@ final readonly class HealthInsuranceSubmissionService
                     || $duty->occurredOn > $window['to']
                 ) {
                     continue;
+                }
+                // Přestup mezi pojišťovnami je skutečnost OSOBY, ne vztahu:
+                // zaměstnanec se dvěma souběžnými vztahy přestupuje jednou
+                // a pojišťovna má dostat jednu odhlášku a jednu přihlášku,
+                // ne po jedné za každý vztah.
+                if ($duty->kind === HealthNotificationDutyKind::InsurerChange) {
+                    $personKey = implode('|', [
+                        $duty->employeeId,
+                        $duty->occurredOn,
+                        $duty->insurerDirection ?? '',
+                        $duty->insurerCode,
+                    ]);
+                    if (isset($personChanges[$personKey])) {
+                        continue;
+                    }
+                    $personChanges[$personKey] = true;
                 }
                 $resolved[] = [
                     'duty' => $duty,
@@ -2020,36 +2047,51 @@ final readonly class HealthInsuranceSubmissionService
             && is_string($identity['citizenship_country_code'] ?? null)
                 ? $identity['citizenship_country_code']
                 : null;
-        $hasBirthNumber = false;
+        $hasInsuranceNumber = false;
         foreach ($this->identities->identifiers($supplierId, $duty->employeeId) as $stored) {
-            if ($stored['identifier_type'] === 'birth_number') {
-                $hasBirthNumber = true;
+            if (in_array($stored['identifier_type'], self::INSURANCE_NUMBER_TYPES, true)) {
+                $hasInsuranceNumber = true;
                 break;
             }
         }
 
-        return $this->codes->employmentStartCode($citizenship, $hasBirthNumber);
+        return $this->codes->employmentStartCode($citizenship, $hasInsuranceNumber);
     }
 
     /**
-     * Číslo pojištěnce: přednostně rodné číslo, náhradou EČP pro cizince bez
-     * přiděleného rodného čísla. Cizinec BEZ obojího (schéma pro něj zná tvar
-     * `[MZ]DDMMYYYY`) tady podporovaný není — chybí spolehlivý zdroj pohlaví
-     * a data narození svázaný přímo s podáním, takže je bezpečnější
-     * srozumitelně selhat, než poslat odhadnuté číslo.
+     * Číslo pojištěnce pro větu HOZ.
+     *
+     * Přednost má číslo přidělené zdravotní pojišťovnou (typ identifikátoru
+     * `health_insurance_number`, opsané z průkazu pojištěnce nebo z oznámení
+     * pojišťovny), pak rodné číslo. Dokumentace `cisloPojistence` v HOZ XSD
+     * říká, že se „zásadně vyplňuje číslo pojištěnce z průkazu pojištěnce",
+     * které se většinou shoduje s rodným číslem, a u cizince po prvním
+     * přihlášení „číslo pojištěnce (z průkazu pojištěnce nebo z oznámení od
+     * příslušné ZP)".
+     *
+     * Evidenční číslo pojištěnce ČSSZ (EČP) číslem pojištěnce zdravotní
+     * pojišťovny NENÍ a jako náhrada se neposílá — pojišťovna by větu přiřadila
+     * jinému pojištěnci nebo žádnému. Bez čísla pojištěnce vznikne srozumitelná
+     * chyba s výzvou číslo opsat; první přihlášení cizince (kód „E"/„C")
+     * číslo nepotřebuje a řeší se jinde.
      */
     private function insuranceNumberFor(
         int $supplierId,
         int $employeeId,
     ): string {
-        $ecp = null;
+        $numbers = [];
+        $hasEcp = false;
         foreach ($this->identities->identifiers(
             $supplierId,
             $employeeId,
         ) as $stored) {
+            if ($stored['identifier_type'] === 'ecp') {
+                $hasEcp = true;
+                continue;
+            }
             if (!in_array(
                 $stored['identifier_type'],
-                ['birth_number', 'ecp'],
+                self::INSURANCE_NUMBER_TYPES,
                 true,
             )) {
                 continue;
@@ -2071,25 +2113,31 @@ final readonly class HealthInsuranceSubmissionService
                     'Otisk čísla pojištěnce neodpovídá ciphertextu.',
                 );
             }
-            if ($stored['identifier_type'] === 'birth_number') {
-                // Karta osoby ukládá RČ v kanonickém tvaru RRMMDD/XXXX;
-                // `cisloPojistence` jsou jen číslice (stejně jako u PREZEC).
-                // Znovu se tu nevaliduje: tvar pak hlídá věta sama a hlásí
-                // ho i se jménem zaměstnance.
-                return (string) preg_replace('/\D/', '', $plaintext);
-            }
-            $ecp ??= $plaintext;
+            // Karta osoby ukládá RČ v kanonickém tvaru RRMMDD/XXXX;
+            // `cisloPojistence` jsou jen číslice (stejně jako u PREZEC).
+            // Znovu se tu nevaliduje: tvar pak hlídá věta sama a hlásí
+            // ho i se jménem zaměstnance.
+            $numbers[$stored['identifier_type']] = (string) preg_replace('/\D/', '', $plaintext);
         }
-        if ($ecp !== null) {
-            return $ecp;
+        foreach (self::INSURANCE_NUMBER_TYPES as $type) {
+            if (isset($numbers[$type])) {
+                return $numbers[$type];
+            }
         }
 
         throw new HealthNotificationException(
             'zp_change_insurance_number_missing',
-            sprintf(
-                'Zaměstnanec (id %d) nemá evidované rodné číslo ani EČP — hromadné oznámení bez čísla pojištěnce sestavit nelze.',
-                $employeeId,
-            ),
+            $hasEcp
+                ? sprintf(
+                    'Zaměstnanec (id %d) má v evidenci jen EČP. To je evidenční číslo ČSSZ, ne číslo pojištěnce zdravotní pojišťovny, a do hromadného oznámení se neposílá. Opište číslo pojištěnce z průkazu pojištěnce nebo z oznámení zdravotní pojišťovny na kartu osoby v Mzdy → Osoby (/payroll/people?person=%d), oddíl Identifikátory, typ „Číslo pojištěnce ZP".',
+                    $employeeId,
+                    $employeeId,
+                )
+                : sprintf(
+                    'Zaměstnanec (id %d) nemá evidované rodné číslo ani číslo pojištěnce zdravotní pojišťovny — hromadné oznámení bez čísla pojištěnce sestavit nelze. Doplňte jedno z nich na kartě osoby v Mzdy → Osoby (/payroll/people?person=%d), oddíl Identifikátory.',
+                    $employeeId,
+                    $employeeId,
+                ),
         );
     }
 

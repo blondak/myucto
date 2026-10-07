@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
@@ -1477,7 +1478,10 @@ final class PayrollRunSnapshotBuilder
      * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
      * u každé brigády; DPČ a další vztahy malého rozsahu se sjednaným příjmem
      * nad rozhodným příjmem výpočet pojistí vždy, takže se hlásí. Pravidlo drží
-     * {@see PayrollExpectedParticipation} i pro oznámení zdravotní pojišťovně.
+     * {@see PayrollExpectedParticipation}. Zdravotní pojištění má vlastní
+     * pravidlo účasti ({@see PayrollExpectedHealthParticipation}) — totéž, ze
+     * kterého vzniká oznámení pojišťovně: zaměstnání malého rozsahu a jednatel
+     * s odměnou pod rozhodným příjmem jsou zaměstnanci pro ZP, i když pro ČSSZ ne.
      *
      * @param array<string,mixed> $row
      * @param array{social:bool,health:bool}|null $gap
@@ -1530,7 +1534,7 @@ final class PayrollRunSnapshotBuilder
                 true,
             );
         }
-        if ($gap['health'] && $this->participatesInLevy(
+        if ($gap['health'] && $this->participatesInHealthInsurance(
             $row['health_insurance_participation'],
             $relationType,
             $row,
@@ -1559,7 +1563,27 @@ final class PayrollRunSnapshotBuilder
 
     /**
      * Stejné pravidlo jako oznámení nástupu zdravotní pojišťovně:
-     * {@see PayrollExpectedParticipation}.
+     * {@see PayrollExpectedHealthParticipation}. Výsledek běhu se tu ještě
+     * nezná, takže DPP mlčí a DPČ se hlásí jen podle sjednané odměny.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function participatesInHealthInsurance(
+        mixed $participation,
+        string $relationType,
+        array $row,
+        string $periodEnd,
+    ): bool {
+        return PayrollExpectedHealthParticipation::expected(
+            is_string($participation) ? $participation : null,
+            $relationType,
+            ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
+            PayrollExpectedHealthParticipation::dpcThreshold($this->rulesets, $periodEnd),
+        );
+    }
+
+    /**
+     * Účast na sociálním pojištění: {@see PayrollExpectedParticipation}.
      *
      * @param array<string,mixed> $row
      */

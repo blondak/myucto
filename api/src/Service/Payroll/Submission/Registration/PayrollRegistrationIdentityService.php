@@ -1188,6 +1188,11 @@ final readonly class PayrollRegistrationIdentityService
             $forUpdate,
         ) as $stored) {
             $type = $stored['identifier_type'];
+            // Číslo pojištěnce zdravotní pojišťovny patří jen do podání
+            // pojišťovnám; ČSSZ ho nezná a registrace ho nepotřebuje.
+            if ($type === 'health_insurance_number') {
+                continue;
+            }
             if (!array_key_exists($type, $identifiers)) {
                 /*
                  * Porušená integrita dat, ne nevyplněný vstup: v evidenci je

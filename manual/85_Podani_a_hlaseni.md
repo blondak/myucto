@@ -1014,9 +1014,10 @@ písm. b) zákona č. 48/1997 Sb. Měsíční hlášení tu druhou povinnost
 hlásí oběma pojišťovnám: dosavadní odhláškou s kódem `O`, nové přihláškou
 s kódem `P`. Návrh u změny pojišťovny proto vede odkazem **Připravit HOZ**
 na záložku **Zdravotní pojišťovny** za měsíc změny; tam vzniknou obě věty
-hromadného oznámení (viz 85.14) a návrh potom uzavřete. U dohod o provedení práce
-a o pracovní činnosti není lhůta vůči pojišťovně osmidenní, ale do 20. dne
-následujícího měsíce, a neposouvá se na pracovní den.
+hromadného oznámení (viz 85.14) a návrh potom uzavřete. Lhůta přestupu vůči
+pojišťovně je osm dnů i u dohod o provedení práce a o pracovní činnosti
+(výjimka 20. dne následujícího měsíce platí u dohod jen pro nástup a skončení)
+a neposouvá se na pracovní den.
 
 **Schválení je jedno kliknutí.** Tlačítko **Ohlásit změnu** se nabídne jen
 u návrhu, který datová věta skutečně unese. Neptá se na důvod ani na potvrzení:
@@ -1390,6 +1391,26 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
   sestaví z nich datovou větu XML i PDF a obojí zmrazí. Připravený soubor není
   odeslaný — odeslání datovou schránkou musíte potvrdit sami.
 
+Komu se oznámení týká, rozhodují pravidla **zdravotního** pojištění, ne pravidla
+ČSSZ (§ 5 písm. a) zákona č. 48/1997 Sb.):
+
+- **Pracovní poměr a zaměstnání malého rozsahu** se hlásí vždy, bez ohledu na
+  výši příjmu.
+- **Jednatel a společník v závislé činnosti** se hlásí, má-li sjednanou odměnu,
+  i pod rozhodným příjmem. Bez sjednané odměny aplikace oznámení nepředpokládá.
+- **DPČ** se hlásí, když sjednaná měsíční odměna dosahuje prahu účasti, nebo
+  když účast doložil schválený mzdový běh.
+- **DPP** se hlásí jen podle schváleného mzdového běhu: o účasti rozhoduje úhrn
+  všech DPP za měsíc. Přihláška se váže k prvnímu měsíci s účastí (k jeho
+  prvnímu dni, nebo ke dni nástupu, je-li pozdější), odhláška ke dni skončení
+  dohody. Měsíce bez účasti mezi nimi aplikace samostatnými odhláškami
+  a přihláškami neřeší; když je pojišťovna vyžaduje, podejte je ručně.
+
+Přehled za měsíc vyhodnocuje jen skutečnosti, které v tom měsíci nastaly.
+Zaměstnanec s dávným nástupem (i před rokem 1997) proto přehled nezablokuje;
+skutečnosti z doby před vznikem veřejného zdravotního pojištění (1. 1. 1993)
+povinnost nezakládají vůbec.
+
 U firmy převedené z jiného mzdového programu ukazuje záložka **ZP — oznámení**
 i události z měsíců před prvním mzdovým obdobím v MyÚčtu, ale jako
 **Oznámil předchozí program**: nepočítají se do dlaždice *Po lhůtě*
@@ -1399,11 +1420,16 @@ oznámení nemá, hromadné oznámení za ten měsíc jde připravit ručně.
 Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
 
 - **Nástup** má kód `P`. U cizince rozhoduje státní příslušnost na kartě osoby
-  a to, zda má v evidenci rodné číslo: občan EU, EHP nebo Švýcarska s rodným
-  číslem se hlásí kódem `A`, bez něj jako první přihlášení kódem `E`; cizinec
-  ze třetí země bez rodného čísla kódem `C`. U prvního přihlášení se místo
-  čísla pojištěnce uvede pohlaví a datum narození (`M05071980`, `Z12101982`),
-  takže je musí mít karta osoby vyplněné.
+  a to, zda má v evidenci rodné číslo nebo číslo pojištěnce ZP: občan EU, EHP
+  nebo Švýcarska s číslem se hlásí kódem `A`, bez něj jako první přihlášení
+  kódem `E`; cizinec ze třetí země bez čísla kódem `C`. U prvního přihlášení se
+  místo čísla pojištěnce uvede pohlaví a datum narození (`M05071980`,
+  `Z12101982`), takže je musí mít karta osoby vyplněné.
+- **Číslo pojištěnce** ve větě je číslo pojištěnce ZP z karty osoby, a když
+  není vyplněné, rodné číslo. EČP se nepoužívá: je to evidenční číslo ČSSZ.
+  Cizinec, kterého pojišťovna už přihlásila, potřebuje na kartě číslo
+  pojištěnce ZP opsané z průkazu pojištěnce nebo z oznámení pojišťovny; bez
+  něj aplikace větu nesestaví a řekne, u koho číslo chybí.
 - **Skončení** má kód `O`.
 - **Přestup k jiné pojišťovně** — změnu zapíšete na kartě osoby (zdravotní
   pojištění od nového dne). Z jedné změny vzniknou dvě věty: u dosavadní
@@ -1411,16 +1437,32 @@ Kód změny v HOZ se určuje podle skutečnosti a podle zaměstnance:
   pojišťovny přihláška s kódem `P` ke dni změny. V přehledu povinností je
   u každé z nich napsané, zda jde o odhlášku, nebo přihlášku; hromadné
   oznámení se sestaví zvlášť za každou pojišťovnu. Lhůta je u obou osm dnů
-  od změny.
+  od změny, i u dohod. Zaměstnanec s několika souběžnými vztahy přestupuje
+  jednou, takže vznikne jedna odhláška a jedna přihláška, ne po jedné za
+  každý vztah.
 - **Jednodenní zaměstnání** — vznikne a skončí týž den — se hlásí jedinou větou
   s kódem `Q`, ne přihláškou a odhláškou.
-- **Mateřská a rodičovská** mají kódy `M` a `U`.
+- **Lhůta dohod.** U DPP a DPČ se nástup, skončení i jednodenní zaměstnání
+  hlásí do 20. dne následujícího měsíce; ostatní skutečnosti mají i u dohod
+  osm dnů.
+- **Mateřská a rodičovská** mají kódy `M` a `U`. Rodičovská, která navazuje na
+  mateřskou bez mezery, je jedna nepřítomnost: `M` se hlásí jen na začátku
+  mateřské a `U` až na konci rodičovské, přechod mezi nimi se nehlásí. Je-li
+  mezi absencemi aspoň jeden den, jde o dvě nepřítomnosti s vlastním `U`
+  i `M`. Skončí-li pracovní vztah během mateřské nebo rodičovské, hlásí se ke
+  dni skončení vedle odhlášky `O` i `U`.
 - **PPZ** je měsíční přehled o platbě pojistného. Ze schválené revize se
   sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
   soubor není odeslaný. Řádný přehled se podává do 20. dne následujícího
   měsíce. Opravný přehled (z opravné revize ke dříve podanému přehledu) má
   lhůtu 8 dnů ode dne zjištění chyby (§ 25 odst. 4 zákona č. 592/1992 Sb.);
-  za den zjištění se bere žádost o opravu mzdového běhu.
+  za den zjištění se bere žádost o opravu mzdového běhu. Bývalý zaměstnanec,
+  kterému po skončení vztahu přišel příjem (doplatek mzdy, odměna), je
+  v přehledu se základem i pojistným, ale do počtu zaměstnanců se
+  nezapočítává, protože v měsíci zaměstnancem nebyl. Plyne-li pojistné za
+  měsíc jen od bývalých zaměstnanců, datová věta přehled neumí (počet nula
+  nepřijme) a aplikace vyzve k podání na tiskopisu pojišťovny. Nesoulad
+  u jedné pojišťovny nebrání sestavit přehled pro ostatní.
 
 ### 85.14.1 Kdy vyjde úřední tiskopis a kdy vlastní sestava
 

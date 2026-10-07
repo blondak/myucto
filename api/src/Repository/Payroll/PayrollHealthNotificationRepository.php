@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
-use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use PDO;
 
 /**
@@ -20,7 +20,7 @@ final readonly class PayrollHealthNotificationRepository
 {
     public function __construct(
         private Connection $db,
-        // Rozhodný příjem pro očekávanou účast dohod ({@see PayrollExpectedParticipation}).
+        // Práh účasti DPČ pro očekávanou účast ({@see PayrollExpectedHealthParticipation}).
         // Bez výchozí hodnoty schválně: nepovinný parametr kontejner nevyplní
         // a dohody by pak tiše vypadly z oznámení.
         private ?PayrollRulesetProvider $rulesets,
@@ -136,7 +136,8 @@ final readonly class PayrollHealthNotificationRepository
      * nástupu je obsahem oznámení, ne jen filtrem: dokud se bral plánovaný,
      * dostala pojišťovna datum, které se nestalo, kdykoli se nástup posunul.
      * Sloupec si drží název `start_date`, aby se doména nemusela ptát,
-     * které z obou dat dostala.
+     * které z obou dat dostala. Výjimkou je dohoda, u které účast doložil až
+     * mzdový běh pozdějšího měsíce — viz {@see self::assemble()}.
      *
      * @return array{
      *   employment_id:int,employee_id:int,relation_type:string,status:string,
@@ -204,42 +205,14 @@ final readonly class PayrollHealthNotificationRepository
         // — a hlavně: přehled za období a detail jednoho vztahu pak vydají
         // tutéž povinnost místo dvou různých odpovědí nad týmiž daty.
         $month = $this->monthBounds($onDate);
-        $employmentIds = [(int) $row['id']];
-        $leave = $this->leaveOccurrences(
-            $supplierId,
-            $employmentIds,
-            $month['from'],
-            $month['to'],
-        )[(int) $row['id']] ?? [];
-        $change = $this->insurerChanges(
-            $supplierId,
-            $employmentIds,
-            $month['from'],
-            $month['to'],
-        )[(int) $row['id']] ?? [];
 
-        return [
-            'employment_id' => (int) $row['id'],
-            'employee_id' => (int) $row['employee_id'],
-            'relation_type' => (string) $row['relation_type'],
-            'status' => (string) $row['status'],
-            'participates' => $this->participates(
-                $this->nullableString($row['health_insurance_participation']),
-                (string) $row['relation_type'],
-                $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'],
-                $onDate,
-            ),
-            'insurer_code' => $this->nullableString($row['insurer_code']),
-            'start_date' => $this->nullableString($row['start_date']),
-            'end_date' => $this->nullableString($row['end_date']),
-            'full_name' => (string) $row['full_name'],
-            'insurer_changed_on' => $change['changed_on'] ?? null,
-            'previous_insurer_code' => $change['previous_insurer_code'] ?? null,
-            'maternity_leave_started_on' => $leave['maternity_started_on'] ?? null,
-            'parental_leave_started_on' => $leave['parental_started_on'] ?? null,
-            'maternity_or_parental_leave_ended_on' =>
-                $leave['leave_ended_on'] ?? null,
-        ];
+        return $this->assemble(
+            $supplierId,
+            [$row],
+            $month['from'],
+            $month['to'],
+            $onDate,
+        )[0] ?? null;
     }
 
     /** @return array{from:string,to:string} */
@@ -254,27 +227,6 @@ final readonly class PayrollHealthNotificationRepository
             'from' => $date->modify('first day of this month')->format('Y-m-d'),
             'to' => $date->modify('last day of this month')->format('Y-m-d'),
         ];
-    }
-
-    /**
-     * `automatic` znamená „rozhodne výpočet", ne „účastní se". Bez výslovného
-     * zahrnutí se proto účast NEPŘEDPOKLÁDÁ — oznámit nástup u vztahu, který
-     * účast nezakládá, je stejná vada jako neoznámit ten, který ji zakládá.
-     * Výjimkou je dohoda se sjednaným příjmem nad rozhodným příjmem, kterou
-     * výpočet pojistí vždy — pravidlo drží {@see PayrollExpectedParticipation}.
-     */
-    private function participates(
-        ?string $participation,
-        string $relationType,
-        ?int $agreedMonthlyMinor,
-        string $onDate,
-    ): bool {
-        return PayrollExpectedParticipation::expected(
-            $participation,
-            $relationType,
-            $agreedMonthlyMinor,
-            $this->rulesets === null ? null : PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $onDate),
-        );
     }
 
     /**
@@ -368,40 +320,101 @@ final readonly class PayrollHealthNotificationRepository
         $statement->execute([
             $to, $to, $to, $to, $to, $to, $supplierId, $to, $from,
         ]);
-        $threshold = $this->rulesets === null
-            ? null
-            : PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $to);
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows) || $rows === []) {
             return [];
         }
 
-        $employmentIds = array_map(
-            static fn (array $row): int => (int) $row['id'],
-            $rows,
-        );
-        $leaves = $this->leaveOccurrences($supplierId, $employmentIds, $from, $to);
+        return $this->assemble($supplierId, $rows, $from, $to, $to);
+    }
+
+    /**
+     * Z řádků vztahů složí fakta pro doménu.
+     *
+     * Účast na zdravotním pojištění rozhoduje
+     * {@see PayrollExpectedHealthParticipation}, ne pravidla ČSSZ. U DPP a DPČ,
+     * kde ji doložil až schválený mzdový běh, se jako den „nástupu" oznamuje
+     * první den prvního měsíce s účastí (nebo skutečný nástup, je-li pozdější):
+     * v měsících před ním dohoda zaměstnáním pro ZP nebyla a přihláška k původnímu
+     * dni by hlásila pojištění, které nevzniklo. Skončení se pak hlásí ke dni
+     * skončení dohody.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array{
+     *   employment_id:int,employee_id:int,relation_type:string,status:string,
+     *   participates:bool,insurer_code:?string,start_date:?string,
+     *   end_date:?string,full_name:string,
+     *   insurer_changed_on:?string,previous_insurer_code:?string,
+     *   maternity_leave_started_on:?string,parental_leave_started_on:?string,
+     *   maternity_or_parental_leave_ended_on:?string
+     * }>
+     */
+    private function assemble(
+        int $supplierId,
+        array $rows,
+        string $from,
+        string $to,
+        string $thresholdOn,
+    ): array {
+        $threshold = $this->rulesets === null
+            ? null
+            : PayrollExpectedHealthParticipation::dpcThreshold($this->rulesets, $thresholdOn);
+        $employmentIds = [];
+        $endDates = [];
+        $agreements = [];
+        foreach ($rows as $row) {
+            $employmentId = (int) $row['id'];
+            $employmentIds[] = $employmentId;
+            $endDates[$employmentId] = $this->nullableString($row['end_date']);
+            if (PayrollExpectedHealthParticipation::decidedByMonthlyIncome((string) $row['relation_type'])) {
+                $agreements[] = $employmentId;
+            }
+        }
+        $leaves = $this->leaveOccurrences($supplierId, $employmentIds, $endDates, $from, $to);
         $changes = $this->insurerChanges($supplierId, $employmentIds, $from, $to);
+        $participatedSince = $this->firstParticipatingPeriods($supplierId, $agreements, $to);
 
         $facts = [];
         foreach ($rows as $row) {
             $employmentId = (int) $row['id'];
             $leave = $leaves[$employmentId] ?? [];
             $change = $changes[$employmentId] ?? [];
+            $participation = $this->nullableString($row['health_insurance_participation']);
+            $relationType = (string) $row['relation_type'];
+            $agreed = $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'];
+            $firstPeriod = $participatedSince[$employmentId] ?? null;
+            $predicted = PayrollExpectedHealthParticipation::expected(
+                $participation,
+                $relationType,
+                $agreed,
+                $threshold,
+            );
+            $participates = $predicted || PayrollExpectedHealthParticipation::expected(
+                $participation,
+                $relationType,
+                $agreed,
+                $threshold,
+                $firstPeriod !== null,
+            );
+            $startDate = $this->nullableString($row['start_date']);
+            $endDate = $endDates[$employmentId];
+            if (!$predicted
+                && $firstPeriod !== null
+                && $startDate !== null
+                && $firstPeriod > $startDate
+                && ($endDate === null || $firstPeriod <= $endDate)
+            ) {
+                $startDate = $firstPeriod;
+            }
             $facts[] = [
                 'employment_id' => $employmentId,
                 'employee_id' => (int) $row['employee_id'],
-                'relation_type' => (string) $row['relation_type'],
+                'relation_type' => $relationType,
                 'status' => (string) $row['status'],
-                'participates' => PayrollExpectedParticipation::expected(
-                    $this->nullableString($row['health_insurance_participation']),
-                    (string) $row['relation_type'],
-                    $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'],
-                    $threshold,
-                ),
+                'participates' => $participates,
                 'insurer_code' => $this->nullableString($row['insurer_code']),
-                'start_date' => $this->nullableString($row['start_date']),
-                'end_date' => $this->nullableString($row['end_date']),
+                'start_date' => $startDate,
+                'end_date' => $endDate,
                 'full_name' => (string) $row['full_name'],
                 'insurer_changed_on' => $change['changed_on'] ?? null,
                 'previous_insurer_code' => $change['previous_insurer_code'] ?? null,
@@ -416,15 +429,95 @@ final readonly class PayrollHealthNotificationRepository
     }
 
     /**
+     * První mzdové období (`YYYY-MM-01`) nejpozději do `$to`, ve kterém
+     * schválený mzdový běh u vztahu doložil účast na zdravotním pojištění.
+     *
+     * Čte se poslední schválená revize každého běhu, stejně jako u měsíční
+     * agendy; zrušený běh účast nedokládá.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string>
+     */
+    private function firstParticipatingPeriods(
+        int $supplierId,
+        array $employmentIds,
+        string $to,
+    ): array {
+        if ($employmentIds === []
+            || !$this->db->hasTable('payroll_statutory_relationship_results')
+        ) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'WITH current_revision AS (
+                 SELECT revision.id,
+                        run.period_start,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY revision.supplier_id, revision.run_id
+                            ORDER BY revision.revision_no DESC
+                        ) AS row_rank
+                   FROM payroll_run_revisions revision
+                   JOIN payroll_runs run
+                     ON run.supplier_id = revision.supplier_id
+                    AND run.id = revision.run_id
+                  WHERE revision.supplier_id = ?
+                    AND revision.status IN (\'approved\', \'superseded\')
+                    AND run.status <> \'cancelled\'
+                    AND run.period_start <= ?
+             )
+             SELECT relationship.employment_id,
+                    MIN(current_revision.period_start) AS first_period
+               FROM payroll_statutory_relationship_results relationship
+               JOIN current_revision
+                 ON current_revision.id = relationship.revision_id
+                AND current_revision.row_rank = 1
+              WHERE relationship.supplier_id = ?
+                AND relationship.calculation_kind = \'health_insurance\'
+                AND relationship.employment_id IN (' . $placeholders . ')
+                AND JSON_VALUE(relationship.result_snapshot_json, \'$.participation.status\')
+                    = \'participates\'
+              GROUP BY relationship.employment_id'
+        );
+        $statement->execute(array_merge(
+            [$supplierId, $to, $supplierId],
+            $employmentIds,
+        ));
+
+        $periods = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $period = $this->nullableString($row['first_period']);
+            if ($period !== null) {
+                $periods[(int) $row['employment_id']] = $period;
+            }
+        }
+
+        return $periods;
+    }
+
+    /**
      * Zahájení a ukončení mateřské a rodičovské dovolené z evidence absencí.
      *
      * Bere se JEN `approved` — oznámit pojišťovně nástup, který zaměstnavatel
      * teprve zvažuje, znamená podat větu o skutečnosti, která nenastala.
      * `ppm` je peněžitá pomoc v mateřství, tedy mateřská dovolená; `parental`
-     * je rodičovská. Obě míří v datové větě na týž kód `M`, ukončení na `U` —
-     * proto se ukončení bere z pozdější z obou absencí, ne z každé zvlášť.
+     * je rodičovská. Obě míří v datové větě na týž kód `M`, ukončení na `U`.
+     *
+     * Navazující absence (rodičovská hned po mateřské, bez mezery) tvoří JEDEN
+     * řetěz: `M` se hlásí jen na jeho začátku a `U` jen na jeho konci. Anotace
+     * `kodZmenyZamestnaceTyp` v HOZ XSD váže `M` na začátek a `U` na ukončení
+     * nepřítomnosti, po kterou je pojištěncem stát; přechod mateřské do
+     * rodičovské tu nepřítomnost nepřerušuje, takže dvojice `U` + `M` týž měsíc
+     * by hlásila konec a nový začátek něčeho, co neskončilo. Přerušená řada
+     * (mezi absencemi je aspoň jeden den) jsou dva řetězy a dává `U` i `M`.
+     *
+     * Skončí-li pracovní vztah v době, kdy řetěz trvá, hlásí se vedle odhlášky
+     * `O` i `U` ke dni skončení vztahu: zaměstnavatel tím dnem přestává být tím,
+     * kdo skutečnost „plátcem je stát" za pojištěnce hlásí, a pojišťovna by jinak
+     * kategorii státního pojištěnce vedla dál bez konce.
      *
      * @param list<int> $employmentIds
+     * @param array<int,?string> $endDates den skončení vztahu podle id vztahu
      * @return array<int,array{
      *   maternity_started_on:?string,parental_started_on:?string,
      *   leave_ended_on:?string
@@ -433,6 +526,7 @@ final readonly class PayrollHealthNotificationRepository
     private function leaveOccurrences(
         int $supplierId,
         array $employmentIds,
+        array $endDates,
         string $from,
         string $to,
     ): array {
@@ -443,41 +537,115 @@ final readonly class PayrollHealthNotificationRepository
             return [];
         }
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        // Kromě absencí v období je potřeba i soused těsně před ním a těsně
+        // po něm: jen tak jde poznat, že začátek v období navazuje na dřívější
+        // absenci, nebo že konec v období plynule pokračuje další.
         $statement = $this->db->pdo()->prepare(
-            'SELECT employment_id,
-                    MIN(CASE WHEN absence_type = \'ppm\'
-                              AND date_from BETWEEN ? AND ?
-                             THEN date_from END) AS maternity_started_on,
-                    MIN(CASE WHEN absence_type = \'parental\'
-                              AND date_from BETWEEN ? AND ?
-                             THEN date_from END) AS parental_started_on,
-                    MAX(CASE WHEN date_to BETWEEN ? AND ?
-                             THEN date_to END) AS leave_ended_on
+            'SELECT employment_id, absence_type, date_from, date_to
                FROM payroll_absences
               WHERE supplier_id = ?
                 AND status = \'approved\'
                 AND absence_type IN (\'ppm\', \'parental\')
                 AND employment_id IN (' . $placeholders . ')
-              GROUP BY employment_id'
+                AND date_from <= DATE_ADD(?, INTERVAL 1 DAY)
+                AND (date_to IS NULL OR date_to >= DATE_SUB(?, INTERVAL 1 DAY))
+              ORDER BY employment_id, date_from, id'
         );
         $statement->execute(array_merge(
-            [$from, $to, $from, $to, $from, $to, $supplierId],
+            [$supplierId],
             $employmentIds,
+            [$to, $from],
         ));
 
-        $occurrences = [];
+        $absences = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            $occurrences[(int) $row['employment_id']] = [
-                'maternity_started_on' =>
-                    $this->nullableString($row['maternity_started_on']),
-                'parental_started_on' =>
-                    $this->nullableString($row['parental_started_on']),
-                'leave_ended_on' =>
-                    $this->nullableString($row['leave_ended_on']),
+            $absences[(int) $row['employment_id']][] = [
+                'type' => (string) $row['absence_type'],
+                'from' => (string) $row['date_from'],
+                'to' => $this->nullableString($row['date_to']),
+            ];
+        }
+
+        $occurrences = [];
+        foreach ($absences as $employmentId => $rows) {
+            $endDate = $endDates[$employmentId] ?? null;
+            $maternity = null;
+            $parental = null;
+            $ended = null;
+            foreach (self::leaveChains($rows) as $chain) {
+                if ($chain['from'] >= $from && $chain['from'] <= $to) {
+                    if ($chain['type'] === 'ppm') {
+                        $maternity ??= $chain['from'];
+                    } else {
+                        $parental ??= $chain['from'];
+                    }
+                }
+                $chainEnd = $chain['to'];
+                if ($endDate !== null
+                    && $chain['from'] <= $endDate
+                    && ($chainEnd === null || $chainEnd > $endDate)
+                ) {
+                    // Vztah skončil uprostřed řetězu: konec státní kategorie
+                    // se hlásí ke dni skončení vztahu, ne k pozdějšímu konci
+                    // absence, kterou už zaměstnavatel nehlásí.
+                    $chainEnd = $endDate;
+                }
+                if ($chainEnd !== null && $chainEnd >= $from && $chainEnd <= $to) {
+                    $ended = $ended === null || $chainEnd > $ended ? $chainEnd : $ended;
+                }
+            }
+            if ($maternity === null && $parental === null && $ended === null) {
+                continue;
+            }
+            $occurrences[$employmentId] = [
+                'maternity_started_on' => $maternity,
+                'parental_started_on' => $parental,
+                'leave_ended_on' => $ended,
             ];
         }
 
         return $occurrences;
+    }
+
+    /**
+     * Seřazené absence jednoho vztahu sloučí do souvislých řetězů. Další
+     * absence navazuje, když začíná nejpozději den po konci předchozí;
+     * otevřená absence (bez konce) řetěz neukončí nikdy.
+     *
+     * @param list<array{type:string,from:string,to:?string}> $rows
+     * @return list<array{type:string,from:string,to:?string}>
+     */
+    private static function leaveChains(array $rows): array
+    {
+        $chains = [];
+        $current = null;
+        foreach ($rows as $row) {
+            if ($current !== null
+                && ($current['to'] === null
+                    || $row['from'] <= self::nextDay($current['to']))
+            ) {
+                if ($current['to'] !== null
+                    && ($row['to'] === null || $row['to'] > $current['to'])
+                ) {
+                    $current['to'] = $row['to'];
+                }
+                continue;
+            }
+            if ($current !== null) {
+                $chains[] = $current;
+            }
+            $current = $row;
+        }
+        if ($current !== null) {
+            $chains[] = $current;
+        }
+
+        return $chains;
+    }
+
+    private static function nextDay(string $date): string
+    {
+        return (new \DateTimeImmutable($date))->modify('+1 day')->format('Y-m-d');
     }
 
     /**

@@ -26,15 +26,37 @@ final readonly class HealthNotificationDutyResolver
         private HealthNotificationDeadlinePolicy $deadlines,
     ) {}
 
-    /** @return list<HealthNotificationDuty> */
-    public function resolve(HealthNotificationFacts $facts): array
-    {
+    /**
+     * Povinnosti ze skutečností vztahu.
+     *
+     * S oknem `[$from, $to]` se vyhodnocují JEN skutečnosti v okně. Pravidlo,
+     * lhůta i pojišťovna se tedy neřeší u dávného nástupu, na který se přehled
+     * za měsíc vůbec neptá; dřív se vyhodnotily všechny a filtrovalo se až po
+     * nich, takže zaměstnanec s nástupem v roce 1995 shodil přehled celé firmy.
+     *
+     * Skutečnost před vznikem veřejného zdravotního pojištění
+     * ({@see HealthNotificationDutyCatalog::predatesPublicHealthInsurance()})
+     * povinnost nezakládá a vynechá se vždy.
+     *
+     * @return list<HealthNotificationDuty>
+     */
+    public function resolve(
+        HealthNotificationFacts $facts,
+        ?string $from = null,
+        ?string $to = null,
+    ): array {
         if (!$facts->participates) {
             return [];
         }
 
         $resolved = [];
         foreach ($this->occurrences($facts) as [$kind, $occurredOn, $insurer, $direction]) {
+            if (($from !== null && $occurredOn < $from)
+                || ($to !== null && $occurredOn > $to)
+                || $this->duties->predatesPublicHealthInsurance($occurredOn)
+            ) {
+                continue;
+            }
             $resolved[] = $this->duty($facts, $kind, $occurredOn, $insurer, $direction);
         }
         usort(

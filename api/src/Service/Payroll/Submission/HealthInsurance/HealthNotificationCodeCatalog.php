@@ -265,10 +265,11 @@ final class HealthNotificationCodeCatalog
      * - `C` — „první přihlášení zaměstnance - cizince ze zemí mimo EU, který
      *   nemá trvalý pobyt na území ČR".
      *
-     * „Přidělené číslo" se tu pozná podle rodného čísla v evidenci osoby —
-     * je to jediný identifikátor, který aplikace drží a který schéma bere jako
-     * číslo pojištěnce. Evidenční číslo ČSSZ (EČP) číslem pojištěnce zdravotní
-     * pojišťovny není, takže cizinec jen s EČP se hlásí jako první přihlášení.
+     * „Přidělené číslo" se tu pozná podle rodného čísla nebo čísla pojištěnce
+     * přiděleného zdravotní pojišťovnou v evidenci osoby — jen ty schéma bere
+     * jako číslo pojištěnce. Evidenční číslo ČSSZ (EČP) číslem pojištěnce
+     * zdravotní pojišťovny není, takže cizinec jen s EČP se hlásí jako první
+     * přihlášení.
      *
      * @param string|null $citizenshipCountryCode ISO 3166-1 alfa-2; `null` nebo
      *        `CZ` = občan ČR, u kterého se kód neodvozuje od cizinecké větve

@@ -99,6 +99,73 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         ]);
     }
 
+    /**
+     * ZP-03: bývalý zaměstnanec s příjmem po skončení vztahu (ppz_counted =
+     * false) se účastní pojištění a výpočet ho má v závazku pojišťovny. Do
+     * počtu zaměstnanců přehledu se nezapočítává, do součtů ano. Dřív ho
+     * builder vynechal celého a přehled spadl na nesouhlasu součtů.
+     */
+    public function testFormerEmployeeWithIncomeCountsInTotalsButNotInHeadcount(): void
+    {
+        $overviews = $this->builder->build(41, $this->formerEmployeeSource());
+
+        self::assertCount(1, $overviews);
+        $totals = $overviews[0]->totals;
+        self::assertSame(1, $totals['person_count']);
+        self::assertSame(1_100_000, $totals['assessment_base_minor_units']);
+        self::assertSame(148_500, $totals['total_contribution_minor_units']);
+        self::assertCount(2, $overviews[0]->people);
+        $former = array_values(array_filter(
+            $overviews[0]->people,
+            static fn (array $person): bool => $person['employee_reference'] === 'employee:9',
+        ));
+        self::assertFalse($former[0]['ppz_counted']);
+        self::assertArrayNotHasKey(
+            'ppz_counted',
+            array_values(array_filter(
+                $overviews[0]->people,
+                static fn (array $person): bool => $person['employee_reference'] === 'employee:7',
+            ))[0],
+            'Započtená osoba nese stejný tvar jako dřív — otisk běžných přehledů se nemění.',
+        );
+    }
+
+    /** Osoba bez účasti (a mimo závazek) do přehledu nepatří ani teď. */
+    public function testPersonWithoutParticipationStaysOutOfTheOverview(): void
+    {
+        $overviews = $this->builder->build(41, $this->source([
+            $this->person(9, 'Syntetická osoba bez účasti', '111', 50_000, 0, 0, false, 'does_not_participate'),
+        ]));
+
+        self::assertSame(
+            ['employee:7', 'employee:12'],
+            array_column($overviews[0]->people, 'employee_reference'),
+        );
+    }
+
+    /** Vada u jiné pojišťovny nesmí zablokovat přehled té, o kterou jde. */
+    public function testMismatchAtAnotherInsurerDoesNotBlockTheRequestedOne(): void
+    {
+        $source = $this->source();
+        $source['statutory_result']['people'] = array_values(array_filter(
+            $source['statutory_result']['people'],
+            static fn (array $person): bool => $person['employee_id'] !== 28,
+        ));
+
+        $overviews = $this->builder->build(41, $source, '111');
+        self::assertSame(['111'], array_map(
+            static fn ($overview): string => $overview->insurerCode,
+            $overviews,
+        ));
+
+        try {
+            $this->builder->build(41, $source, '201');
+            self::fail('Pojišťovna s nesouhlasem musí dál selhat.');
+        } catch (HealthInsuranceOverviewException $exception) {
+            self::assertSame('health_insurance_totals_mismatch', $exception->validationCode);
+        }
+    }
+
     public function testRejectsRevisionThatIsNotCurrentAndApproved(): void
     {
         $source = $this->source();
@@ -201,12 +268,14 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
      *   statutory_result:array<string,mixed>
      * }
      */
-    private function source(): array
+    /** @param list<array<string,mixed>> $extraPeople */
+    private function source(array $extraPeople = []): array
     {
         $people = [
             $this->person(12, 'Syntetická osoba B', '111', 700_000, 31_500, 63_000),
             $this->person(7, 'Syntetická osoba A', '111', 1_000_000, 45_000, 90_000),
             $this->person(28, 'Syntetická osoba C', '201', 500_000, 22_500, 45_000),
+            ...$extraPeople,
         ];
         $root = [
             'calculation_date' => '2026-06-30',
@@ -327,6 +396,50 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         ];
     }
 
+    /**
+     * Dvě osoby u 111: zaměstnanec se základem 1 000 000 a bývalý zaměstnanec
+     * (ppz_counted = false) se základem 100 000 a pojistným 13 500. Závazek
+     * pojišťovny obsahuje oba, počet osob jen jednoho — přesně jak ho skládá
+     * HealthInsuranceMonthCalculator.
+     *
+     * @return array<string,mixed>
+     */
+    private function formerEmployeeSource(): array
+    {
+        $people = [
+            $this->person(7, 'Syntetická osoba A', '111', 1_000_000, 45_000, 90_000),
+            $this->person(9, 'Syntetický bývalý zaměstnanec', '111', 100_000, 4_500, 9_000, false),
+        ];
+        $root = [
+            'calculation_date' => '2026-06-30',
+            'status' => 'calculated',
+            'assessment_base_minor_units' => 1_100_000,
+            'employee_contribution_minor_units' => 49_500,
+            'employer_contribution_minor_units' => 99_000,
+            'total_contribution_minor_units' => 148_500,
+            'insurer_liabilities' => [[
+                'insurer_code' => '111',
+                'person_count' => 1,
+                'assessment_base_minor_units' => 1_100_000,
+                'employee_contribution_minor_units' => 49_500,
+                'employer_contribution_minor_units' => 99_000,
+                'total_contribution_minor_units' => 148_500,
+            ]],
+            'issues' => [],
+            'ruleset_id' => 'cz-health-2026',
+            'ruleset_hash' => str_repeat('b', 64),
+        ];
+        $source = $this->source();
+        $source['statutory_result']['result_snapshot'] = $root;
+        $source['statutory_result']['result_snapshot_hash'] = hash(
+            'sha256',
+            CanonicalJson::encode($root),
+        );
+        $source['statutory_result']['people'] = $people;
+
+        return $source;
+    }
+
     /** @return array<string,mixed> */
     private function person(
         int $employeeId,
@@ -335,6 +448,8 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         int $base,
         int $employee,
         int $employer,
+        bool $ppzCounted = true,
+        ?string $participation = null,
     ): array {
         $input = [
             'employee' => [
@@ -347,12 +462,18 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
             'status' => 'calculated',
             'insurer_status' => 'verified',
             'insurer_code' => $insurerCode,
-            'ppz_counted' => true,
+            'ppz_counted' => $ppzCounted,
             'assessment_base_minor_units' => $base,
             'employee_contribution_minor_units' => $employee,
             'employer_contribution_minor_units' => $employer,
             'total_contribution_minor_units' => $employee + $employer,
         ];
+        if (!$ppzCounted || $participation !== null) {
+            $result['relationships'] = [[
+                'relationship_id' => "employment:{$employeeId}",
+                'participation' => ['status' => $participation ?? 'participates'],
+            ]];
+        }
 
         return [
             'employee_id' => $employeeId,

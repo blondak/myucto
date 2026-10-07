@@ -553,6 +553,31 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * ZP-03: pojistné jen za bývalé zaměstnance (do počtu se nezapočítávají).
+     * Počet 1 se nevymýšlí; chyba řekne, proč přehled touto cestou nevznikne.
+     */
+    public function testOverviewOfOnlyFormerEmployeesExplainsWhyItCannotBeSerialized(): void
+    {
+        $payload = new HealthPaymentOverviewPayload(
+            insurerCode: '111',
+            overviewKind: HealthPaymentOverviewPayload::KIND_REGULAR,
+            employer: $this->employer(),
+            month: 7,
+            year: 2026,
+            employeeCount: 0,
+            assessmentBaseMinorUnits: 100_000,
+            contributionCzk: 135,
+        );
+        try {
+            $this->serializer->serializePaymentOverview($payload);
+            self::fail('Nulový počet zaměstnanců datová věta neumí.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_overview_only_former_employees', $e->errorCode);
+            self::assertStringContainsString('bývalých zaměstnanců', $e->getMessage());
+        }
+    }
+
     public function testAssessmentBaseKeepsTwoDecimalsFromMinorUnits(): void
     {
         foreach ([

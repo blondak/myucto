@@ -15,8 +15,11 @@ final class HealthPaymentOverviewService
     ) {}
 
     /** @return list<HealthPaymentOverview> */
-    public function overviews(int $supplierId, int $revisionId): array
-    {
+    public function overviews(
+        int $supplierId,
+        int $revisionId,
+        ?string $onlyInsurerCode = null,
+    ): array {
         $source = $this->repository->findApprovedHealthResult(
             $supplierId,
             $revisionId,
@@ -28,7 +31,7 @@ final class HealthPaymentOverviewService
             );
         }
 
-        return $this->builder->build($supplierId, $source);
+        return $this->builder->build($supplierId, $source, $onlyInsurerCode);
     }
 
     public function overview(
@@ -41,7 +44,7 @@ final class HealthPaymentOverviewService
                 HealthInsurers::invalidCodeMessage($insurerCode),
             );
         }
-        foreach ($this->overviews($supplierId, $revisionId) as $overview) {
+        foreach ($this->overviews($supplierId, $revisionId, $insurerCode) as $overview) {
             if ($overview->insurerCode === $insurerCode) {
                 return $overview;
             }

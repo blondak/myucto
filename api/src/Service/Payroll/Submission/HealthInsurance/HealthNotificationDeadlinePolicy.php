@@ -93,6 +93,19 @@ final class HealthNotificationDeadlinePolicy
      */
     private const AGREEMENT_RELATION_TYPES = ['dpp', 'dpc'];
 
+    /**
+     * Skutečnosti, na které výjimka dohod dopadá. VZP ji váže na oznámení
+     * nástupu a skončení u osob činných na dohodu — tam o účasti rozhoduje až
+     * příjem měsíce, který se do 20. dne následujícího měsíce teprve zjistí.
+     * Přestup k jiné pojišťovně ani změna údajů na příjmu nezávisí, takže
+     * i u dohody běží základních osm dnů.
+     */
+    private const AGREEMENT_DUTY_KINDS = [
+        HealthNotificationDutyKind::EmploymentStart,
+        HealthNotificationDutyKind::EmploymentEnd,
+        HealthNotificationDutyKind::SingleDayEmployment,
+    ];
+
     /** Povinnosti, které se podle metodiky VZP oznamují souhrnně měsíčně. */
     private const MONTHLY_DUTY_KINDS = [
         HealthNotificationDutyKind::MaternityLeaveStart,
@@ -130,6 +143,7 @@ final class HealthNotificationDeadlinePolicy
         }
         if ($relationType !== null
             && in_array($relationType, self::AGREEMENT_RELATION_TYPES, true)
+            && in_array($kind, self::AGREEMENT_DUTY_KINDS, true)
         ) {
             return $this->window(
                 $occurredOn,
