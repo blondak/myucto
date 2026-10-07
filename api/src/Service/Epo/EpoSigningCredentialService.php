@@ -96,6 +96,24 @@ final class EpoSigningCredentialService
         while (openssl_error_string() !== false) {
         }
         if (!@openssl_pkcs12_read($pfxBytes, $bundle, $pfxPassword)) {
+            $errors = '';
+            while (($error = openssl_error_string()) !== false) {
+                $errors .= $error . "\n";
+            }
+            // OpenSSL 3 má šifru RC2 jen v legacy provideru; starší exporty
+            // z Windows a některých autorit ji používají. Se špatným heslem
+            // to nesouvisí a hláška o hesle by účetní poslala hledat jinde.
+            if (str_contains($errors, 'unsupported')) {
+                throw new EpoSubmissionException(
+                    'certificate_legacy_encryption',
+                    'Soubor P12/PFX používá zastaralé šifrování (RC2), které server nepodporuje. '
+                    . 'Heslo za tím není. Vyexportujte certifikát znovu se šifrováním AES '
+                    . '(ve Windows při exportu volba AES256-SHA256), nebo soubor převeďte '
+                    . 'příkazy openssl pkcs12 -in stary.pfx -legacy -nodes -out docasny.pem '
+                    . 'a openssl pkcs12 -export -in docasny.pem -out novy.pfx (docasny.pem pak smažte).',
+                    400,
+                );
+            }
             throw new EpoSubmissionException(
                 'invalid_certificate',
                 'Soubor P12/PFX nelze otevřít. Zkontrolujte soubor a jeho heslo.',
