@@ -152,6 +152,18 @@ final class PayrollRegistrationChangeDeltaPlannerTest extends TestCase
         ], $plan['changes']['facts']);
     }
 
+    /** REGZEC25-PROC.A3.scope-01: posun data nástupu se hlásí jako A3 (job/@fro). */
+    public function testShiftedStartDateIsFileableAsA3(): void
+    {
+        $changed = $this->profile();
+        $changed['employment']['actual_start_on'] = '2026-08-05';
+
+        $plan = $this->plan($this->profile(), $changed);
+
+        self::assertSame([], $plan['unsupported']);
+        self::assertSame('2026-08-05', $plan['changes']['employment']['actual_start_on']);
+    }
+
     public function testRemovedRestrictionAndMultipleRestrictionsStayManual(): void
     {
         $baseline = $this->profile();
