@@ -56,6 +56,61 @@ final class PayrollRegistrationIdentityRequirements
     ];
 
     /**
+     * Osobní údaje, které přihláška REGZEC A1 povinně nese (EDV 10053–10066).
+     * Čte je i {@see PayrollRegistrationA1SnapshotBuilder}.
+     *
+     * @var list<string>
+     */
+    public const A1_IDENTITY_FIELDS = [
+        'first_name', 'last_name', 'birth_surname', 'birth_date',
+        'birth_place', 'birth_country_code', 'sex',
+    ];
+
+    /** Dohlášení údajů (A3 s `completion`) v rozsahu celého profilu. */
+    private const COMPLETION_FULL_FIELDS = [
+        'first_name', 'last_name', 'birth_date', 'sex',
+        'citizenship_country_code',
+    ];
+
+    /**
+     * Osobní údaje, které nese dohlášení údajů REGZEC A3.
+     *
+     * Delta A3 přenáší jen příjmení, jméno, tituly, dřívější příjmení, datum
+     * narození, pohlaví a občanství (viz {@see PayrollRegistrationProfileCompletion}).
+     * Rodné příjmení, místo a stát narození do věty nikdy nejdou, takže je
+     * dohlášení nesmí vyžadovat. V rozsahu „jen údaje, které ONZ nevedla"
+     * osobní údaje nejdou do věty vůbec.
+     *
+     * @return list<string>
+     */
+    public static function completionIdentityFields(?string $completion): array
+    {
+        return $completion === PayrollRegistrationProfileCompletion::FULL
+            ? self::COMPLETION_FULL_FIELDS
+            : [];
+    }
+
+    /**
+     * Osobní údaje, které věta REGZEC pro danou akci čte z evidence osoby.
+     *
+     * A1 nese celou identitu. Akce 2–8 nesou jen `client/@ikmpsv` a to, co se
+     * do nich dostane ze schválené události (u A3 s dohlášením viz
+     * {@see self::completionIdentityFields()}); EDV rodné příjmení, místo
+     * a stát narození u nich nepřipouští, takže je evidence osoby nesmí
+     * vyžadovat.
+     *
+     * @return list<string>
+     */
+    public static function regzecIdentityFields(?int $action, ?string $completion): array
+    {
+        if ($action === null || $action === 1) {
+            return self::A1_IDENTITY_FIELDS;
+        }
+
+        return $action === 3 ? self::completionIdentityFields($completion) : [];
+    }
+
+    /**
      * Chybějící údaje osoby pro danou agendu.
      *
      * `$agenda === null` znamená „agendu ještě nejde určit" — typicky proto,
@@ -67,6 +122,10 @@ final class PayrollRegistrationIdentityRequirements
      * šifrované a volající (karta osoby) má k dispozici jen informaci, zda
      * existuje.
      *
+     * `$action` (kód akce REGZEC, 2 až 8) přepne na požadavky navazující
+     * události; `null` je přihláška. U A3 pak `$completion` určuje rozsah
+     * dohlášení.
+     *
      * @param array<string,mixed> $identity řádek historie identity
      * @param array<string,mixed> $identifiers birth_number/ecp/vcp → hodnota nebo null
      * @return list<array{field:string,label:string,message:string,panel:string,target:string}>
@@ -76,7 +135,24 @@ final class PayrollRegistrationIdentityRequirements
         array $identity,
         array $identifiers,
         ?bool $hasBirthSurname = null,
+        ?int $action = null,
+        ?string $completion = null,
     ): array {
+        if ($agenda === self::AGENDA_REGZEC && $action !== null && $action !== 1) {
+            // Navazující událost: identifikátor osoby je `ikmpsv` z události,
+            // rodné číslo se přenáší jen v dohlášení a tam je nepovinné.
+            $missing = [];
+            foreach (self::regzecIdentityFields($action, $completion) as $field) {
+                $present = $field === 'sex'
+                    ? in_array($identity['sex'] ?? null, ['male', 'female'], true)
+                    : self::filled($identity[$field] ?? null);
+                if (!$present) {
+                    $missing[] = self::identityProblem($field);
+                }
+            }
+
+            return $missing;
+        }
         $missing = [];
         foreach (self::COMMON_FIELDS as $field) {
             $present = $field === 'birth_surname' && $hasBirthSurname !== null

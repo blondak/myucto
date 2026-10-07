@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
+use MyInvoice\Action\Payroll\PayrollRegistrationImportAction;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
+use MyInvoice\Security\EffectiveRole;
+use Slim\Psr7\Response;
 use MyInvoice\Service\Payroll\Import\Ozuspoj\OzuspojPredecessorIntentImporter;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionKind;
@@ -188,6 +191,60 @@ final class SicknessDocumentImportTest extends TestCase
         self::assertContains((int) $case['id'], $this->watchedCaseIds(), 'NEMPRI zůstává otevřené a hlídané.');
     }
 
+    /**
+     * Návrat v pondělí: odvozený konec je neděle, ale neschopnost skončila
+     * v pátek. HZUPN najde případ i přes víkend, skutečný konec nepřepíše
+     * a rozdíl neohlásí jako rozpor.
+     */
+    public function testHzupnWithMondayReturnKeepsTheRealFridayEnd(): void
+    {
+        $caseId = $this->predecessorSicknessCase('2026-10-05', '2026-10-16', null);
+        $this->container->get(SicknessCaseService::class)
+            ->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'predecessor', null, null);
+        $files = [$this->file('hzupn.xml', SicknessImportXmlFixtures::hzupn20($this->birthNumber, [
+            'decision' => 'A7654321',
+            'returnedOn' => '2026-10-19',
+            'issued' => '2026-10-20',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, self::ENVIRONMENT, $files)['records'][0];
+        self::assertNull($record['blocker'], json_encode($record, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('update_case', $record['operation']);
+        self::assertSame($caseId, $record['benefit']['case_id']);
+        self::assertNotContains('incapacity_to', array_column($record['changes'], 'field'));
+        foreach ($record['warnings'] as $warning) {
+            self::assertStringNotContainsString('Poslední den neschopnosti', (string) $warning);
+        }
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $case = $this->caseRow($caseId);
+        self::assertSame('2026-10-16', $case['incapacity_to']);
+        self::assertSame('2026-10-19', $case['returned_on']);
+        self::assertSame('predecessor', $case['hzupn_status']);
+    }
+
+    public function testHzupnWithMondayReturnTakesFridayEndOfApprovedAbsence(): void
+    {
+        $absenceId = $this->approvedAbsence('2026-10-05', '2026-10-16');
+        $files = [$this->file('hzupn.xml', SicknessImportXmlFixtures::hzupn20($this->birthNumber, [
+            'decision' => 'A7654321',
+            'returnedOn' => '2026-10-19',
+            'issued' => '2026-10-20',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, self::ENVIRONMENT, $files)['records'][0];
+        self::assertNull($record['blocker'], json_encode($record, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('create_case', $record['operation']);
+        self::assertSame('2026-10-16', $record['benefit']['incapacity_to']);
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $case = $this->singleCase();
+        self::assertSame('2026-10-16', $case['incapacity_to']);
+        self::assertSame($absenceId, (int) $case['absence_id']);
+    }
+
     public function testHzupnEndingBeforeTheCaseStartedIsBlocked(): void
     {
         $this->predecessorSicknessCase('2026-09-17', null, self::DECISION);
@@ -239,6 +296,7 @@ final class SicknessDocumentImportTest extends TestCase
             null,
             null,
             [['key' => $key, 'received_on' => '2026-09-30']],
+            true,
         );
 
         self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
@@ -364,6 +422,73 @@ final class SicknessDocumentImportTest extends TestCase
         self::assertSame('predecessor', $this->caseRow($caseId)['nempri_status']);
     }
 
+    /**
+     * Podání dávek a záměry slevy jinde chrání právo `payroll.submissions`;
+     * import je nesmí zapsat s pouhým právem na osoby a vztahy. Náhled je
+     * ukáže každému, kdo import smí otevřít.
+     */
+    public function testSicknessAndOzuspojApplyNeedsSubmissionsPermission(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET social_part_time_discount_reason = "age_55_plus"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $this->person['employment_id']]);
+        $files = [
+            $this->file('ose.xml', SicknessImportXmlFixtures::nempri25('OSE', $this->birthNumber, ['decision' => '10278000600075284N'])),
+            $this->file('ozuspoj.xml', $this->ozuspojXml('2026-02-01')),
+        ];
+        $records = $this->imports->preview($this->supplierId, self::ENVIRONMENT, $files)['records'];
+        $keys = array_column($records, 'key');
+        self::assertCount(2, $keys);
+        $received = array_map(static fn (string $key): array => ['key' => $key, 'received_on' => '2026-02-03'], $keys);
+        $body = [
+            'environment' => self::ENVIRONMENT,
+            'files' => $files,
+            'keys' => $keys,
+            'evidence_confirmed' => true,
+            'received_on' => $received,
+        ];
+        $action = $this->container->get(PayrollRegistrationImportAction::class);
+        self::assertInstanceOf(PayrollRegistrationImportAction::class, $action);
+
+        $preview = $action->preview($this->importRequest($body, false), new Response());
+        if ($preview->getStatusCode() === 403) {
+            self::markTestSkipped('Mzdový modul není v téhle instalaci licencovaný.');
+        }
+        self::assertSame(200, $preview->getStatusCode(), (string) $preview->getBody());
+
+        $denied = $action->apply($this->importRequest($body, false), new Response());
+        self::assertSame(200, $denied->getStatusCode(), (string) $denied->getBody());
+        $results = $this->json($denied)['results'];
+        self::assertCount(2, $results);
+        foreach ($results as $result) {
+            self::assertSame('skipped', $result['status'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
+            self::assertStringContainsString('právo ke správě mzdových podání', (string) $result['message']);
+        }
+        self::assertSame(0, $this->caseCount());
+
+        $allowed = $action->apply($this->importRequest($body, true), new Response());
+        self::assertSame(200, $allowed->getStatusCode(), (string) $allowed->getBody());
+        foreach ($this->json($allowed)['results'] as $result) {
+            self::assertSame('applied', $result['status'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
+        }
+        self::assertSame(1, $this->caseCount());
+    }
+
+    /** @param array<string,mixed> $body */
+    private function importRequest(array $body, bool $withSubmissions): \Psr\Http\Message\ServerRequestInterface
+    {
+        $permissions = ['payroll.person.write' => 2, 'payroll.employment.write' => 2];
+        if ($withSubmissions) {
+            $permissions['payroll.submissions'] = 2;
+        }
+
+        return $this->request('POST', '/api/payroll/imports/registrations/apply')
+            ->withParsedBody($body)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, $permissions, 'custom'));
+    }
+
     public function testOzuspojNeedsDeliveryDayAndThenIsTakenOverOnce(): void
     {
         $this->db->pdo()->prepare(
@@ -405,6 +530,7 @@ final class SicknessDocumentImportTest extends TestCase
             null,
             null,
             $received,
+            true,
         );
         self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
         $intent = $this->db->pdo()->prepare(
@@ -491,6 +617,16 @@ final class SicknessDocumentImportTest extends TestCase
             $this->actors[0],
             null,
             'sickness-import-test',
+            null,
+            false,
+            false,
+            false,
+            false,
+            false,
+            null,
+            null,
+            null,
+            true,
         );
     }
 

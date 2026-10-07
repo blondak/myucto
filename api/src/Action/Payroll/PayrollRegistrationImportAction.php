@@ -19,7 +19,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Jen přihlášená relace: import zakládá osoby a zapisuje identifikátory ČSSZ,
  * stejně jako karta osoby, která je session-only. Použití navíc vyžaduje právo
- * na pracovní vztahy, protože vztahy zakládá, aktivuje a ukončuje.
+ * na pracovní vztahy, protože vztahy zakládá, aktivuje a ukončuje. Věty NEMPRI,
+ * HZUPN a OZUSPOJ zakládají případy dávek a záměry slevy, takže jejich zápis
+ * navíc vyžaduje právo `payroll.submissions` (náhled ho nevyžaduje).
  */
 final class PayrollRegistrationImportAction
 {
@@ -87,6 +89,9 @@ final class PayrollRegistrationImportAction
                 $body['relation_types'] ?? null,
                 $body['terminations'] ?? null,
                 $body['received_on'] ?? null,
+                // Podání dávek (NEMPRI, HZUPN) a záměry slevy (OZUSPOJ) jinde chrání
+                // právo ke správě podání; import je smí zapsat jen s ním.
+                RequestAuthorization::allows($request, 'payroll.submissions', AccessLevel::WRITE),
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

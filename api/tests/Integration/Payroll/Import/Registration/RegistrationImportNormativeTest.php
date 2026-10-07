@@ -335,6 +335,85 @@ final class RegistrationImportNormativeTest extends TestCase
         self::assertSame(['Testovací', 'Zkušební'], array_values($identity));
     }
 
+    /**
+     * `ona` bez data změny do historie jména nepatří: věta by tím vymyslela
+     * platnost verze identity. Import řekne, co a kde doplnit ručně, a historii
+     * nezakládá.
+     */
+    public function testFormerSurnameWithoutEvidenceNamesTheManualStepAndWritesNoHistory(): void
+    {
+        $files = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['ona' => 'Dřívější']))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        $warning = $this->warningContaining($record, 'Dřívější');
+        self::assertStringContainsString('evidence žádné dřívější příjmení osoby nevede', $warning);
+        self::assertStringContainsString('Historie jména', $warning);
+        self::assertStringContainsString('datum', $warning);
+
+        $result = $this->apply($files, [$record['key']])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertSame(1, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_person_identity_history WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, (int) $result['employee_id']],
+        ));
+    }
+
+    public function testFormerSurnameAlreadyInHistoryIsNotReportedAgain(): void
+    {
+        $employeeId = $this->importedPersonWithEarlierSurname('Dřívější');
+        self::assertGreaterThan(0, $employeeId);
+
+        $files = [$this->file('a1-ona.xml', RegistrationXmlFixtures::regzecA1(['ona' => 'Dřívější']))];
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+
+        self::assertSame('matched', $record['match']['status'], json_encode($record, JSON_UNESCAPED_UNICODE) ?: '');
+        foreach ($record['warnings'] as $warning) {
+            self::assertStringNotContainsString('dřívější příjmení', (string) $warning);
+        }
+    }
+
+    public function testFormerSurnameDifferentFromHistoryNamesBoth(): void
+    {
+        $this->importedPersonWithEarlierSurname('Jiné');
+
+        $files = [$this->file('a1-ona.xml', RegistrationXmlFixtures::regzecA1(['ona' => 'Dřívější']))];
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+
+        $warning = $this->warningContaining($record, 'Dřívější');
+        self::assertStringContainsString('vede: Jiné', $warning);
+    }
+
+    /** Založí osobu z A1 a před její aktuální verzi identity vloží starší s daným příjmením. */
+    private function importedPersonWithEarlierSurname(string $surname): int
+    {
+        $files = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1())];
+        $result = $this->apply($files, [$this->previewKey($files)])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        $employeeId = (int) $result['employee_id'];
+        $current = $this->row(
+            'SELECT effective_from FROM payroll_person_identity_history WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name, effective_from, effective_to)
+             VALUES (?, ?, ?, "Jana", ?, "1900-01-01", DATE_SUB(?, INTERVAL 1 DAY))',
+        )->execute([$this->supplierId, $employeeId, 'Jana ' . $surname, $surname, $current['effective_from']]);
+
+        return $employeeId;
+    }
+
+    /** @param array<string,mixed> $record */
+    private function warningContaining(array $record, string $needle): string
+    {
+        foreach ($record['warnings'] as $warning) {
+            if (str_contains((string) $warning, $needle)) {
+                return (string) $warning;
+            }
+        }
+        self::fail("Varování s „{$needle}“ chybí: " . json_encode($record['warnings'], JSON_UNESCAPED_UNICODE));
+    }
+
     /** IMP-07: VČP se přečte, zapíše při založení a podle něj se osoba najde i bez rodného čísla. */
     public function testVcpIsWrittenAndMatchesPersonWithoutBirthNumber(): void
     {

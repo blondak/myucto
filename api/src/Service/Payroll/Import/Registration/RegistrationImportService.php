@@ -215,6 +215,7 @@ final class RegistrationImportService
         mixed $relationTypes = null,
         mixed $terminations = null,
         mixed $receivedOn = null,
+        bool $mayWriteSubmissions = false,
     ): array {
         $this->environment($environment);
         $relationTypeMap = $this->relationTypes($relationTypes);
@@ -368,7 +369,16 @@ final class RegistrationImportService
         // Podání dávek a záměry slevy předchozího programu jdou až po registracích
         // a hlášeních: osoba a vztah, ke kterým patří, mohla vzniknout v téže dávce.
         foreach (array_keys($selected) as $key) {
-            if (isset($sicknessByKey[$key])) {
+            if (!$mayWriteSubmissions && (isset($sicknessByKey[$key]) || isset($ozuspojByKey[$key]))) {
+                // Podání dávek a záměry slevy jinde chrání právo `payroll.submissions`;
+                // import je nesmí obejít právem na osoby. Náhled je ukáže, zápis ne.
+                $results[$key] = $this->result(
+                    $key,
+                    'skipped',
+                    'Zápis podání dávek a záměrů slevy vyžaduje právo ke správě mzdových podání. '
+                    . 'Požádejte správce o jeho přidělení, nebo větu v importu nevybírejte.',
+                );
+            } elseif (isset($sicknessByKey[$key])) {
                 $results[$key] = $this->applySickness(
                     $supplierId,
                     $environment,

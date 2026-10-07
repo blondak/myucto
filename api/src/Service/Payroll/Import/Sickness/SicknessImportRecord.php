@@ -27,6 +27,7 @@ final readonly class SicknessImportRecord
      * @param list<array{from:string,to:string}> $workDays dny práce v době neschopnosti
      * @param list<string> $notes poznámky ke čtení věty, které jdou do varování náhledu
      * @param bool $personReport HZUPN podává sám dobrovolně pojištěný, ne zaměstnavatel
+     * @param bool $incapacityToDerived poslední den neschopnosti věta nenese, odvodil se ze dne před návratem do práce
      */
     public function __construct(
         public string $documentType,
@@ -53,11 +54,46 @@ final readonly class SicknessImportRecord
         public array $workDays = [],
         public array $notes = [],
         public bool $personReport = false,
+        public bool $incapacityToDerived = false,
     ) {}
 
     public function isHzupn(): bool
     {
         return $this->document === SicknessDocumentKind::Hzupn;
+    }
+
+    /**
+     * První den, ve kterém může ve skutečnosti ležet poslední den neschopnosti.
+     *
+     * HZUPN nese jen datum návratu do práce, takže poslední den neschopnosti je
+     * odvozený ze dne před ním. Vrací-li se zaměstnanec v pondělí, den před tím
+     * je neděle, ale neschopnost mohla skončit už v pátek (evidence a NEMPRI
+     * vedou skutečný konec). Odvozený den proto platí jako horní mez a okno
+     * sahá zpět přes víkend. Konec, který věta nese sama, je přesný.
+     */
+    public function incapacityToWindowStart(): ?string
+    {
+        if ($this->incapacityTo === null) {
+            return null;
+        }
+        if (!$this->incapacityToDerived) {
+            return $this->incapacityTo;
+        }
+        $day = new \DateTimeImmutable($this->incapacityTo);
+        while ((int) $day->format('N') >= 6) {
+            $day = $day->modify('-1 day');
+        }
+
+        return $day->format('Y-m-d');
+    }
+
+    /** Je konec neschopnosti vedený v evidenci v souladu s tím, co věta nese nebo z čeho ho odvodila? */
+    public function acceptsIncapacityTo(string $existing): bool
+    {
+        $start = $this->incapacityToWindowStart();
+
+        return $start !== null && $this->incapacityTo !== null
+            && $existing >= $start && $existing <= $this->incapacityTo;
     }
 
     public function fullName(): ?string

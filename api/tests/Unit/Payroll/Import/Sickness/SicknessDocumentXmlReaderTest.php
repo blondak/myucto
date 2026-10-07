@@ -45,6 +45,32 @@ final class SicknessDocumentXmlReaderTest extends TestCase
         self::assertSame('8', $record->caseFields['daily_working_hours']);
     }
 
+    /**
+     * HZUPN konec neschopnosti nenese, odvozuje se ze dne před návratem do práce.
+     * Po víkendu je odvozená neděle jen horní mez: neschopnost skončila nejpozději
+     * v neděli, nejdřív v pátek.
+     */
+    public function testHzupnDerivedEndOfIncapacityIsAnUpperBoundAcrossTheWeekend(): void
+    {
+        $read = static fn (string $returnedOn): SicknessImportRecord => (new SicknessDocumentXmlReader())->read(
+            SicknessImportXmlFixtures::hzupn20(self::BIRTH_NUMBER, ['returnedOn' => $returnedOn]),
+        )['records'][0];
+
+        $monday = $read('2026-10-19');
+        self::assertSame('2026-10-18', $monday->incapacityTo);
+        self::assertTrue($monday->incapacityToDerived);
+        self::assertSame('2026-10-16', $monday->incapacityToWindowStart());
+        self::assertTrue($monday->acceptsIncapacityTo('2026-10-16'));
+        self::assertTrue($monday->acceptsIncapacityTo('2026-10-18'));
+        self::assertFalse($monday->acceptsIncapacityTo('2026-10-15'));
+        self::assertFalse($monday->acceptsIncapacityTo('2026-10-19'));
+
+        $thursday = $read('2026-10-15');
+        self::assertSame('2026-10-14', $thursday->incapacityTo);
+        self::assertSame('2026-10-14', $thursday->incapacityToWindowStart());
+        self::assertFalse($thursday->acceptsIncapacityTo('2026-10-13'));
+    }
+
     public function testNempri25OfCareCarriesDatesAndApplication(): void
     {
         $record = (new SicknessDocumentXmlReader())->read(

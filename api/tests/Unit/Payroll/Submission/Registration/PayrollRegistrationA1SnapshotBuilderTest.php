@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission\Registration;
 
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1SnapshotBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshot;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
@@ -497,6 +498,76 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             static fn () => (new PayrollRegistrationA1SnapshotBuilder())->build(
                 $source,
                 self::identity(),
+                self::scope(),
+            ),
+        );
+    }
+
+    /**
+     * `fdr` (czAdrType) atribut `cnt` nemá a serializér stát nepíše; adresa
+     * pobytu v ČR přenesená z cizí věty (import) proto nese stát jen,
+     * pokud ho někdo doplnil. Bez státu se nesmí A1/A3 odmítnout.
+     */
+    public function testCzechResidenceAddressDoesNotRequireCountry(): void
+    {
+        $source = self::source('1', '1');
+        $source['czech_residence_address'] = [
+            'street' => 'Testovací',
+            'house_number' => '7',
+            'city' => 'Testov',
+            'postal_code' => '602 00',
+        ];
+
+        $snapshot = (new PayrollRegistrationA1SnapshotBuilder())->build(
+            $source,
+            self::identity(),
+            self::scope(),
+        );
+
+        self::assertSame('CZ', $snapshot->czechResidenceAddress['country_code']);
+        self::assertSame('60200', $snapshot->czechResidenceAddress['postal_code']);
+    }
+
+    public function testPermanentAddressStillRequiresCountry(): void
+    {
+        $source = self::source('1', '1');
+        unset($source['permanent_address']['country_code']);
+
+        $this->expectCode(
+            'registration_regzec_a1_required_field_missing',
+            static fn () => (new PayrollRegistrationA1SnapshotBuilder())->build(
+                $source,
+                self::identity(),
+                self::scope(),
+            ),
+        );
+    }
+
+    /**
+     * Dohlášení A3 nenese rodné příjmení, místo ani stát narození, takže
+     * snímek pro A3 je nesmí vyžadovat; přihláška A1 je vyžaduje dál.
+     */
+    public function testCompletionIdentityKeysDoNotRequireBirthPlaceAndSurname(): void
+    {
+        $identity = self::identity();
+        $identity['birth_surname'] = null;
+        $identity['birth_place'] = null;
+        $identity['birth_country_code'] = null;
+
+        $snapshot = (new PayrollRegistrationA1SnapshotBuilder())->build(
+            self::source('1', '1'),
+            $identity,
+            self::scope(),
+            false,
+            PayrollRegistrationIdentityRequirements::completionIdentityFields('full'),
+        );
+        self::assertSame('OST', $snapshot->variant);
+
+        $this->expectCode(
+            'registration_regzec_a1_required_field_missing',
+            static fn () => (new PayrollRegistrationA1SnapshotBuilder())->build(
+                self::source('1', '1'),
+                $identity,
                 self::scope(),
             ),
         );

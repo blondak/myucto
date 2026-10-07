@@ -316,6 +316,16 @@ final class SicknessImportPlanner
                 if ($existing !== null && $this->same($column, $existing, $value)) {
                     continue;
                 }
+                // Konec odvozený ze dne před návratem je jen horní mez; skutečný
+                // konec vedený v případu (např. pátek před pondělním návratem) se
+                // nepřepisuje a neřeší se jako rozpor.
+                if ($column === 'incapacity_to' && $existing !== null
+                    && !isset($record->caseFields[$column])
+                    && $record->incapacityToDerived
+                    && $record->acceptsIncapacityTo((string) $existing)
+                ) {
+                    continue;
+                }
                 $fields[$column] = $value;
                 $this->change($plan, $column, $label2, $existing === null ? null : $this->display($existing), $this->display($value));
                 if ($column === 'incapacity_to' && $existing !== null) {
@@ -390,6 +400,12 @@ final class SicknessImportPlanner
             return $this->finish($plan, $this->missingEventBlocker($record));
         }
         $eventTo = $record->incapacityTo ?? $found['event_to'];
+        if ($record->incapacityToDerived && $found['event_to'] !== null
+            && $record->acceptsIncapacityTo($found['event_to'])
+        ) {
+            // Skutečný konec schválené neschopnosti má přednost před odvozeným.
+            $eventTo = $found['event_to'];
+        }
         $kind = $record->kind;
         $document = $record->document;
         $plan['benefit']['incapacity_from'] = $eventFrom;
@@ -527,15 +543,27 @@ final class SicknessImportPlanner
                 return ['blocker' => 'Hlášení nenese datum návratu do práce, takže ho nejde přiřadit k neschopnosti. '
                     . 'Zapište jeho výsledek ručně v Podání → Dávky nemocenského pojištění.'] + $none;
             }
-            $covering = $this->cases->overlappingForEmployment($supplierId, $environment, $employmentId, $kind, $end, $end);
-            if (count($covering) === 1) {
-                return ['case' => $this->caseService->requireCase($supplierId, $environment, (int) $covering[0]['id'])] + $none;
+            // Odvozený konec (den před návratem) je horní mez: po víkendu mohla
+            // neschopnost skončit už v pátek. Nejdřív se zkusí přesný den,
+            // teprve potom okno přes víkend.
+            $windowStart = $record->incapacityToWindowStart() ?? $end;
+            foreach (array_unique([$end, $windowStart]) as $from) {
+                $covering = $this->cases->overlappingForEmployment($supplierId, $environment, $employmentId, $kind, $from, $end);
+                if (count($covering) === 1) {
+                    return ['case' => $this->caseService->requireCase($supplierId, $environment, (int) $covering[0]['id'])] + $none;
+                }
+                if (count($covering) > 1) {
+                    return ['blocker' => 'Konec neschopnosti ' . $end . ' spadá do víc případů téhož vztahu. Zrušte duplicitní případ a import zopakujte.'] + $none;
+                }
             }
-            if (count($covering) > 1) {
-                return ['blocker' => 'Konec neschopnosti ' . $end . ' spadá do víc případů téhož vztahu. Zrušte duplicitní případ a import zopakujte.'] + $none;
+            foreach (array_unique([$end, $windowStart]) as $from) {
+                $found = $this->fromAbsence($supplierId, $employmentId, $record, $from, $end, null, null);
+                if ($found['event_from'] !== null || $found['blocker'] !== null && $from === $windowStart) {
+                    return $found;
+                }
             }
 
-            return $this->fromAbsence($supplierId, $employmentId, $record, $end, $end, null, null);
+            return $found;
         }
 
         $monthStart = $record->eventMonthStart();

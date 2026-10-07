@@ -53,6 +53,21 @@ final class RegistrationXmlReaderTest extends TestCase
         ], $record->permanentAddress);
     }
 
+    /**
+     * `fdr` (adresa pobytu v ČR) atribut státu nemá; bez doplnění `CZ` by
+     * profil A1 nesl adresu bez státu a A1/A3 by se z něj nedalo sestavit.
+     */
+    public function testCzechResidenceAddressGetsCzechCountry(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::regzecA1(['fdr' => '60200']));
+
+        $profile = $read['records'][0]->a1Profile;
+        self::assertSame('CZ', $profile['czech_residence_address']['country_code']);
+        self::assertSame('60200', $profile['czech_residence_address']['postal_code']);
+        self::assertSame('Brno', $profile['czech_residence_address']['city']);
+        self::assertSame('CZ', $profile['permanent_address']['country_code']);
+    }
+
     /** IMP-01, IMP-06, IMP-07: VS (starý i nový) zaměstnavatele, dřívější příjmení a VČP se čtou. */
     public function testEmployerSymbolsFormerSurnameAndVcpAreRead(): void
     {

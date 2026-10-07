@@ -443,7 +443,7 @@ final class RegistrationXmlReader
 
         return self::present([
             'permanent_address' => $this->profileAddress($node('r:client/r:adr')),
-            'czech_residence_address' => $this->profileAddress($node('r:client/r:fdr')),
+            'czech_residence_address' => $this->profileAddress($node('r:client/r:fdr'), true),
             'contact_address' => $this->profileAddress($node('r:client/r:cdr')),
             'tax_residency' => self::present([
                 'country_code' => $this->upper($this->attribute($residency, 'stat')),
@@ -496,8 +496,12 @@ final class RegistrationXmlReader
         ]);
     }
 
-    /** @return array<string,string>|null */
-    private function profileAddress(?DOMElement $node): ?array
+    /**
+     * @param bool $czech `fdr` (czAdrType) je podle schématu vždy adresa pobytu
+     *                    v ČR a atribut `cnt` nemá, takže se stát doplní zde
+     * @return array<string,string>|null
+     */
+    private function profileAddress(?DOMElement $node, bool $czech = false): ?array
     {
         if ($node === null) {
             return null;
@@ -511,6 +515,9 @@ final class RegistrationXmlReader
             'country_code' => $this->upper($this->attribute($node, 'cnt')),
             'ruian_point' => $this->attribute($node, 'ruianpoint'),
         ]);
+        if ($czech && $address !== []) {
+            $address['country_code'] = 'CZ';
+        }
 
         return $address === [] ? null : $address;
     }

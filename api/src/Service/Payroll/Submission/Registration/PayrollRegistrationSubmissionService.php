@@ -713,11 +713,21 @@ final readonly class PayrollRegistrationSubmissionService
     ): void {
         $identity = $source['identity'] ?? null;
         $identifiers = $source['identifiers'] ?? null;
+        $eventAction = is_array($event) && isset($event['action_code'])
+            ? (int) $event['action_code']
+            : null;
+        $completion = is_array($event['data'] ?? null)
+            && is_string($event['data']['completion'] ?? null)
+            ? $event['data']['completion']
+            : null;
         $problems = is_array($identity)
             ? PayrollRegistrationIdentityRequirements::missing(
                 $agenda,
                 $identity,
                 is_array($identifiers) ? $identifiers : [],
+                null,
+                $eventAction,
+                $completion,
             )
             : [];
 
