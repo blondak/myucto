@@ -92,6 +92,8 @@ export interface PayrollAbsence {
   employment_id: number
   full_name: string
   employment_code: string
+  /** Druh pracovního vztahu; u DPP a DPČ se nárok na náhradu při DPN ověřuje zvlášť. */
+  relation_type?: string
   absence_type: AbsenceType
   date_from: string
   date_to: string

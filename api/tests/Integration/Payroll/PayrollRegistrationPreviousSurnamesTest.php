@@ -65,7 +65,8 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         }
     }
 
-    public function testCollectsEarlierSurnamesNewestFirstWithoutCurrentAndBirthSurname(): void
+    /** Rodné příjmení bylo dřívějším příjmením; Money S3 i ČSSZ ho v `ona` berou. */
+    public function testCollectsEarlierSurnamesNewestFirstWithoutCurrentIncludingBirthSurname(): void
     {
         $this->history('2019-01-01', '2020-12-31', 'Nguyen Quoc', null);
         $this->history('2021-01-01', '2023-12-31', 'Dvořáková', null);
@@ -73,24 +74,22 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         $this->history('2018-01-01', '2018-12-31', 'Nováková', null);
 
         self::assertSame(
-            'Dvořáková, Nguyen Quoc',
+            'Dvořáková, Nguyen Quoc, Nováková',
             $this->repository->previousSurnames(
                 $this->supplierId,
                 $this->employeeId,
                 '2026-08-04',
                 'Novotná',
-                'Nováková',
             ),
         );
         // K dřívějšímu dni se budoucí příjmení nepočítá.
         self::assertSame(
-            'Nguyen Quoc',
+            'Nguyen Quoc, Nováková',
             $this->repository->previousSurnames(
                 $this->supplierId,
                 $this->employeeId,
                 '2022-06-01',
                 'Dvořáková',
-                'Nováková',
             ),
         );
     }
@@ -104,7 +103,6 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
             $this->employeeId,
             '2026-08-04',
             'Novotná',
-            null,
         ));
         $identity = $this->service->sensitiveIdentityAt(
             $this->supplierId,
@@ -141,7 +139,6 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
             $this->employeeId,
             '2026-08-04',
             'Novotná',
-            null,
         );
 
         self::assertSame(str_repeat('C', 40) . ', ' . str_repeat('B', 40), $previous);

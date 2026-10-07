@@ -89,9 +89,9 @@ final readonly class PayrollRegistrationIdentityService
 
     /**
      * Dřívější příjmení osoby ke dni `$onDate` do atributu `name/@ona`
-     * (ID 10064): příjmení z dřívějších verzí identity, která se liší od
-     * platného, oddělená čárkou. `null`, když osoba dřívější příjmení nemá.
-     * Atribut má nejvýš 100 znaků; při přetečení se zahodí nejstarší jména.
+     * (ID 10064). Pravidlo drží jediné místo, viz
+     * {@see PayrollRegistrationIdentityRepository::previousSurnames()}, ze
+     * kterého čte i plná věta A1.
      */
     public function previousSurnames(
         int $supplierId,
@@ -101,27 +101,18 @@ final readonly class PayrollRegistrationIdentityService
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
         $this->date($onDate, 'Rozhodné datum');
-        $names = $this->repository->surnamesUpTo($supplierId, $employeeId, $onDate);
-        if ($names === []) {
+        $identity = $this->repository->identityAt($supplierId, $employeeId, $onDate);
+        $current = trim((string) ($identity['last_name'] ?? ''));
+        if ($current === '') {
             return null;
-        }
-        $current = $names[array_key_last($names)];
-        $previous = [];
-        foreach (array_slice($names, 0, -1) as $name) {
-            if ($name !== $current && !in_array($name, $previous, true)) {
-                $previous[] = $name;
-            }
-        }
-        if ($previous === []) {
-            return null;
-        }
-        while (count($previous) > 1
-            && mb_strlen(implode(', ', $previous), 'UTF-8') > 100
-        ) {
-            array_shift($previous);
         }
 
-        return mb_substr(implode(', ', $previous), 0, 100, 'UTF-8');
+        return $this->repository->previousSurnames(
+            $supplierId,
+            $employeeId,
+            $onDate,
+            $current,
+        );
     }
 
     /**
@@ -1220,7 +1211,6 @@ final readonly class PayrollRegistrationIdentityService
             $employeeId,
             $onDate,
             (string) $identity['last_name'],
-            $this->nullableText($identity['birth_surname'] ?? null),
             $forUpdate,
         );
         if ($previousSurnames !== null) {

@@ -80,8 +80,10 @@ final class PayrollRegistrationIdentityRepository
 
     /**
      * Dřívější příjmení osoby k danému dni (ID 10064): příjmení z dřívějších
-     * záznamů historie jména, bez aktuálního příjmení a bez rodného příjmení,
-     * od nejnovějšího, oddělená čárkou. `null`, když žádné nejsou.
+     * záznamů historie jména, bez aktuálního příjmení, od nejnovějšího,
+     * oddělená čárkou. `null`, když žádné nejsou. Rodné příjmení se
+     * nevynechává: bylo dřívějším příjmením a přijatá podání jiných programů
+     * ho v tomto atributu uvádějí.
      *
      * Atribut má v REGZEC25 nejvýš 100 znaků; vejdou se jen celá příjmení,
      * nejstarší případně vypadnou (nikdy se příjmení neuřízne).
@@ -91,7 +93,6 @@ final class PayrollRegistrationIdentityRepository
         int $employeeId,
         string $onDate,
         string $currentSurname,
-        ?string $birthSurname,
         bool $forUpdate = false,
     ): ?string {
         $statement = $this->db->pdo()->prepare(
@@ -106,9 +107,6 @@ final class PayrollRegistrationIdentityRepository
         );
         $statement->execute([$supplierId, $employeeId, $onDate]);
         $excluded = [mb_strtolower(trim($currentSurname))];
-        if ($birthSurname !== null && trim($birthSurname) !== '') {
-            $excluded[] = mb_strtolower(trim($birthSurname));
-        }
         $names = [];
         $length = 0;
         foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $raw) {
@@ -127,36 +125,6 @@ final class PayrollRegistrationIdentityRepository
         }
 
         return $names === [] ? null : implode(', ', $names);
-    }
-
-    /**
-     * Příjmení osoby ve všech verzích identity platných nejpozději ke dni
-     * `$onDate`, od nejstaršího. Podklad pro dřívější příjmení (`name/@ona`,
-     * ID 10064).
-     *
-     * @return list<string>
-     */
-    public function surnamesUpTo(
-        int $supplierId,
-        int $employeeId,
-        string $onDate,
-    ): array {
-        $statement = $this->db->pdo()->prepare(
-            'SELECT last_name
-               FROM payroll_person_identity_history
-              WHERE supplier_id = ?
-                AND employee_id = ?
-                AND effective_from <= ?
-                AND last_name IS NOT NULL
-                AND last_name <> \'\'
-              ORDER BY effective_from ASC, id ASC'
-        );
-        $statement->execute([$supplierId, $employeeId, $onDate]);
-
-        return array_values(array_map(
-            static fn (mixed $value): string => (string) $value,
-            $statement->fetchAll(PDO::FETCH_COLUMN),
-        ));
     }
 
     /**

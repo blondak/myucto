@@ -945,7 +945,13 @@
         "1961_ollama_provider.sql",
         "1962_payroll_personnel_file.sql",
         "1963_supplier_auto_send_reminders_default_off.sql",
-        "1964_supplier_tax_representation_code.sql"
+        "1964_supplier_tax_representation_code.sql",
+        "1965_payroll_sickness_compensation_chain.sql",
+        "1966_payroll_takeover_sickness_excluded_days.sql",
+        "1967_payroll_sickness_case_document_status.sql",
+        "1968_payroll_health_insurance_number_identifier.sql",
+        "1969_payroll_eldp_pension_status.sql",
+        "1970_payroll_discount_intent_predecessor.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -8799,6 +8805,8 @@
                 "intent_from": "date NOT NULL",
                 "intent_to": "date NULL DEFAULT NULL",
                 "ossz_code": "smallint(5) unsigned NOT NULL",
+                "predecessor_reference": "varchar(190) NULL DEFAULT NULL",
+                "predecessor_source": "varchar(32) NULL DEFAULT NULL",
                 "rejection_reason": "varchar(190) NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "start_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -8831,6 +8839,7 @@
                 "chk_payroll_discount_intent_ended": "`status` = 'ended' and `intent_to` is not null and `ended_accepted_on` is not null or `status` <> 'ended' and `ended_accepted_on` is null",
                 "chk_payroll_discount_intent_ossz": "`ossz_code` between 100 and 999",
                 "chk_payroll_discount_intent_period": "`intent_to` is null or `intent_to` >= `intent_from`",
+                "chk_payroll_discount_intent_predecessor": "`predecessor_source` is null or `predecessor_source` = 'ozuspoj_xml' and `predecessor_reference` is not null and `start_submission_id` is null",
                 "chk_payroll_discount_intent_rejected": "`status` = 'rejected' and `rejection_reason` is not null or `status` <> 'rejected' and `rejection_reason` is null"
             }
         },
@@ -9334,7 +9343,7 @@
                 "fk_payroll_eldp_statement_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_payroll_eldp_statement_builder": "`builder_version` in ('eldp-annual-statement.v1','eldp-annual-statement.v2','eldp-annual-statement.v3')",
+                "chk_payroll_eldp_statement_builder": "`builder_version` in ('eldp-annual-statement.v1','eldp-annual-statement.v2','eldp-annual-statement.v3','eldp-annual-statement.v4')",
                 "chk_payroll_eldp_statement_ciphertext": "`statement_ciphertext` like 'enc:v2:%'",
                 "chk_payroll_eldp_statement_correction": "`statement_sequence` = 1 and `corrects_statement_id` is null or `statement_sequence` > 1 and `corrects_statement_id` is not null",
                 "chk_payroll_eldp_statement_days": "`insurance_days` between 0 and 366 and `excluded_days_total` <= `insurance_days` and `deducted_days_total` <= `insurance_days`",
@@ -12635,10 +12644,12 @@
                 "relation_type": "varchar(32) NULL DEFAULT NULL",
                 "relationship_end_date": "date NULL DEFAULT NULL",
                 "relationship_start_date": "date NULL DEFAULT NULL",
+                "sickness_excluded_days": "smallint(5) unsigned NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "source": "enum('pamica','pohoda','money_s3','other','jmhz','stereo_nx') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "uninsured_income_minor": "bigint(20) NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "withholding_tax_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "worked_days_hundredths": "int(10) unsigned NOT NULL DEFAULT 0",
@@ -12656,8 +12667,10 @@
             },
             "checks": {
                 "chk_pmrt_period_first_day": "dayofmonth(`period_start`) = 1",
+                "chk_pmrt_sickness_excluded_days": "`sickness_excluded_days` is null or `sickness_excluded_days` <= 31",
                 "chk_pmrt_takeover_days": "`insurance_days` <= 31 and `excluded_days` <= 31",
-                "chk_pmrt_takeover_relationship_span": "`relationship_start_date` is null or `relationship_end_date` is null or `relationship_end_date` >= `relationship_start_date`"
+                "chk_pmrt_takeover_relationship_span": "`relationship_start_date` is null or `relationship_end_date` is null or `relationship_end_date` >= `relationship_start_date`",
+                "chk_pmrt_uninsured_income": "`uninsured_income_minor` is null or `uninsured_income_minor` >= 0"
             }
         },
         "payroll_module_state": {
@@ -14180,7 +14193,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "identifier_type": "enum('birth_number','ecp','vcp','foreign_tax_identifier') NOT NULL",
+                "identifier_type": "enum('birth_number','ecp','vcp','foreign_tax_identifier','health_insurance_number') NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -15670,7 +15683,6 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "absence_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "accepted_on": "date NULL DEFAULT NULL",
                 "action_continuation": "tinyint(1) NOT NULL DEFAULT 0",
                 "action_end": "tinyint(1) NOT NULL DEFAULT 0",
                 "action_start": "tinyint(1) NOT NULL DEFAULT 1",
@@ -15679,6 +15691,7 @@
                 "application_from": "date NULL DEFAULT NULL",
                 "application_to": "date NULL DEFAULT NULL",
                 "benefit_kind": "enum('NEM','VPM','OPP','PPM','OSE','DLO') NOT NULL",
+                "cancelled": "tinyint(1) NOT NULL DEFAULT 0",
                 "care_days": "longtext NULL DEFAULT NULL",
                 "care_reason": "enum('ill','quarantine','cannot_care','school_closed') NULL DEFAULT NULL",
                 "cared_birth_date": "date NULL DEFAULT NULL",
@@ -15697,14 +15710,21 @@
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "daily_working_hours": "decimal(4,2) NULL DEFAULT NULL",
                 "decision_number": "varchar(18) NULL DEFAULT NULL",
+                "dlo_has_leave": "tinyint(1) NULL DEFAULT NULL",
+                "dlo_leave_periods": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "dlo_shift_schedule": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "enforcement": "tinyint(1) NOT NULL DEFAULT 0",
                 "environment": "enum('production','test') NOT NULL",
+                "external_reference": "varchar(190) NULL DEFAULT NULL",
                 "first_employment_free_time": "tinyint(1) NOT NULL DEFAULT 0",
                 "foreign_case": "tinyint(1) NOT NULL DEFAULT 0",
                 "hours_worked": "decimal(7,2) NULL DEFAULT NULL",
                 "hours_worked_last_day": "decimal(4,2) NULL DEFAULT NULL",
+                "hzupn_accepted_on": "date NULL DEFAULT NULL",
+                "hzupn_rejection_reason": "varchar(190) NULL DEFAULT NULL",
+                "hzupn_status": "enum('pending','accepted','rejected','predecessor') NOT NULL DEFAULT 'pending'",
                 "hzupn_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "incapacity_from": "date NOT NULL",
@@ -15717,6 +15737,9 @@
                 "long_term_care_consent_on": "date NULL DEFAULT NULL",
                 "long_term_care_refusal_reason": "varchar(500) NULL DEFAULT NULL",
                 "maternity_care_reason": "varchar(3) NULL DEFAULT NULL",
+                "nempri_accepted_on": "date NULL DEFAULT NULL",
+                "nempri_rejection_reason": "varchar(190) NULL DEFAULT NULL",
+                "nempri_status": "enum('pending','accepted','rejected','predecessor') NOT NULL DEFAULT 'pending'",
                 "nempri_submission_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "ossz_code": "smallint(5) unsigned NOT NULL",
                 "other_maternity_claim": "tinyint(1) NULL DEFAULT NULL",
@@ -15729,7 +15752,6 @@
                 "planned_shifts_worked": "tinyint(1) NULL DEFAULT NULL",
                 "probable_income_czk": "bigint(20) unsigned NULL DEFAULT NULL",
                 "receives_pension": "tinyint(1) NOT NULL DEFAULT 0",
-                "rejection_reason": "varchar(190) NULL DEFAULT NULL",
                 "relationship_code": "varchar(3) NULL DEFAULT NULL",
                 "return_reason": "varchar(200) NULL DEFAULT NULL",
                 "returned_on": "date NULL DEFAULT NULL",
@@ -15740,9 +15762,11 @@
                 "shared_household": "tinyint(1) NULL DEFAULT NULL",
                 "shift_hours_last_day": "decimal(4,2) NULL DEFAULT NULL",
                 "small_scope_income_minor": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source": "enum('myucto','predecessor') NOT NULL DEFAULT 'myucto'",
                 "starts_maternity": "tinyint(1) NULL DEFAULT NULL",
-                "status": "enum('draft','prepared','submitted','accepted','rejected','cancelled') NOT NULL DEFAULT 'draft'",
+                "status": "enum('draft','prepared','submitted','accepted','rejected','cancelled') NULL DEFAULT NULL VIRTUAL GENERATED AS (case when `cancelled` = 1 then 'cancelled' when `nempri_status` = 'rejected' or `hzupn_status` = 'rejected' then 'rejected' when `nempri_status` in ('accepted','predecessor') and (`benefit_kind` <> 'NEM' or `hzupn_status` in ('accepted','predecessor')) then 'accepted' when `nempri_status` in ('accepted','predecessor') or `hzupn_status` in ('accepted','predecessor') then 'submitted' when `nempri_submission_id` is not null or `hzupn_submission_id` is not null then 'prepared' else 'draft' end)",
                 "supplier_id": "int(10) unsigned NOT NULL",
+                "transfer_reason": "varchar(16) NULL DEFAULT NULL",
                 "transferred_on": "date NULL DEFAULT NULL",
                 "transferred_other_work": "tinyint(1) NOT NULL DEFAULT 0",
                 "unpaid_leave": "tinyint(1) NOT NULL DEFAULT 0",
@@ -15762,8 +15786,8 @@
                 "fk_payroll_sickness_case_hzupn_submission": "BTREE (supplier_id, environment, hzupn_submission_id)",
                 "fk_payroll_sickness_case_nempri_submission": "BTREE (supplier_id, environment, nempri_submission_id)",
                 "idx_payroll_sickness_case_absence": "BTREE (supplier_id, absence_id)",
+                "idx_payroll_sickness_case_documents": "BTREE (supplier_id, environment, cancelled, nempri_status, hzupn_status)",
                 "idx_payroll_sickness_case_employee": "BTREE (supplier_id, environment, employee_id, incapacity_from)",
-                "idx_payroll_sickness_case_status": "BTREE (supplier_id, environment, status, incapacity_from)",
                 "uq_payroll_sickness_case_environment_id": "UNIQUE BTREE (supplier_id, environment, id)",
                 "uq_payroll_sickness_case_scope": "UNIQUE BTREE (supplier_id, environment, employment_id, benefit_kind, incapacity_from)",
                 "uq_payroll_sickness_case_supplier_id": "UNIQUE BTREE (supplier_id, id)"
@@ -15778,21 +15802,26 @@
                 "fk_payroll_sickness_case_nempri_submission": "(supplier_id, environment, nempri_submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_payroll_sickness_case_accepted": "`status` = 'accepted' and `accepted_on` is not null or `status` <> 'accepted' and `accepted_on` is null",
                 "chk_payroll_sickness_case_application": "`application_to` is null or `application_from` is null or `application_to` >= `application_from`",
                 "chk_payroll_sickness_case_care_days": "`care_days` is null or json_valid(`care_days`)",
                 "chk_payroll_sickness_case_child_order": "`child_order` is null or `child_order` between 1 and 10",
                 "chk_payroll_sickness_case_codes": "(`relationship_code` is null or `relationship_code` regexp cast('^[0-9A-Z]{1,3}$' as char charset binary)) and (`paternity_reason` is null or `paternity_reason` regexp cast('^[0-9A-Z]{1,3}$' as char charset binary)) and (`maternity_care_reason` is null or `maternity_care_reason` regexp cast('^[0-9A-Z]{1,3}$' as char charset binary))",
                 "chk_payroll_sickness_case_correction": "`correction` = 0 or `decision_number` is not null",
+                "chk_payroll_sickness_case_dlo_basis": "`benefit_kind` = 'DLO' and (`dlo_leave_periods` is null or `dlo_has_leave` = 1) or `dlo_has_leave` is null and `dlo_leave_periods` is null and `dlo_shift_schedule` is null",
                 "chk_payroll_sickness_case_hours": "(`daily_working_hours` is null or `daily_working_hours` >= 0 and `daily_working_hours` <= 24) and (`hours_worked_last_day` is null or `hours_worked_last_day` >= 0 and `hours_worked_last_day` <= 24) and (`shift_hours_last_day` is null or `shift_hours_last_day` >= 0 and `shift_hours_last_day` <= 24) and (`hours_worked` is null or `hours_worked` >= 0 and `hours_worked` <= 99999)",
+                "chk_payroll_sickness_case_hzupn_kind": "`benefit_kind` = 'NEM' or `hzupn_status` = 'pending'",
+                "chk_payroll_sickness_case_hzupn_receipt": "`hzupn_status` = 'accepted' and `hzupn_accepted_on` is not null and `hzupn_rejection_reason` is null or `hzupn_status` = 'rejected' and `hzupn_accepted_on` is null and `hzupn_rejection_reason` is not null or `hzupn_status` = 'predecessor' and `hzupn_rejection_reason` is null or `hzupn_status` = 'pending' and `hzupn_accepted_on` is null and `hzupn_rejection_reason` is null",
                 "chk_payroll_sickness_case_ltc_consent": "`long_term_care_consent` is null and `long_term_care_consent_on` is null and `long_term_care_refusal_reason` is null or `benefit_kind` = 'DLO' and `long_term_care_consent_on` is not null and (`long_term_care_consent` = 'granted' and `long_term_care_refusal_reason` is null or `long_term_care_consent` = 'refused' and `long_term_care_refusal_reason` is not null)",
+                "chk_payroll_sickness_case_nempri_receipt": "`nempri_status` = 'accepted' and `nempri_accepted_on` is not null and `nempri_rejection_reason` is null or `nempri_status` = 'rejected' and `nempri_accepted_on` is null and `nempri_rejection_reason` is not null or `nempri_status` = 'predecessor' and `nempri_rejection_reason` is null or `nempri_status` = 'pending' and `nempri_accepted_on` is null and `nempri_rejection_reason` is null",
                 "chk_payroll_sickness_case_ossz": "`ossz_code` between 100 and 999",
                 "chk_payroll_sickness_case_payment_date": "`payroll_payment_date` is null or `benefit_kind` = 'VPM'",
                 "chk_payroll_sickness_case_period": "`incapacity_to` is null or `incapacity_to` >= `incapacity_from`",
-                "chk_payroll_sickness_case_rejected": "`status` = 'rejected' and `rejection_reason` is not null or `status` <> 'rejected' and `rejection_reason` is null",
                 "chk_payroll_sickness_case_return": "`returned_to_work` is null or `returned_to_work` = 0 or `returned_on` is not null",
                 "chk_payroll_sickness_case_transfer": "`transferred_other_work` = 1 and `transferred_on` is not null or `transferred_other_work` = 0 and `transferred_on` is null",
-                "chk_payroll_sickness_case_unpaid_leave": "`unpaid_leave` = 1 and `unpaid_leave_from` is not null and (`unpaid_leave_to` is null or `unpaid_leave_to` >= `unpaid_leave_from`) or `unpaid_leave` = 0 and `unpaid_leave_from` is null and `unpaid_leave_to` is null"
+                "chk_payroll_sickness_case_transfer_reason": "`transfer_reason` is null or `transfer_reason` in ('pregnancy','maternity','breastfeeding') and `transferred_other_work` = 1",
+                "chk_payroll_sickness_case_unpaid_leave": "`unpaid_leave` = 1 and `unpaid_leave_from` is not null and (`unpaid_leave_to` is null or `unpaid_leave_to` >= `unpaid_leave_from`) or `unpaid_leave` = 0 and `unpaid_leave_from` is null and `unpaid_leave_to` is null",
+                "dlo_leave_periods": "json_valid(`dlo_leave_periods`)",
+                "dlo_shift_schedule": "json_valid(`dlo_shift_schedule`)"
             }
         },
         "payroll_sickness_compensation_segments": {
@@ -15833,10 +15862,14 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "absence_id": "bigint(20) unsigned NOT NULL",
-                "average_snapshot_id": "bigint(20) unsigned NOT NULL",
+                "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "calculated_by": "int(10) unsigned NULL DEFAULT NULL",
                 "calculation_trace": "longtext NOT NULL COLLATE utf8mb4_bin",
                 "compensation_minor": "bigint(20) unsigned NOT NULL",
+                "compensation_reduction": "enum('none','half_192_4','reduced_192_5') NOT NULL DEFAULT 'none'",
+                "compensation_reduction_basis_points": "smallint(5) unsigned NULL DEFAULT NULL",
+                "compensation_reduction_minor": "bigint(20) unsigned NULL DEFAULT NULL",
+                "compensation_reduction_reason": "varchar(500) NULL DEFAULT NULL",
                 "compensation_window_from": "date NOT NULL",
                 "compensation_window_to": "date NOT NULL",
                 "conflicting_benefit_excluded": "tinyint(1) NOT NULL DEFAULT 0",
@@ -15864,9 +15897,11 @@
             },
             "checks": {
                 "calculation_trace": "json_valid(`calculation_trace`)",
+                "chk_payroll_sickness_average": "`average_snapshot_id` is not null or `compensation_minor` = 0",
                 "chk_payroll_sickness_flags": "`first_day_fully_worked` in (0,1) and `insurance_eligibility_confirmed` in (0,1) and `conflicting_benefit_excluded` in (0,1)",
+                "chk_payroll_sickness_reduction": "`compensation_reduction` = 'none' and `compensation_reduction_basis_points` is null and `compensation_reduction_minor` is null and `compensation_reduction_reason` is null or `compensation_reduction` = 'half_192_4' and `compensation_reduction_basis_points` = 5000 and `compensation_reduction_minor` is null and `compensation_reduction_reason` is not null or `compensation_reduction` = 'reduced_192_5' and `compensation_reduction_reason` is not null and (`compensation_reduction_basis_points` between 1 and 10000 and `compensation_reduction_minor` is null or `compensation_reduction_basis_points` is null and `compensation_reduction_minor` > 0)",
                 "chk_payroll_sickness_trace": "json_valid(`calculation_trace`)",
-                "chk_payroll_sickness_window": "`compensation_window_to` >= `compensation_window_from` and to_days(`compensation_window_to`) - to_days(`compensation_window_from`) <= 92"
+                "chk_payroll_sickness_window": "`compensation_window_to` >= `compensation_window_from` - interval 1 day and to_days(`compensation_window_to`) - to_days(`compensation_window_from`) <= 92"
             }
         },
         "payroll_sickness_input_materializations": {

@@ -1983,7 +1983,7 @@ onMounted(async () => {
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].firstDayFullyWorked" type="checkbox"> {{ t('payroll_absence.dpn.first_day_worked') }}</label>
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].notEligible" type="checkbox" data-test="dpn-not-eligible"> {{ t('payroll_absence.dpn.not_eligible') }}</label>
               <p
-                v-if="dpnReviews[item.id].notEligible || ['dpp', 'dpc'].includes(item.relation_type)"
+                v-if="dpnReviews[item.id].notEligible || ['dpp', 'dpc'].includes(item.relation_type ?? '')"
                 class="text-warning-800"
                 data-test="dpn-not-eligible-hint"
               >{{ t('payroll_absence.dpn.not_eligible_hint') }}</p>
