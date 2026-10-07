@@ -494,6 +494,40 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * 10321 = 10322 + 10323 (kontrola 78). Bez přeplatku na dani (10322 = 0)
+     * a s přeplaceným bonusem, který zaměstnanec vrací (10323 = −230), je
+     * výsledek záporný. XSD `cisloN14Type` i Pokyny MH (kap. 2.4.8) zápornou
+     * hodnotu připouštějí; dřív ji serializér odmítl jako nevyřešený atribut.
+     */
+    public function testNegativeAnnualSettlementResultIsSerializedWithSign(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['people'][0]['summary']['annual'] = [
+            'performed' => true,
+            'result' => [
+                'settlement_difference_czk' => -230,
+                'tax_difference_czk' => 0,
+                'bonus_difference_czk' => -230,
+                'spouse_credit_claimed' => false,
+                'child_credit_claimed' => false,
+            ],
+        ];
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($payload), []),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertStringContainsString('<form:preplatekRok>-230</form:preplatekRok>', $xml);
+        self::assertStringContainsString('<form:danPreplatekRok>0</form:danPreplatekRok>', $xml);
+        self::assertStringContainsString(
+            '<form:danBonusPreplatekRok>-230</form:danBonusPreplatekRok>',
+            $xml,
+        );
+        self::assertSame([], $this->failedControls($xml, [78]));
+    }
+
     public function testCorrectionAggregatesComeFromTheWholePreparationNotSelectedForms(): void
     {
         $payload = $this->resolution()->requireResolvedDocument()->payload;

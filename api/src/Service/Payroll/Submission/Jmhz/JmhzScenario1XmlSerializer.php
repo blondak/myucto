@@ -1331,18 +1331,29 @@ final class JmhzScenario1XmlSerializer
                     JmhzSchemaCatalog::NS_FORM,
                     'form:vysledekRocnihoZuctovani',
                 );
-                foreach ([
-                    'form:preplatekRok' => ['settlement_difference_czk', '10321'],
-                    'form:danPreplatekRok' => ['tax_difference_czk', '10322'],
-                ] as $element => [$key, $attributeId]) {
-                    $this->text(
-                        $dom,
-                        $resultNode,
-                        JmhzSchemaCatalog::NS_FORM,
-                        $element,
-                        (string) $this->int($result[$key] ?? null, $attributeId),
-                    );
-                }
+                /*
+                 * 10321 je součet 10322 + 10323 (kontrola 78) a 10323 nese
+                 * přeplacený bonus záporně, takže výsledek smí být záporný
+                 * (Pokyny MH 1.4.14 kap. 2.4.8, `cisloN14Type`). Nedoplatek
+                 * na dani se v 10322 vykazuje nulou, proto zůstává nezáporný.
+                 */
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:preplatekRok',
+                    (string) $this->signedInt(
+                        $result['settlement_difference_czk'] ?? null,
+                        '10321',
+                    ),
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danPreplatekRok',
+                    (string) $this->int($result['tax_difference_czk'] ?? null, '10322'),
+                );
                 $this->text(
                     $dom,
                     $resultNode,
