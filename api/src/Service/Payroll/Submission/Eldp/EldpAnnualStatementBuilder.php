@@ -132,8 +132,9 @@ final class EldpAnnualStatementBuilder
             = new EldpDeadlinePolicy(),
         /**
          * Dnešek pro logický test ELDP12 č. 54 (datum vyhotovení nejpozději
-         * v den přijetí). Kontejner ho dodá vždy; bez hodin (čisté sestavení
-         * v testech) se datum vyhotovení proti dnešku neporovnává.
+         * v den přijetí). Kontejner ho dodá explicitní definicí v Bootstrapu
+         * (PHP-DI volitelný parametr autowiringem nevyplní); bez hodin (čisté
+         * sestavení v testech) se datum vyhotovení proti dnešku neporovnává.
          */
         private readonly ?ClockInterface $clock = null,
     ) {}

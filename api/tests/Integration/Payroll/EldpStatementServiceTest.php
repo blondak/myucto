@@ -438,6 +438,35 @@ final class EldpStatementServiceTest extends TestCase
         $this->prepare('synthetic-eldp-correction', true);
     }
 
+    /**
+     * Logický test ELDP12 č. 54 musí platit i ve službě z kontejneru. PHP-DI
+     * volitelný parametr hodin autowiringem nevyplní, takže bez explicitní
+     * definice by builder datum vyhotovení proti dnešku vůbec neporovnal.
+     */
+    public function testContainerBuilderRefusesPreparedOnInTheFuture(): void
+    {
+        try {
+            $this->service->prepare(
+                $this->supplierId,
+                $this->employmentId,
+                2025,
+                'test',
+                [
+                    'excluded_days_confirmed' => true,
+                    'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                    'requested_by_authority' => false,
+                    'note' => 'Syntetický evidenční list s datem vyhotovení v budoucnosti.',
+                    'prepared_on' => '2099-12-31',
+                ],
+                'synthetic-eldp-future-prepared-on',
+                $this->createdBy,
+            );
+            self::fail('Datum vyhotovení v budoucnosti musí služba z kontejneru odmítnout.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_prepared_on_future', $exception->validationCode);
+        }
+    }
+
     public function testManualCompletionRequiresSessionAndBothPermissions(): void
     {
         $bearer = $this->action->complete(
