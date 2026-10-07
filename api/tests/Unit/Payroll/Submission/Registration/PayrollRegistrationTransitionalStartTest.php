@@ -90,8 +90,12 @@ final class PayrollRegistrationTransitionalStartTest extends TestCase
         }
     }
 
-    /** EDV 10223: druh činnosti 10–16 a výkon trestu až od 1. 1. 2026. */
-    public function testSpecialActivitiesCannotStartBefore2026(): void
+    /**
+     * EDV 10223: druh činnosti 10–16 a výkon trestu až od 1. 1. 2026. Zásady
+     * REGZEC (specifický postup č. 3) pro dřívější vztahy předepisují fiktivní
+     * nástup 1. 1. 2026, takže přihláška se nezamítá, ale hlásí s tímto datem.
+     */
+    public function testSpecialActivitiesBeforeTwentyTwentySixAreNotRejected(): void
     {
         $source = self::source('11', '1');
         foreach (['source', 'employment'] as $section) {
@@ -100,20 +104,12 @@ final class PayrollRegistrationTransitionalStartTest extends TestCase
         }
         $source['employment']['contract_start_on'] = '2025-12-01';
         $scope = ['effective_on' => '2025-12-01'] + self::scope();
-        $fields = array_column(
-            (new PayrollRegistrationA1SnapshotBuilder())->problems(
-                $source,
-                PayrollRegistrationA1SnapshotBuilderTest::identity(),
-                $scope,
-            ),
-            'code',
-            'field',
-        );
 
-        self::assertSame(
-            'registration_regzec_a1_start_before_2026',
-            $fields['employment.actual_start_on'] ?? null,
-        );
+        self::assertSame([], (new PayrollRegistrationA1SnapshotBuilder())->problems(
+            $source,
+            PayrollRegistrationA1SnapshotBuilderTest::identity(),
+            $scope,
+        ));
     }
 
     /** @return array<string,mixed> */

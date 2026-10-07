@@ -269,6 +269,7 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
     {
         $source = PayrollRegistrationA1SnapshotBuilderTest::source('1', '1');
         $source['permanent_address']['postal_code'] = ' 602 00 ';
+        $source['permanent_address']['country_code'] = 'SK';
         $source['czech_residence_address'] = [
             'street' => 'Testovací',
             'house_number' => '5',
@@ -295,6 +296,7 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
     public function testCzechResidenceAddressNeedsFiveDigitPostalCode(): void
     {
         $source = PayrollRegistrationA1SnapshotBuilderTest::source('1', '1');
+        $source['permanent_address']['country_code'] = 'SK';
         $source['czech_residence_address'] = [
             'street' => null,
             'house_number' => '5',

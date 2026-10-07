@@ -20,6 +20,9 @@ final class PayrollRegistrationBusinessMatrix
 
     private const SPEC_ACTIVITY_CODES = ['11', '12', '13', '14', 'M'];
 
+    /** Od akce 5 se datová věta druhem činnosti nečlení (jediná varianta OST). */
+    private const FIRST_VARIANTLESS_ACTION = 5;
+
     private const CORRECTION_STANDARD = 'standard';
     private const CORRECTION_NONSTANDARD_1 = 'nonstandard_1';
     private const CORRECTION_NONSTANDARD_2 = 'nonstandard_2';
@@ -123,6 +126,21 @@ final class PayrollRegistrationBusinessMatrix
             $relationshipDetailCode,
         );
         $allowed = self::ALLOWED_VARIANTS[$actionCode] ?? null;
+        if ($actionCode >= self::FIRST_VARIANTLESS_ACTION && $allowed !== null) {
+            // EDV 1.4.0.6, list Vysvětlivky (Datové scénáře): akce 5 až 8 mají
+            // jedinou datovou variantu (OST) a o tom, zda je pro daný druh
+            // činnosti smí zaměstnavatel podat, rozhoduje jen matice povolených
+            // akcí. Druh činnosti tedy variantu větě nemění.
+            $permitted = self::actionPermittedForActivity(
+                $actionCode,
+                $variant,
+                $activityCode,
+            );
+            $variant = self::VARIANT_OST;
+            if (!$permitted) {
+                $allowed = [];
+            }
+        }
         if ($allowed === null || !in_array($variant, $allowed, true)) {
             throw new PayrollRegistrationXmlException(
                 'registration_regzec_action_variant_unsupported',
@@ -196,6 +214,22 @@ final class PayrollRegistrationBusinessMatrix
                     . 'druhem činnosti.',
             );
         }
+    }
+
+    /**
+     * Povolené akce podle druhu činnosti (EDV 1.4.0.6, Changelog 1.4.0.4):
+     * A5 jen u plné (OST) evidence, A6 a A7 navíc u druhu M, A8 u všech druhů.
+     */
+    private static function actionPermittedForActivity(
+        int $actionCode,
+        string $evidenceVariant,
+        string $activityCode,
+    ): bool {
+        return match ($actionCode) {
+            5 => $evidenceVariant === self::VARIANT_OST,
+            6, 7 => $evidenceVariant === self::VARIANT_OST || $activityCode === 'M',
+            default => true,
+        };
     }
 
     private static function activityCorrectionCategory(

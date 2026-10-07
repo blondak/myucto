@@ -4527,10 +4527,6 @@ final class PayrollRegistrationActionTest extends TestCase
                     'identifier' => 'SYN-INS-123',
                 ],
             ],
-            'cancellation' => [
-                'source_submission_id' => 1,
-                'not_started' => true,
-            ],
         ];
 
         foreach ($cases as $interaction => $specificInput) {

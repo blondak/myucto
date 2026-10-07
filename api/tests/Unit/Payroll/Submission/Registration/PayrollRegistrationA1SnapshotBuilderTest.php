@@ -511,6 +511,7 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
     public function testCzechResidenceAddressDoesNotRequireCountry(): void
     {
         $source = self::source('1', '1');
+        $source['permanent_address']['country_code'] = 'SK';
         $source['czech_residence_address'] = [
             'street' => 'Testovací',
             'house_number' => '7',

@@ -158,10 +158,13 @@ final class PayrollRegistrationA1DraftBuilder
             ? $this->foreignLegislation($terms)
             : null;
 
-        $proofIdentity = $foreigner
+        // EDV 1.4.0.6: u A1-10 jsou proofid a nocitizen zakázané.
+        $foreignGroups = $foreigner
+            && $variant !== PayrollRegistrationBusinessMatrix::VARIANT_10;
+        $proofIdentity = $foreignGroups
             ? $this->proofIdentity($citizenship)
             : null;
-        $foreignWorker = $foreigner
+        $foreignWorker = $foreignGroups
             ? $this->foreignWorker($this->section($sources, 'work_permit'), $citizenship)
             : null;
 

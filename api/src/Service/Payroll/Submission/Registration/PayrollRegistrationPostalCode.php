@@ -29,9 +29,15 @@ final class PayrollRegistrationPostalCode
     }
 
     /**
+     * České PSČ: pět číslic, první nesmí být 0, 8 ani 9 (EDV 1.4.0.6,
+     * kontrola 1 - TRVA, KONTAKT, POBYT).
+     */
+    public const CZECH_PATTERN = '/^[1-7]\d{4}$/D';
+
+    /**
      * Normalizované PSČ, nebo null, když pro daný stát nemá platný tvar.
-     * České PSČ je pětimístné; u cizích států se hlídá jen množina znaků,
-     * kterou schéma povoluje (formáty států se liší).
+     * České PSČ je pětimístné s první číslicí 1 až 7; u cizích států se hlídá
+     * jen množina znaků, kterou schéma povoluje (formáty států se liší).
      */
     public static function valid(string $postalCode, ?string $countryCode): ?string
     {
@@ -40,7 +46,7 @@ final class PayrollRegistrationPostalCode
             return null;
         }
         if ($countryCode === 'CZ') {
-            return preg_match('/^\d{5}$/D', $normalized) === 1 ? $normalized : null;
+            return preg_match(self::CZECH_PATTERN, $normalized) === 1 ? $normalized : null;
         }
 
         return preg_match(self::FOREIGN_PATTERN, $normalized) === 1
