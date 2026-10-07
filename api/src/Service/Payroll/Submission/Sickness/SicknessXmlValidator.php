@@ -192,13 +192,16 @@ final readonly class SicknessXmlValidator
         }
         // Hlášení se vždy váže k jedné neschopence a ČSSZ ho s ní páruje číslem
         // rozhodnutí. Bez čísla lze podat jen zahraniční případ, jehož
-        // rozhodnutí nevydal český lékař.
-        if ($payload->confirmationNumber === null && !$payload->foreignCase) {
+        // rozhodnutí nevydal český lékař; to platí i pro slovenskou neschopenku.
+        if ($payload->confirmationNumber === null
+            && !$payload->foreignCase
+            && !$payload->slovakCase
+        ) {
             $this->invalid(
                 'hzupn_confirmation_number_missing',
                 'Chybí číslo rozhodnutí o dočasné pracovní neschopnosti. ČSSZ podle něj '
                 . 'hlášení páruje s neschopenkou; bez něj ho nezpracuje. Výjimkou je jen '
-                . 'zahraniční případ.',
+                . 'zahraniční (i slovenský) případ.',
             );
         }
         $this->hzupnEmployerConfirmation($payload);
@@ -444,40 +447,13 @@ final readonly class SicknessXmlValidator
      */
     private function decisionNumber(NempriXmlPayload $payload): void
     {
-        $kind = $payload->benefitKind;
-        $hasCareReason = $payload->application?->maternityCareReason !== null;
-        $requirement = $kind->decisionNumberRequirement($hasCareReason);
-        $number = $payload->decisionNumber;
-        if ($requirement === SicknessBenefitKind::DECISION_FORBIDDEN) {
-            // PPM s důvodem převzetí řeší application() vlastním kódem.
-            if ($number !== null && $kind !== SicknessBenefitKind::Ppm) {
-                $this->invalid(
-                    'nempri_decision_number_forbidden',
-                    'U tohoto druhu dávky se číslo rozhodnutí nevyplňuje. Smažte ho v případu dávky.',
-                );
-            }
-
-            return;
-        }
-        if ($number === null) {
-            if ($requirement === SicknessBenefitKind::DECISION_REQUIRED && !$payload->foreignCase) {
-                $this->invalid(
-                    'nempri_decision_number_missing',
-                    'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
-                    . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
-                    . 'Výjimkou je jen zahraniční případ.',
-                );
-            }
-
-            return;
-        }
-        if (!$payload->foreignCase && preg_match($kind->decisionNumberPattern(), $number) !== 1) {
-            $this->invalid(
-                'nempri_decision_number_format_invalid',
-                'Číslo rozhodnutí nemá tvar, který ČSSZ u dávky ' . $kind->value . ' kontroluje '
-                . '(NEM: písmeno a 6 až 7 číslic nebo 10 číslic; PPM končí písmenem M, OSE N nebo Z, '
-                . 'OPP T, DLO L, vždy se sedmimístným číslem a volitelnou předponou ICPE).',
-            );
+        $problem = $payload->benefitKind->decisionNumberProblem(
+            $payload->decisionNumber,
+            $payload->application?->maternityCareReason !== null,
+            $payload->foreignCase,
+        );
+        if ($problem !== null) {
+            $this->invalid($problem['code'], $problem['message']);
         }
     }
 

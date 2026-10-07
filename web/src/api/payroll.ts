@@ -8674,6 +8674,8 @@ export const payrollApi = {
   healthPaymentOverviews: (revisionId: number) =>
     api.get<{
       items: PayrollHealthPaymentOverview[]
+      /** Pojišťovny, jejichž přehled nešel sestavit; přehledy ostatních se vypíšou dál. */
+      failures?: Array<{ insurer_code: string; code: string; message: string }>
       electronic_submission: {
         direct_portal: { supported: false; reason_code: string }
         isds: {

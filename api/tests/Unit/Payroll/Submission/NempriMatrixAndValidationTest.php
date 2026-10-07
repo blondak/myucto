@@ -466,6 +466,71 @@ final class NempriMatrixAndValidationTest extends TestCase
         self::assertTrue(true);
     }
 
+    /**
+     * NX-06 (W2): jediné pravidlo čísla rozhodnutí, které volá validátor věty
+     * i předkontrola služby před sestavením věty.
+     */
+    public function testDecisionNumberProblemIsOneRuleForValidatorAndPrecheck(): void
+    {
+        $problem = static fn (SicknessBenefitKind $kind, ?string $number, bool $care = false, bool $foreign = false): ?string
+            => $kind->decisionNumberProblem($number, $care, $foreign)['code'] ?? null;
+
+        self::assertSame('nempri_decision_number_missing', $problem(SicknessBenefitKind::Ppm, null));
+        self::assertNull($problem(SicknessBenefitKind::Ppm, null, true), 'PPM s důvodem převzetí číslo nemá.');
+        self::assertNull($problem(SicknessBenefitKind::Ppm, '1234567M', true), 'Zákaz u PPM s důvodem hlídá žádost o dávku.');
+        self::assertSame('nempri_decision_number_forbidden', $problem(SicknessBenefitKind::Vpm, 'A1234567'));
+        self::assertSame('nempri_decision_number_format_invalid', $problem(SicknessBenefitKind::Ose, 'A1234567'));
+        self::assertNull($problem(SicknessBenefitKind::Ose, '1234567N'));
+        self::assertNull($problem(SicknessBenefitKind::Ose, '1234567890' . '1234567N'), 'ICPE + číslo + písmeno.');
+        self::assertSame('nempri_decision_number_missing', $problem(SicknessBenefitKind::Nem, null));
+        self::assertNull($problem(SicknessBenefitKind::Nem, null, false, true), 'Zahraniční případ číslo mít nemusí.');
+        self::assertNull($problem(SicknessBenefitKind::Opp, null));
+    }
+
+    /**
+     * NX-08 (W2): slovenská DPN. NEMPRI hlásí `zahranicni` pro případ mimo
+     * Česko (i Slovensko), HZUPN „A" jen mimo Česko a Slovensko.
+     */
+    public function testSlovakCaseIsForeignForNempriButNotForHzupn(): void
+    {
+        $row = $this->caseRow([
+            'slovak_case' => 1,
+            'issued_on' => '2026-08-24',
+            'returned_to_work' => 1,
+            'returned_on' => '2026-08-24',
+            'hours_worked_last_day' => '4.00',
+            'shift_hours_last_day' => '8.00',
+        ]);
+        $factory = new SicknessPayloadFactory();
+
+        $nempri = $factory->nempri($row, SicknessBenefitKind::Nem, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0');
+        $hzupn = $factory->hzupn($row, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0');
+
+        self::assertTrue($nempri->foreignCase);
+        self::assertFalse($hzupn->foreignCase);
+        self::assertTrue($hzupn->slovakCase);
+        self::assertStringContainsString('<zahranicni>true</zahranicni>', $this->serializer->serialize($nempri));
+        self::assertStringContainsString('<zahranicni>N</zahranicni>', $this->hzupn->serialize($hzupn));
+
+        $abroad = [...$row, 'slovak_case' => 0, 'foreign_case' => 1];
+        self::assertTrue($factory->nempri($abroad, SicknessBenefitKind::Nem, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0')->foreignCase);
+        self::assertTrue($factory->hzupn($abroad, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0')->foreignCase);
+    }
+
+    public function testSlovakCaseMayOmitTheHzupnConfirmationNumber(): void
+    {
+        $slovak = $this->hzupnPayload(['confirmationNumber' => null, 'slovakCase' => true]);
+        $this->validator->validateHzupn($slovak, $this->hzupn->serialize($slovak), '2026-08-03');
+
+        $czech = $this->hzupnPayload(['confirmationNumber' => null]);
+        try {
+            $this->validator->validateHzupn($czech, $this->hzupn->serialize($czech), '2026-08-03');
+            self::fail('Český případ bez čísla rozhodnutí musí selhat.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_confirmation_number_missing', $exception->validationCode);
+        }
+    }
+
     // ---- NX-07: OPP podklady ----------------------------------------------
 
     public function testPaternityLastDayHoursAndReturnDateGoTogether(): void

@@ -440,6 +440,14 @@ async function loadHealthOverviews() {
       payrollApi.healthPaymentOverviews(run.revision_id!),
     ))
     healthOverviews.value = responses.flatMap(response => response.items)
+    // Nesestavitelná pojišťovna nezastaví výpis ostatních, jen se ohlásí.
+    healthError.value = responses
+      .flatMap(response => response.failures ?? [])
+      .map(failure => t('payroll.submissions.overview.health_insurer_failed', {
+        insurer: failure.insurer_code,
+        message: failure.message,
+      }))
+      .join(' ')
   } catch (exception) {
     healthError.value = apiErrorMessage(
       exception,

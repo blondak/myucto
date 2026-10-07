@@ -446,6 +446,7 @@ final class JmhzReportReader
             leaveMillihours: $this->lenientScaled($t('f:prubehZamestnani/f:neodpracovaneHodiny/f:hodinyNeodpracDovol'), 3),
             absenceMillihours: $this->absenceMillihours($xpath, $body),
             uninsuredIncome: $i('f:pojisteni/f:vymerovaciZaklad/f:prijemNepojistenaCinnost'),
+            employerDiscount: $this->lenientBool($t('f:pojisteni/f:slevaZamestnavatele/f:slevaZamestnavateleEvidovana')),
         );
     }
 

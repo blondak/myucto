@@ -7872,6 +7872,7 @@
           "jmhz_employer_part_time_discount_activity_unsupported": "The part-time discount can only be claimed for an employment relationship."
         },
         "health_load_failed": "The monthly health-insurer overviews could not be loaded.",
+        "health_insurer_failed": "The overview of insurer {insurer} cannot be built: {message}",
         "health_download_failed": "The monthly health-insurer overview could not be prepared or downloaded.",
         "health_send_failed": "The overview could not be prepared for Data Box submission.",
         "health_download_official": "Download PDF/XML",
@@ -10713,6 +10714,7 @@
       "form": {
         "correction": "Corrective submission",
         "foreignCase": "Foreign case (decision issued outside CZ and SK)",
+        "slovakCase": "Slovak case (NEMPRI reports it as foreign, HZUPN as domestic)",
         "additionalNote": "Additional note for the social security office",
         "decisionNumberHint": "The decision number (for e-sick-notes and e-care-notes the number from the doctor's decision) is mandatory for sickness, care and long-term care benefits; without it the authority cannot match the submission. Only a foreign case may omit it. A corrective submission replaces the earlier one with the same decision number.",
         "smallScopeIncome": "Income from small-scope employment (CZK)",

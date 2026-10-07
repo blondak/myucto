@@ -39,7 +39,7 @@ final readonly class SicknessPayloadFactory
             osszCode: (int) $row['ossz_code'],
             correction: (bool) $row['correction'],
             decisionNumber: self::decisionNumber($row['decision_number'] ?? null),
-            foreignCase: (bool) $row['foreign_case'],
+            foreignCase: self::nempriForeignCase($row),
             insuredFirstName: self::requiredIdentity($identity, 'first_name'),
             insuredLastName: self::requiredIdentity($identity, 'last_name'),
             insuredBirthNumber: self::requireBirthNumber($identity),
@@ -198,7 +198,7 @@ final readonly class SicknessPayloadFactory
             // aplikace ho za něj sestavovat nesmí.
             employerReport: true,
             personReport: false,
-            foreignCase: (bool) $row['foreign_case'],
+            foreignCase: self::hzupnForeignCase($row),
             confirmationNumber: self::nullableText($row['decision_number'] ?? null),
             osszCode: (int) $row['ossz_code'],
             osszName: CsszWorkplaceCatalog::nameFor((int) $row['ossz_code']),
@@ -240,7 +240,36 @@ final readonly class SicknessPayloadFactory
             productName: $productName,
             productVersion: $productVersion,
             payloadVersion: $payloadVersion,
+            slovakCase: self::slovakCase($row),
         );
+    }
+
+    /**
+     * `zahranicni` ve větě NEMPRI25: „true" pro případ mimo Česko, tedy i pro
+     * slovenský (DV NEMPRI25, element Zahraniční).
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function nempriForeignCase(array $row): bool
+    {
+        return (bool) ($row['foreign_case'] ?? false) || self::slovakCase($row);
+    }
+
+    /**
+     * `zahranicni` ve větě HZUPN20: „A" jen pro zahraničí mimo Česko a Slovensko,
+     * slovenský případ je jako český „N" (DV HZUPN20, element Zahraniční).
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function hzupnForeignCase(array $row): bool
+    {
+        return (bool) ($row['foreign_case'] ?? false);
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function slovakCase(array $row): bool
+    {
+        return (bool) ($row['slovak_case'] ?? false);
     }
 
     /**

@@ -1709,10 +1709,16 @@ Tlačítkem **Upravit** otevřete editor případu. Má jedno společné **Ulož
 ve spodní liště a tyto sekce:
 
 - **Případ** — kód OSSZ, **číslo rozhodnutí**, den skončení, **Opravné
-  podání**, **Zahraniční případ** a další sdělení pro OSSZ. Číslo rozhodnutí
+  podání**, **Zahraniční případ**, **Slovenský případ** a další sdělení pro
+  OSSZ. Číslo rozhodnutí
   (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského,
   ošetřovného a dlouhodobého ošetřovného povinné a HZUPN ho vyžaduje vždy;
-  bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ.
+  bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční a slovenský
+  případ. Zahraniční případ je rozhodnutí mimo ČR a SR; slovenskou
+  neschopenku označte jako **Slovenský případ**, protože NEMPRI ji hlásí jako
+  zahraniční, kdežto HZUPN jako českou (zahraničí v HZUPN je jen mimo ČR a SR).
+  Číslo rozhodnutí se kontroluje už při přípravě podání podle druhu dávky
+  (povinnost, zákaz i tvar), spolu s ostatními chybějícími údaji případu.
   Číslo rozhodnutí a Opravné podání jdou měnit i u vyřízeného podání.
   Otcovská, peněžitá pomoc v mateřství a vyrovnávací příspěvek číslo
   rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem

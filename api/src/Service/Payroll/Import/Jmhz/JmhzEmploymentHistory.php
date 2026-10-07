@@ -251,13 +251,27 @@ final class JmhzEmploymentHistory
     public function activityCode(string $key): ?string
     {
         foreach (array_reverse($this->months($key)) as $item) {
-            if ($item->form->activityCode !== null) {
-                return $item->form->activityCode;
+            $code = self::formActivityCode($item->form);
+            if ($code !== null) {
+                return $code;
             }
-            $code = $item->form->eldp['code'] ?? null;
-            if (is_string($code) && preg_match('/^(Z[A-C]|[1-9A-JST-Z])\+/', $code, $match) === 1) {
-                return $match[1];
-            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Druh činnosti jednoho formuláře: kód z identifikace (10239, jen větev B),
+     * jinak první pozice kódu ELDP (10240). `null`, když ho formulář nenese.
+     */
+    public static function formActivityCode(JmhzReportForm $form): ?string
+    {
+        if ($form->activityCode !== null) {
+            return $form->activityCode;
+        }
+        $code = $form->eldp['code'] ?? null;
+        if (is_string($code) && preg_match('/^(Z[A-C]|[1-9A-JST-Z])\+/', $code, $match) === 1) {
+            return $match[1];
         }
 
         return null;

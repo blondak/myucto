@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpPensionAgeCode;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzEvidenceStateDays;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 
@@ -244,7 +245,9 @@ final class JmhzEldpEvidenceBuilder
             'valid_from' => $eldpReported ? $insuranceFrom : null,
             'valid_to' => $eldpReported ? $insuranceTo : null,
             'insurance_days' => $eldpReported && !$outsideInsurance ? $insuranceDays : 0,
-            'code' => $eldpReported ? $activityCode . '++' : null,
+            'code' => $eldpReported
+                ? $this->eldpCode($activityCode, $source, $insuranceFrom, $insuranceTo)
+                : null,
             'assessment_base_czk' => $eldpReported ? intdiv($assessmentBaseMinor, 100) : null,
             'in03_active' => false,
             'in04_active' => false,
@@ -473,7 +476,9 @@ final class JmhzEldpEvidenceBuilder
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
         $entryMetadata = null;
         if ($eldpReported) {
-            if (!is_string($code) || $code !== $activityCode . '++') {
+            if (!is_string($code)
+                || $code !== $this->eldpCode($activityCode, $source, $insuranceFrom, $insuranceTo)
+            ) {
                 $this->invalid('jmhz_eldp_code_activity_mismatch', 'Kód ELDP neodpovídá činnosti pracovního vztahu.');
             }
             $entryMetadata = $this->codebook()->requireValue('kod_eldp', $code);
@@ -547,6 +552,10 @@ final class JmhzEldpEvidenceBuilder
                 'attribute_ids' => self::ATTRIBUTE_IDS,
                 // Účastný vztah bez třídy ELDP: poživatel starobního důchodu.
                 'working_pensioner' => $participates && !$eldpReported,
+                // Klíč jen tam, kde kód nese D: otisk ostatních snapshotů zůstává stejný.
+                ...($eldpReported && is_string($code) && ($code[strlen($code) - 2] ?? '') === 'D'
+                    ? ['pension_age_code_from' => $this->pensionAgeCodeFrom($source)]
+                    : []),
             ],
             'insurance_interval' => [
                 'insurance_from' => $insuranceFrom,
@@ -594,6 +603,65 @@ final class JmhzEldpEvidenceBuilder
             ],
         ];
         return new JmhzEldpEvidenceSnapshot($payload);
+    }
+
+    /**
+     * Kód ELDP měsíčního hlášení: druh činnosti, „+" a „+", a druhý znak „D"
+     * od dne dovršení důchodového věku nebo přiznání předčasného starobního
+     * důchodu. Pravidlo je společné s ročním evidenčním listem
+     * ({@see EldpPensionAgeCode}), takže se osoba v listu a v hlášení nemůže
+     * rozejít.
+     *
+     * Důchodové údaje nese zdroj jen tam, kde je zaměstnavatel potvrdil
+     * (`$source['pension_status']`: `pension_age_reached_on`, `early_pension_from`);
+     * bez nich zůstává „++" a zmrazené snapshoty dřívějších měsíců se tím
+     * nemění. Den, kdy kód začíná uprostřed měsíce, nejde zachytit, vyměřovací
+     * základ se v hlášení vede za celý měsíc, a měsíc se zastaví.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function eldpCode(
+        string $activityCode,
+        array $source,
+        string $insuranceFrom,
+        string $insuranceTo,
+    ): string {
+        $code = $activityCode . '++';
+        $codeFrom = $this->pensionAgeCodeFrom($source);
+        $placement = EldpPensionAgeCode::placement($codeFrom, $insuranceFrom, $insuranceTo);
+        if ($placement === EldpPensionAgeCode::MID_INTERVAL) {
+            $this->invalid(
+                'eldp_pension_age_mid_month_unsupported',
+                "Kód ELDP se mění uprostřed měsíce (od {$codeFrom}: dovršení důchodového věku nebo předčasný "
+                . 'starobní důchod). Vyměřovací základ se v hlášení vede za celý měsíc a nejde rozdělit na dvě sekce.',
+            );
+        }
+
+        return $placement === EldpPensionAgeCode::PENSION_AGE
+            ? EldpPensionAgeCode::withPensionAge($code)
+            : $code;
+    }
+
+    /**
+     * Den, od kterého nese činnost kód D, z potvrzených důchodových údajů zdroje.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function pensionAgeCodeFrom(array $source): ?string
+    {
+        $status = $source['pension_status'] ?? null;
+        if ($status === null) {
+            return null;
+        }
+        $status = $this->object($status, 'pension_status');
+        $dates = [];
+        foreach (['pension_age_reached_on', 'early_pension_from'] as $key) {
+            $dates[$key] = ($status[$key] ?? null) === null
+                ? null
+                : $this->date($status[$key], "pension_status.{$key}");
+        }
+
+        return EldpPensionAgeCode::codeFrom($dates);
     }
 
     /**

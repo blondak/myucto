@@ -26,6 +26,38 @@ final class HealthPaymentOverviewBuilder
         array $source,
         ?string $onlyInsurerCode = null,
     ): array {
+        return $this->assemble($supplierId, $source, $onlyInsurerCode, false)['overviews'];
+    }
+
+    /**
+     * Přehledy všech pojišťoven; pojišťovna, jejíž přehled nejde sestavit,
+     * skončí mezi `failures` a výpis ostatních se nezastaví. Vady celého
+     * výsledku se hlásí výjimkou jako u {@see build()}.
+     *
+     * @param array{
+     *   revision:array<string,mixed>,
+     *   statutory_result:array<string,mixed>
+     * } $source
+     * @return array{overviews:list<HealthPaymentOverview>,failures:list<HealthPaymentOverviewFailure>}
+     */
+    public function buildReport(int $supplierId, array $source): array
+    {
+        return $this->assemble($supplierId, $source, null, true);
+    }
+
+    /**
+     * @param array{
+     *   revision:array<string,mixed>,
+     *   statutory_result:array<string,mixed>
+     * } $source
+     * @return array{overviews:list<HealthPaymentOverview>,failures:list<HealthPaymentOverviewFailure>}
+     */
+    private function assemble(
+        int $supplierId,
+        array $source,
+        ?string $onlyInsurerCode,
+        bool $isolate,
+    ): array {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musí být kladné číslo.');
         }
@@ -154,6 +186,7 @@ final class HealthPaymentOverviewBuilder
             );
         }
         $overviews = [];
+        $failures = [];
         foreach ($liabilities as $reference => $totals) {
             $code = substr($reference, 1);
             $people = $peopleByInsurer[$reference] ?? [];
@@ -161,7 +194,16 @@ final class HealthPaymentOverviewBuilder
                 unset($peopleByInsurer[$reference]);
                 continue;
             }
-            $this->assertInsurerTotals($code, $totals, $people);
+            try {
+                $this->assertInsurerTotals($code, $totals, $people);
+            } catch (HealthInsuranceOverviewException|\UnexpectedValueException $exception) {
+                if (!$isolate) {
+                    throw $exception;
+                }
+                $failures[] = $this->failure($code, $exception);
+                unset($peopleByInsurer[$reference]);
+                continue;
+            }
             $overviews[] = new HealthPaymentOverview(
                 $supplierId,
                 $runId,
@@ -187,13 +229,31 @@ final class HealthPaymentOverviewBuilder
             );
         }
         if ($peopleByInsurer !== []) {
-            throw new HealthInsuranceOverviewException(
+            $exception = new HealthInsuranceOverviewException(
                 'health_insurance_totals_mismatch',
                 'Výsledek osoby odkazuje na pojišťovnu bez kořenového závazku.',
             );
+            if (!$isolate) {
+                throw $exception;
+            }
+            foreach (array_keys($peopleByInsurer) as $reference) {
+                $failures[] = $this->failure(substr((string) $reference, 1), $exception);
+            }
         }
 
-        return $overviews;
+        return ['overviews' => $overviews, 'failures' => $failures];
+    }
+
+    private function failure(string $insurerCode, \Throwable $exception): HealthPaymentOverviewFailure
+    {
+        return new HealthPaymentOverviewFailure(
+            $insurerCode,
+            $exception instanceof HealthInsuranceOverviewException
+                ? $exception->validationCode
+                : 'health_insurance_source_invalid',
+            $exception->getMessage(),
+            $exception,
+        );
     }
 
     /**

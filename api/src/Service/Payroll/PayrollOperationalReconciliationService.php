@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverview;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewFailure;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewReconciliationService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
@@ -102,10 +103,11 @@ final class PayrollOperationalReconciliationService
         }
 
         try {
-            $overviews = $this->healthOverviews->overviews($supplierId, $revisionId);
-            $axes = array_merge($axes, $this->healthAxes(
-                $overviews,
-                $this->healthReconciliation->forOverviews($overviews),
+            // Přehledy jsou podání po pojišťovnách: pojišťovna, jejíž přehled
+            // nejde sestavit, je blokovaná sama a ostatní se porovnají dál.
+            $axes = array_merge($axes, $this->healthSection(
+                $revisionId,
+                $this->healthOverviews->overviewReport($supplierId, $revisionId),
             ));
         } catch (\Throwable $exception) {
             $axes[] = $this->blocked(
@@ -294,16 +296,55 @@ final class PayrollOperationalReconciliationService
     }
 
     /**
-     * @param list<HealthPaymentOverview> $overviews
-     * @param list<array<string,mixed>> $reconciliations
+     * Zdravotní osa po pojišťovnách: přehledy se porovnají s platebním
+     * ledgerem a pojišťovna, jejíž přehled nešel sestavit, je blokovaná sama
+     * (`health:liability:i<kód>`), takže jedna vadná nezastaví ostatní.
+     *
+     * @param array{overviews:list<HealthPaymentOverview>,failures:list<HealthPaymentOverviewFailure>} $report
      * @return list<array<string,mixed>>
      */
-    private function healthAxes(array $overviews, array $reconciliations): array
+    private function healthSection(int $revisionId, array $report): array
     {
+        $overviews = $report['overviews'];
+        $axes = $this->healthAxes(
+            $overviews,
+            $overviews === [] ? [] : $this->healthReconciliation->forOverviews($overviews),
+            $report['failures'] !== [],
+        );
+        foreach ($report['failures'] as $failure) {
+            $category = 'i' . $failure->insurerCode;
+            $axes[] = $this->blocked(
+                'health:liability:' . $category,
+                'health',
+                $category,
+                $failure->cause,
+                ['revision_id' => $revisionId, 'insurer_code' => $failure->insurerCode],
+            );
+        }
+
+        return $axes;
+    }
+
+    /**
+     * @param list<HealthPaymentOverview> $overviews
+     * @param list<array<string,mixed>> $reconciliations
+     * @param bool $hasBlockedInsurer některá pojišťovna revize nešla sestavit
+     * @return list<array<string,mixed>>
+     */
+    private function healthAxes(
+        array $overviews,
+        array $reconciliations,
+        bool $hasBlockedInsurer = false,
+    ): array {
         if (count($overviews) !== count($reconciliations)) {
             throw new \UnexpectedValueException(
                 'Počet PPZ neodpovídá počtu reconciliation výsledků.',
             );
+        }
+        if ($overviews === [] && $hasBlockedInsurer) {
+            // Pojišťovny v revizi jsou, jen žádná nešla sestavit, řádek
+            // „žádná pojišťovna" by tvrdil opak. Blokované řeší volající.
+            return [];
         }
         if ($overviews === []) {
             return [$this->finding(

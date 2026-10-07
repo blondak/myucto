@@ -47,5 +47,10 @@ final readonly class HzupnXmlPayload
         public string $productVersion,
         public string $payloadVersion,
         public ?string $notificationEmail = null,
+        /**
+         * Slovenský případ: element `zahranicni` zůstává „N" (ČR i SR), ale
+         * české číslo rozhodnutí slovenská neschopenka mít nemusí.
+         */
+        public bool $slovakCase = false,
     ) {}
 }

@@ -34,6 +34,29 @@ final class HealthPaymentOverviewService
         return $this->builder->build($supplierId, $source, $onlyInsurerCode);
     }
 
+    /**
+     * Výpis přehledů po pojišťovnách: pojišťovna, jejíž přehled nejde sestavit,
+     * skončí mezi `failures` a nezastaví přehledy ostatních. Vada celého
+     * výsledku zdravotního pojištění dál vyhodí výjimku jako {@see overviews()}.
+     *
+     * @return array{overviews:list<HealthPaymentOverview>,failures:list<HealthPaymentOverviewFailure>}
+     */
+    public function overviewReport(int $supplierId, int $revisionId): array
+    {
+        $source = $this->repository->findApprovedHealthResult(
+            $supplierId,
+            $revisionId,
+        );
+        if ($source === null) {
+            throw new HealthInsuranceOverviewException(
+                'health_insurance_result_not_found',
+                'Schválený zdravotní výsledek nebyl nalezen.',
+            );
+        }
+
+        return $this->builder->buildReport($supplierId, $source);
+    }
+
     public function overview(
         int $supplierId,
         int $revisionId,

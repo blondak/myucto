@@ -369,6 +369,107 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     }
 
     /**
+     * DPN-06 (W2): odpracovaná celá směna v den vzniku posouvá první den
+     * neschopnosti (§ 26 odst. 3). Neschopnost 8.-22. 6. s odpracovaným 8. 6.
+     * trvá 14 dnů, celou ji kryje náhrada mzdy a NEMPRI se nepřipravuje.
+     */
+    public function testWorkedFirstDayKeepsFourteenDaySicknessOutOfNempri(): void
+    {
+        [, $employmentId] = $this->employee();
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-06-08',
+                'incapacity_to' => '2026-06-22',
+                'decision_number' => 'A1234567',
+                'worked_on_decisive_day' => true,
+                'hours_worked' => '8',
+                'daily_working_hours' => '8',
+            ],
+            $this->userId,
+        );
+
+        try {
+            $this->service(SicknessSubmissionService::class)->preview(
+                $this->supplierId,
+                'test',
+                (int) $case['id'],
+                SicknessDocumentKind::Nempri,
+            );
+            self::fail('Neschopnost s odpracovaným prvním dnem trvá 14 dnů a NEMPRI se nepodává.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_within_wage_compensation_window', $exception->validationCode);
+        }
+    }
+
+    /** Lhůta NEMPRI se posouvá o odpracovaný první den i v náhledu podání. */
+    public function testWorkedFirstDayShiftsTheNempriWindow(): void
+    {
+        [, $employmentId] = $this->employee();
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-06-08',
+                'incapacity_to' => '2026-06-23',
+                'decision_number' => 'A1234567',
+                'worked_on_decisive_day' => true,
+                'hours_worked' => '8',
+                'daily_working_hours' => '8',
+                'decisive_months' => self::months([
+                    '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05',
+                ]),
+            ],
+            $this->userId,
+        );
+
+        $preview = $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+        );
+
+        self::assertSame('2026-06-23', $preview['window']['earliest_notification_on']);
+    }
+
+    /**
+     * NX-06 (W2): číslo rozhodnutí se ohlídá před sestavením věty stejným
+     * pravidlem jako ve validátoru, takže tvar se hlásí srozumitelně hned
+     * spolu s ostatními chybami případu.
+     */
+    public function testDecisionNumberFormatIsCheckedBeforeThePayloadIsBuilt(): void
+    {
+        [, $employmentId] = $this->employee();
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            ['incapacity_from' => '2026-02-09', 'decision_number' => '12345'],
+            $this->userId,
+        );
+
+        try {
+            $this->service(SicknessSubmissionService::class)->preview(
+                $this->supplierId,
+                'test',
+                (int) $case['id'],
+                SicknessDocumentKind::Nempri,
+            );
+            self::fail('Věta bez rozhodného období a se špatným číslem rozhodnutí nesmí projít.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_decisive_month_missing', $exception->validationCode);
+            self::assertStringContainsString('Číslo rozhodnutí nemá tvar', $exception->getMessage());
+        }
+    }
+
+    /**
      * @template T of object
      * @param class-string<T> $class
      * @return T
