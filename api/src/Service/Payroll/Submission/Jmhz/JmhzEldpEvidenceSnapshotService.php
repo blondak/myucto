@@ -402,7 +402,8 @@ final readonly class JmhzEldpEvidenceSnapshotService
             || CanonicalJson::encode($payload['scope'] ?? null) !== CanonicalJson::encode($scope)
             || CanonicalJson::encode($payload['specification'] ?? null) !== CanonicalJson::encode($manifest['specification'] ?? null)
             || CanonicalJson::encode($payload['source_revision'] ?? null) !== CanonicalJson::encode($manifest['source_revision'] ?? null)
-            || count($payload['eldp_sections'] ?? []) !== 1
+            // Dvě sekce má jen měsíc, ve kterém zaměstnanec dovršil důchodový věk.
+            || !in_array(count($payload['eldp_sections'] ?? []), [1, 2], true)
         ) {
             throw new JmhzEldpEvidenceException('jmhz_eldp_hash_mismatch', 'Citlivý snapshot ELDP neodpovídá manifestu.');
         }

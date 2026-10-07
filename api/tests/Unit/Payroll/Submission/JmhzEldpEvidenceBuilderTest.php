@@ -96,14 +96,53 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $later = [...$source, 'pension_status' => ['pension_age_reached_on' => '2026-08-01', 'early_pension_from' => null]];
         self::assertSame('1++', $builder->deriveOrdinaryConfirmation(7, 101, $later)['code']);
 
-        // Uprostřed měsíce by bylo nutné rozdělit vyměřovací základ.
-        $mid = [...$source, 'pension_status' => ['pension_age_reached_on' => '2026-07-16', 'early_pension_from' => null]];
+        // Předčasný důchod uprostřed měsíce: rozdělení základu pravidla nestanoví.
+        $earlyMid = [...$source, 'pension_status' => ['pension_age_reached_on' => '2027-01-01', 'early_pension_from' => '2026-07-16']];
         try {
-            $builder->deriveOrdinaryConfirmation(7, 101, $mid);
-            self::fail('Kód D uprostřed měsíce nejde do hlášení zachytit.');
+            $builder->deriveOrdinaryConfirmation(7, 101, $earlyMid);
+            self::fail('Předčasný důchod uprostřed měsíce se na sekce nedělí.');
         } catch (JmhzEldpEvidenceException $exception) {
             self::assertSame('eldp_pension_age_mid_month_unsupported', $exception->validationCode);
         }
+    }
+
+    /**
+     * Pravidla podání JMHZ 1.4.5, kap. 4: změní-li se kód ELDP v měsíci, má
+     * každý kód vlastní záznam. Dovršení důchodového věku 16. 7. dělí měsíc na
+     * 1++ (1.–15. 7., 15 dnů) a 1D+ (16.–31. 7., 16 dnů). Kontrola 59 (3. část)
+     * dává sekci před dovršením základ 0 a celý základ sekci D.
+     */
+    public function testPensionAgeReachedMidMonthSplitsTheMonthIntoTwoSections(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $mid = [...$this->source(), 'pension_status' => [
+            'pension_age_reached_on' => '2026-07-16',
+            'early_pension_from' => null,
+        ]];
+
+        $confirmation = $builder->deriveOrdinaryConfirmation(7, 101, $mid);
+        self::assertSame('1D+', $confirmation['code']);
+        self::assertSame(31, $confirmation['insurance_days']);
+        $sections = $builder->build(7, 101, $mid, $confirmation)->payload['eldp_sections'];
+
+        self::assertSame(
+            [
+                ['1++', '2026-07-01', '2026-07-15', 15, 0],
+                ['1D+', '2026-07-16', '2026-07-31', 16, 10_000],
+            ],
+            array_map(
+                static fn (array $section): array => [
+                    $section['code'],
+                    $section['valid_from'],
+                    $section['valid_to'],
+                    $section['insurance_days'],
+                    $section['assessment_base_czk'],
+                ],
+                $sections,
+            ),
+        );
+        self::assertSame([1, 2], array_column($sections, 'ordinal'));
+        self::assertSame([0, 0], array_column($sections, 'excluded_days_total'));
     }
 
     /**

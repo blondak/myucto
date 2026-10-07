@@ -1717,6 +1717,47 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Měsíc dovršení důchodového věku jako dvě sekce ELDP (pravidla podání
+     * JMHZ 1.4.5, kap. 4): obě jdou do hlášení a projdou XSD i kontrolami
+     * sekcí, včetně 3. části kontroly 59 (sekce před dovršením má základ 0).
+     */
+    public function testPensionAgeSplitSectionsAreSerializedAndPassSectionControls(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['eldp']['eldp_sections'] = [
+            [
+                'ordinal' => 1,
+                'code' => '1++',
+                'valid_from' => '2026-07-01',
+                'valid_to' => '2026-07-15',
+                'insurance_days' => 15,
+                'assessment_base_czk' => 0,
+                'excluded_days' => null,
+                'deducted_days' => null,
+            ],
+            [
+                'ordinal' => 2,
+                'code' => '1D+',
+                'valid_from' => '2026-07-16',
+                'valid_to' => '2026-07-31',
+                'insurance_days' => 16,
+                'assessment_base_czk' => 1_000,
+                'excluded_days' => null,
+                'deducted_days' => null,
+            ],
+        ];
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertSame(2, substr_count($xml, '<form:eldp>'));
+        self::assertStringContainsString('<form:kod>1D+</form:kod>', $xml);
+        self::assertSame([], $this->failedControls($xml, [59, 99, 100, 134, 135, 330]));
+    }
+
+    /**
      * Osvobozené příjmy (10289) jsou PODMNOŽINOU zúčtovaného příjmu (10286),
      * ne veličina vedle něj — kontrola 97 ČSSZ zní „(10289) =< (10286)".
      *

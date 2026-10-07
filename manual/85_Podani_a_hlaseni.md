@@ -1267,14 +1267,6 @@ přes ePortál ČSSZ (nebo vztah odložit):
 | 6 | druh činnosti 12 | mezinarodniPronajemSily |
 | 7 | druh činnosti 10 | ozpTpp |
 
-**Zaměstnanec po dosažení důchodového věku.** Od dne potvrzeného v důchodových
-údajích nese ELDP v hlášení kód s druhým znakem `D`. Nepobírá-li zaměstnanec
-starobní důchod a má v měsíci nemoc, ošetřování, mateřskou, otcovskou,
-neplacené volno nebo neomluvenou absenci, patří do hlášení odečítané doby
-(10375), které aplikace zatím nesestaví. Test u vztahu ohlásí nález a hlášení
-za něj podejte ručně přes ePortál ČSSZ, nebo vztah odložte. Totéž platí, když
-důchodový věk připadne doprostřed měsíce.
-
 ### 85.11.5 Odložení vztahu z řádného hlášení
 
 Jeden zaměstnanec s neúplnými daty nesmí zablokovat hlášení za ostatní. U
