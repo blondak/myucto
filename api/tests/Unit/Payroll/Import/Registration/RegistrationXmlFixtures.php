@@ -41,7 +41,9 @@ final class RegistrationXmlFixtures
             'ona' => null,
             'vcp' => null,
             'sme' => 'N',
+            'fdr' => null,
         ];
+        $fdr = $o['fdr'] === null ? '' : '<fdr str="Pobytová" num="7" pnu="' . $o['fdr'] . '" cit="Brno"/>';
         $client = self::attributes(['bno' => $o['bno'], 'ikmpsv' => $o['ikmpsv'], 'vcp' => $o['vcp']]);
         $name = self::attributes(['sur' => $o['last'], 'ona' => $o['ona'], 'fir' => $o['first'], 'tit' => $o['tit']]);
         $birth = self::attributes([
@@ -77,6 +79,7 @@ final class RegistrationXmlFixtures
                 <birth{$birth}/>
                 <stat mal="{$o['sex']}" cnt="CZ"/>
                 <adr{$address}/>
+                {$fdr}
               </client>
               <comp{$comp}/>
               <job{$job}>

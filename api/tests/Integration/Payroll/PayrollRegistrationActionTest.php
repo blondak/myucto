@@ -3225,6 +3225,88 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString('<adr ', $xml);
     }
 
+    /**
+     * Po převodu z cizího programu evidence často nemá rodné příjmení, místo
+     * ani stát narození. A3 je do věty nepřenáší, takže dohlášení nesmí
+     * stát na údajích, které nikdy neodejdou.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('completionModes')]
+    public function testCompletionIsNotBlockedByBirthDataItDoesNotCarry(string $mode): void
+    {
+        $this->startExistingEmployment('2026-02-15', '1', '1', null, true);
+        $this->saveA1ProfileFor('2026-02-15', '1', '1');
+        $this->clearBirthData();
+
+        $event = $this->approveCompletion($mode);
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), $mode . ': ' . (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('act="3"', $xml, $mode);
+        self::assertDoesNotMatchRegularExpression('/<birth [^>]*(nam|cit|stat)=/', $xml, $mode);
+    }
+
+    /** @return iterable<string,array{0:string}> */
+    public static function completionModes(): iterable
+    {
+        yield 'celý profil' => ['full'];
+        yield 'jen údaje, které ONZ nevedla' => ['minimal'];
+    }
+
+    /** Odhláška A2 nese jen IK MPSV, takže rodné příjmení a místo narození nechce. */
+    public function testTerminationIsNotBlockedByBirthDataItDoesNotCarry(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON, null, null, true);
+        $this->clearBirthData();
+
+        $eventResponse = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $eventResponse->getStatusCode(), (string) $eventResponse->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($eventResponse)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString('act="2"', $xml);
+        self::assertStringNotContainsString('<birth ', $xml);
+    }
+
+    private function clearBirthData(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history
+                SET birth_surname = NULL, birth_place = NULL,
+                    birth_country_code = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->identityId]);
+    }
+
     /** Hromadné dohlášení: kandidáti, připravené podání a vada u koho a proč. */
     public function testBatchCompletionPreparesReadyProfilesAndNamesTheRest(): void
     {

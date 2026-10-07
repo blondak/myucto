@@ -1192,6 +1192,7 @@ final readonly class PayrollRegistrationEventService
                     'effective_on' => $startOn,
                 ],
                 ($source['employer_protected_labor_market'] ?? false) === true,
+                PayrollRegistrationIdentityRequirements::completionIdentityFields($mode),
             );
         } catch (PayrollRegistrationIdentitySnapshotException $exception) {
             throw new PayrollRegistrationXmlException(

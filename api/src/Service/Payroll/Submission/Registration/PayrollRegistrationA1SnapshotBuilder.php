@@ -39,19 +39,31 @@ final class PayrollRegistrationA1SnapshotBuilder
     private bool $protectedLaborMarket = false;
 
     /**
+     * Osobní údaje, které sestavovaný snímek povinně nese. U A1 jsou to
+     * všechny z EDV 10053–10066; dohlášení A3 jich nese jen část.
+     *
+     * @var list<string>
+     */
+    private array $identityKeys = PayrollRegistrationIdentityRequirements::A1_IDENTITY_FIELDS;
+
+    /**
      * @param array<string,mixed> $input
      * @param array<string,mixed> $identity
      * @param array<string,mixed> $scope
+     * @param list<string>|null $identityKeys povinné osobní údaje; `null` = přihláška A1
      */
     public function build(
         array $input,
         array $identity,
         array $scope,
         bool $protectedLaborMarket = false,
+        ?array $identityKeys = null,
     ): PayrollRegistrationA1Snapshot {
         $this->problems = null;
         $this->prefix = '';
         $this->protectedLaborMarket = $protectedLaborMarket;
+        $this->identityKeys = $identityKeys
+            ?? PayrollRegistrationIdentityRequirements::A1_IDENTITY_FIELDS;
         $snapshot = $this->assemble($input, $identity, $scope);
         if ($snapshot === null) {
             throw new \LogicException(
@@ -79,6 +91,7 @@ final class PayrollRegistrationA1SnapshotBuilder
         $this->problems = [];
         $this->prefix = '';
         $this->protectedLaborMarket = $protectedLaborMarket;
+        $this->identityKeys = PayrollRegistrationIdentityRequirements::A1_IDENTITY_FIELDS;
         $this->assemble($input, $identity, $scope);
         $problems = $this->problems;
         $this->problems = null;
@@ -490,10 +503,7 @@ final class PayrollRegistrationA1SnapshotBuilder
      */
     private function identityPresent(array $identity): void
     {
-        foreach ([
-            'first_name', 'last_name', 'birth_surname', 'birth_date',
-            'birth_place', 'birth_country_code', 'sex',
-        ] as $key) {
+        foreach ($this->identityKeys as $key) {
             $value = $identity[$key] ?? null;
             if (is_string($value) && trim($value) !== '') {
                 continue;
@@ -740,7 +750,14 @@ final class PayrollRegistrationA1SnapshotBuilder
             'orientation_number' => $this->optionalText($input, 'orientation_number', 12),
             'city' => $this->text($input, 'city', 255),
             'postal_code' => $this->postalCode($input, 'postal_code', $czech),
-            'country_code' => $this->country($input, 'country_code'),
+            // `fdr` (czAdrType) stát nemá a serializér ho nepíše; adresa pobytu
+            // v ČR je z definice česká, takže chybějící stát není vada.
+            'country_code' => $czech && (
+                !is_string($input['country_code'] ?? null)
+                || trim($input['country_code']) === ''
+            )
+                ? 'CZ'
+                : $this->country($input, 'country_code'),
             'ruian_point' => $this->optionalText($input, 'ruian_point', 20),
         ];
     }

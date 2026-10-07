@@ -87,6 +87,71 @@ final class PayrollRegistrationIdentityRequirementsTest extends TestCase
     }
 
     /**
+     * Odhláška A2 nese jen `client/@ikmpsv`, dohlášení A3 nenese rodné příjmení,
+     * místo ani stát narození (EDV je u akcí 2 a 3 zakazuje). Evidence osoby je
+     * proto u těchto akcí nesmí vyžadovat.
+     */
+    public function testFollowUpEventsDoNotRequireWhatTheSentenceDoesNotCarry(): void
+    {
+        $identity = self::completeIdentity();
+        $identity['birth_surname'] = null;
+        $identity['birth_place'] = null;
+        $identity['birth_country_code'] = null;
+        $identifiers = ['birth_number' => null, 'ecp' => null, 'vcp' => null];
+
+        // A1 je dál vyžaduje.
+        self::assertSame(
+            ['identity.birth_surname', 'identity.birth_place'],
+            array_column(Requirements::missing(Requirements::AGENDA_REGZEC, $identity, ['ecp' => '1234567890']), 'field'),
+        );
+        foreach ([
+            'A2' => [2, null],
+            'A3 bez dohlášení' => [3, null],
+            'A3 jen údaje, které ONZ nevedla' => [3, 'minimal'],
+            'A3 celý profil' => [3, 'full'],
+            'A4' => [4, null],
+            'A8' => [8, null],
+        ] as $label => [$action, $completion]) {
+            self::assertSame([], Requirements::missing(
+                Requirements::AGENDA_REGZEC,
+                $identity,
+                $identifiers,
+                null,
+                $action,
+                $completion,
+            ), $label);
+        }
+    }
+
+    public function testFullCompletionStillNeedsWhatItCarries(): void
+    {
+        $identity = self::completeIdentity();
+        $identity['birth_date'] = null;
+        $identity['sex'] = 'unspecified';
+        $identity['citizenship_country_code'] = null;
+
+        self::assertSame(
+            ['identity.birth_date', 'identity.sex', 'identity.citizenship_country_code'],
+            array_column(Requirements::missing(
+                Requirements::AGENDA_REGZEC,
+                $identity,
+                [],
+                null,
+                3,
+                'full',
+            ), 'field'),
+        );
+        self::assertSame([], Requirements::missing(
+            Requirements::AGENDA_REGZEC,
+            $identity,
+            [],
+            null,
+            3,
+            'minimal',
+        ));
+    }
+
+    /**
      * Štítek sekce na kartě osoby: „Doplněno" svítilo i bez občanství
      * a rodného příjmení, protože stačil jediný vyplněný titul.
      */
