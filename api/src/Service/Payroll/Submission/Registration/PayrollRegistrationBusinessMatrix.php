@@ -237,6 +237,12 @@ final class PayrollRegistrationBusinessMatrix
         return self::VARIANT_OST;
     }
 
+    /** EDV 1.4.0.6, ID 10064: u varianty 10 (A1-10, A3-10, A4-10) se `name/@ona` nesmí uvést. */
+    public static function allowsPreviousSurnames(string $variant): bool
+    {
+        return $variant !== self::VARIANT_10;
+    }
+
     /** @return list<string> */
     public static function variantsForAction(int $actionCode): array
     {

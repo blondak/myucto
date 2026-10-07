@@ -155,6 +155,63 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
         );
     }
 
+    /** EDV 1.4.0.6, ID 10064: u varianty 10 je `ona` v matici „/", podání s ním ČSSZ zamítne. */
+    public function testRegzecA1Variant10NeverWritesPreviousSurnames(): void
+    {
+        $xml = self::serializeRegzecA1(
+            self::identity([
+                'title_prefix' => 'Ing.',
+                'previous_surnames' => 'Dvořáková, Nguyen Quoc',
+            ]),
+            '10',
+            null,
+        );
+
+        self::assertStringContainsString(' rel="10"', $xml);
+        self::assertStringContainsString('<name sur="Novotná" fir="Jana" tit="Ing."/>', $xml);
+        self::assertStringNotContainsString(' ona=', $xml);
+    }
+
+    public function testRegzecA3AndA4Variant10NeverWritePreviousSurnames(): void
+    {
+        foreach ([3, 4] as $action) {
+            $payload = self::eventPayload([
+                'activity_code' => '10',
+                'delta' => [
+                    'identity' => [
+                        'last_name' => 'Nová',
+                        'first_name' => 'Jana',
+                        'previous_surnames' => 'Novotná, Nováková',
+                    ],
+                ],
+            ], $action);
+            $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
+            (new PayrollRegistrationXmlValidator(new PayrollRegistrationSchemaCatalog()))
+                ->validate($payload, $xml);
+
+            self::assertStringContainsString('<name sur="Nová" fir="Jana"/>', $xml, "A{$action}");
+            self::assertStringNotContainsString(' ona=', $xml, "A{$action}");
+        }
+    }
+
+    public function testRegzecA4StandardVariantKeepsPreviousSurnames(): void
+    {
+        $payload = self::eventPayload([
+            'activity_code' => '1',
+            'relationship_detail_code' => '1',
+            'delta' => [
+                'identity' => [
+                    'last_name' => 'Nová',
+                    'first_name' => 'Jana',
+                    'previous_surnames' => 'Novotná',
+                ],
+            ],
+        ], 4);
+        $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
+
+        self::assertStringContainsString('<name sur="Nová" fir="Jana" ona="Novotná"/>', $xml);
+    }
+
     /** Snímek identity dřívější příjmení přenese; bez nich klíč nevznikne. */
     public function testIdentitySnapshotCarriesPreviousSurnamesOnlyWhenPresent(): void
     {
@@ -246,10 +303,13 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
     }
 
     /** @param array<string,mixed> $identity */
-    private static function serializeRegzecA1(array $identity): string
-    {
+    private static function serializeRegzecA1(
+        array $identity,
+        string $activityCode = '1',
+        ?string $detailCode = '1',
+    ): string {
         $a1 = (new PayrollRegistrationA1SnapshotBuilder())->build(
-            PayrollRegistrationA1SnapshotBuilderTest::source('1', '1'),
+            PayrollRegistrationA1SnapshotBuilderTest::source($activityCode, $detailCode),
             $identity,
             [
                 'supplier_id' => 11,
@@ -272,11 +332,15 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
     }
 
     /** @param array<string,mixed> $data */
-    private static function eventPayload(array $data): PayrollRegistrationXmlPayload
+    private static function eventPayload(array $data, int $action = 3): PayrollRegistrationXmlPayload
     {
         return self::payload(
             self::snapshot(self::identity(), 'REGZEC25'),
-            new PayrollRegistrationInteraction('REGZEC25', 'change', 3),
+            new PayrollRegistrationInteraction(
+                'REGZEC25',
+                $action === 3 ? 'change' : 'correction',
+                $action,
+            ),
             expectedStartOn: null,
             eventSnapshot: [
                 'schema_reference' => 'payroll-registration-event-snapshot.v1',
@@ -284,8 +348,8 @@ final class PayrollRegistrationNameAndBirthPlaceXmlTest extends TestCase
                 'employee_id' => 41,
                 'employment_id' => 51,
                 'environment' => 'production',
-                'interaction' => 'change',
-                'action_code' => 3,
+                'interaction' => $action === 3 ? 'change' : 'correction',
+                'action_code' => $action,
                 'effective_on' => '2026-08-04',
                 'notification_trigger_on' => '2026-08-04',
                 'person_external_identifier' => ['id' => 61, 'row_version' => 1, 'value' => '1000000001'],

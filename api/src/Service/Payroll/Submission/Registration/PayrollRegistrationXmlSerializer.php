@@ -444,7 +444,19 @@ final class PayrollRegistrationXmlSerializer
         $client->setAttribute('ikmpsv', $this->eventText($personExternal, 'value'));
         $data = $this->eventObject($event, 'data');
         if (in_array($payload->interaction->actionCode, [3, 4], true)) {
-            $this->regzecDeltaClient($document, $namespace, $client, $data);
+            $this->regzecDeltaClient(
+                $document,
+                $namespace,
+                $client,
+                $data,
+                PayrollRegistrationBusinessMatrix::allowsPreviousSurnames(
+                    PayrollRegistrationBusinessMatrix::requireActionVariant(
+                        $payload->interaction->actionCode,
+                        $this->eventText($data, 'activity_code'),
+                        $this->eventNullableText($data, 'relationship_detail_code'),
+                    ),
+                ),
+            );
         }
         $employee->appendChild($client);
 
@@ -570,6 +582,7 @@ final class PayrollRegistrationXmlSerializer
         string $namespace,
         DOMElement $client,
         array $data,
+        bool $allowsPreviousSurnames,
     ): void {
         $delta = $this->eventObject($data, 'delta');
         if (isset($delta['birth_number'])) {
@@ -585,9 +598,13 @@ final class PayrollRegistrationXmlSerializer
             ),
             // Kontrakt s balíčkem E2: delta identity nese `previous_surnames`
             // (čárkou oddělený řetězec) z historie jména.
-            'ona' => $this->previousSurnames(
-                self::textOrNull($identity['previous_surnames'] ?? null),
-            ),
+            // EDV 1.4.0.6, ID 10064: u varianty 10 (A3-10, A4-10) se dřívější
+            // příjmení neuvádí.
+            'ona' => $allowsPreviousSurnames
+                ? $this->previousSurnames(
+                    self::textOrNull($identity['previous_surnames'] ?? null),
+                )
+                : null,
         ], static fn (mixed $value): bool => $value !== null);
         if ($nameAttributes !== []) {
             $name = $this->element($document, $namespace, 'name');
@@ -1018,9 +1035,15 @@ final class PayrollRegistrationXmlSerializer
             if ($title !== null) {
                 $name->setAttribute('tit', $title);
             }
-            $previous = $this->previousSurnames(
-                $this->nullableIdentityString($identity, 'previous_surnames'),
-            );
+            // EDV 1.4.0.6, ID 10064: u varianty 10 se dřívější příjmení
+            // neuvádí (v matici „/") a ČSSZ podání s ním zamítne.
+            $a1 = $payload->identity->regzecA1;
+            $previous = $a1 !== null
+                && !PayrollRegistrationBusinessMatrix::allowsPreviousSurnames($a1->variant)
+                ? null
+                : $this->previousSurnames(
+                    $this->nullableIdentityString($identity, 'previous_surnames'),
+                );
             if ($previous !== null) {
                 $name->setAttribute('ona', $previous);
             }
