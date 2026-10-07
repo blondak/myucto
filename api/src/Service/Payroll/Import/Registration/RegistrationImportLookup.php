@@ -134,6 +134,37 @@ final class RegistrationImportLookup
         return is_string($name) ? $name : null;
     }
 
+    /** @return list<array{residence:string,country_code:?string,effective_from:string,effective_to:?string}> */
+    public function taxResidences(int $supplierId, int $employeeId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT residence, country_code, effective_from, effective_to
+               FROM payroll_person_tax_residences
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY effective_from, id'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+
+        return array_map(static fn (array $row): array => [
+            'residence' => (string) $row['residence'],
+            'country_code' => $row['country_code'] === null ? null : (string) $row['country_code'],
+            'effective_from' => (string) $row['effective_from'],
+            'effective_to' => $row['effective_to'] === null ? null : (string) $row['effective_to'],
+        ], $statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function hasPersonIdentifier(int $supplierId, int $employeeId, string $type): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ? AND identifier_type = ?
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $type]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
     /**
      * @return array{id:int,street_line:string,city:string,postal_code:string,country_code:string,effective_from:string,effective_to:?string}|null
      */

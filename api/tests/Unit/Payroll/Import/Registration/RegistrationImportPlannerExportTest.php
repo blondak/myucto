@@ -103,6 +103,7 @@ final class RegistrationImportPlannerExportTest extends TestCase
         $lookup->method('employeesByIdentifierHash')->willReturn([]);
         $lookup->method('variableSymbols')->willReturn([]);
         $lookup->method('employeeName')->willReturn('Syntetická Osoba');
+        $lookup->method('hasPersonIdentifier')->willReturn(true);
         $lookup->method('employments')->willReturn([[
             'id' => 50,
             'employee_id' => 5,

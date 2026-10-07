@@ -379,7 +379,149 @@ final class RegistrationXmlReader
             positionName: $this->attribute($this->child($xpath, $employee, 'r:job/r:position'), 'name'),
             healthInsurerCode: $this->attribute($this->child($xpath, $employee, 'r:insh'), 'cnr'),
             highestEducationCode: $this->attribute($this->child($xpath, $employee, 'r:fact'), 'highedu'),
+            taxResidency: $this->taxResidency($xpath, $employee),
+            a1Profile: $documentType === 'REGZEC25' ? $this->a1Profile($xpath, $employee) : [],
         );
+    }
+
+    /** @return array{country_code:string,changed_on:?string,identifier_type:?string,identifier:?string}|null */
+    private function taxResidency(DOMXPath $xpath, DOMElement $employee): ?array
+    {
+        $node = $this->child($xpath, $employee, 'r:client/r:taxidrezid');
+        $country = $this->upper($this->attribute($node, 'stat'));
+        if ($country === null) {
+            return null;
+        }
+
+        return [
+            'country_code' => $country,
+            'changed_on' => $this->date($this->attribute($node, 'statchang')),
+            'identifier_type' => $this->attribute($node, 'type'),
+            'identifier' => $this->attribute($node, 'num'),
+        ];
+    }
+
+    /**
+     * Údaje věty ve tvaru profilu registrace A1 (opak
+     * {@see \MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlSerializer}).
+     * Nese jen to, co věta uvádí; chybějící údaj zůstane v profilu, jak byl.
+     *
+     * @return array<string,mixed>
+     */
+    private function a1Profile(DOMXPath $xpath, DOMElement $employee): array
+    {
+        $node = fn (string $path): ?DOMElement => $this->child($xpath, $employee, $path);
+        $job = $node('r:job');
+        $residency = $node('r:client/r:taxidrezid');
+        $fact = $node('r:fact');
+        $restrictions = [];
+        foreach ($fact === null ? [] : ($xpath->query('r:healtrest', $fact) ?: []) as $restriction) {
+            if ($restriction instanceof DOMElement) {
+                $restrictions[] = self::present([
+                    'type_code' => $this->attribute($restriction, 'type'),
+                    'from' => $this->date($this->attribute($restriction, 'fro')),
+                    'to' => $this->date($this->attribute($restriction, 'to')),
+                ]);
+            }
+        }
+        $facts = self::present([
+            'highest_education_code' => $this->attribute($fact, 'highedu'),
+            'disability_card' => $this->flag($fact, 'ztp'),
+        ]);
+        if ($restrictions !== []) {
+            $facts['health_restrictions'] = $restrictions;
+        }
+
+        return self::present([
+            'permanent_address' => $this->profileAddress($node('r:client/r:adr')),
+            'czech_residence_address' => $this->profileAddress($node('r:client/r:fdr')),
+            'contact_address' => $this->profileAddress($node('r:client/r:cdr')),
+            'tax_residency' => self::present([
+                'country_code' => $this->upper($this->attribute($residency, 'stat')),
+                'identifier_type' => $this->attribute($residency, 'type'),
+                'identifier' => $this->attribute($residency, 'num'),
+                'residence_address' => $this->profileAddress($node('r:client/r:rdr')),
+            ]),
+            'employment' => self::present([
+                'contract_start_on' => $this->date($this->attribute($job, 'contractfro')),
+                'employment_status_code' => $this->attribute($job, 'relat'),
+                'work_mode_code' => $this->attribute($job, 'workmode'),
+                'continuous_operation' => $this->flag($job, 'cont'),
+                'prevailing_workplace_code' => $this->attribute($job, 'place'),
+                'expected_workplaces' => $this->attribute($job, 'preplace'),
+                'contract_workplace' => $this->attribute($job, 'contractplace'),
+                'workplace_city' => $this->attribute($job, 'cit'),
+                'workplace_municipality_code' => $this->attribute($job, 'municode'),
+                'profession_code' => $this->attribute($node('r:job/r:prof'), 'clas'),
+                'required_education_code' => $this->attribute($node('r:job/r:prof'), 'edu'),
+                'position_name' => $this->attribute($node('r:job/r:position'), 'name'),
+                'leadership' => $this->flag($node('r:job/r:position'), 'lead'),
+            ]),
+            'pension' => self::present([
+                'type_code' => $this->attribute($node('r:pens'), 'typ'),
+                'received_from' => $this->date($this->attribute($node('r:pens'), 'tak')),
+                'early_retirement' => $this->flag($node('r:pens'), 'early'),
+                'reduced_retirement_age' => $this->flag($node('r:pens'), 'reducedAge'),
+            ]),
+            'health_insurance_code' => $this->attribute($node('r:insh'), 'cnr'),
+            'facts' => $facts,
+            'foreign_legislation' => self::present([
+                'applies' => $this->flag($node('r:forinreg'), 'juris'),
+                'country_code' => $this->upper($this->attribute($node('r:forinreg'), 'state')),
+            ]),
+            'proof_identity' => self::present([
+                'type_code' => $this->attribute($node('r:client/r:proofid'), 'type'),
+                'number' => $this->attribute($node('r:client/r:proofid'), 'num'),
+                'foreign_issuer' => $this->attribute($node('r:client/r:proofid'), 'foreigninst'),
+                'country_code' => $this->upper($this->attribute($node('r:client/r:proofid'), 'stat')),
+            ]),
+            'foreign_worker' => self::present([
+                'free_access' => $this->flag($node('r:nocitizen'), 'freeacc'),
+                'free_access_reason_code' => $this->attribute($node('r:nocitizen'), 'perm'),
+                'permit_type_code' => $this->attribute($node('r:nocitizen'), 'permtype'),
+                'issuing_labour_office_code' => $this->attribute($node('r:nocitizen'), 'issue'),
+                'permit_identifier' => $this->attribute($node('r:nocitizen'), 'permid'),
+                'permit_from' => $this->date($this->attribute($node('r:nocitizen'), 'permfro')),
+                'permit_to' => $this->date($this->attribute($node('r:nocitizen'), 'permto')),
+            ]),
+        ]);
+    }
+
+    /** @return array<string,string>|null */
+    private function profileAddress(?DOMElement $node): ?array
+    {
+        if ($node === null) {
+            return null;
+        }
+        $address = self::present([
+            'street' => $this->attribute($node, 'str'),
+            'house_number' => $this->attribute($node, 'num'),
+            'orientation_number' => $this->attribute($node, 'onum'),
+            'city' => $this->attribute($node, 'cit'),
+            'postal_code' => $this->attribute($node, 'pnu'),
+            'country_code' => $this->upper($this->attribute($node, 'cnt')),
+            'ruian_point' => $this->attribute($node, 'ruianpoint'),
+        ]);
+
+        return $address === [] ? null : $address;
+    }
+
+    private function flag(?DOMElement $node, string $name): ?bool
+    {
+        return match ($this->attribute($node, $name)) {
+            'A' => true,
+            'N' => false,
+            default => null,
+        };
+    }
+
+    /**
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private static function present(array $values): array
+    {
+        return array_filter($values, static fn (mixed $value): bool => $value !== null && $value !== []);
     }
 
     /** @return array<string,?string>|null */

@@ -285,6 +285,17 @@ zaměstnání. Podle výsledku aplikace navrhne:
 - **aktualizaci** údajů, které se liší (zdravotní pojišťovna, adresa, titul,
   místo narození, občanství, pracoviště, CZ-ISCO, druh činnosti); změnu jména
   aplikace jen oznámí, provedete ji na kartě osoby,
+- **doplnění chybějících údajů** u osoby, kterou už evidujete: rodné číslo
+  (u cizince EČP), datum narození, daňovou rezidenci a zahraniční daňový
+  identifikátor. Osobě založené z měsíčních hlášení se zástupným jménem
+  „Doplňte“ věta se jménem zástupné jméno nahradí skutečným. Datum nástupu
+  z REGZEC posune odhadnutý nástup na skutečný den. Daňová rezidence se
+  zapíše od nástupu a jen tam, kde zákonná evidence žádnou ověřenou nevede,
+- **profil registrace REGZEC A1** vztahu: postavení v zaměstnání, pracovní
+  režim, nepřetržitý provoz, název pozice a vedoucí pozice, vzdělání, důchod,
+  příslušnost k cizím předpisům a adresy po složkách, tedy údaje, které
+  evidence jinde nevede. Profil vztahu, za který už registraci podala
+  aplikace, import nemění,
 - **ukončení vztahu** u odhlášení, případně zápis „nenastoupil",
 - **doplnění OIČ a ID zaměstnání**, pokud je věta obsahuje.
 
@@ -321,7 +332,7 @@ vztahu; nový tvar navíc začátek pojistného vztahu a bližší určení čin
   v části Skončení vztahu. Bez zaškrtnutí zůstane jen upozornění. Datum
   v budoucnu nebo před nástupem ukončit nejde, náhled na něj upozorní.
 - **EČP.** Osoba bez rodného čísla se hledá podle EČP. Při založení se EČP
-  nepřevezme, doplňte ho na kartě osoby.
+  zapíše na kartu osoby.
 - U osoby, kterou už evidujete, import doplní chybějící OIČ a ID zaměstnání.
   Druh činnosti a druh vztahu jen porovná; nesoulad ohlásí varováním
   a podmínky vztahu nemění. Vztah, který je zatím jen naplánovaný, import

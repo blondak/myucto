@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Unit\Payroll\Import\Registration\JmhzReportFixtures;
 use MyInvoice\Tests\Unit\Payroll\Import\Registration\RegistrationXmlFixtures;
@@ -36,6 +37,7 @@ final class JmhzTakeoverImportTest extends TestCase
     private RegistrationImportService $imports;
     private PayrollSensitiveData $sensitive;
     private PayrollEmploymentRepository $employments;
+    private PayrollRegistrationIdentityService $registrations;
     private int $supplierId;
     private int $userId;
 
@@ -49,6 +51,7 @@ final class JmhzTakeoverImportTest extends TestCase
         $this->imports = $container->get(RegistrationImportService::class);
         $this->sensitive = $container->get(PayrollSensitiveData::class);
         $this->employments = $container->get(PayrollEmploymentRepository::class);
+        $this->registrations = $container->get(PayrollRegistrationIdentityService::class);
         if (!$this->db->hasTable('payroll_migration_reference_totals')) {
             self::markTestSkipped('Tabulky převzatých mezd v testovací DB nejsou.');
         }
@@ -215,6 +218,94 @@ final class JmhzTakeoverImportTest extends TestCase
         foreach ($again['records'] as $record) {
             self::assertNotContains('start_on', array_column($record['changes'], 'field'), $this->dump($record));
         }
+    }
+
+    /**
+     * Registrace nahraná až po hlášeních: osobu se zástupným jménem dohledá
+     * přes OIČ a doplní, co hlášení nenesla — jméno, rodné číslo, datum
+     * narození a skutečný nástup.
+     */
+    public function testLaterRegistrationReplacesPlaceholderPersonData(): void
+    {
+        $files = $this->reports();
+        $this->apply($files, $this->selectable($this->imports->preview($this->supplierId, 'test', $files)));
+        $employment = $this->employmentByPpv(self::PPV_A);
+        $employee = (int) $this->scalar('SELECT employee_id FROM payroll_employments WHERE id = ?', [$employment]);
+        self::assertStringStartsWith(JmhzDerivedRegistrations::PLACEHOLDER_FIRST_NAME, (string) $this->scalar(
+            'SELECT full_name FROM payroll_employees WHERE id = ?',
+            [$employee],
+        ));
+
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1988-03-04', 'female', 7);
+        $xml = str_replace(
+            ['act="1" dat="2026-07-02"', '</client>', '<job ', '<position name="Účetní"/>'],
+            [
+                'act="3" dat="2026-07-02" fro="2026-07-02"',
+                '<taxidrezid stat="CZ" statchang="2026-07-02"/></client>',
+                '<job relat="1111" workmode="1" cont="N" ',
+                '<position name="Účetní" lead="N"/>',
+            ],
+            RegistrationXmlFixtures::regzecA1([
+                'bno' => $birthNumber,
+                'first' => 'Petra',
+                'last' => 'Syntetická',
+                'tit' => null,
+                'birth_date' => '1988-03-04',
+                'start' => '2019-05-01',
+                'ikmpsv' => RegistrationXmlFixtures::oic(21),
+                'oid' => self::PPV_A,
+            ]),
+        );
+        $regzec = [$this->file('regzec.xml', $xml)];
+        $preview = $this->imports->preview($this->supplierId, 'test', $regzec);
+        self::assertCount(1, $preview['records'], $this->dump($preview['records']));
+        $record = $preview['records'][0];
+        self::assertSame('oic', $record['match']['matched_by'], $this->dump($record));
+        self::assertSame('update', $record['operation'], $this->dump($record));
+        foreach ($record['warnings'] as $warning) {
+            self::assertStringNotContainsString('se liší od evidence', $warning);
+        }
+
+        $result = $this->apply($regzec, $this->selectable($preview));
+
+        self::assertSame(0, $result['summary']['failed'], $this->dump($result['results']));
+        self::assertSame(null, $result['results'][0]['message'] ?? null, $this->dump($result['results']));
+        self::assertSame('Petra Syntetická', $this->scalar('SELECT full_name FROM payroll_employees WHERE id = ?', [$employee]));
+        self::assertSame('1988-03-04', $this->scalar(
+            'SELECT birth_date FROM payroll_person_identity_history WHERE employee_id = ?',
+            [$employee],
+        ));
+        self::assertSame('2019-05-01', $this->scalar(
+            'SELECT MIN(effective_from) FROM payroll_person_identity_history WHERE employee_id = ?',
+            [$employee],
+        ));
+        self::assertSame(
+            $this->sensitive->lookupHash($birthNumber, PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId),
+            $this->scalar(
+                "SELECT value_hash FROM payroll_person_identifiers WHERE employee_id = ? AND identifier_type = 'birth_number'",
+                [$employee],
+            ),
+        );
+        self::assertSame('2019-05-01', $this->scalar('SELECT start_date FROM payroll_employments WHERE id = ?', [$employment]));
+        self::assertSame(0, $this->scalar('SELECT start_estimated FROM payroll_employments WHERE id = ?', [$employment]));
+        self::assertSame(
+            ['czech-resident', 'CZ', '2019-05-01'],
+            array_values((array) $this->db->pdo()->query(
+                'SELECT residence, country_code, effective_from FROM payroll_person_tax_residences WHERE employee_id = ' . $employee,
+            )?->fetch(\PDO::FETCH_ASSOC)),
+        );
+        $profile = $this->registrations->a1ProfileView($this->supplierId, $employment)['profile'];
+        self::assertIsArray($profile);
+        self::assertSame('1111', $profile['employment']['employment_status_code']);
+        self::assertSame('1', $profile['employment']['work_mode_code']);
+        self::assertFalse($profile['employment']['continuous_operation']);
+        self::assertFalse($profile['employment']['leadership']);
+        self::assertSame('Účetní', $profile['employment']['position_name']);
+        self::assertSame('M', $profile['facts']['highest_education_code']);
+        self::assertSame('12', $profile['permanent_address']['house_number']);
+
+        $again = $this->imports->preview($this->supplierId, 'test', $regzec);
+        self::assertSame('none', $again['records'][0]['operation'], $this->dump($again['records'][0]));
     }
 
     /**

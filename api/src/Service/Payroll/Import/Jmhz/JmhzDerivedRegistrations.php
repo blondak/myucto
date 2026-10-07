@@ -30,6 +30,13 @@ final class JmhzDerivedRegistrations
     public const PLACEHOLDER_FIRST_NAME = 'Doplňte';
     public const PLACEHOLDER_LAST_NAME = 'Jméno z hlášení JMHZ';
 
+    public static function isPlaceholderName(?string $firstName, ?string $lastName): bool
+    {
+        return $firstName === self::PLACEHOLDER_FIRST_NAME
+            && $lastName !== null
+            && str_starts_with($lastName, self::PLACEHOLDER_LAST_NAME);
+    }
+
     /**
      * @param list<RegistrationRecord> $fileRecords věty registrací a exportu z téže dávky
      * @return array{sha256:string,records:list<RegistrationRecord>}

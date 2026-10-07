@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -111,6 +112,7 @@ final class RegistrationImportPlanner
             '_record' => $record,
             '_file_sha256' => $fileSha256,
             '_terminate_confirmed' => $terminationConfirmed,
+            '_supplier_id' => $supplierId,
             '_employee_id' => null,
             '_employment_id' => null,
             '_steps' => [
@@ -126,6 +128,11 @@ final class RegistrationImportPlanner
                 'correct_start' => null,
                 'identifiers' => ['person' => null, 'employment' => null],
                 'ecp' => null,
+                'name' => null,
+                'birth_number' => null,
+                'tax_residence' => null,
+                'foreign_tax_identifier' => null,
+                'a1_profile' => null,
             ],
         ];
         if ($record->insuredPersonNumber !== null && $record->birthNumber === null) {
@@ -314,6 +321,10 @@ final class RegistrationImportPlanner
             $plan['_steps']['addresses'][$type] = $address;
             $this->change($plan, $type . '_address', $this->addressLabel($type), null, $this->addressText($address));
         }
+        if ($record->documentType === 'REGZEC25') {
+            $this->planTaxResidence($plan, $record, []);
+            $this->planA1Profile($plan, $record, null);
+        }
         if ($record->documentType === 'REGZEC25' || $record->isCsszExport() || $record->isJmhzDerived()) {
             $this->newEmploymentTerms($plan, $record, $relationType);
             if ($start <= date('Y-m-d')) {
@@ -388,6 +399,7 @@ final class RegistrationImportPlanner
         }
 
         $this->planPersonFacts($supplierId, $plan, $record, $employeeId, $decisive);
+        $this->planPersonIdentifier($supplierId, $plan, $record, $employeeId);
 
         if ($record->isCsszExport()) {
             if ($row !== null) {
@@ -415,7 +427,11 @@ final class RegistrationImportPlanner
             $this->exportInsuranceEnd($plan, $record, $row);
         }
 
-        if (($record->isJmhzDerived() || $record->isCsszExport()) && $row !== null) {
+        // Datum nástupu v registraci je doklad stejně jako hlášení nebo export:
+        // REGZEC nahraný po hlášeních posune odhadnutý nástup na skutečný.
+        if (($record->isJmhzDerived() || $record->isCsszExport() || $record->documentType === 'REGZEC25')
+            && $row !== null
+        ) {
             $current = $row['actual_start_date'] ?? $row['start_date'];
             // Podání dokládají dřívější nástup, než eviduje vztah (typicky vztah
             // založený z pozdějších hlášení, ke kterým přibyla starší): nástup se
@@ -463,6 +479,13 @@ final class RegistrationImportPlanner
                 }
             }
             $this->educationInfo($plan, $record, $employeeId);
+            $this->planTaxResidence($plan, $record, $this->lookup->taxResidences($supplierId, $employeeId));
+            if (is_string($plan['_steps']['tax_residence']['identifier'] ?? null)
+                && !$this->lookup->hasPersonIdentifier($supplierId, $employeeId, 'foreign_tax_identifier')
+            ) {
+                $plan['_steps']['foreign_tax_identifier'] = $plan['_steps']['tax_residence']['identifier'];
+            }
+            $this->planA1Profile($plan, $record, $row === null ? null : (int) $row['id']);
         }
 
         $this->planIdentifiers($supplierId, $environment, $plan, $record, $employeeId, $row);
@@ -476,7 +499,12 @@ final class RegistrationImportPlanner
             || $steps['addresses'] !== []
             || $steps['health_insurer'] !== null
             || $steps['activate_on'] !== null
-            || $steps['ecp'] !== null;
+            || $steps['ecp'] !== null
+            || $steps['name'] !== null
+            || $steps['birth_number'] !== null
+            || $steps['tax_residence'] !== null
+            || $steps['foreign_tax_identifier'] !== null
+            || $steps['a1_profile'] !== null;
         $hasIdentifiers = $steps['identifiers']['person'] !== null || $steps['identifiers']['employment'] !== null;
         $plan['operation'] = match (true) {
             $steps['create_employment'] !== null => 'create_employment',
@@ -611,14 +639,41 @@ final class RegistrationImportPlanner
                 $this->change($plan, $field, $this->factLabel($field), $current, $value);
             }
         }
+        $birthDate = self::text($identity['birth_date'] ?? null);
+        $importedBirthDate = $plan['person']['birth_date'] ?? null;
+        if ($birthDate === null && is_string($importedBirthDate)) {
+            $facts['birth_date'] = $importedBirthDate;
+            $this->change($plan, 'birth_date', 'Datum narození', null, $importedBirthDate);
+        }
         $plan['_steps']['identity_facts'] = $facts;
+        // Osoba založená z hlášení větve A má zástupné jméno, které čeká na
+        // skutečné. Věta se jménem ho nahradí; skutečné jméno import nemění.
+        $placeholder = JmhzDerivedRegistrations::isPlaceholderName(
+            self::text($identity['first_name'] ?? null),
+            self::text($identity['last_name'] ?? null),
+        );
+        if ($placeholder && $record->firstName !== null && $record->lastName !== null) {
+            $plan['_steps']['name'] = [
+                'identity_id' => (int) $identity['id'],
+                'first_name' => $record->firstName,
+                'last_name' => $record->lastName,
+                'full_name' => (string) $record->fullName(),
+            ];
+            $this->change(
+                $plan,
+                'full_name',
+                'Jméno a příjmení',
+                self::text(($identity['first_name'] ?? '') . ' ' . ($identity['last_name'] ?? '')),
+                $record->fullName(),
+            );
+        }
         if ($record->birthSurname !== null && self::text($identity['birth_surname'] ?? null) === null) {
             $plan['_steps']['birth_surname'] = $record->birthSurname;
             $this->change($plan, 'birth_surname', 'Rodné příjmení', null, $record->birthSurname);
         }
         foreach (['first_name' => $record->firstName, 'last_name' => $record->lastName] as $field => $value) {
             $current = self::text($identity[$field] ?? null);
-            if ($value !== null && $current !== null && $current !== $value) {
+            if (!$placeholder && $value !== null && $current !== null && $current !== $value) {
                 $plan['warnings'][] = ($field === 'first_name' ? 'Jméno' : 'Příjmení')
                     . " ve větě ({$value}) se liší od evidence ({$current}). Import ho nemění — "
                     . 'jde-li o skutečnou změnu, zapište ji na kartě osoby.';
@@ -629,6 +684,155 @@ final class RegistrationImportPlanner
             $plan['warnings'][] = "Datum narození ve větě ({$record->birthDate}) se liší od evidence "
                 . "({$birthDate}). Ověřte, že jde o tutéž osobu.";
         }
+    }
+
+    /**
+     * Rodné číslo (u cizince EČP), které karta osoby ještě nevede. Vedené
+     * číslo import nepřepisuje — podle něj se osoba páruje.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function planPersonIdentifier(int $supplierId, array &$plan, RegistrationRecord $record, int $employeeId): void
+    {
+        [$birthNumber, $ecp] = $this->birthNumber($record);
+        if ($birthNumber !== null && !$this->lookup->hasPersonIdentifier($supplierId, $employeeId, 'birth_number')) {
+            $plan['_steps']['birth_number'] = $birthNumber;
+            $this->change($plan, 'birth_number', 'Rodné číslo', null, $this->maskedBirthNumber($birthNumber));
+        } elseif ($birthNumber === null && $ecp !== null
+            && !$this->lookup->hasPersonIdentifier($supplierId, $employeeId, 'ecp')
+        ) {
+            $plan['_steps']['ecp'] = $ecp;
+            $this->change($plan, 'ecp', 'Evidenční číslo pojištěnce (EČP)', null, $this->maskedBirthNumber($ecp));
+        }
+    }
+
+    /**
+     * Daňová rezidence z `taxidrezid`. Zapíše se jen do prázdné (nebo jen
+     * neověřené) řady zákonné evidence, a to od nástupu: věta dokládá stav,
+     * ve kterém osoba ve vztahu je, `statchang` bývá jen den vyplnění věty.
+     * Ověřenou rezidenci import nemění, jiný stát jen ohlásí.
+     *
+     * @param array<string,mixed> $plan
+     * @param list<array{residence:string,country_code:?string,effective_from:string,effective_to:?string}> $current
+     */
+    private function planTaxResidence(array &$plan, RegistrationRecord $record, array $current): void
+    {
+        $imported = $record->taxResidency;
+        if ($imported === null) {
+            return;
+        }
+        $country = (string) $imported['country_code'];
+        $residence = $country === 'CZ' ? 'czech-resident' : 'non-resident';
+        $verified = array_values(array_filter(
+            $current,
+            static fn (array $row): bool => $row['residence'] !== 'unverified',
+        ));
+        if ($verified !== []) {
+            $decisive = $record->decisiveDate() ?? date('Y-m-d');
+            foreach ($verified as $row) {
+                if ($row['effective_from'] <= $decisive && ($row['effective_to'] === null || $row['effective_to'] >= $decisive)
+                    && ($row['residence'] !== $residence || ($residence === 'non-resident' && $row['country_code'] !== $country))
+                ) {
+                    $plan['warnings'][] = "Daňová rezidence ve větě ({$country}) se liší od zákonné evidence "
+                        . '(' . ($row['country_code'] ?? $row['residence']) . '). Import ji nemění, zkontrolujte '
+                        . 'ji na kartě osoby (Zákonná evidence).';
+                }
+            }
+
+            return;
+        }
+        $plan['_steps']['tax_residence'] = [
+            'residence' => $residence,
+            'country_code' => $country,
+            'identifier' => $country === 'CZ' ? null : $imported['identifier'],
+        ];
+        $this->change($plan, 'tax_residence', 'Daňová rezidence', null, $country . ' (od nástupu)');
+    }
+
+    /**
+     * Údaje věty REGZEC, které evidence vede jen v profilu registrace A1
+     * (postavení v zaměstnání, režim práce, nepřetržitý provoz, vedoucí
+     * pozice, vzdělání, důchod, cizí předpisy, strukturované adresy…).
+     * Profil, ze kterého aplikace sama už registraci podala, se nemění.
+     *
+     * @param array<string,mixed> $plan
+     */
+    private function planA1Profile(array &$plan, RegistrationRecord $record, ?int $employmentId): void
+    {
+        if ($record->a1Profile === []) {
+            return;
+        }
+        $base = [];
+        if ($employmentId !== null) {
+            try {
+                $view = $this->identities->a1ProfileView((int) $plan['_supplier_id'], $employmentId);
+            } catch (\Throwable $e) {
+                $plan['warnings'][] = 'Profil registrace A1 se z věty nedoplní: ' . $e->getMessage();
+
+                return;
+            }
+            if (($view['draft']['submitted'] ?? false) === true) {
+                $plan['warnings'][] = 'Registraci vztahu už podala aplikace, profil registrace A1 import nemění. '
+                    . 'Rozdíly proti větě opravte změnovým podáním.';
+
+                return;
+            }
+            $base = is_array($view['profile']) ? $view['profile'] : (array) ($view['draft']['suggested'] ?? []);
+        }
+        $changed = [];
+        foreach (self::flatten($record->a1Profile) as $path => $value) {
+            if (self::scalar(self::at($base, $path)) !== self::scalar($value)) {
+                $changed[] = PayrollRegistrationFieldVocabulary::label((string) preg_replace('/\.\d+(\.|$)/', '$1', $path));
+            }
+        }
+        if ($changed === []) {
+            return;
+        }
+        $plan['_steps']['a1_profile'] = $record->a1Profile;
+        $this->change($plan, 'a1_profile', 'Profil registrace A1', null, implode(', ', array_unique($changed)));
+    }
+
+    /**
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private static function flatten(array $values, string $prefix = ''): array
+    {
+        $result = [];
+        foreach ($values as $key => $value) {
+            $path = $prefix === '' ? (string) $key : $prefix . '.' . $key;
+            if (is_array($value) && $value !== []) {
+                $result += self::flatten($value, $path);
+            } else {
+                $result[$path] = $value;
+            }
+        }
+
+        return $result;
+    }
+
+    /** @param array<string,mixed> $root */
+    private static function at(array $root, string $path): mixed
+    {
+        $node = $root;
+        foreach (explode('.', $path) as $segment) {
+            if (!is_array($node) || !array_key_exists($segment, $node)) {
+                return null;
+            }
+            $node = $node[$segment];
+        }
+
+        return $node;
+    }
+
+    private static function scalar(mixed $value): ?string
+    {
+        return match (true) {
+            $value === null => null,
+            is_bool($value) => $value ? 'A' : 'N',
+            is_scalar($value) => trim((string) $value),
+            default => null,
+        };
     }
 
     /** @param array<string,mixed> $plan */
@@ -1320,7 +1524,8 @@ final class RegistrationImportPlanner
     /** @param array<string,mixed> $plan */
     private function educationInfo(array &$plan, RegistrationRecord $record, ?int $employeeId): void
     {
-        if ($record->highestEducationCode === null) {
+        // REGZEC vzdělání nese do profilu registrace A1, viz planA1Profile().
+        if ($record->highestEducationCode === null || $record->a1Profile !== []) {
             return;
         }
         $plan['changes'][] = [

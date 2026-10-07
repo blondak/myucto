@@ -130,9 +130,11 @@ final class RegistrationImportWriter
                     $employmentId,
                     (string) $steps['correct_start']['to'],
                     null,
-                    $record->isCsszExport()
-                        ? 'Nástup podle exportu zaměstnanců ČSSZ a měsíčních hlášení v téže dávce.'
-                        : 'Nástup podle importovaných měsíčních hlášení JMHZ.',
+                    match (true) {
+                        $record->isCsszExport() => 'Nástup podle exportu zaměstnanců ČSSZ a měsíčních hlášení v téže dávce.',
+                        $record->isJmhzDerived() => 'Nástup podle importovaných měsíčních hlášení JMHZ.',
+                        default => 'Nástup podle importované registrace ČSSZ.',
+                    },
                     $userId,
                     $ip,
                     $userAgent,
@@ -155,6 +157,20 @@ final class RegistrationImportWriter
                 );
             }
 
+            if (is_array($steps['name'] ?? null) && $employeeId !== null) {
+                $this->optional('Jméno', $notes, $operations, 'name', fn () => $this->writePersonCard(
+                    $supplierId,
+                    $employeeId,
+                    $decisive,
+                    [],
+                    null,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                    [],
+                    $steps['name'],
+                ));
+            }
             if ($steps['terms'] !== [] && $employmentId !== null) {
                 $this->optional('Podmínky vztahu', $notes, $operations, 'terms', fn () => $this->writeTerms(
                     $supplierId,
@@ -185,8 +201,23 @@ final class RegistrationImportWriter
                     $userAgent,
                 ));
             }
-            if (is_string($steps['ecp'] ?? null) && $employeeId !== null) {
-                $this->optional('Evidenční číslo pojištěnce', $notes, $operations, 'ecp', fn () => $this->writePersonCard(
+            $personIdentifiers = array_filter([
+                'birth_number' => $steps['birth_number'] ?? null,
+                'ecp' => $steps['ecp'] ?? null,
+                'foreign_tax_identifier' => $steps['foreign_tax_identifier'] ?? null,
+            ], 'is_string');
+            if ($personIdentifiers !== [] && $employeeId !== null) {
+                $label = match (true) {
+                    isset($personIdentifiers['ecp']) => 'Evidenční číslo pojištěnce',
+                    isset($personIdentifiers['birth_number']) => 'Rodné číslo',
+                    default => 'Zahraniční daňový identifikátor',
+                };
+                $operation = match (true) {
+                    isset($personIdentifiers['ecp']) => 'ecp',
+                    isset($personIdentifiers['birth_number']) => 'birth_number',
+                    default => 'foreign_tax_identifier',
+                };
+                $this->optional($label, $notes, $operations, $operation, fn () => $this->writePersonCard(
                     $supplierId,
                     $employeeId,
                     $decisive,
@@ -195,7 +226,16 @@ final class RegistrationImportWriter
                     $userId,
                     $ip,
                     $userAgent,
-                    (string) $steps['ecp'],
+                    $personIdentifiers,
+                ));
+            }
+            if (is_array($steps['tax_residence'] ?? null) && $employeeId !== null) {
+                $this->optional('Daňová rezidence', $notes, $operations, 'tax_residence', fn () => $this->writeTaxResidence(
+                    $supplierId,
+                    $employeeId,
+                    $steps['tax_residence'],
+                    'regzec:' . substr((string) $plan['_file_sha256'], 0, 16) . ':' . $record->sequence,
+                    $userId,
                 ));
             }
             if (is_array($steps['health_insurer']) && $employeeId !== null) {
@@ -253,6 +293,16 @@ final class RegistrationImportWriter
                     (string) $plan['_file_sha256'],
                     $identifiers['person'],
                     $identifiers['employment'],
+                    $userId,
+                ));
+            }
+            // Profil A1 až nakonec: návrh formuláře se skládá z kmenových dat,
+            // která předchozí kroky právě doplnily.
+            if (is_array($steps['a1_profile'] ?? null) && $employmentId !== null) {
+                $this->optional('Profil registrace A1', $notes, $operations, 'a1_profile', fn () => $this->writeA1Profile(
+                    $supplierId,
+                    $employmentId,
+                    $steps['a1_profile'],
                     $userId,
                 ));
             }
@@ -441,11 +491,97 @@ final class RegistrationImportWriter
     }
 
     /**
+     * Rezidence platí od nejstaršího nástupu osoby: věta dokládá stav, ve
+     * kterém osoba ve vztahu je. Neověřené řádky (výchozí doplnění) nahradí,
+     * ověřené plánovač nepouští.
+     *
+     * @param array{residence:string,country_code:string,identifier:?string} $residence
+     */
+    private function writeTaxResidence(
+        int $supplierId,
+        int $employeeId,
+        array $residence,
+        string $reference,
+        ?int $userId,
+    ): void {
+        $today = date('Y-m-d');
+        $view = $this->statutory->editorView($supplierId, $employeeId, $today)
+            ?? throw new \DomainException('Zákonná evidence zaměstnance nebyla nalezena.');
+        /** @var array<string,list<array<string,mixed>>> $sections */
+        $sections = $view['sections'];
+        foreach ($sections['tax_residences'] ?? [] as $row) {
+            if (($row['residence'] ?? null) !== 'unverified') {
+                return;
+            }
+        }
+        $from = null;
+        foreach ($this->lookup->employments($supplierId, $employeeId) as $employment) {
+            $start = $employment['actual_start_date'] ?? $employment['start_date'];
+            if (is_string($start) && ($from === null || $start < $from)) {
+                $from = $start;
+            }
+        }
+        $sections['tax_residences'] = [[
+            'residence' => $residence['residence'],
+            'country_code' => $residence['country_code'],
+            'evidence_reference' => $reference,
+            'effective_from' => $from ?? $today,
+            'effective_to' => null,
+            'evidence_note' => null,
+        ]];
+        $this->statutory->save($supplierId, $employeeId, ['sections' => $sections], $today, $userId, null, null);
+    }
+
+    /**
+     * Údaje věty do profilu registrace A1: nad uloženým profilem (nebo návrhem
+     * z kmenových dat) se přepíšou jen hodnoty, které věta uvádí.
+     *
+     * @param array<string,mixed> $overlay
+     */
+    private function writeA1Profile(int $supplierId, int $employmentId, array $overlay, ?int $userId): void
+    {
+        $view = $this->identities->a1ProfileView($supplierId, $employmentId);
+        if (($view['draft']['submitted'] ?? false) === true) {
+            return;
+        }
+        $base = is_array($view['profile']) ? $view['profile'] : (array) ($view['draft']['suggested'] ?? []);
+        foreach (['status', 'reference_hash', 'created_at', 'created', 'problems'] as $meta) {
+            unset($base[$meta]);
+        }
+        $input = self::overlay($base, $overlay);
+        $input['row_version'] = (int) ($view['draft']['row_version'] ?? 0);
+        $input['effective_on'] = (string) $view['draft']['effective_on'];
+        $this->identities->saveA1Profile($supplierId, $employmentId, $input, $userId);
+    }
+
+    /**
+     * @param array<string,mixed> $base
+     * @param array<string,mixed> $overlay
+     * @return array<string,mixed>
+     */
+    private static function overlay(array $base, array $overlay): array
+    {
+        foreach ($overlay as $key => $value) {
+            $base[$key] = is_array($value) && !array_is_list($value) && is_array($base[$key] ?? null)
+                ? self::overlay($base[$key], $value)
+                : $value;
+        }
+
+        return $base;
+    }
+
+    /**
      * Adresy a rodné příjmení jdou jedním uložením karty osoby — je to jeden
      * optimistický zámek. Adresa se historizuje stejně jako v zápisu z A1:
      * verze pokrývající rozhodný den se uzavře a od něj platí nová.
      *
+     * Skutečné jméno přepíše zástupné na místě (není to změna jména, ale
+     * doplnění). Zástupná verze vznikla k odhadnutému nástupu, takže se
+     * nejstarší verze zároveň protáhne k nástupu, který věta mezitím doložila.
+     *
      * @param array<string,array<string,string>> $addresses
+     * @param array<string,string> $identifierValues typ => hodnota; typ, který karta už vede, se nepřepisuje
+     * @param array{identity_id:int,first_name:string,last_name:string,full_name:string}|null $name
      */
     private function writePersonCard(
         int $supplierId,
@@ -456,22 +592,17 @@ final class RegistrationImportWriter
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
-        ?string $ecp = null,
+        array $identifierValues = [],
+        ?array $name = null,
     ): void {
         $current = $this->profiles->get($supplierId, $employeeId)
             ?? throw new \DomainException('Osobní karta zaměstnance nebyla nalezena.');
+        foreach ($current['identifiers'] as $existing) {
+            unset($identifierValues[(string) ($existing['identifier_type'] ?? '')]);
+        }
         $identifiers = [];
-        if ($ecp !== null) {
-            foreach ($current['identifiers'] as $existing) {
-                if (($existing['identifier_type'] ?? null) === 'ecp') {
-                    // Karta EČP už vede — import ho nepřepisuje.
-                    $ecp = null;
-                    break;
-                }
-            }
-            if ($ecp !== null) {
-                $identifiers[] = ['id' => null, 'identifier_type' => 'ecp', 'value' => $ecp];
-            }
+        foreach ($identifierValues as $type => $value) {
+            $identifiers[] = ['id' => null, 'identifier_type' => $type, 'value' => $value];
         }
         $rows = [];
         foreach ($addresses as $type => $address) {
@@ -497,6 +628,38 @@ final class RegistrationImportWriter
                     'effective_to' => $version['effective_to'],
                 ];
             }
+        }
+        if ($name !== null) {
+            $version = null;
+            $earliest = null;
+            foreach ($current['identity_history'] as $row) {
+                if ((int) $row['id'] === $name['identity_id']) {
+                    $version = $row;
+                }
+                if ($earliest === null || (string) $row['effective_from'] < (string) $earliest['effective_from']) {
+                    $earliest = $row;
+                }
+            }
+            if ($version === null) {
+                throw new \DomainException('Verze identity se zástupným jménem se mezitím změnila. Obnovte náhled.');
+            }
+            $from = (string) $version['effective_from'];
+            if ((int) $earliest['id'] === (int) $version['id']) {
+                foreach ($this->lookup->employments($supplierId, $employeeId) as $employment) {
+                    $start = $employment['actual_start_date'] ?? $employment['start_date'];
+                    if (is_string($start) && $start < $from) {
+                        $from = $start;
+                    }
+                }
+            }
+            $identity = [[
+                'id' => $version['id'],
+                'full_name' => $name['full_name'],
+                'first_name' => $name['first_name'],
+                'last_name' => $name['last_name'],
+                'effective_from' => $from,
+                'effective_to' => $version['effective_to'],
+            ]];
         }
         if ($rows === [] && $identity === [] && $identifiers === []) {
             return;

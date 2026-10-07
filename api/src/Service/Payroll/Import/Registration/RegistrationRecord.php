@@ -95,6 +95,16 @@ final readonly class RegistrationRecord
         public array $relationTypeOptions = [],
         /** Nástup je jen odhad z prvního hlášeného měsíce — účetní ho doplní ze smlouvy. */
         public bool $startEstimated = false,
+        /** Daňová rezidence z `taxidrezid`, `{country_code, changed_on, identifier_type, identifier}`. */
+        public ?array $taxResidency = null,
+        /**
+         * Údaje věty REGZEC ve tvaru profilu registrace A1, jen ty, které věta
+         * uvádí. Import je přenese do profilu vztahu, ať formulář registrace
+         * odpovídá tomu, co ČSSZ od předchozího programu přijala.
+         *
+         * @var array<string,mixed>
+         */
+        public array $a1Profile = [],
     ) {}
 
     public function isCsszExport(): bool
