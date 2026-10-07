@@ -280,7 +280,10 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
         $changed['permanent_address']['city'] = 'Brno';
         $changed['pension']['type_code'] = 'S';
         $changed['pension']['received_from'] = '2026-01-01';
-        $current = $builder->build(self::IDENTITY, self::IDENTIFIERS, $changed);
+        // Pohlaví a datum narození se přes A3 neopravují (jde o A4).
+        $identity = self::IDENTITY;
+        $identity['sex'] = 'F';
+        $current = $builder->build($identity, self::IDENTIFIERS, $changed);
 
         $findings = (new PayrollRegistrationChangeDetector())
             ->compare($baseline, $current);
@@ -291,13 +294,14 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
         // a změna adresy se nedala podat jedním kliknutím.
         self::assertSame('201', $plan['changes']['health_insurance_code']);
         self::assertSame('Brno', $plan['changes']['permanent_address']['city']);
+        // Důchod nese A3 v elementu `pens` (REG-04), už není ruční položka.
+        self::assertSame(
+            ['received_from' => '2026-01-01', 'type_code' => 'S'],
+            $plan['changes']['pension'],
+        );
         self::assertSame([
             [
-                'path' => 'pension.received_from',
-                'reason_code' => 'registration_change_field_not_in_a3_payload',
-            ],
-            [
-                'path' => 'pension.type_code',
+                'path' => 'identity.sex',
                 'reason_code' => 'registration_change_field_not_in_a3_payload',
             ],
         ], $plan['unsupported']);

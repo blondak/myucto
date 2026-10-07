@@ -139,12 +139,24 @@ final class PayrollRegistrationAction
             return $denied;
         }
 
+        $body = (array) ($request->getParsedBody() ?? []);
+        $effectiveOn = $body['effective_on'] ?? null;
+        if ($effectiveOn !== null && !is_string($effectiveOn)) {
+            return $this->noStore(Json::error(
+                $response,
+                'validation_failed',
+                'Datum platnosti změny musí mít tvar RRRR-MM-DD.',
+                422,
+            ));
+        }
+
         return $this->run($response, fn (): array => $this->changes->file(
             $this->currentSupplierId($request),
             $this->environment($request),
             $this->employmentId($args),
             $this->proposalId($args),
             $this->userId($request),
+            $effectiveOn === '' ? null : $effectiveOn,
         ), 201);
     }
 

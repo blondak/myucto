@@ -18,6 +18,8 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRegistrationXmlCoreTest extends TestCase
 {
+    private const P1_GUID = 'AAAAAAAA-1111-2222-3333-BBBBBBBBBBBB';
+
     public function testResolverChoosesP1AndP2ButKeepsIncompleteA1Closed(): void
     {
         $resolver = new PayrollRegistrationInteractionResolver();
@@ -112,6 +114,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 10,
             ),
             expectedStartOn: null,
+            referencedFormGuid: self::P1_GUID,
         );
         $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
 
@@ -119,6 +122,53 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         (new PayrollRegistrationXmlValidator(
             new PayrollRegistrationSchemaCatalog(),
         ))->validate($payload, $xml);
+    }
+
+    /**
+     * REG-02: P2 s čerstvým GUID (a tedy bez odkazu na přijatou P1) ČSSZ
+     * nespáruje a předregistrace zůstane otevřená. Soubor nesmí vzniknout.
+     */
+    public function testPrezecP2WithoutReferenceToP1CannotBeSerialized(): void
+    {
+        $payload = self::payload(
+            self::snapshot('CZ'),
+            new PayrollRegistrationInteraction(
+                'PREZEC26',
+                'pre_registration_no_show',
+                10,
+            ),
+            expectedStartOn: null,
+        );
+
+        $this->expectCode(
+            'registration_prezec_p1_guid_missing',
+            static fn () => (new PayrollRegistrationXmlSerializer())
+                ->serialize($payload),
+        );
+        $this->expectCode(
+            'registration_prezec_p1_guid_missing',
+            static fn () => (new PayrollRegistrationXmlValidator(
+                new PayrollRegistrationSchemaCatalog(),
+            ))->validate($payload, '<PREZEC/>'),
+        );
+    }
+
+    public function testPrezecP2CarriesTheReferencedGuidNotTheFreshOne(): void
+    {
+        $payload = self::payload(
+            self::snapshot('CZ'),
+            new PayrollRegistrationInteraction(
+                'PREZEC26',
+                'pre_registration_no_show',
+                10,
+            ),
+            expectedStartOn: null,
+            referencedFormGuid: self::P1_GUID,
+        );
+        $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
+
+        self::assertStringContainsString('idform="' . self::P1_GUID . '"', $xml);
+        self::assertStringNotContainsString($payload->formGuid, $xml);
     }
 
     public function testPrezecRejectsForeignIdentityAndTamperedBytes(): void
@@ -590,6 +640,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         ?string $expectedStartOn = '2026-08-05',
         ?string $actualStartOn = null,
         ?array $eventSnapshot = null,
+        ?string $referencedFormGuid = null,
     ): PayrollRegistrationXmlPayload {
         return new PayrollRegistrationXmlPayload(
             identity: $snapshot,
@@ -605,6 +656,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             eventSnapshot: $eventSnapshot,
             productName: 'MyÚčto.cz',
             productVersion: '5.6.0',
+            referencedFormGuid: $referencedFormGuid,
         );
     }
 
@@ -917,7 +969,7 @@ XML;
 <PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026" version="1.2" partialAccept="A">
   <VENDOR productName="MyÚčto.cz" productVersion="5.6.0"/>
   <employees>
-    <employee sqnr="1" act="10" idform="12345678-1234-1234-1234-123456789ABC" dat="2026-08-04">
+    <employee sqnr="1" act="10" idform="AAAAAAAA-1111-2222-3333-BBBBBBBBBBBB" dat="2026-08-04">
       <client bno="9152031234"/>
       <comp vs="1234567890"/>
     </employee>

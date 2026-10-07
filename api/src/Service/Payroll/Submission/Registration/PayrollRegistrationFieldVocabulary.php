@@ -259,6 +259,8 @@ final class PayrollRegistrationFieldVocabulary
         'source_submission_id' => ['číslo původního přijatého podání', null],
         'source_filing_on' => ['datum původního přijatého podání', null],
         'discovered_on' => ['datum zjištění chyby', null],
+        'learned_on' => ['datum, kdy se zaměstnavatel o změně dozvěděl', null],
+        'previous_surnames' => ['dřívější příjmení', self::WHERE_NAMES],
         'planned_start_on' => [
             'původní plánovaný den nástupu',
             self::WHERE_RELATIONSHIP,

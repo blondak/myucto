@@ -103,6 +103,24 @@ final readonly class PayrollRegistrationXmlValidator
                     . 'Vzniká automaticky, takže stačí připravit podání znovu.',
             );
         }
+        if ($payload->interaction->documentType === 'PREZEC26'
+            && $payload->interaction->actionCode === 10
+            && (
+                $payload->referencedFormGuid === null
+                || preg_match(
+                    '/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/D',
+                    $payload->referencedFormGuid,
+                ) !== 1
+            )
+        ) {
+            $this->invalid(
+                'registration_prezec_p1_guid_missing',
+                'Oznámení o nenastoupení (PREZEC P2) musí odkazovat na GUID '
+                    . 'původního přijatého částečného přihlášení (P1). Bez '
+                    . 'správného GUID ČSSZ ukončení předregistrace '
+                    . 'nezpracuje.',
+            );
+        }
         if (preg_match('/^\d{8,10}$/D', $payload->employerVariableSymbol)
             !== 1
         ) {

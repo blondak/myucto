@@ -27,5 +27,11 @@ final readonly class PayrollRegistrationXmlPayload
          */
         public ?string $productName = null,
         public ?string $productVersion = null,
+        /*
+         * GUID formuláře původní přijaté PREZEC P1, na který se odkazuje
+         * ukončení předregistrace P2 (atribut 10012). Jen pro P2; u ostatních
+         * podání se nepoužívá a formulář nese vlastní `formGuid`.
+         */
+        public ?string $referencedFormGuid = null,
     ) {}
 }

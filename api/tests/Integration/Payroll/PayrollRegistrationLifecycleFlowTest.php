@@ -222,6 +222,149 @@ final class PayrollRegistrationLifecycleFlowTest extends TestCase
         self::assertStringContainsString('oid="' . self::ID_PPV . '"', $a2Xml);
     }
 
+    /**
+     * REG-04 a REG-05: změna příjmení zjištěná zpětně. Detekce ji navrhne
+     * jako jedno podání A3 (dřív šlo jen o ruční položku), s platností od
+     * začátku nové verze identity a se začátkem osmidenní lhůty ode dne
+     * zjištění; účetní platnost při podání může přepsat.
+     */
+    public function testSurnameChangeIsDetectedAndFiledWithBackdatedValidity(): void
+    {
+        $people = $this->container->get(PayrollPersonCreateService::class);
+        self::assertInstanceOf(PayrollPersonCreateService::class, $people);
+        $person = $people->create($this->supplierId, [
+            'full_name' => 'Petra Registrační',
+            'first_name' => 'Petra',
+            'last_name' => 'Registrační',
+            'birth_date' => '1990-04-15',
+            'birth_number' => self::syntheticBirthNumber('1990-04-15', 'female', 4),
+            'relation_type' => 'employment',
+            'planned_start_on' => self::START_ON,
+            'office_id' => $this->officeId,
+            'health_insurer_code' => '111',
+        ], $this->actors[0], null, null);
+        $employeeId = (int) $person['id'];
+        $employmentId = (int) $this->scalar(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        );
+        $this->completePersonCard($employeeId, $employmentId);
+        $this->saveA1Profile($employmentId, $this->a1Profile('Dlouhá', '12', 'Praha', '11000'));
+        $a1 = $this->prepare($employmentId, ['registration_mode' => 'full']);
+        $this->acceptRegistration($a1, true);
+        $this->calendar->today = self::START_ON;
+        $this->transition($employmentId, 'active', self::START_ON);
+
+        // Nová verze identity s novým příjmením od 1. 11., zjištěno 20. 11.
+        $this->calendar->today = '2026-11-20';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history SET effective_to = "2026-10-31"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $employeeId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 title_prefix, title_suffix, birth_surname, birth_date,
+                 birth_place, birth_country_code, citizenship_country_code,
+                 sex, effective_from)
+             SELECT supplier_id, employee_id, "Petra Nová", first_name, "Nová",
+                    title_prefix, title_suffix, birth_surname, birth_date,
+                    birth_place, birth_country_code, citizenship_country_code,
+                    sex, "2026-11-01"
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ? AND effective_to = "2026-10-31"',
+        )->execute([$this->supplierId, $employeeId]);
+
+        $a3 = $this->proposal($this->detect($employmentId), 'regzec_change');
+        self::assertSame(['identity.last_name'], array_column($a3['findings'], 'path'));
+        self::assertTrue($a3['fileable'], CanonicalJson::encode($a3));
+        self::assertSame('2026-11-28', $a3['due_on']);
+        self::assertSame('2026-11-01', $a3['effective_on']);
+        self::assertSame(
+            ['first_name' => 'Petra', 'last_name' => 'Nová', 'previous_surnames' => 'Registrační'],
+            $a3['changes']['identity'],
+        );
+
+        // Bez přepsání platí navržený začátek nové verze identity.
+        $filed = $this->json(($this->registration)->fileChange(
+            $this->request('POST', "/api/payroll/submissions/registration/{$employmentId}/changes/{$a3['id']}/file")
+                ->withParsedBody(['environment' => 'test']),
+            new Response(),
+            ['employmentId' => (string) $employmentId, 'proposalId' => (string) $a3['id']],
+        ));
+        self::assertSame('2026-11-01', $filed['event']['effective_on']);
+        $submission = $this->prepare($employmentId, ['event_id' => $filed['event']['id']]);
+        // Platnost je 1. 11., ale lhůta běží ode dne zjištění 20. 11.
+        self::assertSame('2026-11-20', $submission['deadline']['earliest_registration_on']);
+        self::assertSame('2026-11-28', $submission['deadline']['due_on']);
+        $xml = $this->artifactXml((int) $submission['submission_id']);
+        self::assertStringContainsString('act="3"', $xml);
+        self::assertStringContainsString(' fro="2026-11-01"', $xml);
+        self::assertMatchesRegularExpression('/<name [^>]*sur="Nová"[^>]*fir="Petra"/', $xml);
+    }
+
+    public function testFilingOverridesTheSuggestedValidityDate(): void
+    {
+        $people = $this->container->get(PayrollPersonCreateService::class);
+        self::assertInstanceOf(PayrollPersonCreateService::class, $people);
+        $person = $people->create($this->supplierId, [
+            'full_name' => 'Petra Registrační',
+            'first_name' => 'Petra',
+            'last_name' => 'Registrační',
+            'birth_date' => '1990-04-15',
+            'birth_number' => self::syntheticBirthNumber('1990-04-15', 'female', 5),
+            'relation_type' => 'employment',
+            'planned_start_on' => self::START_ON,
+            'office_id' => $this->officeId,
+            'health_insurer_code' => '111',
+        ], $this->actors[0], null, null);
+        $employeeId = (int) $person['id'];
+        $employmentId = (int) $this->scalar(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, $employeeId],
+        );
+        $this->completePersonCard($employeeId, $employmentId);
+        $this->saveA1Profile($employmentId, $this->a1Profile('Dlouhá', '12', 'Praha', '11000'));
+        $a1 = $this->prepare($employmentId, ['registration_mode' => 'full']);
+        $this->acceptRegistration($a1, true);
+        $this->calendar->today = self::START_ON;
+        $this->transition($employmentId, 'active', self::START_ON);
+
+        $this->calendar->today = '2026-11-20';
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_addresses SET effective_to = "2026-10-31"
+              WHERE supplier_id = ? AND employee_id = ? AND address_type = "residence"',
+        )->execute([$this->supplierId, $employeeId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Nová 5", "Brno", "602 00", "CZ", "2026-11-01")',
+        )->execute([$this->supplierId, $employeeId]);
+        sleep(1);
+        // Adresa i s číslem popisným do profilu A1 (proklik z návrhu).
+        $this->saveA1Profile($employmentId, $this->a1Profile('Nová', '5', 'Brno', '602 00'));
+
+        $a3 = $this->proposal($this->detect($employmentId), 'regzec_change');
+        self::assertTrue($a3['fileable'], CanonicalJson::encode($a3));
+        // Adresa nemá historii: navrhuje se den zjištění.
+        self::assertSame('2026-11-20', $a3['effective_on']);
+
+        $filed = $this->json(($this->registration)->fileChange(
+            $this->request('POST', "/api/payroll/submissions/registration/{$employmentId}/changes/{$a3['id']}/file")
+                ->withParsedBody(['environment' => 'test', 'effective_on' => '2026-11-01']),
+            new Response(),
+            ['employmentId' => (string) $employmentId, 'proposalId' => (string) $a3['id']],
+        ));
+        self::assertSame('2026-11-01', $filed['event']['effective_on']);
+        $submission = $this->prepare($employmentId, ['event_id' => $filed['event']['id']]);
+        self::assertSame('2026-11-28', $submission['deadline']['due_on']);
+        $xml = $this->artifactXml((int) $submission['submission_id']);
+        self::assertStringContainsString(' fro="2026-11-01"', $xml);
+        // PSČ s mezerou schéma nepřipouští, do věty jde bez mezery.
+        self::assertMatchesRegularExpression('/<adr [^>]*pnu="60200"/', $xml);
+    }
+
     private function completePersonCard(int $employeeId, int $employmentId): void
     {
         $identities = $this->container->get(PayrollRegistrationIdentityService::class);

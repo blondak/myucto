@@ -79,6 +79,36 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Příjmení osoby ve všech verzích identity platných nejpozději ke dni
+     * `$onDate`, od nejstaršího. Podklad pro dřívější příjmení (`name/@ona`,
+     * ID 10064).
+     *
+     * @return list<string>
+     */
+    public function surnamesUpTo(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT last_name
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND effective_from <= ?
+                AND last_name IS NOT NULL
+                AND last_name <> \'\'
+              ORDER BY effective_from ASC, id ASC'
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate]);
+
+        return array_values(array_map(
+            static fn (mixed $value): string => (string) $value,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        ));
+    }
+
+    /**
      * @return list<array{
      *   id:int,identifier_type:string,value_ciphertext:string,
      *   value_hash:string,value_masked:string,row_version:int

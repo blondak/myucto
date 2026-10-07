@@ -113,13 +113,21 @@ final readonly class PayrollRegistrationChangeDetectionService implements
     ): array {
         $this->assertScope($supplierId, $environment, $employmentId);
 
-        return $this->proposals->transaction(
+        $result = $this->proposals->transaction(
             fn (): array => $this->detectLocked(
                 $supplierId,
                 $environment,
                 $employmentId,
             ),
         );
+        // Citlivé hodnoty (daňový identifikátor, číslo dokladu) patří jen do
+        // šifrované události, ne do odpovědi API.
+        foreach ($result['proposals'] as $index => $proposal) {
+            $result['proposals'][$index]['changes'] =
+                PayrollRegistrationChangeDeltaPlanner::redact($proposal['changes']);
+        }
+
+        return $result;
     }
 
     /**
@@ -202,10 +210,21 @@ final readonly class PayrollRegistrationChangeDetectionService implements
         int $employmentId,
         int $proposalId,
         int $userId,
+        ?string $effectiveOn = null,
     ): array {
         $this->assertScope($supplierId, $environment, $employmentId);
         if ($proposalId <= 0 || $userId <= 0) {
             throw new \InvalidArgumentException('Rozsah návrhu není platný.');
+        }
+        if ($effectiveOn !== null) {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $effectiveOn);
+            if (!$parsed instanceof \DateTimeImmutable
+                || $parsed->format('Y-m-d') !== $effectiveOn
+            ) {
+                throw new \InvalidArgumentException(
+                    'Datum platnosti změny musí mít tvar RRRR-MM-DD, například 2026-09-01.',
+                );
+            }
         }
 
         return $this->proposals->transaction(function () use (
@@ -214,6 +233,7 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             $employmentId,
             $proposalId,
             $userId,
+            $effectiveOn,
         ): array {
             $stored = $this->proposals->find(
                 $supplierId,
@@ -271,15 +291,26 @@ final readonly class PayrollRegistrationChangeDetectionService implements
                     'Z navržené změny nevznikl žádný podávaný údaj.',
                 );
             }
+            // Platnost změny (10009) a začátek lhůty jsou dvě různá data:
+            // lhůta běží ode dne, kdy se zaměstnavatel o změně dozvěděl
+            // (detekce), platnost je den, od kterého údaj platí. Výchozí
+            // platnost je návrh detekce (u jména začátek nové verze identity,
+            // jinak den zjištění), účetní ji smí přepsat.
+            $effective = $effectiveOn ?? (string) $match['effective_on'];
+            $changes = $match['changes'];
+            if (is_array($changes['tax_residency'] ?? null)) {
+                $changes['tax_residency']['changed_on'] = $effective;
+            }
             $event = $this->events->approve(
                 $supplierId,
                 $environment,
                 $employmentId,
                 [
                     'interaction' => 'change',
-                    'effective_on' => (string) $stored['detected_on'],
+                    'effective_on' => $effective,
+                    'learned_on' => (string) $stored['detected_on'],
                     'source_reference' => 'change-detection:' . $proposalId,
-                    'changes' => $match['changes'],
+                    'changes' => $changes,
                 ],
                 $userId,
             );
@@ -452,13 +483,21 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             ) + $this->overlay($context),
         );
         $findings = $this->detector->compare($baseline, $current);
+        $previousSurnames = $this->hasPath($findings, 'identity.last_name')
+            ? $this->identities->previousSurnames($supplierId, $employeeId, $today)
+            : null;
 
         $created = [];
         foreach ($this->group($findings) as $duty) {
             $plan = $duty['duty_kind'] === self::DUTY_REGISTRATION
                 && $duty['action_code']
                     === PayrollRegistrationReportableCatalog::ACTION_CHANGE
-                ? $this->planner->plan($duty['findings'], $current, $today)
+                ? $this->planner->plan(
+                    $duty['findings'],
+                    $current,
+                    $today,
+                    $previousSurnames,
+                )
                 : ['changes' => [], 'unsupported' => []];
             $deadline = $this->deadline($duty, $today, $context);
             $stored = $this->proposals->insert([
@@ -490,12 +529,23 @@ final readonly class PayrollRegistrationChangeDetectionService implements
                     ),
                 ]),
             ]);
+            $effectiveOn = $this->suggestedEffectiveOn(
+                $duty['findings'],
+                is_array($live['identity'] ?? null) ? $live['identity'] : [],
+                $baselineOn,
+                (string) $stored['row']['detected_on'],
+                $today,
+            );
+            if (is_array($plan['changes']['tax_residency'] ?? null)) {
+                $plan['changes']['tax_residency']['changed_on'] = $effectiveOn;
+            }
             $created[] = [
                 'id' => (int) $stored['row']['id'],
                 'duty_kind' => $duty['duty_kind'],
                 'action_code' => $duty['action_code'],
                 'status' => (string) $stored['row']['status'],
                 'detected_on' => (string) $stored['row']['detected_on'],
+                'effective_on' => $effectiveOn,
                 'due_on' => (string) $stored['row']['due_on'],
                 'deadline_source' => (string) $stored['row']['deadline_source'],
                 'deadline_ruleset_id' => (string) $stored['row']['deadline_ruleset_id'],
@@ -519,6 +569,55 @@ final readonly class PayrollRegistrationChangeDetectionService implements
         );
 
         return $this->result($created, $open, null, $today);
+    }
+
+    /** @param list<PayrollRegistrationChangeFinding> $findings */
+    private function hasPath(array $findings, string $path): bool
+    {
+        foreach ($findings as $finding) {
+            if ($finding->path === $path) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Navržená platnost změny. Jméno a občanství mají v evidenci identity
+     * verzi s datem začátku platnosti, takže když se mění jen ony, platí změna
+     * od začátku nové verze. Adresy, pojišťovna a ostatní údaje historii
+     * nemají (vědí jen, kdy se změna zjistila), proto se navrhuje den zjištění.
+     * Účetní navržený den při podání přepíše.
+     *
+     * @param list<PayrollRegistrationChangeFinding> $findings
+     * @param array<string,mixed> $identity
+     */
+    private function suggestedEffectiveOn(
+        array $findings,
+        array $identity,
+        string $baselineOn,
+        string $detectedOn,
+        string $today,
+    ): string {
+        if ($findings === []) {
+            return $detectedOn;
+        }
+        foreach ($findings as $finding) {
+            if (!str_starts_with($finding->path, 'identity.')) {
+                return $detectedOn;
+            }
+        }
+        $from = $identity['effective_from'] ?? null;
+        if (is_string($from)
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $from) === 1
+            && $from > $baselineOn
+            && $from <= $today
+        ) {
+            return $from;
+        }
+
+        return $detectedOn;
     }
 
     /**
