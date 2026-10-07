@@ -1733,6 +1733,11 @@ ve spodní liště a tyto sekce:
   zahraniční, kdežto HZUPN jako českou (zahraničí v HZUPN je jen mimo ČR a SR).
   Číslo rozhodnutí se kontroluje už při přípravě podání podle druhu dávky
   (povinnost, zákaz i tvar), spolu s ostatními chybějícími údaji případu.
+  Elektronické číslo může začínat osmimístným IČPE lékaře, které musí projít
+  kontrolní číslicí. HZUPN přijímá jen číslo ve formátu od roku 2020: písmeno
+  E až Z (kromě K) a 6 až 7 číslic, nebo pořadové číslo od 2001010000.
+  Kód OSSZ musí být z číselníku pracovišť ČSSZ; kód 101 (ústředí) se pro
+  e-podání nepoužívá.
   Číslo rozhodnutí a Opravné podání jdou měnit i u vyřízeného podání.
   Otcovská, peněžitá pomoc v mateřství a vyrovnávací příspěvek číslo
   rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem
@@ -1803,7 +1808,8 @@ ve spodní liště a tyto sekce:
 - **Kontaktní pracovník** — jméno, telefon a e-mail osoby, na kterou se OSSZ
   obrátí.
 - **Ukončení neschopnosti** (jen nemocenské, pro HZUPN) — zda se zaměstnanec
-  vrátil do práce. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
+  vrátil do práce; bez odpovědi se hlášení nepřipraví. Den vystavení musí být
+  po 31. 12. 2019 a hodiny posledního dne v rozmezí 0 až 24. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
   skončení zaměstnání), zvolte **Ne** a uveďte důvod; do hlášení jde jen
   důvod, datum návratu a hodiny posledního dne se u odpovědi „Ne“ neposílají.
   Odpovíte-li **Ano**, uveďte datum návratu a hodiny odpracované v poslední

@@ -191,9 +191,9 @@ final class HzupnXmlSerializer
                 $payload->returnedToWork,
             );
         }
-        // DV HZUPN20: důvod patří jen k „nevrátil se“, datum a hodiny jen
-        // k „vrátil se“.
-        if ($payload->returnedToWork !== true && $payload->returnReason !== null) {
+        // DV HZUPN20: důvod patří jen k „nevrátil se“ (při nevyplněném
+        // návratu je zakázaný), datum a hodiny jen k „vrátil se“.
+        if ($payload->returnedToWork === false && $payload->returnReason !== null) {
             $this->text(
                 $document,
                 $namespace,

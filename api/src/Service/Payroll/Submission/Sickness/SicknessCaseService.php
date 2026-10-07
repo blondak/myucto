@@ -1279,10 +1279,13 @@ final readonly class SicknessCaseService
     private function decimal(string $column, mixed $value): string
     {
         $normalized = str_replace(',', '.', trim((string) $value));
-        if (preg_match('/^\d{1,5}(\.\d{1,2})?$/D', $normalized) !== 1) {
+        // Všechny desetinné sloupce případu jsou hodiny jednoho dne: DV NEMPRI25
+        // i HZUPN20 je berou z intervalu 0 až 24.
+        if (preg_match('/^\d{1,2}(\.\d{1,2})?$/D', $normalized) !== 1 || (float) $normalized > 24) {
             throw new SicknessException(
                 'sickness_hours_invalid',
-                'Hodnota „' . $column . '" musí být kladné číslo s nejvýše dvěma desetinnými místy.',
+                'Hodnota „' . $column . '" musí být počet hodin jednoho dne od 0 do 24 s nejvýše '
+                . 'dvěma desetinnými místy.',
             );
         }
 

@@ -178,7 +178,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             'NEM',
             [
                 'incapacity_from' => '2026-02-09',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
             ],
             $this->userId,
         );
@@ -272,7 +272,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
                 'test',
                 $employmentId,
                 'NEM',
-                ['incapacity_from' => '2026-04-08', 'decision_number' => 'A1234567'],
+                ['incapacity_from' => '2026-04-08', 'decision_number' => 'E1234567'],
                 $this->userId,
             );
             self::fail('Neschopnost osmý den po skončení zaměstnání nárok nezakládá.');
@@ -285,7 +285,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             'test',
             $employmentId,
             'NEM',
-            ['incapacity_from' => '2026-04-07', 'decision_number' => 'A1234567'],
+            ['incapacity_from' => '2026-04-07', 'decision_number' => 'E1234567'],
             $this->userId,
         );
         $listed = array_values(array_filter(
@@ -319,7 +319,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             'NEM',
             [
                 'incapacity_from' => '2026-02-09',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
             ],
             $this->userId,
         );
@@ -384,7 +384,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             [
                 'incapacity_from' => '2026-06-08',
                 'incapacity_to' => '2026-06-22',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
                 'worked_on_decisive_day' => true,
                 'hours_worked' => '8',
                 'daily_working_hours' => '8',
@@ -417,7 +417,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             [
                 'incapacity_from' => '2026-06-08',
                 'incapacity_to' => '2026-06-23',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
                 'worked_on_decisive_day' => true,
                 'hours_worked' => '8',
                 'daily_working_hours' => '8',
@@ -543,7 +543,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             'NEM',
             [
                 'incapacity_from' => '2026-02-09',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
                 'daily_working_hours' => '8',
                 'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01']),
             ],
@@ -582,7 +582,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
             'NEM',
             [
                 'incapacity_from' => '2026-04-02',
-                'decision_number' => 'A1234567',
+                'decision_number' => 'E1234567',
                 'daily_working_hours' => '8',
                 'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01', '2026-02']),
             ],

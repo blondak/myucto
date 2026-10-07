@@ -35,6 +35,12 @@ use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
  */
 final readonly class SicknessXmlValidator
 {
+    /** Kontrola 3 LK: den vystavení HZUPN musí být po tomto dni. */
+    private const HZUPN_ISSUED_AFTER = '2019-12-31';
+
+    /** Hodiny posledního dne: interval 0 až 24 (DV HZUPN20, NEMPRI25 StDoublePracDoba). */
+    private const MAX_DAY_HOURS = 24.0;
+
     public function __construct(
         private CsszSchemaCatalog $schemas,
         private NempriXmlSerializer $nempri,
@@ -204,6 +210,18 @@ final readonly class SicknessXmlValidator
                 . 'zahraniční (i slovenský) případ.',
             );
         }
+        // Kontrola 33 LK: HZUPN nese jen číslo ve formátu od r. 2020. Rozhodnutí
+        // mimo český systém (zahraniční, slovenská neschopenka) tvar českého
+        // čísla mít nemusí, stejně jako u NEMPRI.
+        if ($payload->confirmationNumber !== null
+            && !$payload->foreignCase
+            && !$payload->slovakCase
+        ) {
+            $problem = SicknessDecisionNumber::hzupnProblem($payload->confirmationNumber);
+            if ($problem !== null) {
+                $this->invalid($problem['code'], $problem['message']);
+            }
+        }
         $this->hzupnEmployerConfirmation($payload);
         if ($payload->osszName !== null
             && mb_strlen($payload->osszName, 'UTF-8') > CsszWorkplaceCatalog::MAX_NAME_LENGTH
@@ -214,6 +232,12 @@ final readonly class SicknessXmlValidator
             );
         }
         $this->exactDate($payload->issuedOn, 'hzupn_date_invalid');
+        if ($payload->issuedOn <= self::HZUPN_ISSUED_AFTER) {
+            $this->invalid(
+                'hzupn_issue_date_too_early',
+                'Den vystavení hlášení musí být po 31. 12. 2019 (kontrola 3 ČSSZ). Opravte ho u případu.',
+            );
+        }
         $this->exactDate($incapacityFrom, 'hzupn_date_invalid');
         if ($payload->returnedOn !== null) {
             $this->exactDate($payload->returnedOn, 'hzupn_date_invalid');
@@ -228,6 +252,12 @@ final readonly class SicknessXmlValidator
         foreach ($payload->workIntervals as $interval) {
             $this->exactDate($interval['from'], 'hzupn_date_invalid');
             $this->exactDate($interval['to'], 'hzupn_date_invalid');
+            // Kontrola 30 LK (2019) zní „DO musí být > OD", jenže interval nese
+            // celé dny práce: jednodenní práce je od = do a ostře větší by ji
+            // nešlo nahlásit vůbec. DV HZUPN20 v1.12 žádnou kontrolu intervalu
+            // neuvádí a NEMPRI u téhož seznamu dní práce chce od <= do. Rovnost
+            // je proto povolená záměrně; ověření v testovacím prostředí ČSSZ
+            // zůstává otevřené.
             if ($interval['to'] < $interval['from']) {
                 $this->invalid(
                     'hzupn_work_interval_invalid',
@@ -751,11 +781,31 @@ final readonly class SicknessXmlValidator
     /**
      * Potvrzení zaměstnavatele v HZUPN (DV HZUPN20 v1.12): návrat „ano“ nese
      * datum a hodiny, „ne“ nese důvod, a naopak nic z toho nesmí být navíc.
+     *
+     * Odpověď na návrat do práce je u hlášení zaměstnavatele (`hlasZamest=A`)
+     * povinná: bez ní by `potvrzeniZamestnavatele` vůbec nevzniklo a hlášení by
+     * ČSSZ nic nesdělilo. Nevyplněná odpověď proto není „ne“.
      */
     private function hzupnEmployerConfirmation(HzupnXmlPayload $payload): void
     {
         $hours = self::number($payload->hoursWorkedLastDay);
         $shift = self::number($payload->shiftHoursLastDay);
+        if ($payload->returnedToWork === null) {
+            $this->invalid(
+                'hzupn_return_decision_missing',
+                'Hlášení zaměstnavatele musí říct, zda se zaměstnanec po neschopnosti vrátil do práce '
+                . '(Ano s datem a hodinami posledního dne, nebo Ne s důvodem). Vyberte odpověď u případu.',
+            );
+        }
+        foreach ([$hours, $shift] as $value) {
+            if ($value !== null && ($value < 0 || $value > self::MAX_DAY_HOURS)) {
+                $this->invalid(
+                    'hzupn_last_day_hours_out_of_range',
+                    'Pracovní doba i odpracované hodiny posledního dne neschopnosti musí být '
+                    . 'v rozmezí 0 až 24 hodin.',
+                );
+            }
+        }
         if ($payload->returnedToWork === true) {
             if ($payload->returnedOn === null) {
                 $this->invalid(
@@ -788,9 +838,7 @@ final readonly class SicknessXmlValidator
         }
         if ($payload->returnedOn !== null) {
             $this->invalid(
-                $payload->returnedToWork === null
-                    ? 'hzupn_return_date_without_return'
-                    : 'hzupn_return_date_with_no_return',
+                'hzupn_return_date_with_no_return',
                 'Datum návratu do práce se uvádí jen tehdy, když se zaměstnanec do práce vrátil '
                 . '(DV HZUPN20).',
             );
@@ -945,11 +993,12 @@ final readonly class SicknessXmlValidator
 
     private function osszCode(int $code): void
     {
-        if ($code < 100 || $code > 999) {
+        if (!CsszWorkplaceCatalog::acceptsSubmission($code)) {
             $this->invalid(
                 'sickness_ossz_code_invalid',
-                'Kód OSSZ musí být tříciferný podle číselníku pracovišť ČSSZ. '
-                . 'Doplňte ho v Nastavení mezd → Zaměstnavatel.',
+                'Kód OSSZ ' . $code . ' není v číselníku pracovišť ČSSZ C_COKR, nebo ho ČSSZ pro '
+                . 'e-podání nepoužívá (101 ústředí). Opravte ho v Nastavení mezd → Zaměstnavatel, '
+                . 'případně přímo u případu.',
             );
         }
     }

@@ -199,7 +199,7 @@ final readonly class SicknessPayloadFactory
             employerReport: true,
             personReport: false,
             foreignCase: self::hzupnForeignCase($row),
-            confirmationNumber: self::nullableText($row['decision_number'] ?? null),
+            confirmationNumber: self::decisionNumber($row['decision_number'] ?? null),
             osszCode: (int) $row['ossz_code'],
             osszName: CsszWorkplaceCatalog::nameFor((int) $row['ossz_code']),
             issuedOn: $issuedOn,
@@ -221,9 +221,9 @@ final readonly class SicknessPayloadFactory
             ),
             employerVariableSymbol: self::variableSymbol($context),
             returnedToWork: $returnedToWork,
-            returnReason: $returnedToWork === true
-                ? null
-                : self::nullableText($row['return_reason'] ?? null),
+            returnReason: $returnedToWork === false
+                ? self::nullableText($row['return_reason'] ?? null)
+                : null,
             // Datum a hodiny posledního dne patří podle DV HZUPN20 jen
             // k návratu do práce. Řádek případu `returned_on` drží i u „ne“
             // (z něj běží lhůta hlášení), do věty ale nejde.
