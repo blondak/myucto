@@ -1004,8 +1004,8 @@ final readonly class PayrollRegistrationSubmissionService
 
     /**
      * Přijatá P1 přečtená z archivu, ale jen tam, kde se na ni navazuje
-     * (P2 a plná registrace po P1). Bez čitelného archivu se podání nesestaví:
-     * variabilní symbol P2 a okno pro A1 nejde doložit.
+     * (P2 a plná registrace po P1). Poškozený archivovaný soubor podání
+     * zablokuje: variabilní symbol P2 a okno pro A1 by nešly doložit.
      */
     private function acceptedPreRegistrationFiling(
         int $supplierId,
@@ -1025,11 +1025,14 @@ final readonly class PayrollRegistrationSubmissionService
             $employmentId,
             self::AGENDA_PREZEC,
         );
-        $filing = $artifactId === null
-            ? null
-            : PayrollPreRegistrationFiling::fromXml(
-                $this->submissions->artifactBytes($supplierId, $artifactId),
-            );
+        if ($artifactId === null) {
+            // Přijatá P1 bez archivovaného souboru (převzatá z jiného zdroje):
+            // není z čeho číst, podání se opírá o dosavadní údaje.
+            return null;
+        }
+        $filing = PayrollPreRegistrationFiling::fromXml(
+            $this->submissions->artifactBytes($supplierId, $artifactId),
+        );
         if ($filing === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_prezec_p1_archive_unreadable',
