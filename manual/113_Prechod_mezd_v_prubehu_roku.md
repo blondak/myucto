@@ -166,6 +166,20 @@ a tlačítkem do **Mzdy → Srážky a exekuce**. Úkol se splní sám, jakmile 
 u osoby zaevidovaná exekuce, insolvence nebo dohoda o srážce. Zdravotní
 pojišťovnu hlášení nenese vůbec; doplňte ji hromadně (kapitola 80.8.1).
 
+Vykazuje-li poslední převzaté hlášení nemoc, peněžitou pomoc v mateřství
+nebo ošetřovné, převzetí založí úkol **Ověřit rozběhnutou nemoc, PPM nebo
+ošetřovné** s tlačítkem do **Mzdy → Nepřítomnosti**. Hlášení nenese den
+vzniku nepřítomnosti. Pokračuje-li neschopnost do prvního měsíce v MyÚčtu,
+zadejte ji se skutečným dnem vzniku, nebo zadejte dny okna náhrady mzdy, které
+už proplatil předchozí program. Neschopnost zadaná od prvního dne v MyÚčtu
+bez nich by otevřela nové okno náhrady mzdy a náhrada by se vyplatila
+podruhé. Úkol se splní sám, jakmile je u vztahu schválená taková nepřítomnost
+se dnem vzniku před prvním měsícem v MyÚčtu nebo se započtenými dny okna.
+
+Převzatý měsíc z hlášení nese i vyloučené dny podle § 18 odst. 7 zákona
+č. 187/2006 Sb. a příjem z nepojištěné činnosti. Obojí potřebuje rozhodné
+období oznámení o nemocenském (NEMPRI, kapitola 85.15.2).
+
 ## 113.10 Vyúčtování daně a uzávěrka roku
 
 Vyúčtování zálohové a srážkové daně naplní převzaté měsíce z počátečních

@@ -69,11 +69,21 @@ final class NempriPaymentAndPayloadTest extends TestCase
         self::assertSame('11000', $connection->postalCode);
     }
 
-    public function testPartnerSettlementIsNotInvented(): void
+    /**
+     * NX-02: DV NEMPRI25 chce platební spojení u každé věty s akcí vznik.
+     * U výplaty přes partnera účet ani adresu nevymýšlíme, ale ani je tiše
+     * nevynecháme — podání se zastaví s vysvětlením, i když osoba nějaký
+     * účet v evidenci má.
+     */
+    public function testPartnerSettlementStopsWithClearReason(): void
     {
-        self::assertNull(
-            (new NempriPaymentConnectionResolver())->resolve('partner_settlement', null, null),
-        );
+        try {
+            (new NempriPaymentConnectionResolver())->resolve('partner_settlement', '1000000005/0100', null);
+            self::fail('Výplata přes partnera nesmí větu tiše nechat bez platebního spojení.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_payment_connection_partner_settlement', $exception->validationCode);
+            self::assertStringContainsString('partnera', $exception->getMessage());
+        }
     }
 
     public function testMissingAccountStopsWithReason(): void

@@ -173,6 +173,80 @@ final class JmhzEmploymentHistoryTest extends TestCase
         );
     }
 
+    /**
+     * PRE-04: poslední převzaté hlášení vykazuje nemoc (10358/10474), PPM
+     * nebo ošetřovné. Neschopnost může trvat dál a hlášení nenese den jejího
+     * vzniku — převzetí založí úkol ověřit ji, aby se okno náhrady mzdy
+     * neotevřelo podruhé. Nic se nepředvyplňuje. Nemoc v dřívějším měsíci
+     * úkol nezakládá.
+     */
+    public function testAbsenceInTheLastTakenOverMonthBecomesASicknessFollowUp(): void
+    {
+        $row = ['id' => 7, 'code' => 'ZAM-7', 'start_date' => '2026-01-01', 'actual_start_date' => '2026-01-01', 'end_date' => null, 'relation_type' => 'employment'];
+        $plain = JmhzReportFixtures::report([$this->a()], 2026, 1, ['guid_seed' => 1]);
+        $sick = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([$this->a()], 2026, 2, ['guid_seed' => 2]),
+            self::PPV_A,
+            ['vylouceneDobyCelkem' => 6, 'docasNeschopnost' => 6, 'vyloucenePar18' => 14, 'pracovniNeschopnost' => 8, 'vyplaceniDavek' => 6],
+        );
+        $maternity = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([$this->a()], 2026, 2, ['guid_seed' => 3]),
+            self::PPV_A,
+            ['vylouceneDobyCelkem' => 28, 'penezitaPomocMaterstvi' => 28, 'vyloucenePar18' => 28, 'vyplaceniDavek' => 28],
+        );
+        $sickEarlier = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([$this->a()], 2026, 1, ['guid_seed' => 4]),
+            self::PPV_A,
+            ['vylouceneDobyCelkem' => 6, 'docasNeschopnost' => 6, 'vyloucenePar18' => 14, 'pracovniNeschopnost' => 8, 'vyplaceniDavek' => 6],
+        );
+        $plainLater = JmhzReportFixtures::report([$this->a()], 2026, 2, ['guid_seed' => 5]);
+
+        self::assertSame(
+            [JmhzPayrollTakeover::SICKNESS_FOLLOW_UP],
+            JmhzPayrollTakeover::record($this->historyFromXml([$plain, $sick]), 'ppv:' . self::PPV_A, 3, $row, '2026-03')->employment->followUps,
+        );
+        self::assertSame(
+            [JmhzPayrollTakeover::SICKNESS_FOLLOW_UP],
+            JmhzPayrollTakeover::record($this->historyFromXml([$plain, $maternity]), 'ppv:' . self::PPV_A, 3, $row, '2026-03')->employment->followUps,
+        );
+        self::assertSame(
+            [],
+            JmhzPayrollTakeover::record($this->historyFromXml([$sickEarlier, $plainLater]), 'ppv:' . self::PPV_A, 3, $row, '2026-03')->employment->followUps,
+        );
+    }
+
+    /**
+     * NRO-02 a NRO-04: převzatý měsíc nese vyloučené dny § 18 odst. 7 (10366)
+     * zvlášť od vyloučených dob 10357 a příjem 10476.
+     */
+    public function testMonthTotalsCarrySection18DaysAndUninsuredIncome(): void
+    {
+        $xml = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([$this->a()], 2026, 2),
+            self::PPV_A,
+            ['vylouceneDobyCelkem' => 0, 'vyloucenePar18' => 28, 'omluvenaNepritomnost' => 28],
+            0,
+            0,
+        );
+        $batch = $this->batchFromXml([$xml]);
+        $row = ['id' => 7, 'code' => 'ZAM-7', 'start_date' => '2026-01-01', 'actual_start_date' => '2026-01-01', 'end_date' => null, 'relation_type' => 'employment'];
+        $item = $batch->effective()[0];
+
+        $totals = JmhzPayrollTakeover::totals($item, [$item], 3, $row, '1');
+
+        self::assertSame(0, $totals->facts->excludedDays);
+        self::assertSame(28, $totals->facts->sicknessExcludedDays);
+        self::assertSame(0, $totals->facts->uninsuredIncomeMinor);
+
+        $agreement = JmhzReportFixtures::uninsuredAgreement(JmhzReportFixtures::report([$this->a()], 2026, 2), self::PPV_A, 9_000);
+        $agreementItem = $this->batchFromXml([$agreement])->effective()[0];
+        $agreementTotals = JmhzPayrollTakeover::totals($agreementItem, [$agreementItem], 3, $row, null);
+
+        self::assertSame(0, $agreementTotals->socialBaseMinor);
+        self::assertSame(900_000, $agreementTotals->facts->uninsuredIncomeMinor);
+        self::assertNull($agreementTotals->facts->sicknessExcludedDays);
+    }
+
     public function testMonthTotalsSplitPersonIncomeAcrossConcurrentEmployments(): void
     {
         $batch = $this->batch([[2026, 3, [
@@ -211,7 +285,7 @@ final class JmhzEmploymentHistoryTest extends TestCase
         $history = $small->history();
         $form = $history->latest('ppv:' . self::PPV_B)?->form;
         self::assertNotNull($form);
-        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0], $form->eldp);
+        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0, 'sickness_excluded_days' => null, 'absence_days' => ['docasNeschopnost' => 0, 'penezitaPomocMaterstvi' => 0, 'osetrovaniClenaRodiny' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 0]], $form->eldp);
         self::assertSame(3_960, $form->uninsuredIncome);
         self::assertNull($form->workload(), 'Týdenní doba 99 je „neuvedeno", ne 99 hodin.');
         self::assertNull($history->activityCode('ppv:' . self::PPV_B));
@@ -262,12 +336,12 @@ final class JmhzEmploymentHistoryTest extends TestCase
         ];
 
         $benefits = $byPpv['2026-03|' . self::PPV_A];
-        self::assertSame(['code' => '1++', 'insurance_days' => 0, 'excluded_days' => 31], $benefits->form->eldp,
+        self::assertSame(['code' => '1++', 'insurance_days' => 0, 'excluded_days' => 31, 'sickness_excluded_days' => 31, 'absence_days' => ['docasNeschopnost' => 0, 'penezitaPomocMaterstvi' => 0, 'osetrovaniClenaRodiny' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 31]], $benefits->form->eldp,
             'Vyloučené dny jen v podpoložkách (bez úhrnu 10357) se sečtou.');
         self::assertSame([true, 0, 31], $facts($benefits, 1), 'Měsíc v dávkách s kódem ELDP je doba účasti.');
 
         $pensioner = $byPpv['2026-03|' . self::PPV_B];
-        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0], $pensioner->form->eldp);
+        self::assertSame(['code' => null, 'insurance_days' => 0, 'excluded_days' => 0, 'sickness_excluded_days' => null, 'absence_days' => ['docasNeschopnost' => 0, 'penezitaPomocMaterstvi' => 0, 'osetrovaniClenaRodiny' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 0]], $pensioner->form->eldp);
         self::assertSame([true, 22, 0], $facts($pensioner, 2), 'Důchodce bez ELDP s pojistným: dny účasti = trvání pojištění 10.–31. 3.');
 
         $agreement = $byPpv['2026-04|' . self::PPV_B];
@@ -355,5 +429,11 @@ final class JmhzEmploymentHistoryTest extends TestCase
         }
 
         return JmhzBatch::build($items, []);
+    }
+
+    /** @param list<string> $xmls hlášení v pořadí dávky */
+    private function historyFromXml(array $xmls): JmhzEmploymentHistory
+    {
+        return $this->batchFromXml($xmls)->history();
     }
 }

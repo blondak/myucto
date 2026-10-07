@@ -453,7 +453,14 @@ final class JmhzReportReader
      * Seznam ELDP formuláře: kód první sekce s kódem a součty dnů přes sekce.
      * Blok `eldpSeznam` smí měkký režim přejít, proto se čte tolerantně.
      *
-     * @return array{code:?string,insurance_days:int,excluded_days:int}|null
+     * `sickness_excluded_days` jsou vyloučené dny § 18 odst. 7 (10366), `null`
+     * když je hlášení nevydalo ({@see sicknessExcludedDays()}). `absence_days`
+     * jsou dny nepřítomností, které se v příštím měsíci mohou táhnout dál
+     * (nemoc 10358 a 10474, peněžitá pomoc v mateřství 10359, ošetřovné 10360,
+     * výplata dávek 10475) — převzetí podle nich upozorní na rozběhnutou
+     * neschopnost.
+     *
+     * @return array{code:?string,insurance_days:int,excluded_days:int,sickness_excluded_days:?int,absence_days:array<string,int>}|null
      */
     private function eldp(DOMXPath $xpath, DOMElement $body): ?array
     {
@@ -464,6 +471,10 @@ final class JmhzReportReader
         $code = null;
         $days = 0;
         $excluded = 0;
+        $sickness = 0;
+        $sicknessKnown = false;
+        $sicknessUnknown = false;
+        $absence = array_fill_keys(self::ABSENCE_DAY_ELEMENTS, 0);
         foreach ($entries as $entry) {
             if (!$entry instanceof DOMElement) {
                 continue;
@@ -471,9 +482,60 @@ final class JmhzReportReader
             $code ??= $this->text($xpath, 'f:kod', $entry);
             $days += $this->lenientInt($this->text($xpath, 'f:pocetDnu', $entry)) ?? 0;
             $excluded += $this->excludedDays($xpath, $entry);
+            $section = $this->sicknessExcludedDays($xpath, $entry);
+            if ($section === null) {
+                $sicknessUnknown = $sicknessUnknown
+                    || $this->element($xpath, 'f:vylouceneDny', $entry) !== null;
+            } else {
+                $sickness += $section;
+                $sicknessKnown = true;
+            }
+            foreach (self::ABSENCE_DAY_ELEMENTS as $element) {
+                $absence[$element] += $this->lenientInt(
+                    $this->text($xpath, 'f:vylouceneDny/f:' . $element, $entry),
+                ) ?? 0;
+            }
         }
 
-        return ['code' => $code, 'insurance_days' => $days, 'excluded_days' => $excluded];
+        return [
+            'code' => $code,
+            'insurance_days' => $days,
+            'excluded_days' => $excluded,
+            'sickness_excluded_days' => $sicknessKnown && !$sicknessUnknown ? $sickness : null,
+            'absence_days' => $absence,
+        ];
+    }
+
+    /** Podpoložky vyloučených dnů, které ukazují na nepřítomnost s dávkou nebo náhradou mzdy. */
+    private const ABSENCE_DAY_ELEMENTS = [
+        'docasNeschopnost', 'penezitaPomocMaterstvi', 'osetrovaniClenaRodiny',
+        'pracovniNeschopnost', 'vyplaceniDavek',
+    ];
+
+    /**
+     * Vyloučené dny § 18 odst. 7 zák. č. 187/2006 Sb. jedné sekce ELDP.
+     *
+     * Úhrn 10366, a když ho program nevyplnil, součet rozpadu 10473 + 10474 +
+     * 10475 (datový slovník: 10366 = jejich součet). Úhrn vyloučených DOB
+     * 10357 je jiná veličina (§ 16 odst. 4 zák. č. 155/1995 Sb.) a tady se
+     * nepoužije: měsíc neplaceného volna má 10357 = 0 a 10366 = 31. `null`,
+     * když sekce nenese ani úhrn, ani rozpad — nula by byla vymyšlený údaj.
+     */
+    private function sicknessExcludedDays(DOMXPath $xpath, DOMElement $entry): ?int
+    {
+        $total = $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:vyloucenePar18', $entry));
+        if ($total !== null) {
+            return $total;
+        }
+        $sum = null;
+        foreach (self::EXCLUDED_REASONS as $element) {
+            $days = $this->lenientInt($this->text($xpath, 'f:vylouceneDny/f:' . $element, $entry));
+            if ($days !== null) {
+                $sum = ($sum ?? 0) + $days;
+            }
+        }
+
+        return $sum;
     }
 
     /** Podpoložky úhrnu vyloučených dob 10357 (§ 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb.). */

@@ -1587,16 +1587,19 @@ zákona č. 187/2006 Sb.). Z dohody o provedení práce, zaměstnání malého
 rozsahu a zaměstnání studenta jen o prázdninách ochranná lhůta neplyne
 a ostatní dávky ji nemají vůbec. Případ mimo ochrannou lhůtu nejde založit
 ani připravit; u případu v ochranné lhůtě seznam ukáže, do kdy lhůta běží,
-a NEMPRI se podá se dnem skončení zaměstnání.
+a NEMPRI se podá se dnem skončení zaměstnání. Rozhodné období se pak určí,
+jako by událost vznikla den po skončení zaměstnání (§ 19 odst. 11 zákona
+č. 187/2006 Sb.).
 
 **Způsob výplaty mzdy** se do NEMPRI doplní sám z výplatního profilu
 zaměstnance: účet, na který chodí mzda, zahraniční IBAN, nebo adresa bydliště,
 když se mzda vyplácí v hotovosti. Platební spojení se posílá jen s akcí Vznik
 (u ošetřovného bez vzniku je zakázané) a u ostatních dávek vždy; u nemocenského
-jen s elektronickým číslem rozhodnutí (10 číslic). U výplaty přes partnera
-aplikace spojení nevymýšlí, a proto se tam, kde je povinné, příprava zastaví
-a odkáže na kartu osoby, kde doplníte účet nebo adresu. Chybí-li účet nebo
-nejde-li adresu rozložit na ulici, číslo popisné a PSČ, příprava se také zastaví.
+jen s elektronickým číslem rozhodnutí (10 číslic). Chybí-li účet nebo
+nejde-li adresu rozložit na ulici, číslo popisné a PSČ, příprava se zastaví
+a pod chybou je odkaz na kartu osoby. Stejně se zastaví výplata přes partnera:
+MyÚčto nezná účet ani adresu, kam má ČSSZ dávku poslat. Opravte způsob výplaty
+ve výplatním profilu osoby, nebo oznámení podejte mimo aplikaci.
 Ve větě jsou vždy všechny čtyři volby způsobu výplaty (účet v ČR, účet
 v zahraničí, adresa, hotovost), vybraná jako „ano“ a ostatní jako „ne“.
 
@@ -1611,18 +1614,44 @@ součty, nebo jen pravděpodobnou výši příjmu, nikdy obojí.
 
 ### 85.15.2 Rozhodné období a pravděpodobný příjem
 
-Měsíce rozhodného období, za které MyÚčto podalo jednotné měsíční hlášení, si
-ČSSZ vezme z něj. Měsíce před rokem 2026 a měsíce před začátkem vedení mezd
-v MyÚčtu v žádném hlášení z MyÚčta nejsou, a tak je NEMPRI nese samo:
-započitatelný příjem a vyloučené dny se berou z převzatých mezd. Chybí-li
-k měsíci převzatá mzda, příprava se zastaví s výčtem měsíců a odkazem na
-**Kontrolu převodu mezd**; měsíc můžete také doplnit ručně v sekci
-**Rozhodné období** případu. Ručně zadaný měsíc má přednost před převzatým.
+NEMPRI nese rozhodné období vždy celé: každý měsíc se započitatelným příjmem
+a vyloučenými dny podle § 18 odst. 7 zákona č. 187/2006 Sb. a k tomu oba
+součty. Platí to i pro měsíce, za které MyÚčto podalo jednotné měsíční
+hlášení. Měsíc se bere z tohoto zdroje, v tomto pořadí:
 
-Onemocní-li zaměstnanec krátce po nástupu a rozhodné období má méně než
-30 dnů, vychází ČSSZ z **pravděpodobné výše příjmu**. Zadejte ji v sekci
-**Rozhodné období**; tlačítko **Navrhnout z mzdy** předvyplní sjednanou
-měsíční hrubou mzdu. Bez ní se NEMPRI v takovém případě nepřipraví.
+1. ruční zadání v sekci **Rozhodné období** případu,
+2. schválený mzdový běh v MyÚčtu: vyměřovací základ vztahu (i část nad
+   ročním maximem, kterou hlášení nenese) a vyloučené dny odvozené
+   z nepřítomností běhu,
+3. převzaté mzdy předchozího programu.
+
+Chybí-li k měsíci podklad, příprava se zastaví s výčtem měsíců. U měsíců, které
+počítá MyÚčto, mzdu spočítejte a schvalte; převzatou mzdu doplňte
+v **Kontrole převodu mezd**. Měsíc můžete vždy zadat i ručně. Částky jdou do
+věty v celých korunách, haléře se zaokrouhlí nahoru.
+
+U převzatých měsíců se vyloučené dny berou z údaje hlášení o vyloučených dnech
+podle § 18 odst. 7 (neplacené volno, nemoc s náhradou mzdy, dny s dávkou),
+ne z vyloučených dob pro důchodové pojištění. Měsíc bez příjmu, ke kterému
+předchozí program tento údaj nevydal, se zastaví a vyžádá ruční zadání. Měsíc
+dohody bez účasti na pojištění se započte s příjmem z nepojištěné činnosti.
+Převzatý měsíc, ve kterém byl vyměřovací základ krácený ročním maximem, se
+také zastaví: hlášení nenese část nad maximem, kterou rozhodné období
+potřebuje, a tak ji zadejte ručně.
+
+Nemá-li rozhodné období vyměřovací základ nebo aspoň 30 nevyloučených dnů
+(například celé na rodičovské), použije se první předchozí kalendářní rok
+se započitatelným příjmem a aspoň 30 dny (§ 18 odst. 6). Věta pak nese tento
+rok. Teprve když takový rok není, nebo když zaměstnání trvalo méně než
+12 měsíců, vychází ČSSZ z **pravděpodobné výše příjmu**. Stejně je tomu, když
+zaměstnanec onemocní v měsíci nástupu. Zadejte ji v sekci **Rozhodné
+období**; tlačítko **Navrhnout z mzdy** předvyplní sjednanou měsíční hrubou
+mzdu. Bez ní se NEMPRI v takovém případě nepřipraví. S pravděpodobnou výší
+věta jednotlivé měsíce ani součty nenese.
+
+U zaměstnankyně převedené na jinou práci kvůli těhotenství, mateřství nebo
+kojení se rozhodné období spočítá i ke dni převedení a do věty jde to
+výhodnější (§ 19 odst. 6).
 
 Do NEMPRI se zapisuje skutečný den nástupu do zaměstnání, ne sjednaný den
 ze smlouvy. HZUPN se nabízí jen u nemocenského.

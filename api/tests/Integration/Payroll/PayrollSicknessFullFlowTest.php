@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
@@ -95,6 +97,11 @@ final class PayrollSicknessFullFlowTest extends TestCase
             'issued_on' => '2026-06-29',
             'returned_to_work' => '1',
             'returned_on' => '2026-06-29',
+            'hours_worked_last_day' => '4',
+            'shift_hours_last_day' => '8',
+            // Tok nemá mzdové běhy za leden až květen; věta rozhodné období
+            // nese vždy celé, takže se měsíce doplní u případu.
+            'decisive_months' => self::manualMonths('2026-01', '2026-05'),
         ]);
 
         $overview = $this->service(PayrollDeadlineOverviewService::class)
@@ -111,6 +118,8 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $nempri = (string) $submissions->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri)['xml'];
         self::assertStringContainsString('<druhDavky>NEM</druhDavky>', $nempri);
         self::assertStringContainsString('<cisloRozhodnuti>A1234567</cisloRozhodnuti>', $nempri);
+        self::assertStringContainsString('<rozhodneObdobiOd>2026-01-01</rozhodneObdobiOd>', $nempri);
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>200000</zapocitatelnyPrijemCelkem>', $nempri);
         $hzupn = (string) $submissions->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn)['xml'];
         self::assertStringContainsString('<datumNavratDoPrace>2026-06-29</datumNavratDoPrace>', $hzupn);
     }
@@ -134,6 +143,66 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $case = $this->service(SicknessCaseService::class)
             ->requireCase($this->supplierId, self::ENVIRONMENT, (int) $approved['sickness_case']['case_id']);
         self::assertTrue((bool) $case['worked_on_decisive_day']);
+    }
+
+    /**
+     * NRO-01: měsíce, za které MyÚčto spočítalo a schválilo mzdu, věta nese
+     * se započitatelným příjmem z mzdového běhu a se součty. Dřív je
+     * vynechala jako „pokryté měsíčním hlášením" a rozhodné období bez
+     * jediného měsíce ze sítě vypadlo úplně.
+     */
+    public function testDecisivePeriodMonthsComeFromApprovedPayrollRun(): void
+    {
+        $baseComponentId = $this->createComponent('MZDA_NEMPRI', 'base_wage', 'regular');
+        $mappings = $this->service(PayrollComponentJmhzMappingRepository::class);
+        $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
+        $person = $this->createEmployment($this->officeId, 'Hana Zaměstnaná', 9, 'hpp', 'employment', 40, 10_000, true, '2026-07-01');
+        $this->completeJmhzEmployment($person, identity: [
+            'first_name' => 'Hana',
+            'last_name' => 'Zaměstnaná',
+            'birth_date' => '1987-02-03',
+            'sex' => 'female',
+            'birth_number' => self::syntheticBirthNumber('1987-02-03', 'female', 9),
+        ]);
+        $this->assignJmhzIdentity($person, self::syntheticOic(9), sprintf('2%020d', 9));
+        $this->publishShifts($person['employment_id'], self::workdays('2026-07'));
+        $this->createApprovedAverage($person['employment_id'], 3);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET start_date = "2026-07-01", actual_start_date = "2026-07-01"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare(
+            'UPDATE payroll_employment_terms
+                SET effective_from = "2026-07-01", planned_start_on = "2026-07-01", actual_start_on = "2026-07-01"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $response = $this->approveTimeMonth($person['employment_id'], '2026-07', self::workdays('2026-07'));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->createApprovedInput($person, $baseComponentId, 4_200_000, 'nempri-base', '2026-07-01');
+        $run = $this->runPayrollMonth('2026-07-01', '2026-08-14', $this->officeId, 'nempri-decisive');
+        self::assertSame([], $run['blockers'], CanonicalJson::encode($run['blockers']));
+        self::assertSame([], $run['warnings'], CanonicalJson::encode($run['warnings']));
+        self::assertNotNull($run['approved']);
+
+        $this->cashPayout($person['employee_id']);
+        $case = $this->service(SicknessCaseService::class)->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
+            'incapacity_from' => '2026-08-10',
+            'incapacity_to' => '2026-08-31',
+            'decision_number' => 'A2223334',
+            'daily_working_hours' => '8',
+        ], $this->actors[0]);
+
+        $xml = (string) $this->service(SicknessSubmissionService::class)
+            ->preview($this->supplierId, self::ENVIRONMENT, (int) $case['id'], SicknessDocumentKind::Nempri)['xml'];
+
+        self::assertStringContainsString('<rozhodneObdobiOd>2026-07-01</rozhodneObdobiOd>', $xml);
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-07-31</rozhodneObdobiDo>', $xml);
+        self::assertSame(1, substr_count($xml, '<zapocitatelnyPrijem>'));
+        self::assertStringContainsString('<zapocitatelnyPrijem>42000</zapocitatelnyPrijem>', $xml);
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>42000</zapocitatelnyPrijemCelkem>', $xml);
+        self::assertStringContainsString('<vylouceneDnyCelkem>0</vylouceneDnyCelkem>', $xml);
+        self::assertStringNotContainsString('pravdepodobnaVysePrijmu', $xml);
     }
 
     /**
@@ -212,6 +281,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
             'incapacity_from' => '2026-07-03',
             'decision_number' => 'A7654321',
             'daily_working_hours' => '8',
+            'decisive_months' => self::manualMonths('2026-01', '2026-06'),
         ], $this->actors[0]);
         $listed = array_values(array_filter(
             $cases->list($this->supplierId, self::ENVIRONMENT, $person['employment_id']),
@@ -223,6 +293,8 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $xml = (string) $this->service(SicknessSubmissionService::class)
             ->preview($this->supplierId, self::ENVIRONMENT, (int) $case['id'], SicknessDocumentKind::Nempri)['xml'];
         self::assertStringContainsString('<zamestnanDo>2026-06-30</zamestnanDo>', $xml);
+        // § 19 odst. 11: rozhodným dnem je 1. 7. (den po skončení), období končí červnem.
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-06-30</rozhodneObdobiDo>', $xml);
 
         try {
             $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
@@ -268,6 +340,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
             'relationship_code' => 'PL',
             'care_days' => [['from' => '2026-06-08', 'to' => '2026-06-12']],
             'planned_shifts' => true,
+            'decisive_months' => self::manualMonths('2026-01', '2026-05'),
         ]);
 
         $xml = (string) $this->service(SicknessSubmissionService::class)
@@ -295,6 +368,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
             'cared_birth_date' => '1950-01-01',
             'relationship_code' => '2',
             'alternation' => false,
+            'decisive_months' => self::manualMonths('2026-01', '2026-05'),
         ], $this->actors[0]);
 
         try {
@@ -435,6 +509,21 @@ final class PayrollSicknessFullFlowTest extends TestCase
         self::assertSame(200, $decision->getStatusCode(), (string) $decision->getBody());
 
         return $this->json($decision);
+    }
+
+    /**
+     * Ruční měsíce rozhodného období po 40 000 Kč bez vyloučených dnů.
+     *
+     * @return list<array{period:string,income_minor:int,excluded_days:int}>
+     */
+    private static function manualMonths(string $from, string $to): array
+    {
+        $months = [];
+        for ($cursor = new \DateTimeImmutable($from . '-01'); $cursor->format('Y-m') <= $to; $cursor = $cursor->modify('+1 month')) {
+            $months[] = ['period' => $cursor->format('Y-m'), 'income_minor' => 4_000_000, 'excluded_days' => 0];
+        }
+
+        return $months;
     }
 
     /**

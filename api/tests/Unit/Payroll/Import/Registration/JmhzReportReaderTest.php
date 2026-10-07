@@ -72,6 +72,72 @@ final class JmhzReportReaderTest extends TestCase
         self::assertSame('2026-02-01', $form->insuranceFrom);
     }
 
+    /**
+     * NRO-02: vyloučené dny § 18 odst. 7 jsou 10366, ne úhrn vyloučených dob
+     * 10357. Měsíc neplaceného volna má 10357 = 0 a 10366 = 31.
+     */
+    public function testSection18ExcludedDaysAreReadFrom10366(): void
+    {
+        $xml = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2),
+            '200000000000000000101',
+            ['vylouceneDobyCelkem' => 0, 'vyloucenePar18' => 31, 'omluvenaNepritomnost' => 31],
+            0,
+        );
+
+        $eldp = $this->reader->read($xml)->forms[0]->eldp;
+
+        self::assertSame(0, $eldp['excluded_days']);
+        self::assertSame(31, $eldp['sickness_excluded_days']);
+    }
+
+    public function testSection18ExcludedDaysDifferFromExcludedPeriods(): void
+    {
+        $xml = JmhzReportFixtures::withExcludedDays(
+            JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2),
+            '200000000000000000101',
+            ['vylouceneDobyCelkem' => 4, 'docasNeschopnost' => 4, 'vyloucenePar18' => 19, 'omluvenaNepritomnost' => 15, 'pracovniNeschopnost' => 4],
+        );
+
+        $eldp = $this->reader->read($xml)->forms[0]->eldp;
+
+        self::assertSame(4, $eldp['excluded_days']);
+        self::assertSame(19, $eldp['sickness_excluded_days']);
+        self::assertSame(4, $eldp['absence_days']['docasNeschopnost']);
+        self::assertSame(4, $eldp['absence_days']['pracovniNeschopnost']);
+    }
+
+    /** Bez úhrnu 10366 se bere rozpad 10473 + 10474 + 10475; bez obojího je údaj neznámý. */
+    public function testSection18ExcludedDaysFallBackToBreakdownOrStayUnknown(): void
+    {
+        $base = JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2);
+        $breakdown = JmhzReportFixtures::withExcludedDays($base, '200000000000000000101', [
+            'omluvenaNepritomnost' => 3, 'pracovniNeschopnost' => 10, 'vyplaceniDavek' => 5,
+        ]);
+        $onlyTotal = JmhzReportFixtures::withExcludedDays($base, '200000000000000000101', [
+            'vylouceneDobyCelkem' => 6, 'docasNeschopnost' => 6,
+        ]);
+
+        self::assertSame(18, $this->reader->read($breakdown)->forms[0]->eldp['sickness_excluded_days']);
+        self::assertNull($this->reader->read($onlyTotal)->forms[0]->eldp['sickness_excluded_days']);
+        self::assertNull($this->reader->read($base)->forms[0]->eldp['sickness_excluded_days']);
+    }
+
+    /** NRO-04: příjem z nepojištěné činnosti (10476) se čte. */
+    public function testUninsuredIncomeIsRead(): void
+    {
+        $xml = JmhzReportFixtures::uninsuredAgreement(
+            JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2),
+            '200000000000000000101',
+            9_000,
+        );
+
+        $form = $this->reader->read($xml)->forms[0];
+
+        self::assertSame(0, $form->socialBase);
+        self::assertSame(9_000, $form->uninsuredIncome);
+    }
+
     public function testInsuranceStartInsideMonthIsRead(): void
     {
         $xml = JmhzReportFixtures::report([JmhzReportFixtures::person(['insurance_from' => '2026-03-16'])], 2026, 3);

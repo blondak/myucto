@@ -123,6 +123,7 @@ final class JmhzTakeoverPlanner
                 ),
                 'leave_minutes' => array_sum(array_column($employment->leaveTaken, 'minutes')),
                 'deductions_recorded' => in_array(JmhzPayrollTakeover::DEDUCTIONS_FOLLOW_UP, $employment->followUps, true),
+                'sickness_review' => in_array(JmhzPayrollTakeover::SICKNESS_FOLLOW_UP, $employment->followUps, true),
             ];
         }
 

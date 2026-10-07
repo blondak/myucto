@@ -136,6 +136,39 @@ final class PayrollTakeoverFollowUpTest extends TestCase
         self::assertSame('evidence', $item['effective_reason']);
     }
 
+    /**
+     * PRE-04: rozběhnutá nemoc z převzatého hlášení. Pokračující neschopnost
+     * zadaná od prvního dne v MyÚčtu bez započtených dnů by otevřela druhé
+     * okno náhrady mzdy, proto úkol nesplní. Splní ho až nepřítomnost se
+     * skutečným dnem vzniku před prvním měsícem v MyÚčtu.
+     */
+    public function testSicknessFollowUpIsCompletedOnlyByAbsenceWithItsRealStart(): void
+    {
+        [$employeeId, $employmentId] = $this->employment('Syntetická osoba v neschopnosti', '2026-03-01');
+        $taken = new PayrollTakeoverEmployment(
+            personalNumber: 'P1',
+            relationKey: 'employment:' . $employmentId,
+            followUps: [JmhzPayrollTakeover::SICKNESS_FOLLOW_UP],
+        );
+
+        self::assertSame(['follow_ups' => 1], $this->writer->followUps($this->supplierId, $employmentId, $taken, '2026-09', JmhzPayrollTakeover::policy()));
+        $item = $this->item($employeeId, JmhzPayrollTakeover::SICKNESS_FOLLOW_UP);
+        self::assertSame('pending', $item['effective_status'], 'Úkol pro první mzdu v MyÚčtu předchozí program nevyřídil.');
+
+        $absence = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to, status, sickness_window_carried_days)
+             VALUES (?, ?, 'dpn', ?, ?, 'approved', 0)"
+        );
+        $absence->execute([$this->supplierId, $employmentId, '2026-09-01', '2026-09-20']);
+        self::assertSame('pending', $this->item($employeeId, JmhzPayrollTakeover::SICKNESS_FOLLOW_UP)['effective_status']);
+
+        $absence->execute([$this->supplierId, $employmentId, '2026-08-25', '2026-08-31']);
+        $item = $this->item($employeeId, JmhzPayrollTakeover::SICKNESS_FOLLOW_UP);
+        self::assertSame('completed', $item['effective_status']);
+        self::assertSame('evidence', $item['effective_reason']);
+    }
+
     /** @return array{0:int,1:int} */
     private function employment(string $name, string $start, ?string $end = null): array
     {
@@ -169,15 +202,15 @@ final class PayrollTakeoverFollowUpTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function item(int $employeeId): array
+    private function item(int $employeeId, string $itemKey = JmhzPayrollTakeover::DEDUCTIONS_FOLLOW_UP): array
     {
         foreach ($this->employments->listForEmployee($this->supplierId, $employeeId) as $employment) {
             foreach ($employment['checklist'] as $item) {
-                if ($item['item_key'] === JmhzPayrollTakeover::DEDUCTIONS_FOLLOW_UP) {
+                if ($item['item_key'] === $itemKey) {
                     return $item;
                 }
             }
         }
-        self::fail('Úkol srážek chybí.');
+        self::fail("Úkol {$itemKey} chybí.");
     }
 }
