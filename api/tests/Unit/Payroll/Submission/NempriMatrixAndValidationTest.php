@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriCodebook;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisiveMonth;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisivePeriod;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
@@ -334,6 +335,33 @@ final class NempriMatrixAndValidationTest extends TestCase
         $this->validator->validateNempri($student, $xml);
         self::assertStringContainsString('<spadaDoPrazdnin>true</spadaDoPrazdnin>', $xml);
         self::assertStringContainsString('<volnoBezNahradyDo>2026-08-05</volnoBezNahradyDo>', $xml);
+    }
+
+    /**
+     * NEMPRI25-nem.potv.druhDuchodu-3: druh důchodu je kód CIS_DRUHDUCH_NEM.
+     * XSD pustí cokoli z `[0-9A-Z]{1,3}`, takže kód z číselníku přihlášky
+     * (1, 2, 8) by odmítla až územní správa.
+     */
+    public function testPensionKindMustComeFromSicknessCodebook(): void
+    {
+        foreach (['1', '2', '8', 'SD'] as $foreign) {
+            $this->expectRejected('nempri_pension_kind_invalid', $this->payload(
+                SicknessBenefitKind::Nem,
+                null,
+                ['receivesPension' => true, 'pensionKind' => $foreign],
+            ));
+        }
+        $this->expectRejected('nempri_pension_kind_invalid', $this->payload(
+            SicknessBenefitKind::Vpm,
+            null,
+            ['receivesPension' => true, 'pensionKind' => '1'],
+        ));
+        foreach (NempriCodebook::PENSION_KINDS as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Nem, null, ['receivesPension' => true, 'pensionKind' => $code]);
+            $xml = $this->serializer->serialize($payload);
+            $this->validator->validateNempri($payload, $xml);
+            self::assertStringContainsString('<druhDuchodu>' . $code . '</druhDuchodu>', $xml);
+        }
     }
 
     public function testFactoryDropsDailyWorkingHoursWhenEmployeeDidNotWork(): void

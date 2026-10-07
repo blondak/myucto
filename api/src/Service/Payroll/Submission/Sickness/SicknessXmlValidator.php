@@ -517,6 +517,7 @@ final readonly class SicknessXmlValidator
                     'Druh důchodu se uvádí jen u zaměstnance, který důchod pobírá.',
                 );
             }
+            NempriCodebook::assertPensionKind($payload->pensionKind);
             if ($payload->startsMaternity === true && $payload->childBirthDate === null) {
                 $this->invalid(
                     'nempri_child_birth_missing',

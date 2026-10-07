@@ -10767,8 +10767,8 @@
         "returnedNo": "No",
         "returnReason": "Reason for not returning",
         "returnReasonDate": "Date the reason took effect",
-        "pensionKind": "Pension type (code)",
-        "pensionKindHint": "Code from the ČSSZ pension type code list, the same as in the employee registration: 1 old-age, 2 third-degree invalidity, 8 first- or second-degree invalidity. No protection period follows the end of employment for a recipient of an old-age or third-degree invalidity pension.",
+        "pensionKind": "Pension type",
+        "pensionKindHint": "Pension type from the ČSSZ code list for sickness insurance benefits (CIS_DRUHDUCH_NEM). No protection period follows the end of employment for a recipient of an old-age or third-degree invalidity pension.",
         "withinSchoolHolidays": "The employment falls entirely within school holidays",
         "startsMaternity": "Starts maternity benefit",
         "childBirthDate": "Child's date of birth",
@@ -10806,6 +10806,15 @@
           "ONE": "ONE - long-term illness of the mother",
           "ROZ": "ROZ - decision of an authority",
           "UMR": "UMR - death of the mother"
+        },
+        "pensionKinds": {
+          "A": "A - foreign pension of an old-age nature",
+          "B": "B - foreign pension of a full invalidity nature",
+          "C": "C - foreign pension of a partial invalidity nature",
+          "I1": "I1 - first- or second-degree invalidity pension",
+          "I3": "I3 - third-degree invalidity pension",
+          "N": "N - receives no pension",
+          "S": "S - old-age pension"
         },
         "familyRelationships": {
           "PL": "PL - relative in the direct line (parent, child, grandparent, grandchild)",
@@ -11686,6 +11695,7 @@
       "nempri_school_holidays_without_student": "School holidays are stated only for a student.",
       "nempri_pension_kind_missing": "The employee receives a pension, so the confirmation must state the pension type.",
       "nempri_pension_kind_without_pension": "The pension type is stated only for an employee who receives a pension.",
+      "nempri_pension_kind_invalid": "The pension type must be a code from the ČSSZ code list CIS_DRUHDUCH_NEM. Choose it from the list in the benefit case.",
       "nempri_child_birth_missing": "The employee starts maternity benefit, so the confirmation must state the child's date of birth.",
       "nempri_child_birth_without_maternity": "The child's date of birth is stated only when starting maternity benefit.",
       "nempri_unpaid_leave_end_missing": "Unpaid leave must also have the day it lasted until.",

@@ -34,11 +34,12 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * ## Důchod
  *
  * Pobírání důchodu a jeho druh se vyplňují u případu (`pobiraDuchod`,
- * `druhDuchodu` v NEMPRI). Druh se čte kódem z číselníku ČSSZ Druh důchodu
- * (týž číselník nese přihláška REGZEC): `1` starobní, `2` invalidní třetího
- * stupně — z nich ochranná lhůta neplyne. Pobírá-li zaměstnanec důchod a druh
- * není vyplněný, politika radši odmítne s výzvou k doplnění, než aby nárok
- * domýšlela.
+ * `druhDuchodu` v NEMPRI). Druh je kód číselníku CIS_DRUHDUCH_NEM
+ * ({@see NempriCodebook::PENSION_KINDS}), tedy týž údaj, který jde do věty:
+ * `S` starobní, `I3` invalidní třetího stupně — z nich ochranná lhůta neplyne.
+ * Číselník přihlášky REGZEC (1, 2, 8) je jiný a dřív se sem omylem psal.
+ * Pobírá-li zaměstnanec důchod a druh není vyplněný nebo není z číselníku,
+ * politika radši odmítne s výzvou k doplnění, než aby nárok domýšlela.
  *
  * ## Co politika vědomě nerozhoduje
  *
@@ -58,12 +59,12 @@ final class SicknessProtectionPeriodPolicy
     public const LEGAL_REFERENCE = '§ 15 zákona č. 187/2006 Sb.';
 
     /**
-     * Kódy číselníku ČSSZ Druh důchodu, ze kterých ochranná lhůta neplyne:
-     * starobní a invalidní třetího stupně (§ 15 odst. 4 písm. a).
+     * Kódy CIS_DRUHDUCH_NEM, ze kterých ochranná lhůta neplyne: starobní
+     * a invalidní třetího stupně (§ 15 odst. 4 písm. a).
      *
      * @var list<string>
      */
-    public const PENSION_KINDS_WITHOUT_PROTECTION = ['1', '2'];
+    public const PENSION_KINDS_WITHOUT_PROTECTION = ['S', 'I3'];
 
     /**
      * Posoudí, zda sociální událost vznikla za trvání zaměstnání, nebo
@@ -194,7 +195,9 @@ final class SicknessProtectionPeriodPolicy
                     . 'důchodu nejde posoudit, zda nárok vznikl. Doplňte druh důchodu u případu.',
                 );
             }
-            if (in_array(strtoupper($pensionKind), self::PENSION_KINDS_WITHOUT_PROTECTION, true)) {
+            $pensionKind = strtoupper($pensionKind);
+            NempriCodebook::assertPensionKind($pensionKind);
+            if (in_array($pensionKind, self::PENSION_KINDS_WITHOUT_PROTECTION, true)) {
                 return 'zaměstnanec je poživatelem starobního důchodu nebo invalidního důchodu '
                     . 'třetího stupně (písm. a)';
             }

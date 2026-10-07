@@ -22,6 +22,7 @@ final class NempriCodebookContractTest extends TestCase
         self::assertSame(NempriCodebook::MATERNITY_CARE_REASONS, $this->list($source, 'MATERNITY_CARE_REASONS'));
         self::assertSame(NempriCodebook::FAMILY_RELATIONSHIPS, $this->list($source, 'FAMILY_RELATIONSHIPS'));
         self::assertSame(NempriCodebook::CARE_RELATIONSHIPS, $this->list($source, 'CARE_RELATIONSHIPS'));
+        self::assertSame(NempriCodebook::PENSION_KINDS, $this->list($source, 'PENSION_KINDS'));
     }
 
     public function testEveryCodebookValueHasCzechAndEnglishLabel(): void
@@ -39,6 +40,7 @@ final class NempriCodebookContractTest extends TestCase
                 'maternityCareReasons' => NempriCodebook::MATERNITY_CARE_REASONS,
                 'familyRelationships' => NempriCodebook::FAMILY_RELATIONSHIPS,
                 'careRelationships' => NempriCodebook::CARE_RELATIONSHIPS,
+                'pensionKinds' => NempriCodebook::PENSION_KINDS,
             ] as $group => $codes) {
                 foreach ($codes as $code) {
                     self::assertArrayHasKey($code, $codebooks[$group], "{$locale}: {$group}.{$code}");

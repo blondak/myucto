@@ -65,6 +65,7 @@ import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm
 import {
   MATERNITY_CARE_REASONS,
   PATERNITY_REASONS,
+  PENSION_KINDS,
   isOutsideCodebook,
   relationshipCodebook,
 } from './nempriCodebooks'
@@ -229,6 +230,8 @@ const paternityReasonOptions = computed<CodeOption[]>(() =>
   codeOptions(PATERNITY_REASONS, 'paternityReasons', draft.value.paternity_reason))
 const maternityCareReasonOptions = computed<CodeOption[]>(() =>
   codeOptions(MATERNITY_CARE_REASONS, 'maternityCareReasons', draft.value.maternity_care_reason))
+const pensionKindOptions = computed<CodeOption[]>(() =>
+  codeOptions(PENSION_KINDS, 'pensionKinds', draft.value.pension_kind))
 
 /** Odmítnutí dlouhodobé péče musí nést důvod (§ 191a ZP). */
 const longTermCareRefused = computed(() => draft.value.long_term_care_consent === 'refused')
@@ -1301,7 +1304,12 @@ onMounted(() => void load())
               </label>
               <label v-if="draft.receives_pension" class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.pensionKind') }}</span>
-                <input v-model="draft.pension_kind" type="text" maxlength="2" class="w-full rounded-lg border border-neutral-300 p-2 text-sm" data-test="sickness-case-pension-kind">
+                <select v-model="draft.pension_kind" class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm" data-test="sickness-case-pension-kind">
+                  <option :value="null">{{ t('payroll.sicknessCases.codebooks.none') }}</option>
+                  <option v-for="option in pensionKindOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
               </label>
               <label v-if="draftHasStudentSection" class="flex items-center gap-2 text-sm">
                 <input v-model.number="draft.is_student" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-is-student">

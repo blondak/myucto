@@ -10767,8 +10767,8 @@
         "returnedNo": "Ne",
         "returnReason": "Důvod, proč se nevrátil",
         "returnReasonDate": "Den, ke kterému důvod nastal",
-        "pensionKind": "Druh důchodu (kód)",
-        "pensionKindHint": "Kód z číselníku ČSSZ Druh důchodu, stejný jako v přihlášce zaměstnance: 1 starobní, 2 invalidní třetího stupně, 8 invalidní prvního nebo druhého stupně. Poživateli starobního a invalidního důchodu třetího stupně po skončení zaměstnání ochranná lhůta neplyne.",
+        "pensionKind": "Druh důchodu",
+        "pensionKindHint": "Druh důchodu podle číselníku ČSSZ pro dávky nemocenského pojištění (CIS_DRUHDUCH_NEM). Poživateli starobního a invalidního důchodu třetího stupně po skončení zaměstnání ochranná lhůta neplyne.",
         "withinSchoolHolidays": "Zaměstnání spadá výlučně do školních prázdnin",
         "startsMaternity": "Nastupuje na peněžitou pomoc v mateřství",
         "childBirthDate": "Den narození dítěte",
@@ -10806,6 +10806,15 @@
           "ONE": "ONE – dlouhodobé onemocnění matky",
           "ROZ": "ROZ – rozhodnutí orgánu",
           "UMR": "UMR – úmrtí matky"
+        },
+        "pensionKinds": {
+          "A": "A – cizí důchod charakteru starobního",
+          "B": "B – cizí důchod charakteru invalidního plného",
+          "C": "C – cizí důchod charakteru částečného invalidního",
+          "I1": "I1 – invalidní důchod 1. nebo 2. stupně",
+          "I3": "I3 – invalidní důchod 3. stupně",
+          "N": "N – nepobírá",
+          "S": "S – starobní důchod"
         },
         "familyRelationships": {
           "PL": "PL – příbuzný v linii přímé (rodič, dítě, prarodič, vnouče)",
@@ -11686,6 +11695,7 @@
       "nempri_school_holidays_without_student": "Prázdniny se uvádějí jen u studenta.",
       "nempri_pension_kind_missing": "Zaměstnanec pobírá důchod, takže potvrzení musí nést druh důchodu.",
       "nempri_pension_kind_without_pension": "Druh důchodu se uvádí jen u zaměstnance, který důchod pobírá.",
+      "nempri_pension_kind_invalid": "Druh důchodu musí být kód z číselníku ČSSZ CIS_DRUHDUCH_NEM. Vyberte ho v případu dávky ze seznamu.",
       "nempri_child_birth_missing": "Zaměstnankyně nastupuje na peněžitou pomoc v mateřství, takže potvrzení musí nést datum narození dítěte.",
       "nempri_child_birth_without_maternity": "Datum narození dítěte se uvádí jen při nástupu na peněžitou pomoc v mateřství.",
       "nempri_unpaid_leave_end_missing": "Pracovní volno bez náhrady příjmu musí mít i den, do kterého trvalo.",

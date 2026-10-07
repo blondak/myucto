@@ -95,7 +95,7 @@ final readonly class SicknessCaseService
         'daily_working_hours' => 'decimal',
         'small_scope_income_minor' => 'int',
         'receives_pension' => 'bool',
-        'pension_kind' => 'text',
+        'pension_kind' => 'code',
         'is_student' => 'bool',
         'within_school_holidays' => 'nullable_bool',
         'first_employment_free_time' => 'bool',
@@ -481,6 +481,9 @@ final readonly class SicknessCaseService
      */
     private function assertCodebooks(SicknessBenefitKind $kind, array $values): void
     {
+        if (array_key_exists('pension_kind', $values)) {
+            NempriCodebook::assertPensionKind($values['pension_kind']);
+        }
         $touched = array_intersect_key(
             $values,
             array_flip(['relationship_code', 'paternity_reason', 'maternity_care_reason']),

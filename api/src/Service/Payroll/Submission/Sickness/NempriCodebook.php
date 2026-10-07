@@ -41,6 +41,14 @@ final class NempriCodebook
     /** `kodRodVztah` u ošetřovného — CIS_RODVZTAH. */
     public const FAMILY_RELATIONSHIPS = ['PL', 'MA', 'RP', 'SDO', 'SO', 'TCH', 'JIN'];
 
+    /**
+     * `druhDuchodu` v potvrzení zaměstnavatele u NEM, VPM a PPM —
+     * CIS_DRUHDUCH_NEM: A, B, C cizí důchod (starobní, invalidní plný,
+     * částečný), I1 invalidní 1. nebo 2. stupně, I3 invalidní 3. stupně,
+     * N nepobírá, S starobní. Číselník registrace (1, 2, 8) sem nepatří.
+     */
+    public const PENSION_KINDS = ['A', 'B', 'C', 'I1', 'I3', 'N', 'S'];
+
     /** `kodVztah` u dlouhodobého ošetřovného — CIS_VZTAH (1 až 29). */
     public const CARE_RELATIONSHIPS = [
         '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
@@ -126,6 +134,22 @@ final class NempriCodebook
                     . '(DOH, ONE, ROZ, UMR). Vyberte ho v případu dávky ze seznamu.',
                 );
             }
+        }
+    }
+
+    /**
+     * Druh důchodu proti CIS_DRUHDUCH_NEM. `null` projde — povinnost podle
+     * `pobiraDuchod` hlídá {@see SicknessXmlValidator}.
+     */
+    public static function assertPensionKind(?string $pensionKind): void
+    {
+        if ($pensionKind !== null && !in_array($pensionKind, self::PENSION_KINDS, true)) {
+            throw new SicknessException(
+                'nempri_pension_kind_invalid',
+                'Druh důchodu musí být kód z číselníku ČSSZ CIS_DRUHDUCH_NEM (S starobní, '
+                . 'I1 invalidní 1. nebo 2. stupně, I3 invalidní 3. stupně, A, B, C cizí důchod). '
+                . 'Vyberte ho v případu dávky ze seznamu.',
+            );
         }
     }
 }

@@ -1738,10 +1738,12 @@ ve spodní liště a tyto sekce:
   rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem
   rozhodnutí.
 - **Potvrzení zaměstnavatele** — mimo jiné **příjem ze zaměstnání malého
-  rozsahu** v celých korunách. Pobírá-li zaměstnanec důchod, vyplňte **druh
-  důchodu** kódem z číselníku ČSSZ Druh důchodu (stejný jako v přihlášce
-  zaměstnance: 1 starobní, 2 invalidní třetího stupně, 8 invalidní prvního
-  nebo druhého stupně). U studenta zaškrtněte, zda zaměstnání spadá výlučně do
+  rozsahu** v celých korunách. Pobírá-li zaměstnanec důchod, vyberte **druh
+  důchodu** ze seznamu podle číselníku ČSSZ pro dávky CIS_DRUHDUCH_NEM
+  (S starobní, I1 invalidní prvního nebo druhého stupně, I3 invalidní
+  třetího stupně, A, B, C cizí důchod). Číselník přihlášky zaměstnance
+  (1, 2, 8) je jiný a ČSSZ by ho v NEMPRI odmítla; starší takto zapsaný kód
+  je v nabídce označený a je potřeba ho vybrat znovu. U studenta zaškrtněte, zda zaměstnání spadá výlučně do
   školních prázdnin. Pracovní volno bez náhrady příjmu má den od i do.
   U nemocenského, vyrovnávacího příspěvku a mateřské se vyplňuje nástup na
   peněžitou pomoc v mateřství a den narození dítěte. Převedení na jinou práci

@@ -64,7 +64,7 @@ final readonly class SicknessPayloadFactory
                 ? null
                 : (int) $row['small_scope_income_minor'],
             receivesPension: (bool) $row['receives_pension'],
-            pensionKind: self::nullableText($row['pension_kind'] ?? null),
+            pensionKind: self::code($row['pension_kind'] ?? null),
             isStudent: (bool) $row['is_student'],
             withinSchoolHolidays: self::nullableBool($row['within_school_holidays'] ?? null),
             firstEmploymentFreeTime: (bool) $row['first_employment_free_time'],
