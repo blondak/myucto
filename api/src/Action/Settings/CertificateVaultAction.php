@@ -80,7 +80,9 @@ final class CertificateVaultAction
                 );
             }
             $label = trim((string) ($body['label'] ?? ''));
-            $password = (string) ($body['password'] ?? '');
+            // Heslo k souboru má vlastní pole: `password` nese opětovné
+            // ověření uživatele a v multipart formuláři by jedno přebilo druhé.
+            $password = (string) ($body['pfx_password'] ?? '');
             $result = $this->credentials->import(
                 $userId,
                 $supplierId,

@@ -1167,7 +1167,7 @@ export const settingsApi = {
     const data = new FormData()
     data.append('file', payload.file, payload.file.name)
     data.append('label', payload.label)
-    data.append('password', payload.password)
+    data.append('pfx_password', payload.password)
     appendStepUpProof(data, payload.proof)
     if (payload.shareWithOtherSuppliers) {
       data.append('share_with_other_suppliers', '1')
