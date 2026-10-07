@@ -18,6 +18,7 @@ import {
   type PayrollRegistrationCurrent,
   type PayrollRegistrationA1Address,
   type PayrollRegistrationA1Draft,
+  type PayrollRegistrationA1ForeignInsurance,
   type PayrollRegistrationA1Problem,
   type PayrollRegistrationA1Profile,
   type PayrollRegistrationA1ProfilePayload,
@@ -201,6 +202,39 @@ function emptyA1Address(): PayrollRegistrationA1Address {
   }
 }
 
+/** Číselník CIS Sektor (účel zahraničního pojištění). */
+const FOREIGN_INSURANCE_SECTORS = ['01', '02', '03', '04', '05', '06', '07', '08'] as const
+
+function emptyA1ForeignInsurance(): PayrollRegistrationA1ForeignInsurance {
+  return {
+    current: null,
+    name: null,
+    street: null,
+    house_number: null,
+    orientation_number: null,
+    postal_code: null,
+    city: null,
+    country_code: null,
+    identifier: null,
+    sector: null,
+  }
+}
+
+/**
+ * Oddíl cizozemského nositele pojištění existuje ve formuláři vždy u varianty
+ * OST (u druhu činnosti „N" je povinný, jinde nepovinný). Server klíč vrací jen
+ * u vyplněného oddílu, takže se prázdný oddíl dopočítá — před výpočtem
+ * výchozího stavu formuláře, ať ho nezaložení nemarkuje jako změnu.
+ */
+function withForeignInsuranceSection(
+  payload: PayrollRegistrationA1ProfilePayload,
+): PayrollRegistrationA1ProfilePayload {
+  if (a1IsFull.value && !payload.foreign_insurance) {
+    payload.foreign_insurance = emptyA1ForeignInsurance()
+  }
+  return payload
+}
+
 function emptyA1Profile(): PayrollRegistrationA1ProfilePayload {
   return {
     effective_on: '',
@@ -361,7 +395,9 @@ function discardA1LocalDraft(): void {
 function restoreA1LocalDraft(): void {
   const draft = a1LocalDraft.value
   if (draft === null) return
-  a1Form.value = JSON.parse(JSON.stringify(draft.payload)) as PayrollRegistrationA1ProfilePayload
+  a1Form.value = withForeignInsuranceSection(
+    JSON.parse(JSON.stringify(draft.payload)) as PayrollRegistrationA1ProfilePayload,
+  )
   if (a1Draft.value !== null) {
     a1Form.value.effective_on = a1Draft.value.effective_on
     a1Form.value.row_version = a1Draft.value.row_version
@@ -782,11 +818,15 @@ async function loadA1Profile(): Promise<void> {
     )) as PayrollRegistrationA1ProfilePayload
     a1Form.value.effective_on = view.draft.effective_on
     a1Form.value.row_version = view.draft.row_version
+    withForeignInsuranceSection(a1Form.value)
     await fillWorkplaceCityFromCode()
     a1Baseline.value = a1Comparable(a1Form.value)
     a1LocalDraftArmed.value = false
     const local = readA1LocalDraft()
-    a1LocalDraft.value = local !== null && a1Comparable(local.payload) !== a1Baseline.value
+    a1LocalDraft.value = local !== null
+      && a1Comparable(withForeignInsuranceSection(
+        JSON.parse(JSON.stringify(local.payload)) as PayrollRegistrationA1ProfilePayload,
+      )) !== a1Baseline.value
       ? local
       : null
   } catch (exception) {
@@ -802,9 +842,9 @@ async function loadA1Profile(): Promise<void> {
 function a1ResetToSuggestion(): void {
   const draft = a1Draft.value
   if (draft === null) return
-  a1Form.value = blankToNull(JSON.parse(
+  a1Form.value = withForeignInsuranceSection(blankToNull(JSON.parse(
     JSON.stringify(draft.suggested),
-  ) as PayrollRegistrationA1ProfilePayload)
+  ) as PayrollRegistrationA1ProfilePayload))
   a1ProfileMessage.value = ''
 }
 
@@ -3435,6 +3475,185 @@ async function copyXml(): Promise<void> {
                 :class="a1NoteClass('foreign_legislation.country_code')"
               >
                 {{ a1NoteText('foreign_legislation.country_code') }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="a1IsFull && a1Form.foreign_insurance" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.foreign_insurance') }}
+          </h6>
+          <p class="mt-1 text-xs text-neutral-500">
+            {{ t('payroll.people.registration.a1.foreign_insurance.hint') }}
+          </p>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.current') }}
+              </span>
+              <select
+                v-model="a1Form.foreign_insurance.current"
+                v-bind="a1FieldAttrs('foreign_insurance.current')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-current"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option value="P">{{ t('payroll.people.registration.a1.foreign_insurance.current_last') }}</option>
+                <option value="S">{{ t('payroll.people.registration.a1.foreign_insurance.current_present') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('foreign_insurance.current')"
+                :class="a1NoteClass('foreign_insurance.current')"
+              >
+                {{ a1NoteText('foreign_insurance.current') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.country_code') }}
+              </span>
+              <SearchableSelect
+                :class="['mt-1', a1FieldRing('foreign_insurance.country_code')]"
+                :data-a1-field="'foreign_insurance.country_code'"
+                :model-value="a1Form.foreign_insurance.country_code"
+                :options="a1CodeOptions(jmhzOptions?.countries, a1Form.foreign_insurance.country_code)"
+                :placeholder="t('payroll.people.registration.a1.country_select')"
+                :no-results-label="t('payroll.people.registration.a1.country_no_results')"
+                :disabled="a1Busy"
+                accent="payroll"
+                data-test="a1-foreign-insurance-country-code"
+                @update:model-value="a1Form.foreign_insurance.country_code = $event"
+              />
+              <span
+                v-if="a1NoteText('foreign_insurance.country_code')"
+                :class="a1NoteClass('foreign_insurance.country_code')"
+              >
+                {{ a1NoteText('foreign_insurance.country_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.name') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.name"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.name')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-name"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.identifier') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.identifier"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.identifier')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-identifier"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.sector') }}
+              </span>
+              <select
+                v-model="a1Form.foreign_insurance.sector"
+                v-bind="a1FieldAttrs('foreign_insurance.sector')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-sector"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option v-for="code in FOREIGN_INSURANCE_SECTORS" :key="code" :value="code">
+                  {{ code }} · {{ t(`payroll.people.registration.a1.foreign_insurance.sector_option.${code}`) }}
+                </option>
+              </select>
+              <span
+                v-if="a1NoteText('foreign_insurance.sector')"
+                :class="a1NoteClass('foreign_insurance.sector')"
+              >
+                {{ a1NoteText('foreign_insurance.sector') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.street') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.street"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.street')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-street"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.house_number') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.house_number"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.house_number')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-house-number"
+              >
+              <span
+                v-if="a1NoteText('foreign_insurance.house_number')"
+                :class="a1NoteClass('foreign_insurance.house_number')"
+              >
+                {{ a1NoteText('foreign_insurance.house_number') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.orientation_number') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.orientation_number"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.orientation_number')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-orientation-number"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.postal_code') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.postal_code"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.postal_code')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-postal-code"
+              >
+              <span
+                v-if="a1NoteText('foreign_insurance.postal_code')"
+                :class="a1NoteClass('foreign_insurance.postal_code')"
+              >
+                {{ a1NoteText('foreign_insurance.postal_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_insurance.city') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_insurance.city"
+                type="text"
+                v-bind="a1FieldAttrs('foreign_insurance.city')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-insurance-city"
+              >
+              <span
+                v-if="a1NoteText('foreign_insurance.city')"
+                :class="a1NoteClass('foreign_insurance.city')"
+              >
+                {{ a1NoteText('foreign_insurance.city') }}
               </span>
             </label>
           </div>

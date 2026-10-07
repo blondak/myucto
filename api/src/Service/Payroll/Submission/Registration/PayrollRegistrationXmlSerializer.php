@@ -150,6 +150,22 @@ final class PayrollRegistrationXmlSerializer
                     . 'znovu.',
             );
         }
+        if (($a1->employment['activity_code'] ?? null) === 'N'
+            && $a1->variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+            && $a1->foreignInsurance === null
+        ) {
+            // EDV 1.4.0.6, ID 10092 a 10099: u druhu činnosti „N" je cizozemský
+            // nositel pojištění povinný. Bez něj ČSSZ přihlášku odmítne.
+            throw new PayrollRegistrationXmlException(
+                'registration_regzec_a1_foreign_insurance_missing',
+                'Přihlášení zaměstnance s druhem činnosti „N" (smluvní '
+                    . 'zaměstnanec) musí nést cizozemského nositele pojištění — '
+                    . 'bez něj ho ČSSZ nepřijme. V profilu registrace vyplňte '
+                    . 'oddíl Cizozemský nositel pojištění (specifikace a stát) '
+                    . 'a uložte ho.'
+                    . PayrollRegistrationFieldVocabulary::reference('foreign_insurance'),
+            );
+        }
         $document = $this->document();
         $root = $this->root($document, $namespace, 'REGZEC', 'REGZEC25');
         $this->appendVendor($document, $namespace, $root, $payload);
@@ -309,6 +325,9 @@ final class PayrollRegistrationXmlSerializer
         DOMElement $employee,
         PayrollRegistrationA1Snapshot $a1,
     ): void {
+        if ($a1->foreignInsurance !== null) {
+            $this->appendForin($document, $namespace, $employee, $a1->foreignInsurance);
+        }
         if ($a1->pension !== null) {
             $pension = $this->element($document, $namespace, 'pens');
             $this->setMappedAttributes($pension, $a1->pension, [
@@ -425,7 +444,19 @@ final class PayrollRegistrationXmlSerializer
         $client->setAttribute('ikmpsv', $this->eventText($personExternal, 'value'));
         $data = $this->eventObject($event, 'data');
         if (in_array($payload->interaction->actionCode, [3, 4], true)) {
-            $this->regzecDeltaClient($document, $namespace, $client, $data);
+            $this->regzecDeltaClient(
+                $document,
+                $namespace,
+                $client,
+                $data,
+                PayrollRegistrationBusinessMatrix::allowsPreviousSurnames(
+                    PayrollRegistrationBusinessMatrix::requireActionVariant(
+                        $payload->interaction->actionCode,
+                        $this->eventText($data, 'activity_code'),
+                        $this->eventNullableText($data, 'relationship_detail_code'),
+                    ),
+                ),
+            );
         }
         $employee->appendChild($client);
 
@@ -551,6 +582,7 @@ final class PayrollRegistrationXmlSerializer
         string $namespace,
         DOMElement $client,
         array $data,
+        bool $allowsPreviousSurnames,
     ): void {
         $delta = $this->eventObject($data, 'delta');
         if (isset($delta['birth_number'])) {
@@ -560,7 +592,19 @@ final class PayrollRegistrationXmlSerializer
         $nameAttributes = array_filter([
             'sur' => $identity['last_name'] ?? null,
             'fir' => $identity['first_name'] ?? null,
-            'tit' => $delta['title_prefix'] ?? ($identity['title_prefix'] ?? null),
+            'tit' => $this->title(
+                self::textOrNull($delta['title_prefix'] ?? ($identity['title_prefix'] ?? null)),
+                self::textOrNull($delta['title_suffix'] ?? ($identity['title_suffix'] ?? null)),
+            ),
+            // Kontrakt s balíčkem E2: delta identity nese `previous_surnames`
+            // (čárkou oddělený řetězec) z historie jména.
+            // EDV 1.4.0.6, ID 10064: u varianty 10 (A3-10, A4-10) se dřívější
+            // příjmení neuvádí.
+            'ona' => $allowsPreviousSurnames
+                ? $this->previousSurnames(
+                    self::textOrNull($identity['previous_surnames'] ?? null),
+                )
+                : null,
         ], static fn (mixed $value): bool => $value !== null);
         if ($nameAttributes !== []) {
             $name = $this->element($document, $namespace, 'name');
@@ -800,7 +844,26 @@ final class PayrollRegistrationXmlSerializer
         DOMElement $employee,
         array $data,
     ): void {
-        $foreign = $this->eventObject($data, 'foreign_insurance');
+        $this->appendForin(
+            $document,
+            $namespace,
+            $employee,
+            $this->eventObject($data, 'foreign_insurance'),
+        );
+    }
+
+    /**
+     * `forin` (cizozemský nositel pojištění) je společný pro A1 (profil),
+     * A6 a A7 (událost); v `employeeType` stojí hned za `job`.
+     *
+     * @param array<string,mixed> $foreign
+     */
+    private function appendForin(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $employee,
+        array $foreign,
+    ): void {
         $node = $this->element($document, $namespace, 'forin');
         foreach ([
             'current' => 'cur', 'name' => 'nam', 'street' => 'str',
@@ -962,11 +1025,28 @@ final class PayrollRegistrationXmlSerializer
             'fir',
             $this->requiredIdentityString($identity, 'first_name'),
         );
-        $title = $this->nullableIdentityString($identity, 'title_prefix');
-        if ($payload->interaction->documentType === 'REGZEC25'
-            && $title !== null
-        ) {
-            $name->setAttribute('tit', $title);
+        // Tituly a dřívější příjmení nese jen REGZEC; PREZEC26 pro ně atributy
+        // nemá (`nameType` v PREZEC26 1.2 má jen `sur` a `fir`).
+        if ($payload->interaction->documentType === 'REGZEC25') {
+            $title = $this->title(
+                $this->nullableIdentityString($identity, 'title_prefix'),
+                $this->nullableIdentityString($identity, 'title_suffix'),
+            );
+            if ($title !== null) {
+                $name->setAttribute('tit', $title);
+            }
+            // EDV 1.4.0.6, ID 10064: u varianty 10 se dřívější příjmení
+            // neuvádí (v matici „/") a ČSSZ podání s ním zamítne.
+            $a1 = $payload->identity->regzecA1;
+            $previous = $a1 !== null
+                && !PayrollRegistrationBusinessMatrix::allowsPreviousSurnames($a1->variant)
+                ? null
+                : $this->previousSurnames(
+                    $this->nullableIdentityString($identity, 'previous_surnames'),
+                );
+            if ($previous !== null) {
+                $name->setAttribute('ona', $previous);
+            }
         }
         $client->appendChild($name);
         $birth = $this->element($document, $namespace, 'birth');
@@ -983,13 +1063,21 @@ final class PayrollRegistrationXmlSerializer
             'nam',
             $this->requiredIdentityString($identity, 'birth_surname'),
         );
-        $birth->setAttribute(
-            'cit',
-            $this->requiredIdentityString($identity, 'birth_place'),
-        );
+        $birthPlace = $this->requiredIdentityString($identity, 'birth_place');
         $birthCountry = $this->nullableIdentityString(
             $identity,
             'birth_country_code',
+        );
+        $birth->setAttribute(
+            'cit',
+            $payload->interaction->documentType === 'PREZEC26'
+                // PREZEC nemá atribut pro stát narození, ten se píše za obec.
+                ? PayrollRegistrationBirthPlace::forPrezec(
+                    $birthPlace,
+                    $this->requiredIdentityString($identity, 'birth_country_code'),
+                    $payload->preparedOn,
+                )
+                : PayrollRegistrationBirthPlace::forRegzec($birthPlace),
         );
         if ($payload->interaction->documentType === 'REGZEC25'
             && $birthCountry !== null
@@ -1020,6 +1108,60 @@ final class PayrollRegistrationXmlSerializer
             ),
         );
         $client->appendChild($stat);
+    }
+
+    /**
+     * Titul (ID 10055, nejvýš 30 znaků): „všechny tituly v pořadí před a za
+     * jménem", oddělené mezerou. Evidence drží tituly zvlášť, ČSSZ je chce
+     * v jednom atributu.
+     */
+    private function title(?string $prefix, ?string $suffix): ?string
+    {
+        $parts = array_values(array_filter(
+            [$prefix, $suffix],
+            static fn (?string $part): bool => $part !== null && trim($part) !== '',
+        ));
+        if ($parts === []) {
+            return null;
+        }
+        $title = implode(' ', array_map('trim', $parts));
+        if (mb_strlen($title) > 30) {
+            throw new PayrollRegistrationXmlException(
+                'registration_identity_invalid',
+                PayrollRegistrationFieldVocabulary::label('title_prefix')
+                    . ' a ' . mb_lcfirst(PayrollRegistrationFieldVocabulary::label('title_suffix'))
+                    . ' dohromady („' . $title . '") jsou delší, než ČSSZ přijme: '
+                    . 'nejvýš 30 znaků, teď jich je ' . mb_strlen($title)
+                    . '. Zkraťte tituly nebo ponechte jen ty, které ČSSZ potřebuje. '
+                    . PayrollRegistrationFieldVocabulary::describe('title_prefix'),
+            );
+        }
+
+        return $title;
+    }
+
+    private static function textOrNull(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /** Dřívější příjmení (ID 10064): čárkou oddělený seznam, nejvýš 100 znaků. */
+    private function previousSurnames(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (mb_strlen($value) > 100) {
+            throw new PayrollRegistrationXmlException(
+                'registration_identity_invalid',
+                PayrollRegistrationFieldVocabulary::label('previous_surnames')
+                    . ' jsou dohromady delší, než ČSSZ přijme: nejvýš 100 znaků, '
+                    . 'teď jich je ' . mb_strlen($value) . '. '
+                    . PayrollRegistrationFieldVocabulary::describe('previous_surnames'),
+            );
+        }
+
+        return $value;
     }
 
     /**

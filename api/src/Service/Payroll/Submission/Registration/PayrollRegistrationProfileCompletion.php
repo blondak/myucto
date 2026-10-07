@@ -109,7 +109,8 @@ final class PayrollRegistrationProfileCompletion
         if ($full) {
             $delta += [
                 'identity' => self::pick($identity, [
-                    'last_name', 'first_name', 'title_prefix', 'birth_date',
+                    'last_name', 'first_name', 'title_prefix', 'title_suffix',
+                    'previous_surnames', 'birth_date',
                     'sex', 'citizenship_country_code',
                 ]),
                 'permanent_address' => self::clean($a1->permanentAddress),

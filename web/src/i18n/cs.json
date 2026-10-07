@@ -6650,7 +6650,11 @@
             "date": "{field} musí být datum ve tvaru RRRR-MM-DD, například 2026-08-05.",
             "status_for_activity": "{field}: u druhu činnosti „{activity}“ smí být jen {allowed}, teď je „{value}“.",
             "status_format": "{field} musí být čtyřmístný kód z číselníku NKPZ, teď je „{value}“.",
-            "status_unknown": "{field} není v číselníku NKPZ, teď je „{value}“. Vyberte kód z nabídky."
+            "status_unknown": "{field} není v číselníku NKPZ, teď je „{value}“. Vyberte kód z nabídky.",
+            "postal_code_cz": "{field} musí mít u adresy v ČR přesně pět číslic (například 60200), teď je „{value}“.",
+            "health_restrictions_max": "{field} smí obsahovat jediné omezení, teď jich je {count}. Ponechte omezení platné ke dni nástupu.",
+            "foreign_insurance_current": "{field} musí být P (poslední nositel), nebo S (současný nositel), teď je „{value}“.",
+            "foreign_insurance_sector": "{field} musí být kód z číselníku Sektor (01 až 08), teď je „{value}“."
           },
           "gap_open": "Doplnit →",
           "gap_unreachable": "Položku {field} se nepodařilo na obrazovce najít. Napište nám to prosím, je to chyba navigace.",
@@ -6703,6 +6707,7 @@
             "health_and_facts": "Zdravotní pojištění a skutečnosti",
             "pension": "Důchod",
             "foreign_legislation": "Zahraniční legislativa",
+            "foreign_insurance": "Cizozemský nositel pojištění",
             "proof_identity": "Doklad totožnosti",
             "foreign_worker": "Přístup na trh práce",
             "attachments": "Přílohy"
@@ -6760,6 +6765,31 @@
           "foreign_legislation": {
             "applies": "Podléhá zahraniční legislativě",
             "country_code": "Stát legislativy"
+          },
+          "foreign_insurance": {
+            "hint": "Povinné u druhu činnosti „N“ (smluvní zaměstnanec): vyberte specifikaci a stát. Jinde vyplňte jen tehdy, když zaměstnanec byl pojištěn v cizině a vy jste jeho prvním zaměstnavatelem po skončení tohoto pojištění. Vyplníte-li kteroukoli část adresy, je povinné číslo popisné, PSČ i obec.",
+            "current": "Specifikace nositele",
+            "current_last": "P (poslední nositel)",
+            "current_present": "S (současný nositel)",
+            "country_code": "Stát nositele",
+            "name": "Název nositele",
+            "identifier": "Cizozemské číslo pojištění",
+            "sector": "Sektor (účel pojištění)",
+            "sector_option": {
+              "01": "Pracovní úrazy a nemoci z povolání",
+              "02": "Rodinné dávky",
+              "03": "Vše",
+              "04": "Důchody",
+              "05": "Vymáhání a zápočty",
+              "06": "Nemoc",
+              "07": "Dávky v nezaměstnanosti",
+              "08": "Jiné"
+            },
+            "street": "Ulice",
+            "house_number": "Číslo popisné",
+            "orientation_number": "Číslo orientační",
+            "postal_code": "PSČ",
+            "city": "Obec"
           },
           "proof_identity": {
             "type_code": "Typ dokladu",
@@ -11747,6 +11777,7 @@
       "registration_interaction_unsupported": "Tato kombinace se nepodává - aplikace umí jen podání z nabídky u pracovního vztahu. Vyberte druh podání znovu z nabídky.",
       "registration_jurisdiction_direction_mismatch": "Zvolený druh podání neodpovídá aktuálnímu směru mezinárodní příslušnosti k pojištění. Vyberte opačnou z nabízených událostí.",
       "registration_prezec_identifier_required": "Rodné číslo ani evidenční číslo pojištěnce nejsou vyplněné. Částečné přihlášení před nástupem (PREZEC) se bez jednoho z nich podat nedá - doplňte údaj na kartě osoby, nebo pokud zaměstnanec nemá ani jedno, podejte místo toho plnou registraci REGZEC.",
+      "registration_regzec_a1_foreign_insurance_missing": "Přihlášení zaměstnance s druhem činnosti „N“ (smluvní zaměstnanec) musí nést cizozemského nositele pojištění, jinak ho ČSSZ nepřijme. V profilu registrace vyplňte oddíl Cizozemský nositel pojištění (specifikaci a stát) a uložte ho.",
       "registration_regzec_a1_profile_conflict": "Profil registrace mezitím uložil někdo jiný. Rozepsané změny se tím ztratí, ale nepřepíšou cizí práci.",
       "registration_regzec_a1_source_scope_mismatch": "Datum nástupu se mezitím na kartě pracovního vztahu změnilo, takže otevřený formulář míří na jiný den, než ke kterému se registrace zmrazuje. Rozepsané změny se uloží ke správnému dni.",
       "registration_regzec_a1_variant_data_incomplete": "Přihlášení zaměstnance (REGZEC A1) zatím nemá vyplněné všechny údaje, které ČSSZ u tohoto druhu činnosti vyžaduje. Rozpracovaný profil lze uložit, ale podat ho jde až po doplnění - co chybí, ukáže tlačítko Kontrola.",

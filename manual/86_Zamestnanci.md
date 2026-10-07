@@ -149,6 +149,11 @@ do konkrétní historické verze a platí od data **Platí od** uvedeného nad n
 Při registraci pracovního vztahu proto aplikace použije verzi účinnou k datu
 nástupu, nikoli dnešní nebo poslední zadanou hodnotu. Prázdné nepovinné pole lze
 doplnit později; test registrace pak přesně řekne, který údaj ještě chybí.
+Dřívější příjmení pro registraci aplikace nezadáváš zvlášť: skládá je z příjmení
+dřívějších verzí jména (bez aktuálního a rodného příjmení). Při změně příjmení
+proto přidej novou verzi jména, starou nepřepisuj. U osoby narozené mimo ČR je
+potřeba mít vyplněný stát narození, ten se u částečného přihlášení PREZEC píše
+za název obce.
 
 Výplatní účet musí mít název, období účinnosti a rozdělení výplaty; podíly
 účtů a hotovosti se zadávají v procentech a dohromady dávají 100 %. Přepnutí

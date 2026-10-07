@@ -1378,6 +1378,55 @@ describe('EmploymentRegistrationPanel', () => {
   })
 
   /**
+   * EDV 1.4.0.6, ID 10092 a 10099: u druhu činnosti „N“ je cizozemský nositel
+   * pojištění povinný. Oddíl je ve formuláři varianty OST vždy a posílá se až
+   * po vyplnění; prázdný oddíl server bere jako nevyplněný.
+   */
+  it('lets the accountant fill in the foreign insurance carrier of an A1-OST profile', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      ...a1Suggested(),
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="a1-foreign-insurance-current"]').setValue('S')
+    await wrapper.get('[data-test="a1-foreign-insurance-name"]').setValue('Syntetická pojišťovna')
+    const country = wrapper
+      .get('[data-test="a1-foreign-insurance-country-code"]')
+      .get('input[role="combobox"]')
+    await country.trigger('focus')
+    await country.setValue('Slovensko')
+    await country.trigger('keydown', { key: 'Enter' })
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      foreign_insurance: expect.objectContaining({
+        current: 'S',
+        name: 'Syntetická pojišťovna',
+        country_code: 'SK',
+        street: null,
+      }),
+    }))
+  })
+
+  it('does not show the foreign insurance carrier for the limited A1-10 variant', async () => {
+    m.a1Profile.mockResolvedValue(a1View({ variant: '10' }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="a1-foreign-insurance-current"]').exists()).toBe(false)
+  })
+
+  /**
    * Historický kód státu mimo číselník (starší podklad, změna hranic apod.)
    * se nesmí tiše ztratit hned při prvním otevření karty.
    */

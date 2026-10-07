@@ -137,6 +137,7 @@ final class PayrollRegistrationA1DraftBuilder
             $employmentRow,
             $effectiveOn,
             $variant,
+            $foreigner,
         );
 
         $healthInsuranceCode = $variant === PayrollRegistrationBusinessMatrix::VARIANT_10
@@ -164,6 +165,10 @@ final class PayrollRegistrationA1DraftBuilder
             ? $this->foreignWorker($this->section($sources, 'work_permit'), $citizenship)
             : null;
 
+        $foreignInsurance = $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+            ? $this->foreignInsurance($activityCode)
+            : null;
+
         $suggested = [
             'effective_on' => $effectiveOn,
             'row_version' => $rowVersion,
@@ -180,6 +185,9 @@ final class PayrollRegistrationA1DraftBuilder
             'contact_address' => $contactAddress,
             'attachments' => [],
         ];
+        if ($foreignInsurance !== null) {
+            $suggested['foreign_insurance'] = $foreignInsurance;
+        }
 
         $differences = $this->diverged($stored, $suggested);
 
@@ -298,7 +306,13 @@ final class PayrollRegistrationA1DraftBuilder
         }
         $street = $this->text($row['street_line'] ?? null);
         $city = $this->text($row['city'] ?? null);
+        // PSČ jde na ČSSZ bez mezer (viz A1 builder snímku); návrh ho proto
+        // nabízí ve stejném tvaru, ať se „602 00" v evidenci nehlásí jako
+        // rozdíl proti uloženému „60200".
         $postalCode = $this->text($row['postal_code'] ?? null);
+        if ($postalCode !== null) {
+            $postalCode = preg_replace('/\s+/u', '', $postalCode) ?? $postalCode;
+        }
         $country = $this->text($row['country_code'] ?? null);
         if ($street !== null) {
             $this->source("{$path}.street", $label);
@@ -391,7 +405,15 @@ final class PayrollRegistrationA1DraftBuilder
             $this->miss(
                 'tax_residency.identifier_type',
                 'Aplikace nevede typ zahraničního daňového identifikátoru. '
-                . 'Vyberte jej ručně, jinak se identifikátor do A1 neodešle.',
+                . 'Vyberte jej ručně — u daňového rezidenta jiného státu '
+                . 'než ČR je typ i identifikátor povinný.',
+            );
+        } elseif ($country !== null && $country !== 'CZ') {
+            $this->miss(
+                'tax_residency.identifier',
+                'Daňový rezident jiného státu než ČR musí mít zahraniční '
+                . 'daňový identifikátor i jeho typ. Identifikátor doplňte na '
+                . 'kartě osoby (Kontakty a identifikátory), typ vyberte ručně.',
             );
         }
 
@@ -429,6 +451,7 @@ final class PayrollRegistrationA1DraftBuilder
         ?array $employmentRow,
         string $effectiveOn,
         ?string $variant,
+        bool $foreigner = false,
     ): array {
         if ($terms === null) {
             $this->miss(
@@ -552,6 +575,24 @@ final class PayrollRegistrationA1DraftBuilder
                 . 'údaj nevede. Vyplňte jej ručně z personálního podkladu.',
             );
         }
+        // EDV 1.4.0.6, ID 10526 a 10248: u zaměstnance bez českého občanství
+        // povinné, u občana ČR zakázané (z profilu se vyřadí).
+        if ($foreigner && $variant !== PayrollRegistrationBusinessMatrix::VARIANT_10) {
+            $this->miss(
+                'employment.expected_workplaces',
+                'Zaměstnanec bez českého státního občanství musí mít '
+                . 'předpokládaná místa výkonu práce (sídlo zaměstnavatele, '
+                . 'provozovna, obec…). Aplikace je nevede, vyplňte je ručně.',
+            );
+        }
+        if ($foreigner && $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+            $this->miss(
+                'employment.required_education_code',
+                'Zaměstnanec bez českého státního občanství musí mít '
+                . 'vzdělání požadované pro výkon profese (podle volného '
+                . 'pracovního místa). Aplikace je nevede, vyberte je ručně.',
+            );
+        }
 
         return [
             'activity_code' => $activityCode,
@@ -669,6 +710,37 @@ final class PayrollRegistrationA1DraftBuilder
         ];
     }
 
+    /**
+     * Cizozemský nositel pojištění (`forin`): povinný u druhu činnosti „N",
+     * jinak nepovinný. Aplikace údaje o nositeli nevede, takže návrh je prázdný.
+     *
+     * @return array<string,mixed>
+     */
+    private function foreignInsurance(?string $activityCode): array
+    {
+        if ($activityCode === 'N') {
+            $this->miss(
+                'foreign_insurance.current',
+                'Druh činnosti „N" (smluvní zaměstnanec) vyžaduje cizozemského '
+                . 'nositele pojištění: vyberte specifikaci (poslední, nebo '
+                . 'současný) a vyplňte stát. Aplikace údaje o nositeli nevede.',
+            );
+        }
+
+        return [
+            'current' => null,
+            'name' => null,
+            'street' => null,
+            'house_number' => null,
+            'orientation_number' => null,
+            'postal_code' => null,
+            'city' => null,
+            'country_code' => null,
+            'identifier' => null,
+            'sector' => null,
+        ];
+    }
+
     /** @return array<string,mixed> */
     private function proofIdentity(?string $citizenship): array
     {
@@ -681,6 +753,12 @@ final class PayrollRegistrationA1DraftBuilder
             'proof_identity.number',
             'Aplikace nevede číslo dokladu totožnosti. U cizince je ověřený '
             . 'doklad v A1 povinný — opište číslo z dokladu.',
+        );
+        $this->miss(
+            'proof_identity.foreign_issuer',
+            'Aplikace nevede orgán, který doklad vydal. U cizince je povinný '
+            . '(název a obec úřadu, např. „Municipal office, Preston"; není-li '
+            . 'obec známa, stát). Opište jej z dokladu.',
         );
         if ($citizenship !== null) {
             $this->source(
@@ -732,6 +810,12 @@ final class PayrollRegistrationA1DraftBuilder
             'foreign_worker.free_access',
             'Aplikace nevede volný přístup na trh práce. Potvrďte jej ručně; '
             . 'bez něj A1 vyžaduje úplné povolení k zaměstnání.',
+        );
+        $this->miss(
+            'foreign_worker.issuing_labour_office_code',
+            'Je-li druhem oprávnění povolení k zaměstnání, je povinná krajská '
+            . 'pobočka ÚP ČR, která ho vydala; u jiných druhů oprávnění se '
+            . 'neuvádí. Aplikace pobočku nevede, vyberte ji ručně.',
         );
         $from = $permit === null
             ? null

@@ -4502,6 +4502,21 @@ export interface PayrollRegistrationA1Attachment {
   data_base64: string
 }
 
+/** Cizozemský nositel pojištění (`forin`); povinný u druhu činnosti „N". */
+export interface PayrollRegistrationA1ForeignInsurance {
+  /** P = poslední, S = současný nositel. */
+  current: string | null
+  name: string | null
+  street: string | null
+  house_number: string | null
+  orientation_number: string | null
+  postal_code: string | null
+  city: string | null
+  country_code: string | null
+  identifier: string | null
+  sector: string | null
+}
+
 export interface PayrollRegistrationA1ProfilePayload {
   effective_on: string
   row_version: number
@@ -4517,6 +4532,8 @@ export interface PayrollRegistrationA1ProfilePayload {
   czech_residence_address: PayrollRegistrationA1Address | null
   contact_address: PayrollRegistrationA1Address | null
   attachments: PayrollRegistrationA1Attachment[]
+  /** Jen varianta OST; server klíč nevrací, dokud oddíl není vyplněný. */
+  foreign_insurance?: PayrollRegistrationA1ForeignInsurance | null
 }
 
 /** Vada, na které by přísné sestavení A1 padlo, i s cestou k poli. */
