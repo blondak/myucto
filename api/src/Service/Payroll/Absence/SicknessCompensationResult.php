@@ -18,5 +18,11 @@ final readonly class SicknessCompensationResult
         public string $rulesetHash,
         public array $segments,
         public array $trace,
+        public ?SicknessCompensationReduction $reduction = null,
     ) {}
+
+    public function reduction(): SicknessCompensationReduction
+    {
+        return $this->reduction ?? SicknessCompensationReduction::none();
+    }
 }

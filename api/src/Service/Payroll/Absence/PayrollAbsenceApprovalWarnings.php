@@ -64,6 +64,29 @@ final readonly class PayrollAbsenceApprovalWarnings
             ];
         }
 
+        // DPN-04: náhrada mzdy podle § 192 ZP je povinnost zaměstnavatele v trvajícím
+        // vztahu. Okno se koncem vztahu ořízne samo, účetní to ale musí vědět, protože
+        // za další dny už nic nevyplácí ani nehlásí.
+        if (in_array($absence['absence_type'] ?? null, ['dpn', 'quarantine'], true)) {
+            $end = $this->db->pdo()->prepare(
+                'SELECT end_date, employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?',
+            );
+            $end->execute([$supplierId, $employmentId]);
+            $employment = $end->fetch(PDO::FETCH_ASSOC);
+            $endDate = is_array($employment) ? $employment['end_date'] : null;
+            if (is_string($endDate) && $endDate < $to) {
+                $warnings[] = [
+                    'code' => 'sickness_beyond_employment_end',
+                    'message' => sprintf(
+                        'Neschopnost trvá i po skončení pracovního vztahu (%s). Náhrada mzdy se počítá '
+                        . 'nejvýš do tohoto dne; za další dny ji zaměstnavatel neposkytuje.',
+                        (new \DateTimeImmutable($endDate))->format('j. n. Y'),
+                    ),
+                    'path' => '/payroll/people/' . (int) $employment['employee_id'],
+                ];
+            }
+        }
+
         $runs = $this->db->pdo()->prepare(
             "SELECT DISTINCT DATE_FORMAT(run.period_start, '%Y-%m') AS period
                FROM payroll_runs run

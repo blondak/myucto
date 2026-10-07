@@ -24,7 +24,9 @@ final class SicknessCompensationCalculator
         string $date,
         int $averageHourlyMinor,
         array $segments,
+        ?SicknessCompensationReduction $reduction = null,
     ): SicknessCompensationResult {
+        $reduction ??= SicknessCompensationReduction::none();
         if ($averageHourlyMinor <= 0) {
             throw new InvalidArgumentException('DPN náhrada vyžaduje kladný hodinový průměr.');
         }
@@ -125,13 +127,48 @@ final class SicknessCompensationCalculator
             ];
         }
 
-        $totalMinor = 0;
+        // § 192 odst. 4 a 5 ZP: podíl se uplatní na přesný čitatel měsíce, teprve
+        // pak se zaokrouhluje na celé koruny nahoru. Polovina zaokrouhlené náhrady by
+        // se lišila až o korunu a nebyla by „polovinou náhrady", ale polovinou čísla,
+        // které už zaokrouhlení posunulo.
+        $keptBasisPoints = $reduction->keptBasisPoints();
+        $fullByPeriod = [];
+        $totalByPeriod = [];
         foreach ($numeratorByPeriod as $period => $periodNumerators) {
             // § 142 odst. 2 ve spojení s § 144 ZP: na celé koruny nahoru.
-            $periodTotal = RoundingMode::Ceil->roundFraction(
-                array_sum($periodNumerators),
-                $exactDenominator * 100,
-            ) * 100;
+            $exact = array_sum($periodNumerators);
+            $fullByPeriod[$period] = RoundingMode::Ceil->roundFraction($exact, $exactDenominator * 100) * 100;
+            $totalByPeriod[$period] = $keptBasisPoints === null || $keptBasisPoints === 10_000
+                ? $fullByPeriod[$period]
+                : self::ceilShareToCzk($exact, $exactDenominator * 100, $keptBasisPoints) * 100;
+        }
+        if ($reduction->amountMinor !== null) {
+            /*
+             * Snížení pevnou částkou se nedá poctivě rozdělit do více výplatních
+             * období: zákon neříká, který měsíc má snížení nést, a jakékoli dělení
+             * by byl vymyšlený údaj. U náhrady přes konec měsíce se proto snižuje
+             * podílem.
+             */
+            if (count($totalByPeriod) !== 1) {
+                throw new InvalidArgumentException(
+                    'Snížení náhrady pevnou částkou jde jen u náhrady v jednom kalendářním měsíci. '
+                    . 'Náhrada této neschopnosti padá do více měsíců; zadejte snížení procentem.',
+                );
+            }
+            $period = array_key_first($totalByPeriod);
+            if ($reduction->amountMinor > $totalByPeriod[$period]) {
+                throw new InvalidArgumentException(sprintf(
+                    'Snížení náhrady (%s Kč) je vyšší než celá náhrada (%s Kč). '
+                    . 'Má-li se náhrada neposkytnout vůbec, zadejte snížení 100 %%.',
+                    number_format($reduction->amountMinor / 100, 2, ',', ' '),
+                    number_format($totalByPeriod[$period] / 100, 2, ',', ' '),
+                ));
+            }
+            $totalByPeriod[$period] -= $reduction->amountMinor;
+        }
+
+        $totalMinor = 0;
+        foreach ($totalByPeriod as $period => $periodTotal) {
             $totalMinor += $periodTotal;
             foreach ($this->distribute($periodTotal, $minutesByPeriod[$period]) as $index => $amount) {
                 $calculatedSegments[$index]['compensation_minor'] = $amount;
@@ -161,7 +198,59 @@ final class SicknessCompensationCalculator
                 'compensation_rounding' => 'ceil-to-czk-on-period-total',
                 'compensation_rounding_basis' => 'zp-142-2-via-144',
                 'support_status' => 'manual_review',
+                ...($reduction->isNone() ? [] : [
+                    'compensation_before_reduction_minor' => array_sum($fullByPeriod),
+                    ...$reduction->trace(),
+                ]),
             ],
+            $reduction,
+        );
+    }
+
+    /**
+     * Výpočet, ze kterého náhrada nevzniká, ale okno § 192 ZP ano.
+     *
+     * Evidenční list, měsíční hlášení i krácení mzdy čtou okno ze schváleného výpočtu,
+     * takže ho potřebují i tam, kde zaměstnavatel nic neplatí: navazující část
+     * neschopnosti za vyčerpaným oknem, neschopnost bez nároku na nemocenské
+     * (§ 15a zák. č. 187/2006 Sb.) a neschopnost mimo trvání pracovního vztahu.
+     */
+    public function withoutCompensation(string $date, string $reason): SicknessCompensationResult
+    {
+        $rules = AbsenceRuleset::forDate($this->rulesets, $date);
+
+        return new SicknessCompensationResult(
+            0,
+            0,
+            'manual_review',
+            $rules->version->id,
+            $rules->version->canonicalHash,
+            [],
+            [
+                'window_calendar_days' => $rules->sicknessWindowCalendarDays(),
+                'segment_count' => 0,
+                'compensation_minor' => 0,
+                'no_compensation_reason' => $reason,
+                'support_status' => 'manual_review',
+            ],
+        );
+    }
+
+    /**
+     * `ceil(exact * keptBasisPoints / (denominator * 10 000))` bez přetečení 64bitového
+     * čísla: čitatel měsíce jde do 10^16 a vynásobený podílem by přetekl.
+     */
+    private static function ceilShareToCzk(int $exact, int $denominator, int $keptBasisPoints): int
+    {
+        $quotient = intdiv($exact, $denominator);
+        $remainder = $exact % $denominator;
+        $scaled = $quotient * $keptBasisPoints;
+        $whole = intdiv($scaled, 10_000);
+        $rest = $scaled % 10_000;
+
+        return $whole + RoundingMode::Ceil->roundFraction(
+            $rest * $denominator + $remainder * $keptBasisPoints,
+            $denominator * 10_000,
         );
     }
 

@@ -184,6 +184,33 @@ final class EldpSection18ExcludedDaysTest extends TestCase
     }
 
     /**
+     * Navazující část neschopnosti za vyčerpaným oknem (DPN-01): okno je prázdné,
+     * uložené jako den před začátkem části, a všechny její dny jsou nemocenskou
+     * (10475). Okno obrácené o víc než den je vadný záznam a rozpad se nevykáže.
+     */
+    public function testContinuationBeyondExhaustedWindowIsAllBenefitDays(): void
+    {
+        $deriver = new EldpExcludedPeriodDeriver();
+        $continuation = $deriver->deriveSection18(
+            [$this->sickness(1, '2026-08-23', '2026-08-26', '2026-08-23', '2026-08-22', true)],
+            '2026-08-01',
+            '2026-08-31',
+        );
+        $broken = $deriver->deriveSection18(
+            [$this->sickness(1, '2026-08-23', '2026-08-26', '2026-08-23', '2026-08-21', true)],
+            '2026-08-01',
+            '2026-08-31',
+        );
+
+        self::assertTrue($continuation['derivable']);
+        self::assertSame(
+            ['omluvenaNepritomnost' => 0, 'pracovniNeschopnost' => 0, 'vyplaceniDavek' => 4],
+            $continuation['components'],
+        );
+        self::assertFalse($broken['derivable']);
+    }
+
+    /**
      * Peněžitá pomoc v mateřství (i po porodu) a otcovská: celé dny s dávkou
      * → 10475.
      */

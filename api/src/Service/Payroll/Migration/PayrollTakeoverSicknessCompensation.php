@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Migration;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
@@ -44,6 +45,7 @@ final class PayrollTakeoverSicknessCompensation
         private readonly SicknessCompensationCalculator $calculator,
         private readonly PayrollSicknessRepository $sickness,
         private readonly PayrollSicknessInputMaterializer $inputs,
+        private readonly PayrollAbsenceRepository $absences,
     ) {}
 
     /**
@@ -133,7 +135,22 @@ final class PayrollTakeoverSicknessCompensation
     {
         $segments = $this->proration->sicknessCompensationSegments($absence, false);
         if ($segments === []) {
-            throw new \DomainException('v okně § 192 ZP nemá pracovní kalendář žádnou pracovní dobu');
+            // Okno vyčerpané předchozími částmi nebo celé po skončení vztahu: náhrada
+            // nenáleží, výpočet s nulou ale nese okno pro krácení mzdy a hlášení.
+            $bounds = $this->absences->absenceBounds($absence, false);
+            if ($bounds['window_to'] >= $bounds['from']) {
+                throw new \DomainException('v okně § 192 ZP nemá pracovní kalendář žádnou pracovní dobu');
+            }
+            $this->sickness->record(
+                $absence,
+                false,
+                true,
+                true,
+                $this->calculator->withoutCompensation((string) $absence['date_from'], 'window_exhausted'),
+                $userId,
+            );
+
+            return 0;
         }
         $full = $this->calculator->calculate((string) $absence['date_from'], $averageHourlyMinor, $segments);
         $kept = array_values(array_filter(

@@ -181,11 +181,12 @@ final class PayrollTakeoverAbsenceWriter
      * nepřítomností, pokud je pokračováním převzaté neschopnosti téhož vztahu.
      *
      * Převod po letech (PREMIER) rozdělí neschopnost přes konec roku na dvě nepřítomnosti:
-     * jedna končí 31. 12., druhá začíná 1. 1. MyÚčto počítá okno od `date_from` každé
-     * nepřítomnosti zvlášť, takže by druhá dostala celých čtrnáct dnů náhrady znovu.
-     * Prodloužit první nepřítomnost evidence neumí (mění se jen stornem), proto se druhá
-     * naváže tak, jak evidence pokračování případu vede: počtem vyčerpaných dnů okna
-     * (`sickness_window_carried_days`, stejná cesta jako rozpracovaný případ z PAMICA).
+     * jedna končí 31. 12., druhá začíná 1. 1. Schválení v aplikaci řetěz navazujících
+     * částí dopočítá samo ({@see PayrollAbsenceRepository::sicknessChain()}), převod ale
+     * schvaluje bez výpočtu náhrady a navazuje i na neschválenou část, proto se druhá
+     * naváže hned tady, tímtéž vzorcem ({@see PayrollAbsenceRepository::continuedWindowDays()}):
+     * počtem vyčerpaných dnů okna (`sickness_window_carried_days`, stejná cesta jako
+     * rozpracovaný případ z PAMICA).
      *
      * Navazuje se jen na nepřítomnost, kterou zapsal převod téhož zdroje a která končí den
      * před začátkem této; ručně zapsaná sousední neschopnost může být nový případ.
@@ -212,9 +213,12 @@ final class PayrollTakeoverAbsenceWriter
         if ($previous === false) {
             return 0;
         }
-        $window = AbsenceRuleset::forDate($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays();
-        $elapsed = (int) (new \DateTimeImmutable((string) $previous['date_from']))->diff(new \DateTimeImmutable($from))->format('%a');
-        return min($window, PayrollAbsenceRepository::carriedWindowDays($previous) + $elapsed);
+        return PayrollAbsenceRepository::continuedWindowDays(
+            (string) $previous['date_from'],
+            PayrollAbsenceRepository::carriedWindowDays($previous),
+            $from,
+            AbsenceRuleset::forDate($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays(),
+        );
     }
 
     /**

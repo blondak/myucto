@@ -9,7 +9,6 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\MonthlyWageProration;
-use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
 use MyInvoice\Service\Payroll\Time\PayrollEmploymentCalendarProvisioner;
 use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
@@ -71,7 +70,6 @@ final class PayrollWageProrationService
         private readonly PayrollTimeRepository $time,
         private readonly PayrollEmploymentCalendarProvisioner $calendars,
         private readonly PayrollWorkCalendarSchedule $schedule,
-        private readonly PayrollRulesetProvider $rulesets,
         private readonly CzechHolidayCalendar $holidays = new CzechHolidayCalendar(),
     ) {}
 
@@ -351,9 +349,24 @@ final class PayrollWageProrationService
         foreach ($rows as $row) {
             $type = PayrollTimeValue::string($row['absence_type'] ?? null, 'absence_type');
             if ($type === 'dpn' || $type === 'quarantine') {
-                $firstDayFullyWorked = $this->firstDayFullyWorked($supplierId, $row);
-                if ($firstDayFullyWorked === null) {
+                $event = $this->sicknessEvent($supplierId, $row);
+                if ($event === null) {
                     return self::datedNothing('sickness_calculation_missing');
+                }
+                $firstDayFullyWorked = $event['first_day_fully_worked'];
+                if (!$event['eligible']) {
+                    // DPN bez nároku na nemocenské (§ 15a zák. č. 187/2006 Sb.): náhradu
+                    // mzdy nikdo neplatí ani dávku, takže celá doba je krácení bez
+                    // náhrady a svátek v ní zůstává ve mzdě jako u jiné neplacené doby.
+                    $unpaid = [
+                        ...$this->windowSegments($row, $firstDayFullyWorked, AbsenceHolidayTreatment::Ignore, $fromCalendar),
+                        ...$this->beyondWindowSegments($row, $firstDayFullyWorked, $fromCalendar),
+                    ];
+                    $byTitle[PayrollWageReplacementTitle::Unpaid->value]
+                        = ($byTitle[PayrollWageReplacementTitle::Unpaid->value] ?? 0)
+                        + self::minutesInMonth($unpaid, $periodStart, $periodEnd)
+                        - self::minutesOnDates($unpaid, $periodStart, $periodEnd, $holidays);
+                    continue;
                 }
                 $window = $this->windowSegments(
                     $row,
@@ -442,19 +455,10 @@ final class PayrollWageProrationService
             return $this->absences->publishedShiftSegments($row, $firstDayFullyWorked, $holidayTreatment);
         }
 
-        $from = self::localDate($row, (string) $row['date_from']);
-        if ($firstDayFullyWorked) {
-            $from = $from->modify('+1 day');
-        }
-        $to = self::localDate($row, (string) $row['date_to']);
-        if (self::isSickness($row)) {
-            $windowEnd = $this->sicknessWindowEnd($row, $from);
-            if ($windowEnd < $to) {
-                $to = $windowEnd;
-            }
-        }
+        // Okno § 192 ZP, vyčerpané dny i konec vztahu z téhož místa jako směnová cesta.
+        $bounds = $this->absences->absenceBounds($row, $firstDayFullyWorked);
 
-        return $this->calendarSegments($row, $from, $to, $holidayTreatment);
+        return $this->calendarSegments($row, $bounds['from'], $bounds['window_to'], $holidayTreatment);
     }
 
     /**
@@ -473,22 +477,18 @@ final class PayrollWageProrationService
             return [];
         }
 
-        $from = self::localDate($row, (string) $row['date_from']);
-        if ($firstDayFullyWorked) {
-            $from = $from->modify('+1 day');
+        $bounds = $this->absences->absenceBounds($row, $firstDayFullyWorked);
+        $tailFrom = $bounds['window_to']->modify('+1 day');
+        if ($tailFrom < $bounds['from']) {
+            $tailFrom = $bounds['from'];
         }
-        $to = self::localDate($row, (string) $row['date_to']);
-        $tailFrom = $this->sicknessWindowEnd($row, $from)->modify('+1 day');
-        if ($tailFrom < $from) {
-            $tailFrom = $from;
-        }
-        if ($tailFrom > $to) {
+        if ($tailFrom > $bounds['to']) {
             return [];
         }
 
         // Svátek se za oknem neřeší: zaměstnavatel za něj neposkytuje nic, takže
         // bez rozvržené směny je hodin nula — stejně jako u směnové cesty.
-        return $this->calendarSegments($row, $tailFrom, $to, AbsenceHolidayTreatment::Ignore);
+        return $this->calendarSegments($row, $tailFrom, $bounds['to'], AbsenceHolidayTreatment::Ignore);
     }
 
     /**
@@ -591,29 +591,10 @@ final class PayrollWageProrationService
         );
     }
 
-    /**
-     * Poslední den okna náhrady mzdy podle § 192 ZP — týž výpočet z rulesetu
-     * i týž zdroj dnů vyčerpaných předchozím plátcem, jaký používá
-     * {@see PayrollAbsenceRepository::publishedShiftSegments()}.
-     *
-     * @param array<string,mixed> $row
-     */
-    private function sicknessWindowEnd(array $row, \DateTimeImmutable $windowFrom): \DateTimeImmutable
-    {
-        return AbsenceRuleset::forDate($this->rulesets, (string) $row['date_from'])
-            ->sicknessWindowEnd($windowFrom, PayrollAbsenceRepository::carriedWindowDays($row));
-    }
-
     /** @param array<string,mixed> $row */
     private static function isSickness(array $row): bool
     {
         return in_array($row['absence_type'] ?? null, ['dpn', 'quarantine'], true);
-    }
-
-    /** @param array<string,mixed> $row */
-    private static function localDate(array $row, string $date): \DateTimeImmutable
-    {
-        return new \DateTimeImmutable($date, new \DateTimeZone((string) $row['timezone_name']));
     }
 
     /** @return array{by_title:array<string,int>,holiday_minutes:int,reason:string} */
@@ -710,22 +691,27 @@ final class PayrollWageProrationService
     }
 
     /**
-     * Byl první den nemoci odpracován celý? Odpověď je zmrazená ve výpočtu
-     * náhrady; hádat ji znovu by posunulo okno § 192 o den.
+     * Byl první den nemoci odpracován celý a má zaměstnanec nárok? Obě odpovědi
+     * jsou zmrazené ve výpočtu náhrady; hádat první znovu by posunulo okno § 192
+     * o den, druhou by krácení mzdy přisoudilo náhradě, která nevznikla.
      *
      * @param array<string,mixed> $absence
+     * @return array{first_day_fully_worked:bool,eligible:bool}|null
      */
-    private function firstDayFullyWorked(int $supplierId, array $absence): ?bool
+    private function sicknessEvent(int $supplierId, array $absence): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT first_day_fully_worked
+            'SELECT first_day_fully_worked, insurance_eligibility_confirmed
                FROM payroll_sickness_events
               WHERE supplier_id = ? AND absence_id = ?'
         );
         $stmt->execute([$supplierId, PayrollTimeValue::int($absence['id'] ?? null, 'absence_id')]);
-        $value = $stmt->fetchColumn();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $value === false ? null : (int) $value === 1;
+        return is_array($row) ? [
+            'first_day_fully_worked' => (int) $row['first_day_fully_worked'] === 1,
+            'eligible' => (int) $row['insurance_eligibility_confirmed'] === 1,
+        ] : null;
     }
 
     /**

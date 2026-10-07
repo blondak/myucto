@@ -183,20 +183,18 @@ final class PayrollAbsenceAction
                  * doplní; dřív se tahle podmínka tvářila jako chyba formuláře
                  * a absenci nešlo vůbec uložit.
                  */
+                // Neschopnost si průměr hlídá sama níž: navazující část ho bere z první
+                // části, DPN bez nároku a část za vyčerpaným oknem ho nepotřebují.
                 if ($decision === 'approved'
                     && in_array(
                         $absence['absence_type'],
                         PayrollAbsenceValidator::TYPES_REQUIRING_AVERAGE,
                         true,
                     )
+                    && !PayrollAbsenceRepository::isSickness($absence)
                     && $absence['average_snapshot_id'] === null
                 ) {
-                    throw new \InvalidArgumentException(
-                        'Schválení téhle nepřítomnosti počítá náhradu z průměrného '
-                        . 'výdělku — doplňte schválený průměr za čtvrtletí, do kterého '
-                        . 'spadá ' . $absence['date_from'] . ' (záložka Průměry). '
-                        . 'Absence zůstává uložená, nic se neztratí.',
-                    );
+                    throw self::missingAverage($absence);
                 }
                 /*
                  * Placená překážka se bez druhu neschválí: jen druh říká, jaká
@@ -229,44 +227,13 @@ final class PayrollAbsenceAction
                         $this->boolean($body['overdraw_confirmed'] ?? false),
                     );
                 }
-                if ($decision === 'approved'
-                    && in_array($absence['absence_type'], ['dpn', 'quarantine'], true)
-                ) {
-                    if ($absence['average_hourly_minor'] === null) {
-                        throw new \InvalidArgumentException('DPN vyžaduje schválený snapshot průměru.');
-                    }
-                    $firstWorked = $this->boolean($body['first_day_fully_worked'] ?? false);
-                    $insured = $this->boolean($body['insurance_eligibility_confirmed'] ?? false);
-                    $noConflict = $this->boolean($body['conflicting_benefit_excluded'] ?? false);
-                    if (!$insured || !$noConflict) {
-                        throw new \InvalidArgumentException(
-                            'Potvrď účast na pojištění a vyloučení souběžné dávky.'
-                        );
-                    }
-                    // § 192 odst. 1 ZP — za svátek v okně náhrada náleží i bez směny.
-                    $segments = $this->absences->publishedShiftSegments(
+                $sicknessEligible = null;
+                if ($decision === 'approved' && PayrollAbsenceRepository::isSickness($absence)) {
+                    [$absence, $version, $calculation, $sicknessEligible] = $this->approveSickness(
+                        $supplierId,
                         $absence,
-                        $firstWorked,
-                        AbsenceHolidayTreatment::CompensateSickness,
-                    );
-                    if ($segments === []) {
-                        throw new PayrollAbsenceShiftsMissingException(
-                            (int) $absence['employment_id'],
-                            (string) $absence['date_from'],
-                            (string) $absence['date_to'],
-                        );
-                    }
-                    $result = $this->sicknessCalculator->calculate(
-                        (string) $absence['date_from'],
-                        (int) $absence['average_hourly_minor'],
-                        $segments,
-                    );
-                    $calculation = $this->sickness->record(
-                        $absence,
-                        $firstWorked,
-                        $insured,
-                        $noConflict,
-                        $result,
+                        $version,
+                        $body,
                         $this->userId($request),
                     );
                 }
@@ -277,9 +244,12 @@ final class PayrollAbsenceAction
                     $decision,
                     $this->userId($request),
                 );
+                // Mzdový vstup vzniká jen z kladné náhrady: DPN bez nároku, část za
+                // vyčerpaným oknem ani náhrada snížená na nulu do mzdy nic nepřidávají.
                 if ($decision === 'approved'
-                    && in_array($absence['absence_type'], ['dpn', 'quarantine'], true)
+                    && $sicknessEligible === true
                     && is_array($calculation)
+                    && (int) $calculation['compensation_minor'] > 0
                 ) {
                     $this->sicknessInputs->materialize(
                         $supplierId,
@@ -309,7 +279,8 @@ final class PayrollAbsenceAction
                 // § 97 zák. č. 187/2006 Sb.: lhůta NEMPRI běží od události, ne
                 // od toho, kdy si jí někdo všimne. Schválená absence, ze které
                 // plyne dávka, proto rovnou založí (nebo prodlouží) případ.
-                if ($decision === 'approved') {
+                // DPN bez nároku dávku nezakládá, případ NEMPRI proto nevzniká.
+                if ($decision === 'approved' && $sicknessEligible !== false) {
                     $sicknessCase = $this->sicknessCases->onApproved(
                         $supplierId,
                         $absence,
@@ -367,6 +338,19 @@ final class PayrollAbsenceAction
             $version = $this->requiredNonNegativeInt($body['row_version'] ?? null, 'row_version');
             $before = $this->absences->find($supplierId, $id)
                 ?? throw new \InvalidArgumentException('Absence nebyla nalezena.');
+            // Navazující část má okno § 192 ZP spočítané až za touto. Zrušit tuhle pod
+            // ní by jí nechalo okno zkrácené o dny, které už neexistují.
+            $successor = $before['status'] === 'approved'
+                ? $this->absences->approvedSicknessSuccessor($supplierId, $before)
+                : null;
+            if ($successor !== null) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Na tuto neschopnost navazuje schválená část %s – %s, jejíž náhrada mzdy počítá '
+                    . 's okny obou částí. Zrušte nejdřív navazující část, potom tuto.',
+                    $successor['date_from'],
+                    $successor['date_to'],
+                ));
+            }
             $pdo = $this->db->pdo();
             $ownsTransaction = !$pdo->inTransaction();
             if ($ownsTransaction) {
@@ -427,6 +411,196 @@ final class PayrollAbsenceAction
             ]);
         }
         return Json::ok($response, ['absence' => $absence, 'sickness_case' => $sicknessCase]);
+    }
+
+    /**
+     * Výpočet náhrady mzdy při schválení DPN nebo karantény (§ 192 ZP).
+     *
+     * - Navazující část téže neschopnosti nedostane nové okno (DPN-01): vyčerpané dny
+     *   určí řetěz schválených předchozích částí ({@see PayrollAbsenceRepository::sicknessChain()})
+     *   a zapíšou se k části, takže z nich čte krácení mzdy i hlášení. Průměr a pravidla
+     *   (redukční hranice, sazba) jsou z první části — jako u neschopnosti zapsané jedním
+     *   řádkem přes konec čtvrtletí.
+     * - DPN bez nároku na nemocenské (§ 15a zák. č. 187/2006 Sb., DPN-02) se schválí
+     *   s nulovou náhradou: mzda se krátí, mzdový vstup ani případ NEMPRI nevzniká.
+     * - Snížení náhrady podle § 192 odst. 4 a 5 ZP (DPN-03) jde do výpočtu i do důkazu.
+     *
+     * @param array<string,mixed> $absence
+     * @param array<string,mixed> $body
+     * @return array{0:array<string,mixed>,1:int,2:array<string,mixed>,3:bool}
+     */
+    private function approveSickness(
+        int $supplierId,
+        array $absence,
+        int $version,
+        array $body,
+        ?int $userId,
+    ): array {
+        $firstWorked = $this->boolean($body['first_day_fully_worked'] ?? false);
+        $eligible = $this->sicknessEligibility($body);
+        $noConflict = $this->boolean($body['conflicting_benefit_excluded'] ?? false);
+        if ($eligible && !$noConflict) {
+            throw new \InvalidArgumentException(
+                'Potvrďte, že za dny neschopnosti nenáleží souběžná dávka (vyloučení souběhu). '
+                . 'Bez toho se náhrada mzdy nespočítá.',
+            );
+        }
+        $reduction = $this->validator->sicknessReduction($body);
+        if (!$eligible && !$reduction->isNone()) {
+            throw new \InvalidArgumentException(
+                'DPN bez nároku na nemocenské nemá náhradu mzdy, kterou by šlo snížit.',
+            );
+        }
+
+        $chain = $this->absences->sicknessChain($supplierId, $absence);
+        if ($chain['pending_predecessor'] !== null) {
+            throw new \InvalidArgumentException(sprintf(
+                'Tahle neschopnost navazuje na část %s – %s, o které se ještě nerozhodlo. '
+                . 'Schvalte nejdřív ji: okno náhrady mzdy (§ 192 ZP) běží od začátku celé neschopnosti.',
+                $chain['pending_predecessor']['date_from'],
+                $chain['pending_predecessor']['date_to'],
+            ));
+        }
+        $successor = $this->absences->approvedSicknessSuccessor($supplierId, $absence);
+        if ($successor !== null) {
+            throw new \InvalidArgumentException(sprintf(
+                'Na tuto neschopnost už navazuje schválená část %s – %s, jejíž náhrada mzdy se '
+                . 'počítala bez ní. Zrušte navazující část, schvalte tuto a navazující zapište znovu.',
+                $successor['date_from'],
+                $successor['date_to'],
+            ));
+        }
+
+        $rulesDate = (string) $absence['date_from'];
+        $averageSource = $absence;
+        $start = $chain['chain_start'];
+        if ($start !== null) {
+            if ($firstWorked) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Odpracovaný první den lze potvrdit jen u první části neschopnosti (od %s). '
+                    . 'Tahle část na ni navazuje.',
+                    $start['date_from'],
+                ));
+            }
+            $startEvent = $chain['chain_start_event'];
+            if ($startEvent !== null && $startEvent['insurance_eligibility_confirmed'] !== $eligible) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Navazující část neschopnosti musí mít stejný nárok na náhradu jako její první část '
+                    . '(od %s), ta byla schválena %s.',
+                    $start['date_from'],
+                    $startEvent['insurance_eligibility_confirmed'] ? 's nárokem' : 'bez nároku',
+                ));
+            }
+            if ($chain['carried_days'] > PayrollAbsenceRepository::carriedWindowDays($absence)) {
+                $absence = $this->absences->setSicknessWindowCarriedDays(
+                    $supplierId,
+                    (int) $absence['id'],
+                    $chain['carried_days'],
+                    $version,
+                );
+                $version = (int) $absence['row_version'];
+            }
+            $rulesDate = (string) $start['date_from'];
+            if ($start['average_snapshot_id'] !== null) {
+                $averageSource = $start;
+            }
+        }
+        $absence['average_snapshot_id'] = $averageSource['average_snapshot_id'];
+
+        if (!$eligible) {
+            $result = $this->sicknessCalculator->withoutCompensation($rulesDate, 'not_eligible');
+        } else {
+            // § 192 odst. 1 ZP — za svátek v okně náhrada náleží i bez směny.
+            $segments = $this->absences->publishedShiftSegments(
+                $absence,
+                $firstWorked,
+                AbsenceHolidayTreatment::CompensateSickness,
+            );
+            if ($segments === []) {
+                $bounds = $this->absences->absenceBounds($absence, $firstWorked);
+                $windowEmpty = $bounds['window_to'] < $bounds['from'];
+                if (!$windowEmpty
+                    && $this->absences->publishedShiftSegmentsBeyondSicknessWindow($absence, $firstWorked) === []
+                ) {
+                    throw new PayrollAbsenceShiftsMissingException(
+                        (int) $absence['employment_id'],
+                        (string) $absence['date_from'],
+                        (string) $absence['date_to'],
+                    );
+                }
+                if (!$reduction->isNone()) {
+                    throw new \InvalidArgumentException(
+                        'V okně náhrady mzdy (§ 192 ZP) tahle část nemá žádnou zameškanou směnu, '
+                        . 'náhrada je nulová a není co snížit.',
+                    );
+                }
+                $result = $this->sicknessCalculator->withoutCompensation(
+                    $rulesDate,
+                    $windowEmpty ? 'window_exhausted' : 'no_shift_in_window',
+                );
+            } else {
+                if ($averageSource['average_hourly_minor'] === null) {
+                    throw self::missingAverage($averageSource);
+                }
+                $result = $this->sicknessCalculator->calculate(
+                    $rulesDate,
+                    (int) $averageSource['average_hourly_minor'],
+                    $segments,
+                    $reduction,
+                );
+            }
+        }
+        $calculation = $this->sickness->record(
+            $absence,
+            $firstWorked,
+            $eligible,
+            $noConflict,
+            $result,
+            $userId,
+        );
+
+        return [$absence, $version, $calculation, $eligible];
+    }
+
+    /**
+     * Nárok na náhradu mzdy při DPN: `confirmed` (účast na pojištění potvrzena), nebo
+     * `not_eligible` (DPN bez nároku, § 15a zák. č. 187/2006 Sb.). Starší klient posílá
+     * jen `insurance_eligibility_confirmed`; jeho `false` NENÍ volba „bez nároku" —
+     * nezaškrtnuté políčko by jinak tiše schválilo neschopnost bez náhrady.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function sicknessEligibility(array $body): bool
+    {
+        $value = $body['insurance_eligibility'] ?? null;
+        if ($value === 'confirmed') {
+            return true;
+        }
+        if ($value === 'not_eligible') {
+            return false;
+        }
+        if ($value !== null && $value !== '') {
+            throw new \InvalidArgumentException('Nárok na náhradu mzdy musí být „confirmed“, nebo „not_eligible“.');
+        }
+        if ($this->boolean($body['insurance_eligibility_confirmed'] ?? false)) {
+            return true;
+        }
+
+        throw new \InvalidArgumentException(
+            'Potvrďte účast na nemocenském pojištění, nebo zvolte, že zaměstnanec nárok na náhradu '
+            . 'nemá (DPN bez nároku, § 15a zák. č. 187/2006 Sb.).',
+        );
+    }
+
+    /** @param array<string,mixed> $absence */
+    private static function missingAverage(array $absence): \InvalidArgumentException
+    {
+        return new \InvalidArgumentException(
+            'Schválení téhle nepřítomnosti počítá náhradu z průměrného '
+            . 'výdělku — doplňte schválený průměr za čtvrtletí, do kterého '
+            . 'spadá ' . $absence['date_from'] . ' (záložka Průměry). '
+            . 'Absence zůstává uložená, nic se neztratí.',
+        );
     }
 
     /**
