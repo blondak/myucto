@@ -41,6 +41,13 @@ final class JmhzScenario1ControlEvaluator
     private const MONTHLY_CHILD_DEPTH = 5;
 
     /**
+     * Hloubka jednoho dítěte nebo jiné vyživující osoby ve výsledku ročního
+     * zúčtování: `souhrnDataZec` → `rocniUhrny` → `vysledekRocnihoZuctovani`
+     * → `zvyhodneniNaDeti` → `vyzivovaneDeti`/`jineOsoby` → dítě/osoba.
+     */
+    private const ANNUAL_RESULT_DEPTH = 6;
+
+    /**
      * Kontroly, které ověřují stav v systémech ČSSZ nebo v naší evidenci
      * podání, a z vyrobeného XML je tedy vyhodnotit nelze. Nejsou to mezery
      * v pokrytí — rozhodne o nich až protokol o zpracování.
@@ -214,13 +221,13 @@ final class JmhzScenario1ControlEvaluator
         return [
             1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
+            103, 109, 110, 112, 113, 114, 118, 121, 124, 126, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
-            204, 207, 208, 209, 213, 215,
-            191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
+            204, 207, 208, 209, 213, 214, 215,
+            191, 192, 193, 211, 216, 227, 229, 230, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286, 290,
-            296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 331, 332,
+            296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 312, 315, 328, 329, 330, 331, 332,
             335, 336, 337, 338, 339, 341, 342, 343, 354, 355,
         ];
     }
@@ -379,6 +386,10 @@ final class JmhzScenario1ControlEvaluator
             79 => $this->annualSettlementResultRequired($projection),
             112 => $this->annualChildDetailsRequired($projection),
             124 => $this->annualSpouseDetailsRequired($projection),
+            126 => $this->annualOtherCaregiverComplete($projection),
+            214 => $this->annualChildUnderTwentySix($projection),
+            230 => $this->annualChildOrdersDoNotCollide($projection),
+            312 => $this->annualChildOrdersAreContinuous($projection),
             310 => $this->annualResultForbiddenWhenNotPerformed($projection),
             207 => $this->employerDiscountBaseMatchesForms($projection),
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
@@ -3165,25 +3176,296 @@ final class JmhzScenario1ControlEvaluator
                 foreach ($form->all('10440') as $occurrence) {
                     $orders[] = $occurrence->value;
                 }
-                foreach ($orders as $order) {
-                    if (!in_array($order, ['2', '3'], true)) {
-                        continue;
-                    }
-                    $lowerOrUnclaimed = count(array_filter(
-                        $orders,
-                        static fn (string $candidate): bool => $candidate === 'N'
-                            || (in_array($candidate, ['1', '2'], true)
-                                && (int) $candidate < (int) $order),
-                    ));
-                    if ($lowerOrUnclaimed < (int) $order - 1) {
-                        return "Pořadí dětí obsahuje {$order} bez dostatečného počtu"
-                            . ' dětí s nižším pořadím nebo s hodnotou N.';
+                $order = self::orderOutOfSequence($orders);
+
+                return $order === null
+                    ? null
+                    : "Pořadí dětí obsahuje {$order} bez dostatečného počtu"
+                        . ' dětí s nižším pořadím nebo s hodnotou N.';
+            },
+        );
+    }
+
+    /**
+     * Kontrola 312 — roční obdoba kontroly 110 nad maskou 10451. Řada se
+     * posuzuje v každém měsíci roku zúčtování zvlášť, protože pořadí dítěte se
+     * během roku mění (narození, dosažení 26 let, přechod na druhého z rodičů).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualChildOrdersAreContinuous(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $months = self::annualOrdersByMonth($form);
+                if (is_string($months)) {
+                    return $months;
+                }
+                foreach ($months as $month => $orders) {
+                    $order = self::orderOutOfSequence($orders);
+                    if ($order !== null) {
+                        return "V {$month}. měsíci roku zúčtování je uplatněno dítě"
+                            . " s pořadím {$order} bez dostatečného počtu dětí"
+                            . ' s nižším pořadím nebo s hodnotou N.';
                     }
                 }
 
                 return null;
             },
         );
+    }
+
+    /**
+     * Kontrola 230 — roční obdoba kontroly 229: pořadí 1 a 2 smí mít
+     * v témže měsíci roku zúčtování jen jedno dítě.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualChildOrdersDoNotCollide(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $months = self::annualOrdersByMonth($form);
+                if (is_string($months)) {
+                    return $months;
+                }
+                foreach ($months as $month => $orders) {
+                    $order = self::collidingOrder($orders);
+                    if ($order !== null) {
+                        return "Pořadí {$order} je v {$month}. měsíci roku zúčtování"
+                            . ' uvedeno u více vyživovaných dětí.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 214 — roční obdoba kontroly 215. Pro každý měsíc, ve kterém má
+     * dítě v masce 10451 pořadí, se ověří, že 1. dne toho měsíce ještě
+     * nedosáhlo 26 let. Rok zúčtování je rok před vykazovaným obdobím:
+     * výsledek ročního zúčtování se smí vykázat jen v lednovém až březnovém
+     * hlášení (kontrola 191).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualChildUnderTwentySix(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $period = $this->period($projection);
+        if ($period === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        $taxYear = $period[0] - 1;
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($taxYear): ?string {
+                foreach ($form->groupedBy(
+                    ['10448', '10449', '10451'],
+                    self::ANNUAL_RESULT_DEPTH,
+                ) as $child) {
+                    $mask = $child['10451'] ?? null;
+                    if ($mask === null) {
+                        continue;
+                    }
+                    $orders = self::monthlyMask($mask);
+                    if ($orders === null) {
+                        return "Pořadí dítěte 10451 {$mask} nemá 12 měsíčních údajů.";
+                    }
+                    $claimed = array_keys(array_filter(
+                        $orders,
+                        static fn (string $order): bool => in_array($order, ['1', '2', '3'], true),
+                    ));
+                    if ($claimed === []) {
+                        continue;
+                    }
+                    try {
+                        $birthDate = self::childBirthDay(
+                            $child['10448'] ?? null,
+                            $child['10449'] ?? null,
+                        );
+                    } catch (\InvalidArgumentException) {
+                        return 'Z rodného čísla dítěte nelze určit platné datum narození.';
+                    }
+                    if ($birthDate === null) {
+                        return 'Pro kontrolu věku dítěte chybí platné datum narození.';
+                    }
+                    foreach ($claimed as $month) {
+                        $monthStart = self::calendarDay(sprintf('%04d-%02d-01', $taxYear, $month));
+                        if ($monthStart !== null
+                            && self::turnedTwentySixBy($birthDate, $monthStart)
+                        ) {
+                            return "Dítě dosáhlo 26 let nejpozději 1. dne {$month}. měsíce"
+                                . ' roku zúčtování, na který je uplatněno.';
+                        }
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 126 — roční obdoba kontroly 127: při 10455 = ANO musí mít každá
+     * jiná vyživující osoba jméno, příjmení, datum narození nebo rodné číslo
+     * a měsíce vyživování (10441–10445).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualOtherCaregiverComplete(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10455') !== true) {
+                    return null;
+                }
+                $caregivers = $form->groupedBy(
+                    ['10441', '10442', '10443', '10444', '10445'],
+                    self::ANNUAL_RESULT_DEPTH,
+                );
+                if ($caregivers === []) {
+                    return 'Chybí údaje jiné osoby vyživující děti ve společné domácnosti'
+                        . ' (roční zúčtování).';
+                }
+                foreach ($caregivers as $caregiver) {
+                    if (!isset($caregiver['10441'], $caregiver['10442'], $caregiver['10445'])
+                        || (!isset($caregiver['10443']) && !isset($caregiver['10444']))
+                    ) {
+                        return 'Jiná vyživující osoba v ročním zúčtování nemá úplné jméno,'
+                            . ' datum narození nebo rodné číslo a měsíce vyživování.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Pořadí dětí z masek 10451 rozložená po měsících roku zúčtování
+     * (klíč 1–12), nebo text nálezu, když maska nemá 12 údajů.
+     *
+     * @return array<int, list<string>>|string
+     */
+    private static function annualOrdersByMonth(JmhzAttributeScope $form): array|string
+    {
+        $months = [];
+        foreach ($form->all('10451') as $occurrence) {
+            $orders = self::monthlyMask($occurrence->value);
+            if ($orders === null) {
+                return "Pořadí dítěte 10451 {$occurrence->value} nemá 12 měsíčních údajů.";
+            }
+            foreach ($orders as $month => $order) {
+                $months[$month][] = $order;
+            }
+        }
+        ksort($months);
+
+        return $months;
+    }
+
+    /**
+     * Maska o 12 znacích (jeden za každý měsíc roku) jako mapa měsíc → znak.
+     *
+     * @return array<int, string>|null
+     */
+    private static function monthlyMask(string $mask): ?array
+    {
+        if (strlen($mask) !== 12) {
+            return null;
+        }
+        $months = [];
+        foreach (str_split($mask) as $index => $value) {
+            $months[$index + 1] = $value;
+        }
+
+        return $months;
+    }
+
+    /**
+     * Pořadí 2 nebo 3, které v jednom měsíci nemá dost dětí s nižším pořadím
+     * nebo s „N" (kontroly 110 a 312), jinak `null`.
+     *
+     * @param list<string> $orders pořadí všech dětí v jednom měsíci
+     */
+    private static function orderOutOfSequence(array $orders): ?string
+    {
+        foreach ($orders as $order) {
+            if (!in_array($order, ['2', '3'], true)) {
+                continue;
+            }
+            $lowerOrUnclaimed = count(array_filter(
+                $orders,
+                static fn (string $candidate): bool => $candidate === 'N'
+                    || (in_array($candidate, ['1', '2'], true)
+                        && (int) $candidate < (int) $order),
+            ));
+            if ($lowerOrUnclaimed < (int) $order - 1) {
+                return $order;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Pořadí 1 nebo 2 uvedené v jednom měsíci u více dětí (kontroly 229
+     * a 230), jinak `null`. Pořadí 3 a „N" se opakovat smějí.
+     *
+     * @param list<string> $orders pořadí všech dětí v jednom měsíci
+     */
+    private static function collidingOrder(array $orders): ?string
+    {
+        $counts = ['1' => 0, '2' => 0];
+        foreach ($orders as $order) {
+            if (isset($counts[$order])) {
+                ++$counts[$order];
+            }
+        }
+        foreach ($counts as $order => $count) {
+            if ($count > 1) {
+                return (string) $order;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Datum narození dítěte z data, nebo z rodného čísla (kontroly 214
+     * a 215). Neplatné rodné číslo hází `InvalidArgumentException`.
+     */
+    private static function childBirthDay(?string $birthDate, ?string $birthNumber): ?\DateTimeImmutable
+    {
+        $day = self::calendarDay($birthDate);
+        if ($day === null && $birthNumber !== null) {
+            $day = self::calendarDay(CzechBirthNumber::birthDate(
+                CzechBirthNumber::normalize($birthNumber),
+            ));
+        }
+
+        return $day;
+    }
+
+    /**
+     * Dosáhlo dítě 26 let nejpozději prvním dnem měsíce? Slevu nelze uplatnit
+     * ani tehdy, když 26. narozeniny připadnou přesně na 1. den měsíce.
+     */
+    private static function turnedTwentySixBy(
+        \DateTimeImmutable $birthDate,
+        \DateTimeImmutable $monthStart,
+    ): bool {
+        return $birthDate->modify('+26 years') <= $monthStart;
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -3318,20 +3600,18 @@ final class JmhzScenario1ControlEvaluator
                     if (!in_array($order, ['1', '2', '3'], true)) {
                         continue;
                     }
-                    $birthDate = self::calendarDay($child['10437'] ?? null);
-                    if ($birthDate === null && isset($child['10438'])) {
-                        try {
-                            $birthDate = self::calendarDay(CzechBirthNumber::birthDate(
-                                CzechBirthNumber::normalize($child['10438']),
-                            ));
-                        } catch (\InvalidArgumentException) {
-                            return 'Z rodného čísla dítěte nelze určit platné datum narození.';
-                        }
+                    try {
+                        $birthDate = self::childBirthDay(
+                            $child['10437'] ?? null,
+                            $child['10438'] ?? null,
+                        );
+                    } catch (\InvalidArgumentException) {
+                        return 'Z rodného čísla dítěte nelze určit platné datum narození.';
                     }
                     if ($birthDate === null) {
                         return 'Pro kontrolu věku dítěte chybí platné datum narození.';
                     }
-                    if ($periodStart !== null && $birthDate->modify('+26 years') <= $periodStart) {
+                    if ($periodStart !== null && self::turnedTwentySixBy($birthDate, $periodStart)) {
                         return 'Dítě dosáhlo 26 let nejpozději první den vykazovaného měsíce.';
                     }
                 }
@@ -3348,19 +3628,15 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form): ?string {
-                $counts = ['1' => 0, '2' => 0];
+                $orders = [];
                 foreach ($form->all('10440') as $occurrence) {
-                    if (isset($counts[$occurrence->value])) {
-                        ++$counts[$occurrence->value];
-                    }
+                    $orders[] = $occurrence->value;
                 }
-                foreach ($counts as $order => $count) {
-                    if ($count > 1) {
-                        return "Pořadí {$order} je uvedeno u více vyživovaných dětí.";
-                    }
-                }
+                $order = self::collidingOrder($orders);
 
-                return null;
+                return $order === null
+                    ? null
+                    : "Pořadí {$order} je uvedeno u více vyživovaných dětí.";
             },
         );
     }

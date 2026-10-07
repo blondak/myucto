@@ -297,6 +297,95 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 215)->outcome);
     }
 
+    /**
+     * Kontroly 126, 214, 230 a 312 — roční obdoby měsíčních kontrol dětí nad
+     * výsledkem ročního zúčtování. Neměly implementaci, takže každé podání
+     * s ročním zvýhodněním na dítě skončilo na mezeře v pokrytí.
+     */
+    public function testCompleteAnnualChildCreditPassesItsControls(): void
+    {
+        $report = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', 'NN2222222222'),
+            $this->annualChild('Eva', 'Nováková', '2019-08-05', 'NNNNNNNNNNNN'),
+        ]));
+
+        foreach ([126, 214, 230, 312] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::Passed,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} neprošla nad úplným ročním blokem dětí.",
+            );
+        }
+    }
+
+    public function testAnnualChildOrderMustFormASequenceInEveryMonth(): void
+    {
+        $gap = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111222222'),
+        ]));
+        self::assertContains(312, $this->failedIds($gap));
+        self::assertStringContainsString('7. měsíci', $this->finding($gap, 312)->message);
+
+        $unclaimed = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111NNNNNN'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', '222222222222'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($unclaimed, 312)->outcome);
+    }
+
+    public function testAnnualChildOrderCollisionInOneMonthIsReported(): void
+    {
+        $report = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111'),
+            $this->annualChild('Petr', 'Novák', '2017-06-03', 'NNNNNNNNNNN1'),
+        ]));
+
+        self::assertContains(230, $this->failedIds($report));
+        self::assertStringContainsString('12. měsíci', $this->finding($report, 230)->message);
+        self::assertSame(JmhzControlPassability::Passable, $this->finding($report, 230)->passability);
+    }
+
+    /**
+     * Rok zúčtování je rok před únorovým hlášením (2025). Dítě narozené
+     * 1. 3. 1999 má 26. narozeniny 1. 3. 2025, takže za březen už uplatnit
+     * nejde, za únor ještě ano.
+     */
+    public function testAnnualChildAgedTwentySixOnFirstDayOfClaimedMonthIsRefused(): void
+    {
+        $february = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '1999-03-01', '11NNNNNNNNNN'),
+        ]));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($february, 214)->outcome);
+
+        $march = $this->validate($this->annualChildCreditXml([
+            $this->annualChild('Jana', 'Nováková', '1999-03-01', '111NNNNNNNNN'),
+        ]));
+        self::assertContains(214, $this->failedIds($march));
+        self::assertStringContainsString('3. měsíce', $this->finding($march, 214)->message);
+    }
+
+    public function testAnnualOtherHouseholdCaregiverRequiresCompleteIdentity(): void
+    {
+        $caregiver = static fn (string $birth): string => '<form:jineOsoby><form:jinaOsoba>'
+            . '<form:osoba><form:jmeno>Petr</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+            . $birth . '</form:osoba>'
+            . '<form:mesiceVyzivovani>AAAAAAAAAAAA</form:mesiceVyzivovani>'
+            . '</form:jinaOsoba></form:jineOsoby>';
+
+        $incomplete = $this->validate($this->annualChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: $caregiver(''),
+        ));
+        self::assertContains(126, $this->failedIds($incomplete));
+
+        $complete = $this->validate($this->annualChildCreditXml(
+            otherCaregiver: true,
+            caregiverXml: $caregiver('<form:datumNarozeni>1985-03-07</form:datumNarozeni>'),
+        ));
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($complete, 126)->outcome);
+    }
+
     public function testPersonIdentifierChecksumIsEnforced(): void
     {
         $report = $this->validate(str_replace(
@@ -1705,6 +1794,61 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
             . '<form:datumNarozeni>' . $birthDate . '</form:datumNarozeni>'
             . '</form:dite><form:prukazZtpp>false</form:prukazZtpp>'
             . '<form:poradi>' . $order . '</form:poradi></form:vyzivovaneDite>';
+    }
+
+    /**
+     * Únorové hlášení s provedeným ročním zúčtováním za předchozí rok
+     * a uplatněným zvýhodněním na děti.
+     *
+     * @param list<string>|null $children
+     */
+    private function annualChildCreditXml(
+        ?array $children = null,
+        bool $otherCaregiver = false,
+        string $caregiverXml = '',
+    ): string {
+        $children ??= [$this->annualChild('Jana', 'Nováková', '2015-04-11', '111111111111')];
+        $flag = $otherCaregiver ? 'true' : 'false';
+        $annual = '<form:rocniUhrny>'
+            . '<form:rocniZuctovaniProvedeno>true</form:rocniZuctovaniProvedeno>'
+            . '<form:vysledekRocnihoZuctovani>'
+            . '<form:preplatekRok>0</form:preplatekRok>'
+            . '<form:danPreplatekRok>0</form:danPreplatekRok>'
+            . '<form:danBonusPreplatekRok>0</form:danBonusPreplatekRok>'
+            . '<form:uplatnenaSlevaNaPartnera>false</form:uplatnenaSlevaNaPartnera>'
+            . '<form:uplatnenoZvyhodneniNaDeti>true</form:uplatnenoZvyhodneniNaDeti>'
+            . '<form:zvyhodneniNaDeti><form:vyzivujeJinaOsoba>' . $flag
+            . '</form:vyzivujeJinaOsoba>' . $caregiverXml
+            . '<form:vyzivovaneDeti>' . implode('', $children) . '</form:vyzivovaneDeti>'
+            . '</form:zvyhodneniNaDeti>'
+            . '</form:vysledekRocnihoZuctovani>'
+            . '</form:rocniUhrny>';
+
+        $xml = str_replace(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>' . $annual,
+            JmhzXmlSample::document(
+                JmhzXmlSample::form('1000000001', '2000000000000000000001'),
+                month: '2',
+            ),
+        );
+        $this->assertSchemaValid($xml);
+
+        return $xml;
+    }
+
+    private function annualChild(
+        string $givenName,
+        string $familyName,
+        string $birthDate,
+        string $orderMask,
+    ): string {
+        return '<form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>' . $givenName . '</form:jmeno>'
+            . '<form:prijmeni>' . $familyName . '</form:prijmeni>'
+            . '<form:datumNarozeni>' . $birthDate . '</form:datumNarozeni>'
+            . '</form:dite>'
+            . '<form:poradi>' . $orderMask . '</form:poradi></form:vyzivovaneDite>';
     }
 
     private function assertSchemaValid(string $xml): void
