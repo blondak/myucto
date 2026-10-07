@@ -1250,6 +1250,23 @@ vada přípravy (změněné podklady, nesouhlasící otisk) nabídne tlačítko 
 test znovu**. Případ, který aplikace záměrně nezpracovává automaticky, řekne,
 že se podává ručně přes ePortál ČSSZ.
 
+Měsíční hlášení aplikace sestaví pro běžný formulář (druh činnosti 1 až 9
+s bližším určením 1, dohody A až J a T až ZC, druhy 15 a 16), pro formulář
+cinnostKS u druhu činnosti K a N až S s bližším určením 1 (jednatel, společník,
+prokurista, člen orgánu) a pro odložený příjem typu 1. Pracovní vztah lze
+evidovat a přihlásit i v ostatních scénářích, jejich formulář ale aplikace do
+hlášení nesestaví a test u vztahu ohlásí nález s pokynem podat hlášení ručně
+přes ePortál ČSSZ (nebo vztah odložit):
+
+| Scénář | Kdy nastane | Formulář |
+|---|---|---|
+| 2 | odměna pěstouna, druh činnosti M | pestoun |
+| 3 | pracovní vztah specifické skupiny (druh činnosti 1 až 9 s bližším určením 3), druh K a N až S s jiným bližším určením než 1 | cinnostKS |
+| 4 | výkon trestu nebo zabezpečovací detence (bližší určení 2) | vezen |
+| 5 | druh činnosti 11, 13 nebo 14 | jinyPrijem |
+| 6 | druh činnosti 12 | mezinarodniPronajemSily |
+| 7 | druh činnosti 10 | ozpTpp |
+
 ### 85.11.5 Odložení vztahu z řádného hlášení
 
 Jeden zaměstnanec s neúplnými daty nesmí zablokovat hlášení za ostatní. U

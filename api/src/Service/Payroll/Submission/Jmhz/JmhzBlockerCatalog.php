@@ -534,6 +534,13 @@ final class JmhzBlockerCatalog
         'jmhz_scenario2_resolution_blocked' => 'support',
         'jmhz_scenario2_scope_unsupported' => 'retry',
         'jmhz_scenario2_source_version_unsupported' => 'retry',
+        // Formuláře scénářů 2 až 7 aplikace nevydává; hlášení se podává ručně.
+        'jmhz_scenario_2_preparation_unsupported' => 'manual',
+        'jmhz_scenario_3_preparation_unsupported' => 'manual',
+        'jmhz_scenario_4_preparation_unsupported' => 'manual',
+        'jmhz_scenario_5_preparation_unsupported' => 'manual',
+        'jmhz_scenario_6_preparation_unsupported' => 'manual',
+        'jmhz_scenario_7_preparation_unsupported' => 'manual',
         'jmhz_scenario_8_activity_10_forbidden' => ['employment_terms', 'activity_code'],
         'jmhz_scenario_activity_code_invalid' => ['employment_terms', 'activity_code'],
         'jmhz_scenario_activity_code_missing' => ['employment_terms', 'activity_code'],

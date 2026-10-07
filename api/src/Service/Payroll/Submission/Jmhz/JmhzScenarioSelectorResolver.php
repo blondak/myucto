@@ -180,11 +180,32 @@ final class JmhzScenarioSelectorResolver
             'preparation_supported' => $preparationSupported,
             'readiness_issue_code' => $preparationSupported
                 ? null
-                : ($scenarioKey === 'scenario_8'
-                    ? 'deferred_income_evidence_missing'
-                    : "jmhz_{$scenarioKey}_preparation_unsupported"),
+                : self::readinessIssueCode($scenarioKey),
             'readiness_attribute_ids' => $preparationSupported ? [] : $attributes,
         ];
+    }
+
+    /**
+     * Nález připravenosti scénáře, jehož formulář aplikace nevydává.
+     *
+     * Kódy jsou vypsané doslova, ne skládané z klíče scénáře: jen tak je najde
+     * `JmhzCodeCatalogCoverageTest` a vynutí jim druh nápravy i popisek.
+     * Složený kód dřív v UI končil jako „neznámá blokace".
+     */
+    private static function readinessIssueCode(string $scenarioKey): string
+    {
+        return match ($scenarioKey) {
+            'scenario_2' => 'jmhz_scenario_2_preparation_unsupported',
+            'scenario_3' => 'jmhz_scenario_3_preparation_unsupported',
+            'scenario_4' => 'jmhz_scenario_4_preparation_unsupported',
+            'scenario_5' => 'jmhz_scenario_5_preparation_unsupported',
+            'scenario_6' => 'jmhz_scenario_6_preparation_unsupported',
+            'scenario_7' => 'jmhz_scenario_7_preparation_unsupported',
+            'scenario_8' => 'deferred_income_evidence_missing',
+            default => throw new \UnexpectedValueException(
+                "Scénář {$scenarioKey} nemá nález připravenosti.",
+            ),
+        };
     }
 
     /**
