@@ -64,15 +64,17 @@ final class JmhzScenario1ControlEvaluator
         42 => 'Okruh slevy stojí na druhu činnosti (10239) a bližším určení'
             . ' pracovněprávního vztahu (10502), které první profil nevykazuje;'
             . ' podmínka se vynucuje před serializací, z podání ji ověřit nelze.',
-        59 => 'Podmínky vyměřovacího základu se opírají o vyloučené a odečtené'
-            . ' doby (10357, 10375), které první profil nevykazuje; předpoklad'
-            . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
         // 10243 „Zaměstnání malého rozsahu" nemá ve slovníku 1.4.1.6 mapování
         // na XSD, takže se z vyrobeného XML nedá přečíst vůbec. Vydávat
         // kontrolu za splněnou by znamenalo tvrdit, že prošla podmínka, na
-        // kterou jsme se nikdy nemohli podívat.
+        // kterou jsme se nikdy nemohli podívat. Podmínku proto vynucuje
+        // sestavení ELDP řezu nad druhem vztahu ve zmrazeném zdroji: kód
+        // s druhým znakem P u zaměstnání malého rozsahu ani u DPP nevznikne
+        // (`jmhz_eldp_deferred_small_scale_unsupported`), třetí pozice B, F,
+        // J, V, T a první pozice T–ZC s malým rozsahem se nesestavují vůbec.
         133 => 'Zaměstnání malého rozsahu (10243) nemá ve slovníku 1.4.1.6'
-            . ' mapování na XSD, takže se z podání nedá přečíst.',
+            . ' mapování na XSD, takže se z podání nedá přečíst; podmínka se'
+            . ' vynucuje nad druhem vztahu před serializací.',
         143 => 'Katalog uvádí jen „standardní kontrola tvaru VS" bez algoritmu,'
             . ' takže by se musel uhodnout; shodu s registrem zaměstnavatelů'
             . ' ČSSZ navíc lokálně ověřit nelze.',
@@ -212,7 +214,7 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
+            1, 3, 4, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58, 59,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
@@ -396,6 +398,7 @@ final class JmhzScenario1ControlEvaluator
             56 => $this->dateNotAfterFilling($projection, '10272'),
             57 => $this->riskyHoursWithinWorkedHours($projection),
             58 => $this->insuranceDaysWithinMonth($projection),
+            59 => $this->assessmentBaseConditions($projection),
             60 => $this->summaryDateBeforeFilling($projection),
             61, 62 => $this->schemaValidated($context),
             84 => $this->packageOrdinalWithinCount($projection),
@@ -4261,6 +4264,88 @@ final class JmhzScenario1ControlEvaluator
                         return "Kód ELDP {$code} vyžaduje započtené dny rovné intervalu"
                             . " zmenšenému o odečtené doby ({$expected}), uvedeno {$days}.";
                     }
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 59 „Vyměřovací základ s podmínkami" (katalog MH 1.4.2.10),
+     * všech pět částí nad sekcemi ELDP formuláře:
+     *
+     * 1. druhá pozice kódu P ⇒ vyměřovací základ (10245) uveden,
+     * 2. započtené dny (10356) = vyloučené doby (10357) a druhá pozice ≠ D
+     *    ⇒ základ 0,
+     * 3. navazující sekce s kódem D, nenulovými dny a týmž druhem činnosti
+     *    ⇒ v předcházející sekci (bez D) základ 0,
+     * 4. druhá pozice D, dny 0 a odečtené doby (10375) = vyloučené doby ⇒ základ 0,
+     * 5. druhá pozice není D ani P a dny 0 ⇒ základ 0.
+     *
+     * Neuvedený základ je pro části 2 až 5 totéž co nula. Část 4 se bez 10375
+     * nehodnotí (nepřítomný atribut není nula).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function assessmentBaseConditions(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $sections = $form->groupedBy(
+                ['10240', '10241', '10242', '10356', '10357', '10375', '10245'],
+                self::ELDP_SECTION_DEPTH,
+            );
+            $baseIsZero = static fn (?string $base): bool => $base === null || (int) $base === 0;
+            $dated = [];
+            foreach ($sections as $section) {
+                $code = $section['10240'] ?? null;
+                if ($code === null) {
+                    continue;
+                }
+                $second = self::eldpPosition($code, 2);
+                $days = $section['10356'] ?? null;
+                $excluded = $section['10357'] ?? null;
+                $deducted = $section['10375'] ?? null;
+                $base = $section['10245'] ?? null;
+                if ($second === 'P' && $base === null) {
+                    return 'Chybně uvedený vyměřovací základ (1. část kontroly): kód ' . $code
+                        . ' s druhou pozicí P vyžaduje vyměřovací základ.';
+                }
+                if ($second !== 'D' && $second !== 'P' && $days !== null && $excluded !== null
+                    && (int) $days === (int) $excluded && !$baseIsZero($base)
+                ) {
+                    return 'Chybně uvedený vyměřovací základ (2. část kontroly): započtené dny jsou celé'
+                        . " vyloučenou dobou ({$days}), základ musí být 0.";
+                }
+                if ($second === 'D' && $days !== null && (int) $days === 0 && $deducted !== null
+                    && $excluded !== null && (int) $deducted === (int) $excluded && !$baseIsZero($base)
+                ) {
+                    return 'Chybně uvedený vyměřovací základ (4. část kontroly): sekce s kódem D bez'
+                        . ' započtených dnů a s odečtenými dobami rovnými vyloučeným má základ 0.';
+                }
+                if ($second !== 'D' && $second !== 'P' && $days !== null && (int) $days === 0 && !$baseIsZero($base)) {
+                    return 'Chybně uvedený vyměřovací základ (5. část kontroly): bez započtených dnů'
+                        . ' musí být základ 0.';
+                }
+                if (($section['10241'] ?? null) !== null && ($section['10242'] ?? null) !== null) {
+                    $dated[] = $section;
+                }
+            }
+            usort($dated, static fn (array $left, array $right): int => $left['10241'] <=> $right['10241']);
+            for ($index = 1; $index < count($dated); ++$index) {
+                $before = $dated[$index - 1];
+                $after = $dated[$index];
+                $next = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $before['10242']);
+                if (self::eldpPosition((string) $after['10240'], 2) === 'D'
+                    && self::eldpPosition((string) $before['10240'], 2) !== 'D'
+                    && (int) ($after['10356'] ?? 0) !== 0
+                    && self::eldpPosition((string) $after['10240'], 1) === self::eldpPosition((string) $before['10240'], 1)
+                    && $next instanceof \DateTimeImmutable
+                    && $next->modify('+1 day')->format('Y-m-d') === $after['10241']
+                    && !$baseIsZero($before['10245'] ?? null)
+                ) {
+                    return 'Chybně uvedený vyměřovací základ (3. část kontroly): v sekci před dovršením'
+                        . ' důchodového věku, na kterou navazuje sekce s kódem D, se základ uvádí jako 0.';
                 }
             }
 

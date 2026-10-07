@@ -819,6 +819,91 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * Příloha č. 3 Všeobecných zásad ELDP bod a) a kontrola 59 část 2: nemoc
+     * po celý měsíc a v měsíci zúčtovaný příjem — krytí, vyloučená doba se
+     * nevykáže. Hodiny nemoci v pracovním souhrnu přitom zůstávají doložené.
+     * Dřív měsíc odešel s 31 vyloučenými dny a nenulovým základem.
+     */
+    public function testWholeMonthOfSicknessWithIncomeIsCoveredByIncome(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->absenceSource(
+            'dpn',
+            '2026-07-01',
+            '2026-07-31',
+            [
+                'dpn_with_employer_compensation_millihours' => 80_000,
+                'dpn_without_employer_compensation_millihours' => 104_000,
+            ],
+            paidMillihours: 80_000,
+        );
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'][0] += [
+            'compensation_window_from' => '2026-07-01',
+            'compensation_window_to' => '2026-07-14',
+            'insurance_eligibility_confirmed' => true,
+        ];
+        $source = $this->withInput($source, $input);
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(10_000, $section['assessment_base_czk']);
+        self::assertSame(0, $section['excluded_days_total']);
+        self::assertSame(31, $section['section18_days_total']);
+    }
+
+    /**
+     * § 38 odst. 4 písm. h) zákona č. 582/1991 Sb. a logický test 39: měsíc
+     * s kódem D a nemocí má odečtené doby. Měsíční hlášení je zatím zapsat
+     * neumí (IN04), takže měsíc zastaví; dřív odešel s vyloučenými dobami
+     * a bez odečtených, což ČSSZ odmítne.
+     */
+    public function testPensionAgeMonthWithDeductedDaysStops(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = [...$this->sicknessSource(), 'pension_status' => ['pension_age_reached_on' => '2026-01-01', 'early_pension_from' => null]];
+
+        try {
+            $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+            self::fail('Měsíc s kódem D a odečtenými dobami se bez nich vykázat nesmí.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_deducted_days_unsupported', $exception->validationCode);
+        }
+    }
+
+    /**
+     * Kontrola 133 část 3 a Pravidla podání JMHZ kap. 6 bod 1c: zaměstnání
+     * malého rozsahu nemá kód s druhou pozicí P; příjem po skončení patří do
+     * posledního měsíce výkonu (oprava hlášení), ne do odloženého příjmu.
+     */
+    public function testDeferredIncomeOfSmallScaleEmploymentIsRefused(): void
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $entry = &$input['people'][0]['employments'][0];
+        $entry['employment']['relation_type'] = 'small_scale_employment';
+        $entry['employment']['end_date'] = '2026-06-15';
+        $entry['deferred_income'] = ['deferred_type' => '1'];
+        unset($entry);
+        $source = $this->withInput($source, $input);
+
+        try {
+            (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+            self::fail('Odložený příjem ZMR s kódem P nesmí vzniknout.');
+        } catch (JmhzEldpEvidenceException $exception) {
+            self::assertSame('jmhz_eldp_deferred_small_scale_unsupported', $exception->validationCode);
+        }
+    }
+
+    /**
      * Náhradní volno za přesčas: hodiny jdou jen do úhrnu 10275 (mzda za ně
      * nepřísluší, § 114 odst. 1 ZP), vyloučenou dobou ELDP není, ale celé dny
      * jsou vyloučenými dny § 18 odst. 7 písm. a). Umí to až souhrn v5.
