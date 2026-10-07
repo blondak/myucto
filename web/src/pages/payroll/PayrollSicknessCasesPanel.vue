@@ -400,6 +400,7 @@ function edit(item: PayrollSicknessCase): void {
     decision_number: item.decision_number,
     correction: item.correction,
     foreign_case: item.foreign_case,
+    slovak_case: item.slovak_case,
     incapacity_from: item.incapacity_from,
     incapacity_to: item.incapacity_to,
     issued_on: item.issued_on,
@@ -1262,6 +1263,10 @@ onMounted(() => void load())
               <label class="flex items-center gap-2 text-sm">
                 <input v-model.number="draft.foreign_case" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-foreign">
                 {{ t('payroll.sicknessCases.form.foreignCase') }}
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model.number="draft.slovak_case" type="checkbox" :true-value="1" :false-value="0" data-test="sickness-case-slovak">
+                {{ t('payroll.sicknessCases.form.slovakCase') }}
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block text-neutral-700">{{ t('payroll.sicknessCases.form.additionalNote') }}</span>

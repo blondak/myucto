@@ -380,7 +380,12 @@ final readonly class SicknessSubmissionService
         );
 
         if ($document === SicknessDocumentKind::Nempri) {
-            if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo)) {
+            // § 26 odst. 3: odpracovaná celá směna v den vzniku posouvá první
+            // den neschopnosti, a tím okno 14 dnů i lhůtu NEMPRI, stejně jako
+            // v seznamu případů a v hlídači lhůt.
+            $workedFirstDay = $kind === SicknessBenefitKind::Nem
+                && SicknessCaseService::firstDayFullyWorked($row);
+            if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo, 0, $workedFirstDay)) {
                 throw new SicknessException(
                     'nempri_within_wage_compensation_window',
                     'Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji '
@@ -413,20 +418,20 @@ final readonly class SicknessSubmissionService
                 $missing[] = $exception;
                 $payload = null;
             }
-            // Jde-li věta sestavit, číslo rozhodnutí ohlídá validátor níž.
-            if ($payload === null
-                && $kind->requiresDecisionNumber()
-                && !(bool) ($row['foreign_case'] ?? false)
-                && $this->nullableText($row['decision_number'] ?? null) === null
-            ) {
-                $missing[] = new SicknessException(
-                    'nempri_decision_number_missing',
-                    'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
-                    . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
-                    . 'Výjimkou je jen zahraniční případ.',
-                );
+            // Číslo rozhodnutí podle druhu dávky (povinnost, zákaz i tvar) se
+            // ohlídá hned, stejným pravidlem jako ve validátoru věty, a hlásí
+            // se spolu s ostatními chybami případu; validátor ho jinak vidí
+            // až u hotové věty.
+            $problem = $kind->decisionNumberProblem(
+                $this->decisionNumberForCheck($row),
+                $kind->hasApplication()
+                    && $this->nullableText($row['maternity_care_reason'] ?? null) !== null,
+                SicknessPayloadFactory::nempriForeignCase($row),
+            );
+            if ($problem !== null) {
+                $missing[] = new SicknessException($problem['code'], $problem['message']);
             }
-            if ($payload === null) {
+            if ($missing !== [] || $payload === null) {
                 throw new SicknessException(
                     $missing[0]->validationCode,
                     implode("\n", array_map(
@@ -443,6 +448,7 @@ final readonly class SicknessSubmissionService
                 $incapacityTo,
                 $this->nullableText($row['payroll_payment_date'] ?? null),
                 (bool) ($row['lone_caregiver'] ?? false),
+                $workedFirstDay,
             );
         } else {
             if (!$kind->hasEndOfIncapacityReport()) {
@@ -775,6 +781,19 @@ final readonly class SicknessSubmissionService
                 'Případ mezitím někdo změnil. Načtěte ho znovu a podání připravte znovu.',
             );
         }
+    }
+
+    /**
+     * Číslo rozhodnutí tak, jak ho nese věta (velká písmena, bez mezer
+     * okolo): {@see SicknessPayloadFactory} ho normalizuje stejně.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function decisionNumberForCheck(array $row): ?string
+    {
+        $number = $this->nullableText($row['decision_number'] ?? null);
+
+        return $number === null ? null : strtoupper($number);
     }
 
     private function nullableText(mixed $value): ?string

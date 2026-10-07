@@ -126,6 +126,8 @@ final class JmhzReportPlanner
         $reference = self::reference($item->fileSha256, $form->formGuid);
         $this->planIdentifiers($supplierId, $environment, $plan, $form, $employeeId, (int) $row['id']);
         $this->planTerms($supplierId, $plan, $item, $row);
+        $this->verifyActivity($supplierId, $plan, $item, $row);
+        $this->warnMissingDiscountIntent($supplierId, $environment, $plan, $item, $batch, $row);
         $this->planStatutory($supplierId, $plan, $item, $batch, $employeeId, $reference);
         $this->planChildren($supplierId, $plan, $item, $employeeId, $reference);
         $this->fundInfo($plan, $form);
@@ -554,6 +556,73 @@ final class JmhzReportPlanner
         foreach ($diff as $field => $value) {
             $this->change($plan, $field, self::termLabel($field), self::text($covering[$field] ?? null), $value);
         }
+    }
+
+    /**
+     * Druh činnosti z hlášení (10239, jinak první pozice kódu ELDP 10240) se s evidencí jen ověří: rozdíl je
+     * varování, podmínky vztahu import nemění, stejně jako u exportu ČSSZ
+     * ({@see RegistrationImportPlanner}). Druh činnosti určuje kód ELDP
+     * i druh vztahu, takže tichý rozdíl by se projevil až v hlášeních.
+     * Porovnává se jen tehdy, když jsou obě hodnoty vyplněné a evidence má
+     * k 1. dni měsíce hlášení platné podmínky.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed> $row
+     */
+    private function verifyActivity(int $supplierId, array &$plan, JmhzBatchItem $item, array $row): void
+    {
+        $reported = self::text(JmhzEmploymentHistory::formActivityCode($item->form));
+        if ($reported === null) {
+            return;
+        }
+        $versions = $this->remember("terms:{$supplierId}:{$row['id']}", fn () => $this->jmhzLookup->termVersions($supplierId, (int) $row['id']));
+        $covering = JmhzEvidenceTimeline::covering($versions, $item->file->periodStart());
+        $current = $covering === null ? null : self::text($covering['activity_code'] ?? null);
+        if ($current === null || strtoupper($current) === strtoupper($reported)) {
+            return;
+        }
+        $plan['warnings'][] = "Druh činnosti ve vztahu {$row['code']} ({$current}) se liší od hlášení za "
+            . "{$item->period()} ({$reported}). Import ho nemění, zkontrolujte, který je správný.";
+    }
+
+    /**
+     * Předchozí program vedl slevu na pojistném zaměstnavatele (10372), ale
+     * v evidenci k vztahu není přijatý záměr (OZUSPOJ). Nárok na slevu zakládá
+     * až záměr doručený ČSSZ (§ 7a odst. 5 zák. č. 589/1992 Sb.), takže se
+     * sleva po převodu bez něj neuplatní. Příznak z hlášení záměr NEZASTUPUJE
+     * (neříká, kdy ČSSZ záměr přijala), a proto se jen upozorní. Upozornění se
+     * ukazuje u posledního hlášeného měsíce vztahu, jinak by se opakovalo
+     * u každého.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed> $row
+     */
+    private function warnMissingDiscountIntent(
+        int $supplierId,
+        string $environment,
+        array &$plan,
+        JmhzBatchItem $item,
+        JmhzBatch $batch,
+        array $row,
+    ): void {
+        if ($item->form->employerDiscount !== true || !in_array($row['status'], self::OPEN_STATUSES, true)) {
+            return;
+        }
+        $key = $item->form->relationKey();
+        if ($key !== null && $batch->history()->latest($key)?->key !== $item->key) {
+            return;
+        }
+        $present = $this->remember(
+            "discount_intent:{$supplierId}:{$environment}:{$row['id']}",
+            fn () => $this->jmhzLookup->hasAcceptedDiscountIntent($supplierId, $environment, (int) $row['id']),
+        );
+        if ($present) {
+            return;
+        }
+        $plan['warnings'][] = "Předchozí program vykazuje za {$item->period()} slevu na pojistném zaměstnavatele (10372), "
+            . "ale u vztahu {$row['code']} není v evidenci přijatý záměr slevy (OZUSPOJ). Bez něj se sleva po převodu "
+            . 'neuplatní: převezměte záměr z přijatého oznámení předchozího programu, nebo podejte nový. '
+            . 'Z hlášení se záměr neodvozuje.';
     }
 
     /**

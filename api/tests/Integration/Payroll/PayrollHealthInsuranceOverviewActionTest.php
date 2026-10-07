@@ -132,6 +132,7 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             $body['electronic_submission']['isds']['requires_user_confirmation'],
         );
         self::assertCount(1, $body['items']);
+        self::assertSame([], $body['failures']);
         self::assertSame('111', $body['items'][0]['insurer']['code']);
         self::assertSame(
             'Syntetická HTTP osoba',

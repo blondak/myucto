@@ -107,6 +107,11 @@ final readonly class JmhzReportForm
         public ?int $absenceMillihours = null,
         /** Příjem z nepojištěné činnosti (10476) — dohoda nebo malý rozsah pod rozhodným příjmem. */
         public ?int $uninsuredIncome = null,
+        /**
+         * Sleva na pojistném zaměstnavatele (10372, § 7a zák. č. 589/1992 Sb.): příznak, který
+         * předchozí program vykázal. Čte se tolerantně, blok měkký režim smí přejít.
+         */
+        public ?bool $employerDiscount = null,
     ) {}
 
     /**

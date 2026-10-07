@@ -325,6 +325,69 @@ final class JmhzReportImportServiceTest extends TestCase
         self::assertStringContainsString('Začátek vedení mezd v MyÚčtu je nastavený na 2026-01', (string) $openings[0]['reason']);
     }
 
+    /**
+     * IMP-12 (W2): druh činnosti z hlášení (zde první pozice kódu ELDP) se
+     * s evidencí jen ověří. Rozdíl je varování, shoda mlčí.
+     */
+    public function testActivityCodeDifferingFromEvidenceIsAWarning(): void
+    {
+        $this->registerEmployee(withIdentifiers: true);
+        $xml = JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'oic' => $this->oic,
+            'id_ppv' => $this->idPpv,
+        ])], 2026, 2);
+
+        $same = $this->imports->preview($this->supplierId, 'test', [$this->file('same.xml', $xml)])['records'][0];
+        self::assertStringNotContainsString('Druh činnosti ve vztahu', implode("\n", $same['warnings']));
+
+        $changed = str_replace('<form:kod>1++</form:kod>', '<form:kod>2++</form:kod>', $xml);
+        self::assertNotSame($xml, $changed);
+        $record = $this->imports->preview($this->supplierId, 'test', [$this->file('changed.xml', $changed)])['records'][0];
+
+        self::assertStringContainsString('Druh činnosti ve vztahu', implode("\n", $record['warnings']), $this->dump($record));
+        self::assertStringContainsString('(2)', implode("\n", $record['warnings']));
+    }
+
+    /**
+     * PRE-03 (W2): předchozí program vedl slevu zaměstnavatele (10372), ale
+     * v evidenci není přijatý záměr OZUSPOJ. Převzetí na to upozorní; se
+     * záměrem v evidenci mlčí.
+     */
+    public function testEmployerDiscountWithoutIntentInEvidenceWarns(): void
+    {
+        [$employeeId, $employmentId] = $this->registerEmployee(withIdentifiers: true);
+        $xml = str_replace(
+            '<form:slevaZamestnavateleEvidovana>false</form:slevaZamestnavateleEvidovana>',
+            '<form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>',
+            JmhzReportFixtures::report([JmhzReportFixtures::person([
+                'oic' => $this->oic,
+                'id_ppv' => $this->idPpv,
+            ])], 2026, 2),
+        );
+        $files = [$this->file('discount.xml', $xml)];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertStringContainsString('záměr slevy (OZUSPOJ)', implode("\n", $record['warnings']), $this->dump($record));
+
+        $repository = $this->container->get(\MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository::class);
+        $repository->insertPredecessorAccepted(
+            $this->supplierId,
+            'test',
+            $employeeId,
+            $employmentId,
+            'age_55_plus',
+            '2026-01-01',
+            115,
+            '2026-01-05',
+            'ozuspoj_xml',
+            str_repeat('a', 64),
+            $this->userId,
+        );
+
+        $covered = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertStringNotContainsString('záměr slevy (OZUSPOJ)', implode("\n", $covered['warnings']));
+    }
+
     public function testUnpairedFormIsAssignedManually(): void
     {
         [$employeeId, $employmentId] = $this->registerEmployee(withIdentifiers: false);

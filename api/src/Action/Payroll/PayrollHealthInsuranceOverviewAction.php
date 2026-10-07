@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceOverview
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverview;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewFailure;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewReconciliationService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -46,6 +47,12 @@ final class PayrollHealthInsuranceOverviewAction
 
         try {
             $revisionId = $this->routePositiveInt($args, 'revisionId');
+            // Přehledy jsou podání po pojišťovnách: nesestavitelná pojišťovna
+            // se vypíše zvlášť a přehledy ostatních se nezastaví.
+            $report = $this->service->overviewReport(
+                $this->currentSupplierId($request),
+                $revisionId,
+            );
             $items = array_map(
                 fn (HealthPaymentOverview $overview): array => [
                     ...$overview->toArray(),
@@ -54,10 +61,11 @@ final class PayrollHealthInsuranceOverviewAction
                     'payment_reconciliation' =>
                         $this->reconciliation->forOverview($overview),
                 ],
-                $this->service->overviews(
-                    $this->currentSupplierId($request),
-                    $revisionId,
-                ),
+                $report['overviews'],
+            );
+            $failures = array_map(
+                static fn (HealthPaymentOverviewFailure $failure): array => $failure->toArray(),
+                $report['failures'],
             );
         } catch (HealthInsuranceOverviewException $exception) {
             return Json::error(
@@ -77,6 +85,7 @@ final class PayrollHealthInsuranceOverviewAction
 
         return Json::ok($response, [
             'items' => $items,
+            'failures' => $failures,
             'electronic_submission' => [
                 'direct_portal' => [
                     'supported' => false,

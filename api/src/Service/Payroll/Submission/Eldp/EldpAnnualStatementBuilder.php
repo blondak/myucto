@@ -89,9 +89,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  *   rozdělit měsíční vyměřovací základ, který výpočet za část měsíce nevede,
  *   a proto blokuje (`eldp_pension_age_mid_month_unsupported`).
  *
- * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí
- * a kód sestavuje vždy s druhým znakem „+" ({@see JmhzEldpEvidenceBuilder});
- * kód D tam zatím chybí a je to vědomě otevřený rozdíl, ne vzor pro tenhle list.
+ * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí.
+ * Kód D pro ostatní (po dovršení důchodového věku bez důchodu, předčasný důchod)
+ * se skládá tímtéž pravidlem ({@see EldpPensionAgeCode}) i v hlášení
+ * ({@see JmhzEldpEvidenceBuilder}), pokud zdroj nese potvrzené důchodové údaje.
  */
 final class EldpAnnualStatementBuilder
 {
@@ -383,7 +384,7 @@ final class EldpAnnualStatementBuilder
                 $lines[] = $line;
             }
         }
-        $pensionAgeCodeFrom = self::pensionAgeCodeFrom($pension);
+        $pensionAgeCodeFrom = EldpPensionAgeCode::codeFrom($pension);
         if ($pensionAgeCodeFrom !== null) {
             $lines = $this->applyPensionAgeCode(
                 $lines,
@@ -1570,24 +1571,9 @@ final class EldpAnnualStatementBuilder
     }
 
     /**
-     * Den, od kterého nese činnost kód D: dovršení důchodového věku, nebo
-     * přiznání předčasného starobního důchodu, podle toho, co nastalo dřív.
-     *
-     * @param array{pension_age_reached_on:?string,early_pension_from:?string} $pension
-     */
-    private static function pensionAgeCodeFrom(array $pension): ?string
-    {
-        $dates = array_filter(
-            [$pension['pension_age_reached_on'], $pension['early_pension_from']],
-            static fn (?string $date): bool => $date !== null,
-        );
-
-        return $dates === [] ? null : min($dates);
-    }
-
-    /**
      * Druhý znak kódu ELDP „D" pro dobu od dovršení důchodového věku nebo od
      * přiznání předčasného starobního důchodu (číselník kódů ELDP, ID 10240).
+     * Pravidlo je společné s měsíčním hlášením JMHZ ({@see EldpPensionAgeCode}).
      *
      * Měsíc, uvnitř kterého kód začíná, se nerozděluje: výpočet vede
      * vyměřovací základ jen za celý měsíc a rozdělit ho na dvě sekce by byl
@@ -1609,11 +1595,12 @@ final class EldpAnnualStatementBuilder
             if ($line['post_termination'] === true || !is_string($from) || !is_string($to)) {
                 continue;
             }
-            if ($from >= $codeFrom) {
-                $lines[$index]['code'] = substr((string) $line['code'], 0, 1) . 'D+';
+            $placement = EldpPensionAgeCode::placement($codeFrom, $from, $to);
+            if ($placement === EldpPensionAgeCode::PENSION_AGE) {
+                $lines[$index]['code'] = EldpPensionAgeCode::withPensionAge((string) $line['code']);
                 continue;
             }
-            if ($to >= $codeFrom) {
+            if ($placement === EldpPensionAgeCode::MID_INTERVAL) {
                 $label = self::monthLabel((string) $line['period_start']);
                 $blockers[] = [
                     'code' => 'eldp_pension_age_mid_month_unsupported',

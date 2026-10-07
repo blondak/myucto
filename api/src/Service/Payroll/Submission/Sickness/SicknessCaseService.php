@@ -67,7 +67,7 @@ final readonly class SicknessCaseService
     ];
 
     /** Údaje společné oběma podáním; zamknou se až s posledním z nich. */
-    private const SHARED_FIELDS = ['ossz_code', 'foreign_case', 'additional_note'];
+    private const SHARED_FIELDS = ['ossz_code', 'foreign_case', 'slovak_case', 'additional_note'];
 
     /** Nezamyká se nikdy: bez nich nejde podat opravné podání. */
     private const ALWAYS_EDITABLE = ['decision_number', 'correction'];
@@ -84,6 +84,7 @@ final readonly class SicknessCaseService
         'ossz_code' => 'int',
         'decision_number' => 'text',
         'foreign_case' => 'bool',
+        'slovak_case' => 'bool',
         'correction' => 'bool',
         'incapacity_from' => 'date',
         'incapacity_to' => 'date',

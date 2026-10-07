@@ -74,6 +74,8 @@ export interface PayrollSicknessCase {
   ossz_code: number
   decision_number: string | null
   foreign_case: number
+  /** Slovenská neschopenka: NEMPRI ji hlásí jako zahraniční, HZUPN jako českou (N). */
+  slovak_case: number
   correction: number
   incapacity_from: string
   incapacity_to: string | null

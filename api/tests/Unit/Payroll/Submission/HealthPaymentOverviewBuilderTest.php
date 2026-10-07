@@ -166,6 +166,42 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         }
     }
 
+    /**
+     * ZP-03 (W2): výpis přehledů po pojišťovnách. Nesouhlas osob a závazku
+     * u jedné pojišťovny ji vyřadí do `failures`, přehled druhé se sestaví;
+     * dřív spadl celý výpis.
+     */
+    public function testReportIsolatesTheInsurerThatCannotBeBuilt(): void
+    {
+        $source = $this->source();
+        $source['statutory_result']['people'] = array_values(array_filter(
+            $source['statutory_result']['people'],
+            static fn (array $person): bool => $person['employee_id'] !== 28,
+        ));
+
+        $report = $this->builder->buildReport(41, $source);
+
+        self::assertSame(['111'], array_map(
+            static fn ($overview): string => $overview->insurerCode,
+            $report['overviews'],
+        ));
+        self::assertCount(1, $report['failures']);
+        self::assertSame('201', $report['failures'][0]->insurerCode);
+        self::assertSame('health_insurance_totals_mismatch', $report['failures'][0]->code);
+        self::assertInstanceOf(HealthInsuranceOverviewException::class, $report['failures'][0]->cause);
+
+        try {
+            $this->builder->build(41, $source);
+            self::fail('Přísné sestavení všech pojišťoven musí dál selhat.');
+        } catch (HealthInsuranceOverviewException $exception) {
+            self::assertSame('health_insurance_totals_mismatch', $exception->validationCode);
+        }
+
+        $intact = $this->builder->buildReport(41, $this->source());
+        self::assertCount(2, $intact['overviews']);
+        self::assertSame([], $intact['failures']);
+    }
+
     public function testRejectsRevisionThatIsNotCurrentAndApproved(): void
     {
         $source = $this->source();

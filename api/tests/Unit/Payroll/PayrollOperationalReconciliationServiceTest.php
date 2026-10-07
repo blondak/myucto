@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll;
 
 use MyInvoice\Service\Payroll\PayrollOperationalReconciliationService;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceOverviewException;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewFailure;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollOperationalReconciliationServiceTest extends TestCase
@@ -91,6 +93,28 @@ final class PayrollOperationalReconciliationServiceTest extends TestCase
         self::assertSame('payment:settlement:incoming', $axes[1]['key']);
         self::assertSame('match', $axes[1]['status']);
         self::assertSame(0, $axes[1]['difference_minor']);
+    }
+
+    /**
+     * ZP-03 (W2): pojišťovna, jejíž přehled nešel sestavit, je blokovaná sama
+     * (`health:liability:i<kód>`) a výpis nehlásí, že pojišťovna v revizi není.
+     */
+    public function testBlockedInsurerIsReportedOnItsOwnAxis(): void
+    {
+        $axes = $this->invoke('healthSection', [9, [
+            'overviews' => [],
+            'failures' => [new HealthPaymentOverviewFailure(
+                '201',
+                'health_insurance_totals_mismatch',
+                'Součet osob pojišťovny 201 nesouhlasí.',
+                new HealthInsuranceOverviewException('health_insurance_totals_mismatch', 'x'),
+            )],
+        ]]);
+
+        self::assertCount(1, $axes);
+        self::assertSame('health:liability:i201', $axes[0]['key']);
+        self::assertSame('blocked', $axes[0]['status']);
+        self::assertSame('i201', $axes[0]['category']);
     }
 
     public function testJmhzOlderRevisionDiffersAndCurrentRejectionBlocks(): void

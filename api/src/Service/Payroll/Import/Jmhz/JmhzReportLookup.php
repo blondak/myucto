@@ -38,6 +38,24 @@ final class JmhzReportLookup
     }
 
     /**
+     * Má vztah přijatý (nebo už ukončený) záměr uplatňovat slevu na pojistném
+     * zaměstnavatele (OZUSPOJ)?
+     */
+    public function hasAcceptedDiscountIntent(int $supplierId, string $environment, int $employmentId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_discount_intents
+              WHERE supplier_id = ? AND environment = ? AND employment_id = ?
+                AND status IN ("accepted", "ended")
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $environment, $employmentId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
      * Nejdřívější mzdový běh MyÚčta v roce (zrušené běhy se nepočítají).
      */
     public function firstRunPeriod(int $supplierId, int $year): ?string

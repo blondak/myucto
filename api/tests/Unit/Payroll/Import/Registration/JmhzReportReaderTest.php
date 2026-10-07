@@ -76,6 +76,21 @@ final class JmhzReportReaderTest extends TestCase
      * NRO-02: vyloučené dny § 18 odst. 7 jsou 10366, ne úhrn vyloučených dob
      * 10357. Měsíc neplaceného volna má 10357 = 0 a 10366 = 31.
      */
+    /** PRE-03 (W2): příznak slevy zaměstnavatele (10372) předchozího programu se čte. */
+    public function testEmployerDiscountFlagIsRead(): void
+    {
+        $xml = JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2);
+        self::assertFalse($this->reader->read($xml)->forms[0]->employerDiscount);
+
+        $with = str_replace(
+            '<form:slevaZamestnavateleEvidovana>false</form:slevaZamestnavateleEvidovana>',
+            '<form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>',
+            $xml,
+        );
+        self::assertNotSame($xml, $with);
+        self::assertTrue($this->reader->read($with)->forms[0]->employerDiscount);
+    }
+
     public function testSection18ExcludedDaysAreReadFrom10366(): void
     {
         $xml = JmhzReportFixtures::withExcludedDays(

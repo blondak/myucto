@@ -125,6 +125,58 @@ enum SicknessBenefitKind: string
     }
 
     /**
+     * Co je s číslem rozhodnutí špatně podle kontrol NEMPRI25 č. 2 a 3: chybí
+     * povinné, nesmí tam být, nebo nemá tvar druhu dávky. `null` = je v pořádku.
+     *
+     * Jediné místo pravidla: volá ho validátor věty i předkontrola služby před
+     * sestavením věty, aby účetní dostala tutéž srozumitelnou hlášku dřív, než
+     * věta vůbec vznikne. Zahraniční případ číslo z českého systému mít nemusí,
+     * a tak se pro něj tvar nehlídá. PPM s důvodem převzetí do péče vlastní
+     * zákaz čísla hlídá žádost o dávku (jiný kód), tady proto prochází.
+     *
+     * @return array{code:string,message:string}|null
+     */
+    public function decisionNumberProblem(
+        ?string $number,
+        bool $hasCareReason,
+        bool $foreignCase,
+    ): ?array {
+        $requirement = $this->decisionNumberRequirement($hasCareReason);
+        if ($requirement === self::DECISION_FORBIDDEN) {
+            if ($number !== null && $this !== self::Ppm) {
+                return [
+                    'code' => 'nempri_decision_number_forbidden',
+                    'message' => 'U tohoto druhu dávky se číslo rozhodnutí nevyplňuje. Smažte ho v případu dávky.',
+                ];
+            }
+
+            return null;
+        }
+        if ($number === null) {
+            if ($requirement === self::DECISION_REQUIRED && !$foreignCase) {
+                return [
+                    'code' => 'nempri_decision_number_missing',
+                    'message' => 'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
+                        . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
+                        . 'Výjimkou je jen zahraniční případ.',
+                ];
+            }
+
+            return null;
+        }
+        if (!$foreignCase && preg_match($this->decisionNumberPattern(), $number) !== 1) {
+            return [
+                'code' => 'nempri_decision_number_format_invalid',
+                'message' => 'Číslo rozhodnutí nemá tvar, který ČSSZ u dávky ' . $this->value . ' kontroluje '
+                    . '(NEM: písmeno a 6 až 7 číslic nebo 10 číslic; PPM končí písmenem M, OSE N nebo Z, '
+                    . 'OPP T, DLO L, vždy se sedmimístným číslem a volitelnou předponou ICPE).',
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Tvar čísla rozhodnutí podle kontroly č. 2. U NEM `Xnnnnnnn` (číslo
      * z papírové neschopenky) nebo `YYMMDDNNNN`; u ostatních druhů sedmimístné
      * pořadové číslo s písmenem druhu dávky (PPM M, OSE N nebo Z, OPP T, DLO L)

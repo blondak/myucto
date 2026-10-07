@@ -104,6 +104,7 @@ function sicknessCase(overrides: Record<string, unknown> = {}) {
     ossz_code: 115,
     decision_number: 'A1234567',
     foreign_case: 0,
+    slovak_case: 0,
     correction: 0,
     incapacity_from: '2026-08-01',
     incapacity_to: null,

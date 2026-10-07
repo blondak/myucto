@@ -7872,6 +7872,7 @@
           "jmhz_employer_part_time_discount_activity_unsupported": "Slevu za kratší úvazek lze uplatnit jen u pracovního poměru."
         },
         "health_load_failed": "Měsíční přehledy zdravotních pojišťoven se nepodařilo načíst.",
+        "health_insurer_failed": "Přehled pojišťovny {insurer} nejde sestavit: {message}",
         "health_download_failed": "Měsíční přehled zdravotní pojišťovny se nepodařilo připravit nebo stáhnout.",
         "health_send_failed": "Přehled se nepodařilo připravit k podání datovou schránkou.",
         "health_download_official": "Stáhnout PDF/XML",
@@ -10713,6 +10714,7 @@
       "form": {
         "correction": "Opravné podání",
         "foreignCase": "Zahraniční případ (rozhodnutí mimo ČR a SR)",
+        "slovakCase": "Slovenský případ (NEMPRI ho hlásí jako zahraniční, HZUPN jako český)",
         "additionalNote": "Další sdělení pro OSSZ",
         "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného a dlouhodobého ošetřovného povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
         "smallScopeIncome": "Příjem ze zaměstnání malého rozsahu (Kč)",

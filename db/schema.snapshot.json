@@ -951,7 +951,8 @@
         "1967_payroll_sickness_case_document_status.sql",
         "1968_payroll_health_insurance_number_identifier.sql",
         "1969_payroll_eldp_pension_status.sql",
-        "1970_payroll_discount_intent_predecessor.sql"
+        "1970_payroll_discount_intent_predecessor.sql",
+        "1971_payroll_sickness_case_slovak.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -15761,6 +15762,7 @@
                 "school_name": "varchar(200) NULL DEFAULT NULL",
                 "shared_household": "tinyint(1) NULL DEFAULT NULL",
                 "shift_hours_last_day": "decimal(4,2) NULL DEFAULT NULL",
+                "slovak_case": "tinyint(1) NOT NULL DEFAULT 0",
                 "small_scope_income_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "source": "enum('myucto','predecessor') NOT NULL DEFAULT 'myucto'",
                 "starts_maternity": "tinyint(1) NULL DEFAULT NULL",
