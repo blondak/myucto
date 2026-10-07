@@ -631,13 +631,11 @@ final class JmhzEldpEvidenceBuilder
                 'section18_days_provenance' => $section18['provenance'] ?? [],
                 /*
                  * Odečítané doby (10375, 10462–10469) se týkají VÝHRADNĚ dob
-                 * po dosažení důchodového věku. Aplikace důchodový věk nezná —
-                 * nepočítá ho ani neeviduje — takže je nemá z čeho odvodit.
-                 * Roční evidenční list je proto vykazuje jen proti výslovnému
-                 * potvrzení mzdové účetní (`deducted_days_none`); měsíční
-                 * ordinary řez žádné takové potvrzení nemá, a `null` tady
-                 * znamená NEUVEDENO, ne nulu. Element `odecitaneDny` je v XSD
-                 * nepovinný, takže se do hlášení nezapíše.
+                 * po dosažení důchodového věku (kód D). Měsíc s kódem D a
+                 * nenulovými odečtenými dobami se výš zastaví
+                 * (`jmhz_eldp_deducted_days_unsupported`), takže sem dojde jen
+                 * sekce, která žádné nemá; `null` znamená NEUVEDENO. Element
+                 * `odecitaneDny` je v XSD nepovinný a do hlášení se nezapíše.
                  */
                 'deducted_days_total' => null,
             ]],

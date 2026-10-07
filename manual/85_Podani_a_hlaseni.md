@@ -1397,7 +1397,11 @@ vyměřovací základ pro pojistné; měsíce po dosažení maxima jsou dobou po
 Skončí-li vztah a zaměstnanec u vás ve stejném roce do tří měsíců znovu
 nastoupí, evidenční list se neuzavírá a pokračuje dalšími řádky. Aplikace vede
 list za pracovní vztah a oba vztahy do jednoho listu nespojí; v takovém případě
-přípravu zastaví a list podejte mimo aplikaci.
+přípravu zastaví a list podejte mimo aplikaci. Totéž platí pro **nový list po
+podání žádosti o invalidní důchod** (§ 39 odst. 5 zákona č. 582/1991 Sb. ve
+znění do 31. 12. 2025): zůstane-li zaměstnanec po podání žádosti v zaměstnání,
+zakládá se mu nový evidenční list. Aplikace den podání žádosti neeviduje
+a list nerozdělí, takový evidenční list proto podejte mimo aplikaci.
 
 ### Důchodové údaje zaměstnance
 

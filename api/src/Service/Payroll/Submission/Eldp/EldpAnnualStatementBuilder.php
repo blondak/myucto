@@ -67,8 +67,12 @@ use Psr\Clock\ClockInterface;
  *   v § 38, stojí lhůta **3 kalendářní roky**. Do listu se proto nezapisuje:
  *   uchovávací lhůty modul drží na jednom místě, v retenčním katalogu
  *   (kategorie `PENSION_EVIDENCE_SHEETS`), ne v jednotlivých sestavovačích.
- * - **Odečítané doby** (10375, 10462–10469): nula je podmíněná výslovným
- *   potvrzením mzdové účetní, ne výpočtem.
+ * - **Nový list po žádosti o invalidní důchod** (§ 39 odst. 5 zákona
+ *   č. 582/1991 Sb. ve znění do 31. 12. 2025): zůstane-li občan v zaměstnání
+ *   po podání žádosti o invalidní důchod, zaměstnavatel mu založí nový
+ *   evidenční list. Den podání žádosti mzdová revize nenese a modul vede
+ *   jediný list za vztah a rok, takže takový list nerozdělí; podává se mimo
+ *   aplikaci (popsáno v manuálu, kapitola 85.13).
  *
  * ## Důchodové údaje zaměstnance: výslovné potvrzení
  *
