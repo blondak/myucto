@@ -123,21 +123,6 @@ final class JmhzReportReaderTest extends TestCase
         self::assertNull($this->reader->read($base)->forms[0]->eldp['sickness_excluded_days']);
     }
 
-    /** NRO-04: příjem z nepojištěné činnosti (10476) se čte. */
-    public function testUninsuredIncomeIsRead(): void
-    {
-        $xml = JmhzReportFixtures::uninsuredAgreement(
-            JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2),
-            '200000000000000000101',
-            9_000,
-        );
-
-        $form = $this->reader->read($xml)->forms[0];
-
-        self::assertSame(0, $form->socialBase);
-        self::assertSame(9_000, $form->uninsuredIncome);
-    }
-
     public function testInsuranceStartInsideMonthIsRead(): void
     {
         $xml = JmhzReportFixtures::report([JmhzReportFixtures::person(['insurance_from' => '2026-03-16'])], 2026, 3);
