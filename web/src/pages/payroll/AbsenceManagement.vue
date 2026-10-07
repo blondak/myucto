@@ -837,14 +837,25 @@ function showSicknessNotice(outcome: PayrollAbsenceSicknessCaseOutcome | null | 
     ? t(`payroll.sicknessCases.benefitKinds.${outcome.benefit_kind}`)
     : ''
   const message = reasonText(outcome.reason_code, outcome.message)
-  const text = outcome.outcome === 'created'
+  // Založený případ, kterému chybí údaj (hodiny prvního dne), hlásí výzvu
+  // k doplnění; bez ní by NEMPRI z případu neprošlo.
+  // Událost z doby předchozího programu: podal-li podání on, rozhodne účetní.
+  const predecessorPeriod = outcome.outcome === 'created' && outcome.reason_code === 'sickness_case_predecessor_period'
+  const incomplete = outcome.outcome === 'created' && Boolean(outcome.reason_code) && !predecessorPeriod
+  let text = outcome.outcome === 'created'
     ? (outcome.nempri_due_on
         ? t('payroll.sicknessCases.absenceNotice.created', { kind, due: formatDate(outcome.nempri_due_on) })
         : t('payroll.sicknessCases.absenceNotice.createdNoDue', { kind }))
     : t(`payroll.sicknessCases.absenceNotice.${outcome.outcome}`, { kind, message })
+  if (incomplete) {
+    text += ' ' + t('payroll.sicknessCases.absenceNotice.incomplete', { kind, message })
+  }
+  if (predecessorPeriod) {
+    text += ' ' + t('payroll.sicknessCases.absenceNotice.predecessorPeriod', { kind, message })
+  }
   sicknessNotice.value = {
     text,
-    warning: outcome.outcome === 'skipped' || outcome.outcome === 'kept',
+    warning: outcome.outcome === 'skipped' || outcome.outcome === 'kept' || incomplete || predecessorPeriod,
   }
 }
 

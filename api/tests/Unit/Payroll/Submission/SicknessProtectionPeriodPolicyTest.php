@@ -111,6 +111,49 @@ final class SicknessProtectionPeriodPolicyTest extends TestCase
         );
     }
 
+    /**
+     * DPN-08, § 15 odst. 4 písm. a): poživateli starobního důchodu (kód 1)
+     * a invalidního důchodu třetího stupně (kód 2) ochranná lhůta neplyne.
+     * Invalidní důchod prvního nebo druhého stupně (kód 8) ji nevylučuje.
+     */
+    public function testOldAgeOrThirdDegreeInvalidityPensionerHasNoProtectionPeriod(): void
+    {
+        $this->expectRefused(
+            'sickness_protection_period_excluded',
+            SicknessBenefitKind::Nem,
+            '2026-07-03',
+            $this->context('2020-01-01', '2026-06-30'),
+            ['receives_pension' => 1, 'pension_kind' => '1'],
+        );
+        $this->expectRefused(
+            'sickness_protection_period_excluded',
+            SicknessBenefitKind::Nem,
+            '2026-07-03',
+            $this->context('2020-01-01', '2026-06-30'),
+            ['receives_pension' => '1', 'pension_kind' => '2'],
+        );
+
+        $result = $this->policy->assess(
+            SicknessBenefitKind::Nem,
+            '2026-07-03',
+            $this->context('2020-01-01', '2026-06-30'),
+            ['receives_pension' => 1, 'pension_kind' => '8'],
+        );
+        self::assertSame(SicknessProtectionPeriodPolicy::STATUS_PROTECTION_PERIOD, $result['status']);
+    }
+
+    /** Pobírá-li důchod a druh chybí, nárok se nedomýšlí — politika chce druh. */
+    public function testPensionWithoutKindIsRefusedUntilKindIsKnown(): void
+    {
+        $this->expectRefused(
+            'sickness_protection_period_pension_kind_missing',
+            SicknessBenefitKind::Nem,
+            '2026-07-03',
+            $this->context('2020-01-01', '2026-06-30'),
+            ['receives_pension' => 1, 'pension_kind' => null],
+        );
+    }
+
     /** Ošetřovné, DLO, otcovská ani vyrovnávací příspěvek ochrannou lhůtu nemají. */
     public function testBenefitsWithoutProtectionPeriodAreRefusedAfterEnd(): void
     {

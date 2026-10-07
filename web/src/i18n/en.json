@@ -10563,10 +10563,26 @@
       "statuses": {
         "draft": "Draft",
         "prepared": "Prepared",
-        "submitted": "Sent",
-        "accepted": "Accepted",
+        "submitted": "Partly settled",
+        "accepted": "All settled",
         "rejected": "Rejected",
         "cancelled": "Cancelled"
+      },
+      "documentStatuses": {
+        "pending": "not delivered",
+        "prepared": "prepared, not delivered",
+        "accepted": "accepted by ČSSZ on {date}",
+        "rejected": "rejected: {reason}",
+        "predecessor": "filed by the previous program"
+      },
+      "documents": {
+        "nempri": "NEMPRI",
+        "hzupn": "HZUPN"
+      },
+      "receipt": {
+        "title": "{document} outcome from the ČSSZ protocol",
+        "predecessorHint": "The event falls into the time when payroll was run by the previous payroll program. If that program filed this submission, record it with Filed by the previous program; the delivery date is optional.",
+        "reopenHint": "{document} is recorded as filed by the previous program, so MyÚčto does not prepare it or monitor its deadline. If the previous program did not file it, return it with Not filed by the previous program."
       },
       "actions": {
         "create": "Create case",
@@ -10581,6 +10597,14 @@
         "dispatchHzupn": "Send HZUPN via data box",
         "recordAccepted": "Record acceptance",
         "recordRejected": "Record rejection",
+        "recordAcceptedNempri": "Record NEMPRI acceptance",
+        "recordRejectedNempri": "Record NEMPRI rejection",
+        "recordPredecessorNempri": "NEMPRI filed by the previous program",
+        "recordAcceptedHzupn": "Record HZUPN acceptance",
+        "recordRejectedHzupn": "Record HZUPN rejection",
+        "recordPredecessorHzupn": "HZUPN filed by the previous program",
+        "reopenPredecessorNempri": "NEMPRI not filed by the previous program",
+        "reopenPredecessorHzupn": "HZUPN not filed by the previous program",
         "addWorkInterval": "Add interval",
         "removeWorkInterval": "Remove",
         "addCareInterval": "Add care days",
@@ -10594,6 +10618,8 @@
         "probableIncomeNoSuggestion": "The employment has no agreed monthly wage on the event date to base a suggestion on. Enter the amount manually.",
         "incapacityEndRequired": "The end-of-incapacity report can only be filed once the incapacity has ended. Fill in the end date.",
         "alreadyPrepared": "The submission is already prepared. Send it with Send via data box, or file a correction with the decision number.",
+        "documentSettled": "The submission is settled. It can only be prepared again as a correction (Corrective submission in the case editor).",
+        "documentByPredecessor": "The previous payroll program filed this submission, so MyÚčto does not prepare it.",
         "receiptDateRequired": "Fill in the date the submission was delivered to the authority, from the protocol.",
         "rejectionReasonRequired": "Fill in the rejection reason from the protocol.",
         "endOfIncapacity": "Fill in only after the incapacity has ended. The authority pays the final benefit from these values.",
@@ -10679,7 +10705,26 @@
         "returnedYes": "Yes",
         "returnedNo": "No",
         "returnReason": "Reason for not returning",
-        "returnReasonDate": "Date the reason took effect"
+        "returnReasonDate": "Date the reason took effect",
+        "pensionKind": "Pension type (code)",
+        "pensionKindHint": "Code from the ČSSZ pension type code list, the same as in the employee registration: 1 old-age, 2 third-degree invalidity, 8 first- or second-degree invalidity. No protection period follows the end of employment for a recipient of an old-age or third-degree invalidity pension.",
+        "withinSchoolHolidays": "The employment falls entirely within school holidays",
+        "startsMaternity": "Starts maternity benefit",
+        "childBirthDate": "Child's date of birth",
+        "transferredOtherWork": "Transferred to other work",
+        "transferredOn": "Transfer date",
+        "transferReason": "Reason for the transfer",
+        "transferReasonHint": "If the employee was transferred because of pregnancy, maternity or breastfeeding, the decisive period may be set to the transfer date when that is more favourable (section 19(6) of Act No. 187/2006 Coll.).",
+        "transferReasons": {
+          "pregnancy": "Pregnancy",
+          "maternity": "Maternity",
+          "breastfeeding": "Breastfeeding"
+        },
+        "dloBasisTitle": "Payout data for long-term care benefit",
+        "dloBasisHint": "Fill in for continuation and end: whether the employee had leave during the benefit period and when, and with scheduled shifts their schedule.",
+        "dloHasLeave": "Had leave",
+        "dloLeavePeriods": "Leave periods",
+        "dloShiftSchedule": "Schedule of planned shifts"
       },
       "errorFix": {
         "where": "Fix for {name}:",
@@ -10749,7 +10794,8 @@
       },
       "origin": {
         "fromAbsence": "Created from the approved absence. The NEMPRI deadline is monitored from the day of the event.",
-        "openAbsences": "Open absences"
+        "openAbsences": "Open absences",
+        "predecessor": "Event from the time of the previous payroll program. A takeover records a submission whose deadline began before the first payroll month in MyÚčto as filed by the previous program; for an approved absence you record it yourself. Return anything the previous program did not file with Not filed by the previous program and MyÚčto will monitor it."
       },
       "longTermCare": {
         "title": "Employer decision on long-term care",
@@ -10769,6 +10815,9 @@
         "cancelled": "The draft sickness benefit case was cancelled together with the absence.",
         "kept": "The sickness benefit case already has a submission and was kept: {message}",
         "skipped": "No sickness benefit case was created: {message}",
+        "shortened": "The cancelled absence shortened the sickness benefit case ({kind}) to the day before it.",
+        "incomplete": "The sickness benefit case ({kind}) needs completing: {message}",
+        "predecessorPeriod": "The sickness benefit case ({kind}) needs your decision: {message}",
         "open": "Open benefit cases"
       }
     },
@@ -11529,7 +11578,7 @@
       "nempri_maternity_care_child_missing": "When the child was taken into care, the application must name that child.",
       "sickness_event_after_employment": "The insured event began after the employment ended and this benefit type has no protection period. Check the event start date or the employment end date.",
       "sickness_event_outside_protection_period": "The insured event began after the protection period following the end of employment (section 15 of Act No. 187/2006 Coll.). No entitlement arose from this employment.",
-      "sickness_protection_period_excluded": "No protection period follows from this employment (agreement to complete a job, small-scope employment or a student during holidays). No entitlement arose after the employment ended.",
+      "sickness_protection_period_excluded": "No protection period follows from this employment (agreement to complete a job, small-scope employment, a student during holidays, or a recipient of an old-age or third-degree invalidity pension). No entitlement arose after the employment ended.",
       "hzupn_not_for_benefit_kind": "The notice of ending incapacity for work is only filed for sickness benefit.",
       "nempri_within_wage_compensation_window": "The incapacity for work or quarantine did not exceed 14 calendar days. It is fully covered by wage compensation (section 192 of the Labour Code) and sickness benefit is only paid from day 15 (section 26(1) of Act No. 187/2006 Coll.), so nothing is sent to the Czech Social Security Administration. If the incapacity lasted longer, correct its end date in the case.",
       "hzupn_return_before_incapacity": "The day of return to work cannot precede the start of the incapacity for work.",
@@ -11687,7 +11736,22 @@
       "sickness_benefit_kind_invalid": "The benefit type must be one of NEM, VPM, OPP, PPM, OSE or DLO from the ČSSZ code list.",
       "sickness_case_cancelled": "A submission cannot be prepared from a cancelled case.",
       "sickness_case_conflict": "Someone else changed this case in the meantime. Reload it and repeat the change.",
-      "sickness_case_not_editable": "An accepted or cancelled case can no longer be edited. File the correction as a corrective submission referencing the decision number.",
+      "sickness_case_not_editable": "A cancelled case can no longer be edited. If the event occurred again, create a new case.",
+      "sickness_case_document_settled": "The submission is already settled (accepted, or filed by the previous program), so its data no longer change. File a correction instead: tick Corrective submission and fill in the decision number.",
+      "sickness_receipt_already_recorded": "The acceptance of this submission is already recorded. Another acceptance belongs only to a corrective submission.",
+      "sickness_receipt_already_settled": "The submission is already settled; a rejection or filing by the previous program cannot be recorded for it.",
+      "sickness_receipt_predecessor": "This submission was filed by the previous payroll program; acceptance is recorded only for submissions sent from MyÚčto.",
+      "sickness_receipt_predecessor_not_takeover": "Filing by the previous program can only be recorded on a case taken over from the previous payroll program.",
+      "sickness_receipt_reopen_not_predecessor": "Only a submission recorded as filed by the previous program can be returned for filing. An outcome of a submission from MyÚčto is corrected by a corrective submission.",
+      "sickness_case_predecessor_period": "The submission deadline began while payroll was run by the previous payroll program. If that program filed it, record it on the case with Filed by the previous program; otherwise prepare and file it from MyÚčto.",
+      "sickness_document_handled_by_predecessor": "The previous payroll program filed this submission for the event, so MyÚčto does not file it again.",
+      "sickness_transfer_reason_invalid": "The reason for transfer to other work must be pregnancy, maternity or breastfeeding.",
+      "sickness_transfer_reason_without_transfer": "The transfer reason is filled in only for a transfer to other work. Tick the transfer and fill in its date.",
+      "sickness_protection_period_pension_kind_missing": "The employee receives a pension but its type is missing on the case. Without it, it cannot be assessed whether a protection period follows the end of employment. Fill in the pension type.",
+      "dlo_basis_not_in_kind": "Leave and the shift schedule are filled in as payout data only for long-term care benefit.",
+      "dlo_leave_periods_without_leave": "Leave periods belong to \"Had leave\". Tick it, or remove the periods.",
+      "dlo_shift_schedule_without_planned_shifts": "The shift schedule belongs to \"Had shifts scheduled on the benefit days\". Tick it, or remove the schedule.",
+      "nempri_worked_hours_missing": "The employee worked the whole shift on the first day of incapacity, but neither the shift nor the schedule for that day is recorded. Fill in the working hours and hours worked on the case.",
       "sickness_case_overlaps": "This employment already has a recorded case of the same benefit type overlapping this period. ČSSZ would not be able to match two submissions for the same event.",
       "sickness_case_period_invalid": "The end date of the insured event cannot be earlier than its start date.",
       "sickness_date_invalid": "The entered date has an invalid format. Enter it as YYYY-MM-DD.",
@@ -11697,7 +11761,7 @@
       "sickness_incapacity_from_missing": "The case must have the date the insured event began.",
       "sickness_notification_window_invalid": "The filing window came out empty. Check the dates of the insured event.",
       "sickness_ossz_code_missing": "The company is missing the three-digit OSSZ workplace code from the ČSSZ code list. Fill it in under Payroll settings, Employer section, or enter it directly on the case.",
-      "sickness_receipt_outcome_invalid": "The submission outcome must be accepted, rejected or cancelled.",
+      "sickness_receipt_outcome_invalid": "The submission outcome must be accepted, rejected, filed by the previous program or cancelled.",
       "sickness_submission_not_prepared": "The submission has not been prepared yet, so there is nothing to send. First choose Prepare on the case.",
       "sickness_supplier_missing": "The company for this benefit case was not found.",
       "sickness_variable_symbol_missing": "The payroll office of the employment is missing its ČSSZ variable symbol. Fill it in under Payroll settings, Employer, at the employment's office and prepare the submission again.",

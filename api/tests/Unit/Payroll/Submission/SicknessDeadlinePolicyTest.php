@@ -134,7 +134,8 @@ final class SicknessDeadlinePolicyTest extends TestCase
     /**
      * § 40 odst. 1 mluví o podpůrčí době „nejdéle 9 kalendářních dnů" — je to
      * horní mez. Skončila-li potřeba ošetřování dřív, běží lhůta od skutečného
-     * skončení, ne od uplynutí devíti dnů.
+     * skončení, ne od uplynutí devíti dnů. Oznámení se předává PO skončení
+     * péče (§ 97 odst. 1 věta čtvrtá), tedy nejdřív den po posledním dni péče.
      */
     public function testCareBenefitUsesActualEndWhenShorterThanSupportPeriod(): void
     {
@@ -144,7 +145,58 @@ final class SicknessDeadlinePolicyTest extends TestCase
             '2026-09-04',
         );
 
-        self::assertSame('2026-09-04', $window->earliestNotificationOn);
+        self::assertSame('2026-09-05', $window->earliestNotificationOn);
+        // Sobota 5. 9. se posouvá na pondělí 7. 9.
+        self::assertSame('2026-09-07', $window->dueOn);
+    }
+
+    /** DPN-09: péče skončila 10. 6., oznámení nejdřív 11. 6. */
+    public function testCareBenefitEndedEarlyIsDueTheDayAfterCareEnded(): void
+    {
+        $window = $this->policy->forNempri(
+            SicknessBenefitKind::Ose,
+            '2026-06-08',
+            '2026-06-10',
+        );
+
+        self::assertSame('2026-06-11', $window->earliestNotificationOn);
+        self::assertSame('2026-06-11', $window->dueOn);
+    }
+
+    /**
+     * DPN-06, § 26 odst. 3: odpracoval-li zaměstnanec v den vzniku celou směnu,
+     * je prvním dnem neschopnosti až následující den. DPN 8. až 22. 6. má pak
+     * jen 14 dnů, nemocenské nenáleží a NEMPRI nevzniká.
+     */
+    public function testWorkedFirstDayShiftsIncapacityStartForNempriDuty(): void
+    {
+        self::assertTrue($this->policy->nempriRequired(
+            SicknessBenefitKind::Nem,
+            '2026-06-08',
+            '2026-06-22',
+        ));
+        self::assertFalse($this->policy->nempriRequired(
+            SicknessBenefitKind::Nem,
+            '2026-06-08',
+            '2026-06-22',
+            workedFirstDay: true,
+        ));
+    }
+
+    /** DPN-06: s odpracovaným prvním dnem začíná lhůta NEMPRI o den později. */
+    public function testWorkedFirstDayShiftsNempriDeadlineByOneDay(): void
+    {
+        $plain = $this->policy->forNempri(SicknessBenefitKind::Nem, '2026-06-08', '2026-06-30');
+        $worked = $this->policy->forNempri(
+            SicknessBenefitKind::Nem,
+            '2026-06-08',
+            '2026-06-30',
+            workedFirstDay: true,
+        );
+
+        self::assertSame('2026-06-22', $plain->earliestNotificationOn);
+        self::assertSame('2026-06-23', $worked->earliestNotificationOn);
+        self::assertSame('2026-06-23', $worked->dueOn);
     }
 
     public function testLoneCarerGetsLongerCareSupportPeriod(): void

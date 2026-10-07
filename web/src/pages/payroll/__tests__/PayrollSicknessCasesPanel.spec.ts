@@ -134,8 +134,15 @@ function sicknessCase(overrides: Record<string, unknown> = {}) {
     shift_hours_last_day: null,
     additional_note: null,
     status: 'draft',
-    accepted_on: null,
-    rejection_reason: null,
+    nempri_status: 'pending',
+    nempri_accepted_on: null,
+    nempri_rejection_reason: null,
+    hzupn_status: 'pending',
+    hzupn_accepted_on: null,
+    hzupn_rejection_reason: null,
+    cancelled: 0,
+    source: 'myucto',
+    external_reference: null,
     nempri_submission_id: null,
     hzupn_submission_id: null,
     row_version: 1,
@@ -569,13 +576,104 @@ describe('PayrollSicknessCasesPanel', () => {
   it('nedovolí zapsat přijetí bez dne doručení', async () => {
     const wrapper = await mountPanel()
 
-    expect(actionsOf(wrapper, 'accept')?.disabled).toBe(true)
+    expect(actionsOf(wrapper, 'accept-nempri')?.disabled).toBe(true)
 
-    await wrapper.find('[data-test="sickness-case-accepted-on-7"]')
+    await wrapper.find('[data-test="sickness-case-accepted-on-7-nempri"]')
       .setValue('2026-08-18')
     await flushPromises()
 
-    expect(actionsOf(wrapper, 'accept')?.disabled).toBe(false)
+    expect(actionsOf(wrapper, 'accept-nempri')?.disabled).toBe(false)
+    // Den doručení NEMPRI neodemkne zápis HZUPN — každé podání má svůj.
+    expect(actionsOf(wrapper, 'accept-hzupn')?.disabled).toBe(true)
+  })
+
+  /**
+   * PRE-01: po přijetí NEMPRI zůstává případ upravitelný a HZUPN má vlastní
+   * zápis výsledku; přijetí se posílá s tiskopisem.
+   */
+  it('po přijetí NEMPRI nabídne úpravu a výsledek HZUPN', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({
+      status: 'submitted',
+      nempri_status: 'accepted',
+      nempri_accepted_on: '2026-08-16',
+      incapacity_to: '2026-08-20',
+    })]))
+    m.recordReceipt.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+
+    expect(wrapper.get('[data-test="sickness-case-documents-7"]').text()).toContain('documentStatuses.accepted')
+    expect(wrapper.find('[data-test="sickness-case-receipt-7-nempri"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="sickness-case-receipt-7-hzupn"]').exists()).toBe(true)
+    expect(actionsOf(wrapper, 'edit')?.show).not.toBe(false)
+    expect(actionsOf(wrapper, 'prepare-nempri')?.disabled).toBe(true)
+
+    await wrapper.find('[data-test="sickness-case-accepted-on-7-hzupn"]').setValue('2026-08-24')
+    await flushPromises()
+    actionsOf(wrapper, 'accept-hzupn')!.run!()
+    await flushPromises()
+
+    expect(m.recordReceipt).toHaveBeenCalledWith('production', 7, {
+      outcome: 'accepted',
+      document: 'hzupn',
+      accepted_on: '2026-08-24',
+      reason: null,
+    })
+  })
+
+  /**
+   * NEMPRI vedené jako podané předchozím programem jde vrátit k podání
+   * z MyÚčta; jinak by se povinnost přestala hlídat a nešla by připravit.
+   */
+  it('u NEMPRI předchozího programu nabídne vrácení k podání', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({
+      source: 'predecessor',
+      nempri_status: 'predecessor',
+      incapacity_to: '2026-08-20',
+    })]))
+    m.recordReceipt.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('[data-test="sickness-case-reopen-hint-7-nempri"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="sickness-case-accepted-on-7-nempri"]').exists()).toBe(false)
+    expect(actionsOf(wrapper, 'accept-nempri')?.show).toBe(false)
+    expect(actionsOf(wrapper, 'reopen-hzupn')?.show).toBe(false)
+    actionsOf(wrapper, 'reopen-nempri')!.run!()
+    await flushPromises()
+
+    expect(m.recordReceipt).toHaveBeenCalledWith('production', 7, {
+      outcome: 'pending',
+      document: 'nempri',
+      accepted_on: null,
+      reason: null,
+    })
+  })
+
+  /** NX-03: podklady pro výplatu DLO se ukládají s případem. */
+  it('u DLO uloží pracovní volno a rozvrh směn', async () => {
+    m.list.mockResolvedValue(listResponse([sicknessCase({
+      benefit_kind: 'DLO',
+      planned_shifts: 1,
+      dlo_has_leave: 1,
+      dlo_leave_periods: [{ from: '2026-08-05', to: '2026-08-06' }],
+      dlo_shift_schedule: [{ from: '2026-08-03', to: '2026-08-07' }],
+    })]))
+    m.update.mockResolvedValue(sicknessCase())
+    const wrapper = await mountPanel()
+
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.edit'))!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="sickness-case-dlo-basis"]').exists()).toBe(true)
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('actions.save'))!
+      .trigger('click')
+    await flushPromises()
+
+    const payload = m.update.mock.calls[0][3]
+    expect(payload.dlo_has_leave).toBe(1)
+    expect(payload.dlo_leave_periods).toEqual([{ from: '2026-08-05', to: '2026-08-06' }])
+    expect(payload.dlo_shift_schedule).toEqual([{ from: '2026-08-03', to: '2026-08-07' }])
   })
 
   it('zobrazí náhled zmrazené datové věty', async () => {

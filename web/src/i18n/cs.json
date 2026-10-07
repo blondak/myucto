@@ -10563,10 +10563,26 @@
       "statuses": {
         "draft": "Rozpracováno",
         "prepared": "Připraveno",
-        "submitted": "Odesláno",
-        "accepted": "Přijato ČSSZ",
+        "submitted": "Částečně vyřízeno",
+        "accepted": "Vše vyřízeno",
         "rejected": "Odmítnuto",
         "cancelled": "Zrušeno"
+      },
+      "documentStatuses": {
+        "pending": "nedoručeno",
+        "prepared": "připraveno, nedoručeno",
+        "accepted": "přijato ČSSZ {date}",
+        "rejected": "odmítnuto: {reason}",
+        "predecessor": "podal předchozí program"
+      },
+      "documents": {
+        "nempri": "NEMPRI",
+        "hzupn": "HZUPN"
+      },
+      "receipt": {
+        "title": "Výsledek {document} z protokolu ČSSZ",
+        "predecessorHint": "Událost spadá do doby, kdy mzdy vedl předchozí mzdový program. Podal-li toto podání on, zapište to tlačítkem Podal předchozí program; den doručení je nepovinný.",
+        "reopenHint": "{document} je vedené jako podané předchozím programem, MyÚčto ho nepřipravuje a jeho lhůtu nehlídá. Nepodal-li ho předchozí program, vraťte ho tlačítkem Předchozí program nepodal."
       },
       "actions": {
         "create": "Založit případ",
@@ -10581,6 +10597,14 @@
         "dispatchHzupn": "Odeslat HZUPN datovou schránkou",
         "recordAccepted": "Zapsat přijetí",
         "recordRejected": "Zapsat odmítnutí",
+        "recordAcceptedNempri": "Zapsat přijetí NEMPRI",
+        "recordRejectedNempri": "Zapsat odmítnutí NEMPRI",
+        "recordPredecessorNempri": "NEMPRI podal předchozí program",
+        "recordAcceptedHzupn": "Zapsat přijetí HZUPN",
+        "recordRejectedHzupn": "Zapsat odmítnutí HZUPN",
+        "recordPredecessorHzupn": "HZUPN podal předchozí program",
+        "reopenPredecessorNempri": "Předchozí program NEMPRI nepodal",
+        "reopenPredecessorHzupn": "Předchozí program HZUPN nepodal",
         "addWorkInterval": "Přidat interval",
         "removeWorkInterval": "Odebrat",
         "addCareInterval": "Přidat dny péče",
@@ -10594,6 +10618,8 @@
         "probableIncomeNoSuggestion": "Pracovní vztah nemá ke dni události sjednanou měsíční mzdu, ze které by šel návrh spočítat. Zadejte částku ručně.",
         "incapacityEndRequired": "Hlášení při ukončení pracovní neschopnosti se podává až po jejím skončení. Doplňte den skončení.",
         "alreadyPrepared": "Podání už je připravené. Odešlete ho tlačítkem Odeslat datovou schránkou, nebo podejte opravné podání s číslem rozhodnutí.",
+        "documentSettled": "Podání je vyřízené. Znovu ho připravíte jen jako opravné podání (Opravné podání v editoru případu).",
+        "documentByPredecessor": "Toto podání podal předchozí mzdový program, MyÚčto ho nepřipravuje.",
         "receiptDateRequired": "Nejdřív doplňte den doručení podání ČSSZ z protokolu.",
         "rejectionReasonRequired": "Nejdřív doplňte důvod odmítnutí z protokolu.",
         "endOfIncapacity": "Vyplňte až po skončení neschopnosti. Z těchto údajů ČSSZ vyplácí poslední dávku.",
@@ -10679,7 +10705,26 @@
         "returnedYes": "Ano",
         "returnedNo": "Ne",
         "returnReason": "Důvod, proč se nevrátil",
-        "returnReasonDate": "Den, ke kterému důvod nastal"
+        "returnReasonDate": "Den, ke kterému důvod nastal",
+        "pensionKind": "Druh důchodu (kód)",
+        "pensionKindHint": "Kód z číselníku ČSSZ Druh důchodu, stejný jako v přihlášce zaměstnance: 1 starobní, 2 invalidní třetího stupně, 8 invalidní prvního nebo druhého stupně. Poživateli starobního a invalidního důchodu třetího stupně po skončení zaměstnání ochranná lhůta neplyne.",
+        "withinSchoolHolidays": "Zaměstnání spadá výlučně do školních prázdnin",
+        "startsMaternity": "Nastupuje na peněžitou pomoc v mateřství",
+        "childBirthDate": "Den narození dítěte",
+        "transferredOtherWork": "Převedena na jinou práci",
+        "transferredOn": "Den převedení",
+        "transferReason": "Důvod převedení",
+        "transferReasonHint": "Byla-li zaměstnankyně převedena kvůli těhotenství, mateřství nebo kojení, může se rozhodné období určit ke dni převedení, je-li to pro ni výhodnější (§ 19 odst. 6 zákona č. 187/2006 Sb.).",
+        "transferReasons": {
+          "pregnancy": "Těhotenství",
+          "maternity": "Mateřství",
+          "breastfeeding": "Kojení"
+        },
+        "dloBasisTitle": "Podklady pro výplatu dlouhodobého ošetřovného",
+        "dloBasisHint": "Vyplňte u trvání a ukončení: zda měl zaměstnanec v období dávky pracovní volno a kdy, a při rozvržených směnách jejich rozvrh.",
+        "dloHasLeave": "Měl pracovní volno",
+        "dloLeavePeriods": "Období pracovního volna",
+        "dloShiftSchedule": "Rozvrh plánovaných směn"
       },
       "errorFix": {
         "where": "Oprava u osoby {name}:",
@@ -10749,7 +10794,8 @@
       },
       "origin": {
         "fromAbsence": "Založeno ze schválené nepřítomnosti. Lhůta NEMPRI se hlídá ode dne události.",
-        "openAbsences": "Otevřít nepřítomnosti"
+        "openAbsences": "Otevřít nepřítomnosti",
+        "predecessor": "Událost z doby předchozího mzdového programu. Převod vede podání, jehož lhůta začala před prvním měsícem vedení mezd v MyÚčtu, jako podané předchozím programem; u schválené nepřítomnosti to zapíšete sami. Co předchozí program nepodal, vraťte tlačítkem Předchozí program nepodal a MyÚčto to pohlídá."
       },
       "longTermCare": {
         "title": "Rozhodnutí zaměstnavatele o dlouhodobé péči",
@@ -10769,6 +10815,9 @@
         "cancelled": "Rozpracovaný případ dávky se se zrušením nepřítomnosti zrušil.",
         "kept": "Případ dávky už má podání, a proto zůstal: {message}",
         "skipped": "Případ dávky nevznikl: {message}",
+        "shortened": "Zrušená nepřítomnost zkrátila případ dávky ({kind}) na den před sebou.",
+        "incomplete": "Případ dávky ({kind}) je potřeba doplnit: {message}",
+        "predecessorPeriod": "Případ dávky ({kind}) čeká na rozhodnutí: {message}",
         "open": "Otevřít případy dávek"
       }
     },
@@ -11529,7 +11578,7 @@
       "nempri_maternity_care_child_missing": "U převzetí dítěte do péče musí žádost uvést převzaté dítě.",
       "sickness_event_after_employment": "Sociální událost vznikla po skončení zaměstnání a tento druh dávky ochrannou lhůtu nemá. Zkontrolujte den vzniku události nebo skončení vztahu.",
       "sickness_event_outside_protection_period": "Sociální událost vznikla po uplynutí ochranné lhůty po skončení zaměstnání (§ 15 zák. č. 187/2006 Sb.). Nárok z tohoto vztahu nevznikl.",
-      "sickness_protection_period_excluded": "Z tohoto vztahu ochranná lhůta neplyne (dohoda o provedení práce, malý rozsah nebo student o prázdninách). Nárok po skončení zaměstnání nevznikl.",
+      "sickness_protection_period_excluded": "Z tohoto vztahu ochranná lhůta neplyne (dohoda o provedení práce, malý rozsah, student o prázdninách, nebo poživatel starobního či invalidního důchodu třetího stupně). Nárok po skončení zaměstnání nevznikl.",
       "hzupn_not_for_benefit_kind": "Hlášení při ukončení pracovní neschopnosti se podává jen u nemocenského.",
       "nempri_within_wage_compensation_window": "Neschopnost nebo karanténa nepřesáhla 14 kalendářních dnů. Celou ji kryje náhrada mzdy (§ 192 zákoníku práce), nemocenské náleží až od 15. dne (§ 26 odst. 1 zák. č. 187/2006 Sb.), takže se ČSSZ nic nepředává. Trvá-li neschopnost déle, opravte v případu den skončení.",
       "hzupn_return_before_incapacity": "Den návratu do práce nemůže předcházet vzniku pracovní neschopnosti.",
@@ -11687,7 +11736,22 @@
       "sickness_benefit_kind_invalid": "Druh dávky musí být jedna z hodnot NEM, VPM, OPP, PPM, OSE nebo DLO podle číselníku ČSSZ.",
       "sickness_case_cancelled": "Ze zrušeného případu se podání nepřipravuje.",
       "sickness_case_conflict": "Případ mezitím někdo změnil. Načtěte ho znovu a úpravu zopakujte.",
-      "sickness_case_not_editable": "Přijatý ani zrušený případ se už needituje. Opravu podejte jako opravné podání s číslem rozhodnutí.",
+      "sickness_case_not_editable": "Zrušený případ se už needituje. Vznikla-li událost znovu, založte nový případ.",
+      "sickness_case_document_settled": "Podání je už vyřízené (přijaté, nebo podané předchozím programem), takže se jeho údaje nemění. Opravu podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí.",
+      "sickness_receipt_already_recorded": "Přijetí tohoto podání je už zapsané. Další přijetí patří jen k opravnému podání.",
+      "sickness_receipt_already_settled": "Podání je už vyřízené, odmítnutí ani vyřízení předchozím programem k němu zapsat nejde.",
+      "sickness_receipt_predecessor": "Toto podání podal předchozí mzdový program, přijetí se zapisuje jen k podání odeslanému z MyÚčta.",
+      "sickness_receipt_predecessor_not_takeover": "Vyřízení předchozím programem jde zapsat jen u případu převzatého z předchozího mzdového programu.",
+      "sickness_receipt_reopen_not_predecessor": "Zpět k podání jde vrátit jen podání vedené jako podané předchozím programem. Výsledek podání z MyÚčta se opravuje opravným podáním.",
+      "sickness_case_predecessor_period": "Lhůta podání začala běžet ještě v době předchozího mzdového programu. Podal-li ho on, zapište to u případu tlačítkem Podal předchozí program; jinak ho připravte a podejte z MyÚčta.",
+      "sickness_document_handled_by_predecessor": "Toto podání k události podal předchozí mzdový program, MyÚčto ho znovu nepodává.",
+      "sickness_transfer_reason_invalid": "Důvod převedení na jinou práci musí být těhotenství, mateřství, nebo kojení.",
+      "sickness_transfer_reason_without_transfer": "Důvod převedení se vyplňuje jen u převedení na jinou práci. Zaškrtněte převedení a doplňte jeho den.",
+      "sickness_protection_period_pension_kind_missing": "Zaměstnanec pobírá důchod, ale u případu chybí jeho druh. Bez něj nejde posoudit, zda po skončení zaměstnání plyne ochranná lhůta. Doplňte druh důchodu.",
+      "dlo_basis_not_in_kind": "Pracovní volno a rozvrh směn se jako podklad pro výplatu vyplňují jen u dlouhodobého ošetřovného.",
+      "dlo_leave_periods_without_leave": "Období pracovního volna patří k údaji „Měl pracovní volno“. Zaškrtněte ho, nebo období smažte.",
+      "dlo_shift_schedule_without_planned_shifts": "Rozvrh směn patří k údaji „Měl na dny dávky rozvržené směny“. Zaškrtněte ho, nebo rozvrh smažte.",
+      "nempri_worked_hours_missing": "Zaměstnanec v den vzniku neschopnosti odpracoval celou směnu, ale směna ani rozvrh ten den nejsou zapsané. Doplňte u případu pracovní dobu a odpracované hodiny.",
       "sickness_case_overlaps": "Pro tento pracovní vztah už je evidovaný případ téhož druhu dávky, který se s obdobím překrývá. Dvě podání za tutéž událost by ČSSZ nespárovala.",
       "sickness_case_period_invalid": "Den skončení sociální události nesmí předcházet dni jejího vzniku.",
       "sickness_date_invalid": "Zadané datum má neplatný tvar. Zadejte ho ve tvaru RRRR-MM-DD.",
@@ -11697,7 +11761,7 @@
       "sickness_incapacity_from_missing": "Případ musí mít vyplněný den vzniku sociální události.",
       "sickness_notification_window_invalid": "Okno pro podání vyšlo prázdné. Zkontrolujte data sociální události.",
       "sickness_ossz_code_missing": "Firma nemá vyplněný třímístný kód OSSZ podle číselníku pracovišť ČSSZ. Doplňte ho v Nastavení mezd, sekce Zaměstnavatel, nebo ho zadejte přímo u případu.",
-      "sickness_receipt_outcome_invalid": "Výsledek podání musí být přijato, zamítnuto nebo zrušeno.",
+      "sickness_receipt_outcome_invalid": "Výsledek podání musí být přijato, odmítnuto, podáno předchozím programem nebo zrušeno.",
       "sickness_submission_not_prepared": "Podání ještě není připravené, takže není co odeslat. Nejdřív u případu zvolte Připravit.",
       "sickness_supplier_missing": "Firma případu dávky nebyla nalezena.",
       "sickness_variable_symbol_missing": "Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd, Zaměstnavatel, u účtárny vztahu a podání připravte znovu.",

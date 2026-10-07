@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollSicknessCaseAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -16,6 +17,7 @@ use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Response;
 
 /**
@@ -450,6 +452,375 @@ final class PayrollSicknessFullFlowTest extends TestCase
         self::assertStringContainsString('<kodZdravotniPojistovny>205</kodZdravotniPojistovny>', $incoming);
         self::assertStringContainsString('<kodzmeny>P</kodzmeny>', $incoming);
         self::assertStringContainsString('<datumZmeny>2026-07-01</datumZmeny>', $incoming);
+    }
+
+    /**
+     * PRE-01: NEMPRI a HZUPN jsou dvě podání (§ 97 odst. 1–3 zák.
+     * č. 187/2006 Sb.). Dřív zapsané přijetí NEMPRI zamklo celý případ: údaje
+     * pro HZUPN nešly uložit (`sickness_case_not_editable`), prodloužení
+     * neschopnosti založilo druhý případ a lhůta HZUPN zmizela z hlídače.
+     */
+    public function testHzupnCanBePreparedAfterNempriReceiptWasRecorded(): void
+    {
+        $person = $this->sicknessPerson(9, 'Hana Návratová');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
+        $first = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-22', (int) $average['id'], $dpn);
+        self::assertSame('created', $first['sickness_case']['outcome'], json_encode($first['sickness_case']) ?: '');
+        $caseId = (int) $first['sickness_case']['case_id'];
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        $this->cashPayout($person['employee_id']);
+        $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+            'decision_number' => 'A1234567',
+            'daily_working_hours' => '8',
+        ]);
+
+        $receipt = $this->recordReceiptViaApi($caseId, [
+            'outcome' => 'accepted',
+            'document' => 'nempri',
+            'accepted_on' => '2026-06-24',
+        ]);
+        self::assertSame(200, $receipt->getStatusCode(), (string) $receipt->getBody());
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('accepted', $case['nempri_status']);
+        self::assertSame('2026-06-24', $case['nempri_accepted_on']);
+        self::assertSame('pending', $case['hzupn_status']);
+        self::assertSame('submitted', $case['status']);
+
+        // Prodloužení po přijetí NEMPRI patří k téže neschopnosti.
+        $extended = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-23', '2026-06-26', (int) $average['id'], $dpn);
+        self::assertSame('extended', $extended['sickness_case']['outcome'], json_encode($extended['sickness_case']) ?: '');
+        self::assertSame($caseId, (int) $extended['sickness_case']['case_id']);
+
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('2026-06-26', $case['incapacity_to']);
+        $case = $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+            'issued_on' => '2026-06-29',
+            'returned_to_work' => '1',
+            'returned_on' => '2026-06-29',
+            'hours_worked_last_day' => '8',
+            'shift_hours_last_day' => '8',
+            // Editor posílá celý formulář: nezměněné údaje přijatého NEMPRI
+            // uložení neshodí.
+            'daily_working_hours' => '8.00',
+            'decision_number' => 'A1234567',
+        ]);
+        self::assertSame('2026-06-29', $case['returned_on']);
+
+        $hzupn = (string) $this->service(SicknessSubmissionService::class)
+            ->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn)['xml'];
+        self::assertStringContainsString('<datumNavratDoPrace>2026-06-29</datumNavratDoPrace>', $hzupn);
+
+        $watched = [];
+        foreach ($this->service(PayrollDeadlineOverviewService::class)->overview($this->supplierId, self::ENVIRONMENT, 400)['items'] as $item) {
+            if (($item['case_id'] ?? null) === $caseId) {
+                $watched[] = $item['title'];
+            }
+        }
+        self::assertSame(['HZUPN'], $watched);
+    }
+
+    /**
+     * PRE-01: vyřízené podání zamkne jen SVOJE údaje. Změna údaje přijatého
+     * NEMPRI bez opravného podání neprojde, s opravným ano; druhé přijetí
+     * téhož podání jde zapsat jen u opravy.
+     */
+    public function testSettledNempriLocksOnlyItsOwnFieldsUntilCorrection(): void
+    {
+        $person = $this->sicknessPerson(10, 'Rita Opravná');
+        $this->cashPayout($person['employee_id']);
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
+            'incapacity_from' => '2026-06-08',
+            'incapacity_to' => '2026-06-30',
+            'decision_number' => 'A2223334',
+            'daily_working_hours' => '8',
+        ], $this->actors[0]);
+        $caseId = (int) $case['id'];
+        $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'accepted', '2026-06-23', null);
+
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        try {
+            $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+                'daily_working_hours' => '6',
+            ]);
+            self::fail('Údaj přijatého NEMPRI se bez opravného podání nemění.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_case_document_settled', $exception->validationCode);
+        }
+        try {
+            $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'accepted', '2026-06-25', null);
+            self::fail('Druhé přijetí téhož NEMPRI patří jen k opravnému podání.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_receipt_already_recorded', $exception->validationCode);
+        }
+        try {
+            $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn, 'predecessor', null, null);
+            self::fail('Vyřízení předchozím programem jde zapsat jen u převzatého případu.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_receipt_predecessor_not_takeover', $exception->validationCode);
+        }
+
+        $case = $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+            'correction' => '1',
+            'daily_working_hours' => '6',
+        ]);
+        self::assertSame('6.00', $case['daily_working_hours']);
+        $case = $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'accepted', '2026-06-25', null);
+        self::assertSame('2026-06-25', $case['nempri_accepted_on']);
+        self::assertSame('pending', $case['hzupn_status']);
+
+        $case = $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn, 'accepted', '2026-07-02', null);
+        self::assertSame('accepted', $case['status']);
+    }
+
+    /**
+     * Schválení zpětně zapsané neschopnosti z doby před prvním měsícem vedení
+     * mezd v MyÚčtu nedokládá, že ji předchozí program podal. Dřív ji případ
+     * rovnou vedl jako podanou předchozím programem, povinnost se přestala
+     * hlídat a NEMPRI nešlo připravit. Teď je podání hlídané a vyřízení
+     * předchozím programem se jen nabídne; zapsané jde i vrátit.
+     */
+    public function testApprovedAbsenceBeforeStartPeriodOnlyOffersPredecessor(): void
+    {
+        $person = $this->sicknessPerson(16, 'Věra Zpětná');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state SET start_period = "2026-07-01" WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
+
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-26', (int) $average['id'], $dpn);
+        $outcome = $approved['sickness_case'];
+        self::assertSame('created', $outcome['outcome'], json_encode($outcome) ?: '');
+        self::assertSame('sickness_case_predecessor_period', $outcome['reason_code']);
+        self::assertSame('2026-06-22', $outcome['nempri_due_on']);
+        $caseId = (int) $outcome['case_id'];
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('predecessor', $case['source']);
+        self::assertSame('pending', $case['nempri_status']);
+        self::assertSame('pending', $case['hzupn_status']);
+
+        $case = $cases->recordReceipt($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri, 'predecessor', null, null);
+        self::assertSame('predecessor', $case['nempri_status']);
+
+        $reopened = $this->recordReceiptViaApi($caseId, ['outcome' => 'pending', 'document' => 'nempri']);
+        self::assertSame(200, $reopened->getStatusCode(), (string) $reopened->getBody());
+        $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('pending', $case['nempri_status']);
+        $watched = [];
+        foreach ($this->service(PayrollDeadlineOverviewService::class)->overview($this->supplierId, self::ENVIRONMENT, 400)['items'] as $item) {
+            if (($item['case_id'] ?? null) === $caseId) {
+                $watched[] = $item['title'];
+            }
+        }
+        self::assertContains('NEMPRI', $watched);
+    }
+
+    /**
+     * DPN-05: převzatá neschopnost s 10 dny okna u předchozího plátce. Den
+     * vzniku je 1. 6., ne první den v MyÚčtu, a lhůta NEMPRI běží od 15. 6.
+     */
+    public function testCarriedWindowDaysMoveCaseStartAndDeadline(): void
+    {
+        $person = $this->sicknessPerson(11, 'Lenka Převzatá');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $created = $this->requestAbsence($person['employment_id'], 'dpn', '2026-06-11', '2026-06-30', (int) $average['id']);
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        $carried = $this->absences->sicknessWindowCarried(
+            $this->request('POST', '/api/payroll/absences/sickness-window')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'sickness_window_carried_days' => 10,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $carried->getStatusCode(), (string) $carried->getBody());
+        $absence = $this->json($carried)['absence'];
+        $decision = $this->absences->decision(
+            $this->request('POST', '/api/payroll/absences/decision')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $decision->getStatusCode(), (string) $decision->getBody());
+        $outcome = $this->json($decision)['sickness_case'];
+
+        self::assertSame('created', $outcome['outcome'], json_encode($outcome) ?: '');
+        self::assertSame('2026-06-15', $outcome['nempri_due_on']);
+        $case = $this->service(SicknessCaseService::class)
+            ->requireCase($this->supplierId, self::ENVIRONMENT, (int) $outcome['case_id']);
+        self::assertSame('2026-06-01', $case['incapacity_from']);
+    }
+
+    /**
+     * DPN-06, § 26 odst. 3: odpracoval-li zaměstnanec 8. 6. celou směnu, je
+     * prvním dnem neschopnosti 9. 6. DPN do 22. 6. pak trvá 14 dnů, celou ji
+     * kryje náhrada mzdy a případ NEMPRI nevzniká.
+     */
+    public function testWorkedFirstDayDelaysNempriDuty(): void
+    {
+        $person = $this->sicknessPerson(12, 'Otto Směnový');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-22', (int) $average['id'], [
+            'first_day_fully_worked' => true,
+            'insurance_eligibility_confirmed' => true,
+            'conflicting_benefit_excluded' => true,
+        ]);
+
+        self::assertNull($approved['sickness_case'], json_encode($approved['sickness_case']) ?: '');
+    }
+
+    /**
+     * NX-04: „pracoval v den vzniku" vyžaduje pracovní dobu a odpracované
+     * hodiny. Celá odpracovaná směna = obojí stejné, délka ze zveřejněné směny
+     * (8:00–16:30 s půlhodinovou přestávkou = 8 hodin).
+     */
+    public function testWorkedFirstDayFillsShiftHoursIntoCase(): void
+    {
+        $person = $this->sicknessPerson(13, 'Iva Celosměnná');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-26', (int) $average['id'], [
+            'first_day_fully_worked' => true,
+            'insurance_eligibility_confirmed' => true,
+            'conflicting_benefit_excluded' => true,
+        ]);
+        self::assertSame('created', $approved['sickness_case']['outcome'], json_encode($approved['sickness_case']) ?: '');
+        self::assertNull($approved['sickness_case']['reason_code']);
+        // Lhůta NEMPRI od 15. dne neschopnosti počítané od 9. 6. (§ 26 odst. 3).
+        self::assertSame('2026-06-23', $approved['sickness_case']['nempri_due_on']);
+
+        $case = $this->service(SicknessCaseService::class)
+            ->requireCase($this->supplierId, self::ENVIRONMENT, (int) $approved['sickness_case']['case_id']);
+        self::assertTrue((bool) $case['worked_on_decisive_day']);
+        self::assertSame('8.00', $case['daily_working_hours']);
+        self::assertSame('8.00', $case['hours_worked']);
+    }
+
+    /**
+     * DPN-07: zrušení navazující nepřítomnosti vrátí konec případu na den před
+     * ní. Dřív zůstal případ až do 26. 6. a HZUPN by hlásilo pozdější návrat.
+     */
+    public function testCancelledContinuationShortensCase(): void
+    {
+        $person = $this->sicknessPerson(14, 'Marek Zkrácený');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
+        $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-19', (int) $average['id'], $dpn);
+        $second = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-20', '2026-06-22', (int) $average['id'], $dpn);
+        $caseId = (int) $second['sickness_case']['case_id'];
+        $third = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-23', '2026-06-26', (int) $average['id'], $dpn);
+        self::assertSame('extended', $third['sickness_case']['outcome']);
+
+        $cancelled = $this->absences->cancel(
+            $this->request('POST', '/api/payroll/absences/cancel')->withParsedBody([
+                'row_version' => $third['absence']['row_version'],
+            ]),
+            new Response(),
+            ['id' => (string) $third['absence']['id']],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        self::assertSame('shortened', $this->json($cancelled)['sickness_case']['outcome'] ?? null);
+
+        $case = $this->service(SicknessCaseService::class)
+            ->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
+        self::assertSame('2026-06-22', $case['incapacity_to']);
+        self::assertSame('draft', $case['status']);
+    }
+
+    /**
+     * NX-03 a NRO-06: podklady pro výplatu DLO (`maVolno`, `pracovniVolno`,
+     * `seznamRozvrhuSmen`) a důvod převedení na jinou práci (§ 19 odst. 6)
+     * se ukládají s případem a drží vazbu na nadřazený údaj.
+     */
+    public function testDloPayoutBasisAndTransferReasonAreStored(): void
+    {
+        $person = $this->sicknessPerson(15, 'Dana Pečovatelka');
+        $cases = $this->service(SicknessCaseService::class);
+        $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'DLO', [
+            'incapacity_from' => '2026-06-08',
+            'action_end' => true,
+        ], $this->actors[0]);
+        $caseId = (int) $case['id'];
+
+        $case = $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+            'dlo_has_leave' => '1',
+            'dlo_leave_periods' => [['from' => '2026-06-15', 'to' => '2026-06-16']],
+            'planned_shifts' => '1',
+            'dlo_shift_schedule' => [['from' => '2026-06-08', 'to' => '2026-06-12']],
+            'transferred_other_work' => '1',
+            'transferred_on' => '2026-03-10',
+            'transfer_reason' => 'pregnancy',
+        ]);
+        self::assertSame(1, (int) $case['dlo_has_leave']);
+        self::assertSame([['from' => '2026-06-15', 'to' => '2026-06-16']], $case['dlo_leave_periods']);
+        self::assertSame([['from' => '2026-06-08', 'to' => '2026-06-12']], $case['dlo_shift_schedule']);
+        self::assertSame('pregnancy', $case['transfer_reason']);
+
+        foreach ([
+            'dlo_leave_periods_without_leave' => ['dlo_has_leave' => '0', 'dlo_leave_periods' => [['from' => '2026-06-15', 'to' => '2026-06-16']]],
+            'dlo_shift_schedule_without_planned_shifts' => ['planned_shifts' => '0'],
+            'sickness_transfer_reason_invalid' => ['transfer_reason' => 'holiday'],
+        ] as $code => $input) {
+            try {
+                $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], $input);
+                self::fail('Nekonzistentní podklad nesmí projít: ' . $code);
+            } catch (SicknessException $exception) {
+                self::assertSame($code, $exception->validationCode);
+            }
+        }
+
+        // Zrušené převedení s sebou smaže den i důvod.
+        $case = $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
+            'transferred_other_work' => '0',
+        ]);
+        self::assertNull($case['transferred_on']);
+        self::assertNull($case['transfer_reason']);
+
+        $nem = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
+            'incapacity_from' => '2026-06-08',
+        ], $this->actors[0]);
+        try {
+            $cases->update($this->supplierId, self::ENVIRONMENT, (int) $nem['id'], (int) $nem['row_version'], [
+                'dlo_has_leave' => '1',
+            ]);
+            self::fail('Podklady DLO u nemocenského nejsou.');
+        } catch (SicknessException $exception) {
+            self::assertSame('dlo_basis_not_in_kind', $exception->validationCode);
+        }
+        try {
+            $cases->update($this->supplierId, self::ENVIRONMENT, (int) $nem['id'], (int) $nem['row_version'], [
+                'transfer_reason' => 'pregnancy',
+            ]);
+            self::fail('Důvod převedení bez převedení nedává smysl.');
+        } catch (SicknessException $exception) {
+            self::assertSame('sickness_transfer_reason_without_transfer', $exception->validationCode);
+        }
+    }
+
+    /** @param array<string,mixed> $body */
+    private function recordReceiptViaApi(int $caseId, array $body): ResponseInterface
+    {
+        return $this->service(PayrollSicknessCaseAction::class)->receipt(
+            $this->request('POST', "/api/payroll/submissions/sickness-cases/{$caseId}/receipt")
+                ->withParsedBody($body + ['environment' => self::ENVIRONMENT]),
+            new Response(),
+            ['caseId' => (string) $caseId],
+        );
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string} */

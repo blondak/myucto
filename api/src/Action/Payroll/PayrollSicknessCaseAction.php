@@ -30,7 +30,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Endpoint záměrně NEUMÍ nastavit stav `accepted` přímo. Povinnost splní až
  * PŘEDÁNÍ územní správě sociálního zabezpečení, takže přijetí se zapisuje jen
- * přes `receipt` a vždy se dnem doručení z protokolu.
+ * přes `receipt`, vždy u konkrétního tiskopisu (`document` = nempri | hzupn)
+ * a vždy se dnem doručení z protokolu.
  *
  * `dispatch` zařadí připravené podání do fronty datové schránky. Je tady, a ne
  * na obrazovce „Stav odeslání": ta patří kanálu VREP/APEP, kterým NEMPRI ani
@@ -218,12 +219,23 @@ final class PayrollSicknessCaseAction
 
         return $this->run($response, function () use ($request, $args): array {
             $body = (array) ($request->getParsedBody() ?? []);
+            $outcome = $this->text($body['outcome'] ?? null, 'outcome');
+            // Zrušení patří celému případu; výsledek podání vždy jednomu
+            // z tiskopisů — přijetí NEMPRI nesmí uzavřít HZUPN.
+            if ($outcome === 'cancelled') {
+                return $this->cases->cancel(
+                    $this->currentSupplierId($request),
+                    $this->environment($request),
+                    $this->caseId($args),
+                );
+            }
 
             return $this->cases->recordReceipt(
                 $this->currentSupplierId($request),
                 $this->environment($request),
                 $this->caseId($args),
-                $this->text($body['outcome'] ?? null, 'outcome'),
+                $this->document($request),
+                $outcome,
                 $this->optionalText($body['accepted_on'] ?? null),
                 $this->optionalText($body['reason'] ?? null),
             );

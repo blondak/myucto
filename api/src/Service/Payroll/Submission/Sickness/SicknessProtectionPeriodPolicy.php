@@ -28,13 +28,24 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * zaměstnání, zaměstnavatel žádost nepředává, protože nárok z jeho pojištění
  * nevznikl.
  *
+ * **§ 15 odst. 4 písm. a) a odst. 5 písm. b)** — ochranná lhůta neplyne
+ * poživateli starobního důchodu a invalidního důchodu třetího stupně.
+ *
+ * ## Důchod
+ *
+ * Pobírání důchodu a jeho druh se vyplňují u případu (`pobiraDuchod`,
+ * `druhDuchodu` v NEMPRI). Druh se čte kódem z číselníku ČSSZ Druh důchodu
+ * (týž číselník nese přihláška REGZEC): `1` starobní, `2` invalidní třetího
+ * stupně — z nich ochranná lhůta neplyne. Pobírá-li zaměstnanec důchod a druh
+ * není vyplněný, politika radši odmítne s výzvou k doplnění, než aby nárok
+ * domýšlela.
+ *
  * ## Co politika vědomě nerozhoduje
  *
- * Těhotenství v den skončení zaměstnání a pobírání starobního či invalidního
- * důchodu třetího stupně (§ 15 odst. 4 písm. a) aplikace nedrží jako ověřený
- * fakt. U PPM se proto připouští celých 180 dnů a obrazovka říká, že delší
- * lhůta platí jen u ženy těhotné při skončení; důchod se u případu vyplňuje
- * pro NEMPRI a jeho druh se tu neposuzuje.
+ * Těhotenství v den skončení zaměstnání aplikace nedrží jako ověřený fakt.
+ * U PPM se proto připouští celých 180 dnů a obrazovka říká, že delší lhůta
+ * platí jen u ženy těhotné při skončení. Ostatní výluky § 15 (dovolená, výkon
+ * trestu, služba) aplikace neeviduje.
  */
 final class SicknessProtectionPeriodPolicy
 {
@@ -45,6 +56,14 @@ final class SicknessProtectionPeriodPolicy
     public const PPM_PREGNANCY_DAYS = 180;
 
     public const LEGAL_REFERENCE = '§ 15 zákona č. 187/2006 Sb.';
+
+    /**
+     * Kódy číselníku ČSSZ Druh důchodu, ze kterých ochranná lhůta neplyne:
+     * starobní a invalidní třetího stupně (§ 15 odst. 4 písm. a).
+     *
+     * @var list<string>
+     */
+    public const PENSION_KINDS_WITHOUT_PROTECTION = ['1', '2'];
 
     /**
      * Posoudí, zda sociální událost vznikla za trvání zaměstnání, nebo
@@ -163,6 +182,22 @@ final class SicknessProtectionPeriodPolicy
             && self::truthy($row['within_school_holidays'] ?? null)
         ) {
             return 'jde o zaměstnání studenta výlučně v době prázdnin (písm. d)';
+        }
+        if (self::truthy($row['receives_pension'] ?? null)) {
+            $pensionKind = self::nullableText($row['pension_kind'] ?? null);
+            if ($pensionKind === null) {
+                throw new SicknessException(
+                    'sickness_protection_period_pension_kind_missing',
+                    'Zaměstnanec pobírá důchod, ale u případu chybí jeho druh. Poživateli '
+                    . 'starobního důchodu a invalidního důchodu třetího stupně ochranná lhůta '
+                    . 'neplyne (§ 15 odst. 4 písm. a) zák. č. 187/2006 Sb.), takže bez druhu '
+                    . 'důchodu nejde posoudit, zda nárok vznikl. Doplňte druh důchodu u případu.',
+                );
+            }
+            if (in_array(strtoupper($pensionKind), self::PENSION_KINDS_WITHOUT_PROTECTION, true)) {
+                return 'zaměstnanec je poživatelem starobního důchodu nebo invalidního důchodu '
+                    . 'třetího stupně (písm. a)';
+            }
         }
 
         return null;

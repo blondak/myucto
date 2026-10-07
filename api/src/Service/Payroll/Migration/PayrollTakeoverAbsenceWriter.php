@@ -9,10 +9,12 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceOverlapException;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 
 /**
  * Zápis převzatých nepřítomností a zůstatku dovolené ({@see PayrollTakeoverEmployment}),
@@ -58,6 +60,8 @@ final class PayrollTakeoverAbsenceWriter
         private readonly PayrollTimeRepository $time,
         private readonly PayrollLeaveRepository $leave,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly SicknessCaseFromAbsenceService $sicknessCases,
+        private readonly PayrollModuleStateRepository $moduleState,
     ) {}
 
     /**
@@ -95,6 +99,8 @@ final class PayrollTakeoverAbsenceWriter
         $already = 0;
         $rejected = 0;
         $continued = 0;
+        /** @var array<string,int> $sicknessCases */
+        $sicknessCases = [];
         foreach (self::splitAtQuarters(self::mergedAbsences($absences, $overlaps)) as $absence) {
             if ($this->recorded($supplierId, $employmentId, $absence)) {
                 $already++;
@@ -149,8 +155,13 @@ final class PayrollTakeoverAbsenceWriter
                     $this->absences->decide($supplierId, (int) $created['id'], (int) $created['row_version'], 'approved', $userId);
                     $approved++;
                 } catch (\DomainException|\InvalidArgumentException) {
-                    continue;
+                    // Neschválená zůstane k rozhodnutí účetní; případ dávky se
+                    // přesto založí níž, událost u předchozího programu proběhla.
                 }
+            }
+            $sicknessCase = $this->sicknessCase($supplierId, (int) $created['id'], $userId, $policy);
+            if ($sicknessCase !== null) {
+                $sicknessCases[$sicknessCase] = ($sicknessCases[$sicknessCase] ?? 0) + 1;
             }
         }
         if ($overlaps > 0) {
@@ -173,7 +184,46 @@ final class PayrollTakeoverAbsenceWriter
         if ($already > 0) {
             $counts['absences_existing'] = $already;
         }
+        foreach ($sicknessCases as $key => $count) {
+            $counts[$key] = $count;
+        }
         return $written > 0 ? $counts + ['absences' => $written] : $counts;
+    }
+
+    /**
+     * Případ dávky k převzaté nepřítomnosti, která trvá aspoň do prvního měsíce
+     * vedení mezd v MyÚčtu (§ 97 odst. 2 a 3 zák. č. 187/2006 Sb.). Převod
+     * schvaluje nepřítomnosti mimo akci schválení, takže by jinak případ nevznikl
+     * a lhůtu HZUPN k návratu do práce by nikdo nehlídal. Den vzniku se odvodí
+     * z nepřítomnosti a dnů okna vyčerpaných předchozím plátcem.
+     *
+     * Vrací klíč počtu do protokolu, nebo `null`, když z nepřítomnosti případ
+     * neplyne.
+     */
+    private function sicknessCase(int $supplierId, int $absenceId, ?int $userId, PayrollTakeoverPolicy $policy): ?string
+    {
+        $startPeriod = $this->moduleState->get($supplierId)['start_period'] ?? null;
+        $absence = $this->absences->find($supplierId, $absenceId);
+        if (!is_string($startPeriod) || $startPeriod === '' || $absence === null) {
+            return null;
+        }
+        $result = $this->sicknessCases->onTakenOver(
+            $supplierId,
+            $absence,
+            $userId,
+            $startPeriod,
+            null,
+            $policy->sourceKey . ':absence:' . $absenceId,
+        );
+        if ($result === null) {
+            return null;
+        }
+
+        return match ($result['outcome']) {
+            'created' => 'sickness_cases',
+            'skipped' => 'sickness_cases_skipped',
+            default => 'sickness_cases_existing',
+        };
     }
 
     /**

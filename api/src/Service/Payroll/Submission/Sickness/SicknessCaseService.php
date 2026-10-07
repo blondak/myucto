@@ -17,13 +17,64 @@ use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
  *
  * Služba vědomě NEUMÍ nastavit stav `accepted` přímo. Povinnost je splněná
  * PŘEDÁNÍM územní správě sociálního zabezpečení, takže přijetí se zapisuje jen
- * přes {@see self::recordReceipt()} a vždy se dnem z protokolu.
+ * přes {@see self::recordReceipt()}, vždy u konkrétního podání (NEMPRI, HZUPN)
+ * a vždy se dnem z protokolu.
+ *
+ * ## Co se po vyřízení podání ještě smí měnit
+ *
+ * NEMPRI a HZUPN mají vlastní stav ({@see SicknessDocumentStatus}). Vyřízené
+ * podání zamkne jen SVOJE údaje: přijaté NEMPRI nesmí zamknout návrat do
+ * práce, dny práce ani konec neschopnosti, ze kterých se teprve sestaví HZUPN.
+ * Číslo rozhodnutí a příznak opravného podání se nezamykají nikdy, a když je
+ * opravné podání zaškrtnuté, odemknou se i údaje vyřízeného podání. Zamyká se
+ * jen skutečná ZMĚNA hodnoty: editor posílá celý formulář a nezměněné pole
+ * vyřízeného podání nesmí uložení shodit.
  */
 final readonly class SicknessCaseService
 {
+    /** Případ evidovaný v MyÚčtu. */
+    public const SOURCE_MYUCTO = 'myucto';
+    /** Případ převzatý z předchozího mzdového programu nebo z doby před ním. */
+    public const SOURCE_PREDECESSOR = 'predecessor';
+
+    /** @var list<string> */
+    public const SOURCES = [self::SOURCE_MYUCTO, self::SOURCE_PREDECESSOR];
+
     /**
-     * Sloupce, které smí zapsat klient. Whitelist, ne blacklist: `status`,
-     * `accepted_on`, obě vazby na podání i `row_version` musí zůstat mimo
+     * Důvod převedení na jinou práci (§ 19 odst. 6 zák. č. 187/2006 Sb.):
+     * těhotenství, mateřství, kojení.
+     *
+     * @var list<string>
+     */
+    public const TRANSFER_REASONS = ['pregnancy', 'maternity', 'breastfeeding'];
+
+    /**
+     * Údaje HZUPN u nemocenského (§ 97 odst. 3): ukončení neschopnosti, návrat
+     * do práce a dny práce v době neschopnosti. U jiných dávek HZUPN není a tytéž
+     * sloupce patří k NEMPRI (podklady pro výplatu).
+     *
+     * @var list<string>
+     */
+    private const HZUPN_FIELDS = [
+        'incapacity_to',
+        'issued_on',
+        'returned_to_work',
+        'return_reason',
+        'returned_on',
+        'hours_worked_last_day',
+        'shift_hours_last_day',
+        'work_days',
+    ];
+
+    /** Údaje společné oběma podáním; zamknou se až s posledním z nich. */
+    private const SHARED_FIELDS = ['ossz_code', 'foreign_case', 'additional_note'];
+
+    /** Nezamyká se nikdy: bez nich nejde podat opravné podání. */
+    private const ALWAYS_EDITABLE = ['decision_number', 'correction'];
+
+    /**
+     * Sloupce, které smí zapsat klient. Whitelist, ne blacklist: stavy podání,
+     * dny doručení, obě vazby na podání i `row_version` musí zůstat mimo
      * dosah HTTP požadavku, jinak by šlo prohlásit povinnost za splněnou bez
      * jediného odeslaného bajtu.
      *
@@ -54,6 +105,7 @@ final readonly class SicknessCaseService
         'child_birth_date' => 'date',
         'transferred_other_work' => 'bool',
         'transferred_on' => 'date',
+        'transfer_reason' => 'transfer_reason',
         'enforcement' => 'bool',
         'insolvency' => 'bool',
         'returned_to_work' => 'nullable_bool',
@@ -93,6 +145,9 @@ final readonly class SicknessCaseService
         'worked_last_day' => 'nullable_bool',
         'planned_shifts' => 'nullable_bool',
         'planned_shifts_worked' => 'nullable_bool',
+        'dlo_has_leave' => 'nullable_bool',
+        'dlo_leave_periods' => 'periods',
+        'dlo_shift_schedule' => 'periods',
         'probable_income_czk' => 'int',
         'contact_worker_name' => 'text',
         'contact_worker_phone' => 'text',
@@ -231,12 +286,28 @@ final readonly class SicknessCaseService
             ? json_decode((string) $row['care_days'], true)
             : null;
         $row['care_days'] = is_array($careDays) ? $careDays : [];
+        foreach (['dlo_leave_periods', 'dlo_shift_schedule'] as $column) {
+            if (is_string($row[$column] ?? null)) {
+                $decoded = json_decode((string) $row[$column], true);
+                $row[$column] = is_array($decoded) ? $decoded : null;
+            }
+        }
 
         return $row;
     }
 
     /**
+     * `$system` nese údaje, které klient zapsat nesmí a zakládá je jen aplikace
+     * sama: stav podání vyřízeného předchozím programem, původ případu a odkaz
+     * na převzatý záznam ({@see SicknessCaseFromAbsenceService}). HTTP akce ho
+     * nepředává nikdy.
+     *
      * @param array<string,mixed> $input
+     * @param array{
+     *   nempri_status?:string,nempri_accepted_on?:?string,
+     *   hzupn_status?:string,hzupn_accepted_on?:?string,
+     *   source?:string,external_reference?:?string
+     * } $system
      * @return array<string,mixed>
      */
     public function create(
@@ -246,11 +317,14 @@ final readonly class SicknessCaseService
         string $benefitKind,
         array $input,
         int $createdBy,
+        array $system = [],
     ): array {
         $kind = $this->benefitKind($benefitKind);
         $values = $this->normalize($input, true);
         $this->assertCodebooks($kind, $values);
         $this->assertLongTermCareConsent($kind, $values, []);
+        $values = $this->assertBenefitBasis($kind, $values, []);
+        $values = [...$values, ...$this->systemValues($kind, $system)];
         $incapacityFrom = (string) $values['incapacity_from'];
         $context = $this->requireContext(
             $supplierId,
@@ -333,18 +407,18 @@ final readonly class SicknessCaseService
         array $input,
     ): array {
         $row = $this->requireCase($supplierId, $environment, $caseId);
-        $status = SicknessCaseStatus::from((string) $row['status']);
-        if (!$status->isOpen()) {
+        if ((int) ($row['cancelled'] ?? 0) === 1) {
             throw new SicknessException(
                 'sickness_case_not_editable',
-                'Přijatý ani zrušený případ se už needituje. Opravu podejte opravným podáním '
-                . 's číslem rozhodnutí.',
+                'Zrušený případ se už needituje. Vznikla-li událost znovu, založte nový případ.',
             );
         }
         $values = $this->normalize($input, false);
         $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);
+        $this->assertSettledDocumentsUnchanged($kind, $row, $values, $input);
         $this->assertCodebooks($kind, $values);
         $this->assertLongTermCareConsent($kind, $values, $row);
+        $values = $this->assertBenefitBasis($kind, $values, $row);
         if (array_key_exists('incapacity_from', $values) && $values['incapacity_from'] !== null) {
             $this->protection->assess(
                 $kind,
@@ -486,10 +560,23 @@ final readonly class SicknessCaseService
     }
 
     /**
-     * Zápis výsledku z protokolu ČSSZ.
+     * Zápis výsledku podání z protokolu ČSSZ — vždy u KONKRÉTNÍHO podání.
      *
-     * `accepted` vyžaduje den doručení. Bez něj by povinnost byla „splněná
-     * někdy" a hlídač termínů by neměl co porovnat s lhůtou.
+     * NEMPRI a HZUPN se podávají zvlášť a zvlášť se i přijímají; přijetí NEMPRI
+     * proto nic neříká o HZUPN a jeho lhůta se hlídá dál.
+     *
+     * - `accepted` vyžaduje den doručení. Bez něj by povinnost byla „splněná
+     *   někdy" a hlídač termínů by neměl co porovnat s lhůtou. Podruhé jde
+     *   zapsat jen u opravného podání.
+     * - `rejected` vyžaduje důvod; vyřízené podání odmítnout nejde.
+     * - `predecessor` jen u převzatého případu: podání podal předchozí program,
+     *   den doručení je nepovinný.
+     * - `pending` vrací podání vedené jako podané předchozím programem zpět
+     *   k podání z MyÚčta. Převod ho tak označí podle lhůty, ne podle toho, co
+     *   předchozí program skutečně odeslal; když to nesedí, povinnost se jinak
+     *   přestane hlídat a podání nejde připravit. Zrušení případu cestou není:
+     *   nový případ téže události by narazil na jedinečný klíč.
+     * - `cancelled` zruší celý případ ({@see self::cancel()}).
      *
      * @return array<string,mixed>
      */
@@ -497,38 +584,126 @@ final readonly class SicknessCaseService
         int $supplierId,
         string $environment,
         int $caseId,
+        SicknessDocumentKind $document,
         string $outcome,
         ?string $acceptedOn,
         ?string $reason,
     ): array {
+        if ($outcome === 'cancelled') {
+            return $this->cancel($supplierId, $environment, $caseId);
+        }
         $row = $this->requireCase($supplierId, $environment, $caseId);
+        if ((int) ($row['cancelled'] ?? 0) === 1) {
+            throw new SicknessException(
+                'sickness_case_cancelled',
+                'Případ je zrušený, výsledek podání se k němu nezapisuje.',
+            );
+        }
+        $kind = SicknessBenefitKind::from((string) $row['benefit_kind']);
+        if ($document === SicknessDocumentKind::Hzupn && !$kind->hasEndOfIncapacityReport()) {
+            throw new SicknessException(
+                'hzupn_not_for_benefit_kind',
+                'Hlášení při ukončení pracovní neschopnosti (HZUPN) se podává jen u nemocenského, '
+                . 'u tohoto druhu dávky se jeho výsledek nezapisuje.',
+            );
+        }
+        $current = self::documentStatus($row, $document);
+        $label = $document->agendaCode();
+        $correction = (int) ($row['correction'] ?? 0) === 1;
         $changes = match ($outcome) {
-            'accepted' => [
-                'status' => SicknessCaseStatus::Accepted->value,
-                'accepted_on' => $this->requireDate(
-                    $acceptedOn,
-                    'sickness_receipt_date_missing',
-                    'Přijetí musí nést den doručení podání z protokolu ČSSZ.',
-                ),
-                'rejection_reason' => null,
-            ],
-            'rejected' => [
-                'status' => SicknessCaseStatus::Rejected->value,
-                'accepted_on' => null,
-                'rejection_reason' => $this->requireText(
-                    $reason,
-                    'sickness_rejection_reason_missing',
-                    'Odmítnutí musí nést důvod z protokolu ČSSZ.',
-                ),
-            ],
-            'cancelled' => [
-                'status' => SicknessCaseStatus::Cancelled->value,
-                'accepted_on' => null,
-                'rejection_reason' => null,
-            ],
+            'accepted' => (function () use ($current, $correction, $label, $acceptedOn): array {
+                if ($current === SicknessDocumentStatus::Predecessor) {
+                    throw new SicknessException(
+                        'sickness_receipt_predecessor',
+                        $label . ' podal předchozí mzdový program, MyÚčto ho nepodávalo. '
+                        . 'Přijetí se zapisuje jen k podání odeslanému z MyÚčta.',
+                    );
+                }
+                if ($current === SicknessDocumentStatus::Accepted && !$correction) {
+                    throw new SicknessException(
+                        'sickness_receipt_already_recorded',
+                        'Přijetí ' . $label . ' je už zapsané. Další přijetí patří jen k opravnému '
+                        . 'podání: zaškrtněte u případu Opravné podání.',
+                    );
+                }
+
+                return [
+                    'status' => SicknessDocumentStatus::Accepted->value,
+                    'accepted_on' => $this->requireDate(
+                        $acceptedOn,
+                        'sickness_receipt_date_missing',
+                        'Přijetí musí nést den doručení podání z protokolu ČSSZ.',
+                    ),
+                    'rejection_reason' => null,
+                ];
+            })(),
+            'rejected' => (function () use ($current, $label, $reason): array {
+                if ($current->isSettled()) {
+                    throw new SicknessException(
+                        'sickness_receipt_already_settled',
+                        $label . ' je už vyřízené, odmítnutí k němu zapsat nejde. Odmítnuté '
+                        . 'opravné podání podejte znovu.',
+                    );
+                }
+
+                return [
+                    'status' => SicknessDocumentStatus::Rejected->value,
+                    'accepted_on' => null,
+                    'rejection_reason' => $this->requireText(
+                        $reason,
+                        'sickness_rejection_reason_missing',
+                        'Odmítnutí musí nést důvod z protokolu ČSSZ.',
+                    ),
+                ];
+            })(),
+            'predecessor' => (function () use ($row, $current, $label, $acceptedOn): array {
+                if (($row['source'] ?? self::SOURCE_MYUCTO) !== self::SOURCE_PREDECESSOR) {
+                    throw new SicknessException(
+                        'sickness_receipt_predecessor_not_takeover',
+                        'Vyřízení předchozím programem jde zapsat jen u případu převzatého '
+                        . 'z předchozího mzdového programu. Podání z MyÚčta se zapisuje '
+                        . 'dnem doručení z protokolu ČSSZ.',
+                    );
+                }
+                if ($current === SicknessDocumentStatus::Accepted) {
+                    throw new SicknessException(
+                        'sickness_receipt_already_settled',
+                        $label . ' je už přijaté z MyÚčta, předchozí program ho nepodával.',
+                    );
+                }
+
+                return [
+                    'status' => SicknessDocumentStatus::Predecessor->value,
+                    'accepted_on' => $acceptedOn === null || trim($acceptedOn) === ''
+                        ? null
+                        : $this->requireDate(
+                            $acceptedOn,
+                            'sickness_date_invalid',
+                            'Den doručení podání předchozím programem musí být ve tvaru RRRR-MM-DD.',
+                        ),
+                    'rejection_reason' => null,
+                ];
+            })(),
+            'pending' => (function () use ($row, $current, $label): array {
+                if (($row['source'] ?? self::SOURCE_MYUCTO) !== self::SOURCE_PREDECESSOR
+                    || $current !== SicknessDocumentStatus::Predecessor
+                ) {
+                    throw new SicknessException(
+                        'sickness_receipt_reopen_not_predecessor',
+                        'Zpět k podání jde vrátit jen ' . $label . ' vedené jako podané předchozím '
+                        . 'programem. Výsledek podání z MyÚčta se opravuje opravným podáním.',
+                    );
+                }
+
+                return [
+                    'status' => SicknessDocumentStatus::Pending->value,
+                    'accepted_on' => null,
+                    'rejection_reason' => null,
+                ];
+            })(),
             default => throw new SicknessException(
                 'sickness_receipt_outcome_invalid',
-                'Výsledek podání musí být accepted, rejected nebo cancelled.',
+                'Výsledek podání musí být accepted, rejected, predecessor, pending nebo cancelled.',
             ),
         };
         if (!$this->cases->update(
@@ -536,7 +711,11 @@ final readonly class SicknessCaseService
             $environment,
             $caseId,
             (int) $row['row_version'],
-            $changes,
+            [
+                $document->statusColumn() => $changes['status'],
+                $document->acceptedOnColumn() => $changes['accepted_on'],
+                $document->rejectionReasonColumn() => $changes['rejection_reason'],
+            ],
         )) {
             throw new SicknessException(
                 'sickness_case_conflict',
@@ -545,6 +724,287 @@ final readonly class SicknessCaseService
         }
 
         return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Zrušení celého případu (událost nenastala, absence byla zrušena). Zrušený
+     * případ se nehlídá a nic se z něj nepřipravuje.
+     *
+     * @return array<string,mixed>
+     */
+    public function cancel(
+        int $supplierId,
+        string $environment,
+        int $caseId,
+    ): array {
+        $row = $this->requireCase($supplierId, $environment, $caseId);
+        if ((int) ($row['cancelled'] ?? 0) === 1) {
+            return $row;
+        }
+        if (!$this->cases->update(
+            $supplierId,
+            $environment,
+            $caseId,
+            (int) $row['row_version'],
+            ['cancelled' => 1],
+        )) {
+            throw new SicknessException(
+                'sickness_case_conflict',
+                'Případ mezitím někdo změnil. Načtěte ho znovu a zrušení zopakujte.',
+            );
+        }
+
+        return $this->requireCase($supplierId, $environment, $caseId);
+    }
+
+    /**
+     * Stav jednoho podání případu. Řádek bez sloupce (starší data) je `pending`.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function documentStatus(array $row, SicknessDocumentKind $document): SicknessDocumentStatus
+    {
+        return SicknessDocumentStatus::tryFrom((string) ($row[$document->statusColumn()] ?? ''))
+            ?? SicknessDocumentStatus::Pending;
+    }
+
+    /**
+     * Pracoval zaměstnanec v den vzniku neschopnosti CELOU směnu? Pak se podle
+     * § 26 odst. 3 zák. č. 187/2006 Sb. za první den neschopnosti považuje
+     * následující kalendářní den a posouvá se i den, od kterého náleží
+     * nemocenské a běží lhůta NEMPRI. Odpracovaná jen část směny den nevznikl
+     * neposouvá; jsou-li hodiny známé, musí dosáhnout pracovní doby.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function firstDayFullyWorked(array $row): bool
+    {
+        if ((int) ($row['worked_on_decisive_day'] ?? 0) !== 1) {
+            return false;
+        }
+        $worked = $row['hours_worked'] ?? null;
+        $shift = $row['daily_working_hours'] ?? null;
+        if (!is_numeric($worked) || !is_numeric($shift)) {
+            return true;
+        }
+
+        return round((float) $worked * 100) >= round((float) $shift * 100);
+    }
+
+    /**
+     * Údaje vyřízeného podání (přijatého nebo podaného předchozím programem) se
+     * už nemění — jinak by evidence tvrdila něco jiného, než co ČSSZ dostala.
+     * Výjimkou je opravné podání: s ním se údaje mění právě proto, aby se
+     * mohly podat znovu.
+     *
+     * Kontroluje se jen skutečná změna hodnoty; editor posílá celý formulář.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $values normalizované hodnoty z požadavku
+     * @param array<string,mixed> $input  syrový požadavek (dny práce, ruční měsíce)
+     */
+    private function assertSettledDocumentsUnchanged(
+        SicknessBenefitKind $kind,
+        array $row,
+        array $values,
+        array $input,
+    ): void {
+        $correction = array_key_exists('correction', $values)
+            ? (int) $values['correction'] === 1
+            : (int) ($row['correction'] ?? 0) === 1;
+        if ($correction) {
+            return;
+        }
+        $nempriSettled = self::documentStatus($row, SicknessDocumentKind::Nempri)->isSettled();
+        $hasHzupn = $kind->hasEndOfIncapacityReport();
+        $hzupnSettled = $hasHzupn
+            && self::documentStatus($row, SicknessDocumentKind::Hzupn)->isSettled();
+        if (!$nempriSettled && !$hzupnSettled) {
+            return;
+        }
+
+        $changed = [];
+        foreach ($values as $column => $value) {
+            if (in_array($column, self::ALWAYS_EDITABLE, true)) {
+                continue;
+            }
+            $document = $this->fieldDocument($kind, $column);
+            $locked = match ($document) {
+                'hzupn' => $hzupnSettled,
+                'nempri' => $nempriSettled,
+                default => $nempriSettled && (!$hasHzupn || $hzupnSettled),
+            };
+            if ($locked && !$this->sameValue(self::EDITABLE[$column] ?? 'text', $value, $row[$column] ?? null)) {
+                $changed[$document === 'hzupn' ? 'HZUPN' : 'NEMPRI'] = true;
+            }
+        }
+        if (array_key_exists('work_days', $input)) {
+            $locked = $hasHzupn ? $hzupnSettled : $nempriSettled;
+            if ($locked && $this->workIntervals($input) !== ($row['work_days'] ?? [])) {
+                $changed[$hasHzupn ? 'HZUPN' : 'NEMPRI'] = true;
+            }
+        }
+        if ($nempriSettled && array_key_exists('decisive_months', $input)) {
+            $stored = [];
+            foreach ($row['decisive_months'] ?? [] as $month) {
+                $stored[(string) $month['period']] = [
+                    'income_minor' => (int) $month['income_minor'],
+                    'excluded_days' => (int) $month['excluded_days'],
+                ];
+            }
+            if ($this->decisiveMonthsInput($input) !== $stored) {
+                $changed['NEMPRI'] = true;
+            }
+        }
+        if ($changed === []) {
+            return;
+        }
+        $documents = implode(' a ', array_keys($changed));
+        throw new SicknessException(
+            'sickness_case_document_settled',
+            $documents . ' je už vyřízené (přijaté, nebo podané předchozím programem), takže '
+            . 'se jeho údaje nemění — evidence musí odpovídat tomu, co ČSSZ dostala. Opravu '
+            . 'podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí.',
+        );
+    }
+
+    /** Ke kterému podání pole patří: `nempri`, `hzupn`, nebo `shared`. */
+    private function fieldDocument(SicknessBenefitKind $kind, string $column): string
+    {
+        if (in_array($column, self::SHARED_FIELDS, true)) {
+            return 'shared';
+        }
+        if ($kind->hasEndOfIncapacityReport() && in_array($column, self::HZUPN_FIELDS, true)) {
+            return 'hzupn';
+        }
+
+        return 'nempri';
+    }
+
+    private function sameValue(string $type, mixed $new, mixed $old): bool
+    {
+        if ($new === null || $old === null) {
+            // Nevyplněné prohlášení a „ne" znamenají pro uložení totéž:
+            // editor posílá u nezaškrtnutého pole jednou null, jindy 0.
+            if ($type === 'bool' || $type === 'nullable_bool') {
+                return (int) ($new ?? 0) === (int) ($old ?? 0);
+            }
+
+            return $new === null && $old === null;
+        }
+
+        return match ($type) {
+            'decimal' => round((float) $new * 100) === round((float) $old * 100),
+            'int', 'id', 'bool', 'nullable_bool' => (int) $new === (int) $old,
+            'periods' => json_decode((string) $new, true)
+                == (is_array($old) ? $old : json_decode((string) $old, true)),
+            default => (string) $new === (string) $old,
+        };
+    }
+
+    /**
+     * Podklady, které závisí na jiném poli téhož případu: důvod převedení jen
+     * při převedení (§ 19 odst. 6), podklady pro výplatu DLO jen u dlouhodobého
+     * ošetřovného — období volna při `maVolno`, rozvrh směn při plánovaných
+     * směnách (DV NEMPRI25, Podklady pro výplatu DLO). Posuzuje se výsledný
+     * stav (uložený + měněný); zrušené převedení s sebou smaže i den a důvod.
+     *
+     * @param array<string,mixed> $values
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function assertBenefitBasis(SicknessBenefitKind $kind, array $values, array $row): array
+    {
+        if (array_key_exists('transferred_other_work', $values) && (int) $values['transferred_other_work'] === 0) {
+            $values['transferred_on'] = null;
+            $values['transfer_reason'] = null;
+        }
+        $merged = static fn (string $column): mixed => array_key_exists($column, $values)
+            ? $values[$column]
+            : ($row[$column] ?? null);
+        if ($merged('transfer_reason') !== null && (int) ($merged('transferred_other_work') ?? 0) !== 1) {
+            throw new SicknessException(
+                'sickness_transfer_reason_without_transfer',
+                'Důvod převedení na jinou práci se vyplňuje jen tehdy, když byla zaměstnankyně '
+                . 'převedena. Zaškrtněte převedení a doplňte jeho den.',
+            );
+        }
+
+        $dloColumns = ['dlo_has_leave', 'dlo_leave_periods', 'dlo_shift_schedule'];
+        if ($kind !== SicknessBenefitKind::Dlo) {
+            foreach ($dloColumns as $column) {
+                if (($values[$column] ?? null) !== null) {
+                    throw new SicknessException(
+                        'dlo_basis_not_in_kind',
+                        'Pracovní volno a rozvrh směn se jako podklad pro výplatu vyplňují jen '
+                        . 'u dlouhodobého ošetřovného.',
+                    );
+                }
+            }
+
+            return $values;
+        }
+        if ((int) ($merged('dlo_has_leave') ?? 0) !== 1 && array_key_exists('dlo_has_leave', $values)) {
+            $values['dlo_leave_periods'] = null;
+        }
+        if ($merged('dlo_leave_periods') !== null && (int) ($merged('dlo_has_leave') ?? 0) !== 1) {
+            throw new SicknessException(
+                'dlo_leave_periods_without_leave',
+                'Období pracovního volna patří k údaji „má volno“. Zaškrtněte ho, nebo období smažte.',
+            );
+        }
+        if ($merged('dlo_shift_schedule') !== null && (int) ($merged('planned_shifts') ?? 0) !== 1) {
+            throw new SicknessException(
+                'dlo_shift_schedule_without_planned_shifts',
+                'Rozvrh směn patří k údaji „měl plánované směny“. Zaškrtněte ho, nebo rozvrh smažte.',
+            );
+        }
+
+        return $values;
+    }
+
+    /**
+     * Údaje, které při založení případu doplňuje jen aplikace.
+     *
+     * @param array<string,mixed> $system
+     * @return array<string,mixed>
+     */
+    private function systemValues(SicknessBenefitKind $kind, array $system): array
+    {
+        $values = [];
+        foreach ([SicknessDocumentKind::Nempri, SicknessDocumentKind::Hzupn] as $document) {
+            $status = $system[$document->statusColumn()] ?? null;
+            if ($status === null) {
+                continue;
+            }
+            $parsed = SicknessDocumentStatus::from((string) $status);
+            if ($parsed === SicknessDocumentStatus::Rejected || $parsed === SicknessDocumentStatus::Accepted) {
+                throw new \InvalidArgumentException('Při založení případu jde podání označit jen jako vyřízené předchozím programem.');
+            }
+            if ($document === SicknessDocumentKind::Hzupn && !$kind->hasEndOfIncapacityReport()) {
+                continue;
+            }
+            $values[$document->statusColumn()] = $parsed->value;
+            $acceptedOn = $system[$document->acceptedOnColumn()] ?? null;
+            if ($acceptedOn !== null) {
+                $values[$document->acceptedOnColumn()] = $this->requireDate(
+                    (string) $acceptedOn,
+                    'sickness_date_invalid',
+                    'Den doručení podání musí být ve tvaru RRRR-MM-DD.',
+                );
+            }
+        }
+        if (isset($system['source'])) {
+            if (!in_array($system['source'], self::SOURCES, true)) {
+                throw new \InvalidArgumentException('Neznámý původ případu dávky.');
+            }
+            $values['source'] = $system['source'];
+        }
+        if (isset($system['external_reference'])) {
+            $values['external_reference'] = mb_substr(trim((string) $system['external_reference']), 0, 190);
+        }
+
+        return $values;
     }
 
     /** @return array<string,mixed> */
@@ -655,6 +1115,7 @@ final readonly class SicknessCaseService
                 'Datum v případu musí být ve tvaru RRRR-MM-DD.',
             ),
             'care_reason' => $this->careReason($value),
+            'transfer_reason' => $this->transferReason($value),
             'ltc_consent' => $this->longTermCareConsentValue($value),
             'code' => $this->codebookValue($value),
             'periods' => $this->periodsJson($value),
@@ -670,6 +1131,20 @@ final readonly class SicknessCaseService
                 'nempri_care_reason_invalid',
                 'Důvod péče musí být onemocnění, karanténa, nemožnost péče o dítě, '
                 . 'nebo uzavření školy či zařízení.',
+            );
+        }
+
+        return $reason;
+    }
+
+    private function transferReason(mixed $value): string
+    {
+        $reason = trim((string) $value);
+        if (!in_array($reason, self::TRANSFER_REASONS, true)) {
+            throw new SicknessException(
+                'sickness_transfer_reason_invalid',
+                'Důvod převedení na jinou práci musí být těhotenství, mateřství, nebo kojení '
+                . '(§ 19 odst. 6 zákona č. 187/2006 Sb.).',
             );
         }
 

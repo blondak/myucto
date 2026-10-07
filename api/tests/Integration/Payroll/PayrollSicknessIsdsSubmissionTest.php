@@ -380,9 +380,9 @@ final class PayrollSicknessIsdsSubmissionTest extends TestCase
         $case = $pdo->prepare(
             'INSERT INTO payroll_sickness_cases
                 (supplier_id, environment, employee_id, employment_id,
-                 benefit_kind, ossz_code, incapacity_from, status,
+                 benefit_kind, ossz_code, incapacity_from,
                  nempri_submission_id, created_by)
-             VALUES (?, "test", ?, ?, "NEM", 115, "2026-08-01", "prepared", ?, ?)',
+             VALUES (?, "test", ?, ?, "NEM", 115, "2026-08-01", ?, ?)',
         );
         $case->execute([
             $this->supplierId,
