@@ -11243,6 +11243,7 @@
         "jmhz_eldp_code_activity_mismatch": "Kód evidenčního listu neodpovídá druhu činnosti pracovního vztahu.",
         "jmhz_eldp_confirmation_note_invalid": "Volitelná poznámka k potvrzení evidenčního listu smí mít nejvýše 500 znaků.",
         "jmhz_eldp_days_mismatch": "Počet dnů evidenčního listu neodpovídá délce vykazovaného pojistného intervalu.",
+        "jmhz_eldp_deducted_days_unsupported": "Zaměstnanec po dosažení důchodového věku, který nepobírá starobní důchod, má v měsíci nemoc, ošetřování, mateřskou, otcovskou, neplacené volno nebo neomluvenou absenci. Ty se vykazují jako odečítané doby (10375), které aplikace do měsíčního hlášení zatím nesestaví. Hlášení za tento vztah podejte ručně přes ePortál ČSSZ, nebo vztah odložte.",
         "jmhz_eldp_employment_not_found": "Pracovní vztah není obsažen ve zdrojové mzdové revizi evidenčního listu.",
         "jmhz_eldp_employment_scope_mismatch": "Pracovní vztah nelze ve zdrojovém snapshotu jednoznačně určit.",
         "jmhz_eldp_environment_invalid": "Prostředí evidenčního listu (produkce nebo test) není platné.",

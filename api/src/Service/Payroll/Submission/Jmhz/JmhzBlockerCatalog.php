@@ -262,6 +262,7 @@ final class JmhzBlockerCatalog
         'jmhz_eldp_code_activity_mismatch' => ['employment_terms', 'activity_code'],
         'jmhz_eldp_confirmation_note_invalid' => 'ordinary_evidence',
         'jmhz_eldp_days_mismatch' => 'absences',
+        'jmhz_eldp_deducted_days_unsupported' => 'manual',
         'jmhz_eldp_employment_not_found' => 'runs',
         'jmhz_eldp_employment_scope_mismatch' => 'support',
         'jmhz_eldp_environment_invalid' => 'support',

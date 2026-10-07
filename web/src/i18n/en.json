@@ -11243,6 +11243,7 @@
         "jmhz_eldp_code_activity_mismatch": "The pension insurance record code does not match the employment's activity type.",
         "jmhz_eldp_confirmation_note_invalid": "The optional note on the pension insurance record confirmation may have at most 500 characters.",
         "jmhz_eldp_days_mismatch": "The number of days on the pension insurance record does not match the length of the reported insurance interval.",
+        "jmhz_eldp_deducted_days_unsupported": "An employee past retirement age who does not draw an old-age pension has sickness, care, maternity, paternity, unpaid leave or unexcused absence in the month. These are reported as deducted periods (10375), which the application does not yet build into the monthly report. File this employment's report manually through the ČSSZ ePortal, or defer the employment.",
         "jmhz_eldp_employment_not_found": "The employment relationship is not included in the source payroll revision of the pension insurance record.",
         "jmhz_eldp_employment_scope_mismatch": "The employment relationship cannot be uniquely identified in the source snapshot.",
         "jmhz_eldp_environment_invalid": "The pension insurance record's environment (production or test) is not valid.",

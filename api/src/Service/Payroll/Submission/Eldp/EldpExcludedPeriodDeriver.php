@@ -136,6 +136,60 @@ final class EldpExcludedPeriodDeriver
      */
     public const UNPAID_EXCUSED_TYPES = ['unpaid_leave', 'public_function', 'employee_obstacle_unpaid'];
 
+    /**
+     * Nepřítomnosti, které u pojištěnce výdělečně činného po dosažení
+     * důchodového věku (druhá pozice kódu ELDP „D") tvoří odečítané doby
+     * (10375 a rozpad 10462–10469): pracovní volno bez náhrady příjmu,
+     * neomluvená nepřítomnost a doby omluvných důvodů § 16 odst. 4 písm. a)
+     * zákona č. 155/1995 Sb. (datový slovník JMHZ 1.4.1.6 u 10375, Pokyny
+     * k vyplnění MH kap. 3.6.4). Peněžitá pomoc v mateřství jen před porodem,
+     * stejně jako u vyloučených dob.
+     *
+     * Vrací ID nepřítomností, které do intervalu zasahují. Odečítané doby
+     * modul nedopočítává (viz hlavička třídy), takže volající s neprázdným
+     * výsledkem musí sestavení zastavit, ne vykázat sekci bez nich.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @return list<int>
+     */
+    public static function pensionAgeDeductedAbsenceIds(
+        array $absences,
+        string $intervalFrom,
+        string $intervalTo,
+    ): array {
+        $deductedTypes = [
+            ...array_keys(self::EXCLUDED_ATTRIBUTES),
+            ...self::UNPAID_EXCUSED_TYPES,
+            'unexcused',
+        ];
+        $ids = [];
+        foreach ($absences as $absence) {
+            $type = is_array($absence) ? ($absence['absence_type'] ?? null) : null;
+            if (!in_array($type, $deductedTypes, true)) {
+                continue;
+            }
+            $from = self::date($absence['date_from'] ?? null);
+            $to = self::date($absence['date_to'] ?? null);
+            if ($from === null || $to === null) {
+                continue;
+            }
+            $countedFrom = max($from, $intervalFrom);
+            $countedTo = min($to, $intervalTo);
+            if ($countedFrom > $countedTo) {
+                continue;
+            }
+            if ($type === 'ppm') {
+                $preBirth = self::ppmPreBirthWindow($absence, $countedFrom, $countedTo);
+                if ($preBirth['missing'] === null && $preBirth['window'] === null) {
+                    continue;
+                }
+            }
+            $ids[] = is_int($absence['id'] ?? null) ? $absence['id'] : 0;
+        }
+
+        return $ids;
+    }
+
     public const MONTH_INSURED = 'insured';
     public const MONTH_OUTSIDE_INSURANCE = 'outside_insurance';
     public const MONTH_UNEXPLAINED = 'unexplained';

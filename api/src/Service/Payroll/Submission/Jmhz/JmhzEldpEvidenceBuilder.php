@@ -482,6 +482,29 @@ final class JmhzEldpEvidenceBuilder
                 $this->invalid('jmhz_eldp_code_activity_mismatch', 'Kód ELDP neodpovídá činnosti pracovního vztahu.');
             }
             $entryMetadata = $this->codebook()->requireValue('kod_eldp', $code);
+            /*
+             * Po dosažení důchodového věku bez pobírání starobního důchodu
+             * jsou volno bez náhrady, neomluvená absence a omluvné důvody
+             * odečítanými dobami a IN04 (10375, 10462–10469) je povinná.
+             * Sekce bez nich by tvrdila celý měsíc doby pojištění. Odečítané
+             * doby se zatím neodvozují, proto se takový měsíc zastaví stejně
+             * jako změna kódu uprostřed měsíce.
+             */
+            if ($this->pensionAgeWithoutPension($source, $insuranceFrom, $insuranceTo)) {
+                $deducted = EldpExcludedPeriodDeriver::pensionAgeDeductedAbsenceIds(
+                    $absences,
+                    $insuranceFrom,
+                    $insuranceTo,
+                );
+                if ($deducted !== []) {
+                    $this->invalid(
+                        'jmhz_eldp_deducted_days_unsupported',
+                        'Zaměstnanec po dosažení důchodového věku má v měsíci nepřítomnost, která tvoří'
+                        . ' odečítané doby (10375). Ty aplikace do měsíčního hlášení zatím nevykazuje;'
+                        . ' hlášení za tento vztah podejte ručně přes ePortál ČSSZ.',
+                    );
+                }
+            }
             // Nulový základ u účastného vztahu je legitimní: měsíc mimo dobu
             // pojištění, nebo měsíc celý v omluvné nepřítomnosti (nemoc,
             // ošetřovné), který dobou pojištění zůstává. Který z nich nastal,
@@ -662,6 +685,37 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return EldpPensionAgeCode::codeFrom($dates);
+    }
+
+    /**
+     * Dovršila osoba důchodový věk před intervalem a nepobírá v něm starobní
+     * důchod? Jen pro ni se vedou odečítané doby (datový slovník JMHZ 1.4.1.6
+     * u 10375: „pojištěnec, který … nepobírá starobní důchod a je výdělečně
+     * činný po dovršení důchodového věku"). Předčasný důchod je důchod, takže
+     * kód D z něj odečítané doby nezakládá.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function pensionAgeWithoutPension(array $source, string $intervalFrom, string $intervalTo): bool
+    {
+        $status = $source['pension_status'] ?? null;
+        if ($status === null) {
+            return false;
+        }
+        $status = $this->object($status, 'pension_status');
+        $reachedOn = ($status['pension_age_reached_on'] ?? null) === null
+            ? null
+            : $this->date($status['pension_age_reached_on'], 'pension_status.pension_age_reached_on');
+        if ($reachedOn === null || $reachedOn > $intervalFrom) {
+            return false;
+        }
+        $earlyFrom = ($status['early_pension_from'] ?? null) === null
+            ? null
+            : $this->date($status['early_pension_from'], 'pension_status.early_pension_from');
+        $fullPaidFrom = $status['full_pension_paid_from'] ?? null;
+
+        return ($earlyFrom === null || $earlyFrom > $intervalTo)
+            && (!is_string($fullPaidFrom) || $fullPaidFrom > substr($intervalTo, 0, 7));
     }
 
     /**
