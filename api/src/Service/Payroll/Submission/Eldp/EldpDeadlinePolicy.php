@@ -103,6 +103,10 @@ final class EldpDeadlinePolicy
     public const TERMINATION_RULESET = 'cz-eldp-deadlines.termination.v1';
     public const AUTHORITY_REQUEST_RULESET =
         'cz-eldp-deadlines.authority-request.v1';
+    public const AUTHORITY_REQUEST_PRE_2026_RULESET =
+        'cz-eldp-deadlines.authority-request.pre-2026.v1';
+    public const AUTHORITY_REQUEST_STATED_RULESET =
+        'cz-eldp-deadlines.authority-request.stated-due.v1';
 
     private const SOURCES = [
         'law' => '582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 až 4',
@@ -229,22 +233,83 @@ final class EldpDeadlinePolicy
     }
 
     /**
-     * Evidenční list vyžádaný ČSSZ/ÚSSZ za rok 2026.
+     * Evidenční list vyžádaný ČSSZ/ÚSSZ.
+     *
+     * Lhůta i její zákonný důvod závisí na vykazovaném roce, ne na dni výzvy:
+     *
+     * - **rok 2026** — přechodné ustanovení čl. V bod 8 zák. č. 360/2025 Sb.:
+     *   do 8 dnů ode dne obdržení výzvy (ruleset `authority-request.v1`, beze
+     *   změny proti dřívějším listům, aby se zmrazené listy daly zopakovat),
+     * - **roky do 2025** — § 39 odst. 3 ve znění účinném do 31. 12. 2025, které
+     *   se na ně podle čl. V bod 1 použije: také 8 dnů od obdržení výzvy, ale
+     *   s vlastním citovaným ustanovením (dřív list za rok 2025 citoval
+     *   přechodné ustanovení „za rok 2026"),
+     * - **roky od 2027** — žádné přechodné ustanovení už nedopadá a samostatný
+     *   list zaměstnavateli neukládá žádná obecná lhůta; § 38a odst. 1 a 2 se
+     *   cituje jen jako obdoba (lhůta pro hlášení na výzvu). Termín proto
+     *   určuje sama výzva a bez něj se lhůta nevymýšlí.
+     *
+     * @param string|null $requestDueOn lhůta uvedená ve výzvě; povinná pro roky
+     *        od 2027, jinak se nepoužije
      */
-    public function forAuthorityRequest(string $requestReceivedOn): EldpDeadlineWindow
-    {
+    public function forAuthorityRequest(
+        string $requestReceivedOn,
+        int $year,
+        ?string $requestDueOn = null,
+    ): EldpDeadlineWindow {
+        self::assertYear($year);
         $received = self::date($requestReceivedOn, 'Datum doručení výzvy');
-        $dueOn = $received->modify('+8 days')->format('Y-m-d');
+        $transitionYear = self::LAST_ANNUAL_YEAR + 1;
+        if ($year === $transitionYear) {
+            return $this->window(
+                $received->format('Y-m-d'),
+                $received->modify('+8 days')->format('Y-m-d'),
+                self::AUTHORITY_REQUEST_RULESET,
+                'authority_request_within_8_days',
+                'annual',
+                'Čl. V bod 8 zákona č. 360/2025 Sb. — evidenční list s údaji '
+                    . 'za rok 2026 vyžádaný ČSSZ/ÚSSZ se předkládá do 8 dnů ode dne '
+                    . 'obdržení výzvy.',
+            );
+        }
+        if ($year < $transitionYear) {
+            return $this->window(
+                $received->format('Y-m-d'),
+                $received->modify('+8 days')->format('Y-m-d'),
+                self::AUTHORITY_REQUEST_PRE_2026_RULESET,
+                'authority_request_within_8_days_old_wording',
+                'annual',
+                'Zákon č. 582/1991 Sb., § 39 odst. 3 ve znění účinném do 31. 12. 2025 '
+                    . '(čl. V bod 1 zákona č. 360/2025 Sb.) — evidenční list za rok '
+                    . $year . ' je zaměstnavatel povinen předložit na výzvu orgánu '
+                    . 'sociálního zabezpečení do 8 dnů ode dne obdržení výzvy.',
+            );
+        }
+        if ($requestDueOn === null) {
+            throw new EldpValidationException(
+                'eldp_authority_request_due_on_missing',
+                'Za rok ' . $year . ' žádná zákonná lhůta pro samostatný evidenční '
+                    . 'list na výzvu neplatí — termín určuje výzva ČSSZ/ÚSSZ. Zadejte '
+                    . 'lhůtu, kterou výzva uvádí.',
+            );
+        }
+        $due = self::date($requestDueOn, 'Lhůta uvedená ve výzvě');
+        if ($due < $received) {
+            throw new EldpValidationException(
+                'eldp_authority_request_due_on_invalid',
+                'Lhůta uvedená ve výzvě nemůže předcházet dni jejího doručení.',
+            );
+        }
 
         return $this->window(
             $received->format('Y-m-d'),
-            $dueOn,
-            self::AUTHORITY_REQUEST_RULESET,
-            'authority_request_within_8_days',
+            $due->format('Y-m-d'),
+            self::AUTHORITY_REQUEST_STATED_RULESET,
+            'authority_request_due_on_stated_in_request',
             'annual',
-            'Čl. V bod 8 zákona č. 360/2025 Sb. — evidenční list s údaji '
-                . 'za rok 2026 vyžádaný ČSSZ/ÚSSZ se předkládá do 8 dnů ode dne '
-                . 'obdržení výzvy.',
+            'Zákon č. 582/1991 Sb., § 38a odst. 1 a 2 obdobně — evidenční list za rok '
+                . $year . ' se sestavuje jen na výzvu ČSSZ/ÚSSZ a předkládá se ve lhůtě, '
+                . 'kterou určila výzva.',
         );
     }
 

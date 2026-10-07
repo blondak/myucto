@@ -611,7 +611,7 @@ final class JmhzEldpEvidenceBuilder
      *
      * @param array<string,mixed> $input
      */
-    private static function workingPensioner(array $input, int $employeeId): bool
+    public static function workingPensioner(array $input, int $employeeId): bool
     {
         foreach ((array) ($input['people'] ?? []) as $person) {
             if (!is_array($person) || (($person['employee'] ?? [])['id'] ?? null) !== $employeeId) {

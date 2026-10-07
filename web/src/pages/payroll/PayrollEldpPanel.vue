@@ -67,6 +67,25 @@ const excludedDaysConfirmed = ref(false)
 const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)
 const authorityRequestReceivedOn = ref('')
+const authorityRequestDueOn = ref('')
+/*
+ * Od roku 2027 lhůtu pro list na výzvu neurčuje zákon, ale výzva. Zrcadlí
+ * `EldpDeadlinePolicy` (LAST_ANNUAL_YEAR + 2); server je autorita a pole bez
+ * hodnoty odmítne srozumitelnou chybou.
+ */
+const authorityDueOnRequired = computed(() =>
+  requestedByAuthority.value && year.value >= LAST_ANNUAL_ELDP_YEAR + 2)
+/*
+ * Důchodové údaje zmrazená revize nenese, a přitom na nich stojí kód ELDP
+ * (D od dovršení důchodového věku nebo předčasného důchodu) i to, zda se list
+ * za poživatele plného starobního důchodu vůbec vede. Potvrzení je výslovné
+ * i tehdy, když nic z toho nenastalo.
+ */
+const pensionConfirmed = ref(false)
+const pensionAgeReachedOn = ref('')
+const earlyPensionFrom = ref('')
+const fullPensionPaidFrom = ref('')
+const foreignInsurance = ref(false)
 const note = ref('')
 /*
  * Opravný evidenční list. Zmrazený list se nepřepisuje; změněný podklad jde
@@ -146,7 +165,9 @@ const canPrepare = computed(() =>
   && standaloneAllowed.value
   && excludedDaysConfirmed.value
   && deductedDaysNone.value
+  && pensionConfirmed.value
   && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
+  && (!authorityDueOnRequired.value || authorityRequestDueOn.value !== '')
   && note.value.trim().length <= 500)
 
 /**
@@ -168,8 +189,12 @@ const prepareBlockers = computed<string[]>(() => {
   if (employmentId.value === null) missing.push(t('payroll.eldp.blockers.employment'))
   if (!excludedDaysConfirmed.value) missing.push(t('payroll.eldp.blockers.excluded'))
   if (!deductedDaysNone.value) missing.push(t('payroll.eldp.blockers.deducted'))
+  if (!pensionConfirmed.value) missing.push(t('payroll.eldp.blockers.pension'))
   if (requestedByAuthority.value && authorityRequestReceivedOn.value === '') {
     missing.push(t('payroll.eldp.blockers.authorityDate'))
+  }
+  if (authorityDueOnRequired.value && authorityRequestDueOn.value === '') {
+    missing.push(t('payroll.eldp.blockers.authorityDueOn'))
   }
   if (note.value.trim().length > 500) missing.push(t('payroll.eldp.blockers.noteTooLong'))
   return missing
@@ -446,6 +471,15 @@ async function prepare(): Promise<void> {
       authority_request_received_on: requestedByAuthority.value
         ? authorityRequestReceivedOn.value
         : null,
+      authority_request_due_on: requestedByAuthority.value && authorityRequestDueOn.value !== ''
+        ? authorityRequestDueOn.value
+        : null,
+      pension_status: {
+        pension_age_reached_on: pensionAgeReachedOn.value || null,
+        early_pension_from: earlyPensionFrom.value || null,
+        full_pension_paid_from: fullPensionPaidFrom.value || null,
+        foreign_insurance: foreignInsurance.value,
+      },
       note: note.value.trim(),
       // Opravný list je nový požadavek: pod klíčem řádného listu by ho server
       // odmítl jako jiné potvrzení téhož požadavku.
@@ -665,6 +699,75 @@ watch(requestedByAuthority, value => {
           >
           <span>{{ t('payroll.eldp.confirmDeducted') }}</span>
         </label>
+        <fieldset
+          class="space-y-3 rounded-lg border border-neutral-200 p-3"
+          data-test="eldp-pension"
+        >
+          <legend class="px-1 text-sm font-medium text-neutral-700">
+            {{ t('payroll.eldp.pension.title') }}
+          </legend>
+          <p class="max-w-prose text-xs text-neutral-500">
+            {{ t('payroll.eldp.pension.description') }}
+          </p>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-neutral-700">
+                {{ t('payroll.eldp.pension.ageReachedOn') }}
+              </span>
+              <DateInput
+                v-model="pensionAgeReachedOn"
+                class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+                data-test="eldp-pension-age" />
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll.eldp.pension.ageReachedOnHint') }}
+              </span>
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-neutral-700">
+                {{ t('payroll.eldp.pension.earlyPensionFrom') }}
+              </span>
+              <DateInput
+                v-model="earlyPensionFrom"
+                class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+                data-test="eldp-pension-early" />
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll.eldp.pension.earlyPensionFromHint') }}
+              </span>
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-neutral-700">
+                {{ t('payroll.eldp.pension.fullPensionPaidFrom') }}
+              </span>
+              <input
+                v-model="fullPensionPaidFrom"
+                type="month"
+                class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+                data-test="eldp-pension-full"
+              >
+              <span class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll.eldp.pension.fullPensionPaidFromHint') }}
+              </span>
+            </label>
+          </div>
+          <label class="flex items-start gap-2 text-sm text-neutral-700">
+            <input
+              v-model="foreignInsurance"
+              type="checkbox"
+              class="mt-0.5"
+              data-test="eldp-pension-foreign"
+            >
+            <span>{{ t('payroll.eldp.pension.foreignInsurance') }}</span>
+          </label>
+          <label class="flex items-start gap-2 text-sm font-medium text-neutral-700">
+            <input
+              v-model="pensionConfirmed"
+              type="checkbox"
+              class="mt-0.5"
+              data-test="eldp-pension-confirm"
+            >
+            <span>{{ t('payroll.eldp.pension.confirm') }}</span>
+          </label>
+        </fieldset>
         <label class="flex items-start gap-2 text-sm text-neutral-700">
           <input
             v-model="requestedByAuthority"
@@ -684,6 +787,18 @@ watch(requestedByAuthority, value => {
             data-test="eldp-authority-request-date" />
           <span class="mt-1 block text-xs text-neutral-500">
             {{ t('payroll.eldp.authorityRequestReceivedOnHint') }}
+          </span>
+        </label>
+        <label v-if="authorityDueOnRequired" class="block max-w-sm text-sm">
+          <span class="mb-1 block font-medium text-neutral-700">
+            {{ t('payroll.eldp.authorityRequestDueOn') }}
+          </span>
+          <DateInput
+            v-model="authorityRequestDueOn"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            data-test="eldp-authority-request-due-on" />
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.eldp.authorityRequestDueOnHint') }}
           </span>
         </label>
         <label class="block text-sm">

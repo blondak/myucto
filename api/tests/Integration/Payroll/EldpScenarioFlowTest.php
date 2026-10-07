@@ -117,6 +117,7 @@ final class EldpScenarioFlowTest extends TestCase
             [
                 'excluded_days_confirmed' => true,
                 'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
                 'requested_by_authority' => true,
                 'authority_request_received_on' => '2026-08-20',
                 'note' => 'Syntetická výzva ČSSZ.',

@@ -72,6 +72,14 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_confirmation_document_required: 'confirmation_document',
   eldp_confirmation_document_missing: 'confirmation_document',
   eldp_confirmation_document_corrupt: 'confirmation_document',
+  eldp_authority_request_due_on_missing: 'confirmation',
+  eldp_authority_request_due_on_invalid: 'confirmation',
+  // Důchodové údaje zaměstnance se doplňují ve formuláři evidenčního listu.
+  eldp_pension_status_not_confirmed: 'pension',
+  eldp_pension_status_invalid: 'pension',
+  eldp_pension_status_conflict: 'pension',
+  eldp_not_kept_full_old_age_pension: 'pension_not_kept',
+  eldp_pension_age_mid_month_unsupported: 'unsupported',
   eldp_no_insurance_period: 'no_insurance',
   eldp_standalone_statement_not_applicable: 'not_applicable',
   eldp_manual_already_fulfilled: 'manual_state',
@@ -95,7 +103,7 @@ export const eldpRemediationCodes: Record<string, string> = {
 }
 
 /** Kinds, jejichž náprava je ve formuláři evidenčního listu samotném. */
-const ELDP_LOCAL_KINDS = ['confirmation', 'confirmation_document', 'no_insurance', 'not_applicable', 'manual_state']
+const ELDP_LOCAL_KINDS = ['confirmation', 'confirmation_document', 'no_insurance', 'not_applicable', 'manual_state', 'pension', 'pension_not_kept']
 
 export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: number | null, year: number) {
   const kind = Object.hasOwn(eldpRemediationCodes, blocker.code) ? eldpRemediationCodes[blocker.code]! : 'unknown'

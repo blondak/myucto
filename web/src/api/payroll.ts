@@ -4879,6 +4879,24 @@ export interface PayrollEldpSupport {
   annual_employer_duty: boolean
   last_annual_year: number
   deadline_rulesets: string[]
+  /** Od kterého roku musí výzva nést vlastní lhůtu. */
+  authority_request_due_on_required_from_year?: number
+}
+
+/**
+ * Důchodové údaje zaměstnance k evidenčnímu listu. Všechny klíče se posílají
+ * vždy, i prázdné — „nic jsem nezadala" a „důchod nepobírá" se jinak nedají
+ * rozlišit.
+ */
+export interface PayrollEldpPensionStatus {
+  /** Den dosažení důchodového věku, je-li do konce vykazovaného roku. */
+  pension_age_reached_on: string | null
+  /** Den, od kterého je zaměstnanec poživatelem předčasného starobního důchodu. */
+  early_pension_from: string | null
+  /** První měsíc výplaty starobního důchodu v plné výši, `RRRR-MM`. */
+  full_pension_paid_from: string | null
+  /** Účast na důchodovém pojištění v cizině. */
+  foreign_insurance: boolean
 }
 
 /**
@@ -8681,6 +8699,10 @@ export const payrollApi = {
     deducted_days_none: boolean
     requested_by_authority: boolean
     authority_request_received_on: string | null
+    /** Lhůta uvedená ve výzvě; od roku 2027 ji neurčuje zákon, ale výzva. */
+    authority_request_due_on?: string | null
+    /** Výslovně potvrzené důchodové údaje; kód ELDP i vedení listu na nich stojí. */
+    pension_status: PayrollEldpPensionStatus
     note: string
     idempotency_key: string
     /** Opravný evidenční list k poslednímu zmrazenému listu rozsahu. */

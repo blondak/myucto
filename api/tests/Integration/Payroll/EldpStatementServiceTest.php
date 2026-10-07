@@ -207,6 +207,7 @@ final class EldpStatementServiceTest extends TestCase
             [
                 'excluded_days_confirmed' => true,
                 'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
                 'requested_by_authority' => true,
                 'note' => 'Jiné potvrzení pod stejným idempotency klíčem.',
             ],
@@ -474,6 +475,7 @@ final class EldpStatementServiceTest extends TestCase
             [
                 'excluded_days_confirmed' => true,
                 'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
                 'requested_by_authority' => false,
                 'note' => 'Syntetický evidenční list pro integrační test.',
                 'correction' => $correction,

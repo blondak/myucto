@@ -820,7 +820,21 @@ final readonly class EldpStatementService
      */
     private static function normalizedConfirmation(array $confirmation): array
     {
-        return [
+        /*
+         * Lhůta z výzvy a důchodové údaje vstupují do otisku jen tehdy, když
+         * přišly. Otisk dřív zapsaných požadavků se tím nemění.
+         */
+        $optional = [];
+        if (is_string($confirmation['authority_request_due_on'] ?? null)
+            && $confirmation['authority_request_due_on'] !== ''
+        ) {
+            $optional['authority_request_due_on'] = $confirmation['authority_request_due_on'];
+        }
+        if (array_key_exists('pension_status', $confirmation)) {
+            $optional['pension_status'] = $confirmation['pension_status'];
+        }
+
+        return $optional + [
             'excluded_days_confirmed' => $confirmation['excluded_days_confirmed'] ?? null,
             'deducted_days_none' => $confirmation['deducted_days_none'] ?? null,
             'requested_by_authority' => $confirmation['requested_by_authority'] ?? null,
