@@ -36,9 +36,14 @@ final class RegistrationXmlFixtures
             'city' => 'Praha',
             'ikmpsv' => null,
             'oid' => null,
+            'vs' => '1234567890',
+            'nvs' => null,
+            'ona' => null,
+            'vcp' => null,
+            'sme' => 'N',
         ];
-        $client = self::attributes(['bno' => $o['bno'], 'ikmpsv' => $o['ikmpsv']]);
-        $name = self::attributes(['sur' => $o['last'], 'fir' => $o['first'], 'tit' => $o['tit']]);
+        $client = self::attributes(['bno' => $o['bno'], 'ikmpsv' => $o['ikmpsv'], 'vcp' => $o['vcp']]);
+        $name = self::attributes(['sur' => $o['last'], 'ona' => $o['ona'], 'fir' => $o['first'], 'tit' => $o['tit']]);
         $birth = self::attributes([
             'dat' => $o['birth_date'],
             'nam' => $o['birth_surname'],
@@ -57,12 +62,13 @@ final class RegistrationXmlFixtures
             'fro' => $o['start'],
             'rel' => $o['rel'],
             'relDetail' => $o['detail'],
-            'sme' => 'N',
+            'sme' => $o['sme'],
             'contractplace' => 'Praha',
             'cit' => $o['workplace'],
             'municode' => $o['municode'],
         ]);
         $insurer = $o['insurer'] === null ? '' : '<insh cnr="' . $o['insurer'] . '"/>';
+        $comp = self::attributes(['vs' => $o['vs'], 'nvs' => $o['nvs'], 'nam' => 'Syntetický zaměstnavatel']);
 
         return self::regzec(<<<XML
             <employee sqnr="1" dep="111" act="1" dat="2026-07-02">
@@ -72,7 +78,7 @@ final class RegistrationXmlFixtures
                 <stat mal="{$o['sex']}" cnt="CZ"/>
                 <adr{$address}/>
               </client>
-              <comp vs="1234567890" nam="Syntetický zaměstnavatel"/>
+              <comp{$comp}/>
               <job{$job}>
                 <prof clas="{$o['clas']}"/>
                 <position name="Účetní"/>
@@ -83,25 +89,68 @@ final class RegistrationXmlFixtures
             XML);
     }
 
-    public static function regzecA2(string $birthNumber, string $oic, string $idPpv, string $endOn): string
+    /** @param array<string,string|null> $options `rel`, `sme`, `endbydeath` (A/N), `rsnterempl`, `vs` */
+    public static function regzecA2(string $birthNumber, string $oic, string $idPpv, string $endOn, array $options = []): string
     {
+        $o = $options + ['rel' => '1', 'sme' => null, 'endbydeath' => null, 'rsnterempl' => null, 'vs' => '1234567890'];
+        $job = self::attributes([
+            'oid' => $idPpv,
+            'to' => $endOn,
+            'rel' => $o['rel'],
+            'relDetail' => '1',
+            'sme' => $o['sme'],
+            'endbydeath' => $o['endbydeath'],
+        ]);
+        $unemployment = $o['rsnterempl'] === null ? '' : '<unemplcomp rsnterempl="' . $o['rsnterempl'] . '"/>';
+
         return self::regzec(<<<XML
             <employee sqnr="1" dep="111" act="2" dat="2026-09-01">
               <client bno="{$birthNumber}" ikmpsv="{$oic}"/>
-              <comp vs="1234567890" nam="Syntetický zaměstnavatel"/>
-              <job oid="{$idPpv}" to="{$endOn}" rel="1" relDetail="1"/>
+              <comp vs="{$o['vs']}" nam="Syntetický zaměstnavatel"/>
+              <job{$job}/>
+              {$unemployment}
             </employee>
             XML);
     }
 
-    public static function regzecA3(string $birthNumber, string $effectiveOn): string
+    /** Hlášení o nenastoupení (A8) téže osoby; `oid` je ID PPV, `notstart` A/N. */
+    public static function regzecA8(string $birthNumber, ?string $oid = null, string $notStart = 'A', string $date = '2026-07-20'): string
     {
+        $job = self::attributes(['oid' => $oid, 'notstart' => $notStart]);
+
         return self::regzec(<<<XML
-            <employee sqnr="1" dep="111" act="3" dat="2026-09-02" fro="{$effectiveOn}">
+            <employee sqnr="1" dep="111" act="8" dat="{$date}">
               <client bno="{$birthNumber}"/>
               <comp vs="1234567890" nam="Syntetický zaměstnavatel"/>
-              <job rel="1"/>
-              <insh cnr="207"/>
+              <job{$job}/>
+            </employee>
+            XML);
+    }
+
+    /** @param array<string,string|null> $options `insurer`, `oid`, `ikmpsv`, `sme`, `relDetail`, `rel`, `place` (cit pracoviště), `municode`, `vcp` */
+    public static function regzecA3(?string $birthNumber, string $effectiveOn, array $options = []): string
+    {
+        $o = $options + [
+            'insurer' => '207', 'oid' => null, 'ikmpsv' => null, 'sme' => null,
+            'relDetail' => null, 'rel' => '1', 'place' => null, 'municode' => null, 'vcp' => null,
+        ];
+        $client = self::attributes(['bno' => $birthNumber, 'ikmpsv' => $o['ikmpsv'], 'vcp' => $o['vcp']]);
+        $job = self::attributes([
+            'oid' => $o['oid'],
+            'rel' => $o['rel'],
+            'relDetail' => $o['relDetail'],
+            'sme' => $o['sme'],
+            'cit' => $o['place'],
+            'municode' => $o['municode'],
+        ]);
+        $insurer = $o['insurer'] === null ? '' : '<insh cnr="' . $o['insurer'] . '"/>';
+
+        return self::regzec(<<<XML
+            <employee sqnr="1" dep="111" act="3" dat="2026-09-02" fro="{$effectiveOn}">
+              <client{$client}/>
+              <comp vs="1234567890" nam="Syntetický zaměstnavatel"/>
+              <job{$job}/>
+              {$insurer}
             </employee>
             XML);
     }
@@ -118,6 +167,22 @@ final class RegistrationXmlFixtures
                     <birth nam="{$last}" cit="Testov"/>
                     <stat cnt="CZ"/>
                   </client>
+                  <comp vs="1234567890"/>
+                </employee>
+              </employees>
+            </PREZEC>
+            XML;
+    }
+
+    /** Ukončení předregistrace (P2) k částečnému přihlášení {@see prezecP1()}. */
+    public static function prezecP2(string $birthNumber, string $date = '2026-09-20'): string
+    {
+        return <<<XML
+            <?xml version="1.0" encoding="UTF-8"?>
+            <PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026" version="1.2" partialAccept="A">
+              <employees>
+                <employee sqnr="1" act="10" idform="0F8A3C2E-1B2D-4C5E-8F9A-0123456789AB" dat="{$date}">
+                  <client bno="{$birthNumber}"/>
                   <comp vs="1234567890"/>
                 </employee>
               </employees>

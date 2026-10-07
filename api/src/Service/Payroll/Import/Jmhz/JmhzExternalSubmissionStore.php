@@ -380,8 +380,48 @@ final class JmhzExternalSubmissionStore
     }
 
     /**
+     * Podmínka „podání stále platí" pro měsíční hlášení předchozího programu, jediné
+     * místo pro {@see sentMonthly()} i hlídač převzatých měsíců bez hlášení. Vyřadí
+     * podání zrušené stornem (storno nese GUID rušeného podání) a podání, které ČSSZ
+     * podle načteného protokolu nepřijala a žádný jiný protokol téhož GUID nepřijal.
+     * Fragment začíná `AND` a patří za podmínky na status a typ podání.
+     */
+    public static function inForceSql(string $alias, bool $withProtocols): string
+    {
+        $sql = "AND NOT (
+                    {$alias}.submission_guid IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM payroll_external_jmhz_submissions c
+                                 WHERE c.supplier_id = {$alias}.supplier_id AND c.environment = {$alias}.environment
+                                   AND c.document_kind = 'monthly' AND c.period = {$alias}.period
+                                   AND c.submission_type = 'S' AND c.status = 'sent'
+                                   AND c.submission_guid = {$alias}.submission_guid)
+                )";
+        if ($withProtocols) {
+            // 2 = nebylo přijato, 3 = zamítnuto; 1, 4 a 6 podání přijaly (úplně, částečně, s propustnými chybami).
+            $sql .= "
+                AND NOT (
+                    {$alias}.submission_guid IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM payroll_imported_jmhz_protocols r
+                                 WHERE r.supplier_id = {$alias}.supplier_id AND r.environment = {$alias}.environment
+                                   AND r.submission_guid = {$alias}.submission_guid AND r.status_code IN (2, 3))
+                    AND NOT EXISTS (SELECT 1 FROM payroll_imported_jmhz_protocols a
+                                     WHERE a.supplier_id = {$alias}.supplier_id AND a.environment = {$alias}.environment
+                                       AND a.submission_guid = {$alias}.submission_guid AND a.status_code IN (1, 4, 6))
+                )";
+        }
+
+        return $sql;
+    }
+
+    /**
      * Odeslané měsíční hlášení předchozího programu za období, nejnovější podle odeslání;
      * `null`, když za období žádné neodešlo.
+     *
+     * Nepočítá se podání, které už zaniklo: řádné nebo opravné hlášení, které zrušilo
+     * stornující podání téhož programu (storno nese GUID rušeného podání), a podání,
+     * které ČSSZ podle načteného protokolu nepřijala (zamítnuto, nebylo přijato)
+     * a které žádný jiný protokol nepřijal. Nové řádné hlášení za takový měsíc je
+     * správně (s novým GUID) a nesmí být blokované.
      *
      * @return array{id:int,source:string,submission_type:?string,submission_guid:?string,submitted_at:?string,program:?string}|null
      */
@@ -391,11 +431,12 @@ final class JmhzExternalSubmissionStore
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, source, submission_type, submission_guid, submitted_at, program
-               FROM payroll_external_jmhz_submissions
-              WHERE supplier_id = ? AND environment = ? AND document_kind = 'monthly' AND period = ?
-                AND status = 'sent' AND (submission_type IS NULL OR submission_type <> 'S')
-              ORDER BY COALESCE(submitted_at, filled_at) DESC, id DESC LIMIT 1"
+            "SELECT s.id, s.source, s.submission_type, s.submission_guid, s.submitted_at, s.program
+               FROM payroll_external_jmhz_submissions s
+              WHERE s.supplier_id = ? AND s.environment = ? AND s.document_kind = 'monthly' AND s.period = ?
+                AND s.status = 'sent' AND (s.submission_type IS NULL OR s.submission_type <> 'S')
+                " . self::inForceSql('s', $this->db->hasTable('payroll_imported_jmhz_protocols')) . "
+              ORDER BY COALESCE(s.submitted_at, s.filled_at) DESC, s.id DESC LIMIT 1"
         );
         $stmt->execute([$supplierId, $environment, $period]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);

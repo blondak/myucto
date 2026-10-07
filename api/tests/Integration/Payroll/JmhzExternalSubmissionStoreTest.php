@@ -107,6 +107,75 @@ final class JmhzExternalSubmissionStoreTest extends TestCase
     }
 
     /**
+     * PRE-05: stornující podání ruší řádné hlášení se stejným GUID, takže nové řádné
+     * hlášení za měsíc (s novým GUID) není duplicita. Dřív `sentMonthly()` vracelo
+     * i stornované hlášení a MyÚčto odmítlo připravit náhradní.
+     */
+    public function testSentMonthlyIgnoresRegularCancelledByStorno(): void
+    {
+        $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_JMHZ_XML,
+            ['source_key' => 'xml:r'] + self::submission('R', 'sent'), [], null);
+        self::assertSame('R', $this->store->sentMonthly($this->supplierId, 'production', '2026-02')['submission_type'] ?? null);
+
+        $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_JMHZ_XML,
+            ['source_key' => 'xml:s'] + self::submission('S', 'sent'), [], null);
+        self::assertNull(
+            $this->store->sentMonthly($this->supplierId, 'production', '2026-02'),
+            'Storno zneplatnilo řádné hlášení, za měsíc už nic podáno není.',
+        );
+
+        $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_JMHZ_XML,
+            ['source_key' => 'xml:r2', 'submission_guid' => '33333333-3333-4333-8333-333333333333']
+                + self::submission('R', 'sent'),
+            [], null);
+        self::assertSame(
+            '33333333-3333-4333-8333-333333333333',
+            $this->store->sentMonthly($this->supplierId, 'production', '2026-02')['submission_guid'] ?? null,
+            'Nové řádné hlášení s novým GUID je platné podání za měsíc.',
+        );
+    }
+
+    /** PRE-05: hlášení, které podle načteného protokolu ČSSZ zamítla, měsíc nepodalo. */
+    public function testRejectedProtocolDoesNotMarkMonthSent(): void
+    {
+        if (!$this->db->hasTable('payroll_imported_jmhz_protocols')) {
+            self::markTestSkipped('Chybí tabulka payroll_imported_jmhz_protocols.');
+        }
+        $this->store->store($this->supplierId, 'production', JmhzExternalSubmissionStore::SOURCE_JMHZ_XML,
+            ['source_key' => 'xml:r'] + self::submission('R', 'sent'), [], null);
+        self::assertNotNull($this->store->sentMonthly($this->supplierId, 'production', '2026-02'));
+
+        $this->protocol(3, 'a');
+        self::assertNull(
+            $this->store->sentMonthly($this->supplierId, 'production', '2026-02'),
+            'Zamítnuté podání měsíc nepodalo.',
+        );
+
+        $this->protocol(1, 'b');
+        self::assertNotNull(
+            $this->store->sentMonthly($this->supplierId, 'production', '2026-02'),
+            'Pozdější přijetí téhož GUID podání platí.',
+        );
+    }
+
+    private function protocol(int $statusCode, string $dedupe): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_imported_jmhz_protocols
+                (supplier_id, environment, protocol_kind, variable_symbol, period_month, period_year, submission_guid,
+                 status_code, status_name, error_count, payload_sha256, payload_xml, dedupe_key)
+             VALUES (?, 'production', 'processing', '1234567890', 2, 2026, ?, ?, ?, 0, ?, '<x/>', ?)"
+        )->execute([
+            $this->supplierId,
+            '22222222-2222-4222-8222-222222222222',
+            $statusCode,
+            $statusCode === 3 ? 'Rejected' : 'ProcessedAndComplete',
+            str_repeat('b', 64),
+            str_pad($dedupe, 64, $dedupe),
+        ]);
+    }
+
+    /**
      * Přehled musí říct, KDO a JAKOU akcí byl v podání: dřív ukazoval u registrace
      * jen „—" a počet formulářů, takže nešlo poznat, co se podalo.
      */

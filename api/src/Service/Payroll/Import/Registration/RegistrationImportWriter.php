@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Import\Registration;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
@@ -46,6 +47,7 @@ final class RegistrationImportWriter
         private readonly PayrollRegistrationIdentityRepository $registrations,
         private readonly RegistrationImportLookup $lookup,
         private readonly PayrollHealthInsurerWriter $healthInsurers,
+        private readonly PayrollEmploymentTerminationRepository $terminationRecords,
     ) {}
 
     /**
@@ -176,6 +178,7 @@ final class RegistrationImportWriter
                     $supplierId,
                     $employmentId,
                     $steps['terms'],
+                    $decisive,
                     $userId,
                     $ip,
                     $userAgent,
@@ -204,17 +207,20 @@ final class RegistrationImportWriter
             $personIdentifiers = array_filter([
                 'birth_number' => $steps['birth_number'] ?? null,
                 'ecp' => $steps['ecp'] ?? null,
+                'vcp' => $steps['vcp'] ?? null,
                 'foreign_tax_identifier' => $steps['foreign_tax_identifier'] ?? null,
             ], 'is_string');
             if ($personIdentifiers !== [] && $employeeId !== null) {
                 $label = match (true) {
                     isset($personIdentifiers['ecp']) => 'Evidenční číslo pojištěnce',
                     isset($personIdentifiers['birth_number']) => 'Rodné číslo',
+                    isset($personIdentifiers['vcp']) => 'Variabilní číslo pojištěnce',
                     default => 'Zahraniční daňový identifikátor',
                 };
                 $operation = match (true) {
                     isset($personIdentifiers['ecp']) => 'ecp',
                     isset($personIdentifiers['birth_number']) => 'birth_number',
+                    isset($personIdentifiers['vcp']) => 'vcp',
                     default => 'foreign_tax_identifier',
                 };
                 $this->optional($label, $notes, $operations, $operation, fn () => $this->writePersonCard(
@@ -282,6 +288,24 @@ final class RegistrationImportWriter
                     $userAgent,
                 );
                 $operations[] = $target === 'ended' ? 'terminated' : 'no_show';
+            }
+            if (($steps['termination_reason'] ?? null) === 'death' && $employmentId !== null) {
+                $this->optional('Způsob skončení', $notes, $operations, 'termination_reason', fn () => $this->terminationRecords->save(
+                    $supplierId,
+                    $employmentId,
+                    [
+                        'termination_method' => 'death',
+                        'legal_ground' => 'none',
+                        'employee_stated_reason' => null,
+                        'severance_multiple_override' => null,
+                        'severance_override_reason' => null,
+                        'working_time_account_applies' => false,
+                        'other_income_from' => null,
+                        'other_payer_applies_protected_amount' => false,
+                    ],
+                    null,
+                    $userId,
+                ));
             }
             $identifiers = $steps['identifiers'];
             if (($identifiers['person'] !== null || $identifiers['employment'] !== null) && $employmentId !== null) {
@@ -380,11 +404,20 @@ final class RegistrationImportWriter
         return (int) $created['id'];
     }
 
-    /** @param array<string,string> $changes */
+    /**
+     * Podmínky z věty. Verze, která začíná před měsícem rozhodného dne, se
+     * nepřepisuje zpětně: změna z věty platí od prvního dne toho měsíce jako
+     * nová verze (stejně jako u měsíčního hlášení JMHZ). Přepis na místě zůstává
+     * jen u verze, která začíná v témže měsíci nebo později - typicky vztah,
+     * který import právě založil.
+     *
+     * @param array<string,string> $changes
+     */
     private function writeTerms(
         int $supplierId,
         int $employmentId,
         array $changes,
+        string $decisive,
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
@@ -398,24 +431,23 @@ final class RegistrationImportWriter
         if (($body['jmhz_workplace_municipality_code'] ?? null) === null) {
             $body['jmhz_workplace_country_code'] = null;
         }
-        $body['effective_from'] = (string) $current['effective_from'];
+        $monthStart = substr($decisive, 0, 7) . '-01';
+        $correct = (string) $current['effective_from'] >= $monthStart;
+        $body['effective_from'] = $correct ? (string) $current['effective_from'] : $monthStart;
         $row = $this->lookup->employment($supplierId, $employmentId)
             ?? throw new \DomainException('Pracovní vztah v téhle firmě neexistuje.');
 
-        $this->employments->correctTerms(
-            $supplierId,
-            $employmentId,
-            $this->employmentValidator->terms(
-                $body,
-                $this->employments->currentCzIscoCode($supplierId, $employmentId),
-                $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
-                $this->employments->currentRelationType($supplierId, $employmentId),
-            ),
-            (int) $row['row_version'],
-            $userId,
-            $ip,
-            $userAgent,
+        $terms = $this->employmentValidator->terms(
+            $body,
+            $this->employments->currentCzIscoCode($supplierId, $employmentId),
+            $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
+            $this->employments->currentRelationType($supplierId, $employmentId),
         );
+        if ($correct) {
+            $this->employments->correctTerms($supplierId, $employmentId, $terms, (int) $row['row_version'], $userId, $ip, $userAgent);
+        } else {
+            $this->employments->addTerms($supplierId, $employmentId, $terms, (int) $row['row_version'], $userId, $ip, $userAgent);
+        }
     }
 
     /**
@@ -779,10 +811,10 @@ final class RegistrationImportWriter
     }
 
     /**
-     * Identifikátory platí od nástupu, nebo od data účinnosti věty, pokud je
-     * pozdější. Den vyhotovení věty se nepoužívá: OIČ i ID PPV označují vztah
-     * od jeho začátku a měsíce mezi nástupem a vyhotovením by jinak zůstaly
-     * v měsíčním hlášení bez identifikátorů.
+     * Identifikátory platí od nástupu vztahu. Ani den vyhotovení věty, ani její
+     * účinnost (`employee@fro` u změnové věty A3) se nepoužívá: OIČ i ID PPV
+     * označují vztah od jeho začátku a měsíce mezi nástupem a vyhotovením věty
+     * by jinak zůstaly v měsíčním hlášení bez identifikátorů.
      */
     private function writeIdentifiers(
         int $supplierId,
@@ -797,9 +829,6 @@ final class RegistrationImportWriter
         $row = $this->lookup->employment($supplierId, $employmentId)
             ?? throw new \DomainException('Pracovní vztah v téhle firmě neexistuje.');
         $validFrom = (string) ($row['start_date'] ?? $record->decisiveDate() ?? date('Y-m-d'));
-        if ($record->effectiveOn !== null && $record->effectiveOn > $validFrom) {
-            $validFrom = $record->effectiveOn;
-        }
         if ($row['end_date'] !== null && $validFrom > $row['end_date']) {
             $validFrom = (string) $row['end_date'];
         }

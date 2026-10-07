@@ -29,6 +29,11 @@ import type {
 export const IMPORT_MAX_FILES = 20
 export const IMPORT_MAX_FILE_BYTES = 5_000_000
 export const IMPORT_MAX_TOTAL_BYTES = 15_000_000
+// XML registrací a měsíčních hlášení JMHZ: balík má až 1500 formulářů (desítky MB
+// u některých programů), proto vyšší limit než u ostatních importů. Celek se vejde
+// do těla požadavku (base64 = +33 %, výchozí strop IIS 30 MB).
+export const IMPORT_XML_MAX_FILE_BYTES = 20_000_000
+export const IMPORT_XML_MAX_TOTAL_BYTES = 20_000_000
 
 export type ImportFileRejectReason =
   | 'unsupported_file'
@@ -46,6 +51,12 @@ export interface ImportFileLimits {
   maxFiles: number
   maxFileBytes: number
   maxTotalBytes: number
+}
+
+export const IMPORT_XML_LIMITS: ImportFileLimits = {
+  maxFiles: IMPORT_MAX_FILES,
+  maxFileBytes: IMPORT_XML_MAX_FILE_BYTES,
+  maxTotalBytes: IMPORT_XML_MAX_TOTAL_BYTES,
 }
 
 const DEFAULT_LIMITS: ImportFileLimits = {

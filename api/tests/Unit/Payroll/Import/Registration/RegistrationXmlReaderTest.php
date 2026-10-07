@@ -53,6 +53,62 @@ final class RegistrationXmlReaderTest extends TestCase
         ], $record->permanentAddress);
     }
 
+    /** IMP-01, IMP-06, IMP-07: VS (starý i nový) zaměstnavatele, dřívější příjmení a VČP se čtou. */
+    public function testEmployerSymbolsFormerSurnameAndVcpAreRead(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::regzecA1([
+            'vs' => '1234567890',
+            'nvs' => '9876543210',
+            'ona' => 'Dřívější',
+            'vcp' => '612345678',
+        ]));
+
+        $record = $read['records'][0];
+        self::assertSame('1234567890', $record->employerVariableSymbol);
+        self::assertSame('9876543210', $record->employerNewVariableSymbol);
+        self::assertSame('Dřívější', $record->formerSurname);
+        self::assertSame('612345678', $record->vcp);
+        self::assertSame('Zkušební', $record->birthSurname, 'ona se nesmí zaměnit s rodným příjmením.');
+    }
+
+    public function testPreRegistrationReadsEmployerSymbol(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::prezecP1(
+            RegistrationXmlFixtures::birthNumber('1985-03-04', 'female', 2),
+            'Petra',
+            'Nováková',
+            '2026-12-01',
+        ));
+
+        self::assertSame('1234567890', $read['records'][0]->employerVariableSymbol);
+        self::assertNull($read['records'][0]->employerNewVariableSymbol);
+    }
+
+    /** IMP-08: úmrtí a kód důvodu ukončení se čtou. */
+    public function testDeregistrationReadsDeathAndTerminationReason(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::regzecA2(
+            RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1),
+            RegistrationXmlFixtures::oic(7),
+            '200000000000000000101',
+            '2026-08-31',
+            ['endbydeath' => 'A', 'rsnterempl' => '15'],
+        ));
+
+        $record = $read['records'][0];
+        self::assertTrue($record->endedByDeath);
+        self::assertSame('15', $record->terminationReasonCode);
+
+        $plain = $this->reader->read(RegistrationXmlFixtures::regzecA2(
+            RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1),
+            RegistrationXmlFixtures::oic(7),
+            '200000000000000000101',
+            '2026-08-31',
+        ))['records'][0];
+        self::assertFalse($plain->endedByDeath);
+        self::assertNull($plain->terminationReasonCode);
+    }
+
     public function testPreRegistrationIsReadWithExpectedStart(): void
     {
         $read = $this->reader->read(RegistrationXmlFixtures::prezecP1(

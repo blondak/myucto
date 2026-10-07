@@ -126,6 +126,23 @@ final class JmhzPredecessorGapServiceTest extends TestCase
         self::assertSame([], $this->gaps()->missing($this->supplierId, 'production'));
     }
 
+    /** PRE-05: hlášení zrušené stornem téhož GUID měsíc nepodalo, hlídač ho musí hlásit dál. */
+    public function testRegularSubmissionCancelledByStornoDoesNotCloseTheGap(): void
+    {
+        $guid = '44444444-4444-4444-8444-444444444444';
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_external_jmhz_submissions
+                (supplier_id, environment, source, source_key, document_kind, period, submission_type, submission_guid, status,
+                 payload_ciphertext, payload_hash, payload_sha256)
+             VALUES (?, "production", "jmhz_xml", ?, "monthly", ?, ?, ?, "sent", "x", ?, ?)',
+        );
+        $insert->execute([$this->supplierId, 'syn-r', self::PERIOD, 'R', $guid, str_repeat("\0", 32), str_repeat('a', 64)]);
+        self::assertSame([], $this->gaps()->missing($this->supplierId, 'production'));
+
+        $insert->execute([$this->supplierId, 'syn-s', self::PERIOD, 'S', $guid, str_repeat("\0", 32), str_repeat('c', 64)]);
+        self::assertSame([self::PERIOD], array_column($this->gaps()->missing($this->supplierId, 'production'), 'period'));
+    }
+
     /**
      * Účetní potvrdí, že hlášení podal předchozí program mimo MyÚčto: měsíc
      * přestane být mezerou všude (hlídač, Měsíční přehled) a platí jako odeslané

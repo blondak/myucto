@@ -27,6 +27,7 @@ import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFor
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
 import {
+  IMPORT_XML_LIMITS,
   buildRegistrationPairs,
   buildRelationChoices,
   filesFingerprint,
@@ -471,6 +472,7 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
         test-id="registration-dropzone"
         accept=".xml"
         :allowed-extensions="['xml']"
+        :limits="IMPORT_XML_LIMITS"
         :drop-hint="t('payroll_imports.registration.drop_hint')"
         :disabled="!canWrite || busy !== null"
       />

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use PDO;
 
@@ -20,7 +21,8 @@ use PDO;
  *
  *   - měsíc má nezrušený převzatý běh,
  *   - pro jeho období platí lhůta JMHZ (starší měsíce hlášení nemají),
- *   - v historii předchozího programu za něj není ODESLANÉ řádné/opravné hlášení,
+ *   - v historii předchozího programu za něj není ODESLANÉ řádné/opravné hlášení, které stále platí
+ *     (nezrušené stornem ani zamítnutím podle protokolu, viz {@see JmhzExternalSubmissionStore::inForceSql()}),
  *   - MyÚčto za něj nemá vlastní povinnost JMHZ v evidenci podání.
  *
  * Jen ostré prostředí: testovací podání předchozí program nevede.
@@ -66,6 +68,7 @@ final readonly class JmhzPredecessorGapService
                        AND ext.period = DATE_FORMAT(run.period_start, '%Y-%m')
                        AND ext.status = 'sent'
                        AND (ext.submission_type IS NULL OR ext.submission_type <> 'S')
+                       " . JmhzExternalSubmissionStore::inForceSql('ext', $this->db->hasTable('payroll_imported_jmhz_protocols')) . "
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM payroll_obligations obligation

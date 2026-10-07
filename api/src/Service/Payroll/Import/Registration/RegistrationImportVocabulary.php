@@ -17,7 +17,7 @@ final class RegistrationImportVocabulary
     public const DOCUMENT_TYPES = ['REGZEC25', 'PREZEC26', 'CSSZ_EXPORT', 'JMHZ', 'JMHZ_DERIVED'];
     public const RELATION_TYPES = ['employment', 'small_scale_employment', 'dpc', 'dpp', 'statutory_body'];
     public const MATCH_STATUSES = ['new', 'matched', 'ambiguous', 'not_found'];
-    public const MATCHED_BY = ['birth_number', 'oic', 'id_ppv', 'name_birth_date', 'manual'];
+    public const MATCHED_BY = ['birth_number', 'vcp', 'oic', 'id_ppv', 'name_birth_date', 'manual'];
     public const OPERATIONS = [
         'create_person',
         'create_employment',

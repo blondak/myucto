@@ -17,13 +17,25 @@ final class ImportFiles
     public const MAX_FILES = 20;
     public const MAX_FILE_BYTES = 5_000_000;
     public const MAX_TOTAL_BYTES = 15_000_000;
+    /**
+     * Limity importu registrací a hlášení: balík JMHZ má až 1500 formulářů po 7-8 kB,
+     * což je kolem 11 MB. Tělo požadavku nese soubor v base64 (+ třetina), takže
+     * 20 MB souborů je zhruba 27 MB těla - pod výchozími 30 MB IIS
+     * (`maxAllowedContentLength`), 55 MB nginx a PHP `post_max_size` v Dockeru.
+     */
+    public const XML_MAX_FILE_BYTES = 20_000_000;
+    public const XML_MAX_TOTAL_BYTES = 20_000_000;
 
     /**
      * @param list<string> $allowedExtensions přípony malými písmeny bez tečky
      * @return list<array{name:string,content:string,sha256:string,extension:string}>
      */
-    public static function fromRequest(mixed $files, array $allowedExtensions): array
-    {
+    public static function fromRequest(
+        mixed $files,
+        array $allowedExtensions,
+        int $maxFileBytes = self::MAX_FILE_BYTES,
+        int $maxTotalBytes = self::MAX_TOTAL_BYTES,
+    ): array {
         if (!is_array($files) || !array_is_list($files) || $files === []) {
             throw new \InvalidArgumentException('Vyberte aspoň jeden soubor k importu.');
         }
@@ -52,24 +64,24 @@ final class ImportFiles
             if (!is_string($encoded) || $encoded === '') {
                 throw new \InvalidArgumentException("Soubor „{$name}“ je prázdný.");
             }
-            if (strlen($encoded) > (int) ceil(self::MAX_FILE_BYTES * 4 / 3) + 4) {
+            if (strlen($encoded) > (int) ceil($maxFileBytes * 4 / 3) + 4) {
                 throw new \InvalidArgumentException(
-                    "Soubor „{$name}“ je větší než 5 MB. Zmenšete ho nebo ho rozdělte.",
+                    "Soubor „{$name}“ je větší než " . self::megabytes($maxFileBytes) . ' MB. Zmenšete ho nebo ho rozdělte.',
                 );
             }
             $content = base64_decode($encoded, true);
             if ($content === false || $content === '') {
                 throw new \InvalidArgumentException("Obsah souboru „{$name}“ se nepodařilo načíst. Nahrajte ho znovu.");
             }
-            if (strlen($content) > self::MAX_FILE_BYTES) {
+            if (strlen($content) > $maxFileBytes) {
                 throw new \InvalidArgumentException(
-                    "Soubor „{$name}“ je větší než 5 MB. Zmenšete ho nebo ho rozdělte.",
+                    "Soubor „{$name}“ je větší než " . self::megabytes($maxFileBytes) . ' MB. Zmenšete ho nebo ho rozdělte.',
                 );
             }
             $total += strlen($content);
-            if ($total > self::MAX_TOTAL_BYTES) {
+            if ($total > $maxTotalBytes) {
                 throw new \InvalidArgumentException(
-                    'Soubory mají dohromady víc než 15 MB. Rozdělte import na víc dávek.',
+                    'Soubory mají dohromady víc než ' . self::megabytes($maxTotalBytes) . ' MB. Rozdělte import na víc dávek.',
                 );
             }
             $sha256 = hash('sha256', $content);
@@ -88,6 +100,11 @@ final class ImportFiles
         }
 
         return $result;
+    }
+
+    private static function megabytes(int $bytes): int
+    {
+        return (int) round($bytes / 1_000_000);
     }
 
     private static function name(mixed $value): string
