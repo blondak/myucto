@@ -8356,6 +8356,11 @@
       "deductedDerivedHint": "Periods deducted after reaching retirement age (code D) are derived from absences: unpaid leave, unexcused absence, sickness, care and months without insurance participation.",
       "deathOn": "Date of the employee's death",
       "deathOnHint": "Fill in only for a pension record issued in connection with death (type 03). It is submitted within 3 months of death.",
+      "copy": {
+        "download": "Copy for the employee (PDF)",
+        "hint": "The copy is printed from the frozen sheet; record the hand-over at the request on the person card.",
+        "failed": "The copy could not be prepared."
+      },
       "fromRequest": {
         "title": "Record sheet for a recorded request",
         "body": "{requester} delivered on {received}, submit by {due}.",

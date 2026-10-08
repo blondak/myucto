@@ -8931,6 +8931,28 @@ export const payrollApi = {
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
+  /** Stejnopis zmrazeného evidenčního listu pro zaměstnance (PDF). */
+  downloadEldpCopy: async (params: {
+    employment_id: number
+    year: number
+    environment: PayrollRegzelEnvironment
+  }): Promise<void> => {
+    const response = await api.get<Blob>('/payroll/submissions/eldp/copy', {
+      params,
+      responseType: 'blob',
+    })
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `stejnopis-eldp-${params.year}-${params.employment_id}.pdf`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
   completeEldp: (statementId: number, payload: {
     environment: PayrollRegzelEnvironment
     expected_obligation_row_version: number

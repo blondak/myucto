@@ -402,6 +402,7 @@ final class RoutePermissionMap
         // Evidenční list důchodového pojištění je podání jako každé jiné:
         // náhled READ, příprava WRITE. Odeslání tudy nevede.
         ['GET', '#^/api/payroll/submissions/eldp$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/eldp/copy$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/eldp$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/eldp/[0-9]+/manual-completion$#', 'payroll.submissions', AccessLevel::WRITE],
         // Registrace zaměstnance je podání jako každé jiné, proto stejné právo

@@ -8356,6 +8356,11 @@
       "deductedDerivedHint": "Odečtené doby po dosažení důchodového věku (kód D) aplikace odvozuje z nepřítomností: neplacené volno, neomluvená absence, nemoc, ošetřování a měsíce bez účasti na pojištění.",
       "deathOn": "Datum úmrtí zaměstnance",
       "deathOnHint": "Vyplňte jen u evidenčního listu v souvislosti s úmrtím (typ 03). Předkládá se do 3 měsíců od úmrtí.",
+      "copy": {
+        "download": "Stejnopis pro zaměstnance (PDF)",
+        "hint": "Stejnopis se tiskne ze zmrazeného listu; předání zapište u výzvy na kartě osoby.",
+        "failed": "Stejnopis se nepodařilo připravit."
+      },
       "fromRequest": {
         "title": "Evidenční list na výzvu z evidence výzev",
         "body": "{requester} doručena {received}, předložit do {due}.",

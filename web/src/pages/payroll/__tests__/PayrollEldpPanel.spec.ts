@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   downloadSubmissionArtifact: vi.fn(),
   searchDocuments: vi.fn(),
   pensionRequests: vi.fn(),
+  downloadEldpCopy: vi.fn(),
   canWrite: true,
   canRead: true,
 }))
@@ -25,6 +26,7 @@ vi.mock('@/api/payroll', () => ({
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
     pensionRequests: m.pensionRequests,
+    downloadEldpCopy: m.downloadEldpCopy,
   },
 }))
 
@@ -526,6 +528,11 @@ describe('PayrollEldpPanel', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]!.findAll('td')[4]!.text()).toBe('6')
     expect(rows[1]!.text()).toContain('payroll.eldp.formSheet.postTermination')
+
+    // Stejnopis pro zaměstnance se tiskne ze zmrazeného listu téhož rozsahu.
+    await wrapper.get('[data-test="eldp-copy"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadEldpCopy).toHaveBeenCalledWith({ employment_id: 101, year: 2025, environment: 'production' })
 
     await wrapper.get('[data-test="eldp-correction"]').setValue(true)
     await wrapper.get('[data-test="eldp-prepared-on"]').setValue('2025-10-05')

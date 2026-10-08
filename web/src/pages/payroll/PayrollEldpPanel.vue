@@ -523,6 +523,26 @@ async function prepare(): Promise<void> {
   }
 }
 
+const copyDownloading = ref(false)
+const copyError = ref('')
+
+async function downloadCopy(): Promise<void> {
+  if (employmentId.value === null || copyDownloading.value) return
+  copyDownloading.value = true
+  copyError.value = ''
+  try {
+    await payrollApi.downloadEldpCopy({
+      employment_id: employmentId.value,
+      year: year.value,
+      environment: environment.value,
+    })
+  } catch {
+    copyError.value = t('payroll.eldp.copy.failed')
+  } finally {
+    copyDownloading.value = false
+  }
+}
+
 async function downloadControlXml(): Promise<void> {
   if (!prepared.value || downloading.value) return
   downloading.value = true
@@ -1001,6 +1021,23 @@ watch(requestedByAuthority, value => {
             </tbody>
           </table>
         </div>
+        <!-- Stejnopis pro zaměstnance (§ 38 odst. 5 ve znění do 31. 12. 2025) ze zmrazeného listu. -->
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+            :disabled="copyDownloading"
+            data-test="eldp-copy"
+            @click="downloadCopy"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.download" />
+            </svg>
+            {{ t('payroll.eldp.copy.download') }}
+          </button>
+          <span class="text-xs text-neutral-500">{{ t('payroll.eldp.copy.hint') }}</span>
+        </div>
+        <p v-if="copyError" class="mt-2 text-xs text-danger-700" role="alert" data-test="eldp-copy-error">{{ copyError }}</p>
       </div>
 
       <!--

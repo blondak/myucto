@@ -1897,6 +1897,10 @@ final class Routes
                 '/submissions/eldp',
                 [PayrollEldpAction::class, 'get'],
             );
+            $g->get(
+                '/submissions/eldp/copy',
+                [PayrollEldpAction::class, 'copy'],
+            );
             $g->post(
                 '/submissions/eldp',
                 [PayrollEldpAction::class, 'prepare'],

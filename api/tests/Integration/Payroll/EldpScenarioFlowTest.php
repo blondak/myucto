@@ -163,6 +163,17 @@ final class EldpScenarioFlowTest extends TestCase
             ['id' => (string) $employeeId],
         ));
         self::assertSame('2026-08-27', $copied['requests'][0]['copy_delivered_on']);
+        $copy = $eldp->copy(
+            $this->request('GET', '/api/payroll/submissions/eldp/copy')->withQueryParams([
+                'employment_id' => (string) $agreement['employment_id'],
+                'year' => '2026',
+                'environment' => 'test',
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $copy->getStatusCode(), (string) $copy->getBody());
+        $copy->getBody()->rewind();
+        self::assertStringStartsWith('%PDF-', (string) $copy->getBody());
 
         $confirmation = $this->json($actions->save(
             $this->request('POST', $uri)->withParsedBody([
