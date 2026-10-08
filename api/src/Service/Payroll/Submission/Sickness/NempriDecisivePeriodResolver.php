@@ -46,7 +46,11 @@ use MyInvoice\Service\Tax\TaxConstants;
  *  - § 19 odst. 11: událost v ochranné lhůtě → rozhodný den je den po
  *    skončení pojištění ({@see decisiveDate()}),
  *  - § 19 odst. 6: převedená těhotná, matka nebo kojící zaměstnankyně →
- *    období ke dni převedení, je-li výhodnější.
+ *    období ke dni převedení, je-li výhodnější. Všeobecné zásady NEMPRI
+ *    chtějí v tom případě současně DRUHÉ oznámení s obdobím ke dni
+ *    převedení a výhodnější určí ÚSSZ. Případ dávky zatím nese jen jedno
+ *    oznámení NEMPRI, a tak se do něj dává výhodnější z obou období; druhé
+ *    oznámení k případu je otevřený dluh (vlastní stav podání a lhůta).
  *
  * ## Částky
  *
@@ -133,10 +137,15 @@ final class NempriDecisivePeriodResolver
     ): NempriDecisivePeriod {
         [$from, $to] = self::bounds($decisiveDate, $employmentStart);
         if ($from > $to) {
-            // § 18 odst. 5: rozhodný den v měsíci vzniku pojištění. Věta přesto
-            // musí nést obě hranice, a tak nese den nástupu — jediný den,
-            // o kterém je jisté, že do zaměstnání patří.
-            return self::probable($from, $from, $probableIncomeCzk, '§ 18 odst. 5');
+            // § 18 odst. 5: rozhodný den v měsíci vzniku pojištění, rozhodné
+            // období se neurčuje. Věta ho přesto nese povinně, a tak podle
+            // Všeobecných zásad NEMPRI od = den nástupu do zaměstnání a do = den
+            // předcházející vzniku sociální události. Vznikla-li událost přímo
+            // v den nástupu, zůstane do = den nástupu (do < od by věta neprošla
+            // kontrolou 15).
+            $dayBefore = (new \DateTimeImmutable($decisiveDate))->modify('-1 day')->format('Y-m-d');
+
+            return self::probable($employmentStart, max($employmentStart, $dayBefore), $probableIncomeCzk, '§ 18 odst. 5');
         }
         if (self::inclusiveDays($from, $to) < self::MINIMUM_DAYS) {
             // Období podle § 18 odst. 4 kratší než 30 kalendářních dnů: na

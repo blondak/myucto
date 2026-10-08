@@ -16,6 +16,9 @@ export const MATERNITY_CARE_REASONS = ['DOH', 'ONE', 'ROZ', 'UMR'] as const
 /** `kodRodVztah` u ošetřovného — CIS_RODVZTAH. */
 export const FAMILY_RELATIONSHIPS = ['PL', 'MA', 'RP', 'SDO', 'SO', 'TCH', 'JIN'] as const
 
+/** `druhDuchodu` u NEM, VPM a PPM — CIS_DRUHDUCH_NEM. */
+export const PENSION_KINDS = ['A', 'B', 'C', 'I1', 'I3', 'N', 'S'] as const
+
 /** `kodVztah` u dlouhodobého ošetřovného — CIS_VZTAH. */
 export const CARE_RELATIONSHIPS = [
   '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',

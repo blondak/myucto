@@ -409,7 +409,7 @@ final class SicknessXmlBuilderTest extends TestCase
             'employerReport' => true,
             'personReport' => false,
             'foreignCase' => false,
-            'confirmationNumber' => 'A1234567',
+            'confirmationNumber' => 'E1234567',
             'osszCode' => 115,
             'osszName' => null,
             'issuedOn' => '2026-08-24',

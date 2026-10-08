@@ -145,8 +145,12 @@ final class SicknessDeadlinePolicy
      *                                         a platů; povinný jen u VPM.
      * @param bool        $loneCarer           Osamělý pojištěnec podle
      *                                         § 40 odst. 1 písm. b).
-     * @param bool        $workedFirstDay      V den vzniku neschopnosti odpracoval
-     *                                         celou směnu (§ 26 odst. 3); jen NEM.
+     * @param bool        $workedFirstDay      V den vzniku události odpracoval
+     *                                         celou směnu; uplatní se jen tam,
+     *                                         kde to zákon váže
+     *                                         ({@see self::firstDayShiftDefersSupport()}).
+     * @param bool        $awaitsEventMonthIncome Zaměstnání malého rozsahu nebo
+     *                                         DPP ({@see self::awaitsEventMonthIncome()}).
      */
     public function forNempri(
         SicknessBenefitKind $kind,
@@ -155,7 +159,9 @@ final class SicknessDeadlinePolicy
         ?string $payrollPaymentDate = null,
         bool $loneCarer = false,
         bool $workedFirstDay = false,
+        bool $awaitsEventMonthIncome = false,
     ): SicknessNotificationWindow {
+        $workedFirstDay = $workedFirstDay && self::firstDayShiftDefersSupport($kind);
         $from = $this->exactDate(
             $incapacityFrom,
             'Den vzniku sociální události musí být datum ve tvaru RRRR-MM-DD.',
@@ -215,12 +221,15 @@ final class SicknessDeadlinePolicy
             // skutečného skončení — podpůrčí doba je HORNÍ mez, ne pevná délka
             // („nejdéle 9 kalendářních dnů"). Předává se PO skončení péče, tedy
             // nejdřív následující den, stejně jako po uplynutí podpůrčí doby.
+            // Vznikla-li potřeba v den už odpracované směny, podpůrčí doba
+            // počíná až následujícím dnem (§ 40 odst. 1 věta druhá).
             SicknessBenefitKind::Ose => [
                 $this->earlier(
                     $from->modify('+' . (
-                        $loneCarer
+                        ($loneCarer
                             ? $absence->careSupportDaysLoneCarer()
-                            : $absence->careSupportDays()
+                            : $absence->careSupportDays())
+                        + ($workedFirstDay ? 1 : 0)
                     ) . ' days'),
                     $end?->modify('+1 day'),
                 ),
@@ -234,6 +243,17 @@ final class SicknessDeadlinePolicy
             ],
             SicknessBenefitKind::Vpm => [$from, ''],
         };
+        // Malý rozsah a DPP: oznámení se zasílá až po zjištění započitatelného
+        // příjmu v kalendářním měsíci, v němž sociální událost vznikla
+        // (Všeobecné zásady NEMPRI, prijemMalyRozsah). Dřív ho zaměstnavatel
+        // nezná, a tedy ani nepodá.
+        if ($awaitsEventMonthIncome) {
+            $afterEventMonth = $from->modify('first day of next month');
+            if ($afterEventMonth > $earliest) {
+                $earliest = $afterEventMonth;
+                $reference .= ' a Všeobecné zásady NEMPRI (malý rozsah a DPP)';
+            }
+        }
 
         return $this->window(
             $earliest,
@@ -243,6 +263,90 @@ final class SicknessDeadlinePolicy
             self::SOURCE_DERIVED_IMMEDIACY,
             $absence,
         );
+    }
+
+    /**
+     * Posouvá odpracovaná celá směna v den vzniku začátek podpůrčí doby?
+     * U nemocenského se za první den neschopnosti považuje následující den
+     * (§ 26 odst. 3), u ošetřovného počíná podpůrčí doba následujícím dnem
+     * (§ 40 odst. 1 věta druhá). U ostatních dávek zákon nic takového nemá.
+     */
+    public static function firstDayShiftDefersSupport(SicknessBenefitKind $kind): bool
+    {
+        return $kind === SicknessBenefitKind::Nem || $kind === SicknessBenefitKind::Ose;
+    }
+
+    /**
+     * Čeká oznámení na příjem z měsíce události? U dohody o provedení práce
+     * a u zaměstnání malého rozsahu (případ nese příjem z malého rozsahu)
+     * ano: nárok i výši dávky určuje započitatelný příjem v měsíci, kdy
+     * sociální událost vznikla, a ten je znám až po jeho skončení.
+     *
+     * @param array<string,mixed> $context fakta vztahu (`relation_type`)
+     * @param array<string,mixed> $row     řádek případu (`small_scope_income_minor`)
+     */
+    public static function awaitsEventMonthIncome(array $context, array $row): bool
+    {
+        $smallScope = $row['small_scope_income_minor'] ?? null;
+
+        return ($context['relation_type'] ?? null) === 'dpp'
+            || ($smallScope !== null && $smallScope !== '');
+    }
+
+    /**
+     * Podává se k případu HZUPN? `null` = ano, jinak důvod, proč ne.
+     *
+     * - HZUPN vzniká jen u nemocenského ({@see SicknessBenefitKind::hasEndOfIncapacityReport()}).
+     * - ČSSZ ho od zaměstnavatele chce jen u DPN delší než 14 kalendářních
+     *   dnů (§ 109 odst. 1 písm. a) bod 1): kratší kryje náhrada mzdy a dávka
+     *   z ní neplyne — totéž pravidlo jako u NEMPRI ({@see self::nempriRequired()}).
+     * - Skončilo-li zaměstnání v průběhu DPN, nebo vznikla-li DPN až v ochranné
+     *   lhůtě, tiskopis se podle ePortálu ČSSZ nezasílá; vyzve-li k němu OSSZ,
+     *   podává se podle výzvy (§ 98 odst. 1) mimo hlídané povinnosti.
+     *
+     * @return array{code:string,message:string}|null
+     */
+    public function hzupnNotRequired(
+        SicknessBenefitKind $kind,
+        string $incapacityFrom,
+        ?string $incapacityTo,
+        ?string $employmentEnd,
+        bool $workedFirstDay = false,
+    ): ?array {
+        if (!$kind->hasEndOfIncapacityReport()) {
+            return [
+                'code' => 'hzupn_not_for_benefit_kind',
+                'message' => 'Hlášení při ukončení pracovní neschopnosti (HZUPN) se podává jen '
+                    . 'u nemocenského. U tohoto druhu dávky žádné nevzniká.',
+            ];
+        }
+        if (!$this->nempriRequired($kind, $incapacityFrom, $incapacityTo, 0, $workedFirstDay)) {
+            return [
+                'code' => 'hzupn_within_wage_compensation_window',
+                'message' => 'Neschopnost nepřesáhla 14 kalendářních dnů, celou ji kryje náhrada mzdy '
+                    . 'a nemocenské z ní nevzniká. Hlášení HZUPN zaměstnavatel ČSSZ zasílá jen u '
+                    . 'neschopnosti delší než 14 dnů, takže se nepodává.',
+            ];
+        }
+        $end = $employmentEnd === null || trim($employmentEnd) === '' ? null : $employmentEnd;
+        if ($end !== null && $incapacityFrom > $end) {
+            return [
+                'code' => 'hzupn_incapacity_in_protection_period',
+                'message' => 'Neschopnost vznikla až po skončení zaměstnání (v ochranné lhůtě). ČSSZ '
+                    . 'hlášení HZUPN v tomto případě nepožaduje; vyzve-li k němu OSSZ, podejte ho '
+                    . 'podle její výzvy.',
+            ];
+        }
+        if ($end !== null && ($incapacityTo === null || $end <= $incapacityTo)) {
+            return [
+                'code' => 'hzupn_employment_ended_during_incapacity',
+                'message' => 'Zaměstnání skončilo v průběhu neschopnosti, zaměstnanec se do práce '
+                    . 'nevrací. ČSSZ hlášení HZUPN v tomto případě nepožaduje; vyzve-li k němu OSSZ, '
+                    . 'podejte ho podle její výzvy.',
+            ];
+        }
+
+        return null;
     }
 
     /**
@@ -380,6 +484,8 @@ final class SicknessDeadlinePolicy
             'hzupn_earliest' => 'return_to_work_day',
             'ose_earliest_after_care_end' => 'next_day',
             'nem_first_day_fully_worked' => 'next_day',
+            'ose_first_day_fully_worked' => 'next_day',
+            'small_scope_and_dpp_earliest' => 'first_day_after_event_month',
             'sources' => self::SOURCES,
         ]));
     }

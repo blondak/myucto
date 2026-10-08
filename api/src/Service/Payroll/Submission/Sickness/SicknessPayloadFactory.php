@@ -64,7 +64,7 @@ final readonly class SicknessPayloadFactory
                 ? null
                 : (int) $row['small_scope_income_minor'],
             receivesPension: (bool) $row['receives_pension'],
-            pensionKind: self::nullableText($row['pension_kind'] ?? null),
+            pensionKind: self::code($row['pension_kind'] ?? null),
             isStudent: (bool) $row['is_student'],
             withinSchoolHolidays: self::nullableBool($row['within_school_holidays'] ?? null),
             firstEmploymentFreeTime: (bool) $row['first_employment_free_time'],
@@ -104,8 +104,9 @@ final readonly class SicknessPayloadFactory
      * zaměstnanec některé prohlášení nevyplnil — a takové prohlášení uvést
      * jako „NE“. U ošetřovného se proto prohlášení o společné domácnosti,
      * osamělosti, péči o dítě do 16 let, nároku jiné osoby na PPM a osobní
-     * péči posílají vždy; nevyplněné jako `false`. Přesně tak je nesou
-     * přijatá podání jiných mzdových programů.
+     * péči posílají vždy; nevyplněné jako `false`. U dlouhodobého ošetřovného
+     * stejně střídání, nárok jiné osoby na PPM, společná domácnost a osobní
+     * péče. Přesně tak je nesou přijatá podání jiných mzdových programů.
      *
      * @param array<string,mixed> $row
      */
@@ -118,13 +119,21 @@ final readonly class SicknessPayloadFactory
         $start = (bool) ($row['action_start'] ?? true);
         $duration = (bool) ($row['action_continuation'] ?? false)
             || (bool) ($row['action_end'] ?? false);
-        // Neučiněné prohlášení je u ošetřovného „NE“, ale jen u prvků, které
-        // DV NEMPRI25 pro danou akci vyžaduje: prohlášení vzniku při vzniku,
-        // `pecovalOsobne` při trvání nebo ukončení.
-        $declared = static fn (string $key, bool $applies): ?bool => $kind === SicknessBenefitKind::Ose
+        // Neučiněné prohlášení je u ošetřovného i dlouhodobého ošetřovného
+        // „NE“, ale jen u prvků, které DV NEMPRI25 pro danou akci a druh
+        // vyžaduje: prohlášení vzniku při vzniku, `pecovalOsobne` při trvání
+        // nebo ukončení. Prvek, který druh dávky nemá, zůstane prázdný.
+        $care = $kind !== null && $kind->hasActions();
+        $declared = static fn (string $key, bool $applies): ?bool => $care
             ? ($applies ? (self::nullableBool($row[$key] ?? null) ?? false) : null)
             : self::nullableBool($row[$key] ?? null);
+        $oseStart = $start && $kind === SicknessBenefitKind::Ose;
         $otherClaim = $declared('other_maternity_claim', $start);
+        $workedLastDay = self::nullableBool($row['worked_last_day'] ?? null);
+        // U ošetřovného patří hodiny posledního dne jen k `pracovalPoslDenPD`
+        // = true (DV NEMPRI25, jinak zakázané); DLO a otcovská je vážou
+        // na návrat do práce.
+        $lastDayHours = $kind !== SicknessBenefitKind::Ose || $workedLastDay === true;
 
         return new NempriBenefitApplication(
             actionStart: (bool) ($row['action_start'] ?? true),
@@ -141,25 +150,25 @@ final readonly class SicknessPayloadFactory
             schoolName: self::nullableText($row['school_name'] ?? null),
             schoolBusinessId: self::nullableText($row['school_business_id'] ?? null),
             sharedHousehold: $declared('shared_household', $start),
-            loneCaregiver: $declared('lone_caregiver', $start),
-            childUnder16: $declared('child_under_16', $start),
+            loneCaregiver: $declared('lone_caregiver', $oseStart || !$care),
+            childUnder16: $declared('child_under_16', $oseStart || !$care),
             otherMaternityClaim: $otherClaim,
             otherParentalClaim: $kind === SicknessBenefitKind::Ose && $otherClaim === true
                 ? (self::nullableBool($row['other_parental_claim'] ?? null) ?? false)
                 : self::nullableBool($row['other_parental_claim'] ?? null),
-            otherPersonS57: $kind === SicknessBenefitKind::Ose && $otherClaim === true
+            otherPersonS57: $care && $otherClaim === true
                 ? (self::nullableBool($row['other_person_s57'] ?? null) ?? false)
                 : self::nullableBool($row['other_person_s57'] ?? null),
             caredPersonally: $declared('cared_personally', $duration),
             careDays: self::periods($row['care_days'] ?? null),
             relationshipCode: self::code($row['relationship_code'] ?? null),
-            alternation: self::nullableBool($row['alternation'] ?? null),
+            alternation: $declared('alternation', ($start && $kind === SicknessBenefitKind::Dlo) || !$care),
             paternityReason: self::code($row['paternity_reason'] ?? null),
             maternityCareReason: self::code($row['maternity_care_reason'] ?? null),
             childOrder: $order === null || $order === '' ? null : (int) $order,
-            workedLastDay: self::nullableBool($row['worked_last_day'] ?? null),
-            shiftHoursLastDay: self::decimal($row['shift_hours_last_day'] ?? null),
-            hoursWorkedLastDay: self::decimal($row['hours_worked_last_day'] ?? null),
+            workedLastDay: $workedLastDay,
+            shiftHoursLastDay: $lastDayHours ? self::decimal($row['shift_hours_last_day'] ?? null) : null,
+            hoursWorkedLastDay: $lastDayHours ? self::decimal($row['hours_worked_last_day'] ?? null) : null,
             plannedShifts: self::nullableBool($row['planned_shifts'] ?? null),
             plannedShiftsWorked: self::nullableBool($row['planned_shifts_worked'] ?? null),
             returnedOn: self::nullableText($row['returned_on'] ?? null),
@@ -199,7 +208,7 @@ final readonly class SicknessPayloadFactory
             employerReport: true,
             personReport: false,
             foreignCase: self::hzupnForeignCase($row),
-            confirmationNumber: self::nullableText($row['decision_number'] ?? null),
+            confirmationNumber: self::decisionNumber($row['decision_number'] ?? null),
             osszCode: (int) $row['ossz_code'],
             osszName: CsszWorkplaceCatalog::nameFor((int) $row['ossz_code']),
             issuedOn: $issuedOn,
@@ -221,9 +230,9 @@ final readonly class SicknessPayloadFactory
             ),
             employerVariableSymbol: self::variableSymbol($context),
             returnedToWork: $returnedToWork,
-            returnReason: $returnedToWork === true
-                ? null
-                : self::nullableText($row['return_reason'] ?? null),
+            returnReason: $returnedToWork === false
+                ? self::nullableText($row['return_reason'] ?? null)
+                : null,
             // Datum a hodiny posledního dne patří podle DV HZUPN20 jen
             // k návratu do práce. Řádek případu `returned_on` drží i u „ne“
             // (z něj běží lhůta hlášení), do věty ale nejde.

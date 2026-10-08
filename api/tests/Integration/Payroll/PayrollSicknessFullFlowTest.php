@@ -94,7 +94,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
 
         $this->cashPayout($person['employee_id']);
         $case = $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
-            'decision_number' => 'A1234567',
+            'decision_number' => 'E1234567',
             'daily_working_hours' => '8',
             'issued_on' => '2026-06-29',
             'returned_to_work' => '1',
@@ -119,7 +119,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $submissions = $this->service(SicknessSubmissionService::class);
         $nempri = (string) $submissions->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Nempri)['xml'];
         self::assertStringContainsString('<druhDavky>NEM</druhDavky>', $nempri);
-        self::assertStringContainsString('<cisloRozhodnuti>A1234567</cisloRozhodnuti>', $nempri);
+        self::assertStringContainsString('<cisloRozhodnuti>E1234567</cisloRozhodnuti>', $nempri);
         self::assertStringContainsString('<rozhodneObdobiOd>2026-01-01</rozhodneObdobiOd>', $nempri);
         self::assertStringContainsString('<zapocitatelnyPrijemCelkem>200000</zapocitatelnyPrijemCelkem>', $nempri);
         $hzupn = (string) $submissions->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn)['xml'];
@@ -191,7 +191,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $case = $this->service(SicknessCaseService::class)->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
             'incapacity_from' => '2026-08-10',
             'incapacity_to' => '2026-08-31',
-            'decision_number' => 'A2223334',
+            'decision_number' => 'E2223334',
             'daily_working_hours' => '8',
         ], $this->actors[0]);
 
@@ -220,7 +220,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
             'incapacity_from' => '2026-06-08',
             'incapacity_to' => '2026-06-21',
-            'decision_number' => 'A1112223',
+            'decision_number' => 'E1112223',
             'daily_working_hours' => '8',
         ], $this->actors[0]);
         $caseId = (int) $case['id'];
@@ -237,6 +237,15 @@ final class PayrollSicknessFullFlowTest extends TestCase
             self::fail('NEMPRI k neschopnosti do 14 dnů nevzniká.');
         } catch (SicknessException $exception) {
             self::assertSame('nempri_within_wage_compensation_window', $exception->validationCode);
+        }
+        // HZUPN20-CRIT-WEB-1: HZUPN zasílá zaměstnavatel jen u DPN delší než
+        // 14 dnů, stejně jako NEMPRI.
+        try {
+            $this->service(SicknessSubmissionService::class)
+                ->preview($this->supplierId, self::ENVIRONMENT, $caseId, SicknessDocumentKind::Hzupn);
+            self::fail('HZUPN k neschopnosti do 14 dnů nevzniká.');
+        } catch (SicknessException $exception) {
+            self::assertSame('hzupn_within_wage_compensation_window', $exception->validationCode);
         }
     }
 
@@ -281,7 +290,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
 
         $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
             'incapacity_from' => '2026-07-03',
-            'decision_number' => 'A7654321',
+            'decision_number' => 'E7654321',
             'daily_working_hours' => '8',
             'decisive_months' => self::manualMonths('2026-01', '2026-06'),
         ], $this->actors[0]);
@@ -473,7 +482,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $case = $cases->requireCase($this->supplierId, self::ENVIRONMENT, $caseId);
         $this->cashPayout($person['employee_id']);
         $cases->update($this->supplierId, self::ENVIRONMENT, $caseId, (int) $case['row_version'], [
-            'decision_number' => 'A1234567',
+            'decision_number' => 'E1234567',
             'daily_working_hours' => '8',
         ]);
 
@@ -505,7 +514,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
             // Editor posílá celý formulář: nezměněné údaje přijatého NEMPRI
             // uložení neshodí.
             'daily_working_hours' => '8.00',
-            'decision_number' => 'A1234567',
+            'decision_number' => 'E1234567',
         ]);
         self::assertSame('2026-06-29', $case['returned_on']);
 
@@ -535,7 +544,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         $case = $cases->create($this->supplierId, self::ENVIRONMENT, $person['employment_id'], 'NEM', [
             'incapacity_from' => '2026-06-08',
             'incapacity_to' => '2026-06-30',
-            'decision_number' => 'A2223334',
+            'decision_number' => 'E2223334',
             'daily_working_hours' => '8',
         ], $this->actors[0]);
         $caseId = (int) $case['id'];

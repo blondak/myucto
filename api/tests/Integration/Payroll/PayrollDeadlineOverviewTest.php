@@ -199,6 +199,29 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(['HZUPN:pending'], $titles);
     }
 
+    /**
+     * HZUPN20-APPLIC-2: skončilo-li zaměstnání v průběhu neschopnosti, ČSSZ
+     * HZUPN nepožaduje a hlídač ho nehlídá; NEMPRI zůstává.
+     */
+    public function testHzupnIsNotWatchedWhenEmploymentEndedDuringIncapacity(): void
+    {
+        $this->sicknessCase('NEM', '2026-08-01', '2026-08-18', null);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-08-10" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $titles = array_map(
+            static fn (array $item): string => $item['title'],
+            array_values(array_filter(
+                $overview['items'],
+                static fn (array $item): bool => $item['source'] === 'sickness_case',
+            )),
+        );
+
+        self::assertSame(['NEMPRI'], $titles);
+    }
+
     /** Odmítnuté podání hlídač ukazuje dál a říká, že je odmítnuté. */
     public function testRejectedNempriStaysWatchedWithItsStatus(): void
     {

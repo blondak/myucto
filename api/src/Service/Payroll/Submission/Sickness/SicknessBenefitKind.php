@@ -164,28 +164,33 @@ enum SicknessBenefitKind: string
 
             return null;
         }
-        if (!$foreignCase && preg_match($this->decisionNumberPattern(), $number) !== 1) {
+        if ($foreignCase) {
+            return null;
+        }
+        if (preg_match($this->decisionNumberPattern(), $number) !== 1) {
             return [
                 'code' => 'nempri_decision_number_format_invalid',
                 'message' => 'Číslo rozhodnutí nemá tvar, který ČSSZ u dávky ' . $this->value . ' kontroluje '
-                    . '(NEM: písmeno a 6 až 7 číslic nebo 10 číslic; PPM končí písmenem M, OSE N nebo Z, '
-                    . 'OPP T, DLO L, vždy se sedmimístným číslem a volitelnou předponou ICPE).',
+                    . '(NEM: písmeno a 6 až 7 číslic nebo 10 číslic, případně s předsazeným IČPE; PPM '
+                    . 'končí písmenem M, OSE N nebo Z, OPP T, DLO L, vždy se sedmimístným číslem '
+                    . 'a volitelnou předponou ICPE).',
             ];
         }
 
-        return null;
+        return SicknessDecisionNumber::icpeProblem($number, 'nempri_decision_number_icpe_invalid');
     }
 
     /**
      * Tvar čísla rozhodnutí podle kontroly č. 2. U NEM `Xnnnnnnn` (číslo
-     * z papírové neschopenky) nebo `YYMMDDNNNN`; u ostatních druhů sedmimístné
-     * pořadové číslo s písmenem druhu dávky (PPM M, OSE N nebo Z, OPP T, DLO L)
-     * a volitelnou předponou ICPE.
+     * z papírové neschopenky) nebo `YYMMDDNNNN`, případně s předsazeným
+     * osmimístným IČPE; u ostatních druhů sedmimístné pořadové číslo
+     * s písmenem druhu dávky (PPM M, OSE N nebo Z, OPP T, DLO L) a volitelnou
+     * předponou ICPE.
      */
     public function decisionNumberPattern(): string
     {
         return match ($this) {
-            self::Nem => '/^(?:[A-Z]\d{6,7}|\d{10})$/D',
+            self::Nem => '/^(?:[A-Z]\d{6,7}|(?:\d{8})?\d{10})$/D',
             self::Ppm => '/^(?:\d{1,10})?\d{7}M$/D',
             self::Ose => '/^(?:\d{1,10})?\d{7}[NZ]$/D',
             self::Opp => '/^(?:\d{1,10})?\d{7}T$/D',
@@ -208,7 +213,7 @@ enum SicknessBenefitKind: string
             return $startsClaim ? self::DECISION_REQUIRED : self::DECISION_FORBIDDEN;
         }
         if ($this === self::Nem) {
-            return $decisionNumber !== null && preg_match('/^\d{10}$/D', $decisionNumber) === 1
+            return $decisionNumber !== null && SicknessDecisionNumber::isElectronicSickness($decisionNumber)
                 ? self::DECISION_REQUIRED
                 : self::DECISION_OPTIONAL;
         }

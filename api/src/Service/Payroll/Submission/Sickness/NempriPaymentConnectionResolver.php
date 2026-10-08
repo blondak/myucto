@@ -84,6 +84,17 @@ final readonly class NempriPaymentConnectionResolver
             );
         }
         if (preg_match('/^([A-Z]{2})\d{2}[0-9A-Z]{1,30}$/D', $compact, $match) === 1) {
+            // `ucetZahranicni/stat` nesmí být CZ (DV NEMPRI25). Český IBAN, který
+            // nejde rozložit na předčíslí, číslo a kód banky, je chybný účet,
+            // ne zahraniční.
+            if ($match[1] === 'CZ') {
+                throw new SicknessException(
+                    'nempri_payment_connection_invalid',
+                    'Výplatní účet zaměstnance je český IBAN v neplatném tvaru (CZ, 2 kontrolní '
+                    . 'číslice a 20 číslic účtu), takže ho nelze zapsat do NEMPRI. Opravte ho na kartě osoby.',
+                );
+            }
+
             return new NempriPaymentConnection(
                 NempriPaymentConnection::KIND_ACCOUNT_FOREIGN,
                 iban: $compact,

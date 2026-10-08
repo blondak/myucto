@@ -1733,15 +1733,22 @@ ve spodní liště a tyto sekce:
   zahraniční, kdežto HZUPN jako českou (zahraničí v HZUPN je jen mimo ČR a SR).
   Číslo rozhodnutí se kontroluje už při přípravě podání podle druhu dávky
   (povinnost, zákaz i tvar), spolu s ostatními chybějícími údaji případu.
+  Elektronické číslo může začínat osmimístným IČPE lékaře, které musí projít
+  kontrolní číslicí. HZUPN přijímá jen číslo ve formátu od roku 2020: písmeno
+  E až Z (kromě K) a 6 až 7 číslic, nebo pořadové číslo od 2001010000.
+  Kód OSSZ musí být z číselníku pracovišť ČSSZ; kód 101 (ústředí) se pro
+  e-podání nepoužívá.
   Číslo rozhodnutí a Opravné podání jdou měnit i u vyřízeného podání.
   Otcovská, peněžitá pomoc v mateřství a vyrovnávací příspěvek číslo
   rozhodnutí nemají. Opravné podání nahradí dřívější podání se stejným číslem
   rozhodnutí.
 - **Potvrzení zaměstnavatele** — mimo jiné **příjem ze zaměstnání malého
-  rozsahu** v celých korunách. Pobírá-li zaměstnanec důchod, vyplňte **druh
-  důchodu** kódem z číselníku ČSSZ Druh důchodu (stejný jako v přihlášce
-  zaměstnance: 1 starobní, 2 invalidní třetího stupně, 8 invalidní prvního
-  nebo druhého stupně). U studenta zaškrtněte, zda zaměstnání spadá výlučně do
+  rozsahu** v celých korunách. Pobírá-li zaměstnanec důchod, vyberte **druh
+  důchodu** ze seznamu podle číselníku ČSSZ pro dávky CIS_DRUHDUCH_NEM
+  (S starobní, I1 invalidní prvního nebo druhého stupně, I3 invalidní
+  třetího stupně, A, B, C cizí důchod). Číselník přihlášky zaměstnance
+  (1, 2, 8) je jiný a ČSSZ by ho v NEMPRI odmítla; starší takto zapsaný kód
+  je v nabídce označený a je potřeba ho vybrat znovu. U studenta zaškrtněte, zda zaměstnání spadá výlučně do
   školních prázdnin. Pracovní volno bez náhrady příjmu má den od i do.
   U nemocenského, vyrovnávacího příspěvku a mateřské se vyplňuje nástup na
   peněžitou pomoc v mateřství a den narození dítěte. Převedení na jinou práci
@@ -1795,20 +1802,40 @@ ve spodní liště a tyto sekce:
   nepředává: zaměstnanec v práci nechybí a dávka mu z tohoto zaměstnání
   nenáleží.
   Prohlášení, které zaměstnanec v žádosti nevyplnil, nechte nezaškrtnuté:
-  podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží. Hranice
-  žádosti jsou předvyplněné dny případu.
+  podle zásad NEMPRI se uvede „NE“ a žádost se kvůli tomu nezdrží; platí to
+  u ošetřovného i u dlouhodobého ošetřovného (střídání, nárok jiné osoby,
+  společná domácnost). Hranice žádosti jsou předvyplněné dny případu. Při
+  trvání nebo ukončení péče jsou dny, kdy zaměstnanec pečoval, povinné.
+  U ošetřovného se hodiny posledního dne posílají jen tehdy, když
+  zaměstnanec poslední den pracoval; u dlouhodobého ošetřovného patří
+  k datu návratu do práce. Datum narození dítěte nebo ošetřované osoby ani
+  den převedení na jinou práci nesmí být v budoucnu. Opravné podání jde
+  podat i u dávek bez čísla rozhodnutí (vyrovnávací příspěvek, mateřská
+  s převzetím dítěte do péče, otcovská).
 - **Rozhodné období** — viz níže.
 - **Kontaktní pracovník** — jméno, telefon a e-mail osoby, na kterou se OSSZ
   obrátí.
 - **Ukončení neschopnosti** (jen nemocenské, pro HZUPN) — zda se zaměstnanec
-  vrátil do práce. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
+  vrátil do práce; bez odpovědi se hlášení nepřipraví. Den vystavení musí být
+  po 31. 12. 2019 a hodiny posledního dne v rozmezí 0 až 24. Když se nevrátil (nástup na peněžitou pomoc v mateřství,
   skončení zaměstnání), zvolte **Ne** a uveďte důvod; do hlášení jde jen
   důvod, datum návratu a hodiny posledního dne se u odpovědi „Ne“ neposílají.
   Odpovíte-li **Ano**, uveďte datum návratu a hodiny odpracované v poslední
   den neschopnosti i pracovní dobu (0 a 0, když zaměstnanec nepracoval;
   je-li pracovní doba větší než 0, nesmí být odpracováno 0). HZUPN hlásí nástup do zaměstnání, a proto se jeho lhůta („neprodleně",
   § 97 odst. 3 zákona č. 187/2006 Sb.) počítá ode dne nástupu: od zapsaného
-  dne návratu, jinak od dne po skončení neschopnosti.
+  dne návratu, jinak od dne po skončení neschopnosti. HZUPN se nepodává
+  a hlídač ho nehlídá u neschopnosti do 14 dnů (nemocenské z ní nevzniká),
+  když zaměstnání skončilo v průběhu neschopnosti a když neschopnost vznikla
+  až v ochranné lhůtě; vyzve-li k němu OSSZ, podejte ho podle její výzvy.
+
+**Lhůta NEMPRI u malého rozsahu a DPP.** U zaměstnání malého rozsahu
+a u dohody o provedení práce se oznámení podává až po skončení měsíce,
+v němž událost vznikla: teprve pak je znám započitatelný příjem, který
+oznámení nese. U DPP ho proto vyplňte vždy, jinak se oznámení nepřipraví.
+Odpracoval-li zaměstnanec v den vzniku potřeby ošetřování celou směnu,
+podpůrčí doba ošetřovného, a tím i lhůta oznámení, začíná až následujícím
+dnem, stejně jako první den neschopnosti u nemocenského.
 
 **Ochranná lhůta.** Vznikne-li neschopnost nebo karanténa až po skončení
 zaměstnání, nemocenské náleží jen v ochranné lhůtě 7 kalendářních dnů
@@ -1880,11 +1907,15 @@ rok. Teprve když takový rok není, nebo když zaměstnání trvalo méně než
 zaměstnanec onemocní v měsíci nástupu. Zadejte ji v sekci **Rozhodné
 období**; tlačítko **Navrhnout z mzdy** předvyplní sjednanou měsíční hrubou
 mzdu. Bez ní se NEMPRI v takovém případě nepřipraví. S pravděpodobnou výší
-věta jednotlivé měsíce ani součty nenese.
+věta jednotlivé měsíce ani součty nenese. Onemocní-li zaměstnanec v měsíci
+nástupu, rozhodné období se neurčuje a věta nese od dne nástupu do dne před
+vznikem události, jak to chtějí Všeobecné zásady NEMPRI.
 
 U zaměstnankyně převedené na jinou práci kvůli těhotenství, mateřství nebo
 kojení se rozhodné období spočítá i ke dni převedení a do věty jde to
-výhodnější (§ 19 odst. 6).
+výhodnější (§ 19 odst. 6). Všeobecné zásady NEMPRI chtějí v tom případě
+současně i druhé oznámení s rozhodným obdobím ke dni převedení; to MyÚčto
+k případu zatím nesestaví, podejte ho přes portál ČSSZ.
 
 Do NEMPRI se zapisuje skutečný den nástupu do zaměstnání, ne sjednaný den
 ze smlouvy. HZUPN se nabízí jen u nemocenského.

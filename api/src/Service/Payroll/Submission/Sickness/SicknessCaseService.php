@@ -95,7 +95,7 @@ final readonly class SicknessCaseService
         'daily_working_hours' => 'decimal',
         'small_scope_income_minor' => 'int',
         'receives_pension' => 'bool',
-        'pension_kind' => 'text',
+        'pension_kind' => 'code',
         'is_student' => 'bool',
         'within_school_holidays' => 'nullable_bool',
         'first_employment_free_time' => 'bool',
@@ -481,6 +481,9 @@ final readonly class SicknessCaseService
      */
     private function assertCodebooks(SicknessBenefitKind $kind, array $values): void
     {
+        if (array_key_exists('pension_kind', $values)) {
+            NempriCodebook::assertPensionKind($values['pension_kind']);
+        }
         $touched = array_intersect_key(
             $values,
             array_flip(['relationship_code', 'paternity_reason', 'maternity_care_reason']),
@@ -865,7 +868,8 @@ final readonly class SicknessCaseService
             'sickness_case_document_settled',
             $documents . ' je už vyřízené (přijaté, nebo podané předchozím programem), takže '
             . 'se jeho údaje nemění — evidence musí odpovídat tomu, co ČSSZ dostala. Opravu '
-            . 'podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí.',
+            . 'podejte opravným podáním: zaškrtněte Opravné podání a vyplňte číslo rozhodnutí, '
+            . 'nese-li ho druh dávky.',
         );
     }
 
@@ -1276,10 +1280,13 @@ final readonly class SicknessCaseService
     private function decimal(string $column, mixed $value): string
     {
         $normalized = str_replace(',', '.', trim((string) $value));
-        if (preg_match('/^\d{1,5}(\.\d{1,2})?$/D', $normalized) !== 1) {
+        // Všechny desetinné sloupce případu jsou hodiny jednoho dne: DV NEMPRI25
+        // i HZUPN20 je berou z intervalu 0 až 24.
+        if (preg_match('/^\d{1,2}(\.\d{1,2})?$/D', $normalized) !== 1 || (float) $normalized > 24) {
             throw new SicknessException(
                 'sickness_hours_invalid',
-                'Hodnota „' . $column . '" musí být kladné číslo s nejvýše dvěma desetinnými místy.',
+                'Hodnota „' . $column . '" musí být počet hodin jednoho dne od 0 do 24 s nejvýše '
+                . 'dvěma desetinnými místy.',
             );
         }
 

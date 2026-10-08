@@ -172,14 +172,23 @@ final class NempriDecisivePeriodResolverTest extends TestCase
         self::assertSame(42_000, $result->probableIncomeCzk);
     }
 
-    /** § 18 odst. 5: událost v měsíci vzniku pojištění. */
+    /**
+     * § 18 odst. 5: událost v měsíci vzniku pojištění. Rozhodné období se
+     * neurčuje a věta podle Všeobecných zásad NEMPRI nese od = den nástupu,
+     * do = den před vznikem události (NEMPRI25-rozhodneObdobi.pravdepodobnaVysePrijmu-3).
+     * Událost v den nástupu nechá do = den nástupu.
+     */
     public function testEventInFirstMonthOfEmploymentUsesStartDay(): void
     {
-        $result = $this->resolver->resolve('2026-06-15', '2026-06-01', '2026-01', NempriDecisiveSources::fromArrays([], []), 38_000);
+        $result = $this->resolver->resolve('2026-06-15', '2026-06-03', '2026-01', NempriDecisiveSources::fromArrays([], []), 38_000);
 
-        self::assertSame('2026-06-01', $result->from);
-        self::assertSame('2026-06-01', $result->to);
+        self::assertSame('2026-06-03', $result->from);
+        self::assertSame('2026-06-14', $result->to);
         self::assertSame(38_000, $result->probableIncomeCzk);
+
+        $sameDay = $this->resolver->resolve('2026-06-03', '2026-06-03', '2026-01', NempriDecisiveSources::fromArrays([], []), 38_000);
+        self::assertSame('2026-06-03', $sameDay->from);
+        self::assertSame('2026-06-03', $sameDay->to);
     }
 
     /**

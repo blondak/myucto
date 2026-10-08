@@ -199,6 +199,69 @@ final class SicknessDeadlinePolicyTest extends TestCase
         self::assertSame('2026-06-23', $worked->dueOn);
     }
 
+    /**
+     * NEMPRI25-CR-11, § 40 odst. 1 věta druhá: vznikla-li potřeba ošetřování
+     * v den už odpracované směny, podpůrčí doba ošetřovného počíná až
+     * následujícím dnem. Péče od 1. 9. 2026: bez směny nejdřív 10. 9.,
+     * s odpracovanou směnou 11. 9. U PPM se odpracovaný den nepromítá.
+     */
+    public function testWorkedFirstDayDefersCareSupportPeriod(): void
+    {
+        $plain = $this->policy->forNempri(SicknessBenefitKind::Ose, '2026-09-01');
+        $worked = $this->policy->forNempri(SicknessBenefitKind::Ose, '2026-09-01', workedFirstDay: true);
+        $ppm = $this->policy->forNempri(SicknessBenefitKind::Ppm, '2026-09-01', workedFirstDay: true);
+
+        self::assertSame('2026-09-10', $plain->earliestNotificationOn);
+        self::assertSame('2026-09-11', $worked->earliestNotificationOn);
+        self::assertSame('2026-09-01', $ppm->earliestNotificationOn);
+        self::assertTrue(SicknessDeadlinePolicy::firstDayShiftDefersSupport(SicknessBenefitKind::Ose));
+        self::assertFalse(SicknessDeadlinePolicy::firstDayShiftDefersSupport(SicknessBenefitKind::Dlo));
+    }
+
+    /**
+     * NEMPRI25-lhuta-8: u malého rozsahu a DPP se oznámení zasílá až po
+     * zjištění započitatelného příjmu v měsíci události, tedy nejdřív první
+     * den následujícího měsíce. Pozdější termín podle druhu dávky zůstává.
+     */
+    public function testSmallScopeAndAgreementWaitForEventMonthIncome(): void
+    {
+        $plain = $this->policy->forNempri(SicknessBenefitKind::Nem, '2026-08-03');
+        $dpp = $this->policy->forNempri(SicknessBenefitKind::Nem, '2026-08-03', awaitsEventMonthIncome: true);
+        $late = $this->policy->forNempri(SicknessBenefitKind::Nem, '2026-08-25', awaitsEventMonthIncome: true);
+        $care = $this->policy->forNempri(SicknessBenefitKind::Ose, '2026-08-03', '2026-08-05', awaitsEventMonthIncome: true);
+
+        self::assertSame('2026-08-17', $plain->earliestNotificationOn);
+        self::assertSame('2026-09-01', $dpp->earliestNotificationOn);
+        self::assertSame('2026-09-01', $dpp->dueOn);
+        self::assertSame('2026-09-08', $late->earliestNotificationOn);
+        self::assertSame('2026-09-01', $care->earliestNotificationOn);
+
+        self::assertTrue(SicknessDeadlinePolicy::awaitsEventMonthIncome(['relation_type' => 'dpp'], []));
+        self::assertTrue(SicknessDeadlinePolicy::awaitsEventMonthIncome(['relation_type' => 'hpp'], ['small_scope_income_minor' => 450000]));
+        self::assertFalse(SicknessDeadlinePolicy::awaitsEventMonthIncome(['relation_type' => 'hpp'], ['small_scope_income_minor' => null]));
+    }
+
+    /**
+     * HZUPN20-CRIT-WEB-1, APPLIC-2 a CRIT-LAW-5: HZUPN se zasílá jen
+     * u nemocenského s DPN delší než 14 dnů a ne, když zaměstnání skončilo
+     * v průběhu DPN nebo DPN vznikla až v ochranné lhůtě.
+     */
+    public function testEndOfIncapacityReportIsRequiredOnlyWhenCsszWantsIt(): void
+    {
+        $reason = fn (SicknessBenefitKind $kind, string $from, ?string $to, ?string $end, bool $worked = false): ?string
+            => $this->policy->hzupnNotRequired($kind, $from, $to, $end, $worked)['code'] ?? null;
+
+        self::assertSame('hzupn_not_for_benefit_kind', $reason(SicknessBenefitKind::Ose, '2026-08-01', '2026-08-30', null));
+        self::assertSame('hzupn_within_wage_compensation_window', $reason(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-14', null));
+        self::assertSame('hzupn_within_wage_compensation_window', $reason(SicknessBenefitKind::Nem, '2026-06-08', '2026-06-22', null, true));
+        self::assertNull($reason(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-15', null));
+        self::assertNull($reason(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-30', '2026-09-30'));
+        self::assertSame('hzupn_employment_ended_during_incapacity', $reason(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-30', '2026-08-20'));
+        self::assertSame('hzupn_employment_ended_during_incapacity', $reason(SicknessBenefitKind::Nem, '2026-08-01', '2026-08-30', '2026-08-30'));
+        self::assertSame('hzupn_employment_ended_during_incapacity', $reason(SicknessBenefitKind::Nem, '2026-08-01', null, '2026-08-20'));
+        self::assertSame('hzupn_incapacity_in_protection_period', $reason(SicknessBenefitKind::Nem, '2026-08-03', '2026-08-30', '2026-07-31'));
+    }
+
     public function testLoneCarerGetsLongerCareSupportPeriod(): void
     {
         $window = $this->policy->forNempri(

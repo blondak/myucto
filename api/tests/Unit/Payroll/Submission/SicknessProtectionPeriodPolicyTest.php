@@ -112,9 +112,10 @@ final class SicknessProtectionPeriodPolicyTest extends TestCase
     }
 
     /**
-     * DPN-08, § 15 odst. 4 písm. a): poživateli starobního důchodu (kód 1)
-     * a invalidního důchodu třetího stupně (kód 2) ochranná lhůta neplyne.
-     * Invalidní důchod prvního nebo druhého stupně (kód 8) ji nevylučuje.
+     * DPN-08, § 15 odst. 4 písm. a): poživateli starobního důchodu (S)
+     * a invalidního důchodu třetího stupně (I3) ochranná lhůta neplyne.
+     * Invalidní důchod prvního nebo druhého stupně (I1) ji nevylučuje. Kódy
+     * jsou z CIS_DRUHDUCH_NEM, tedy tytéž, které nese NEMPRI.
      */
     public function testOldAgeOrThirdDegreeInvalidityPensionerHasNoProtectionPeriod(): void
     {
@@ -123,23 +124,44 @@ final class SicknessProtectionPeriodPolicyTest extends TestCase
             SicknessBenefitKind::Nem,
             '2026-07-03',
             $this->context('2020-01-01', '2026-06-30'),
-            ['receives_pension' => 1, 'pension_kind' => '1'],
+            ['receives_pension' => 1, 'pension_kind' => 'S'],
         );
         $this->expectRefused(
             'sickness_protection_period_excluded',
             SicknessBenefitKind::Nem,
             '2026-07-03',
             $this->context('2020-01-01', '2026-06-30'),
-            ['receives_pension' => '1', 'pension_kind' => '2'],
+            ['receives_pension' => '1', 'pension_kind' => 'I3'],
         );
 
         $result = $this->policy->assess(
             SicknessBenefitKind::Nem,
             '2026-07-03',
             $this->context('2020-01-01', '2026-06-30'),
-            ['receives_pension' => 1, 'pension_kind' => '8'],
+            ['receives_pension' => 1, 'pension_kind' => 'I1'],
         );
         self::assertSame(SicknessProtectionPeriodPolicy::STATUS_PROTECTION_PERIOD, $result['status']);
+    }
+
+    /**
+     * Kód číselníku přihlášky (1 starobní, 2 invalidní 3. stupně) není druh
+     * důchodu NEMPRI; nárok se z něj nedomýšlí ani jedním směrem.
+     */
+    public function testRegistrationPensionCodeIsRefusedInsteadOfGuessed(): void
+    {
+        foreach (['1', '2', '8'] as $legacy) {
+            try {
+                $this->policy->assess(
+                    SicknessBenefitKind::Nem,
+                    '2026-07-03',
+                    $this->context('2020-01-01', '2026-06-30'),
+                    ['receives_pension' => 1, 'pension_kind' => $legacy],
+                );
+                self::fail('Kód přihlášky ' . $legacy . ' není druh důchodu NEMPRI.');
+            } catch (SicknessException $exception) {
+                self::assertSame('nempri_pension_kind_invalid', $exception->validationCode);
+            }
+        }
     }
 
     /** Pobírá-li důchod a druh chybí, nárok se nedomýšlí — politika chce druh. */

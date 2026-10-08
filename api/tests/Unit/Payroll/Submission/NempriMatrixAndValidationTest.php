@@ -9,13 +9,16 @@ use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\HzupnXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriBenefitApplication;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriCodebook;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisiveMonth;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriDecisivePeriod;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnection;
+use MyInvoice\Service\Payroll\Submission\Sickness\NempriPaymentConnectionResolver;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriPerson;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlPayload;
 use MyInvoice\Service\Payroll\Submission\Sickness\NempriXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDecisionNumber;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessInsuredContactReader;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessPayloadFactory;
@@ -268,6 +271,223 @@ final class NempriMatrixAndValidationTest extends TestCase
         ));
     }
 
+    /**
+     * NEMPRI25-dlo.zadost.jeStridani-2 (a narokNaPPMjinouOsobou-2,
+     * spolecnaDomacnost-2): u DLO s akcí vznik jsou prohlášení povinná,
+     * nevyplněná se uvádí jako „NE“ stejně jako u ošetřovného.
+     */
+    public function testDloStartDeclarationsDefaultToNoAndMustBePresent(): void
+    {
+        $application = (new SicknessPayloadFactory())->application(
+            ['action_start' => 1, 'action_end' => 0],
+            new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
+            SicknessBenefitKind::Dlo,
+        );
+        self::assertFalse($application->alternation);
+        self::assertFalse($application->otherMaternityClaim);
+        self::assertFalse($application->sharedHousehold);
+        self::assertNull($application->loneCaregiver, 'Osamělost DLO nenese.');
+        self::assertNull($application->caredPersonally);
+        $claim = (new SicknessPayloadFactory())->application(
+            ['action_start' => 1, 'other_maternity_claim' => 1],
+            null,
+            SicknessBenefitKind::Dlo,
+        );
+        self::assertFalse($claim->otherPersonS57);
+        $end = (new SicknessPayloadFactory())->application(['action_start' => 0, 'action_end' => 1], null, SicknessBenefitKind::Dlo);
+        self::assertNull($end->alternation);
+        self::assertFalse($end->caredPersonally);
+
+        $payload = $this->payload(SicknessBenefitKind::Dlo, $this->dlo());
+        $xml = $this->serializer->serialize($payload);
+        $this->validator->validateNempri($payload, $xml);
+        foreach (['<jeStridani>false<', '<narokNaPPMjinouOsobou>false<', '<spolecnaDomacnost>true<'] as $element) {
+            self::assertStringContainsString($element, $xml);
+        }
+        $this->expectRejected('nempri_care_declaration_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(alternation: null),
+        ));
+        $this->expectRejected('nempri_care_declaration_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(sharedHousehold: null),
+        ));
+    }
+
+    /**
+     * NEMPRI25-ose.zadost.pecovalVeDnech-2 (a dlo.zadost.pecovalVeDnech-2):
+     * při trvání nebo ukončení jsou dny péče povinné.
+     */
+    public function testCareDaysAreRequiredForContinuationAndEnd(): void
+    {
+        $this->expectRejected('nempri_care_days_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionEnd: true, careDays: []),
+        ));
+        $this->expectRejected('nempri_care_days_missing', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(actionStart: false, actionContinuation: true, careDays: []),
+        ));
+        $this->expectRejected('nempri_care_days_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, careDays: []),
+        ));
+        $start = $this->payload(SicknessBenefitKind::Ose, $this->care(careDays: []));
+        $this->validator->validateNempri($start, $this->serializer->serialize($start));
+        self::assertTrue(true);
+    }
+
+    /**
+     * NEMPRI25-ose.podklady.pracovniDobaPoslDenPD-4: u ošetřovného jsou hodiny
+     * posledního dne bez `pracovalPoslDenPD = true` zakázané — ve validátoru,
+     * v serializaci i v továrně.
+     */
+    public function testCareLastDayHoursOnlyWhenEmployeeWorkedLastDay(): void
+    {
+        $stale = $this->payload(SicknessBenefitKind::Ose, $this->care(
+            actionStart: false,
+            actionEnd: true,
+            workedLastDay: false,
+            shiftHoursLastDay: '8',
+        ));
+        self::assertStringNotContainsString('pracovniDobaPoslDenPD', $this->serializer->serialize($stale));
+        $this->expectRejected('nempri_last_day_hours_without_worked', $stale);
+
+        $factory = new SicknessPayloadFactory();
+        $notWorked = $factory->application([
+            'action_start' => 0,
+            'action_end' => 1,
+            'worked_last_day' => 0,
+            'shift_hours_last_day' => '8.00',
+            'hours_worked_last_day' => '2.00',
+        ], null, SicknessBenefitKind::Ose);
+        self::assertNull($notWorked->shiftHoursLastDay);
+        self::assertNull($notWorked->hoursWorkedLastDay);
+        $worked = $factory->application([
+            'action_start' => 0,
+            'action_end' => 1,
+            'worked_last_day' => 1,
+            'shift_hours_last_day' => '8.00',
+            'hours_worked_last_day' => '2.00',
+        ], null, SicknessBenefitKind::Ose);
+        self::assertSame('8.00', $worked->shiftHoursLastDay);
+        // Otcovská a DLO váží hodiny na návrat do práce, ne na `pracovalPoslDenPD`.
+        $dlo = $factory->application(['action_end' => 1, 'shift_hours_last_day' => '8.00'], null, SicknessBenefitKind::Dlo);
+        self::assertSame('8.00', $dlo->shiftHoursLastDay);
+    }
+
+    /**
+     * NEMPRI25-dlo.podklady.pracovniDobaPoslDenPD-3: u DLO jsou hodiny
+     * posledního dne povinné s datem návratu do práce a naopak, odpracováno
+     * nesmí převýšit pracovní dobu.
+     */
+    public function testDloLastDayHoursGoWithReturnDate(): void
+    {
+        $this->expectRejected('nempri_last_day_hours_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, shiftHoursLastDay: null, hoursWorkedLastDay: null),
+        ));
+        $this->expectRejected('nempri_return_date_missing', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, returnedOn: null),
+        ));
+        $this->expectRejected('nempri_last_day_hours_exceed', $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, shiftHoursLastDay: '4', hoursWorkedLastDay: '6'),
+        ));
+        $none = $this->payload(
+            SicknessBenefitKind::Dlo,
+            $this->dlo(actionStart: false, actionEnd: true, returnedOn: null, shiftHoursLastDay: null, hoursWorkedLastDay: null),
+        );
+        $this->validator->validateNempri($none, $this->serializer->serialize($none));
+        self::assertTrue(true);
+    }
+
+    /**
+     * NEMPRI25-LK-13: datum narození dítěte nebo ošetřované osoby a den
+     * převedení na jinou práci nesmí být pozdější než dnešek.
+     */
+    public function testBirthAndTransferDatesMustNotBeInTheFuture(): void
+    {
+        $future = (new \DateTimeImmutable('tomorrow', new \DateTimeZone('Europe/Prague')))->format('Y-m-d');
+        $this->expectRejected('nempri_date_in_future', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['startsMaternity' => true, 'childBirthDate' => $future],
+        ));
+        $this->expectRejected('nempri_date_in_future', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['transferredOtherWork' => true, 'transferredOn' => $future],
+        ));
+        $this->expectRejected('nempri_date_in_future', $this->payload(
+            SicknessBenefitKind::Opp,
+            new NempriBenefitApplication(
+                fromDate: '2026-09-14',
+                person: new NempriPerson('Dítě', 'Testovací', null, $future),
+                paternityReason: 'OTC',
+                plannedShifts: false,
+            ),
+        ));
+        $today = $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['startsMaternity' => true, 'childBirthDate' => (new \DateTimeImmutable('today', new \DateTimeZone('Europe/Prague')))->format('Y-m-d')],
+        );
+        $this->validator->validateNempri($today, $this->serializer->serialize($today));
+        self::assertTrue(true);
+    }
+
+    /**
+     * NEMPRI25-dokument.opravnePodani-2: opravné podání jde podat u každého
+     * druhu dávky; číslo rozhodnutí chce jen tam, kde je ho druh povinně nese.
+     */
+    public function testCorrectionWithoutDecisionNumberIsAllowedWhereKindHasNone(): void
+    {
+        $child = new NempriPerson('Dítě', 'Testovací', null, '2026-08-20');
+        foreach ([
+            [SicknessBenefitKind::Vpm, null],
+            [SicknessBenefitKind::Ppm, new NempriBenefitApplication(fromDate: '2026-09-01', person: $child, maternityCareReason: 'DOH')],
+            [SicknessBenefitKind::Opp, new NempriBenefitApplication(fromDate: '2026-09-14', person: $child, paternityReason: 'OTC', plannedShifts: false)],
+        ] as [$kind, $application]) {
+            $payload = $this->payload($kind, $application, ['correction' => true, 'decisionNumber' => null]);
+            $xml = $this->serializer->serialize($payload);
+            $this->validator->validateNempri($payload, $xml);
+            self::assertStringContainsString('<opravnePodani>true</opravnePodani>', $xml, $kind->value);
+        }
+        $this->expectRejected('nempri_correction_without_decision_number', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['correction' => true, 'decisionNumber' => null],
+        ));
+        $foreign = $this->payload(SicknessBenefitKind::Nem, null, ['correction' => true, 'decisionNumber' => null, 'foreignCase' => true]);
+        $this->validator->validateNempri($foreign, $this->serializer->serialize($foreign));
+    }
+
+    /** NEMPRI25-platebniSpojeni.ucetZahranicni.stat-3: zahraniční účet nesmí mít stát CZ. */
+    public function testForeignAccountMustNotBeCzech(): void
+    {
+        $this->expectRejected('nempri_payment_connection_invalid', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['paymentConnection' => new NempriPaymentConnection(
+                NempriPaymentConnection::KIND_ACCOUNT_FOREIGN,
+                iban: 'CZ6508000000192000145399',
+                countryCode: 'CZ',
+            )],
+        ));
+        try {
+            (new NempriPaymentConnectionResolver())->fromAccount('CZ65 0800 0000 1920 0014');
+            self::fail('Český IBAN v neplatném tvaru není zahraniční účet.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_payment_connection_invalid', $exception->validationCode);
+        }
+        $slovak = (new NempriPaymentConnectionResolver())->fromAccount('SK31 1200 0000 1987 4263 7541');
+        self::assertSame('SK', $slovak->countryCode);
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, ['paymentConnection' => $slovak]);
+        $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+    }
+
     // ---- NX-04: potvrzení zaměstnavatele ----------------------------------
 
     public function testEmployerConfirmationConditionalElements(): void
@@ -334,6 +554,33 @@ final class NempriMatrixAndValidationTest extends TestCase
         $this->validator->validateNempri($student, $xml);
         self::assertStringContainsString('<spadaDoPrazdnin>true</spadaDoPrazdnin>', $xml);
         self::assertStringContainsString('<volnoBezNahradyDo>2026-08-05</volnoBezNahradyDo>', $xml);
+    }
+
+    /**
+     * NEMPRI25-nem.potv.druhDuchodu-3: druh důchodu je kód CIS_DRUHDUCH_NEM.
+     * XSD pustí cokoli z `[0-9A-Z]{1,3}`, takže kód z číselníku přihlášky
+     * (1, 2, 8) by odmítla až územní správa.
+     */
+    public function testPensionKindMustComeFromSicknessCodebook(): void
+    {
+        foreach (['1', '2', '8', 'SD'] as $foreign) {
+            $this->expectRejected('nempri_pension_kind_invalid', $this->payload(
+                SicknessBenefitKind::Nem,
+                null,
+                ['receivesPension' => true, 'pensionKind' => $foreign],
+            ));
+        }
+        $this->expectRejected('nempri_pension_kind_invalid', $this->payload(
+            SicknessBenefitKind::Vpm,
+            null,
+            ['receivesPension' => true, 'pensionKind' => '1'],
+        ));
+        foreach (NempriCodebook::PENSION_KINDS as $code) {
+            $payload = $this->payload(SicknessBenefitKind::Nem, null, ['receivesPension' => true, 'pensionKind' => $code]);
+            $xml = $this->serializer->serialize($payload);
+            $this->validator->validateNempri($payload, $xml);
+            self::assertStringContainsString('<druhDuchodu>' . $code . '</druhDuchodu>', $xml);
+        }
     }
 
     public function testFactoryDropsDailyWorkingHoursWhenEmployeeDidNotWork(): void
@@ -432,6 +679,150 @@ final class NempriMatrixAndValidationTest extends TestCase
         self::assertNull($yes->returnReason);
     }
 
+    /**
+     * HZUPN20-potvrzeniZamestnavatele-1 a duvodNavratDoPrace-2: hlášení
+     * zaměstnavatele musí odpovědět na návrat do práce a důvod nenávratu
+     * patří jen k odpovědi „ne“, nikdy k nevyplněné.
+     */
+    public function testHzupnRequiresReturnAnswerAndReasonOnlyForNo(): void
+    {
+        $this->expectHzupnRejected('hzupn_return_decision_missing', [
+            'returnedToWork' => null,
+            'returnedOn' => null,
+            'hoursWorkedLastDay' => null,
+            'shiftHoursLastDay' => null,
+        ]);
+
+        $unanswered = $this->hzupnPayload([
+            'returnedToWork' => null,
+            'returnReason' => 'konec',
+            'returnedOn' => null,
+            'hoursWorkedLastDay' => null,
+            'shiftHoursLastDay' => null,
+        ]);
+        self::assertStringNotContainsString('duvodNavratDoPrace', $this->hzupn->serialize($unanswered));
+
+        $row = $this->caseRow([
+            'issued_on' => '2026-08-24',
+            'returned_to_work' => null,
+            'return_reason' => 'konec',
+        ]);
+        $payload = (new SicknessPayloadFactory())->hzupn($row, $this->context(), $this->identity(), '1.0', 'MyUcto', '1.0');
+        self::assertNull($payload->returnReason);
+    }
+
+    /** HZUPN20-pracovniDobaPoslDenPD-3, pocetOdpracHodinPoslDenPD-3: hodiny 0 až 24. */
+    public function testHzupnLastDayHoursStayWithinOneDay(): void
+    {
+        $this->expectHzupnRejected('hzupn_last_day_hours_out_of_range', ['shiftHoursLastDay' => '25', 'hoursWorkedLastDay' => '8']);
+        $this->expectHzupnRejected('hzupn_last_day_hours_out_of_range', ['shiftHoursLastDay' => '30', 'hoursWorkedLastDay' => '25']);
+        $full = $this->hzupnPayload(['shiftHoursLastDay' => '24', 'hoursWorkedLastDay' => '24']);
+        $this->validator->validateHzupn($full, $this->hzupn->serialize($full), '2026-08-03');
+        self::assertTrue(true);
+    }
+
+    /** HZUPN20-LK3-1: den vystavení po 31. 12. 2019. */
+    public function testHzupnIssueDateMustFollowYear2019(): void
+    {
+        $this->expectHzupnRejected('hzupn_issue_date_too_early', ['issuedOn' => '2019-12-31']);
+        $first = $this->hzupnPayload(['issuedOn' => '2020-01-01']);
+        $this->validator->validateHzupn($first, $this->hzupn->serialize($first), '2019-12-20');
+        self::assertTrue(true);
+    }
+
+    /**
+     * HZUPN20-LK30-1: kontrola 30 zní „DO > OD“, ale jednodenní práce má od = do.
+     * Rovnost je povolená záměrně (komentář u validátoru); obrácený interval ne.
+     */
+    public function testHzupnSingleDayWorkIntervalIsAllowedButReversedIsNot(): void
+    {
+        $single = $this->hzupnPayload(['workIntervals' => [['from' => '2026-08-10', 'to' => '2026-08-10']]]);
+        $xml = $this->hzupn->serialize($single);
+        $this->validator->validateHzupn($single, $xml, '2026-08-03');
+        self::assertStringContainsString('<pracovalOd>2026-08-10</pracovalOd>', $xml);
+        $this->expectHzupnRejected('hzupn_work_interval_invalid', [
+            'workIntervals' => [['from' => '2026-08-11', 'to' => '2026-08-10']],
+        ]);
+    }
+
+    /**
+     * HZUPN20-LK33-1 a cisloPotvrzeni-3: HZUPN nese číslo rozhodnutí ve formátu
+     * od r. 2020 (ČPN s písmenem E až Z kromě K, PČ od 2001010000, i s IČPE).
+     */
+    public function testHzupnConfirmationNumberUsesPost2020Format(): void
+    {
+        foreach (['A1234567', 'D123456', 'K1234567', '1912310001', '12345', 'E12345678'] as $number) {
+            $this->expectHzupnRejected('hzupn_confirmation_number_format_invalid', ['confirmationNumber' => $number]);
+        }
+        $this->expectHzupnRejected('hzupn_confirmation_number_icpe_invalid', ['confirmationNumber' => '12345675' . '2601010001']);
+        foreach (['E1234567', 'Z123456', 'L7654321', '2001010000', '6000000001', '12345674' . '2601010001'] as $number) {
+            $payload = $this->hzupnPayload(['confirmationNumber' => $number]);
+            $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+        }
+        // Rozhodnutí mimo český systém tvar českého čísla mít nemusí.
+        foreach (['foreignCase', 'slovakCase'] as $flag) {
+            $payload = $this->hzupnPayload(['confirmationNumber' => 'SK-77/2026', $flag => true]);
+            $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+        }
+        $lower = (new SicknessPayloadFactory())->hzupn(
+            $this->caseRow(['issued_on' => '2026-08-24', 'returned_to_work' => 1, 'returned_on' => '2026-08-24']),
+            $this->context(),
+            $this->identity(),
+            '1.0',
+            'MyUcto',
+            '1.0',
+        );
+        self::assertSame('E1234567', $lower->confirmationNumber);
+    }
+
+    /** NEMPRI25-dokument.kodOSSZ-3 a HZUPN20-kodOSSZ-3: kód z C_COKR, 101 ne. */
+    public function testOsszCodeMustComeFromWorkplaceCodebook(): void
+    {
+        foreach ([101, 100, 999, 120] as $code) {
+            $this->expectRejected('sickness_ossz_code_invalid', $this->payload(SicknessBenefitKind::Nem, null, ['osszCode' => $code]));
+            $this->expectHzupnRejected('sickness_ossz_code_invalid', ['osszCode' => $code]);
+        }
+        self::assertTrue(CsszWorkplaceCatalog::acceptsSubmission(115));
+        self::assertFalse(CsszWorkplaceCatalog::acceptsSubmission(101));
+        self::assertSame('Praha 5', CsszWorkplaceCatalog::nameFor(115));
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, ['osszCode' => 772]);
+        $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+    }
+
+    /**
+     * NEMPRI25-ERR-22: IČPE předsazené číslu rozhodnutí musí projít kontrolou
+     * 8. číslice (Luhn). Platí pro všechny druhy dávky, i pro NEM, jehož
+     * elektronické číslo s IČPE (18 číslic) je zároveň „elektronické“ pro
+     * povinné platební spojení.
+     */
+    public function testDecisionNumberIcpeMustPassLuhnCheck(): void
+    {
+        $this->expectRejected('nempri_decision_number_icpe_invalid', $this->payload(
+            SicknessBenefitKind::Ose,
+            $this->care(),
+            ['decisionNumber' => '12345675' . '260101001N'],
+        ));
+        $this->expectRejected('nempri_decision_number_icpe_invalid', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisionNumber' => '12345675' . '2601011234'],
+        ));
+        $this->expectRejected('nempri_payment_connection_required', $this->payload(
+            SicknessBenefitKind::Nem,
+            null,
+            ['decisionNumber' => '12345674' . '2601011234', 'paymentConnection' => null],
+        ));
+        foreach ([
+            [SicknessBenefitKind::Ose, $this->care(), '12345674' . '260101001N'],
+            [SicknessBenefitKind::Nem, null, '12345674' . '2601011234'],
+        ] as [$kind, $application, $number]) {
+            $payload = $this->payload($kind, $application, ['decisionNumber' => $number]);
+            $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
+        }
+        self::assertTrue(SicknessDecisionNumber::icpeChecksumValid('12345674'));
+        self::assertFalse(SicknessDecisionNumber::icpeChecksumValid('12345675'));
+    }
+
     // ---- NX-06: číslo rozhodnutí ------------------------------------------
 
     public function testDecisionNumberPerBenefitKind(): void
@@ -481,7 +872,7 @@ final class NempriMatrixAndValidationTest extends TestCase
         self::assertSame('nempri_decision_number_forbidden', $problem(SicknessBenefitKind::Vpm, 'A1234567'));
         self::assertSame('nempri_decision_number_format_invalid', $problem(SicknessBenefitKind::Ose, 'A1234567'));
         self::assertNull($problem(SicknessBenefitKind::Ose, '1234567N'));
-        self::assertNull($problem(SicknessBenefitKind::Ose, '1234567890' . '1234567N'), 'ICPE + číslo + písmeno.');
+        self::assertNull($problem(SicknessBenefitKind::Ose, '1234567490' . '1234567N'), 'ICPE + číslo + písmeno.');
         self::assertSame('nempri_decision_number_missing', $problem(SicknessBenefitKind::Nem, null));
         self::assertNull($problem(SicknessBenefitKind::Nem, null, false, true), 'Zahraniční případ číslo mít nemusí.');
         self::assertNull($problem(SicknessBenefitKind::Opp, null));
@@ -749,6 +1140,18 @@ final class NempriMatrixAndValidationTest extends TestCase
         }
     }
 
+    /** @param array<string,mixed> $overrides */
+    private function expectHzupnRejected(string $code, array $overrides): void
+    {
+        $payload = $this->hzupnPayload($overrides);
+        try {
+            $this->validator->validateHzupn($payload, $this->hzupn->serialize($payload), '2026-08-03');
+            self::fail('Validace měla odmítnout hlášení s kódem ' . $code . '.');
+        } catch (SicknessException $exception) {
+            self::assertSame($code, $exception->validationCode, $exception->getMessage());
+        }
+    }
+
     private function account(): NempriPaymentConnection
     {
         return new NempriPaymentConnection(
@@ -796,8 +1199,10 @@ final class NempriMatrixAndValidationTest extends TestCase
         ?bool $workedLastDay = false,
         ?bool $plannedShifts = true,
         ?bool $plannedShiftsWorked = false,
-        ?string $shiftHoursLastDay = '8',
+        ?string $shiftHoursLastDay = null,
         ?string $hoursWorkedLastDay = null,
+        array $careDays = [['from' => '2026-09-07', 'to' => '2026-09-11']],
+        ?bool $sharedHousehold = true,
     ): NempriBenefitApplication {
         return new NempriBenefitApplication(
             actionStart: $actionStart,
@@ -808,14 +1213,14 @@ final class NempriMatrixAndValidationTest extends TestCase
             person: new NempriPerson('Dítě', 'Testovací', '1501010007', null),
             careReason: $careReason,
             schoolName: $schoolName,
-            sharedHousehold: true,
+            sharedHousehold: $sharedHousehold,
             loneCaregiver: false,
             childUnder16: true,
             otherMaternityClaim: $otherMaternityClaim,
             otherParentalClaim: $otherParentalClaim,
             otherPersonS57: $otherPersonS57,
             caredPersonally: $caredPersonally,
-            careDays: [['from' => '2026-09-07', 'to' => '2026-09-11']],
+            careDays: $careDays,
             relationshipCode: 'PL',
             workedLastDay: $workedLastDay,
             shiftHoursLastDay: $shiftHoursLastDay,
@@ -836,6 +1241,11 @@ final class NempriMatrixAndValidationTest extends TestCase
         ?bool $hasLeave = true,
         array $leavePeriods = [['from' => '2026-09-02', 'to' => '2026-09-04']],
         array $shiftSchedule = [['from' => '2026-09-07', 'to' => '2026-09-11']],
+        ?bool $alternation = false,
+        ?string $returnedOn = '2026-10-01',
+        ?string $shiftHoursLastDay = '8',
+        ?string $hoursWorkedLastDay = '0',
+        array $careDays = [['from' => '2026-09-01', 'to' => '2026-09-30']],
     ): NempriBenefitApplication {
         return new NempriBenefitApplication(
             actionStart: $actionStart,
@@ -843,14 +1253,16 @@ final class NempriMatrixAndValidationTest extends TestCase
             fromDate: '2026-09-01',
             toDate: '2026-09-30',
             person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
+            sharedHousehold: true,
+            otherMaternityClaim: false,
             caredPersonally: true,
-            careDays: [['from' => '2026-09-01', 'to' => '2026-09-30']],
+            careDays: $careDays,
             relationshipCode: '3',
-            alternation: false,
-            shiftHoursLastDay: '8',
-            hoursWorkedLastDay: '0',
+            alternation: $alternation,
+            shiftHoursLastDay: $shiftHoursLastDay,
+            hoursWorkedLastDay: $hoursWorkedLastDay,
             plannedShifts: true,
-            returnedOn: '2026-10-01',
+            returnedOn: $returnedOn,
             workDays: [['from' => '2026-09-14', 'to' => '2026-09-14']],
             hasLeave: $hasLeave,
             leavePeriods: $leavePeriods,
@@ -924,7 +1336,7 @@ final class NempriMatrixAndValidationTest extends TestCase
             'employerReport' => true,
             'personReport' => false,
             'foreignCase' => false,
-            'confirmationNumber' => 'A1234567',
+            'confirmationNumber' => 'E1234567',
             'osszCode' => 115,
             'osszName' => null,
             'issuedOn' => '2026-08-24',
@@ -957,7 +1369,7 @@ final class NempriMatrixAndValidationTest extends TestCase
         return [...[
             'ossz_code' => 115,
             'correction' => 0,
-            'decision_number' => 'a1234567',
+            'decision_number' => 'e1234567',
             'foreign_case' => 0,
             'worked_on_decisive_day' => 0,
             'hours_worked' => null,

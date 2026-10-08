@@ -189,6 +189,8 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
             relationshipCode: '3',
             alternation: false,
+            otherMaternityClaim: false,
+            sharedHousehold: false,
         ));
         $xml = $this->serializer->serialize($dlo);
         $this->validator->validateNempri($dlo, $xml);
@@ -216,6 +218,8 @@ final class NempriBenefitApplicationXmlTest extends TestCase
                 person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
                 relationshipCode: 'PL',
                 alternation: false,
+                otherMaternityClaim: false,
+                sharedHousehold: false,
             )),
         );
         $this->expectRejected(
@@ -282,6 +286,8 @@ final class NempriBenefitApplicationXmlTest extends TestCase
                 person: new NempriPerson('Osoba', 'Ošetřovaná', null, '1950-01-01'),
                 relationshipCode: $code,
                 alternation: false,
+                otherMaternityClaim: false,
+                sharedHousehold: false,
             ));
             $this->validator->validateNempri($payload, $this->serializer->serialize($payload));
         }
@@ -425,7 +431,6 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             careDays: [['from' => '2026-09-07', 'to' => '2026-09-11']],
             relationshipCode: $relationshipCode,
             workedLastDay: false,
-            shiftHoursLastDay: '8',
             plannedShifts: true,
             plannedShiftsWorked: false,
         );

@@ -379,12 +379,12 @@ final readonly class SicknessSubmissionService
             $incapacityFrom,
         );
 
+        // Odpracovaná celá směna v den vzniku posouvá první den neschopnosti
+        // (§ 26 odst. 3) a počátek podpůrčí doby ošetřovného (§ 40 odst. 1),
+        // a tím okno 14 dnů i lhůty, stejně jako v seznamu případů a v hlídači.
+        $workedFirstDay = SicknessDeadlinePolicy::firstDayShiftDefersSupport($kind)
+            && SicknessCaseService::firstDayFullyWorked($row);
         if ($document === SicknessDocumentKind::Nempri) {
-            // § 26 odst. 3: odpracovaná celá směna v den vzniku posouvá první
-            // den neschopnosti, a tím okno 14 dnů i lhůtu NEMPRI, stejně jako
-            // v seznamu případů a v hlídači lhůt.
-            $workedFirstDay = $kind === SicknessBenefitKind::Nem
-                && SicknessCaseService::firstDayFullyWorked($row);
             if (!$this->deadlines->nempriRequired($kind, $incapacityFrom, $incapacityTo, 0, $workedFirstDay)) {
                 throw new SicknessException(
                     'nempri_within_wage_compensation_window',
@@ -431,6 +431,18 @@ final readonly class SicknessSubmissionService
             if ($problem !== null) {
                 $missing[] = new SicknessException($problem['code'], $problem['message']);
             }
+            // U DPP oznámení nese započitatelný příjem z měsíce události
+            // (`prijemMalyRozsah`); kvůli němu se ostatně čeká na konec měsíce.
+            if (($context['relation_type'] ?? null) === 'dpp'
+                && ($row['small_scope_income_minor'] ?? null) === null
+            ) {
+                $missing[] = new SicknessException(
+                    'nempri_small_scope_income_missing',
+                    'Zaměstnanec pracuje na dohodu o provedení práce, takže oznámení nese započitatelný '
+                    . 'příjem z kalendářního měsíce, v němž sociální událost vznikla. Doplňte ho '
+                    . 'u případu (Příjem ze zaměstnání malého rozsahu nebo DPP).',
+                );
+            }
             if ($missing !== [] || $payload === null) {
                 throw new SicknessException(
                     $missing[0]->validationCode,
@@ -449,14 +461,18 @@ final readonly class SicknessSubmissionService
                 $this->nullableText($row['payroll_payment_date'] ?? null),
                 (bool) ($row['lone_caregiver'] ?? false),
                 $workedFirstDay,
+                SicknessDeadlinePolicy::awaitsEventMonthIncome($context, $row),
             );
         } else {
-            if (!$kind->hasEndOfIncapacityReport()) {
-                throw new SicknessException(
-                    'hzupn_not_for_benefit_kind',
-                    'Hlášení při ukončení pracovní neschopnosti (HZUPN) se podává jen '
-                    . 'u nemocenského. U tohoto druhu dávky žádné nevzniká.',
-                );
+            $notRequired = $this->deadlines->hzupnNotRequired(
+                $kind,
+                $incapacityFrom,
+                $incapacityTo,
+                $this->nullableText($context['end_date'] ?? null),
+                $workedFirstDay,
+            );
+            if ($notRequired !== null) {
+                throw new SicknessException($notRequired['code'], $notRequired['message']);
             }
             $manifest = $this->schemas->manifestFor(CsszSchemaCatalog::HZUPN20);
             $payload = $this->payloads->hzupn(
