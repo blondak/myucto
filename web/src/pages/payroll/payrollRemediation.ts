@@ -53,7 +53,7 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_takeover_excluded_days_mismatch: 'takeover',
   eldp_deducted_days_unknown: 'unsupported',
   eldp_section_15a_history_unavailable: 'unsupported',
-  eldp_rehire_within_three_months: 'unsupported',
+  eldp_statement_continues_previous_employment: 'previous_employment',
   eldp_post_termination_small_scale_unsupported: 'unsupported',
   eldp_excluded_days_exceed_deducted: 'integrity',
   eldp_base_with_fully_excluded_section: 'absence_overlap',
@@ -140,6 +140,14 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
     action = 'terms'
   } else if (['prepared_on', 'correction'].includes(kind)) {
     path = '/payroll/submissions/eldp'
+    action = 'eldp_form'
+  } else if (kind === 'previous_employment') {
+    // Navazující zaměstnání patří do listu dřívějšího vztahu: proklik otevře
+    // formulář evidenčního listu rovnou u něj.
+    const previous = Number(blocker.detail?.previous_employment_id)
+    path = Number.isInteger(previous) && previous > 0
+      ? `/payroll/submissions/eldp?employment=${previous}&year=${year}`
+      : '/payroll/submissions/eldp'
     action = 'eldp_form'
   } else if (['absence_dates', 'absence_overlap', 'income_month'].includes(kind) && hasEmployment) {
     path = `/payroll/absences?employment=${employmentId}&tab=absences`
