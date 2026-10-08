@@ -270,9 +270,11 @@ final class JmhzRegistrationProtocolParserTest extends TestCase
     }
 
     /**
-     * NEMPRI25/HZUPN20 (`CSSZ_NEM_PRI`) a OZUSPOJ23 (`CSSZ_OZUSPOJ`) VREP
-     * přijímá, ale tvar jejich protokolu zatím nikdo neviděl. Parser ho nesmí
-     * vyložit podle JMHZ ani mlčky zahodit — pojmenuje ho.
+     * Protokol k NEMPRI25/HZUPN20 (`CSSZ_NEM_PRI`) nebo OZUSPOJ23
+     * (`CSSZ_OZUSPOJ`), který neodpovídá doloženému tvaru (přijetí bez
+     * formuláře, cizí druh formuláře), parser nesmí vyložit podle JMHZ ani
+     * mlčky zahodit — pojmenuje ho. Doložený tvar kryje
+     * {@see JmhzCsszFormProtocolParserTest}.
      */
     public function testUndocumentedProtocolShapeIsNamedNotGuessed(): void
     {

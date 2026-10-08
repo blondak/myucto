@@ -51,10 +51,7 @@ final readonly class JmhzProtocolReport
      */
     public function originalAlreadyAtCssz(): bool
     {
-        $errors = $this->errors;
-        foreach ($this->parts as $part) {
-            $errors = [...$errors, ...$part->errors];
-        }
+        $errors = $this->allErrors();
         if ($errors === []) {
             return false;
         }
@@ -80,6 +77,29 @@ final readonly class JmhzProtocolReport
         return $this->originalAlreadyAtCssz()
             ? 'submitted'
             : $this->status->payrollRemoteStatus();
+    }
+
+    /** Odmítla ČSSZ podání kvůli chybějícímu pověření k e-službě u OSSZ (chyba 103)? */
+    public function missingServiceAuthorization(): bool
+    {
+        foreach ($this->allErrors() as $error) {
+            if ($error->reportsMissingServiceAuthorization()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<JmhzProtocolError> chyby souhrnu i všech částí protokolu */
+    public function allErrors(): array
+    {
+        $errors = $this->errors;
+        foreach ($this->parts as $part) {
+            $errors = [...$errors, ...$part->errors];
+        }
+
+        return $errors;
     }
 
     /** @return list<JmhzProtocolError> */

@@ -53,13 +53,20 @@ final readonly class JmhzProtocolParser
     ];
 
     /**
-     * Třídy, které VREP přijímá, ale jejichž protokol jsme zatím neviděli
-     * (NEMPRI25, HZUPN20, OZUSPOJ23). Odpověď se nesmí vyložit podle JMHZ ani
-     * zahodit: parser ji pojmenuje kódem {@see UNDOCUMENTED_SHAPE_CODE}
-     * a transport ji uloží k ručnímu vyřízení.
+     * Podání jednoho formuláře (NEMPRI25 a HZUPN20 pod `CSSZ_NEM_PRI`,
+     * OZUSPOJ23 pod `CSSZ_OZUSPOJ`), viz {@see parseCsszFormSubmission()}.
+     * Klíčem je `Class`, hodnotou doložené `Item/@subtype` téže třídy.
      */
-    private const UNDOCUMENTED_PROTOCOL_CLASSES = ['CSSZ_NEM_PRI', 'CSSZ_OZUSPOJ'];
+    private const CSSZ_FORM_SUBTYPES = [
+        'CSSZ_NEM_PRI' => ['NEMPRI25', 'HZUPN20'],
+        'CSSZ_OZUSPOJ' => ['OZUSPOJ23'],
+    ];
 
+    /**
+     * Protokol k podání jednoho formuláře, který neodpovídá doloženému tvaru.
+     * Odpověď se nesmí vyložit podle JMHZ ani zahodit: parser ji pojmenuje
+     * tímhle kódem a transport ji uloží k ručnímu vyřízení.
+     */
     public const UNDOCUMENTED_SHAPE_CODE = 'jmhz_protocol_shape_undocumented';
     private const ERROR_KINDS = ['prijem', 'zpracovani'];
     private const PART_SCOPES = [
@@ -141,16 +148,28 @@ final readonly class JmhzProtocolParser
         $correlation = trim(
             $this->text($xpath, "//g:Header/g:MessageDetails/g:CorrelationID"),
         );
-        if (in_array($class, self::UNDOCUMENTED_PROTOCOL_CLASSES, true)) {
-            throw new JmhzTransportException(
-                self::UNDOCUMENTED_SHAPE_CODE,
-                'ČSSZ vrátila protokol k podání ' . $class . ', jehož tvar zatím'
-                    . ' nemáme doložený. Aplikace ho uloží k podání a výsledek'
-                    . ' zpracování zapište podle protokolu ručně.',
-            );
+        $result = $xpath->query("//*[local-name()='ProcessingResult']")->item(0);
+        if (isset(self::CSSZ_FORM_SUBTYPES[$class])) {
+            try {
+                if (!$result instanceof DOMElement) {
+                    throw new JmhzTransportException(
+                        'jmhz_protocol_unreadable',
+                        'Protokol neobsahuje element ProcessingResult.',
+                    );
+                }
+
+                return $this->parseCsszFormSubmission($result, $class, $qualifier, $correlation);
+            } catch (JmhzTransportException $exception) {
+                throw new JmhzTransportException(
+                    self::UNDOCUMENTED_SHAPE_CODE,
+                    'ČSSZ vrátila protokol k podání ' . $class . ', který neodpovídá'
+                        . ' doloženému tvaru (' . $exception->getMessage() . ').'
+                        . ' Aplikace ho uloží k podání a výsledek zpracování'
+                        . ' zapište podle protokolu ručně.',
+                );
+            }
         }
 
-        $result = $xpath->query("//*[local-name()='ProcessingResult']")->item(0);
         if (!$result instanceof DOMElement) {
             throw new JmhzTransportException(
                 'jmhz_protocol_unreadable',
@@ -449,8 +468,145 @@ final readonly class JmhzProtocolParser
     }
 
     /**
+     * Protokol k podání jednoho formuláře: NEMPRI25 a HZUPN20 (`CSSZ_NEM_PRI`),
+     * OZUSPOJ23 (`CSSZ_OZUSPOJ`).
+     *
+     * Zdroj tvaru: protokoly zkušebních podání do testovacího prostředí ČSSZ
+     * z 8. 10. 2026 (kolo 2). Tvar je registrační protokol s jediným
+     * formulářem:
+     *
+     * 1. `Item/@subtype` nese název formuláře; obecná položka má prázdné `sqnr`,
+     *    formulář pořadí věty (OZUSPOJ23 ho čísluje od nuly).
+     * 2. `identifier` formuláře je rodné číslo; nikam se nepřebírá, osobu podání
+     *    identifikuje zmrazená věta. GUID formuláře protokol nenese, takže se
+     *    výsledek formuláře neukládá zvlášť — podání má formulář jediný.
+     * 3. Chyba komunikace (třeba 103 „pověření k e-službě není zaznamenáno
+     *    v registru podávajících") podání vůbec nezpracuje: `ProcessingResult`
+     *    nese kód v `errNumber` a holý text v `errMsg` a jediná položka je
+     *    celá prázdná.
+     *
+     * Výklad stavu je stejný jako u registrace s jedním formulářem; částečné
+     * přijetí u jediného formuláře nastat nemůže, a když z protokolu vyjde,
+     * protokol si odporuje. Cokoli mimo tenhle tvar volající pojmenuje jako
+     * nedoložený tvar a podání jde k ručnímu vyřízení.
+     */
+    private function parseCsszFormSubmission(
+        DOMElement $result,
+        string $class,
+        string $qualifier,
+        string $correlation,
+    ): JmhzProtocolReport {
+        $outcome = $this->assertOutcome($result->getAttribute('result'));
+        $errors = $this->parseRegistrationErrors(
+            $result->getAttribute('errMsg'),
+            $result->getAttribute('errNumber'),
+            false,
+        );
+        $subtypes = self::CSSZ_FORM_SUBTYPES[$class];
+        $subtype = null;
+        $formSeen = false;
+        $parts = [];
+        foreach ($result->getElementsByTagName('Item') as $item) {
+            $itemSubtype = trim($item->getAttribute('subtype'));
+            $sequence = trim($item->getAttribute('sqnr'));
+            if ($itemSubtype === ''
+                && $sequence === ''
+                && trim($item->getAttribute('result')) === ''
+                && trim($item->getAttribute('identifier')) === ''
+                && trim($item->getAttribute('errMsg')) === ''
+            ) {
+                if ($outcome !== 'ERROR') {
+                    throw new JmhzTransportException(
+                        'jmhz_protocol_part_unknown',
+                        'Přijatý protokol obsahuje prázdnou položku.',
+                    );
+                }
+                continue;
+            }
+            if (!in_array($itemSubtype, $subtypes, true)
+                || ($subtype !== null && $subtype !== $itemSubtype)
+            ) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_part_unknown',
+                    'Položka protokolu nemá doložený druh formuláře.',
+                );
+            }
+            $subtype = $itemSubtype;
+            $status = $this->assertOutcome($item->getAttribute('result')) === 'OK'
+                ? JmhzSubmissionStatus::ProcessedAndComplete
+                : JmhzSubmissionStatus::Rejected;
+            $itemErrors = $this->parseRegistrationErrors(
+                $item->getAttribute('errMsg'),
+                $item->getAttribute('errNum'),
+                true,
+            );
+            if ($sequence === '') {
+                $parts[] = new JmhzProtocolPart(
+                    JmhzProtocolPartKind::General,
+                    $status,
+                    null,
+                    null,
+                    null,
+                    $itemErrors,
+                );
+                continue;
+            }
+            if (preg_match('/^[0-9]{1,4}$/D', $sequence) !== 1 || $formSeen) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_form_unidentified',
+                    'Protokol nemá právě jeden formulář s pořadovým číslem.',
+                );
+            }
+            $formSeen = true;
+            $parts[] = new JmhzProtocolPart(
+                JmhzProtocolPartKind::Form,
+                $status,
+                null,
+                null,
+                null,
+                $itemErrors,
+            );
+        }
+        if ($outcome === 'OK' && !$formSeen) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_form_unidentified',
+                'Přijatý protokol neuvádí výsledek formuláře.',
+            );
+        }
+        $status = $this->derivePartialStatus(
+            $outcome,
+            $parts,
+            1,
+            $this->intAttribute($result, 'countWar'),
+        );
+        if ($status === JmhzSubmissionStatus::PartiallyAccepted) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_outcome_conflict',
+                'Protokol hlásí chybu, ale jeho jediný formulář je přijatý.',
+            );
+        }
+        if (($qualifier === self::QUALIFIER_REJECTED) !== ($status === JmhzSubmissionStatus::Rejected)) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_qualifier_conflict',
+                'Obálka protokolu hlásí jiný výsledek než ProcessingResult.',
+            );
+        }
+
+        return new JmhzProtocolReport(
+            JmhzProtocolKind::PartialSubmission,
+            $class,
+            $status,
+            $this->correlationReference($correlation),
+            $parts,
+            $errors,
+            [],
+        );
+    }
+
+    /**
      * Chyby registračního protokolu. Text bývá „PREFIX: kód - popis" (víc
      * chyb oddělených středníkem) i holý popis s kódem jen v `errNum`.
+     * Stejně je píší i protokoly k podání jednoho formuláře.
      *
      * @return list<JmhzProtocolError>
      */

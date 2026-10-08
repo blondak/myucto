@@ -146,6 +146,19 @@ final readonly class JmhzProtocolError
     public const DUPLICATE_SUBMISSION_CODE = 20_022;
 
     /**
+     * Chyba komunikace 103 (`RaisedBy` CSSZDIS): pověření k e-službě dané třídy
+     * není zaznamenané v registru podávajících na OSSZ, nebo tam není
+     * certifikát, kterým je podání podepsané. Podání se vůbec nezpracovalo,
+     * vada je v registraci u OSSZ, ne v obsahu podání.
+     */
+    public const SERVICE_AUTHORIZATION_MISSING_CODE = 103;
+
+    public function reportsMissingServiceAuthorization(): bool
+    {
+        return $this->code === self::SERVICE_AUTHORIZATION_MISSING_CODE;
+    }
+
+    /**
      * Kontrola 22 ve variantě 3 nebo 4: shodné řádné (GUID, VS, období a balík)
      * nebo stornovací podání už ČSSZ MÁ. Taková „chyba" neříká, že podání
      * neprošlo, ale že jeho originál u ČSSZ je; typicky po opakování odeslání,
