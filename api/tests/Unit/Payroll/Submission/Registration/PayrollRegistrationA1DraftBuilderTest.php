@@ -157,10 +157,13 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
             self::assertArrayHasKey('employment.small_scale', $draft['sources']);
         }
 
+        // Bez odměny nebo rozhodného příjmu zůstává dosavadní „ne", aby se
+        // nezastavilo dohlášení A3 (příznak nenese); zdroj na to upozorní.
         foreach ([[null, 450_000], [300_000, null]] as [$agreed, $threshold]) {
             $draft = $build($agreed, $threshold);
-            self::assertNull($draft['suggested']['employment']['small_scale']);
-            self::assertContains('employment.small_scale', self::missingFields($draft));
+            self::assertFalse($draft['suggested']['employment']['small_scale']);
+            self::assertNotContains('employment.small_scale', self::missingFields($draft));
+            self::assertStringContainsString('chybí', $draft['sources']['employment.small_scale']);
         }
     }
 

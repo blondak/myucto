@@ -517,21 +517,19 @@ final class PayrollRegistrationA1DraftBuilder
                     ? null
                     : (int) $terms['small_scale_threshold_minor'],
             );
-            if ($meets === null) {
-                $this->miss(
-                    'employment.small_scale',
-                    'U dohody o pracovní činnosti rozhoduje o zaměstnání malého '
-                    . 'rozsahu sjednaná měsíční odměna proti rozhodnému příjmu. '
-                    . 'Doplňte odměnu v sjednaných podmínkách pracovního vztahu, '
-                    . 'nebo příznak vyplňte ručně.',
-                );
-            } else {
-                $smallScale = !$meets;
-                $this->source(
-                    'employment.small_scale',
-                    'Sjednaná měsíční odměna DPČ proti rozhodnému příjmu.',
-                );
-            }
+            // Bez sjednané odměny (typicky převzatý vztah) zůstává dosavadní
+            // „ne": dohlášení A3 příznak nenese a jeho vynucení by zastavilo
+            // registraci, kterou ČSSZ přijme. Zdroj to řekne, ať ho účetní
+            // u A1 zkontroluje.
+            $smallScale = $meets === null ? false : !$meets;
+            $this->source(
+                'employment.small_scale',
+                $meets === null
+                    ? 'Sjednaná měsíční odměna DPČ chybí, navrženo „ne". U odměny '
+                        . 'pod rozhodným příjmem jde o zaměstnání malého rozsahu — '
+                        . 'doplňte odměnu v sjednaných podmínkách nebo příznak opravte.'
+                    : 'Sjednaná měsíční odměna DPČ proti rozhodnému příjmu.',
+            );
         } elseif ($relationType !== null) {
             $smallScale = $relationType === 'small_scale_employment';
             $this->source(
