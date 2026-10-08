@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\Crm\CrmAggregationService;
+use MyInvoice\Service\Supplier\SupplierDirectory;
+use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
 
 /**
  * Přehled firem pro účetní kancelář — cross-supplier dashboard (Fáze F,
@@ -29,6 +31,7 @@ final class PortfolioAggregationService
         private readonly Connection $db,
         private readonly UserSupplierRepository $memberships,
         private readonly CrmAggregationService $crm,
+        private readonly SupplierDirectory $directory,
     ) {}
 
     /**
@@ -38,10 +41,21 @@ final class PortfolioAggregationService
     {
         $supplierIds = $this->allowedSupplierIds($userId, $isSuperadmin);
         $volumes = (new PortfolioVolumeCounter($this->db))->countsFor($supplierIds);
+        // Urgenci počítá jediné místo, totéž co ve správě firem. Vlastní varianta by se
+        // od ní rozešla v predikátech (schvalované koncepty, pohyby mimo faktury).
+        $directory = [];
+        if ($supplierIds !== []) {
+            foreach ($this->directory->list($supplierIds, new SupplierDirectoryQuery(), $now) as $entry) {
+                $directory[(int) $entry['id']] = $entry;
+            }
+        }
         $companies = [];
         foreach ($supplierIds as $sid) {
             $row = $this->buildRow($sid, $now, $volumes[$sid] ?? array_fill_keys(PortfolioVolumeCounter::KEYS, 0));
             if ($row !== null) {
+                $row['urgency'] = $directory[$sid]['urgency'] ?? null;
+                $row['last_invoice_date'] = $directory[$sid]['last_invoice_date'] ?? null;
+                $row['last_activity_at'] = $directory[$sid]['last_activity_at'] ?? null;
                 $companies[] = $row;
             }
         }

@@ -225,7 +225,7 @@ Přepínání dodavatele stačí, dokud spravujete pár firem. Účetní kancel�
 vidět termíny a resty napříč všemi firmami najednou.
 
 1. Otevřete `Systém → Přehled firem`. Položka se zobrazí jen uživatelům s přístupem k více než jedné firmě.
-2. Projděte tabulku. Je seřazená dle urgence: firma s nejbližším daňovým termínem nahoře, firmy bez termínu (neplátci DPH) dole.
+2. Projděte karty firem. Výchozí řazení je podle urgence, řazení a filtry popisuje [51. Přehled firem](51_Prehled_firem.md). Seznam v `Systém → Firmy` ukazuje u každé firmy jen štítek urgence, důvody se zobrazí po najetí myší.
 3. Kliknutím na **název firmy** nebo na konkrétní číslo či termín přepnete aktivní firmu a rovnou se dostanete do odpovídající agendy. Například klik na nezaúčtované doklady vás přepne na firmu a otevře filtrovaný seznam faktur.
 
 <!-- cols: 32 68 -->

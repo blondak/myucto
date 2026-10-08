@@ -8,6 +8,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Portfolio\PortfolioAggregationService;
 use MyInvoice\Service\Portfolio\PortfolioVolumeCounter;
+use MyInvoice\Service\Supplier\SupplierDirectory;
+use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -29,6 +31,7 @@ final class PortfolioVolumeCountsTest extends TestCase
 
     private Connection $db;
     private PortfolioAggregationService $portfolio;
+    private SupplierDirectory $directory;
     private bool $inTx = false;
 
     private int $czId = 0;
@@ -48,6 +51,7 @@ final class PortfolioVolumeCountsTest extends TestCase
             $c = Bootstrap::buildContainer();
             $this->db = $c->get(Connection::class);
             $this->portfolio = $c->get(PortfolioAggregationService::class);
+            $this->directory = $c->get(SupplierDirectory::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -165,6 +169,39 @@ final class PortfolioVolumeCountsTest extends TestCase
         self::assertSame(1, $counts[$a]['issued_invoices']);
         self::assertSame(0, $counts[$a]['bank_statements']);
         self::assertSame([], (new PortfolioVolumeCounter($this->db))->countsFor([]));
+    }
+
+    /**
+     * Urgence v přehledu je TÁŽ, kterou počítá správa firem ({@see SupplierDirectory}).
+     * Přehled podle ní řadí, takže vlastní varianta výpočtu by obě stránky rozešla.
+     */
+    public function testOverviewCarriesDirectoryUrgency(): void
+    {
+        $a = $this->supplier('__TEST PORTFOLIO urgence A', 'double_entry');
+        $b = $this->supplier('__TEST PORTFOLIO urgence B', 'tax_evidence');
+        $this->purchase($a, 'invoice', 'draft');
+        $this->purchase($a, 'invoice', 'draft');
+        $this->invoice($b, 'invoice', 'paid');
+
+        $userId = $this->user();
+        $this->assign($userId, [$a, $b]);
+        $now = new \DateTimeImmutable();
+
+        $byId = [];
+        foreach ($this->portfolio->overview($userId, false, $now)['companies'] as $row) {
+            $byId[$row['supplier_id']] = $row;
+        }
+        $directory = [];
+        foreach ($this->directory->list([$a, $b], new SupplierDirectoryQuery(), $now) as $row) {
+            $directory[$row['id']] = $row;
+        }
+
+        self::assertSame(2, $byId[$a]['urgency']['purchase_drafts']);
+        self::assertSame(2 * SupplierDirectory::WEIGHT_PURCHASE_DRAFT, $byId[$a]['urgency']['score']);
+        self::assertSame($directory[$a]['urgency'], $byId[$a]['urgency']);
+        self::assertSame('none', $byId[$b]['urgency']['level']);
+        self::assertNotNull($byId[$b]['last_invoice_date']);
+        self::assertSame($directory[$b]['last_invoice_date'], $byId[$b]['last_invoice_date']);
     }
 
     private function supplier(string $name, string $mode, ?string $account = null): int

@@ -12772,8 +12772,12 @@
   },
   "portfolio": {
     "title": "Přehled firem",
-    "subtitle": "Termíny a resty napříč všemi vašimi firmami, seřazeno podle názvu. Barevný pruh u karty ukazuje naléhavost.",
+    "subtitle": "Termíny a resty napříč všemi vašimi firmami. Výchozí řazení je podle urgence, stejně jako ve správě firem.",
     "empty": "Žádné firmy k zobrazení.",
+    "search_placeholder": "Hledat název nebo IČO",
+    "sort_deadline": "Nejbližší termín",
+    "sort_unbooked": "Nejvíc k doúčtování",
+    "sort_bank": "Nejvíc nespárovaných plateb",
     "col_company": "Firma",
     "col_deadline": "Nejbližší termín",
     "col_unbooked": "Nezaúčtováno",

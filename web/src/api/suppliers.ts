@@ -25,18 +25,21 @@ export interface SupplierDirectoryParams {
   urgency?: 'with' | 'without'
 }
 
+/** Urgence firmy (BE `SupplierDirectory`): vážený součet věcí, které čekají na účetní. */
+export interface SupplierUrgencyInfo {
+  score: number
+  level: 'high' | 'medium' | 'low' | 'none'
+  vat: { status: 'overdue' | 'due_soon' | 'ok'; deadline: string; days: number; period: string } | null
+  overdue_receivables: number
+  overdue_payables: number
+  unmatched_bank_transactions: number
+  purchase_drafts: number
+}
+
 export interface SupplierDirectoryItem extends SupplierListItem {
   last_invoice_date: string | null
   last_activity_at: string | null
-  urgency: {
-    score: number
-    level: 'high' | 'medium' | 'low' | 'none'
-    vat: { status: 'overdue' | 'due_soon' | 'ok'; deadline: string; days: number; period: string } | null
-    overdue_receivables: number
-    overdue_payables: number
-    unmatched_bank_transactions: number
-    purchase_drafts: number
-  }
+  urgency: SupplierUrgencyInfo
 }
 
 export interface Supplier {

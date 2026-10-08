@@ -30168,7 +30168,8 @@ components:
     PortfolioCompany:
       type: object
       required: [supplier_id, company_name, ic, is_vat_payer, accounting_mode, next_deadline, unbooked_documents,
-                 unbooked_breakdown, unmatched_bank_transactions, purchase_drafts, period_status, last_bank_import_at, volume]
+                 unbooked_breakdown, unmatched_bank_transactions, purchase_drafts, period_status, last_bank_import_at, volume,
+                 urgency, last_invoice_date, last_activity_at]
       properties:
         supplier_id: { type: integer }
         company_name: { type: string }
@@ -30200,6 +30201,31 @@ components:
             status: { type: string, enum: [open, closing, closed] }
         last_bank_import_at: { type: [string, 'null'] }
         volume: { $ref: '#/components/schemas/PortfolioVolume' }
+        urgency:
+          description: Urgence firmy, vážený součet věcí, které čekají na účetní (nepodané DPH, faktury po splatnosti, nespárované platby, koncepty).
+          oneOf:
+            - $ref: '#/components/schemas/PortfolioUrgency'
+            - type: 'null'
+        last_invoice_date: { type: [string, 'null'], format: date }
+        last_activity_at: { type: [string, 'null'] }
+    PortfolioUrgency:
+      type: object
+      required: [score, level, vat, overdue_receivables, overdue_payables, unmatched_bank_transactions, purchase_drafts]
+      properties:
+        score: { type: integer }
+        level: { type: string, enum: [high, medium, low, none] }
+        vat:
+          type: [object, 'null']
+          description: Stav přiznání DPH za poslední období; jen u firem, které DPH podávají přes aplikaci.
+          properties:
+            status: { type: string, enum: [overdue, due_soon, ok] }
+            deadline: { type: string, format: date }
+            days: { type: integer }
+            period: { type: string }
+        overdue_receivables: { type: integer }
+        overdue_payables: { type: integer }
+        unmatched_bank_transactions: { type: integer }
+        purchase_drafts: { type: integer }
     PortfolioVolume:
       type: object
       description: |

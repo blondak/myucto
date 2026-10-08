@@ -19,7 +19,7 @@ vi.mock('@/api/portfolio', () => ({ portfolioApi: { overview: m.overview } }))
 
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push, replace: m.push }), useRoute: () => ({ query: {} }) }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 
@@ -40,7 +40,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/components/ui/buttonStyles', () => ({
-  ICONS: { cycle: 'M0 0', factory: 'M0 0' },
+  ICONS: { cycle: 'M0 0', factory: 'M0 0', chevron: 'M0 0' },
   btnOutline: () => 'btn-outline',
   btnFilled: () => 'btn-filled',
 }))
@@ -71,6 +71,9 @@ function company(over: Partial<PortfolioCompany> = {}): PortfolioCompany {
       cash_documents: 0,
       journal_entries: 4321,
     },
+    urgency: null,
+    last_invoice_date: null,
+    last_activity_at: null,
     ...over,
   }
 }

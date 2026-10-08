@@ -5,8 +5,8 @@
  * jen role accountant/admin/readonly (nav gate v AppLayout, route RBAC v BE).
  * Každá firma má vlastní kartu: hlavička, co je potřeba udělat, objem dat.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { portfolioApi, type PortfolioCompany, type PortfolioCheckSummary } from '@/api/portfolio'
 import Modal from '@/components/ui/Modal.vue'
@@ -16,8 +16,11 @@ import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PortfolioVolumeChips from './PortfolioVolumeChips.vue'
+import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
+import { applyListing, DEFAULT_DIR, listingFromQuery, queryFromListing, type PortfolioListing } from './portfolioListing'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -34,7 +37,7 @@ async function load() {
   error.value = ''
   try {
     const res = await portfolioApi.overview()
-    companies.value = [...res.companies].sort((a, b) => a.company_name.localeCompare(b.company_name, 'cs'))
+    companies.value = res.companies
     generatedAt.value = res.generated_at
     void loadChecks(companies.value)
   } catch (e) {
@@ -44,6 +47,48 @@ async function load() {
   }
 }
 onMounted(load)
+
+// Řazení a filtry žijí v URL, aby šel odkaz na konkrétní pohled sdílet.
+const listing = reactive<PortfolioListing>(listingFromQuery(route.query))
+const search = ref(listing.q)
+const visible = computed(() => applyListing(companies.value, listing))
+const hasActiveFilters = computed(() => !!(listing.q || listing.vat || listing.mode || listing.urgency))
+
+function applyFilters() {
+  void router.replace({ query: queryFromListing(listing) })
+}
+
+function onSortChange() {
+  listing.dir = DEFAULT_DIR[listing.sort]
+  applyFilters()
+}
+
+function toggleDir() {
+  listing.dir = listing.dir === 'asc' ? 'desc' : 'asc'
+  applyFilters()
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, (value) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    listing.q = value.trim()
+    applyFilters()
+  }, 200)
+})
+onBeforeUnmount(() => clearTimeout(searchTimer))
+
+watch(() => route.query, (q) => {
+  Object.assign(listing, listingFromQuery(q))
+  if (listing.q !== search.value.trim()) search.value = listing.q
+})
+
+function clearFilters() {
+  clearTimeout(searchTimer)
+  search.value = ''
+  Object.assign(listing, { q: '', vat: undefined, mode: undefined, urgency: undefined })
+  applyFilters()
+}
 
 /** Přepne aktivní firmu (X-Supplier-Id) a naviguje na cílovou agendu — mirror SupplierSwitcher.pick(). */
 function switchTo(supplierId: number, path: string) {
@@ -221,8 +266,47 @@ function periodBadgeClass(status: string): string {
     <EmptyState v-else-if="companies.length === 0" boxed icon="chart" :title="t('portfolio.empty')" />
 
     <template v-else>
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <input v-model="search" type="search" :placeholder="t('portfolio.search_placeholder')" data-testid="portfolio-search"
+          class="flex-1 min-w-[12rem] h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+        <select v-model="listing.sort" @change="onSortChange" :title="t('common.sort_by')" data-testid="portfolio-sort"
+          class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+          <option value="urgency">{{ t('supplier.listing.sort_urgency') }}</option>
+          <option value="name">{{ t('supplier.listing.sort_name') }}</option>
+          <option value="deadline">{{ t('portfolio.sort_deadline') }}</option>
+          <option value="unbooked">{{ t('portfolio.sort_unbooked') }}</option>
+          <option value="bank">{{ t('portfolio.sort_bank') }}</option>
+          <option value="overdue">{{ t('supplier.listing.sort_overdue') }}</option>
+          <option value="last_invoice">{{ t('supplier.listing.sort_last_invoice') }}</option>
+          <option value="last_activity">{{ t('supplier.listing.sort_last_activity') }}</option>
+        </select>
+        <button type="button" @click="toggleDir" :class="btnOutline('neutral')" class="whitespace-nowrap" data-testid="portfolio-dir">
+          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': listing.dir === 'asc' }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+          {{ listing.dir === 'asc' ? t('supplier.listing.dir_asc') : t('supplier.listing.dir_desc') }}
+        </button>
+        <select v-model="listing.vat" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface" data-testid="portfolio-vat">
+          <option :value="undefined">{{ t('supplier.listing.vat_all') }}</option>
+          <option value="payer">{{ t('supplier.listing.vat_payer') }}</option>
+          <option value="non_payer">{{ t('supplier.listing.vat_non_payer') }}</option>
+        </select>
+        <select v-model="listing.mode" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface" data-testid="portfolio-mode">
+          <option :value="undefined">{{ t('supplier.listing.mode_all') }}</option>
+          <option value="double_entry">{{ t('supplier.listing.mode_double_entry') }}</option>
+          <option value="tax_evidence">{{ t('supplier.listing.mode_tax_evidence') }}</option>
+        </select>
+        <select v-model="listing.urgency" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface" data-testid="portfolio-urgency">
+          <option :value="undefined">{{ t('supplier.listing.urgency_all') }}</option>
+          <option value="with">{{ t('supplier.listing.urgency_with') }}</option>
+          <option value="without">{{ t('supplier.listing.urgency_without') }}</option>
+        </select>
+      </div>
+      <p class="text-xs text-neutral-500 mb-2">{{ t('supplier.listing.count', { n: visible.length }) }}</p>
+
+      <EmptyState v-if="!visible.length && hasActiveFilters" boxed variant="filtered"
+        :cta="t('common.empty_state.clear_filters')" @action="clearFilters" />
+
       <div class="space-y-5">
-        <article v-for="c in companies" :key="c.supplier_id" data-testid="company-card"
+        <article v-for="c in visible" :key="c.supplier_id" data-testid="company-card"
           class="relative bg-surface border border-neutral-200 rounded-xl shadow-sm overflow-hidden transition-shadow hover:shadow-md">
           <span class="absolute inset-y-0 left-0 w-1.5" :class="accentClass(c)" aria-hidden="true"></span>
 
@@ -240,6 +324,7 @@ function periodBadgeClass(status: string): string {
                 <span v-if="c.period_status" class="inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap" :class="periodBadgeClass(c.period_status.status)">
                   {{ c.period_status.fiscal_year }} · {{ t('portfolio.period_status_' + c.period_status.status) }}
                 </span>
+                <SupplierUrgency v-if="c.urgency" :urgency="c.urgency" />
                 <span v-if="checkState(c)?.status === 'loading'" class="text-neutral-400">{{ t('portfolio.check_loading') }}</span>
                 <span v-else-if="checkState(c)?.status === 'error'" class="text-neutral-400">{{ t('portfolio.check_failed') }}</span>
               </div>

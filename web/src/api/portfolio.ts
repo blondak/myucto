@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { SupplierUrgencyInfo } from './suppliers'
 
 /** Nejbližší termín DPH/KH/SH napříč typy (CrmAggregationService::nextTaxDeadline). */
 export interface PortfolioDeadline {
@@ -44,6 +45,10 @@ export interface PortfolioCompany {
   period_status: PortfolioPeriodStatus | null
   last_bank_import_at: string | null
   volume: PortfolioVolume
+  /** Táž urgence jako ve správě firem (BE SupplierDirectory). */
+  urgency: SupplierUrgencyInfo | null
+  last_invoice_date: string | null
+  last_activity_at: string | null
 }
 
 export interface PortfolioOverview {

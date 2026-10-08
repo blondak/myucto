@@ -21,7 +21,7 @@ Položka se v menu zobrazí jen tehdy, když máte k dispozici více firem. Str�
 ## 51.3 Krok za krokem: denní průchod firmami
 
 1. Otevřete `Systém → Přehled firem`.
-2. Projděte karty firem. Barevný pruh u karty ukazuje naléhavost.
+2. Projděte karty firem. Nahoře jsou firmy s nejvyšší urgencí, štítek **Urgence** u názvu firmy vypisuje důvody. Řazení a filtry nad kartami popisuje [§ 51.7.3](#5173-razeni-filtry-a-urgence).
 3. U každé firmy zkontrolujte **Nejbližší termín**, **Nezaúčtováno**, **Nespárováno (banka)** a **Koncepty PF**.
 4. Klikněte na konkrétní ukazatel. Aplikace přepne aktivní firmu a otevře zdrojovou agendu (viz tabulka níže).
 5. Po dokončení práce se vraťte do Přehledu firem a klikněte na **Obnovit**.
@@ -80,7 +80,32 @@ Běžný uživatel vidí výhradně firmy, ke kterým má řádek přiřazení a
 
 Omezení se provádí na serveru, nikoli pouze skrytím řádků v prohlížeči. Přehled proto není závislý na právě zvolené firmě v přepínači. Po kliknutí na ukazatel se aktivní firma nastaví a stránka se načte znovu s jejím kontextem.
 
-Firmy jsou v přehledu řazené podle názvu. Naléhavost nejbližšího daňového termínu ukazuje barevný pruh u karty: termín po splatnosti je výraznější než budoucí termín, firma bez vypočteného termínu nemá pruh upozornění.
+Naléhavost nejbližšího daňového termínu ukazuje barevný pruh u karty: termín po splatnosti je výraznější než budoucí termín, firma bez vypočteného termínu nemá pruh upozornění.
+
+### 51.7.3 Řazení, filtry a urgence
+
+Nad kartami je hledání podle názvu nebo IČO, volba řazení s přepínačem směru a filtry **Plátci / Neplátci DPH**, **Podvojné účetnictví / Daňová evidence** a **Jen s urgencí / Jen bez urgence**. Nastavení se ukládá do adresy stránky, takže odkaz na konkrétní pohled lze poslat kolegovi.
+
+<!-- cols: 34 66 -->
+| Řazení | Pořadí |
+|---|---|
+| **Podle urgence** (výchozí) | Nejvyšší urgence nahoře. Při shodě rozhoduje bližší daňový termín, potom název. |
+| **Abecedně** | Podle názvu firmy. |
+| **Nejbližší termín** | Termíny po splatnosti nahoře, firmy bez termínu na konci. |
+| **Nejvíc k doúčtování** | Podle ukazatele **Nezaúčtováno**. |
+| **Nejvíc nespárovaných plateb** | Podle ukazatele **Nespárováno (banka)**. |
+| **Nejvíc faktur po splatnosti** | Podle počtu vystavených faktur po splatnosti. |
+| **Poslední vystavená faktura**, **Poslední aktivita** | Nejčerstvější nahoře, firmy bez faktury nebo aktivity na konci. |
+
+Urgence je stejná jako ve [správě firem](95_Multi_supplier.md). Skládá se z vážených položek:
+
+- přiznání DPH za poslední období po termínu bez doloženého podání (nejvyšší váha), nebo s termínem do 7 dní,
+- přijaté faktury po splatnosti,
+- vystavené faktury po splatnosti,
+- nespárované příchozí platby za posledních 90 dní,
+- koncepty přijatých faktur ke kontrole (bez konceptů čekajících na schválení).
+
+Stav přiznání DPH se počítá jen u firem, které DPH podávají přes aplikaci, tedy mají aspoň jedno doložené podání. Počty dokladů se započítávají jen do stropu, aby firma se stovkou starých nespárovaných plateb nepřebila firmu s nepodaným přiznáním. Podle výsledku je urgence **Vysoká**, **Střední**, **Nízká**, nebo štítek hlásí **Nic nečeká**.
 
 ### 51.7.2 Pruh akutních kontrol
 

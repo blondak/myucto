@@ -17,6 +17,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -29,7 +30,8 @@ const suppliers = ref<SupplierDirectoryItem[]>([])
 const loading = ref(false)
 const loadError = ref(false)
 
-// Řazení a filtry žijí v URL, aby šel odkaz na konkrétní pohled sdílet.
+// Řazení a hledání žijí v URL, aby šel odkaz na konkrétní pohled sdílet. Plné filtry
+// a důvody urgence má Přehled firem (/portfolio), správa firem zůstává seznamem.
 const SORTS: SupplierDirectorySort[] = ['urgency', 'name', 'last_invoice', 'last_activity', 'overdue']
 const DEFAULT_DIR: Record<SupplierDirectorySort, 'asc' | 'desc'> = {
   urgency: 'desc', name: 'asc', last_invoice: 'desc', last_activity: 'desc', overdue: 'desc',
@@ -45,16 +47,13 @@ function paramsFromQuery(q: LocationQuery): SupplierDirectoryParams {
     sort,
     dir: pick(q.dir, ['asc', 'desc'] as const) ?? DEFAULT_DIR[sort],
     q: typeof q.q === 'string' ? q.q : '',
-    vat: pick(q.vat, ['payer', 'non_payer'] as const),
-    mode: pick(q.mode, ['double_entry', 'tax_evidence'] as const),
-    urgency: pick(q.urgency, ['with', 'without'] as const),
   }
 }
 
 const filters = reactive<SupplierDirectoryParams>(paramsFromQuery(route.query))
 const search = ref(filters.q ?? '')
 
-const hasActiveFilters = computed(() => !!(filters.q || filters.vat || filters.mode || filters.urgency))
+const hasActiveFilters = computed(() => !!filters.q)
 
 function queryFromFilters(): Record<string, string> {
   const sort = filters.sort ?? 'urgency'
@@ -62,9 +61,6 @@ function queryFromFilters(): Record<string, string> {
   if (sort !== 'urgency') out.sort = sort
   if (filters.dir && filters.dir !== DEFAULT_DIR[sort]) out.dir = filters.dir
   if (filters.q) out.q = filters.q
-  if (filters.vat) out.vat = filters.vat
-  if (filters.mode) out.mode = filters.mode
-  if (filters.urgency) out.urgency = filters.urgency
   return out
 }
 
@@ -95,7 +91,7 @@ onBeforeUnmount(() => clearTimeout(searchTimer))
 function clearFilters() {
   clearTimeout(searchTimer)
   search.value = ''
-  Object.assign(filters, { q: '', vat: undefined, mode: undefined, urgency: undefined })
+  filters.q = ''
   applyFilters()
 }
 
@@ -121,37 +117,6 @@ watch(() => route.query, (q) => {
   if ((filters.q ?? '') !== search.value.trim()) search.value = filters.q ?? ''
   void loadSuppliers()
 })
-
-const URGENCY_LEVEL_LABEL = computed<Record<string, string>>(() => ({
-  high: t('supplier.listing.level_high'),
-  medium: t('supplier.listing.level_medium'),
-  low: t('supplier.listing.level_low'),
-}))
-
-function urgencyBadgeClass(level: string): string {
-  if (level === 'high') return 'bg-danger-50 text-danger-600 ring-danger-500/20'
-  if (level === 'medium') return 'bg-warning-50 text-warning-600 ring-warning-500/20'
-  return 'bg-neutral-100 text-neutral-600 ring-neutral-300/40'
-}
-
-/** Důvody urgence jako krátké štítky, nejzávažnější první. */
-function urgencyReasons(s: SupplierDirectoryItem): { text: string; tone: 'danger' | 'warning' | 'neutral' }[] {
-  const u = s.urgency
-  const out: { text: string; tone: 'danger' | 'warning' | 'neutral' }[] = []
-  if (u.vat?.status === 'overdue') out.push({ text: t('supplier.listing.vat_overdue', { period: u.vat.period }), tone: 'danger' })
-  if (u.vat?.status === 'due_soon') out.push({ text: t('supplier.listing.vat_due_soon', { period: u.vat.period, days: u.vat.days }), tone: 'warning' })
-  if (u.overdue_payables > 0) out.push({ text: t('supplier.listing.overdue_payables', { n: u.overdue_payables }), tone: 'warning' })
-  if (u.overdue_receivables > 0) out.push({ text: t('supplier.listing.overdue_receivables', { n: u.overdue_receivables }), tone: 'warning' })
-  if (u.unmatched_bank_transactions > 0) out.push({ text: t('supplier.listing.unmatched_bank', { n: u.unmatched_bank_transactions }), tone: 'neutral' })
-  if (u.purchase_drafts > 0) out.push({ text: t('supplier.listing.purchase_drafts', { n: u.purchase_drafts }), tone: 'neutral' })
-  return out
-}
-
-function reasonClass(tone: 'danger' | 'warning' | 'neutral'): string {
-  if (tone === 'danger') return 'text-danger-600'
-  if (tone === 'warning') return 'text-warning-600'
-  return 'text-neutral-500'
-}
 
 onMounted(async () => {
   await loadSuppliers()
@@ -346,21 +311,10 @@ function switchSupplier(id: number) {
           <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': filters.dir === 'asc' }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
           {{ filters.dir === 'asc' ? t('supplier.listing.dir_asc') : t('supplier.listing.dir_desc') }}
         </button>
-        <select v-model="filters.vat" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
-          <option :value="undefined">{{ t('supplier.listing.vat_all') }}</option>
-          <option value="payer">{{ t('supplier.listing.vat_payer') }}</option>
-          <option value="non_payer">{{ t('supplier.listing.vat_non_payer') }}</option>
-        </select>
-        <select v-model="filters.mode" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
-          <option :value="undefined">{{ t('supplier.listing.mode_all') }}</option>
-          <option value="double_entry">{{ t('supplier.listing.mode_double_entry') }}</option>
-          <option value="tax_evidence">{{ t('supplier.listing.mode_tax_evidence') }}</option>
-        </select>
-        <select v-model="filters.urgency" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
-          <option :value="undefined">{{ t('supplier.listing.urgency_all') }}</option>
-          <option value="with">{{ t('supplier.listing.urgency_with') }}</option>
-          <option value="without">{{ t('supplier.listing.urgency_without') }}</option>
-        </select>
+        <router-link v-if="auth.canRead('dashboard.portfolio')" to="/portfolio" :class="btnOutline('neutral')" class="whitespace-nowrap" data-testid="suppliers-portfolio-link">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+          {{ t('nav.portfolio') }}
+        </router-link>
         <button @click="newSupplier" :class="btnFilled('primary')" class="whitespace-nowrap sm:ml-auto">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('supplier.new') }}
@@ -407,14 +361,8 @@ function switchSupplier(id: number) {
                   <span v-if="s.dic">{{ s.dic }}</span>
                   <span v-if="!s.ic && !s.dic" class="text-neutral-400">—</span>
                 </td>
-                <td class="px-3 py-2" data-testid="supplier-urgency">
-                  <div v-if="s.urgency.level !== 'none'" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap" :class="urgencyBadgeClass(s.urgency.level)">
-                      {{ URGENCY_LEVEL_LABEL[s.urgency.level] }}
-                    </span>
-                    <span v-for="r in urgencyReasons(s)" :key="r.text" class="whitespace-nowrap" :class="reasonClass(r.tone)">{{ r.text }}</span>
-                  </div>
-                  <span v-else class="text-xs text-neutral-400">{{ t('supplier.listing.no_urgency') }}</span>
+                <td class="px-3 py-2">
+                  <SupplierUrgency :urgency="s.urgency" compact />
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-xs whitespace-nowrap">
                   <span v-if="s.last_invoice_date">{{ formatDate(s.last_invoice_date) }}</span>
@@ -467,11 +415,8 @@ function switchSupplier(id: number) {
             </span>
             <span class="font-mono">{{ t('supplier.clients') }}: {{ s.clients_count }} · {{ t('supplier.invoices') }}: {{ s.invoices_count }}</span>
           </div>
-          <div v-if="s.urgency.level !== 'none'" class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs">
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap" :class="urgencyBadgeClass(s.urgency.level)">
-              {{ URGENCY_LEVEL_LABEL[s.urgency.level] }}
-            </span>
-            <span v-for="r in urgencyReasons(s)" :key="r.text" class="whitespace-nowrap" :class="reasonClass(r.tone)">{{ r.text }}</span>
+          <div v-if="s.urgency.level !== 'none'" class="mt-1.5">
+            <SupplierUrgency :urgency="s.urgency" compact />
           </div>
           <div v-if="s.last_invoice_date || s.last_activity_at" class="flex flex-wrap gap-x-3 mt-1 text-xs text-neutral-500">
             <span v-if="s.last_invoice_date">{{ t('supplier.listing.col_last_invoice') }}: {{ formatDate(s.last_invoice_date) }}</span>
