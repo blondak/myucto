@@ -54,8 +54,18 @@ final class SyntheticPohodaPayroll
         return self::write($root, true);
     }
 
+    /**
+     * Totéž jako {@see self::writeWithReports()}, ale věty registrace Jany jsou úplné, jak je PAMICA
+     * odeslala: první (duben) hlásí jiné CZ-ISCO než karta, druhá (květen) s kartou souhlasí a nese
+     * navíc stát a místo narození, daňovou rezidenci a pojišťovnu.
+     */
+    public static function writeWithRegistrations(string $root): string
+    {
+        return self::write($root, true, true);
+    }
+
     /** Zapíše složku mezd `<IČO>_<rok>` s `91_mzdy.xml` do `$root` a vrátí cestu k souboru. */
-    public static function write(string $root, bool $reports = false): string
+    public static function write(string $root, bool $reports = false, bool $registrations = false): string
     {
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
@@ -137,7 +147,14 @@ final class SyntheticPohodaPayroll
             $x .= '<RegZAMitems><ID>1</ID><RefAg>1</RefAg><RefZAM>1</RefZAM><RefPomer>1</RefPomer><RelTyp>3</RelTyp>'
                 . '<OIC>' . self::JANA_OIC . '</OIC><IDPPV>' . self::JANA_ID_PPV . '</IDPPV>'
                 . self::attributes([[10228, self::JANA_ID_PPV], [10234, '41101'], [10239, '1'], [10502, '1'], [10527, 'Brno pobočka'],
-                    [10528, 'Praha'], [10529, '554782'], [10386, '1.1.2026', 0, 1]]) . '</RegZAMitems>';
+                    [10528, 'Praha'], [10529, '554782'], [10386, '1.1.2026', 0, 1], ...($registrations ? self::janaSentence() : [])])
+                . '<DatCreate>2026-04-09T10:00:00</DatCreate></RegZAMitems>';
+            if ($registrations) {
+                $row('RegZAM', ['ID' => 3, 'RelStavDP' => 7, 'DatPod' => '2026-05-04', 'DatPrij' => '2026-05-04', 'ElOdeslano' => 1]);
+                $x .= '<RegZAMitems><ID>3</ID><RefAg>3</RefAg><RefZAM>1</RefZAM><RefPomer>1</RefPomer><Sqnr>1</Sqnr><RelTyp>3</RelTyp>'
+                    . self::attributes([...self::janaSentence(), [10234, '43111'], [10235, 'účetní'], [10249, '1111'], [10255, '1'], [10407, 'N'], [10065, 'CZ'], [10066, 'Brno'], [10068, 'CZ'], [10102, '111']])
+                    . '<DatCreate>2026-05-04T10:00:00</DatCreate></RegZAMitems>';
+            }
         } else {
             $row('RegZAMitems', ['ID' => 1, 'RefAg' => 1, 'RefZAM' => 1, 'RefPomer' => 1, 'RelTyp' => 3, 'OIC' => self::JANA_OIC, 'IDPPV' => self::JANA_ID_PPV]);
         }
@@ -209,6 +226,18 @@ final class SyntheticPohodaPayroll
             // Březen PAMICA připravila, ale neodeslala.
             . $header(4, 3, 1, 0, false, '2026-04-14T08:00:00', $g['mar'])
             . $item(6, 4, 1, 1, $jana('R', '40.00', '255.00'));
+    }
+
+    /**
+     * Společné atributy Janiny věty registrace (bez CZ-ISCO): akce a okres, osoba, zaměstnavatel
+     * a vztah. Osobu najde import podle OIČ a ID PPV, rodné číslo Jana nemá.
+     *
+     * @return list<array{0:int,1:string}>
+     */
+    private static function janaSentence(): array
+    {
+        return [[10004, '712'], [10051, self::JANA_OIC], [10053, 'Testovací'], [10054, 'Jana'], [10056, '4.5.1990'], [10059, 'Ž'],
+            [10067, 'CZ'], [10120, 'Syntetická firma'], [10221, '1234567890'], [10227, '1.3.2025']];
     }
 
     /**

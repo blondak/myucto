@@ -41,6 +41,8 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_PAYROLL_MONTH = 'payroll_month';
     /** Převedená trvalá srážka: reference srážky v PAMICA => id případu nebo dohody. */
     public const KIND_PAYROLL_DEDUCTION = 'payroll_deduction';
+    /** Převzatá věta registrace ČSSZ: `RegZAM:id:id věty` => id vztahu (nebo osoby). */
+    public const KIND_PAYROLL_REGISTRATION = 'payroll_registration';
 
     protected function runsTable(): string
     {

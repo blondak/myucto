@@ -79,6 +79,7 @@ final class PohodaPayrollImporter
         private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
         private readonly PayrollTakeoverRepeatedMonth $repeatedMonth,
         private readonly PayrollTakeoverSicknessCompensation $sicknessCompensation,
+        private readonly PohodaPayrollRegistrations $registrations,
     ) {}
 
     /**
@@ -629,6 +630,8 @@ final class PohodaPayrollImporter
                 }
                 $this->jmhz->write($supplierId, $userOrNull, $file, $year, $records, $jmhz, $this->people->matchedRelations(),
                     $confirmIdentifiers, $protocol, self::STEP_JMHZ);
+                // Přijaté registrace produktovým importem: až po podmínkách z hlášení, věty jen doplňují.
+                $this->submittedRegistrations($supplierId, $userOrNull, $jmhz['registrations'], $runId, $protocol);
                 $protocol->finish(self::STEP_JMHZ);
             }
             // Podání a údaje osob jsou zapsané; další kroky čtou soubor samy.
@@ -703,6 +706,45 @@ final class PohodaPayrollImporter
             }
         }
         return $protocol;
+    }
+
+    /**
+     * Přijaté registrace ČSSZ z PAMICA převzaté produktovým importem ({@see PohodaPayrollRegistrations}).
+     *
+     * @param list<array<string,mixed>> $registrations
+     */
+    private function submittedRegistrations(int $supplierId, ?int $userId, array $registrations, ?int $runId, ImportProtocol $protocol): void
+    {
+        $result = $this->registrations->import($supplierId, $userId, $registrations, $runId);
+        $counts = $result['counts'];
+        foreach ($counts as $name => $count) {
+            if ($count > 0) {
+                $protocol->count(self::STEP_JMHZ, $name, $count);
+            }
+        }
+        foreach (array_slice($result['problems'], 0, self::MESSAGE_LIMIT) as $problem) {
+            $protocol->warn(self::STEP_JMHZ, $problem['code'], $problem['text'], $problem['context']);
+        }
+        if (count($result['problems']) > self::MESSAGE_LIMIT) {
+            $protocol->warn(self::STEP_JMHZ, 'registrations_more', sprintf('Další nepřevzaté věty registrací: %d.', count($result['problems']) - self::MESSAGE_LIMIT));
+        }
+        if ($counts['registrations_sentences'] === 0) {
+            return;
+        }
+        $protocol->info(self::STEP_JMHZ, 'registrations_imported', sprintf(
+            'Registrace ČSSZ přijaté z PAMICA: vět %d, už dříve převzatých %d, zapsáno %d, beze změny %d, bez odpovídajícího vztahu %d, '
+            . 'v rozporu s kartou %d, nezapsáno %d (zablokováno %d, selhalo %d). Neodeslaná nebo nepřijatá podání (%d) se nepřebírají.',
+            $counts['registrations_sentences'],
+            $counts['registrations_done'],
+            $counts['registrations_applied'],
+            $counts['registrations_unchanged'],
+            $counts['registrations_unmatched'],
+            $counts['registrations_differs'],
+            $counts['registrations_blocked'] + $counts['registrations_failed'],
+            $counts['registrations_blocked'],
+            $counts['registrations_failed'],
+            $counts['registrations_files_unaccepted'],
+        ));
     }
 
     /**

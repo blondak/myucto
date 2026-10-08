@@ -147,6 +147,36 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ?', [$supplierId]));
     }
 
+    public function testAcceptedRegistrationsGoThroughProductImportWithoutOverwritingCards(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::writeWithRegistrations($this->tmp);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ);
+        self::assertSame(2, $counts['registrations_sentences'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $counts['registrations_files_unaccepted'] ?? 0, 'Petrova neodeslaná přihláška se nepřebírá.');
+        self::assertSame(1, $counts['registrations_differs'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, $counts['registrations_applied'] ?? 0, $this->explain($protocol));
+        self::assertStringContainsString('Kód CZ-ISCO', self::messages($protocol, PohodaPayrollImporter::STEP_JMHZ)['registration_differs'] ?? '');
+
+        $jana = $this->employment($supplierId, '1001');
+        self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_registration_a1_profiles WHERE supplier_id = ? AND employment_id = ?', [$supplierId, $jana['id']]),
+            'Profil přihlášky A1 vznikne z přijaté věty.');
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ? AND cz_isco_code <> '43111'", [$supplierId, $jana['id']]),
+            'CZ-ISCO z karty PAMICA věta registrace nepřepíše.');
+        self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_employments WHERE supplier_id = ? AND employee_id = ?', [$supplierId, $jana['employee_id']]),
+            'Věty nezaložily druhý vztah.');
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $counts = self::stepCounts($again, PohodaPayrollImporter::STEP_JMHZ);
+        self::assertSame(1, $counts['registrations_done'] ?? 0, $this->explain($again));
+        self::assertArrayNotHasKey('registrations_applied', $counts);
+        self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_registration_a1_profiles WHERE supplier_id = ? AND employment_id = ?', [$supplierId, $jana['id']]));
+    }
+
     private function payrollSupplier(): int
     {
         $pdo = $this->db->pdo();

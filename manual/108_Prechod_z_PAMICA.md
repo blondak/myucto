@@ -761,10 +761,28 @@ v `Mzdy → Podání a hlášení`, záložka **JMHZ**, oddíl *Podání předch
 ([§ 85.14.14](85_Podani_a_hlaseni.md#851414-podani-predchozim-programem)); za měsíc,
 za který řádné hlášení odešlo, MyÚčto řádné hlášení znovu nepřipraví.
 
+**Přijaté registrace jdou importem registrací.** Každá věta registrace, kterou
+ČSSZ přijala, se složí zpátky do formuláře REGZEC a projde stejným importem
+jako soubor nahraný v `Mzdy → Importy`. Z vět tak vznikne profil přihlášky A1
+a doplní se údaje, které karty PAMICA nenesou: stát a místo narození, daňová
+rezidence, zdravotní pojišťovna, CZ-ISCO, pracoviště, kontaktní adresa a další.
+Věty jdou v pořadí, v jakém je PAMICA vyplnila, a opakovaný převod je nezdvojí.
+
+Karta PAMICA má i tady přednost:
+
+- věta, ke které převod nezná vztah (PAMICA ho vede s jiným nástupem nebo ho
+  převod nezaložil), se nepřevezme a nezaloží druhý vztah téže osoby,
+- věta, která by změnila údaj vyplněný z karty (typicky starší adresa, pohlaví,
+  CZ-ISCO) nebo ukončila vztah, se nepřevezme a protokol vypíše, v čem se liší,
+- neodeslaná registrace a registrace bez přijetí ČSSZ se nepoužijí.
+
+Věty ověřuje import proti variabilnímu symbolu mzdové účtárny. Než převod
+spustíte, zadejte VS ČSSZ v `Mzdy → Nastavení`; s jiným VS import věty odmítne
+jako podání jiného zaměstnavatele.
+
 Prohlášení poplatníka, slevy na dani a sleva pracujícího důchodce se z hlášení
-nepřebírají: nesou je už zpracované mzdy. Údaje registrace, které evidence
-bere z karty zaměstnance (adresy, doklad totožnosti, vzdělání), a údaje, pro
-které nemá místo, zůstávají v obsahu uloženém v historii podání.
+nepřebírají: nesou je už zpracované mzdy. Údaje, pro které evidence nemá místo,
+zůstávají v obsahu uloženém v historii podání.
 
 ## 108.10 Související kapitoly
 
