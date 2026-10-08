@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
+use MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService;
 
 /**
  * Jedna společná fronta odchozích mzdových podání.
@@ -55,6 +56,7 @@ final class PayrollSubmissionQueueService
         private readonly PayrollRegistrationTransportService $registration,
         private readonly PayrollIsdsSubmissionService $isds,
         private readonly HealthInsuranceIsdsSubmissionService $healthIsds,
+        private readonly CsszFormVrepTransportService $csszForms,
     ) {}
 
     /**
@@ -318,6 +320,14 @@ final class PayrollSubmissionQueueService
                     $idempotencyKey,
                     $userId,
                 ),
+            PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM
+                => $this->dispatchCsszForm(
+                    $supplierId,
+                    $environment,
+                    $submissionId,
+                    $idempotencyKey,
+                    $userId,
+                ),
             PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL
                 => $this->dispatchIsds(
                     $supplierId,
@@ -410,6 +420,38 @@ final class PayrollSubmissionQueueService
             'outbox' => null,
             'message' => 'Přihláška nebo odhláška zaměstnance byla předána'
                 . ' ČSSZ. Úřad potvrdil převzetí; výsledek se dotáhne sám.',
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function dispatchCsszForm(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $idempotencyKey,
+        ?int $userId,
+    ): array {
+        $result = $this->csszForms->send(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $idempotencyKey,
+            $userId,
+        );
+
+        return [
+            'submission_id' => $submissionId,
+            'mode' => PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM,
+            'dispatched' => true,
+            'attempt' => $result['attempt'] ?? null,
+            'settled' => (bool) ($result['settled'] ?? false),
+            'correlation_reference' => is_array($result['attempt'] ?? null)
+                ? ($result['attempt']['correlation_reference'] ?? null)
+                : null,
+            'outbox' => null,
+            'message' => 'Podání bylo předáno ČSSZ přes VREP. Úřad potvrdil'
+                . ' převzetí; protokol se uloží k podání a výsledek podle něj'
+                . ' zapíšete u případu nebo záměru.',
         ];
     }
 

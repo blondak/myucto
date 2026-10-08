@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 use MyInvoice\Repository\Payroll\EldpStatementRepository;
+use MyInvoice\Repository\Payroll\PayrollEmployerIdentifierSql;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
@@ -34,10 +37,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentit
  *    PŘEDÁNÍ územní správě sociálního zabezpečení; připravené XML není
  *    předané podání a případ se proto na `ready` neposune na `accepted`.
  *
- * Kanál je `isds`. Je to jediný kanál, který je pro tyhle dvě agendy doložený
- * až do tvaru zprávy — viz {@see SicknessChannelCatalog}. VREP/APEP ČSSZ
- * přijímá, ale identifikátor třídy podání pro NEMPRI a HZUPN nemáme
- * v připnutém protokolu, takže se neotevírá.
+ * Podání se připravuje na kanál `isds` — viz {@see SicknessChannelCatalog}.
+ * Druhý doložený kanál je VREP/APEP (Class `CSSZ_NEM_PRI`); odesílá ho
+ * {@see \MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService}
+ * a kanál podání si přepíše až při odeslání. Oba kanály se vzájemně hlídají:
+ * podání, které odešlo přes VREP, se do datové schránky nezařadí a naopak.
  *
  * Doložený kanál ale musí být i PRŮCHODNÝ. Dokud {@see enqueueDataBox()}
  * neexistovalo, končilo podání ve stavu `ready` a účetní ho neměla kde odeslat:
@@ -84,6 +88,7 @@ final readonly class SicknessSubmissionService
         private NempriPayrollMonthReader $payrollMonths,
         private EldpStatementRepository $revisions,
         private SicknessInsuredContactReader $insuredContacts,
+        private PayrollSubmissionTransportAttemptRepository $attempts,
     ) {}
 
     /**
@@ -295,6 +300,20 @@ final readonly class SicknessSubmissionService
                     . ' Nejdřív u případu zvolte Připravit.',
             );
         }
+        // Podání, které už odešlo přes VREP (nebo možná odešlo), se do datové
+        // schránky nezařadí: u ČSSZ by vzniklo podruhé. Pravidla jsou tatáž
+        // jako ve frontě podání ({@see PayrollDispatchGate}).
+        foreach ($this->attempts->listForSubmission($supplierId, $environment, $submissionId) as $attempt) {
+            $reason = PayrollDispatchGate::possiblyDeliveredReason($attempt);
+            if ($reason === null && !PayrollDispatchGate::attemptAllowsRetry($attempt)) {
+                $reason = 'Podání už bylo odesláno přes VREP (pokus č. '
+                    . (int) ($attempt['attempt_no'] ?? 0) . '). Datovou schránkou'
+                    . ' se znovu neodesílá, u ČSSZ by vzniklo jako duplicita.';
+            }
+            if ($reason !== null) {
+                throw new SicknessException('sickness_submission_sent_via_vrep', $reason);
+            }
+        }
 
         $queued = $this->dataBox->enqueue(
             $supplierId,
@@ -368,10 +387,13 @@ final readonly class SicknessSubmissionService
         $employmentId = (int) $row['employment_id'];
         $incapacityFrom = (string) $row['incapacity_from'];
         $incapacityTo = $this->nullableText($row['incapacity_to'] ?? null);
-        $context = $this->caseService->requireContext(
-            $supplierId,
-            $employmentId,
-            $incapacityFrom,
+        $context = PayrollEmployerIdentifierSql::resolveVariableSymbol(
+            $this->caseService->requireContext(
+                $supplierId,
+                $employmentId,
+                $incapacityFrom,
+            ),
+            $environment,
         );
         $identity = $this->identities->sensitiveIdentityAt(
             $supplierId,

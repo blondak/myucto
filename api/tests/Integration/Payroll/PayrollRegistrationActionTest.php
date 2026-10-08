@@ -24,6 +24,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzReceiptVerifier;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
@@ -2364,6 +2366,87 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * Protokol ČSSZ k přijaté A1 v tvaru, jaký vrací VREP (Item/@subtype
+     * REGZEC25, sqnr = pořadí věty, identifier „RČ;OIČ;IDPPV"), projde
+     * skutečným parserem i verifierem protokolů a z něj se převezme OIČ
+     * a ID PPV vztahu jako `trusted_receipt`. Dřív parser takový protokol
+     * odmítl a podání zůstalo navždy „odesláno".
+     */
+    public function testRegzecA1ProtocolFromVrepAssignsOicAndIdPpvAsTrustedReceipt(): void
+    {
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
+        $this->saveA1ProfileFor(self::START_ON, '1', '1');
+        $prepared = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        self::assertSame('REGZEC25', $prepared['agenda_code']);
+        $correlation = 'B0000000000000000000000000000001';
+        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+        $submitted = $submissions->transition(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $prepared['row_version'],
+            'submitted',
+            $correlation,
+        );
+        $protocol = '<?xml version="1.0" encoding="utf-8"?>'
+            . '<GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope"><EnvelopeVersion>2.0</EnvelopeVersion>'
+            . '<Header><MessageDetails><Class>CSSZ_REGZEC</Class><Qualifier>response</Qualifier>'
+            . '<Function>submit</Function><CorrelationID>' . $correlation . '</CorrelationID>'
+            . '</MessageDetails></Header><GovTalkDetails><Keys /></GovTalkDetails><Body>'
+            . '<Message xmlns="http://www.cssz.cz/XMLSchema/envelope" version="1.2" eType="response"><Header /><Body>'
+            . '<ProcessingResult type="CSSZ_REGZEC" version="1,0" result="OK" errMsg="" errNumber="0"'
+            . ' count="1" countErr="0" countWar="0"><Details>'
+            . '<Item sqnr="" identifier="" subtype="REGZEC25" period="" result="OK" errMsg="" errNum="" />'
+            . '<Item sqnr="1" identifier="7001010001;1000000001;200000000000000000002" subtype="REGZEC25"'
+            . ' period="" result="OK" errMsg="" errNum="" />'
+            . '</Details></ProcessingResult></Body></Message></Body></GovTalkMessage>';
+        $signatures = new class () implements JmhzProtocolSignatureVerifierInterface {
+            public function verifiedProtocolXml(string $bytes, string $environment): string
+            {
+                return $bytes;
+            }
+        };
+
+        $receipt = $submissions->importReceipt(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $submitted['row_version'],
+            null,
+            $protocol,
+            $correlation,
+            $correlation,
+            'CSSZ_REGZEC',
+            'accepted',
+            'vrep_apep',
+            'synthetic-regzec-a1-protocol:' . $this->employmentId,
+            $this->userId,
+            new JmhzReceiptVerifier($signatures),
+        );
+
+        self::assertTrue($receipt['trusted']);
+        self::assertSame('accepted', $receipt['submission_status']);
+        $identity = $this->identities->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'test',
+            self::START_ON,
+            true,
+        );
+        self::assertSame('trusted_receipt', $identity['person_external_identifier']['source_kind']);
+        self::assertSame((int) $receipt['id'], $identity['person_external_identifier']['source_receipt_id']);
+        self::assertSame('trusted_receipt', $identity['employment_external_identifier']['source_kind']);
+        self::assertSame((int) $receipt['id'], $identity['employment_external_identifier']['source_receipt_id']);
+    }
+
+    /**
      * EDV 1.4.0.6, ID 10092 a 10099: u druhu činnosti "N" musí A1 nést
      * cizozemského nositele pojištění. Profil bez něj zůstane rozpracovaný,
      * s ním se uloží, vrátí a podání ho zapíše mezi `job` a `pens`.
@@ -2762,6 +2845,39 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertContains(
             'employer_variable_symbol_placeholder',
             array_column($prepared['problems'], 'code'),
+        );
+    }
+
+    /**
+     * Zkušební podání do TEST ČSSZ (8. 10. 2026): registrace odcházela pod
+     * ostrým VS firmy, přestože účtárna má pro test přidělený vlastní. Výběr
+     * podle prostředí je teď stejný jako u JMHZ ({@see \MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol}).
+     */
+    public function testTestEnvironmentRegistrationUsesTheOfficeTestVariableSymbol(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET test_social_security_variable_symbol = "8880001234"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $test = $this->registrationService->preview(
+            $this->supplierId,
+            'test',
+            $this->employmentId,
+        );
+        $production = $this->registrationService->preview(
+            $this->supplierId,
+            'production',
+            $this->employmentId,
+        );
+        $prepared = $this->json($this->post());
+
+        self::assertStringContainsString('vs="8880001234"', $test['xml']);
+        self::assertStringNotContainsString('vs="9990001234"', $test['xml']);
+        self::assertStringContainsString('vs="9990001234"', $production['xml']);
+        self::assertStringContainsString(
+            'vs="8880001234"',
+            $this->storedArtifactXml((int) $prepared['submission_id']),
         );
     }
 

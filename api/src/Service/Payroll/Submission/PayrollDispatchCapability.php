@@ -41,6 +41,12 @@ final readonly class PayrollDispatchCapability
          * ({@see PayrollSubmissionSettlementService}).
          */
         public bool $authorityReportsResult = true,
+        /**
+         * Kanál je zatím ověřený jen v testovacím prostředí ČSSZ; do ostrého
+         * se z fronty neodesílá (VREP pro NEMPRI, HZUPN a OZUSPOJ do zkušebního
+         * podání, viz {@see \MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService::PRODUCTION_OPEN}).
+         */
+        public bool $testEnvironmentOnly = false,
     ) {
         if (($mode === PayrollDispatchCapabilityCatalog::MODE_NONE)
             !== ($reason !== null)

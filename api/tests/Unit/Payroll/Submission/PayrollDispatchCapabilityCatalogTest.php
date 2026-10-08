@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapability;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use PHPUnit\Framework\TestCase;
 
@@ -103,11 +104,12 @@ final class PayrollDispatchCapabilityCatalogTest extends TestCase
                 => PayrollDispatchCapabilityCatalog::MODE_ISDS_HEALTH,
             HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION
                 => PayrollDispatchCapabilityCatalog::MODE_ISDS_HEALTH,
-            // Tyhle tři aplikace NEODESÍLÁ — a tvrdit opak by znamenalo
+            // OZUSPOJ23 jde přes VREP (CSSZ_OZUSPOJ, CSSZSubmClasses.pdf).
+            OzuspojSubmissionService::AGENDA_CODE
+                => PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM,
+            // Tyhle dvě aplikace NEODESÍLÁ — a tvrdit opak by znamenalo
             // tlačítko, které vždycky selže.
             EldpStatementService::AGENDA_CODE
-                => PayrollDispatchCapabilityCatalog::MODE_NONE,
-            OzuspojSubmissionService::AGENDA_CODE
                 => PayrollDispatchCapabilityCatalog::MODE_NONE,
             PayrollRegistrationSubmissionService::AGENDA_EMPLOYER_REGISTRATION
                 => PayrollDispatchCapabilityCatalog::MODE_NONE,
@@ -120,6 +122,42 @@ final class PayrollDispatchCapabilityCatalogTest extends TestCase
                 "Agenda {$code} má jiný režim odeslání, než je doložený.",
             );
         }
+    }
+
+    /**
+     * NEMPRI a HZUPN mají VREP jako druhý kanál (Class CSSZ_NEM_PRI); fronta
+     * odesílá dál datovou schránkou, dokud VREP neověří zkušební podání.
+     */
+    public function testSicknessAgendasOfferVrepAsTheAlternateChannel(): void
+    {
+        $catalog = new PayrollDispatchCapabilityCatalog();
+
+        foreach (['NEMPRI', 'HZUPN'] as $code) {
+            $capability = $catalog->forAgenda($code);
+            self::assertSame(PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, $capability->mode);
+            self::assertSame(
+                PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM,
+                $capability->alternateMode,
+            );
+            self::assertFalse($capability->testEnvironmentOnly);
+        }
+    }
+
+    /** VREP pro OZUSPOJ je do zkušebního podání otevřený jen do testu ČSSZ. */
+    public function testOzuspojVrepIsTestEnvironmentOnlyUntilVerified(): void
+    {
+        $capability = (new PayrollDispatchCapabilityCatalog())
+            ->forAgenda(OzuspojSubmissionService::AGENDA_CODE);
+        $gate = new PayrollDispatchGate();
+        $row = ['submission_status' => 'ready', 'attempt' => null, 'outbox' => null];
+
+        self::assertTrue($capability->testEnvironmentOnly);
+        self::assertTrue($capability->authorityReportsResult);
+        self::assertNull($gate->blockedReason($row, $capability, 'test', 0));
+        self::assertStringContainsString(
+            'jen v testovacím prostředí ČSSZ',
+            (string) $gate->blockedReason($row, $capability, 'production', 0),
+        );
     }
 
     /** Schránky pojišťoven jsou doložené jen pro ostré prostředí. */

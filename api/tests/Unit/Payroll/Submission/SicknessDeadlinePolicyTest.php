@@ -371,22 +371,39 @@ final class SicknessDeadlinePolicyTest extends TestCase
         self::assertSame($expected, $window->earliestNotificationOn);
     }
 
-    public function testVrepChannelStaysClosedWithNamedReason(): void
+    /**
+     * VREP je doložený `CSSZSubmClasses.pdf` (CSSZ_NEM_PRI, eType NEMPRI25
+     * a HZUPN20). Datová schránka zůstává výchozím kanálem přípravy.
+     */
+    public function testVrepChannelIsDocumentedAndIsdsStaysTheDefault(): void
     {
         $catalog = new SicknessChannelCatalog();
 
         self::assertSame('isds', $catalog->dispatchChannel());
         $catalog->assertDispatchable('isds');
+        $catalog->assertDispatchable('vrep_apep');
+        self::assertSame('CSSZ_NEM_PRI', SicknessChannelCatalog::VREP_CLASS);
+        self::assertSame('NEMPRI25', $catalog->vrepForm('NEMPRI'));
+        self::assertSame('HZUPN20', $catalog->vrepForm('HZUPN'));
 
         try {
-            $catalog->assertDispatchable('vrep_apep');
-            self::fail('Nedoložený kanál se nesmí otevřít.');
+            $catalog->vrepForm('OZUSPOJ');
+            self::fail('Jiná agenda nesmí dostat formulář nemocenského podání.');
+        } catch (SicknessException $exception) {
+            self::assertSame(SicknessChannelCatalog::REASON_CHANNEL_UNKNOWN, $exception->validationCode);
+        }
+    }
+
+    public function testEportalStaysManualWithNamedReason(): void
+    {
+        try {
+            (new SicknessChannelCatalog())->assertDispatchable('eportal');
+            self::fail('Ruční kanál se nesmí tvářit jako strojový.');
         } catch (SicknessException $exception) {
             self::assertSame(
-                SicknessChannelCatalog::REASON_VREP_CLASS_UNDOCUMENTED,
+                SicknessChannelCatalog::REASON_PORTAL_MANUAL_ONLY,
                 $exception->validationCode,
             );
-            self::assertStringContainsString('5ffu6xk', $exception->getMessage());
         }
     }
 

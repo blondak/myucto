@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
+use MyInvoice\Repository\Payroll\PayrollEmployerIdentifierSql;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
@@ -258,10 +259,13 @@ final readonly class OzuspojSubmissionService
             && $row['intent_to'] !== ''
                 ? (string) $row['intent_to']
                 : null;
-        $context = $this->intentService->requireContext(
-            $supplierId,
-            $employmentId,
-            $intentFrom,
+        $context = PayrollEmployerIdentifierSql::resolveVariableSymbol(
+            $this->intentService->requireContext(
+                $supplierId,
+                $employmentId,
+                $intentFrom,
+            ),
+            $environment,
         );
         $identity = $this->identities->sensitiveIdentityAt(
             $supplierId,

@@ -12,6 +12,9 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
  * Potvrzení převzetí a protokol jsou schválně dvě různá pole: splynout je do
  * jednoho „je to hotové" je přesně ta chyba, kvůli které se podání hlásí jako
  * přijaté ve chvíli, kdy se teprve kontroluje.
+ *
+ * `manualReview` znamená konečnou odpověď ČSSZ v nedoloženém tvaru: pokus je
+ * dotažený, ale výsledek podání zapisuje člověk podle uloženého protokolu.
  */
 final readonly class JmhzDispatchOutcome
 {
@@ -20,10 +23,11 @@ final readonly class JmhzDispatchOutcome
         public array $attempt,
         public ?JmhzVrepAcknowledgement $acknowledgement = null,
         public ?JmhzProtocolReport $report = null,
+        public bool $manualReview = false,
     ) {}
 
     public function isSettled(): bool
     {
-        return $this->report !== null;
+        return $this->report !== null || $this->manualReview;
     }
 }

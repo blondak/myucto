@@ -1590,6 +1590,39 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Čeká podání v odchozí frontě datové schránky (nebo jí už odešlo)?
+     *
+     * Totéž zařazení, které ukazuje fronta podání
+     * ({@see PayrollSubmissionQueueRepository}); zrušená nebo selhaná položka
+     * nic neblokuje. Druhý kanál (VREP) se nesmí otevřít nad podáním, které
+     * už jde datovou schránkou — u ČSSZ by vzniklo dvakrát.
+     */
+    public function hasActiveIsdsOutbox(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM submission_outbox candidate
+               JOIN payroll_submission_artifacts queued_artifact
+                 ON queued_artifact.supplier_id = candidate.supplier_id
+                AND queued_artifact.environment = candidate.environment
+                AND queued_artifact.id = candidate.artifact_id
+                AND queued_artifact.submission_id = ?
+              WHERE candidate.supplier_id = ?
+                AND candidate.environment = ?
+                AND candidate.channel = "isds"
+                AND candidate.artifact_kind = "payroll_submission"
+                AND candidate.dispatch_state NOT IN ("failed", "cancelled")
+              LIMIT 1',
+        );
+        $statement->execute([$submissionId, $supplierId, $environment]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
      * Originál posledního ověřeného protokolu každé součásti podání.
      *
      * Vrací artefakt, ne `remote_status`: ten u protokolu dílčího balíku nese

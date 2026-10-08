@@ -782,9 +782,9 @@ final readonly class PayrollMonthlyChecklistService
             // ({@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessChannelCatalog})
             // a odesílá se z karty případu
             // ({@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService::enqueueDataBox()}).
-            // Kanál VREP/APEP pro ně otevřený není — protokol v1.47 pro ně
-            // neuvádí identifikátor třídy podání — takže odkaz vede na
-            // Nemocenské případy, ne na „Stav odeslání".
+            // VREP/APEP je pro ně druhý kanál (Class CSSZ_NEM_PRI), ale jejich
+            // protokol se zapisuje u případu, takže odkaz vede na Nemocenské
+            // případy, ne na „Stav odeslání".
             'NEMPRI', 'HZUPN' => $this->isdsAgendaDescription(
                 'XML (' . $agendaCode . ' — hlášení zaměstnavatele o dávce nemocenského pojištění)',
                 'ČSSZ (nebo místně příslušná OSSZ)',

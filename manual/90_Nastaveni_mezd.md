@@ -83,7 +83,11 @@ vlastní přidělený variabilní symbol, jiný než ostrý, a podání poslané
 symbolem zamítne. Odmítnutí přitom hlásí chybějící pověření k e-službě nebo
 nezaznamenaný certifikát, takže se snadno splete s problémem podpisu. Jakmile je
 testovací symbol vyplněný, přehled odeslání ho v testovacím prostředí nabídne
-sám a při odesílání pod ostrým symbolem upozorní.
+sám a při odesílání pod ostrým symbolem upozorní. Všechna podání ČSSZ
+připravená pro testovací prostředí (měsíční hlášení JMHZ, registrace
+zaměstnance PREZEC a REGZEC, NEMPRI, HZUPN i OZUSPOJ) nesou testovací symbol;
+bez něj zůstává symbol účtárny. Do ostrého prostředí testovací symbol nikdy
+neodejde.
 
 V záložce **Podání** se potvrzuje samostatný profil REGZEL. Obsahuje
 čtyřmístný `kodFU`, povinný `kodPracovisteFU` (kromě Specializovaného

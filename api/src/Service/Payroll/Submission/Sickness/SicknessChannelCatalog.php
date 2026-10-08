@@ -11,7 +11,7 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * kanál se otevře jen tehdy, když je doložený z primárního zdroje, a odmítnutí
  * vždy pojmenuje, KTERÁ specifikace chybí — ne obecné „nepodporováno".
  *
- * ## Co je doložené
+ * ## Datová schránka (ISDS)
  *
  * ČSSZ, „Komunikační kanály e-Podání" (podklad uložený 17. 8. 2026,
  * `private/Mzdy/podklady/cssz-komunikacni-kanaly-2026-08-17/`) uvádí v tabulce
@@ -26,29 +26,47 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * a k ISDS dodává: „do specializované datové schránky e-Podání ČSSZ
  * (preferováno): ID schránky: 5ffu6xk, Název schránky: e-podani ČSSZ
  * a/nebo do datových schránek místně příslušné OSSZ/PSSZ/MSSZ."
- *
  * Podávací a dotazovací protokol v1.47 (11. 2. 2025) k tomu u obou agend
- * uvádí sloupec ISDS jako „holé XML", tedy bez GovTalk obálky.
+ * uvádí sloupec ISDS jako „holé XML", tedy bez GovTalk obálky. Datová schránka
+ * zůstává výchozím kanálem připraveného podání.
  *
- * ## Co doložené NENÍ
+ * ## VREP/APEP
  *
- * Kanál VREP/APEP vyžaduje v GovTalk obálce identifikátor třídy podání
- * (`<Class>`). Protokol v1.47 příklady uvádí jen pro `CSSZ_PRIHL`,
- * `CSSZ_RELDP`, `CSSZ_ONZ` a `CSSZ_HPN`; hodnotu pro NEMPRI25 ani HZUPN20
- * v žádném z připnutých podkladů nemáme. Odhadnout ji je přesně ta chyba,
- * které se modul u JMHZ vyhnul tím, že produkční URL VREP zůstala `null`,
- * dokud ji nepotvrdil nezávislý zdroj. Kanál proto zůstává zavřený.
+ * GovTalk `Class` a `eType` obou agend jsou doložené v dokumentu ČSSZ „Přehled
+ * obálek" (`CSSZSubmClasses.pdf`, stažen 8. 10. 2026 a bajtově shodný s kopií
+ * z 15. 8. 2026; `private/normy/zdroje/vrep/`, textová vrstva
+ * `private/normy/zdroje/nempri25/CSSZSubmClasses.txt`, řádky 53 a 60):
+ *
+ *   NEMPRI25 — Class `CSSZ_NEM_PRI`, eType `NEMPRI25`
+ *   HZUPN20  — Class `CSSZ_NEM_PRI`, eType `HZUPN20`
+ *
+ * Dřívější tvrzení, že třída „v žádném z připnutých podkladů není", vzniklo
+ * hledáním jen v Podávacím protokolu v1.47, který tabulku tříd nemá. Obě
+ * agendy sdílejí jednu třídu, takže obálka se staví podle formuláře
+ * ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkRequestShape::forForm()}).
+ * Tvar protokolu, kterým VREP odpoví, zatím doložený není; odpověď se uloží
+ * k podání a výsledek zapíše účetní (viz `JmhzProtocolParser`).
  *
  * ePortál (PIKR) je ruční kanál s ověřenou identitou podatele; strojové
  * rozhraní pro něj neexistuje, takže se nenabízí ani jako „skoro".
  */
 final class SicknessChannelCatalog
 {
-    /** Kanál, kterým podání odchází, když je otevřený. */
+    /** Výchozí kanál připraveného podání. */
     public const CHANNEL_ISDS = 'isds';
 
-    public const REASON_VREP_CLASS_UNDOCUMENTED =
-        'cssz_vrep_submission_class_undocumented';
+    /** Druhý doložený kanál: certifikátem podepsané podání na VREP/APEP. */
+    public const CHANNEL_VREP = 'vrep_apep';
+
+    /** GovTalk `Class` obou agend (`CSSZSubmClasses.pdf`). */
+    public const VREP_CLASS = 'CSSZ_NEM_PRI';
+
+    /** Agenda → formulář (`Message/@eType`) téhož dokumentu. */
+    private const VREP_FORMS = [
+        'NEMPRI' => 'NEMPRI25',
+        'HZUPN' => 'HZUPN20',
+    ];
+
     public const REASON_PORTAL_MANUAL_ONLY =
         'cssz_eportal_manual_channel_only';
     public const REASON_CHANNEL_UNKNOWN =
@@ -62,7 +80,7 @@ final class SicknessChannelCatalog
     public const CSSZ_EPODANI_DATA_BOX = '5ffu6xk';
 
     /** @var list<string> */
-    private const DOCUMENTED_CHANNELS = [self::CHANNEL_ISDS];
+    private const DOCUMENTED_CHANNELS = [self::CHANNEL_ISDS, self::CHANNEL_VREP];
 
     /** @return list<string> */
     public function documentedChannels(): array
@@ -76,15 +94,28 @@ final class SicknessChannelCatalog
     }
 
     /**
-     * Kanál, kterým se podání této agendy odesílá.
-     *
-     * Volání je záměrně bez parametru: obě agendy mají tentýž doložený kanál
-     * a přetěžovat rozhodnutí druhem tiskopisu by naznačovalo volbu, která
-     * neexistuje.
+     * Kanál, pod kterým se podání připraví. Je to datová schránka; odeslání
+     * přes VREP si kanál podání přepíše teprve ve chvíli, kdy opravdu odchází
+     * ({@see \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::adoptDispatchChannel()}).
      */
     public function dispatchChannel(): string
     {
         return self::CHANNEL_ISDS;
+    }
+
+    /** Formulář (`eType`) agendy pro obálku VREP, nebo výjimka. */
+    public function vrepForm(string $agendaCode): string
+    {
+        $form = self::VREP_FORMS[strtoupper(trim($agendaCode))] ?? null;
+        if ($form === null) {
+            throw new SicknessException(
+                self::REASON_CHANNEL_UNKNOWN,
+                'Agenda ' . $agendaCode . ' nepatří k nemocenským podáním NEMPRI'
+                . ' ani HZUPN, takže pro ni nemáme doložený formulář VREP.',
+            );
+        }
+
+        return $form;
     }
 
     /**
@@ -97,14 +128,6 @@ final class SicknessChannelCatalog
             return;
         }
         [$code, $message] = match ($channel) {
-            'vrep_apep' => [
-                self::REASON_VREP_CLASS_UNDOCUMENTED,
-                'ČSSZ kanál VREP/APEP pro NEMPRI i HZUPN přijímá, ale identifikátor třídy podání '
-                . '(prvek Class v GovTalk obálce) pro tyhle dvě agendy není v připnutém Podávacím '
-                . 'a dotazovacím protokolu v1.47 uvedený. Hádat ho nebudeme. Odešlete podání datovou '
-                . 'schránkou do e-Podání ČSSZ (' . self::CSSZ_EPODANI_DATA_BOX . ') nebo na místně '
-                . 'příslušnou OSSZ.',
-            ],
             'eportal', 'pikr' => [
                 self::REASON_PORTAL_MANUAL_ONLY,
                 'ePortál ČSSZ je ruční kanál s ověřenou identitou podatele; strojové rozhraní pro něj '

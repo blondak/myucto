@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 
 final class JmhzScenario1DocumentResolver
 {
@@ -758,11 +759,11 @@ final class JmhzScenario1DocumentResolver
          * s hlavičkou musí shodovat, patří i sem. Bez vyplněného testovacího
          * VS zůstává VS registrace; produkce testovací VS nikdy nedostane.
          */
-        if ($variableSymbol !== null
-            && $registration['id'] !== null
-            && isset($testVariableSymbols[$registration['id']])
-        ) {
-            $variableSymbol = $testVariableSymbols[$registration['id']];
+        if ($variableSymbol !== null && $registration['id'] !== null) {
+            $variableSymbol = CsszEmployerVariableSymbol::preferTest(
+                $variableSymbol,
+                $testVariableSymbols[$registration['id']] ?? null,
+            );
         }
 
         // Nálezy zůstávají na revizi (ne na osobě): adresnost už nese readiness

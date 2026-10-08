@@ -1980,6 +1980,23 @@ final class Routes
                 '/submissions/registration-transport/{attemptId:[0-9]+}/close',
                 [PayrollRegistrationTransportAction::class, 'close'],
             );
+            // NEMPRI, HZUPN a OZUSPOJ přes VREP (CSSZSubmClasses.pdf).
+            $g->post(
+                '/submissions/cssz-form-transport/{submissionId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollCsszFormTransportAction::class, 'send'],
+            );
+            $g->get(
+                '/submissions/cssz-form-transport/{submissionId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollCsszFormTransportAction::class, 'status'],
+            );
+            $g->post(
+                '/submissions/cssz-form-transport/{attemptId:[0-9]+}/poll',
+                [\MyInvoice\Action\Payroll\PayrollCsszFormTransportAction::class, 'poll'],
+            );
+            $g->post(
+                '/submissions/cssz-form-transport/{attemptId:[0-9]+}/close',
+                [\MyInvoice\Action\Payroll\PayrollCsszFormTransportAction::class, 'close'],
+            );
             // Případy dávek nemocenského pojištění (NEMPRI, HZUPN).
             // Dvě podání s vlastními lhůtami podle § 97 zák. č. 187/2006 Sb.
             // Případ žije i bez podání — lhůta podle odst. 2 běží od 15. dne

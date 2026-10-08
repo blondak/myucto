@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService;
 
 /**
  * Kterou agendu umí aplikace odeslat SAMA, a když ne, tak proč — jeden seznam.
@@ -41,7 +42,7 @@ use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
  *
  * Kanál v evidenci (`payroll_submissions.channel`) tady záměrně NEHRAJE ROLI:
  * říká, kde podání VZNIKLO, ne kudy může ven — JMHZ je vedené na `vrep_apep`
- * a přitom jde i datovkou, OZUSPOJ je na `vrep_apep` taky a ven nejde vůbec.
+ * a přitom jde i datovkou, NEMPRI a HZUPN vznikají na `isds` a jdou i přes VREP.
  */
 final class PayrollDispatchCapabilityCatalog
 {
@@ -50,6 +51,12 @@ final class PayrollDispatchCapabilityCatalog
 
     /** Totéž, ale přes adaptér registrací (PREZEC/REGZEC). */
     public const MODE_VREP_REGISTRATION = 'vrep_registration';
+
+    /**
+     * Totéž, ale přes adaptér jednotlivých formulářů ČSSZ (NEMPRI, HZUPN,
+     * OZUSPOJ; {@see \MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService}).
+     */
+    public const MODE_VREP_CSSZ_FORM = 'vrep_cssz_form';
 
     /** Aplikace zařadí do odchozí fronty datové schránky (e-Podání ČSSZ). */
     public const MODE_ISDS_PAYROLL = 'isds_payroll';
@@ -71,6 +78,7 @@ final class PayrollDispatchCapabilityCatalog
     public const MODES = [
         self::MODE_VREP_JMHZ,
         self::MODE_VREP_REGISTRATION,
+        self::MODE_VREP_CSSZ_FORM,
         self::MODE_ISDS_PAYROLL,
         self::MODE_ISDS_HEALTH,
         self::MODE_NONE,
@@ -153,15 +161,22 @@ final class PayrollDispatchCapabilityCatalog
                 self::MODE_VREP_REGISTRATION,
                 null,
             ),
+            // NEMPRI a HZUPN jdou datovou schránkou i přes VREP (Class
+            // CSSZ_NEM_PRI, CSSZSubmClasses.pdf). Fronta odesílá primárním
+            // kanálem, tedy datovkou: VREP zatím neprošel zkušebním podáním
+            // a tvar jeho protokolu není doložený, takže výsledek z něj zapíše
+            // účetní ručně.
             new PayrollDispatchCapability(
                 'NEMPRI',
                 self::MODE_ISDS_PAYROLL,
                 null,
+                alternateMode: self::MODE_VREP_CSSZ_FORM,
             ),
             new PayrollDispatchCapability(
                 'HZUPN',
                 self::MODE_ISDS_PAYROLL,
                 null,
+                alternateMode: self::MODE_VREP_CSSZ_FORM,
             ),
             new PayrollDispatchCapability(
                 HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
@@ -198,14 +213,14 @@ final class PayrollDispatchCapabilityCatalog
                     . ' ho na ČSSZ obvyklou cestou.',
                 authorityReportsResult: false,
             ),
+            // OZUSPOJ23: VREP doložený v CSSZSubmClasses.pdf (Class
+            // CSSZ_OZUSPOJ, eType OZUSPOJ23). Dokud ho neověří zkušební podání,
+            // jde jen do testovacího prostředí; ostré podání zůstává ruční.
             new PayrollDispatchCapability(
                 OzuspojSubmissionService::AGENDA_CODE,
-                self::MODE_NONE,
-                'Oznámení záměru uplatňovat slevu na pojistném aplikace'
-                    . ' neodesílá — ČSSZ pro něj nemá doložený strojový kanál.'
-                    . ' Připravené XML stáhněte na záložce Záměry slev'
-                    . ' a podejte je ze své datové schránky.',
-                authorityReportsResult: false,
+                self::MODE_VREP_CSSZ_FORM,
+                null,
+                testEnvironmentOnly: !CsszFormVrepTransportService::PRODUCTION_OPEN,
             ),
             new PayrollDispatchCapability(
                 PayrollRegistrationSubmissionService::AGENDA_EMPLOYER_REGISTRATION,

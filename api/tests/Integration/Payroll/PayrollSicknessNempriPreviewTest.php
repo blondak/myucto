@@ -77,6 +77,61 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         }
     }
 
+    /**
+     * Do testovacího prostředí ČSSZ odchází testovací VS účtárny, stejně jako
+     * u JMHZ a registrací ({@see \MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol}).
+     */
+    public function testTestEnvironmentUsesTheOfficeTestVariableSymbol(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET test_social_security_variable_symbol = "8880001234"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+        [$employeeId, $employmentId] = $this->employee();
+        $dependantId = $this->dependant($employeeId);
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'OSE',
+            [
+                'incapacity_from' => '2026-02-09',
+                'incapacity_to' => '2026-02-13',
+                'decision_number' => '1234567N',
+                'daily_working_hours' => '8',
+                'action_start' => true,
+                'action_end' => true,
+                'worked_last_day' => false,
+                'cared_dependant_id' => $dependantId,
+                'care_reason' => 'ill',
+                'shared_household' => true,
+                'child_under_16' => true,
+                'cared_personally' => true,
+                'care_days' => [['from' => '2026-02-09', 'to' => '2026-02-13']],
+                'relationship_code' => 'PL',
+                'planned_shifts' => true,
+                'planned_shifts_worked' => false,
+                'decisive_months' => [
+                    ['period' => '2025-10', 'income_minor' => 2_600_000, 'excluded_days' => 0],
+                    ['period' => '2025-11', 'income_minor' => 3_000_000, 'excluded_days' => 0],
+                    ['period' => '2025-12', 'income_minor' => 3_100_000, 'excluded_days' => 0],
+                    ['period' => '2026-01', 'income_minor' => 3_000_000, 'excluded_days' => 0],
+                ],
+            ],
+            $this->userId,
+        );
+
+        $xml = (string) $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+        )['xml'];
+
+        self::assertStringContainsString('<VSZamestnavatel>8880001234</VSZamestnavatel>', $xml);
+        self::assertStringNotContainsString('1234567890', $xml);
+    }
+
     public function testCareBenefitCaseBuildsCompleteSubmission(): void
     {
         [$employeeId, $employmentId] = $this->employee();

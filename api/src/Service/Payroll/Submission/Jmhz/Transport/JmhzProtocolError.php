@@ -95,6 +95,34 @@ final readonly class JmhzProtocolError
     }
 
     /**
+     * Chyba z protokolu k registraci zaměstnance (PREZEC, REGZEC).
+     *
+     * Registrační protokoly nemají připnutý katalog: nesou kódy ePodání ČSSZ
+     * (`061`, `306`, `604`) i kódy post DIS validace evidence ČSSZ
+     * (`103901602`, Katalog kontrol MH 1.4.2.10 je uvádí ve sloupci poznámek).
+     * Na rozdíl od JMHZ o výsledku podání nerozhodují — ten nese `result`
+     * formuláře (Interpretace protokolů REGZEC v1.0). Kód se proto jen
+     * přenáší s textem a neodvozuje se z něj kontrola katalogu.
+     */
+    public static function fromRegistrationCode(int $code, string $message): self
+    {
+        if ($code <= 0) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_error_message_unreadable',
+                'Chyba registračního protokolu nemá kladný kód.',
+            );
+        }
+
+        return new self(
+            $code,
+            $message,
+            JmhzProtocolErrorOrigin::Platform,
+            null,
+            self::derivePassability($message),
+        );
+    }
+
+    /**
      * Propustnost z textu popisu, ne z připnutého katalogu (viz komentář
      * u {@see self::PASSABILITY_PREFIX}). Jediné sdílené místo, kudy prochází
      * všechna volání {@see self::fromCode()} — parser sem posílá text popisu

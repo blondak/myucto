@@ -472,6 +472,7 @@ final class JmhzBlockerCatalog
         'jmhz_protocol_qualifier_conflict' => 'support',
         'jmhz_protocol_qualifier_unknown' => 'support',
         'jmhz_protocol_result_unknown' => 'support',
+        'jmhz_protocol_shape_undocumented' => 'submission',
         'jmhz_protocol_reverify_artifact_mismatch' => 'support',
         'jmhz_protocol_reverify_channel_unsupported' => 'submission',
         'jmhz_protocol_reverify_not_found' => 'submission',

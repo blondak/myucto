@@ -36,8 +36,42 @@ final readonly class JmhzGovTalkEnvelope
     public const NS_CSSZ_ENVELOPE = 'http://www.cssz.cz/XMLSchema/envelope';
     public const ENVELOPE_VERSION = '2.0';
 
-    /** Doložené hodnoty `Class` z oficiálního katalogu obálek ČSSZ. */
-    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'];
+    /** Doložené hodnoty `Class` z oficiálního katalogu obálek ČSSZ (`CSSZSubmClasses.pdf`). */
+    private const CLASSES = [
+        'CSSZ_JMHZ',
+        'CSSZ_REGZEC',
+        'CSSZ_PREZEC',
+        'CSSZ_NEM_PRI',
+        'CSSZ_OZUSPOJ',
+    ];
+
+    /**
+     * Kde datová věta formuláře nese variabilní symbol zaměstnavatele.
+     *
+     * Podací protokol v1.47 (str. 30): `Key[@Type="vars"]` je u podání vázaných
+     * k organizaci povinný a „kontroluje se shoda s VS uvedeným v datové větě
+     * podání". Rozpor tedy ČSSZ odmítne; zachytit ho tady je levnější.
+     * NEMPRI25 má VS v `zamestnani/VSZamestnavatel`, HZUPN20 v
+     * `zamestnani/variabilniSymbol` (XSD HZUPN20 v1.2), OZUSPOJ23 v
+     * `zamestnavatel/vs`.
+     */
+    private const FORM_PAYLOADS = [
+        'NEMPRI25' => [
+            'root' => 'NEMPRI',
+            'namespace' => 'http://schemas.cssz.cz/nem/NEMPRI25',
+            'symbol' => '/f:NEMPRI/f:datovaVeta/f:zamestnani/f:VSZamestnavatel',
+        ],
+        'HZUPN20' => [
+            'root' => 'PodaniHZUPN',
+            'namespace' => 'http://schemas.cssz.cz/nem/HZUPN20',
+            'symbol' => '/f:PodaniHZUPN/f:FormularHZUPN/f:zamestnani/f:variabilniSymbol',
+        ],
+        'OZUSPOJ23' => [
+            'root' => 'podaniOzuspoj',
+            'namespace' => 'http://schemas.cssz.cz/POJ/OZUSPOJ23',
+            'symbol' => '/f:podaniOzuspoj/f:formularOzuspoj/f:zamestnavatel/f:vs',
+        ],
+    ];
     private const ENVIRONMENTS = ['test', 'production'];
     private const PAYLOAD_PLACEHOLDER = 'JMHZ-PAYLOAD-SLOT-2f0a1c';
 
@@ -66,9 +100,7 @@ final readonly class JmhzGovTalkEnvelope
         $environment = $this->assertEnvironment($environment);
         $this->assertEnvelopeType($shape, $class);
         $payload = $this->parsePayload($bodyXml);
-        if ($class === 'CSSZ_JMHZ') {
-            $this->assertJmhzPayload($payload, $symbol, $software);
-        }
+        $this->assertPayload($shape, $class, $payload, $symbol, $software);
 
         $dom = $this->skeleton($class, $shape->submitQualifier, $shape, $symbol);
         // Protokol: „CorrelationID … při odeslání musí být prázdné." Přiděluje
@@ -241,9 +273,7 @@ final readonly class JmhzGovTalkEnvelope
         $environment = $this->assertEnvironment($environment);
         $this->assertEnvelopeType($shape, $class);
         $payload = $this->parsePayload($bodyXml);
-        if ($class === 'CSSZ_JMHZ') {
-            $this->assertJmhzPayload($payload, $symbol, $software);
-        }
+        $this->assertPayload($shape, $class, $payload, $symbol, $software);
         // Podepisují a šifrují se přesně archivované bajty. Znovunačtení přes
         // DOM slouží jen ke kontrole tvaru; jeho saveXML() by zahodilo XML
         // deklaraci a sjednotilo konce řádků, takže by změnilo SHA-256 podání.
@@ -358,6 +388,65 @@ final readonly class JmhzGovTalkEnvelope
         return $dom;
     }
 
+    private function assertPayload(
+        JmhzGovTalkRequestShape $shape,
+        string $class,
+        DOMDocument $payload,
+        string $variableSymbol,
+        JmhzSoftwareIdentification $software,
+    ): void {
+        if ($class === 'CSSZ_JMHZ') {
+            $this->assertJmhzPayload($payload, $variableSymbol, $software);
+
+            return;
+        }
+        $form = self::FORM_PAYLOADS[$shape->bodyEnvelopeType] ?? null;
+        if ($form !== null) {
+            $this->assertFormPayload($payload, $form, $variableSymbol);
+        }
+    }
+
+    /**
+     * Kořen datové věty musí patřit ohlášenému formuláři a každý VS ve větě se
+     * musí shodovat s klíčem `vars` obálky.
+     *
+     * @param array{root:string,namespace:string,symbol:string} $form
+     */
+    private function assertFormPayload(
+        DOMDocument $payload,
+        array $form,
+        string $variableSymbol,
+    ): void {
+        $root = $payload->documentElement;
+        if ($root === null
+            || $root->namespaceURI !== $form['namespace']
+            || $root->localName !== $form['root']
+        ) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_payload_invalid',
+                'Tělo podání nepatří formuláři, pod kterým se má odeslat (čeká se kořen `'
+                    . $form['root'] . '`).',
+            );
+        }
+        $xpath = new DOMXPath($payload);
+        $xpath->registerNamespace('f', $form['namespace']);
+        $symbols = $xpath->query($form['symbol']);
+        if ($symbols === false || $symbols->length === 0) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_variable_symbol_mismatch',
+                'Variabilní symbol obálky neodpovídá variabilnímu symbolu v datové větě podání.',
+            );
+        }
+        foreach ($symbols as $symbol) {
+            if (trim($symbol->textContent) !== $variableSymbol) {
+                throw new JmhzTransportException(
+                    'jmhz_govtalk_variable_symbol_mismatch',
+                    'Variabilní symbol obálky neodpovídá variabilnímu symbolu v datové větě podání.',
+                );
+            }
+        }
+    }
+
     private function assertJmhzPayload(
         DOMDocument $payload,
         string $variableSymbol,
@@ -428,8 +517,10 @@ final readonly class JmhzGovTalkEnvelope
         if (!JmhzGovTalkRequestShape::isCatalogEnvelopeType($shape->bodyEnvelopeType)) {
             return;
         }
-        if ($shape->bodyEnvelopeType
-            !== JmhzGovTalkRequestShape::envelopeTypeFor($submissionClass)
+        // Kontroluje se dvojice (Class, eType), ne eType odvozený z Class:
+        // CSSZ_NEM_PRI patří dvěma formulářům.
+        if (JmhzGovTalkRequestShape::classForForm($shape->bodyEnvelopeType)
+            !== $submissionClass
         ) {
             throw new JmhzTransportException(
                 'jmhz_govtalk_envelope_type_mismatch',
