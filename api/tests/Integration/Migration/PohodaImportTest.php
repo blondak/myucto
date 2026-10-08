@@ -357,6 +357,39 @@ final class PohodaImportTest extends TestCase
         self::assertSame(1, (int) ($payment['owns_entry'] ?? 0), json_encode($rows));
     }
 
+    /**
+     * Odpočet uplatněný v POHODĚ před datem plnění. Doklad běžného období zařadí evidence
+     * DPH do období plnění a protokol na posun upozorní. Doklad minulého období s datem
+     * pro KH v minulém roce má POHODA v prvním období agendy, stejně jako evidence DPH
+     * podle data plnění - v lednu zůstává a varování nedostane.
+     */
+    public function testEarlyClaimIsReportedOnlyWhenThePeriodDiffers(): void
+    {
+        $base = $this->supplier();
+        $baseDir = $this->tmp . DIRECTORY_SEPARATOR . 'base';
+        mkdir($baseDir);
+        $this->importer->run($base, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($baseDir)), false);
+
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withEarlyClaims($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame(1, self::stepCounts($protocol, 'purchase_invoices')['claim_moved'] ?? 0, $this->explain($protocol));
+        $steps = array_column($protocol->toArray()['steps'], null, 'key');
+        $warned = array_column(array_filter($steps['purchase_invoices']['messages'],
+            static fn (array $m): bool => $m['code'] === 'claim_before_document'), 'context');
+        self::assertSame([SyntheticPohodaExport::EARLY_CLAIM_CURRENT], array_column($warned, 'document_no'));
+
+        $builder = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
+        $delta = function (int $month, string $line) use ($builder, $base, $supplierId): float {
+            $after = $builder->build($supplierId, SyntheticPohodaExport::YEAR, $month, 'monthly')['summary']['lines'];
+            $before = $builder->build($base, SyntheticPohodaExport::YEAR, $month, 'monthly')['summary']['lines'];
+            return (float) ($after[$line]['vat'] ?? 0) - (float) ($before[$line]['vat'] ?? 0);
+        };
+        self::assertEqualsWithDelta(210.0, $delta(1, '40'), 0.005, 'Doklad minulého období v prvním období agendy.');
+        self::assertEqualsWithDelta(210.0, $delta(3, '40'), 0.005, 'Odpočet běžného dokladu v období plnění.');
+    }
+
     /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
     public function testDomesticReverseSaleIsFlagged(): void
     {

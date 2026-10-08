@@ -508,6 +508,7 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
+        $this->claimPeriod($ctx, $step, $doc, $type);
         ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
@@ -1159,6 +1160,35 @@ final class InvoiceImporter
             'commitment' => $ctx->commitments[$number] = $id,
             'internal_purchase' => $ctx->internalPurchases[$number] = $id,
         };
+    }
+
+    /**
+     * Odpočet, který Pohoda uplatnila (datum pro KH) dřív, než ho MyÚčto připustí - před
+     * datem plnění nebo vystavení (§ 73). Evidence DPH ho zařadí až do období plnění,
+     * protokol na posun upozorní stejně jako převod z PREMIER.
+     *
+     * Doklad minulého období s datem pro KH v minulém roce zařadí Pohoda do prvního
+     * období agendy - tam ho porovnává i tato kontrola. DPH takového dokladu převod
+     * nevyřazuje: odvody DPH v Pohodě ukazují, že ho přiznání převáděného roku obsahuje.
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function claimPeriod(PohodaContext $ctx, string $step, array $doc, string $type): void
+    {
+        $claim = $doc['claim'];
+        if ($claim === null || $type === 'advance') {
+            return;
+        }
+        $earliest = max((string) ($doc['tax'] ?? $doc['issue']), (string) $doc['issue']);
+        $claim = max($claim, (string) ($ctx->period['starts_on'] ?? sprintf('%04d-01-01', $ctx->year())));
+        if ($claim >= $earliest || substr($claim, 0, 7) === substr($earliest, 0, 7)) {
+            return;
+        }
+        $ctx->protocol->warn($step, 'claim_before_document', sprintf(
+            'Doklad %s: Pohoda uplatnila odpočet k %s, dřív než je datum plnění nebo vystavení (%s). MyÚčto odpočet před držením dokladu nepřipustí - doklad je v DPH v období %s.',
+            $doc['number'], $claim, $earliest, substr($earliest, 0, 7)
+        ), ['document_no' => $doc['number']]);
+        $ctx->protocol->count($step, 'claim_moved');
     }
 
     /** @param array<string,mixed> $doc */

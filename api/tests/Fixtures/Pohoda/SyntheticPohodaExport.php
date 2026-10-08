@@ -452,6 +452,29 @@ final class SyntheticPohodaExport
             self::bank(self::FOREIGN_RECEIPT, 'receipt', '2026-03-10', 4255.33, self::FOREIGN_ISSUED_VS, 'Odběratel Test s.r.o.', self::PARTNER_ACCOUNT));
     }
 
+    /** Odpočet uplatněný před datem plnění ({@see withEarlyClaims()}). */
+    public const EARLY_CLAIM_PREVIOUS = '25PF0900';
+    public const EARLY_CLAIM_CURRENT = '26PF0050';
+
+    /**
+     * Přijaté faktury, u kterých POHODA uplatnila odpočet (datum pro KH) dřív než k datu
+     * plnění, obě 1 000 + 210 Kč:
+     *  - 25PF0900: doklad minulého období (vystaven a uplatněn 10. 12. 2025, plnění
+     *    1. 1. 2026), DPH je podané v přiznání agendy 2025;
+     *  - 26PF0050: vystaven a uplatněn 20. 1. 2026, plnění až 1. 3. 2026.
+     */
+    public static function withEarlyClaims(string $agendaDir): void
+    {
+        $early = static fn (string $number, string $date, string $supply): string =>
+            str_replace('<inv:dateTax>' . $date . '</inv:dateTax>', '<inv:dateTax>' . $supply . '</inv:dateTax>',
+                self::invoice('receivedInvoice', $number, substr($number, -4), $date, 1000, 210));
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            $early(self::EARLY_CLAIM_PREVIOUS, '2025-12-10', '2026-01-01') . $early(self::EARLY_CLAIM_CURRENT, '2026-01-20', '2026-03-01'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'Služby', 1000, '518000', '321001', '2026-01-20')
+            . self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'DPH', 210, '343011', '321001', '2026-01-20'));
+    }
+
     /** Úhrada přes platební bránu ({@see withPaymentGateway()}). */
     public const GATEWAY_INVOICE = '26FV0040';
     public const GATEWAY_BANK = 'BAN0010040';
