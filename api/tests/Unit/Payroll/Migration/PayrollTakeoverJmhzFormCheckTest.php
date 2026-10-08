@@ -59,6 +59,20 @@ final class PayrollTakeoverJmhzFormCheckTest extends TestCase
         self::assertSame(['advance_tax'], array_column($rows[0]['differences'], 'metric'));
     }
 
+    /**
+     * Osvobozené plnění (stravenkový paušál) je v 10286, v hrubé mzdě předchozího
+     * programu být nemusí. Rozdíl jen v příjmu proto nález nezakládá.
+     */
+    public function testIncomeDifferenceAloneIsNotReported(): void
+    {
+        $rows = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(2, 21, 40_000_00, 40_000_00, 4_880_00, 1_800_00, 3_600_00)],
+            [self::entry(2, 21, self::form(42_300, 40_000, 4_880, 1_800, 3_600))],
+        );
+
+        self::assertSame([], $rows);
+    }
+
     public function testNothingIsReportedWithoutForm(): void
     {
         self::assertSame([], PayrollTakeoverJmhzFormCheck::compare([self::wage(1, 11, 0, 0, 0, 0, 0)], []));

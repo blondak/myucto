@@ -40,6 +40,15 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
  * Sociální pojistné se neporovnává: pojistné zaměstnavatele je veličina firmy,
  * ne osoby, a základ SP rozdíl osoby ukáže sám.
  *
+ * ── Zúčtovaný příjem nález sám nezakládá ────────────────────────────────────
+ * 10286 zahrnuje i příjmy osvobozené od daně (Pokyny MH 1.4.14 k 10286), kdežto
+ * „hrubá mzda“ předchozího programu je jeho vlastní pojem (PAMICA `KcHrubaM`)
+ * a osvobozená plnění typu stravenkového paušálu v ní být nemusí. Kdyby rozdíl
+ * v příjmu stačil k nálezu, hlásila by kontrola každého zaměstnance s takovým
+ * plněním. Nález proto zakládá až rozdíl ve veličině se shodnou definicí na obou
+ * stranách (základ SP, záloha, zdravotní pojistné); rozdíl v příjmu se k němu
+ * přidá do rozpadu jako vysvětlení.
+ *
  * ── Kdy se nic nehlásí ─────────────────────────────────────────────────────
  *  - za osobu a měsíc není přijatý formulář nebo převzatá mzda (chybějící hlášení
  *    hlídá {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService}),
@@ -52,6 +61,9 @@ final class PayrollTakeoverJmhzFormCheck
 {
     /** Názvy veličin, jak jdou po drátě (shodu s klientem hlídá PayrollEnumContractTest). */
     public const METRIC_NAMES = ['gross', 'social_base', 'advance_tax', 'health_insurance'];
+
+    /** Veličiny, které nález samy nezakládají (viz docblock třídy). */
+    private const CONTEXT_ONLY_METRICS = ['gross'];
 
     /** Rozdíl v haléřích, který je ještě zaokrouhlením na celé koruny. */
     public const TOLERANCE_MINOR = [
@@ -198,7 +210,12 @@ final class PayrollTakeoverJmhzFormCheck
                     'difference_minor' => $jmhz - $taken,
                 ];
             }
-            if ($differences === []) {
+            $decisive = array_filter(
+                $differences,
+                static fn (array $difference): bool
+                    => !in_array($difference['metric'], self::CONTEXT_ONLY_METRICS, true),
+            );
+            if ($decisive === []) {
                 continue;
             }
             $out[] = [
