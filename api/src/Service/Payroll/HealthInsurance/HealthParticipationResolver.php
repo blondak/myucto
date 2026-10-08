@@ -129,6 +129,26 @@ final class HealthParticipationResolver
                 );
                 continue;
             }
+            if ($relationship->associationMember) {
+                // § 5 písm. a) body 4 a 5 zákona č. 48/1997 Sb.: člen družstva
+                // nebo SVJ bez započitatelného příjmu není zaměstnancem, takže
+                // se nezapočítá do počtu ani základu přehledu. Započitatelný
+                // příjem je částka rozhodného příjmu (stejný práh jako DPČ).
+                $participates = $fact->participationIncomeMinorUnits >= $dpcThresholdMinorUnits;
+                $decisions[$relationship->relationshipId] = new HealthParticipationDecision(
+                    $relationship->relationshipId,
+                    $participates
+                        ? HealthParticipationStatus::Participates
+                        : HealthParticipationStatus::DoesNotParticipate,
+                    $fact->participationIncomeMinorUnits,
+                    $fact->participationIncomeMinorUnits,
+                    $dpcThresholdMinorUnits,
+                    [$participates
+                        ? 'association_member_counting_income_met'
+                        : 'association_member_below_counting_income'],
+                );
+                continue;
+            }
             $decisions[$relationship->relationshipId] = new HealthParticipationDecision(
                 $relationship->relationshipId,
                 HealthParticipationStatus::Participates,

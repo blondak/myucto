@@ -59,6 +59,28 @@ final class PayrollExpectedHealthParticipationTest extends TestCase
         self::assertFalse(PayrollExpectedHealthParticipation::expected('automatic', 'dpc', 1_200_000, null), 'Bez pravidel roku se nehádá.');
     }
 
+    /**
+     * Člen družstva nebo SVJ (§ 5 písm. a) body 4 a 5) se pojišťovně hlásí
+     * jako DPČ: při sjednané odměně alespoň započitatelného příjmu, jinak až
+     * podle schváleného běhu. Bez příznaku je člen orgánu zaměstnancem vždy.
+     */
+    public function testAssociationMemberIsReportedOnlyWithCountingIncome(): void
+    {
+        self::assertFalse(PayrollExpectedHealthParticipation::expected(
+            'automatic', 'statutory_body', 300_000, self::DPC_THRESHOLD, associationMember: true,
+        ));
+        self::assertTrue(PayrollExpectedHealthParticipation::expected(
+            'automatic', 'statutory_body', self::DPC_THRESHOLD, self::DPC_THRESHOLD, associationMember: true,
+        ));
+        self::assertTrue(PayrollExpectedHealthParticipation::expected(
+            'automatic', 'employment', 300_000, self::DPC_THRESHOLD, true, true,
+        ));
+        self::assertTrue(PayrollExpectedHealthParticipation::decidedByMonthlyIncome('employment', true));
+        self::assertTrue(PayrollExpectedHealthParticipation::expected(
+            'automatic', 'statutory_body', 300_000, self::DPC_THRESHOLD,
+        ));
+    }
+
     public function testUnknownRelationTypeDoesNotParticipate(): void
     {
         self::assertFalse(PayrollExpectedHealthParticipation::expected('automatic', 'neznamy', 5_000_000, self::DPC_THRESHOLD, true));

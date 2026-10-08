@@ -537,6 +537,26 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         );
     }
 
+    /**
+     * OZUSPOJ-LAW-7a-3 / § 7a odst. 3 písm. e): zaměstnanec uvedený v měsíčním
+     * přehledu nákladů na náhrady mezd pro příspěvek v době částečné práce
+     * (§ 120e odst. 5 zákona o zaměstnanosti) slevu nemá, ať je důvod jakýkoli.
+     */
+    public function testEmployeeListedInThePartialWorkOverviewGetsNoDiscount(): void
+    {
+        foreach ([SocialPartTimeDiscountReason::Age55Plus, SocialPartTimeDiscountReason::DisabledPerson] as $reason) {
+            $result = $this->discountedPerson(1_000_000, reason: $reason, partialWork: true);
+
+            self::assertSame(0, $result->partTimeDiscountMinorUnits, $reason->value);
+            self::assertSame(
+                SocialPartTimeDiscountOutcome::PartialWorkContribution,
+                $result->people[0]->relationships[0]->partTimeEmployerDiscountOutcome,
+                $reason->value,
+            );
+        }
+        self::assertSame(50_000, $this->discountedPerson(1_000_000)->partTimeDiscountMinorUnits);
+    }
+
     public function testProtectedLaborMarketDoesNotTouchOtherReasonsOrOrdinaryEmployers(): void
     {
         $ordinary = $this->discountedPerson(
@@ -1230,6 +1250,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         ?int $employmentDays = null,
         ?SocialPartTimeDiscountReason $reason = null,
         bool $protectedLaborMarket = false,
+        bool $partialWork = false,
     ): \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult {
         return $this->calculate([
             $this->person('person-1', [
@@ -1244,6 +1265,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                     weeklyMillihours: $weeklyMillihours,
                     employmentDays: $employmentDays,
                     protectedLaborMarket: $protectedLaborMarket,
+                    partialWork: $partialWork,
                 ),
             ]),
         ]);
@@ -1266,6 +1288,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         ?int $monthDays = null,
         bool $workedHoursMissing = false,
         bool $protectedLaborMarket = false,
+        bool $partialWork = false,
     ): SocialInsuranceRelationshipInput {
         return new SocialInsuranceRelationshipInput(
             $id,
@@ -1301,6 +1324,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                 ? ($weeklyMillihours ?? 20_000)
                 : $weeklyMillihours,
             $protectedLaborMarket,
+            $partialWork,
         );
     }
 

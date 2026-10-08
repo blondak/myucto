@@ -215,6 +215,7 @@ const advancedTermsPrefilled = computed(() => {
     || terms.cz_isco_code !== null
     || terms.social_insurance_participation !== 'automatic'
     || terms.health_insurance_participation !== 'automatic'
+    || terms.health_association_member === true
     || terms.tax_regime !== 'advance'
     || terms.foreign_legislation_country_code !== null
     || terms.a1_certificate_until !== null
@@ -442,6 +443,7 @@ function hydrate(employment: PayrollEmployment) {
     jmhz_relationship_detail_code: terms.jmhz_relationship_detail_code,
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
+    health_association_member: terms.health_association_member ?? false,
     tax_regime: terms.tax_regime,
     foreign_legislation_country_code: terms.foreign_legislation_country_code,
     a1_certificate_until: terms.a1_certificate_until,
@@ -1721,6 +1723,22 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <select v-model="termsForm.health_insurance_participation" :disabled="!canEditTerms || busy" :class="INPUT">
                   <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
                 </select>
+              </label>
+              <label
+                v-if="employment.relation_type !== 'dpp' && employment.relation_type !== 'dpc'"
+                class="flex items-start gap-2 text-sm text-neutral-700 sm:col-span-2"
+              >
+                <input
+                  v-model="termsForm.health_association_member"
+                  type="checkbox"
+                  :disabled="!canEditTerms || busy"
+                  class="mt-0.5 rounded border-neutral-300 text-payroll-600"
+                  data-test="terms-health-association-member"
+                >
+                <span class="min-w-0">
+                  {{ t('payroll.people.health_association_member') }}
+                  <span class="block text-xs text-neutral-500">{{ t('payroll.people.health_association_member_hint') }}</span>
+                </span>
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.tax_regime_label') }}

@@ -188,7 +188,8 @@ function validatorRejection(
     const reason = value('reason')
     if (reason === null || ![
       'state_insured', 'ztp_or_ztp_p', 'pension_age_without_pension',
-      'sickness_care_or_quarantine', 'osvc_minimum_advance', 'foster_reward_only', 'unverified',
+      'sickness_care_or_quarantine', 'osvc_minimum_advance', 'foster_reward_only',
+      'child_under_7_care', 'unverified',
     ].includes(reason)) {
       return 'Pole reason musí být z číselníku.'
     }

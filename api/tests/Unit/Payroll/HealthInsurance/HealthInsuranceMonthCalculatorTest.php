@@ -234,6 +234,93 @@ final class HealthInsuranceMonthCalculatorTest extends TestCase
         }
     }
 
+    /**
+     * Od 1. 1. 2026 se minimum neuplatní u zaměstnance pečujícího o dítě do
+     * 7 let, a to ode dne potvrzeného pojišťovnou (§ 7 odst. 1 písm. k)
+     * z. 48/1997 Sb., § 3 odst. 8 a 9 z. 592/1992 Sb.). Za celý měsíc se
+     * pojistné počítá jen ze skutečného základu, od poloviny měsíce se minimum
+     * poměrně krátí. Bez výjimky by se předepsal doplatek do plného minima.
+     */
+    public function testEmployeeCaringForChildUnder7HasNoMinimumFromTheConfirmedDay(): void
+    {
+        $fullMonth = $this->calculate([
+            $this->person(
+                'parent-full-month',
+                [$this->relationship('hpp', HealthEmploymentKind::Employment, 100_000)],
+                reductions: [$this->fullMonthReduction(HealthMinimumReductionReason::ChildUnder7Care)],
+            ),
+        ]);
+        self::assertSame(HealthCalculationStatus::Calculated, $fullMonth->status);
+        self::assertSame(0, $fullMonth->people[0]->effectiveMinimumMinorUnits);
+        self::assertSame(13_500, $fullMonth->totalContributionMinorUnits);
+
+        $fromMidMonth = $this->calculate([
+            $this->person(
+                'parent-from-17th',
+                [$this->relationship('hpp', HealthEmploymentKind::Employment, 500_000)],
+                reductions: [new HealthMinimumReductionInterval(
+                    '2026-08-17',
+                    '2026-08-31',
+                    HealthMinimumReductionReason::ChildUnder7Care,
+                    'minimum:child-under-7-confirmation',
+                )],
+            ),
+        ]);
+        self::assertSame(15, $fromMidMonth->people[0]->minimumExcludedCalendarDays);
+        self::assertSame(16, $fromMidMonth->people[0]->minimumApplicableCalendarDays);
+        self::assertSame(1_156_130, $fromMidMonth->people[0]->effectiveMinimumMinorUnits);
+    }
+
+    /**
+     * Člen družstva nebo SVJ, který pro ně pracuje za odměnu, není od
+     * 1. 1. 2026 zaměstnancem v měsíci bez započitatelného příjmu (§ 5
+     * písm. a) body 4 a 5 z. 48/1997 Sb.). Do počtu zaměstnanců ani základu
+     * přehledu se pak nezapočítá a minimum se mu nedopočítá; jakmile
+     * započitatelného příjmu dosáhne, je zaměstnancem jako ostatní.
+     */
+    public function testAssociationMemberWithoutCountingIncomeIsNotAnEmployee(): void
+    {
+        $member = fn (int $amount): HealthInsuranceRelationshipInput => new HealthInsuranceRelationshipInput(
+            'svj-member',
+            HealthEmploymentKind::CorporateBody,
+            '2026-08-01',
+            null,
+            HealthIncomeAttribution::CurrentEmploymentMonth,
+            [$this->component('wage', $amount)],
+            associationMember: true,
+        );
+
+        $below = $this->calculate([
+            $this->person('svj-below', [$member(300_000)]),
+        ]);
+        self::assertSame(HealthCalculationStatus::Calculated, $below->status);
+        self::assertSame(
+            HealthParticipationStatus::DoesNotParticipate,
+            $below->people[0]->relationships[0]->participation->status,
+        );
+        self::assertFalse($below->people[0]->ppzCounted);
+        self::assertSame(0, $below->assessmentBaseMinorUnits);
+        self::assertSame(0, $below->totalContributionMinorUnits);
+        foreach ($below->insurerLiabilities as $liability) {
+            self::assertSame(0, $liability->personCount);
+        }
+
+        $reached = $this->calculate([
+            $this->person(
+                'svj-reached',
+                [$member(450_000)],
+                reductions: [$this->fullMonthReduction(HealthMinimumReductionReason::StateInsured)],
+            ),
+        ]);
+        self::assertSame(
+            HealthParticipationStatus::Participates,
+            $reached->people[0]->relationships[0]->participation->status,
+        );
+        self::assertTrue($reached->people[0]->ppzCounted);
+        self::assertSame(450_000, $reached->assessmentBaseMinorUnits);
+        self::assertSame(1, $reached->insurerLiabilities[0]->personCount);
+    }
+
     public function testEmployerPaysTopUpOnlyWithVerifiedEmployerObstacle(): void
     {
         $result = $this->calculate([

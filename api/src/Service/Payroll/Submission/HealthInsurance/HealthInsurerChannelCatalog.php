@@ -37,7 +37,7 @@ final class HealthInsurerChannelCatalog
         'zp_shared_data_message_acceptance_unconfirmed';
 
     /** Poslední den přechodného období pro dosavadní elektronické formáty. */
-    public const LEGACY_FORMAT_TRANSITION_END = '2026-12-31';
+    private const LEGACY_FORMAT_TRANSITION_END = '2026-12-31';
 
     private const RECIPIENT_CODES = [
         '111' => 'zp_vzp_111',

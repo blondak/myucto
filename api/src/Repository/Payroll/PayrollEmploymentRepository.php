@@ -1550,7 +1550,8 @@ final class PayrollEmploymentRepository
                     terms.cz_isco_code, terms.activity_code,
                     terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
-                    terms.health_insurance_participation, terms.tax_regime,
+                    terms.health_insurance_participation,
+                    terms.health_association_member, terms.tax_regime,
                     terms.other_withholding_eligibility,
                     terms.foreign_legislation_country_code,
                     terms.a1_certificate_until, terms.risky_work,
@@ -1703,9 +1704,10 @@ final class PayrollEmploymentRepository
                  is_primary, change_reason, created_by,
                  jmhz_assignment_user_kind, jmhz_assignment_user_ico,
                  jmhz_assignment_user_country_code, jmhz_assignment_user_foreign_id,
-                 jmhz_assignment_user_name, jmhz_risk_categorization_code)
+                 jmhz_assignment_user_name, jmhz_risk_categorization_code,
+                 health_association_member)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?)'
+                     ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -1760,6 +1762,7 @@ final class PayrollEmploymentRepository
             $data['jmhz_assignment_user_foreign_id'] ?? null,
             $data['jmhz_assignment_user_name'] ?? null,
             $data['jmhz_risk_categorization_code'] ?? null,
+            (int) ($data['health_association_member'] ?? false),
         ]);
     }
 
@@ -1803,6 +1806,7 @@ final class PayrollEmploymentRepository
                  jmhz_assignment_user_kind = ?, jmhz_assignment_user_ico = ?,
                  jmhz_assignment_user_country_code = ?, jmhz_assignment_user_foreign_id = ?,
                  jmhz_assignment_user_name = ?, jmhz_risk_categorization_code = ?,
+                 health_association_member = ?,
                  row_version = row_version + 1
                WHERE supplier_id = ? AND id = ?'
         )->execute([
@@ -1855,6 +1859,7 @@ final class PayrollEmploymentRepository
             $data['jmhz_assignment_user_foreign_id'] ?? null,
             $data['jmhz_assignment_user_name'] ?? null,
             $data['jmhz_risk_categorization_code'] ?? null,
+            (int) ($data['health_association_member'] ?? false),
             $supplierId,
             $termsId,
         ]);
@@ -2539,6 +2544,7 @@ final class PayrollEmploymentRepository
             'jmhz_specific_legal_fact_applies',
             'jmhz_ozp_employment_support_applies',
             'jmhz_deep_mining_work_applies',
+            'health_association_member',
         ];
         foreach ($ints as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {

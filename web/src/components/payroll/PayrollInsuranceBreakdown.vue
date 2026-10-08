@@ -181,6 +181,8 @@ const PARTICIPATION_REASON_KEYS = new Set([
   'dpc_group_below_threshold',
   'dpp_group_negative_income_requires_period_revision',
   'dependent_income_relationship',
+  'association_member_counting_income_met',
+  'association_member_below_counting_income',
   'manual_review',
 ])
 

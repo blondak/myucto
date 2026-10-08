@@ -317,6 +317,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
           'osvc_minimum_advance',
           'foster_reward_only',
           'sickness_care_or_quarantine',
+          'child_under_7_care',
           'unverified',
         ],
       },
@@ -448,6 +449,7 @@ export const EVIDENCE_REASONS: Readonly<Record<string, readonly string[]>> = {
     'minimum:osvc-advance-confirmation',
     'minimum:foster-reward-decision',
     'minimum:sickness-certificate',
+    'minimum:child-under-7-confirmation',
   ],
   'health_other_employer_bases.evidence_reference': [
     'minimum:other-employer-confirmation',
@@ -468,6 +470,7 @@ const MINIMUM_REDUCTION_REASONS: Readonly<Record<string, readonly string[]>> = {
   osvc_minimum_advance: ['minimum:osvc-advance-confirmation'],
   foster_reward_only: ['minimum:foster-reward-decision'],
   sickness_care_or_quarantine: ['minimum:sickness-certificate'],
+  child_under_7_care: ['minimum:child-under-7-confirmation'],
 }
 
 /** Volba „jiné" v nabídce důvodů — odemkne volný text. */

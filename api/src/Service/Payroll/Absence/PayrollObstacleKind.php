@@ -27,6 +27,10 @@ namespace MyInvoice\Service\Payroll\Absence;
  * - § 208 jiné překážky: průměrný výdělek,
  * - § 209 částečná nezaměstnanost: nejméně 60 %, výši určuje dohoda s odborovou
  *   organizací nebo vnitřní předpis; bez něj jde o jinou překážku podle § 208.
+ * - částečná práce s příspěvkem (§ 120a a násl. zákona č. 435/2004 Sb.): náhrada
+ *   nejméně 80 %; zaměstnanec v ní je uveden v měsíčním přehledu nákladů pro
+ *   příspěvek (§ 120e odst. 5), a proto za něj za ten měsíc nenáleží sleva na
+ *   pojistném (§ 7a odst. 3 písm. e) zákona č. 589/1992 Sb.).
  *
  * Výběr navazuje na měsíční hlášení: náhrada strany zaměstnance jde do 10341,
  * strany zaměstnavatele do 10340 (pokyny MPSV k vyplnění MH 1.4.13).
@@ -53,6 +57,7 @@ enum PayrollObstacleKind: string
     case WeatherInterruption = 'weather_interruption';
     case OtherEmployerObstacle = 'other_employer_obstacle';
     case PartialUnemployment = 'partial_unemployment';
+    case PartialWork = 'partial_work';
 
     public const EMPLOYEE_SIDE_TYPE = 'employee_obstacle';
     public const EMPLOYER_SIDE_TYPE = 'employer_obstacle';
@@ -64,7 +69,7 @@ enum PayrollObstacleKind: string
     {
         return match ($this) {
             self::Downtime, self::WeatherInterruption, self::OtherEmployerObstacle,
-            self::PartialUnemployment => self::EMPLOYER_SIDE_TYPE,
+            self::PartialUnemployment, self::PartialWork => self::EMPLOYER_SIDE_TYPE,
             default => self::EMPLOYEE_SIDE_TYPE,
         };
     }
@@ -101,13 +106,14 @@ enum PayrollObstacleKind: string
             self::WeatherInterruption => 'zp-207-b',
             self::OtherEmployerObstacle => 'zp-208',
             self::PartialUnemployment => 'zp-209',
+            self::PartialWork => 'zoz-120a-120e',
         };
     }
 
     public function defaultRateBasisPoints(): int
     {
         return match ($this) {
-            self::Downtime => 8_000,
+            self::Downtime, self::PartialWork => 8_000,
             self::WeatherInterruption, self::PartialUnemployment => 6_000,
             default => self::FULL_RATE_BASIS_POINTS,
         };

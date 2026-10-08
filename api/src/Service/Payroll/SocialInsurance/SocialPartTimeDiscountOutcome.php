@@ -11,7 +11,8 @@ namespace MyInvoice\Service\Payroll\SocialInsurance;
  * situace, kdy sleva „nenáleží", ačkoli je zaměstnanec v okruhu podle odst. 1
  * a nárok je doložený — překročený úhrn vyměřovacích základů, překročený
  * základ na hodinu, překročená odpracovaná doba, zaměstnanec s postižením
- * u zaměstnavatele na chráněném trhu práce. To není vada evidence
+ * u zaměstnavatele na chráněném trhu práce, zaměstnanec uvedený v přehledu
+ * nákladů pro příspěvek v době částečné práce. To není vada evidence
  * (ta končí `manual_review`), ale zákonný výsledek měsíce, a musí být
  * pojmenovaný: sleva, která tiše zmizela, vypadá jako chyba výpočtu.
  */
@@ -23,4 +24,5 @@ enum SocialPartTimeDiscountOutcome: string
     case WorkedHoursAboveLimit = 'worked_hours_above_limit';
     case ShorterWorkingTimeOutsideRange = 'shorter_working_time_outside_range';
     case ProtectedLaborMarket = 'protected_labor_market';
+    case PartialWorkContribution = 'partial_work_contribution';
 }

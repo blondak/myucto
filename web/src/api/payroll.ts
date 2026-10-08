@@ -336,6 +336,8 @@ export interface PayrollEmploymentTerms {
   jmhz_relationship_detail_code: string | null
   social_insurance_participation: PayrollInsuranceParticipation
   health_insurance_participation: PayrollInsuranceParticipation
+  // Člen družstva nebo SVJ: zaměstnancem pro ZP jen v měsíci se započitatelným příjmem.
+  health_association_member?: boolean
   tax_regime: PayrollTaxRegime
   // Nepovinné schválně: obrazovky, které pole nenabízejí, posílají podmínky bez
   // něj a server v takovém případě ponechá uloženou hodnotu (jinak by uložení

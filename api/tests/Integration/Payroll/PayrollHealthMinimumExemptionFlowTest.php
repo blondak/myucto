@@ -81,6 +81,54 @@ final class PayrollHealthMinimumExemptionFlowTest extends TestCase
         self::assertLessThan(self::FULL_MONTH_TOP_UP, $topUp);
     }
 
+    /**
+     * Od 1. 1. 2026 se minimum neuplatní u zaměstnance pečujícího o dítě do
+     * 7 let (zákon č. 289/2025 Sb.). Výjimka zadaná na kartě osoby od data,
+     * které potvrdila pojišťovna, projde uložením i mzdovým během.
+     */
+    public function testChildUnder7CareConfirmedByTheInsurerRemovesTheTopUp(): void
+    {
+        $fullMonth = $this->statutoryBody(25);
+        $this->addReduction($fullMonth['employee_id'], 'child_under_7_care', '2026-01-01');
+        self::assertSame(
+            0,
+            $this->runJuly($fullMonth, 'zp-min-child')['employee_minimum_top_up_minor_units'],
+        );
+    }
+
+    public function testChildUnder7CareIsRefusedBeforeTheLawKnowsIt(): void
+    {
+        $person = $this->statutoryBody(26);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('od 1. 1. 2026');
+        $this->addReduction($person['employee_id'], 'child_under_7_care', '2025-12-01');
+    }
+
+    /**
+     * Člen výboru SVJ s odměnou 3 000 Kč: od 1. 1. 2026 bez započitatelného
+     * příjmu není zaměstnancem pro ZP (§ 5 písm. a) bod 5 z. 48/1997 Sb.).
+     * Do přehledu o platbě se nezapočítá a doplatek do minima nevznikne.
+     * Bez příznaku by se počítal jako jednatel s doplatkem do minimální mzdy.
+     */
+    public function testOwnersAssociationMemberBelowCountingIncomeIsLeftOutOfTheOverview(): void
+    {
+        $person = $this->statutoryBody(27);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET health_association_member = 1
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+
+        $health = $this->runJuly($person, 'zp-svj-member', 300_000);
+
+        self::assertSame(0, $health['assessment_base_minor_units']);
+        self::assertSame(0, $health['employee_minimum_top_up_minor_units']);
+        $counted = 0;
+        foreach ($health['insurer_liabilities'] ?? [] as $liability) {
+            $counted += (int) $liability['person_count'];
+        }
+        self::assertSame(0, $counted);
+    }
+
     public function testVerifiedWorkingPensionerIsStateInsuredWithoutManualExemption(): void
     {
         $person = $this->createEmployment(
@@ -160,10 +208,10 @@ final class PayrollHealthMinimumExemptionFlowTest extends TestCase
      * @param array{employee_id:int,employment_id:int,name:string} $person
      * @return array<string,mixed>
      */
-    private function runJuly(array $person, string $key): array
+    private function runJuly(array $person, string $key, int $amountMinor = 450_000): array
     {
         $this->createApprovedTimeMonth($person['employment_id'], '2026-07');
-        $this->createApprovedInput($person, $this->componentId, 450_000, $key . '-base', '2026-07-01');
+        $this->createApprovedInput($person, $this->componentId, $amountMinor, $key . '-base', '2026-07-01');
         $run = $this->runs->createRun(
             $this->supplierId,
             '2026-07-01',

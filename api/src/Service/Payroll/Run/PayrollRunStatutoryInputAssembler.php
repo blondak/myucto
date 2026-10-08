@@ -757,6 +757,11 @@ final class PayrollRunStatutoryInputAssembler
                 // písm. d); ty se počítají jako dřív, tedy bez tohoto vyloučení.
                 employerOnProtectedLaborMarket:
                     ($term['employer_protected_labor_market'] ?? false) === true,
+                listedInPartialWorkOverview: self::partialWorkInPeriod(
+                    $snapshot['absences'] ?? null,
+                    $periodStart,
+                    $periodEnd,
+                ),
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -767,6 +772,37 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
+    }
+
+    /**
+     * Byl zaměstnanec v měsíci v částečné práci s příspěvkem? Překážka
+     * `partial_work` (§ 120a a násl. zákona o zaměstnanosti) znamená, že ho
+     * zaměstnavatel uvádí v měsíčním přehledu nákladů na náhrady mezd
+     * (§ 120e odst. 5), a za takový měsíc mu sleva podle § 7a odst. 3
+     * písm. e) zákona č. 589/1992 Sb. nenáleží.
+     */
+    private static function partialWorkInPeriod(
+        mixed $absences,
+        string $periodStart,
+        string $periodEnd,
+    ): bool {
+        if (!is_array($absences) || !array_is_list($absences)) {
+            return false;
+        }
+        foreach ($absences as $absence) {
+            if (is_array($absence)
+                && ($absence['absence_type'] ?? null) === PayrollObstacleKind::EMPLOYER_SIDE_TYPE
+                && ($absence['obstacle_kind'] ?? null) === PayrollObstacleKind::PartialWork->value
+                && is_string($absence['date_from'] ?? null)
+                && is_string($absence['date_to'] ?? null)
+                && $absence['date_from'] <= $periodEnd
+                && $absence['date_to'] >= $periodStart
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1370,6 +1406,9 @@ final class PayrollRunStatutoryInputAssembler
                 $employmentTo,
                 $attribution,
                 $components,
+                // Klíč nese jen vztah člena družstva nebo SVJ; starší revize
+                // a ostatní vztahy ho nemají a počítají se jako dřív.
+                associationMember: ($term['health_association_member'] ?? false) === true,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(

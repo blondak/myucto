@@ -163,6 +163,7 @@ final readonly class PayrollHealthNotificationRepository
                     employment.end_date,
                     employee.full_name,
                     terms.health_insurance_participation,
+                    terms.health_association_member,
                     COALESCE(terms.monthly_gross_minor, employment.monthly_gross_minor)
                         AS agreed_monthly_minor,
                     coverage.insurer_code
@@ -274,6 +275,15 @@ final readonly class PayrollHealthNotificationRepository
                              OR terms.effective_to >= ?)
                       ORDER BY terms.effective_from DESC
                       LIMIT 1) AS health_insurance_participation,
+                    (SELECT terms.health_association_member
+                       FROM payroll_employment_terms terms
+                      WHERE terms.supplier_id = employment.supplier_id
+                        AND terms.employment_id = employment.id
+                        AND terms.effective_from <= ?
+                        AND (terms.effective_to IS NULL
+                             OR terms.effective_to >= ?)
+                      ORDER BY terms.effective_from DESC
+                      LIMIT 1) AS health_association_member,
                     COALESCE(
                       (SELECT terms.monthly_gross_minor
                          FROM payroll_employment_terms terms
@@ -318,7 +328,7 @@ final readonly class PayrollHealthNotificationRepository
         // nevrátí zpět do `ended`, nemá vyrábět povinnosti. Doména je
         // rozlišit neumí — `HealthNotificationFacts` stav vztahu vůbec nenese.
         $statement->execute([
-            $to, $to, $to, $to, $to, $to, $supplierId, $to, $from,
+            $to, $to, $to, $to, $to, $to, $to, $to, $supplierId, $to, $from,
         ]);
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows) || $rows === []) {
@@ -366,7 +376,10 @@ final readonly class PayrollHealthNotificationRepository
             $employmentId = (int) $row['id'];
             $employmentIds[] = $employmentId;
             $endDates[$employmentId] = $this->nullableString($row['end_date']);
-            if (PayrollExpectedHealthParticipation::decidedByMonthlyIncome((string) $row['relation_type'])) {
+            if (PayrollExpectedHealthParticipation::decidedByMonthlyIncome(
+                (string) $row['relation_type'],
+                (int) ($row['health_association_member'] ?? 0) === 1,
+            )) {
                 $agreements[] = $employmentId;
             }
         }
@@ -383,11 +396,13 @@ final readonly class PayrollHealthNotificationRepository
             $relationType = (string) $row['relation_type'];
             $agreed = $row['agreed_monthly_minor'] === null ? null : (int) $row['agreed_monthly_minor'];
             $firstPeriod = $participatedSince[$employmentId] ?? null;
+            $associationMember = (int) ($row['health_association_member'] ?? 0) === 1;
             $predicted = PayrollExpectedHealthParticipation::expected(
                 $participation,
                 $relationType,
                 $agreed,
                 $threshold,
+                associationMember: $associationMember,
             );
             $participates = $predicted || PayrollExpectedHealthParticipation::expected(
                 $participation,
@@ -395,6 +410,7 @@ final readonly class PayrollHealthNotificationRepository
                 $agreed,
                 $threshold,
                 $firstPeriod !== null,
+                $associationMember,
             );
             $startDate = $this->nullableString($row['start_date']);
             $endDate = $endDates[$employmentId];
