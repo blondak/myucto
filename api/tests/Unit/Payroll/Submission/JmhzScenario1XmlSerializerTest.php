@@ -2310,6 +2310,43 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('<form:pojisteni>', $xml);
     }
 
+    /**
+     * Obsahová oprava a dílčí balíky staví formulář součásti stejnou cestou
+     * jako řádné hlášení, takže opravený formulář vězně i jiného příjmu je
+     * týž typ formuláře s typem O.
+     */
+    public function testContentCorrectionKeepsTheSpecialFormType(): void
+    {
+        foreach ([
+            'vezen' => $this->specialScenarioPayload('scenario_4', '1', '2'),
+            'jinyPrijem' => $this->uninsuredPayload('scenario_5', '11'),
+            'mezinarodniPronajemSily' => $this->uninsuredPayload('scenario_6', '12'),
+        ] as $body => $payload) {
+            $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+                $this->resolutionFor($payload),
+                JmhzSubmissionEnvelope::createForExistingSubmission(
+                    'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                    [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                    '2026-08-26T09:30:00Z',
+                    'MyÚčto.cz',
+                    '5.6.0',
+                ),
+                JmhzContentCorrectionPlan::create([
+                    JmhzContentCorrectionForm::amendAccepted(
+                        101,
+                        'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                        affectsSummary: false,
+                        affectsPvpoj: false,
+                    ),
+                ]),
+            );
+
+            self::assertStringContainsString("<form:{$body} ", $result['xml'], $body);
+            self::assertStringContainsString('<typFormulare>O</typFormulare>', $result['xml']);
+            self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $result['xml']);
+        }
+    }
+
     public function testInternationalHireWithChildCreditIsRefused(): void
     {
         $payload = $this->payloadWithChildCredit();
