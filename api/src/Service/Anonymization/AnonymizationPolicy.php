@@ -225,7 +225,7 @@ final class AnonymizationPolicy
         'gopay_clearings' => ['account_name' => 'party_name', 'clearing_id' => 'keep', 'currency' => 'keep', 'file_content' => 'blob_text', 'file_hash' => 'keep', 'file_name' => 'file_name', 'payout_issue_code' => 'keep', 'payout_issue_message' => 'text', 'pdf_content' => 'blob_pdf', 'pdf_hash' => 'keep', 'pdf_name' => 'file_name', 'variable_symbol' => 'symbol'],
         'gopay_movements' => ['account_movement_id' => 'keep', 'counterparty_name' => 'party_name', 'currency' => 'keep', 'external_id' => 'keep', 'issue_code' => 'keep', 'issue_message' => 'text', 'order_id' => 'keep', 'payment_channel' => 'keep', 'payment_session_id' => 'keep'],
         'gopay_settings' => ['currency' => 'keep', 'payout_account_number' => 'keep', 'payout_bank_code' => 'keep'],
-        'import_jobs' => ['current_step' => 'keep', 'last_error' => 'text', 'log_text' => 'text', 'params' => 'json', 'result_mime' => 'keep', 'result_name' => 'file_name', 'result_path' => 'file_path'],
+        'import_jobs' => ['current_step' => 'keep', 'last_error' => 'text', 'log_text' => 'text', 'params' => 'json', 'report' => 'json', 'result_mime' => 'keep', 'result_name' => 'file_name', 'result_path' => 'file_path'],
         'income_tax_finalization_overrides' => ['check_key' => 'keep', 'reason' => 'text'],
         'income_tax_return_snapshots' => ['business_errors' => 'json', 'snapshot_json' => 'json', 'source_manifest' => 'json', 'source_sha256' => 'keep', 'xml_content' => 'text', 'xml_sha256' => 'keep'],
         'income_tax_returns' => ['computed' => 'json', 'inputs' => 'json'],
