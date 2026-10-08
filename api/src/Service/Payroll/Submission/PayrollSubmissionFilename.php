@@ -73,6 +73,8 @@ final class PayrollSubmissionFilename
             'application/zip' => 'zip',
             'application/json' => 'json',
             'text/plain' => 'txt',
+            'image/png' => 'png',
+            'image/jpeg' => 'jpg',
             default => 'xml',
         };
     }

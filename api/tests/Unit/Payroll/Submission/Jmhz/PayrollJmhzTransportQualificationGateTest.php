@@ -8,6 +8,8 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -67,6 +69,9 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             // Stejný důvod jako u mazání pokusu: skutečná instance nad atrapou
             // spojení, aby kvůli testu nemusel repozitář do seznamu bypass-finals.
             new PayrollImportedJmhzProtocolRepository($this->createStub(Connection::class)),
+            new PayrollSubmissionManualAcceptanceReader(
+                new PayrollSubmissionManualAcceptanceRepository($this->createStub(Connection::class)),
+            ),
         );
 
         $response = $action->send(
@@ -111,6 +116,9 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             $this->createStub(ActivityLogger::class),
             $this->createStub(IpMatcher::class),
             new PayrollImportedJmhzProtocolRepository($this->createStub(Connection::class)),
+            new PayrollSubmissionManualAcceptanceReader(
+                new PayrollSubmissionManualAcceptanceRepository($this->createStub(Connection::class)),
+            ),
         );
 
         $response = $action->send($request, new Response(), ['submissionId' => '42']);

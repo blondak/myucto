@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,6 +30,7 @@ final class PayrollSubmissionOverviewAction
         private readonly PayrollSubmissionSettlementPolicy $settlements,
         private readonly PayrollDispatchCapabilityCatalog $capabilities,
         private readonly PayrollObligationSubjectResolver $subjects,
+        private readonly PayrollSubmissionManualAcceptanceReader $manualAcceptances,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -161,6 +163,19 @@ final class PayrollSubmissionOverviewAction
         // k vztahu, účtárna, pojišťovna); zbytek zůstává `null`, ne hádaný.
         $subjects = $this->subjects->resolve($supplierId, $items);
 
+        // Ruční potvrzení přijetí jde k řádku zvlášť od stavu: „přijato" podle
+        // člověka se nesmí v seznamu tvářit jako přijetí podle protokolu.
+        $manualAcceptances = $this->manualAcceptances->summaries(
+            $supplierId,
+            $environment,
+            array_values(array_filter(array_map(
+                static fn (array $row): int => (int) (
+                    $row['latest_submission']['id'] ?? 0
+                ),
+                $items,
+            ))),
+        );
+
         // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
         // u řádku vidí, ne kvůli souhrnu.
         foreach ($items as $index => &$item) {
@@ -173,6 +188,9 @@ final class PayrollSubmissionOverviewAction
             $item['subject_label'] = $subjects[$index]['subject_label'];
             $item['subject_employee_id'] = $subjects[$index]['subject_employee_id'];
             $item['settlement'] = $this->settlement($item, $outboxes);
+            $item['manual_acceptance'] = $manualAcceptances[
+                (int) ($item['latest_submission']['id'] ?? 0)
+            ] ?? null;
             // Kanál, kterým poslední podání SKUTEČNĚ odešlo. `preferred_channel`
             // povinnosti je jen plán z doby založení (u PPZ „portál pojišťovny"),
             // a vedle zprávy odeslané datovkou by tvrdil něco jiného.

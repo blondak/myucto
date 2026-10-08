@@ -57,6 +57,29 @@ final class PayrollSubmissionStateMachine
         'ready',
     ];
 
+    /**
+     * Stavy, ze kterých smí účetní podání RUČNĚ označit za přijaté, protože
+     * přijetí vidí v aplikaci úřadu a ověřený protokol nedorazil
+     * ({@see PayrollSubmissionService::acceptManually()}).
+     *
+     * Do {@see self::TRANSITIONS} se tyhle hrany schválně nepřidávají: obecný
+     * přechod by pak pustil `accepted` bez protokolu i bez záznamu, kdo to
+     * tvrdí. Chybí tu stavy před odesláním (podání na portálu mimo aplikaci
+     * má vlastní cestu {@see PayrollSubmissionSettlementService::settleAsFiledExternally()})
+     * a stavy, o kterých už je rozhodnuto (`accepted`, `superseded`,
+     * `cancelled_in_time`).
+     *
+     * @var list<string>
+     */
+    public const MANUALLY_ACCEPTABLE_STATUSES = [
+        'submitted',
+        'processing',
+        'waiting_for_identity',
+        'partially_accepted',
+        'rejected',
+        'correction_required',
+    ];
+
     /** @var array<string,list<string>> */
     private const TRANSITIONS = [
         'draft' => ['validated', 'cancelled_in_time'],

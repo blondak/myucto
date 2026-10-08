@@ -470,6 +470,7 @@ final class AnonymizationPolicy
         'payroll_submission_deadlines' => ['ruleset_hash' => 'keep', 'ruleset_id' => 'keep', 'trigger_event_hash' => 'keep'],
         'payroll_submission_inbox_items' => ['snooze_reason' => 'text', 'source_key_hash' => 'keep'],
         'payroll_submission_issues' => ['details_ciphertext' => 'wipe', 'details_hash' => 'keep', 'entity_reference' => 'text', 'entity_type' => 'keep', 'issue_code' => 'keep'],
+        'payroll_submission_manual_acceptances' => ['idempotency_key_hash' => 'keep', 'note' => 'text', 'request_fingerprint' => 'keep'],
         'payroll_submission_parts' => ['agenda_code' => 'keep', 'part_reference' => 'text', 'source_entity_reference' => 'text', 'source_entity_type' => 'keep', 'source_snapshot_hash' => 'keep', 'subject_reference' => 'text'],
         'payroll_submission_receipts' => ['correlation_reference' => 'keep', 'idempotency_key_hash' => 'keep', 'protocol_code' => 'keep', 'receipt_reference' => 'keep', 'request_fingerprint' => 'keep', 'summary_hash' => 'keep'],
         'payroll_submission_signing_profiles' => ['cssz_registered_serial' => 'keep'],
