@@ -308,6 +308,17 @@ nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje p
 chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **Ke kterému
 dni** určuje, který měsíc se kontroluje.
 
+**Sdělení zdravotní pojišťovny zaměstnancem.** Zaměstnanec je povinen sdělit
+zaměstnavateli, u které zdravotní pojišťovny je pojištěn, při nástupu a změnu
+do osmi dnů; zaměstnavatel přijetí sdělení písemně potvrdí (§ 12 písm. b)
+zákona č. 48/1997 Sb.). Pod sekcemi zdravotního pojištění je u každé zapsané
+pojišťovny blok **Sdělení zdravotní pojišťovny zaměstnancem**: zapište den,
+kdy zaměstnanec pojišťovnu sdělil, a den, kdy jste to potvrdili, a tlačítkem
+**Potvrzení (PDF)** si vytiskněte písemné potvrzení k podpisu. Potvrzení lze
+vytvořit až po zápisu dne sdělení; nese den potvrzení, a není-li zapsaný, dnešní
+datum. Obě data se ukládají samostatně tlačítkem **Uložit sdělení**, ne
+společným uložením evidence, a obsah hromadného oznámení se jimi nemění.
+
 Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc zadaná,
 platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
 do minimálního vyměřovacího základu hradí zaměstnanec. Výjimkou je měsíc se

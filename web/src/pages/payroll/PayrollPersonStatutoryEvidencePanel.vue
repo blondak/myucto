@@ -40,6 +40,7 @@ import {
 import DateInput from '@/components/ui/DateInput.vue'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
+import PayrollHealthInsurerNoticePanel from '@/components/payroll/PayrollHealthInsurerNoticePanel.vue'
 import { usePersonCardSaveSection } from './personCardSave'
 
 /**
@@ -1496,6 +1497,18 @@ onMounted(() => {
                 </div>
               </section>
             </div>
+            <!--
+              Sdělení pojišťovny zaměstnancem a potvrzení zaměstnavatele
+              (§ 12 písm. b) zákona č. 48/1997 Sb.) jsou údaje věty historie
+              pojišťovny, ale ukládají se vlastní cestou - nejsou součástí
+              editoru výše ani jeho společného Uložit.
+            -->
+            <PayrollHealthInsurerNoticePanel
+              v-if="group.key === 'health'"
+              class="mt-3"
+              :person-id="personId"
+              :can-write="canWrite"
+            />
           </div>
         </div>
 

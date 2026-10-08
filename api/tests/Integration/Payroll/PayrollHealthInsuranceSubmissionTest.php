@@ -940,10 +940,19 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
     }
 
-    public function testMissingBusinessIdStopsTheSubmissionWithAnActionableReason(): void
+    /**
+     * Bez IČO a bez čísla plátce u pojišťovny podání nevznikne a hláška řekne,
+     * že místo IČO stačí zvláštní číslo plátce od VZP.
+     */
+    public function testMissingBusinessIdWithoutPayerNumberStopsTheSubmissionWithAnActionableReason(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE supplier SET ic = "" WHERE id = ?',
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = NULL, row_version = row_version + 1
+              WHERE supplier_id = ?',
         )->execute([$this->supplierId]);
 
         try {
@@ -953,10 +962,64 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 $this->revisionId,
                 '111',
             );
-            self::fail('Bez IČO nelze sestavit číslo plátce.');
+            self::fail('Bez IČO a bez čísla plátce nelze číslo plátce sestavit.');
         } catch (HealthNotificationException $e) {
             self::assertSame('zp_payer_business_id_missing', $e->errorCode);
+            self::assertStringContainsString('NNNNNNNN99', $e->getMessage());
+            self::assertStringContainsString('VZP', $e->getMessage());
         }
+    }
+
+    /**
+     * PREHLED-ZP-ICP-4: zaměstnavatel bez IČO (nebo s víc než 99 účtárnami)
+     * má zvláštní číslo plátce NNNNNNNN99 přidělené VZP. Zadá se do VS účtu
+     * pojišťovny a podání musí projít, ne skončit chybou o chybějícím IČO.
+     */
+    public function testEmployerWithoutBusinessIdUsesTheSpecialPayerNumberFromTheAccount(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET ic = "" WHERE id = ?',
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = "7654321099", row_version = row_version + 1
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $result = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            (int) $result['artifact_id'],
+        );
+
+        self::assertStringContainsString(
+            '<identifikacniCisloPlatce>7654321099</identifikacniCisloPlatce>',
+            $xml,
+        );
+    }
+
+    public function testBulkNotificationOfEmployerWithoutBusinessIdUsesTheSpecialPayerNumber(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET ic = "" WHERE id = ?',
+        )->execute([$this->supplierId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = "7654321099", row_version = row_version + 1
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        $artifact = $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+
+        self::assertStringContainsString(
+            '<identifikacniCisloPlatce>7654321099</identifikacniCisloPlatce>',
+            $artifact['bytes'],
+        );
     }
 
     public function testMissingInsurerPayerNumberStopsTheSubmission(): void
@@ -1245,6 +1308,119 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             '<cisloPojistence>Z12101982</cisloPojistence>',
             $artifact['bytes'],
         );
+    }
+
+    /**
+     * HOZ-AD-6 / HOZ-LEG-5: trvalý pobyt zaměstnance sděluje zaměstnavatel ze
+     * zákona (§ 10 zákona č. 48/1997 Sb.), i když ho schéma činí volitelným.
+     */
+    public function testBulkNotificationCarriesTheResidenceAddressOfTheEmployee(): void
+    {
+        $this->residenceAddress('Krátká 3', '602 00', 'Brno');
+
+        $artifact = $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+
+        self::assertStringContainsString('<ulice>Krátká 3</ulice>', $artifact['bytes']);
+        self::assertStringContainsString('<obec>Brno</obec>', $artifact['bytes']);
+        self::assertStringContainsString('<psc>60200</psc>', $artifact['bytes']);
+    }
+
+    public function testBulkNotificationWithoutResidenceAddressStillGoesOutWithoutIt(): void
+    {
+        $artifact = $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+
+        self::assertStringNotContainsString('<adresa>', $artifact['bytes']);
+        self::assertStringContainsString('<kodzmeny>P</kodzmeny>', $artifact['bytes']);
+    }
+
+    public function testResidenceAddressAbroadIsNotSentIntoTheCzechAddressElement(): void
+    {
+        $this->residenceAddress('Hauptstrasse 1', '10115', 'Berlin', 'DE');
+
+        $artifact = $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+
+        self::assertStringNotContainsString('<adresa>', $artifact['bytes']);
+    }
+
+    public function testInvalidResidenceAddressNamesThePersonAndWhereToFixIt(): void
+    {
+        $this->residenceAddress('Krátká 3', 'bez PSČ', 'Brno');
+
+        try {
+            $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '111');
+            self::fail('Adresa s neplatným PSČ se nesmí poslat.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_postal_code_invalid', $e->errorCode);
+            self::assertStringContainsString('Jana Nováková', $e->getMessage());
+            self::assertStringContainsString('/payroll/people?person=' . $this->employeeId, $e->getMessage());
+        }
+    }
+
+    /**
+     * HOZ-KZ-5: u ZP MV ČR (211) se kódy E a C nepoužívají; zaměstnanec musí
+     * být předem zaregistrovaný a nástup se hlásí kódem P nebo A.
+     */
+    public function testZpMvNeverGetsFirstRegistrationCodesAndAsksForRegistration(): void
+    {
+        $this->moveToInsurer211();
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "SK", sex = "male", birth_date = "1980-07-05"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'DELETE FROM payroll_person_identifiers WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        try {
+            $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '211');
+            self::fail('Pro ZP MV ČR nelze nástup cizince bez čísla pojištěnce ohlásit kódem E.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_mv_registration_required', $e->errorCode);
+            self::assertStringContainsString('ZP MV ČR', $e->getMessage());
+        }
+    }
+
+    public function testZpMvStartOfRegisteredEuCitizenUsesCodeA(): void
+    {
+        $this->moveToInsurer211();
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET citizenship_country_code = "SK", sex = "male", birth_date = "1980-07-05"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($pdo, $this->employeeId, 'health_insurance_number', '1234567891');
+
+        $artifact = $this->service->bulkNotificationDownload($this->supplierId, '2026-03', '211');
+
+        self::assertStringContainsString('<kodzmeny>A</kodzmeny>', $artifact['bytes']);
+        self::assertStringContainsString('<kodZdravotniPojistovny>211</kodZdravotniPojistovny>', $artifact['bytes']);
+    }
+
+    private function residenceAddress(
+        string $streetLine,
+        string $postalCode,
+        string $city,
+        string $country = 'CZ',
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", ?, ?, ?, ?, "2020-01-01")',
+        )->execute([$this->supplierId, $this->employeeId, $streetLine, $city, $postalCode, $country]);
+    }
+
+    private function moveToInsurer211(): void
+    {
+        $this->healthInsurerAccount($this->db->pdo(), '211');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_health_coverage_history
+                SET insurer_code = "211"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
     }
 
     public function testBulkNotificationFailsClosedWithoutIdentityFirstAndLastName(): void
@@ -1992,7 +2168,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         )->execute([$this->supplierId, $employeeId]);
     }
 
-    private function healthInsurerAccount(PDO $pdo): void
+    private function healthInsurerAccount(PDO $pdo, string $insurerCode = '111'): void
     {
         $actorId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')
             ->fetchColumn();
@@ -2002,8 +2178,8 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_institutions
                 (supplier_id, institution_type, institution_code)
-             VALUES (?, "health_insurer", "111")',
-        )->execute([$this->supplierId]);
+             VALUES (?, "health_insurer", ?)',
+        )->execute([$this->supplierId, $insurerCode]);
         $institutionId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_institution_accounts
@@ -2019,7 +2195,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         )->execute([
             $this->supplierId,
             $institutionId,
-            hash('sha256', 'synthetic-vzp-account', true),
+            hash('sha256', 'synthetic-vzp-account-' . $insurerCode, true),
             $actorId,
             $actorId,
             $actorId,

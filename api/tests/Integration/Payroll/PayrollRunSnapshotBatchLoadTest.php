@@ -274,6 +274,65 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
     }
 
     /**
+     * OZUSPOJ-formularOzuspoj-6: snímek nese odvozený výrok o věkové hranici
+     * důvodu slevy, ne datum narození (snímek se ukládá nešifrovaně).
+     */
+    public function testSnapshotCarriesTheAgeConditionVerdictButNotTheBirthDate(): void
+    {
+        $this->seed(1);
+        $employeeId = (int) $this->scalar(
+            'SELECT employee_id FROM payroll_employments WHERE supplier_id = ? ORDER BY id LIMIT 1',
+            [$this->supplierId],
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET social_part_time_discount_reason = "age_55_plus"
+              WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $verdicts = [];
+        foreach ([['1965-01-01', 'met'], ['1995-01-01', 'not_met'], [null, 'unknown']] as [$birthDate, $expected]) {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_employees SET birth_date = ? WHERE supplier_id = ? AND id = ?'
+            )->execute([$birthDate, $this->supplierId, $employeeId]);
+            $snapshot = $this->build();
+            $term = $snapshot->data['people'][0]['employments'][0]['term'];
+            $verdicts[$expected] = $term['social_part_time_discount_age_condition'] ?? 'missing';
+            if ($birthDate !== null) {
+                self::assertStringNotContainsString(
+                    $birthDate,
+                    $snapshot->json,
+                    'Datum narození se nesmí dostat do snímku.',
+                );
+            }
+        }
+
+        self::assertSame(['met' => 'met', 'not_met' => 'not_met', 'unknown' => 'unknown'], $verdicts);
+    }
+
+    /**
+     * OZUSPOJ-LAW-7a-3: příznak zaměstnavatele na chráněném trhu práce
+     * (§ 7a odst. 3 písm. d) se zmrazí do snímku z profilu REGZEL; bez profilu
+     * je „ne".
+     */
+    public function testSnapshotCarriesTheProtectedLaborMarketFlagOfTheEmployer(): void
+    {
+        $this->seed(1);
+        $flag = fn (): bool => $this->build()
+            ->data['people'][0]['employments'][0]['term']['employer_protected_labor_market'];
+
+        self::assertFalse($flag());
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_regzel_employer_profiles
+                (supplier_id, social_enterprise, employment_agency, protected_labor_market,
+                 evidence_confirmed_by)
+             VALUES (?, 0, 0, 1, ?)'
+        )->execute([$this->supplierId, $this->actorId]);
+
+        self::assertTrue($flag());
+    }
+
+    /**
      * Dávkové načtení nesmí přiřadit řádky jiné osobě.
      *
      * Tohle je ta chyba, kterou by počet dotazů ani stabilita otisku neodhalily:

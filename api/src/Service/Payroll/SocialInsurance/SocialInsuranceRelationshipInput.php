@@ -44,6 +44,12 @@ final readonly class SocialInsuranceRelationshipInput
         public ?int $partTimeDiscountEmploymentDays = null,
         public ?int $partTimeDiscountMonthDays = null,
         public ?int $agreedWeeklyWorkingMillihours = null,
+        /**
+         * Zaměstnavatel je uznaný jako zaměstnavatel na chráněném trhu práce
+         * (§ 78 zákona o zaměstnanosti). Podle § 7a odst. 3 písm. d) mu sleva
+         * za zaměstnance s postižením (§ 7a odst. 1 písm. f) nenáleží.
+         */
+        public bool $employerOnProtectedLaborMarket = false,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Social insurance relationship ID is not canonical.');

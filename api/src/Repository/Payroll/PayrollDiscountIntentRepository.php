@@ -95,6 +95,7 @@ final readonly class PayrollDiscountIntentRepository
                     employment.actual_start_date,
                     employment.end_date,
                     employee.full_name,
+                    employee.birth_date AS employee_birth_date,
                     terms.social_part_time_discount_reason,
                     terms.social_part_time_discount_evidence,
                     supplier.company_name AS employer_name,

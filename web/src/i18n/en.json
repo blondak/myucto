@@ -10514,6 +10514,28 @@
         "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
       }
     },
+    "healthInsurerNotice": {
+      "title": "Health insurer notice from the employee",
+      "intro": "The employee must tell the employer which health insurer they are insured with on starting work and within eight days of any change. The employer confirms receipt in writing (Section 12(b) of Act No. 48/1997 Coll.). Record the notice date and the confirmation date here and print the confirmation. The content of the bulk notification is not affected.",
+      "empty": "The person has no health insurer recorded yet.",
+      "effectiveFrom": "Insured with the insurer from {day}",
+      "notifiedOn": "Employee notified the insurer on",
+      "confirmedOn": "Employer confirmed receipt on",
+      "saved": "The notice has been recorded.",
+      "actions": {
+        "save": "Save notice",
+        "confirmation": "Confirmation (PDF)"
+      },
+      "hints": {
+        "readOnly": "You do not have permission to edit the person's statutory evidence.",
+        "noticeRequired": "First record and save the date the employee notified the insurer."
+      },
+      "errors": {
+        "loadFailed": "The insurer notices could not be loaded.",
+        "saveFailed": "The notice could not be saved.",
+        "downloadFailed": "The confirmation could not be created."
+      }
+    },
     "discountIntents": {
       "title": "Insurance discount intent",
       "intro": "The employer discount for short working hours is reported in the monthly report, but the entitlement comes from a different filing: the notification of intent (OZUSPOJ). Without it the Czech Social Security Administration will not recognise the discount and the deducted premium becomes a debt. The discount is applied only once the intent carries the delivery date from the CSSA protocol.",
@@ -10526,6 +10548,7 @@
       "acceptedOnInput": "Delivery date from the protocol",
       "endOnInput": "Last day of application",
       "rejectionReason": "Rejection reason from the protocol",
+      "informedOnInput": "Date the employee was informed in writing",
       "dueOn": "Notify no later than",
       "employeeInformedOn": "Employee informed in writing",
       "employeeInformedHint": "Section 23d(2) requires informing the employee in writing before the discount is first applied.",
@@ -10540,6 +10563,7 @@
       "accepted": "Acceptance recorded; the discount applies from the given date.",
       "rejected": "Rejection recorded. The discount will not be applied.",
       "endRequested": "End date recorded. Prepare the end notification.",
+      "informedRecorded": "The date the employee was informed has been recorded.",
       "ended": "The end of the discount application has been recorded.",
       "actions": {
         "create": "Create intent",
@@ -10550,6 +10574,7 @@
         "end": "Set end date",
         "prepareEnd": "Prepare end notification",
         "confirmEnd": "Record the end",
+        "recordInformed": "Record information given",
         "cancel": "Prepare cancellation"
       },
       "hints": {
@@ -10557,7 +10582,8 @@
         "readOnly": "You do not have write access to payroll submissions.",
         "acceptedOnRequired": "First copy the delivery date from the CSSA protocol - the entitlement rests on it.",
         "rejectionReasonRequired": "First copy the rejection reason from the CSSA protocol.",
-        "endOnRequired": "First enter the last day the discount is applied."
+        "endOnRequired": "First enter the last day the discount is applied.",
+        "informedOnRequired": "Enter the date the employee was informed in writing first."
       },
       "statuses": {
         "draft": "Draft",
@@ -11765,6 +11791,7 @@
       "registration_a3_completion_variant_unsupported": "The application prepares the completion of data only for ordinary employments (OST variant). For this activity type file it via the ČSSZ portal.",
       "registration_event_relationship_detail_invalid": "The relationship detail does not match the activity type. Correct it in the employment terms.",
       "zp_first_registration_identity_missing": "The first registration of a foreigner without an assigned insurance number is reported with sex and date of birth. Add them on the person card.",
+      "zp_mv_registration_required": "ZP MV ČR (211) does not use codes E and C. The employee must first be registered with ZP MV ČR and the assigned insured number copied onto the person card; only then can the start be reported with code P or A.",
       "hzupn_incapacity_end_missing": "The notice of ending incapacity for work can only be filed after it has ended (section 97(3)). Fill in the end date of the incapacity.",
       "hzupn_incapacity_period_invalid": "The end date of the incapacity for work cannot be earlier than its start date.",
       "hzupn_issue_date_missing": "The notification must have an issue date. Fill it in on the case.",
@@ -11945,7 +11972,7 @@
       "zp_payer_account_missing": "The company has no payment account on record for that date. Create one under Payroll, Employer settings, Institution payment accounts (type Health insurer), and enter the ten-digit payer number the insurer assigned you at registration in the employer VS field.",
       "zp_payer_accounting_unit_invalid": "The payer's accounting unit number must have exactly two digits.",
       "zp_payer_business_id_invalid": "The payer's company ID (IČO) must have exactly eight digits.",
-      "zp_payer_business_id_missing": "The company is missing its company ID (IČO). Fill it in under company settings - the payer identification number cannot be built without it.",
+      "zp_payer_business_id_missing": "The company has no company ID (IČO) and no payer number is recorded for the insurer. Fill in the IČO in company settings or, if the company has no IČO or more than 99 payroll units, enter the special payer number NNNNNNNN99 assigned by VZP in the employer VS field of the insurer payment account.",
       "zp_payer_number_invalid": "The payer's identification number must have exactly ten digits - an eight-digit company ID plus a two-digit accounting unit number.",
       "zp_payer_number_missing": "The payment account effective on that date is missing the ten-digit payer number. Fill it in under Payroll, Employer settings, Institution payment accounts, in the employer VS field - the insurer assigned it at registration and it has exactly ten digits.",
       "zp_pdf_artifact_mismatch": "The stored PDF's fingerprint does not match the frozen statement. Try preparing the submission again.",

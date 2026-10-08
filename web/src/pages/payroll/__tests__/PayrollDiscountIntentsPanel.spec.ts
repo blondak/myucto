@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   requestEnd: vi.fn(),
   recordReceipt: vi.fn(),
+  recordEmployeeInformed: vi.fn(),
   person: vi.fn(),
   canWrite: vi.fn(() => true),
 }))
@@ -20,6 +21,7 @@ vi.mock('@/api/payrollDiscountIntents', () => ({
     prepare: m.prepare,
     requestEnd: m.requestEnd,
     recordReceipt: m.recordReceipt,
+    recordEmployeeInformed: m.recordEmployeeInformed,
   },
 }))
 
@@ -252,6 +254,45 @@ describe('PayrollDiscountIntentsPanel', () => {
     expect(card).toContain('01. 09. 2026')
     expect(card).toContain('20. 10. 2026')
     expect(card).not.toContain('2026-09-01')
+  })
+
+  /**
+   * § 23d odst. 2: poučení zaměstnance před prvním uplatněním slevy se dá
+   * zapsat i dodatečně, jinak by upozornění v mzdovém běhu nešlo odstranit.
+   */
+  it('dodatečně zapíše den poučení zaměstnance', async () => {
+    m.list.mockResolvedValue([intent({ status: 'accepted', accepted_on: '2026-08-20' })])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    const action = () => wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.discountIntents.actions.recordInformed'))
+    expect(action()?.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="discount-intent-informed-on-1"]').setValue('2026-08-25')
+    await flushPromises()
+    expect(action()?.attributes('disabled')).toBeUndefined()
+
+    await action()?.trigger('click')
+    await flushPromises()
+
+    expect(m.recordEmployeeInformed).toHaveBeenCalledWith(1, 'production', '2026-08-25')
+  })
+
+  it('u záměru s doloženým poučením a u převzatého záměru zápis poučení nenabízí', async () => {
+    m.list.mockResolvedValue([
+      intent({ id: 1, employee_informed_on: '2026-08-01' }),
+      intent({ id: 2, predecessor_source: 'ozuspoj_xml', status: 'accepted' }),
+    ])
+
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="discount-intent-informed-on-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="discount-intent-informed-on-2"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="discount-intent-informed-1"]').text())
+      .toContain('01. 08. 2026')
   })
 
   /** Rozbalené XML se nedalo zavřít a překrývalo zbytek karty. */

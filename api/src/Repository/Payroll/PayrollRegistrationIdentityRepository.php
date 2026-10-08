@@ -596,6 +596,30 @@ final class PayrollRegistrationIdentityRepository
         ];
     }
 
+    /**
+     * Adresa trvalého pobytu osoby (u cizince adresa místa pobytu) ke dni
+     * `$onDate`; `null`, když ji karta osoby k tomu dni nemá.
+     *
+     * @return array{street_line:string,city:string,postal_code:string,country_code:string}|null
+     */
+    public function residenceAddressAt(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $address = $this->a1DraftAddress($supplierId, $employeeId, 'residence', $onDate);
+        if ($address === null) {
+            return null;
+        }
+
+        return [
+            'street_line' => (string) $address['street_line'],
+            'city' => (string) $address['city'],
+            'postal_code' => (string) $address['postal_code'],
+            'country_code' => (string) $address['country_code'],
+        ];
+    }
+
     /** @return array<string,mixed>|null */
     private function a1DraftAddress(
         int $supplierId,

@@ -40,6 +40,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
@@ -752,6 +753,10 @@ final class PayrollRunStatutoryInputAssembler
                 ),
                 partTimeDiscountMonthDays: $this->calendarDaysInMonth($periodStart, $periodEnd),
                 agreedWeeklyWorkingMillihours: $this->weeklyWorkingMillihours($term),
+                // Klíč chybí ve zmrazených revizích starších než posouzení § 7a odst. 3
+                // písm. d); ty se počítají jako dřív, tedy bez tohoto vyloučení.
+                employerOnProtectedLaborMarket:
+                    ($term['employer_protected_labor_market'] ?? false) === true,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -881,6 +886,23 @@ final class PayrollRunStatutoryInputAssembler
             $employmentTo,
         );
         if (!$verdict->allowsDiscount()) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        // Věková hranice důvodu (§ 7a odst. 1 písm. a, d, g): snímek ji nese
+        // jako odvozený výrok. Starší revize klíč nemají a posuzují se tak,
+        // jak se z nich počítalo; revize s klíčem, kde věk nevychází nebo ho
+        // nejde ověřit, slevu neuplatní (sleva je výhoda zaměstnavatele a
+        // přeplacená je podle § 7c odst. 3 dluh).
+        if (array_key_exists('social_part_time_discount_age_condition', $term)
+            && !in_array(
+                $term['social_part_time_discount_age_condition'],
+                [
+                    SocialPartTimeDiscountAgeCondition::MET,
+                    SocialPartTimeDiscountAgeCondition::NOT_APPLICABLE,
+                ],
+                true,
+            )
+        ) {
             return [SocialDiscountEvidence::Unverified, null, null];
         }
 

@@ -524,6 +524,90 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
     }
 
     /**
+     * OZUSPOJ-formularOzuspoj-6: důvod slevy s věkovou hranicí se proti datu
+     * narození nikde neověřoval. Snímek teď nese odvozený výrok a nesplněná
+     * nebo neověřitelná podmínka slevu zavře, i když je záměr přijatý.
+     *
+     * @return array<string,mixed>
+     */
+    private function acceptedIntentSnapshot(?string $ageCondition, bool $withKey = true): array
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = null;
+        $term['social_part_time_discount_notified_on'] = null;
+        $term['social_part_time_discount_intent'] = [
+            'status' => 'accepted',
+            'intent_from' => '2026-01-01',
+            'intent_to' => null,
+            'accepted_on' => '2025-12-15',
+        ];
+        if ($withKey) {
+            $term['social_part_time_discount_age_condition'] = $ageCondition;
+        }
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] =
+            $this->workMonth(90_000, 8_000);
+
+        return $snapshot;
+    }
+
+    public function testAgeConditionNotMetClosesTheDiscountEvenWithAnAcceptedIntent(): void
+    {
+        foreach (['not_met', 'unknown'] as $condition) {
+            $bundle = (new PayrollRunStatutoryInputAssembler())
+                ->assemble($this->acceptedIntentSnapshot($condition));
+
+            self::assertSame(
+                SocialDiscountEvidence::Unverified,
+                $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+                $condition,
+            );
+        }
+    }
+
+    public function testProtectedLaborMarketFlagReachesTheRelationshipInput(): void
+    {
+        $snapshot = $this->acceptedIntentSnapshot('not_applicable');
+        $snapshot['people'][0]['employments'][0]['term']['social_part_time_discount_reason'] = 'disabled_person';
+        $snapshot['people'][0]['employments'][0]['term']['employer_protected_labor_market'] = true;
+
+        $relationship = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($snapshot)->socialInsurance?->people[0]->relationships[0];
+        self::assertTrue($relationship?->employerOnProtectedLaborMarket);
+
+        unset($snapshot['people'][0]['employments'][0]['term']['employer_protected_labor_market']);
+        $relationship = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($snapshot)->socialInsurance?->people[0]->relationships[0];
+        self::assertFalse($relationship?->employerOnProtectedLaborMarket);
+    }
+
+    public function testAgeConditionMetKeepsTheDiscount(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($this->acceptedIntentSnapshot('met'));
+
+        self::assertSame(
+            SocialDiscountEvidence::Verified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /** Starší zmrazená revize klíč nemá a posuzuje se tak, jak se z ní počítalo. */
+    public function testSnapshotWithoutTheAgeKeyKeepsThePreviousAssessment(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())
+            ->assemble($this->acceptedIntentSnapshot(null, withKey: false));
+
+        self::assertSame(
+            SocialDiscountEvidence::Verified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /**
      * Záměr ukončený uprostřed vykazovaného měsíce ho už nepokrývá
      * (§ 7b odst. 4 a kontrola 291 bod 1).
      */

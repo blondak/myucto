@@ -78,6 +78,52 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertSame('/payroll/people?person=11&employment=22&panel=employment_terms&field=social_part_time_discount_reason', $transition[0]->remediationPath);
     }
 
+    /** OZUSPOJ-formularOzuspoj-6: věková hranice důvodu slevy proti datu narození. */
+    public function testAgeBoundDiscountReasonWarnsWhenTheBirthDateContradictsOrIsMissing(): void
+    {
+        $codes = static fn (array $row): array => array_map(
+            static fn ($item) => $item->code,
+            self::invoke(PayrollRunSnapshotBuilder::class, 'discountValidations', [
+                $row + ['social_part_time_discount_reason' => 'age_55_plus', 'start_date' => '2020-01-01', 'actual_start_date' => null, 'end_date' => null],
+                null, 22, 11, '2026-06-01',
+            ]),
+        );
+
+        self::assertContains('part_time_discount_age_condition', $codes(['employee_birth_date' => '1990-01-01']));
+        self::assertContains('part_time_discount_age_condition', $codes(['employee_birth_date' => null]));
+        self::assertNotContains('part_time_discount_age_condition', $codes(['employee_birth_date' => '1960-01-01']));
+    }
+
+    /** OZUSPOJ-formularOzuspoj-5: § 23d odst. 2, poučení zaměstnance před prvním uplatněním slevy. */
+    public function testAcceptedIntentWithoutEmployeeInformationWarns(): void
+    {
+        $intent = ['status' => 'accepted', 'intent_from' => '2026-05-01', 'intent_to' => null, 'accepted_on' => '2026-04-20', 'discount_reason' => 'age_55'];
+        $validations = self::invoke(PayrollRunSnapshotBuilder::class, 'discountValidations', [
+            ['social_part_time_discount_reason' => 'age_55'], $intent, 22, 11, '2026-06-01',
+            ['intent_from' => '2026-05-01', 'employee_informed_on' => null, 'predecessor_source' => null],
+        ]);
+        $codes = array_map(static fn ($item) => $item->code, $validations);
+
+        self::assertContains('part_time_discount_employee_not_informed', $codes);
+    }
+
+    public function testEmployeeInformedAfterTheFirstMonthWarnsAndInTimeDoesNot(): void
+    {
+        $intent = ['status' => 'accepted', 'intent_from' => '2026-05-01', 'intent_to' => null, 'accepted_on' => '2026-04-20', 'discount_reason' => 'age_55'];
+        $run = static fn (?string $informedOn, ?string $predecessor = null): array => array_map(
+            static fn ($item) => $item->code,
+            self::invoke(PayrollRunSnapshotBuilder::class, 'discountValidations', [
+                ['social_part_time_discount_reason' => 'age_55'], $intent, 22, 11, '2026-06-01',
+                ['intent_from' => '2026-05-01', 'employee_informed_on' => $informedOn, 'predecessor_source' => $predecessor],
+            ]),
+        );
+
+        self::assertContains('part_time_discount_employee_not_informed', $run('2026-06-02'));
+        self::assertNotContains('part_time_discount_employee_not_informed', $run('2026-04-30'));
+        self::assertNotContains('part_time_discount_employee_not_informed', $run('2026-05-31'));
+        self::assertNotContains('part_time_discount_employee_not_informed', $run(null, 'previous_program'));
+    }
+
     /**
      * Měsíce zpracované v předchozím programu patří do počátečních stavů, ne do
      * mzdových běhů. Kontrola je proto musí odmítnout dřív, než z nich vyrobí

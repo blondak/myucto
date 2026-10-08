@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 
 /**
  * Validace datové věty OZUSPOJ proti připnutému XSD a proti těm pravidlům
@@ -18,6 +19,9 @@ use DOMDocument;
  */
 final readonly class OzuspojXmlValidator
 {
+    /** Doplněk znakové množiny `simpleA_ZX_SP_Type` z baseTypes2.xsd (mezera se hlídá XSD). */
+    private const DISALLOWED_NAME_CHARACTER = "/[^A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\\-,\\.' ]/u";
+
     public function __construct(
         private OzuspojSchemaCatalog $schemas,
     ) {}
@@ -95,19 +99,41 @@ final readonly class OzuspojXmlValidator
                 'Kód OSSZ musí být tříciferný podle číselníku pracovišť ČSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel.',
             );
         }
+        if (!CsszWorkplaceCatalog::acceptsSubmission($payload->osszCode)) {
+            $this->invalid(
+                'ozuspoj_ossz_code_not_in_codebook',
+                'Kód OSSZ ' . $payload->osszCode . ' není v číselníku okresů ČSSZ pro e-podání (kód 101, ústředí, se pro e-podání nepoužívá). Opravte ho v Nastavení mezd → Zaměstnavatel na kód místně příslušné OSSZ.',
+            );
+        }
         if (preg_match('/^\d{10}$/D', $payload->employerVariableSymbol) !== 1) {
             $this->invalid(
                 'ozuspoj_variable_symbol_invalid',
                 'OZUSPOJ vyžaduje desetimístný variabilní symbol zaměstnavatele. Doplňte ho v Nastavení mezd → Účtárny.',
             );
         }
-        if ($payload->employeeBirthNumber !== null
-            && preg_match('/^\d{9,10}$/D', $payload->employeeBirthNumber) !== 1
+        // XSD nechává `rodneCislo` nepovinné, ale oznámení záměru i skončení
+        // nese rodné číslo zaměstnance (§ 23e odst. 1 a 2, § 23f odst. 3
+        // písm. a) a ČSSZ podle něj (nebo podle EČP) osobu identifikuje.
+        // Bez něj by podání prošlo schématem a záměr by nešlo přiřadit.
+        if ($payload->employeeBirthNumber === null
+            || trim($payload->employeeBirthNumber) === ''
         ) {
+            $this->invalid(
+                'ozuspoj_birth_number_missing',
+                'Zaměstnanec nemá k rozhodnému dni vyplněné rodné číslo ani evidenční číslo pojištěnce (EČP). ČSSZ podle něj záměr přiřazuje osobě, takže ho doplňte v Osobách u identifikátorů zaměstnance a oznámení připravte znovu.',
+            );
+        }
+        if (preg_match('/^\d{9,10}$/D', $payload->employeeBirthNumber) !== 1) {
             $this->invalid(
                 'ozuspoj_birth_number_invalid',
                 'Rodné číslo nebo evidenční číslo pojištěnce musí mít 9 nebo 10 číslic.',
             );
+        }
+        foreach ([
+            'jméno' => $payload->employeeFirstName,
+            'příjmení' => $payload->employeeLastName,
+        ] as $label => $name) {
+            $this->assertNameCharacters($label, $name);
         }
         foreach ([
             'ozuspoj_employer_name_missing' => $payload->employerName,
@@ -128,6 +154,33 @@ final readonly class OzuspojXmlValidator
         if ($payload->intentTo !== null) {
             $this->exactDate($payload->intentTo);
         }
+    }
+
+    /**
+     * Jméno a příjmení smí mít jen znaky z `simpleA_ZX_SP_Type` v baseTypes2.xsd
+     * (latinka s diakritikou, `-`, `,`, `.`, `'` a mezera). Jiný znak (číslice,
+     * závorka, cyrilice, tabulátor) XSD zamítne, ale hláškou knihovny, ze které
+     * uživatel nepozná, co a kde opravit. Jméno se samo nepřepisuje: změna
+     * zapsaného jména osoby by byla změnou její identity v podání.
+     */
+    private function assertNameCharacters(string $label, string $value): void
+    {
+        if (preg_match_all(self::DISALLOWED_NAME_CHARACTER, $value, $matches) < 1) {
+            return;
+        }
+        $characters = array_values(array_unique($matches[0]));
+        $shown = implode(' ', array_map(
+            static fn (string $character): string => $character === "\t"
+                ? '[tabulátor]'
+                : '„' . $character . '“',
+            $characters,
+        ));
+        $this->invalid(
+            'ozuspoj_employee_name_characters_invalid',
+            'Ve ' . ($label === 'jméno' ? 'jméně' : 'příjmení') . ' zaměstnance jsou znaky, které datová věta OZUSPOJ nepřipouští: '
+                . $shown . '. Opravte ' . $label
+                . ' v Osobách u zaměstnance (povolená je latinka, pomlčka, čárka, tečka, apostrof a mezera) a oznámení připravte znovu.',
+        );
     }
 
     private function exactDate(string $value): void

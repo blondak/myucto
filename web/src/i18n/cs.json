@@ -10514,6 +10514,28 @@
         "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
       }
     },
+    "healthInsurerNotice": {
+      "title": "Sdělení zdravotní pojišťovny zaměstnancem",
+      "intro": "Zaměstnanec je povinen sdělit zaměstnavateli, u které zdravotní pojišťovny je pojištěn, při nástupu a změnu do osmi dnů. Zaměstnavatel přijetí sdělení písemně potvrdí (§ 12 písm. b) zákona č. 48/1997 Sb.). Zapište zde den sdělení a den potvrzení a potvrzení si vytiskněte. Obsah hromadného oznámení se tím nemění.",
+      "empty": "Osoba zatím nemá zapsanou zdravotní pojišťovnu.",
+      "effectiveFrom": "Pojištěn u pojišťovny od {day}",
+      "notifiedOn": "Zaměstnanec sdělil pojišťovnu dne",
+      "confirmedOn": "Zaměstnavatel potvrdil přijetí dne",
+      "saved": "Sdělení je zapsané.",
+      "actions": {
+        "save": "Uložit sdělení",
+        "confirmation": "Potvrzení (PDF)"
+      },
+      "hints": {
+        "readOnly": "Nemáte oprávnění upravovat zákonnou evidenci osoby.",
+        "noticeRequired": "Nejdřív zapište a uložte den, kdy zaměstnanec pojišťovnu sdělil."
+      },
+      "errors": {
+        "loadFailed": "Sdělení pojišťovny se nepodařilo načíst.",
+        "saveFailed": "Sdělení se nepodařilo uložit.",
+        "downloadFailed": "Potvrzení se nepodařilo vytvořit."
+      }
+    },
     "discountIntents": {
       "title": "Záměr uplatňovat slevu na pojistném",
       "intro": "Sleva zaměstnavatele za kratší úvazky se vykazuje v měsíčním hlášení, ale nárok na ni zakládá jiné podání: oznámení záměru (OZUSPOJ). Bez něj Česká správa sociálního zabezpečení slevu neuzná a odečtené pojistné se stane dluhem. Sleva se ve výpočtu uplatní teprve u záměru, u kterého je zapsaný den doručení z protokolu ČSSZ.",
@@ -10526,6 +10548,7 @@
       "acceptedOnInput": "Den doručení z protokolu",
       "endOnInput": "Poslední den uplatňování",
       "rejectionReason": "Důvod odmítnutí z protokolu",
+      "informedOnInput": "Den písemného poučení zaměstnance",
       "dueOn": "Oznámit nejpozději",
       "employeeInformedOn": "Zaměstnanec písemně informován",
       "employeeInformedHint": "§ 23d odst. 2 ukládá informovat zaměstnance písemně před prvním uplatněním slevy.",
@@ -10540,6 +10563,7 @@
       "accepted": "Přijetí záměru je zapsané, sleva se od uvedeného dne uplatní.",
       "rejected": "Odmítnutí je zapsané. Sleva se neuplatní.",
       "endRequested": "Den skončení je zapsaný. Připravte oznámení o skončení.",
+      "informedRecorded": "Den poučení zaměstnance je zapsaný.",
       "ended": "Skončení uplatňování slevy je zapsané.",
       "actions": {
         "create": "Založit záměr",
@@ -10550,6 +10574,7 @@
         "end": "Zadat den skončení",
         "prepareEnd": "Připravit oznámení o skončení",
         "confirmEnd": "Zapsat skončení",
+        "recordInformed": "Zapsat poučení",
         "cancel": "Připravit storno"
       },
       "hints": {
@@ -10557,7 +10582,8 @@
         "readOnly": "Nemáte oprávnění zapisovat do mzdových podání.",
         "acceptedOnRequired": "Nejdřív opište den doručení z protokolu ČSSZ — na něm stojí nárok na slevu.",
         "rejectionReasonRequired": "Nejdřív opište důvod odmítnutí z protokolu ČSSZ.",
-        "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje."
+        "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje.",
+        "informedOnRequired": "Nejdřív zadejte den, kdy byl zaměstnanec písemně poučen."
       },
       "statuses": {
         "draft": "Rozpracováno",
@@ -11765,6 +11791,7 @@
       "registration_a3_completion_variant_unsupported": "Dohlášení údajů aplikace připraví jen u běžných pracovních vztahů (varianta OST). U tohoto druhu činnosti ho podejte přes portál ČSSZ.",
       "registration_event_relationship_detail_invalid": "Bližší určení vztahu neodpovídá druhu činnosti. Opravte ho v podmínkách pracovního vztahu.",
       "zp_first_registration_identity_missing": "První přihlášení cizince bez přiděleného čísla pojištěnce se hlásí pohlavím a datem narození. Doplňte je na kartě osoby.",
+      "zp_mv_registration_required": "U ZP MV ČR (211) se kódy E a C nepoužívají. Zaměstnanec musí být nejdřív zaregistrovaný u ZP MV ČR a přidělené číslo pojištěnce se opíše na kartu osoby; teprve pak lze nástup ohlásit kódem P nebo A.",
       "hzupn_incapacity_end_missing": "Hlášení o ukončení pracovní neschopnosti se podává až po jejím skončení (§ 97 odst. 3). Doplňte den skončení neschopnosti.",
       "hzupn_incapacity_period_invalid": "Den skončení pracovní neschopnosti nesmí předcházet dni jejího vzniku.",
       "hzupn_issue_date_missing": "Hlášení musí mít vyplněný den vystavení. Doplňte ho u případu.",
@@ -11945,7 +11972,7 @@
       "zp_payer_account_missing": "Firma nemá k danému datu evidovaný platební účet. Založte ho v Mzdy, Nastavení zaměstnavatele, Platební účty institucí (typ Zdravotní pojišťovna) a do pole VS zaměstnavatele zadejte desetimístné číslo plátce, které vám pojišťovna přidělila při registraci.",
       "zp_payer_accounting_unit_invalid": "Číslo účtárny plátce musí mít přesně dvě číslice.",
       "zp_payer_business_id_invalid": "IČO plátce musí mít přesně osm číslic.",
-      "zp_payer_business_id_missing": "Firma nemá vyplněné IČO. Doplňte ho v nastavení firmy - bez něj nelze sestavit identifikační číslo plátce.",
+      "zp_payer_business_id_missing": "Firma nemá vyplněné IČO a u pojišťovny není evidované ani číslo plátce. Doplňte IČO v nastavení firmy, nebo - nemá-li firma IČO či má víc než 99 účtáren - zadejte zvláštní číslo plátce NNNNNNNN99 od VZP do pole VS zaměstnavatele u platebního účtu pojišťovny.",
       "zp_payer_number_invalid": "Identifikační číslo plátce musí mít přesně deset číslic - osmimístné IČO a dvoumístné číslo účtárny.",
       "zp_payer_number_missing": "U platebního účtu účinného k danému datu chybí desetimístné číslo plátce. Doplňte ho v Mzdy, Nastavení zaměstnavatele, Platební účty institucí, do pole VS zaměstnavatele - pojišťovna ho přidělila při registraci a má přesně deset číslic.",
       "zp_pdf_artifact_mismatch": "Otisk uloženého PDF neodpovídá zmrazenému přehledu. Zkuste přípravu podání zopakovat.",

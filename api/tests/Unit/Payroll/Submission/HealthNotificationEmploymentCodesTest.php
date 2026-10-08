@@ -108,6 +108,25 @@ final class HealthNotificationEmploymentCodesTest extends TestCase
         self::assertTrue($this->codes->isKnown($expected));
     }
 
+    /** HOZ-KZ-5: ZP MV ČR (211) kódy E a C nepoužívá, nástup se hlásí kódem P nebo A. */
+    public function testZpMvDoesNotGetFirstRegistrationCodes(): void
+    {
+        self::assertSame('A', $this->codes->employmentStartCode('SK', true, '211'));
+        self::assertSame('P', $this->codes->employmentStartCode('UA', true, '211'));
+        self::assertSame('P', $this->codes->employmentStartCode('CZ', false, '211'));
+        // jiná pojišťovna dál ohlašuje první přihlášení
+        self::assertSame('E', $this->codes->employmentStartCode('SK', false, '111'));
+
+        foreach (['SK', 'UA'] as $citizenship) {
+            try {
+                $this->codes->employmentStartCode($citizenship, false, '211');
+                self::fail('Pro ZP MV ČR nelze první přihlášení ohlásit kódem E ani C.');
+            } catch (HealthNotificationException $exception) {
+                self::assertSame('zp_mv_registration_required', $exception->errorCode);
+            }
+        }
+    }
+
     public function testFirstRegistrationNumberIsSexAndBirthDate(): void
     {
         self::assertSame(

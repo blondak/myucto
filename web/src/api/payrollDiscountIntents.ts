@@ -146,4 +146,15 @@ export const payrollDiscountIntentsApi = {
       `/payroll/submissions/discount-intents/${id}/receipt`,
       { ...payload, environment },
     ).then(response => response.data),
+
+  /** Den písemného poučení zaměstnance před prvním uplatněním slevy (§ 23d odst. 2). */
+  recordEmployeeInformed: (
+    id: number,
+    environment: PayrollRegzelEnvironment,
+    employeeInformedOn: string,
+  ) =>
+    api.post<PayrollDiscountIntent>(
+      `/payroll/submissions/discount-intents/${id}/employee-informed`,
+      { environment, employee_informed_on: employeeInformedOn },
+    ).then(response => response.data),
 }

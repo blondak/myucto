@@ -152,6 +152,100 @@ final class OzuspojXmlSerializerTest extends TestCase
         $this->validator()->validate($payload, $xml);
     }
 
+    /** @param array<string,mixed> $overrides */
+    private function payloadWith(array $overrides): OzuspojXmlPayload
+    {
+        $base = $this->payload();
+        $values = [
+            'kind' => $base->kind,
+            'osszCode' => $base->osszCode,
+            'intentFrom' => $base->intentFrom,
+            'intentTo' => null,
+            'employerVariableSymbol' => $base->employerVariableSymbol,
+            'employerIdentificationNumber' => $base->employerIdentificationNumber,
+            'employerName' => $base->employerName,
+            'employeeFirstName' => $base->employeeFirstName,
+            'employeeLastName' => $base->employeeLastName,
+            'employeeBirthDate' => $base->employeeBirthDate,
+            'employeeBirthNumber' => $base->employeeBirthNumber,
+            'productName' => $base->productName,
+            'productVersion' => $base->productVersion,
+        ];
+
+        return new OzuspojXmlPayload(...array_merge($values, $overrides));
+    }
+
+    /** OZUSPOJ-rodneCislo-3: XSD rodné číslo nevyžaduje, oznámení ho nést musí. */
+    public function testMissingBirthNumberIsRejectedBeforeTheSchema(): void
+    {
+        $payload = $this->payloadWith(['employeeBirthNumber' => null]);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        $this->expectException(OzuspojException::class);
+        $this->expectExceptionMessage('rodné číslo ani evidenční číslo pojištěnce');
+        $this->validator()->validate($payload, $xml);
+    }
+
+    /** OZUSPOJ-kodOSSZ-3: kód 101 je v C_COKR označený „Nepoužívat pro e-podání". */
+    public function testCentralOfficeCodeIsRejected(): void
+    {
+        $payload = $this->payloadWith(['osszCode' => 101]);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        $this->expectException(OzuspojException::class);
+        $this->expectExceptionMessage('není v číselníku okresů ČSSZ');
+        $this->validator()->validate($payload, $xml);
+    }
+
+    /** XSD povolí kterýkoli kód 100 až 999, číselník ale ne. */
+    public function testCodeOutsideTheCodebookIsRejected(): void
+    {
+        $payload = $this->payloadWith(['osszCode' => 999]);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        $this->expectException(OzuspojException::class);
+        $this->expectExceptionMessage('není v číselníku okresů ČSSZ');
+        $this->validator()->validate($payload, $xml);
+    }
+
+    public function testPragueDistrictCodeIsAccepted(): void
+    {
+        $payload = $this->payloadWith(['osszCode' => 112]);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        $this->validator()->validate($payload, $xml);
+        $this->addToAssertionCount(1);
+    }
+
+    /** OZUSPOJ-XSD-3: znak mimo baseTypes2.xsd se pojmenuje dřív než hláškou knihovny. */
+    public function testNameWithCharacterOutsideTheSchemaListsTheCharacter(): void
+    {
+        $payload = $this->payloadWith(['employeeLastName' => 'Novák (ml.)']);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        try {
+            $this->validator()->validate($payload, $xml);
+            self::fail('Příjmení se závorkami musí být zamítnuto.');
+        } catch (OzuspojException $exception) {
+            self::assertSame('ozuspoj_employee_name_characters_invalid', $exception->validationCode);
+            self::assertStringContainsString('„(“', $exception->getMessage());
+            self::assertStringContainsString('„)“', $exception->getMessage());
+            self::assertStringContainsString('příjmení', $exception->getMessage());
+        }
+    }
+
+    public function testNameWithCzechLettersApostropheAndHyphenIsAccepted(): void
+    {
+        $payload = $this->payloadWith([
+            'employeeFirstName' => 'Jarmila-Žofie',
+            'employeeLastName' => "Dvořáková O'Neil, ml.",
+        ]);
+        $xml = (new OzuspojXmlSerializer())->serialize($payload);
+
+        $this->validator()->validate($payload, $xml);
+        $this->addToAssertionCount(1);
+    }
+
     /**
      * Otisk schématu je připnutý. Kdyby se soubor vyměnil, validace se musí
      * zavřít, ne mlčky validovat proti cizímu XSD.

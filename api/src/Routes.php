@@ -1558,6 +1558,20 @@ final class Routes
                 '/people/{id:[0-9]+}/statutory-evidence',
                 [PayrollPersonStatutoryEvidenceAction::class, 'save'],
             );
+            // Sdělení zdravotní pojišťovny zaměstnancem a písemné potvrzení
+            // zaměstnavatele (§ 12 písm. b) zákona č. 48/1997 Sb.).
+            $g->get(
+                '/people/{id:[0-9]+}/health-insurer-notices',
+                [\MyInvoice\Action\Payroll\PayrollHealthInsurerNoticeAction::class, 'list'],
+            );
+            $g->put(
+                '/people/{id:[0-9]+}/health-insurer-notices/{coverageId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollHealthInsurerNoticeAction::class, 'record'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/health-insurer-notices/{coverageId:[0-9]+}/confirmation',
+                [\MyInvoice\Action\Payroll\PayrollHealthInsurerNoticeAction::class, 'confirmation'],
+            );
             $g->post(
                 '/statutory-evidence/bulk-defaults/preview',
                 [PayrollStatutoryEvidenceBulkDefaultsAction::class, 'preview'],
@@ -2029,6 +2043,10 @@ final class Routes
             $g->post(
                 '/submissions/discount-intents/{intentId:[0-9]+}/receipt',
                 [PayrollDiscountIntentAction::class, 'receipt'],
+            );
+            $g->post(
+                '/submissions/discount-intents/{intentId:[0-9]+}/employee-informed',
+                [PayrollDiscountIntentAction::class, 'employeeInformed'],
             );
             $g->get(
                 '/submissions/signing-profile',

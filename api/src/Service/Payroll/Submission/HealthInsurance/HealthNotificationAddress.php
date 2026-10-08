@@ -19,12 +19,33 @@ final readonly class HealthNotificationAddress
         public string $houseNumber,
         public string $postalCode,
         public string $city,
+        /** `street` už nese i číslo popisné (karta osoby ho drží v jednom poli). */
+        public bool $streetContainsNumber = false,
     ) {}
+
+    /**
+     * Adresa z karty osoby, kde je ulice s číslem v jediném poli `street_line`.
+     * Dělit ji na ulici a číslo by znamenalo odhadovat, co uživatel zapsal, a
+     * schéma stejně obojí chce v jednom prvku `ulice`.
+     */
+    public static function fromStreetLine(
+        string $streetLine,
+        string $postalCode,
+        string $city,
+    ): self {
+        return new self(
+            street: $streetLine,
+            houseNumber: '',
+            postalCode: str_replace([' ', "\u{00A0}"], '', $postalCode),
+            city: $city,
+            streetContainsNumber: true,
+        );
+    }
 
     /** Ulice a číslo popisné v jednom prvku `ulice` (`string60Typ`). */
     public function streetLine(): string
     {
-        return trim($this->street) . ' ' . trim($this->houseNumber);
+        return trim(trim($this->street) . ' ' . trim($this->houseNumber));
     }
 
     public function assertValid(): void
@@ -36,7 +57,7 @@ final readonly class HealthNotificationAddress
             );
         }
         if (trim($this->street) === ''
-            || trim($this->houseNumber) === ''
+            || (trim($this->houseNumber) === '' && !$this->streetContainsNumber)
             || trim($this->city) === ''
         ) {
             throw new HealthNotificationException(

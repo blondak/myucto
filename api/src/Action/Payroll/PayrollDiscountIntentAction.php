@@ -167,6 +167,29 @@ final class PayrollDiscountIntentAction
         });
     }
 
+    /** @param array<string,string> $args */
+    public function employeeInformed(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, function () use ($request, $args): array {
+            $body = (array) ($request->getParsedBody() ?? []);
+
+            return $this->intents->recordEmployeeInformed(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->intentId($args),
+                $this->text($body['employee_informed_on'] ?? null, 'employee_informed_on'),
+            );
+        });
+    }
+
     /**
      * @param callable():array<string,mixed> $work
      */

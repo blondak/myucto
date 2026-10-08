@@ -108,6 +108,15 @@ final class OzuspojDeadlinePolicy
      * zaměstnance se skončení uplatňování slevy na pojistném za tohoto
      * zaměstnance neoznamuje." Tuhle výjimku vyhodnocuje volající — politika
      * jen počítá lhůtu, když se oznamovat má.
+     *
+     * „Měsíc, ve kterém slevu uplatnil naposledy" je poslední kalendářní měsíc
+     * pokrytý záměrem CELÝ — stejné měřítko jako kontrola 291 v
+     * {@see OzuspojDiscountEligibility}: sleva za měsíc, který záměr nepokrývá
+     * až do konce, se neuplatní. Končí-li záměr uprostřed měsíce, je tedy
+     * posledním měsícem uplatnění měsíc předchozí. Lhůta 8 dnů se počítá podle
+     * § 23 odst. 1 a 3 od dne následujícího po skončení toho měsíce (osmého dne
+     * následujícího měsíce) a připadne-li na sobotu, neděli nebo svátek, posouvá
+     * se na nejbližší následující pracovní den.
      */
     public function forIntentEnd(string $intentTo): OzuspojNotificationWindow
     {
@@ -116,10 +125,20 @@ final class OzuspojDeadlinePolicy
             'Den skončení uplatňování slevy musí být datum ve tvaru RRRR-MM-DD.',
         );
         $monthEnd = $to->modify('last day of this month');
+        $lastClaimedMonthEnd = $to->format('Y-m-d') === $monthEnd->format('Y-m-d')
+            ? $monthEnd
+            : $to->modify('last day of previous month');
+        $due = CzechWorkingDays::shiftToWorkingDay(
+            $lastClaimedMonthEnd->modify('+8 days'),
+        );
+        // Končí-li záměr uprostřed měsíce, lhůta za předchozí měsíc může
+        // vypršet dřív než samotný den skončení. Okno pak nesmí začínat po
+        // svém konci — registr povinností takový interval odmítá.
+        $earliest = $to < $due ? $to : $due;
 
         return new OzuspojNotificationWindow(
-            $to->format('Y-m-d'),
-            $monthEnd->modify('+8 days')->format('Y-m-d'),
+            $earliest->format('Y-m-d'),
+            $due->format('Y-m-d'),
             'calendar_days',
             self::RULESET_ID,
             $this->rulesetHash(),
@@ -153,6 +172,8 @@ final class OzuspojDeadlinePolicy
             'due_day_of_following_month' => 20,
             'due_shift' => 'next_czech_working_day',
             'end_notification_calendar_days_after_month' => 8,
+            'end_notification_month' => 'last_fully_covered',
+            'end_notification_shift' => 'next_czech_working_day',
             'sources' => self::SOURCES,
         ]));
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
+
 /**
  * Přehrání kontroly 291 katalogu kontrol MH nad vlastní evidencí záměrů.
  *
@@ -73,14 +75,12 @@ final readonly class OzuspojDiscountEligibility
             );
         }
 
-        $coverageStart = $employmentStartOn !== null
-            && $employmentStartOn > $periodStart
-                ? $employmentStartOn
-                : $periodStart;
-        $coverageEnd = $employmentEndOn !== null
-            && $employmentEndOn < $periodEnd
-                ? $employmentEndOn
-                : $periodEnd;
+        [$coverageStart, $coverageEnd] = SocialPartTimeDiscountAgeCondition::coverage(
+            $periodStart,
+            $periodEnd,
+            $employmentStartOn,
+            $employmentEndOn,
+        );
         if ($intent->intentFrom > $coverageStart
             || ($intent->intentTo !== null && $intent->intentTo < $coverageEnd)
         ) {

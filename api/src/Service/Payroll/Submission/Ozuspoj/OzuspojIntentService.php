@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -100,6 +102,7 @@ final readonly class OzuspojIntentService
                 'Pracovní vztah nemá k tomuhle dni vyplněný důvod slevy podle § 7a odst. 1. Doplňte ho v kartě vztahu a záměr založte znovu.',
             );
         }
+        $this->assertAgeConditionNotViolated($reason, $context, $intentFrom);
         $employmentStart = $this->employmentStart($context);
         if ($intentFrom < $employmentStart) {
             throw new OzuspojException(
@@ -424,6 +427,46 @@ final readonly class OzuspojIntentService
         );
     }
 
+    /**
+     * Zapíše den, kdy zaměstnavatel zaměstnance písemně poučil o uplatňování
+     * slevy (§ 23d odst. 2). Poučení se dá doplnit i dodatečně, aby upozornění
+     * na jeho absenci v mzdovém běhu šlo vůbec odstranit.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordEmployeeInformed(
+        int $supplierId,
+        string $environment,
+        int $intentId,
+        string $informedOn,
+    ): array {
+        $row = $this->requireIntent($supplierId, $environment, $intentId);
+        $this->assertDate($informedOn);
+        if ($informedOn > $this->today()) {
+            throw new OzuspojException(
+                'ozuspoj_informed_on_in_future',
+                'Den poučení zaměstnance nemůže být v budoucnosti.',
+            );
+        }
+        if (!$this->intents->update(
+            $supplierId,
+            $environment,
+            $intentId,
+            (int) $row['row_version'],
+            ['employee_informed_on' => $informedOn],
+        )) {
+            throw new OzuspojException(
+                'ozuspoj_intent_conflict',
+                'Záměr mezitím někdo změnil. Načtěte ho znovu a akci zopakujte.',
+            );
+        }
+
+        return $this->describe(
+            $this->requireIntent($supplierId, $environment, $intentId),
+            $this->registrationSubmittedOn($supplierId, $environment, (int) $row['employment_id']),
+        );
+    }
+
     /** @return array<string,mixed> */
     public function requireIntent(
         int $supplierId,
@@ -466,6 +509,33 @@ final readonly class OzuspojIntentService
         return $context;
     }
 
+    /**
+     * Věková hranice důvodu (§ 7a odst. 1 písm. a, d, g) proti datu narození.
+     * Zamítá se jen prokazatelný rozpor - chybějící datum narození záměr
+     * nezastaví, ale mzdový běh pak slevu neuplatní, dokud se nedoplní.
+     *
+     * @param array<string,mixed> $context
+     */
+    private function assertAgeConditionNotViolated(
+        SocialPartTimeDiscountReason $reason,
+        array $context,
+        string $intentFrom,
+    ): void {
+        $birthDate = $context['employee_birth_date'] ?? null;
+        $verdict = SocialPartTimeDiscountAgeCondition::assess(
+            $reason,
+            is_string($birthDate) && $birthDate !== '' ? $birthDate : null,
+            $intentFrom,
+            $intentFrom,
+        );
+        if ($verdict === SocialPartTimeDiscountAgeCondition::NOT_MET) {
+            throw new OzuspojException(
+                'ozuspoj_discount_reason_age_not_met',
+                'Podle data narození zaměstnanec k tomuto dni nesplňuje věkovou podmínku zvoleného důvodu slevy (§ 7a odst. 1 písm. ' . $reason->paragraph7aLetter() . '). Opravte důvod slevy v kartě vztahu nebo den, od kterého se sleva uplatní.',
+            );
+        }
+    }
+
     /** @param array<string,mixed> $context */
     public function osszCode(array $context): int
     {
@@ -476,6 +546,12 @@ final readonly class OzuspojIntentService
             throw new OzuspojException(
                 'ozuspoj_ossz_code_missing',
                 'Zaměstnavatel nemá vyplněný kód místně příslušné OSSZ. Doplňte ho v Nastavení mezd → Zaměstnavatel a oznámení podejte znovu.',
+            );
+        }
+        if (!CsszWorkplaceCatalog::acceptsSubmission($code)) {
+            throw new OzuspojException(
+                'ozuspoj_ossz_code_not_in_codebook',
+                'Kód OSSZ ' . $code . ' není v číselníku okresů ČSSZ pro e-podání (kód 101, ústředí, se pro e-podání nepoužívá). Opravte ho v Nastavení mezd → Zaměstnavatel na kód místně příslušné OSSZ.',
             );
         }
 

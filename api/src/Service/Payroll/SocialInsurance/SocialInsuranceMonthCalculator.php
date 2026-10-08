@@ -685,6 +685,13 @@ final class SocialInsuranceMonthCalculator
         $averageWage = $this->moneyParameter($ruleset, 'average_wage.monthly');
         $outcome = SocialPartTimeDiscountOutcome::Applied;
         if (
+            // § 7a odst. 3 písm. d): zaměstnanec s postižením (odst. 1 písm. f)
+            // v pracovním poměru k zaměstnavateli na chráněném trhu práce.
+            $reason === SocialPartTimeDiscountReason::DisabledPerson
+            && $claim->relationship->employerOnProtectedLaborMarket
+        ) {
+            $outcome = SocialPartTimeDiscountOutcome::ProtectedLaborMarket;
+        } elseif (
             $reason->requiresShorterWorkingTime()
             && ($weeklyMillihours < $this->integerParameter(
                 $ruleset,
