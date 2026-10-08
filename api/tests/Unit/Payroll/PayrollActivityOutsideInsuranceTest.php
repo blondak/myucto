@@ -129,7 +129,7 @@ final class PayrollActivityOutsideInsuranceTest extends TestCase
     public function testHealthInsurerNotificationIsNotExpectedForOutsideInsuranceActivity(): void
     {
         self::assertTrue(PayrollExpectedHealthParticipation::expected('automatic', 'employment', null, null));
-        self::assertTrue(PayrollExpectedHealthParticipation::expected('automatic', 'employment', null, null, false, '2'));
+        self::assertTrue(PayrollExpectedHealthParticipation::expected('automatic', 'employment', null, null, false, activityCode: '2'));
         foreach (['11', '12', '13', '14'] as $code) {
             self::assertFalse(PayrollExpectedHealthParticipation::expected(
                 'automatic',
@@ -137,7 +137,7 @@ final class PayrollActivityOutsideInsuranceTest extends TestCase
                 3_000_000,
                 null,
                 false,
-                $code,
+                activityCode: $code,
             ));
         }
     }
@@ -179,7 +179,7 @@ final class PayrollActivityOutsideInsuranceTest extends TestCase
                 HealthComponentTreatment::Included,
                 HealthCorrectionTreatment::CurrentMonth,
             )],
-            $outsideInsurance,
+            outsideInsurance: $outsideInsurance,
         );
         $person = new HealthPersonMonthInput(
             'person-1',
