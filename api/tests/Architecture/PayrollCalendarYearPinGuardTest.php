@@ -48,11 +48,6 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
         // nebo hlášku libxml.
         'Service/Payroll/Submission/HealthInsurance/HealthPaymentOverviewPayload.php' =>
             ['assertValid'],
-        // EDV REGZEC 1.4.0.6, atribut 10223: druh činnosti 10–16 a výkon
-        // trestu jde přihlásit jen s nástupem od 1. 1. 2026. Pevná hranice
-        // datové věty ČSSZ, ne rok podpory mzdového modulu.
-        'Service/Payroll/Submission/Registration/PayrollRegistrationA1SnapshotBuilder.php' =>
-            ['startsBeforeSpecialActivityEvidence'],
     ];
 
     public function testNoCalendarYearLiteralGatesPayrollCalculations(): void

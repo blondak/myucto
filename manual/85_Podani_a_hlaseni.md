@@ -62,7 +62,11 @@ které jde připravit nebo odeslat. Nepřipravené se nejdřív připraví, pak 
 v ostrém prostředí ukáže jedno potvrzení se seznamem *co → komu → jakou cestou*.
 Po potvrzení:
 
-- **JMHZ** odejde přes VREP ČSSZ (podepsané certifikátem) hned.
+- **JMHZ** odejde přes VREP ČSSZ (podepsané certifikátem) hned. Hlášení,
+  které obsahuje pracovní vztah s právě přijatou změnou údajů zaměstnance (A3),
+  se ale nepřipraví dřív než 48 hodin po jejím přijetí; data se do systémů
+  ČSSZ propisují později a dřív odeslané hlášení by ČSSZ mohla zamítnout
+  (chyba 243). Hláška uvede, od kdy to jde.
 - **Přehledy o platbě** všem pojišťovnám a **hromadná oznámení** se zařadí do
   odchozí fronty datové schránky. S Mobilním klíčem je odešle **jedno potvrzení
   v mobilu** — každá zpráva jde do schránky své pojišťovny. Když jedna zpráva
@@ -638,8 +642,21 @@ pozdější změna osobní karty už nemění dříve zmrazené podání.
 
 Úplnou registraci REGZEC s akcí A1 aplikace nepřipraví ani neodešle, dokud
 nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající varianty
-OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
-OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
+OST, 10 nebo SPEC. Datová věta navazujících akcí A5 až A8 má jedinou variantu
+(OST) bez ohledu na druh činnosti; o tom, zda je zaměstnavatel smí podat,
+rozhoduje druh činnosti: storno A8 jde podat u všech druhů, přechod pod jiné
+české předpisy A6 a A7 u všech kromě 10, 11 až 14 a výkonu trestu (a navíc u druhu M),
+převod pod jiný variabilní symbol A5 jen u běžné plné evidence. Nepovolenou
+akci aplikace odmítne ještě před schválením události.
+
+Kód správy sociálního zabezpečení v nastavení zaměstnavatele musí být kód
+okresní správy ČSSZ z jejího číselníku (89 hodnot, například 110 pro Prahu 10).
+Jiný kód aplikace odmítne už při uložení nastavení, protože ho ČSSZ nepřijme.
+
+Zaměstnanec s českým státním občanstvím musí mít pro přihlášku A1 rodné číslo
+nebo EČP; datum narození a pohlaví aplikace kontroluje proti rodnému číslu a
+zaměstnanci mladšímu 14 let k nástupu podání nevytvoří (ČSSZ ho zamítá na
+vstupu, i u dohod).
 
 **Nástup před 1. 7. 2026.** Událost, která nastala do 31. 3. 2026 a do té doby
 nebyla ČSSZ ohlášená, se od 1. 4. 2026 hlásí už jen přes REGZEC (Pravidla pro
@@ -648,8 +665,15 @@ s datem 15. 2. 2026. Lhůtu podle tehdejších pravidel ale neodvozuje: termíne
 je den nástupu, podání je vedené jako po lhůtě a nad podáním je vysvětlení.
 Podejte ho bez zbytečného odkladu. Částečné přihlášení PREZEC P1 jde podat až
 od 23. 6. 2026 — u staršího nástupu aplikace rovnou nabídne plnou registraci.
-Druh činnosti 10 až 16 a výkon trestu jde přihlásit jen s nástupem od
-1. 1. 2026; dřívější datum ohlásí kontrola profilu.
+U druhu činnosti 10 až 16 a u výkonu trestu se vztahem vzniklým před
+1. 1. 2026 aplikace do přihlášky sama dosadí povinné fiktivní datum nástupu
+1. 1. 2026; skutečný nástup zůstává v evidenci beze změny.
+
+**Náhradní lhůta.** Začal-li zaměstnanec pracovat bez předchozího ohlášení,
+zaškrtněte u přímé plné registrace po nástupu **Nástup nebyl předem znám**:
+lhůtou je pak osm dnů od vzniku povinnosti poskytovat plnění, resp. od prvního
+plnění (§ 19 odst. 1 písm. b) zákona č. 323/2025 Sb.), tedy od dne nástupu.
+Volbu aplikace nepřijme u nástupu, který teprve nastane.
 
 **Náhled, příprava a stav přihlášky.** V části **Registrace vztahu na ČSSZ**
 jsou dvě samostatná tlačítka: **Zjistit, co se podá** ukáže náhled a lhůtu,
@@ -667,9 +691,13 @@ nástupem**: výchozí je **Částečné přihlášení (PREZEC P1)** se základ
 údaji, zbytek se doplní plnou registrací do osmi dnů po nástupu. Máte-li
 profil A1 hotový, zvolte **Plná registrace (REGZEC A1)** a podejte ji rovnou;
 v podání je předpokládaný den nástupu. Nastoupí-li zaměstnanec jindy, podejte
-opravu A4, nenastoupí-li vůbec, storno A8. Cizinec se přihlašuje vždy plnou
-registrací před zahájením práce, volba se u něj neukazuje. Dřív než osm dnů
-před nástupem aplikace přihlášku nepřipraví a napíše, od kterého dne to jde.
+opravu A4, nenastoupí-li vůbec, storno A8. Plnou registraci A1 po přijatém
+částečném přihlášení (P1) jde se skutečným datem nástupu dohlásit jen do osmi
+dnů po předpokládaném dni nástupu z P1; nastoupí-li zaměstnanec později,
+aplikace A1 nepřipraví a vede k podání P2 a nového přihlášení s novým
+předpokládaným dnem. Cizinec se přihlašuje vždy plnou registrací před
+zahájením práce, volba se u něj neukazuje. Dřív než osm dnů před nástupem
+aplikace přihlášku nepřipraví a napíše, od kterého dne to jde.
 
 **Storno přihlášení (A8).** Ve formuláři události A2–A8 zvolte **A8** a důvod
 storna. **Zaměstnanec nenastoupil** se oznamuje do osmi dnů od předpokládaného
@@ -688,9 +716,12 @@ P2 musí odkazovat na GUID formuláře původní přijaté P1, jinak ji ČSSZ
 nezpracuje a předregistrace zůstane otevřená. Aplikace proto GUID bere z
 protokolu ČSSZ, kterým byla P1 přijata, a do P2 ho opíše; ukončení se
 připraví až po načtení tohoto protokolu. V P2 jsou jen variabilní symbol,
-rodné číslo, GUID P1 a datum vyhotovení, žádné další osobní údaje. Podává se
-do osmi dnů od předpokládaného dne nástupu. Byl-li zaměstnanec přihlášen
-plnou registrací (REGZEC A1), použijte storno A8.
+rodné číslo, GUID P1 a datum vyhotovení, žádné další osobní údaje. Variabilní
+symbol aplikace přebírá z přijaté P1, ne z dnešního nastavení účtárny. Podává
+se do osmi dnů od předpokládaného dne nástupu. Byl-li zaměstnanec přihlášen
+plnou registrací (REGZEC A1), použijte storno A8; podali-li jste P1 i A1,
+potřebujete P2 i A8 (A1 předregistraci neuzavírá a P2 registraci nestornuje) a
+aplikace u obou podání na dvojici upozorní.
 
 **Postavení v zaměstnání** se vybírá ze seznamu čtyřmístných kódů Klasifikace
 postavení v zaměstnání (NKPZ), kratší kód ČSSZ nepřijme. Aplikace kód navrhne
@@ -820,6 +851,11 @@ JMHZ, shodnou korelaci důvěryhodné doručenky a přijatý výsledek daného v
 Chybějící, čekající nebo odmítnutý měsíc přípravu A2 zablokuje a uvede konkrétní
 období. Při přípravě se celý plán pod zámkem znovu ověří a uloží se jeho
 neměnný otisk; pozdější historie se nepřepisuje.
+
+U cizince s povolením k zaměstnání, zaměstnaneckou nebo modrou kartou, jehož
+zaměstnání končí dřív, než oprávnění vyprší, odhláška A2 vyžaduje **důvod
+předčasného ukončení** (1 až 3); jinak je pole zakázané. Údaje o oprávnění
+aplikace bere z ověřeného profilu registrace A1.
 
 Odhláška A2 nese OIČ a ID PPV, které musí mít doložený původ: protokol o přijetí
 registrace, přijaté dohlášení údajů A3, nebo import exportu zaměstnanců
@@ -1046,6 +1082,16 @@ je co hlásit. U každého návrhu je, o kterou povinnost jde, termín, věta
 Konkrétní staré a nové hodnoty se u citlivých údajů (rodné číslo, evidenční
 a variabilní číslo pojištěnce, daňový identifikátor, číslo dokladu totožnosti)
 nikdy nezobrazují ani neukládají; u nich se hlásí pouze to, že se změnily.
+
+Posun data nástupu u už registrovaného zaměstnance se hlásí jako A3 (nový
+nástup v elementu job, nejpozději osm dnů po dni vyplnění podání, zaměstnanec
+musí být ke dni nástupu starší 14 let). Změnu A3 a opravu A4 aplikace sestaví jen
+z částí, které daná varianta datové věty smí nést: A3-10 a A4-10 nenesou
+kontaktní adresu, pobyt v ČR, doklad, rezidenci, pojišťovnu, zdravotní stav, přístup
+na trh práce ani důchod, A3-SPEC a A4-SPEC nenesou kontaktní adresu, důchod,
+příslušnost k cizím předpisům, nejvyšší vzdělání a většinu pracovních údajů.
+U české adresy je číslo popisné jen číselné (nejvýš čtyři číslice) a PSČ nesmí
+začínat 0, 8 ani 9.
 
 **Kdy detekce běží.** Vždy, když otevřete registrační kartu člověka nebo
 přepnete prostředí, a hromadně za celou firmu při otevření přehledu termínů.

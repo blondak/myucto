@@ -253,6 +253,13 @@ final class PayrollRegistrationXmlSerializer
             'activity_code' => 'rel',
             'relationship_detail_code' => 'relDetail',
         ]);
+        // Zásady REGZEC, specifický postup č. 3: vztahy druhu 10 až 16 a výkon
+        // trestu vzniklé před 1. 1. 2026 se hlásí s fiktivním nástupem.
+        $job->setAttribute('fro', PayrollRegistrationSpecialStartDate::reported(
+            self::textOrNull($a1->employment['activity_code'] ?? null),
+            self::textOrNull($a1->employment['relationship_detail_code'] ?? null),
+            (string) ($a1->employment['actual_start_on'] ?? ''),
+        ));
         if ($a1->variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
             $this->setMappedAttributes($job, $a1->employment, [
                 'small_scale' => 'sme',
@@ -502,6 +509,13 @@ final class PayrollRegistrationXmlSerializer
                 $job->setAttribute('contractfro', (string) $delta['contract_start_on']);
             }
             $this->regzecDeltaJob($document, $namespace, $job, $delta);
+            if ($job->hasAttribute('fro')) {
+                $job->setAttribute('fro', PayrollRegistrationSpecialStartDate::reported(
+                    $this->eventText($data, 'activity_code'),
+                    is_string($detail) ? $detail : null,
+                    $job->getAttribute('fro'),
+                ));
+            }
         } elseif ($action === 8) {
             $job->setAttribute('notstart', ($data['not_started'] ?? false) ? 'A' : 'N');
         }

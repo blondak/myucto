@@ -182,6 +182,12 @@ final class PayrollRegistrationIdentityRequirements
         }
         if ($agenda === self::AGENDA_REGZEC
             && !$hasBno
+            && ($identity['citizenship_country_code'] ?? null) === 'CZ'
+        ) {
+            // EDV 1.4.0.6, client/@bno: u českého občanství povinné.
+            $missing[] = self::identifierProblem(self::AGENDA_REGZEC);
+        } elseif ($agenda === self::AGENDA_REGZEC
+            && !$hasBno
             && !self::filled($identifiers['vcp'] ?? null)
         ) {
             // Bez identifikátoru musí REGZEC nést úplnou zahraniční identitu.
@@ -281,13 +287,16 @@ final class PayrollRegistrationIdentityRequirements
     }
 
     /** @return array{field:string,label:string,message:string,panel:string,target:string} */
-    private static function identifierProblem(): array
+    private static function identifierProblem(string $agenda = self::AGENDA_PREZEC): array
     {
         return [
             'field' => 'identifier.value',
             'label' => 'Rodné číslo nebo EČP',
-            'message' => 'Rodné číslo nebo EČP chybí — částečné přihlášení '
-                . 'PREZEC bez něj nejde podat. Doplňte na '
+            'message' => 'Rodné číslo nebo EČP chybí — '
+                . ($agenda === self::AGENDA_REGZEC
+                    ? 'u zaměstnance s českým státním občanstvím ho přihláška REGZEC A1 vyžaduje'
+                    : 'částečné přihlášení PREZEC bez něj nejde podat')
+                . '. Doplňte na '
                 . PayrollRegistrationFieldVocabulary::WHERE_IDENTIFIERS . '.',
             'panel' => self::PANEL_IDENTIFIERS,
             'target' => self::TARGET_PERSON,

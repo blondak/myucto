@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationEventRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -273,11 +274,8 @@ final readonly class PayrollRegistrationEventService
                     'employer_name',
                     150,
                 ),
-                'workplace_code' => $this->requiredDigits(
+                'workplace_code' => $this->csszWorkplaceCode(
                     $context['social_security_office_code'] ?? null,
-                    'cssz_workplace_code',
-                    3,
-                    3,
                 ),
             ],
             'data' => $data,
@@ -600,11 +598,9 @@ final readonly class PayrollRegistrationEventService
                 $employmentExternalIdentifier,
             ),
             'variable_symbol_transfer' => [
-                'new_variable_symbol' => $this->requiredDigits(
+                'new_variable_symbol' => $this->newVariableSymbol(
                     $input['new_variable_symbol'] ?? null,
-                    'new_variable_symbol',
-                    8,
-                    10,
+                    $context['social_security_variable_symbol'] ?? null,
                 ),
             ],
             'czech_legislation_start' => [
@@ -629,7 +625,137 @@ final readonly class PayrollRegistrationEventService
             ),
         };
 
-        return $data + $this->relationIdentity($context);
+        $relation = $this->relationIdentity($context);
+        if ($interaction === 'change' || $interaction === 'correction') {
+            $this->assertDeltaMatchesVariant(
+                $interaction === 'change' ? 3 : 4,
+                $relation,
+                $data['delta'],
+            );
+        }
+        if ($interaction === 'change') {
+            $this->assertStartDateAge($supplierId, $context, $effectiveOn, $data['delta']);
+        }
+
+        return $data + $relation;
+    }
+
+    /**
+     * Nový variabilní symbol (A5, ID 10222): 8 až 10 číslic a nesmí se
+     * shodovat s původním (EDV 1.4.0.6, kontrola `nvs <> vs`).
+     */
+    private function newVariableSymbol(mixed $value, mixed $currentVariableSymbol): string
+    {
+        $new = $this->requiredDigits($value, 'new_variable_symbol', 8, 10);
+        if (is_string($currentVariableSymbol) && $new === trim($currentVariableSymbol)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a5_variable_symbol_unchanged',
+                $this->actionName(5) . ' musí nést jiný variabilní symbol, než pod '
+                    . 'jakým je zaměstnavatel veden teď (' . $new . '). ČSSZ '
+                    . 'podání se shodným novým symbolem zamítne. Zadejte nový '
+                    . 'variabilní symbol přidělený ČSSZ.'
+                    . PayrollRegistrationFieldVocabulary::reference('new_variable_symbol'),
+            );
+        }
+
+        return $new;
+    }
+
+    /**
+     * Kód správy sociálního zabezpečení (`employee/@dep`, ID 10004) musí být
+     * z číselníku okresů ČSSZ (C_COKR).
+     */
+    private function csszWorkplaceCode(mixed $value): string
+    {
+        $code = $this->requiredDigits($value, 'cssz_workplace_code', 3, 3);
+        if (!PayrollCsszDistrictCodebook::contains($code)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_cssz_workplace_code_invalid',
+                PayrollRegistrationFieldVocabulary::label('cssz_workplace_code')
+                    . " „{$code}\" není v číselníku okresních správ ČSSZ, takže "
+                    . 'ho ČSSZ odmítne. Opravte kód v nastavení mezd zaměstnavatele '
+                    . '(například 110 pro Prahu 10).'
+                    . PayrollRegistrationFieldVocabulary::reference('cssz_workplace_code'),
+            );
+        }
+
+        return $code;
+    }
+
+    /**
+     * Části změny a opravy, které varianta věty zakazuje (EDV 1.4.0.6):
+     * pro A3-10, A3-SPEC, A4-10 a A4-SPEC se zakázaný element nepošle,
+     * podání by ČSSZ zamítla.
+     *
+     * @param array<string,mixed> $relation
+     * @param array<string,mixed> $delta
+     */
+    private function assertDeltaMatchesVariant(
+        int $actionCode,
+        array $relation,
+        array $delta,
+    ): void {
+        $variant = PayrollRegistrationBusinessMatrix::requireActionVariant(
+            $actionCode,
+            is_string($relation['activity_code'] ?? null) ? $relation['activity_code'] : null,
+            is_string($relation['relationship_detail_code'] ?? null)
+                ? $relation['relationship_detail_code']
+                : null,
+        );
+        $forbidden = PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta);
+        if ($forbidden === []) {
+            return;
+        }
+        $single = count($forbidden) === 1;
+        throw new PayrollRegistrationXmlException(
+            'registration_event_delta_variant_forbidden',
+            $this->names('', $forbidden) . ' se'
+                . ' u druhu činnosti „' . (string) $relation['activity_code']
+                . '" (varianta ' . $this->actionName($actionCode) . ', ' . $variant . ')'
+                . ($single ? ' neposílá' : ' neposílají')
+                . ' - ČSSZ by takové podání zamítla. Odeberte '
+                . ($single ? 'ji' : 'je') . ' z oznámení.'
+                . $this->references('', $forbidden),
+        );
+    }
+
+    /**
+     * Nový nástup v A3 (job/@fro, ID 10223): zaměstnanci mladšímu 14 let
+     * k tomuto dni ČSSZ podání zamítne na vstupu.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $delta
+     */
+    private function assertStartDateAge(
+        int $supplierId,
+        array $context,
+        string $effectiveOn,
+        array $delta,
+    ): void {
+        $start = is_array($delta['employment'] ?? null)
+            ? ($delta['employment']['actual_start_on'] ?? null)
+            : null;
+        if (!is_string($start)) {
+            return;
+        }
+        $current = $this->identities->sensitiveIdentityAt(
+            $supplierId,
+            (int) ($context['employee_id'] ?? 0),
+            $effectiveOn,
+        );
+        $birthDate = $current['identity']['birth_date'] ?? null;
+        if (is_string($birthDate)
+            && PayrollRegistrationMinimumAge::isUnderage($birthDate, $start)
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_underage',
+                'Zaměstnanci je k novému datu nástupu ' . $start . ' méně než '
+                    . PayrollRegistrationMinimumAge::YEARS . ' let a ČSSZ takové '
+                    . 'podání zamítne na vstupu. Zkontrolujte datum narození na '
+                    . 'kartě osoby a datum nástupu.'
+                    . PayrollRegistrationFieldVocabulary::reference('employment.actual_start_on'),
+            );
+        }
     }
 
     /** @param array<string,mixed> $context @param array<string,mixed> $input @return array<string,mixed> */
@@ -711,6 +837,7 @@ final readonly class PayrollRegistrationEventService
             $activityCode,
             $endedByDeath,
             $context,
+            $this->earlyTerminationApplies($supplierId, $employmentId, $effectiveOn),
         );
         $this->assertMatchesTerminationRecord(
             $supplierId,
@@ -834,7 +961,98 @@ final readonly class PayrollRegistrationEventService
     }
 
     /** @param array<string,mixed> $context @return array<string,mixed>|null */
+    /**
+     * Důvod předčasného ukončení (`unemplcomp/@earlyterm`, ID 10534) je podle
+     * EDV 1.4.0.6 povinný u A2-OST a A2-SPEC, když cizinec s povolením
+     * k zaměstnání, zaměstnaneckou nebo modrou kartou (druh oprávnění 1, 2, 4)
+     * končí dřív, než oprávnění vyprší; jinak je zakázaný. Údaje o oprávnění
+     * jsou v ověřeném profilu registrace A1.
+     */
+    private function earlyTerminationApplies(
+        int $supplierId,
+        int $employmentId,
+        string $endOn,
+    ): bool {
+        $profile = $this->identities->a1Profile($supplierId, $employmentId);
+        $worker = is_array($profile['foreign_worker'] ?? null)
+            ? $profile['foreign_worker']
+            : null;
+        if ($worker === null) {
+            return false;
+        }
+        $permitTo = $worker['permit_to'] ?? null;
+
+        return in_array($worker['permit_type_code'] ?? null, ['1', '2', '4'], true)
+            && is_string($permitTo)
+            && $endOn < $permitTo;
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<string,mixed>|null
+     */
     private function unemployment(
+        mixed $value,
+        string $scenario,
+        string $activityCode,
+        ?bool $endedByDeath,
+        array $context,
+        bool $earlyTerminationApplies = false,
+    ): ?array {
+        $early = null;
+        if (is_array($value) && !array_is_list($value)
+            && array_key_exists('early_termination_reason', $value)
+        ) {
+            $rawEarly = $value['early_termination_reason'];
+            unset($value['early_termination_reason']);
+            if ($value === []) {
+                $value = null;
+            }
+            if ($rawEarly !== null) {
+                $early = $this->earlyTerminationReason($rawEarly);
+            }
+        }
+        $directlyEnded = $scenario === '10' || $endedByDeath === true;
+        if ($early !== null && ($directlyEnded || !$earlyTerminationApplies)) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_early_termination_forbidden',
+                'Důvod předčasného ukončení se v odhlášce neposílá: uvádí se'
+                    . ' jen u cizince s povolením k zaměstnání, zaměstnaneckou'
+                    . ' nebo modrou kartou, jehož zaměstnání končí dřív, než'
+                    . ' oprávnění vyprší. Nechte pole ve formuláři prázdné.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'unemployment.early_termination_reason',
+                    ),
+            );
+        }
+        if ($early === null && !$directlyEnded && $earlyTerminationApplies) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_early_termination_required',
+                'Zaměstnání cizince končí dřív, než vyprší jeho povolení'
+                    . ' k zaměstnání, zaměstnanecká nebo modrá karta, a proto'
+                    . ' ČSSZ vyžaduje důvod předčasného ukončení (1 až 3).'
+                    . ' Doplňte ho ve formuláři odhlášky.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'unemployment.early_termination_reason',
+                    ),
+            );
+        }
+        $result = $this->unemploymentBody(
+            $value,
+            $scenario,
+            $activityCode,
+            $endedByDeath,
+            $context,
+        );
+        if ($early === null) {
+            return $result;
+        }
+
+        return ($result ?? []) + ['early_termination_reason' => $early];
+    }
+
+    /** @param array<string,mixed> $context @return array<string,mixed>|null */
+    private function unemploymentBody(
         mixed $value,
         string $scenario,
         string $activityCode,
@@ -858,18 +1076,13 @@ final readonly class PayrollRegistrationEventService
             if ($value === null) {
                 return null;
             }
-            $input = $this->object($value, 'unemployment');
             $this->onlyKeys(
-                $input,
-                ['early_termination_reason'],
+                $this->object($value, 'unemployment'),
+                [],
                 'unemployment.',
                 'u varianty A2-SPEC',
             );
-            return [
-                'early_termination_reason' => $this->earlyTerminationReason(
-                    $input['early_termination_reason'] ?? null,
-                ),
-            ];
+            return null;
         }
         $input = $this->object($value, 'unemployment');
         $mode = $this->requiredCode($input, 'mode', 32, 'unemployment.mode');
@@ -1208,6 +1421,24 @@ final readonly class PayrollRegistrationEventService
             $employeeId,
             $sourceOn,
         );
+        if ($mode === PayrollRegistrationProfileCompletion::FULL) {
+            // Dohlášení nese datum narození i pohlaví, ČSSZ je kontroluje
+            // proti rodnému číslu (EDV 1.4.0.6, ID 10056 a 10059).
+            $mismatch = PayrollRegistrationBirthNumberConsistency::problems(
+                $current['identity'],
+                CzechBirthNumber::forSubmission(
+                    is_string($current['identifiers']['birth_number'] ?? null)
+                        ? $current['identifiers']['birth_number']
+                        : null,
+                ),
+            );
+            if ($mismatch !== []) {
+                throw new PayrollRegistrationXmlException(
+                    $mismatch[0]['code'],
+                    $mismatch[0]['message'],
+                );
+            }
+        }
         $endDate = $context['end_date'] ?? null;
 
         return [
@@ -1634,10 +1865,21 @@ final readonly class PayrollRegistrationEventService
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a8_explanation_attachment_invalid',
-                'Soubor se zdůvodněním storna se nepodařilo přečíst, nebo je'
-                    . ' větší než 15 MB. Přiložte ho ve formuláři znovu.'
+                'Soubor se zdůvodněním storna se nepodařilo přečíst. Přiložte'
+                    . ' ho ve formuláři znovu.'
                     . PayrollRegistrationFieldVocabulary::reference(
                         'explanation_attachment.data_base64',
+                    ),
+            );
+        }
+        foreach (PayrollRegistrationAttachmentRules::violations([
+            ['name' => $name, 'data_base64' => $data],
+        ]) as $violation) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a8_explanation_attachment_invalid',
+                PayrollRegistrationAttachmentRules::message($violation)
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'explanation_attachment',
                     ),
             );
         }
@@ -1754,6 +1996,17 @@ final readonly class PayrollRegistrationEventService
                 );
             }
         }
+        // EDV 1.4.0.6, ID 10095, 10097, 10098: je-li uvedena část adresy,
+        // jsou povinné číslo popisné, PSČ i obec.
+        $missing = PayrollRegistrationForeignInsurerAddress::missing($result);
+        if ($missing !== []) {
+            throw new \InvalidArgumentException($this->note(
+                'foreign_insurance.' . $missing[0],
+                'chybí. Je-li uvedena jakákoli část adresy zahraničního nositele, '
+                    . 'musí být vyplněné číslo popisné, PSČ i obec ('
+                    . $this->names('foreign_insurance.', $missing, false) . ').',
+            ));
+        }
         return $result;
     }
 
@@ -1827,9 +2080,27 @@ final readonly class PayrollRegistrationEventService
             );
         }
         if (($raw['residence_address'] ?? null) !== null) {
+            // EDV 1.4.0.6, ID 10520 a další: u rezidence v ČR je adresa
+            // bydliště ve státě rezidence zakázaná a její stát (10524)
+            // je shodný se státem rezidence (10068).
+            if ($result['country_code'] === 'CZ') {
+                throw new \InvalidArgumentException($this->say(
+                    'tax_residency.residence_address',
+                    'se u daňové rezidence v ČR neposílá - adresa bydliště ve'
+                        . ' státě rezidence patří jen k rezidenci v jiném státě.',
+                ));
+            }
             $result['residence_address'] = $this->residenceAddress(
                 $raw['residence_address'],
             );
+            if ($result['residence_address']['country_code'] !== $result['country_code']) {
+                throw new \InvalidArgumentException($this->say(
+                    'tax_residency.residence_address.country_code',
+                    'musí být shodný se státem daňové rezidence („'
+                        . $result['country_code'] . '“), teď je „'
+                        . $result['residence_address']['country_code'] . '“.',
+                ));
+            }
         }
         ksort($result, SORT_STRING);
 
@@ -1852,10 +2123,10 @@ final readonly class PayrollRegistrationEventService
         ], $path . '.', 'v adrese bydliště ve státě rezidence');
         $country = $this->country($raw['country_code'] ?? null, $path . '.country_code');
         $result = [
-            'house_number' => $this->requiredText(
+            'house_number' => $this->houseNumber(
                 $raw['house_number'] ?? null,
+                $country,
                 $path . '.house_number',
-                12,
             ),
             'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,
@@ -1876,6 +2147,31 @@ final readonly class PayrollRegistrationEventService
     }
 
     /**
+     * Číslo popisné v adrese datové věty. U české adresy (stát CZ a vždy
+     * u pobytu v ČR) je jen číselné do čtyř číslic (EDV 1.4.0.6, kontrola 1).
+     */
+    private function houseNumber(
+        mixed $value,
+        string $country,
+        string $path,
+        bool $czechResidence = false,
+    ): string {
+        $text = $this->requiredText($value, $path, 12);
+        if (($czechResidence || $country === 'CZ')
+            && !PayrollRegistrationHouseNumber::validDescriptive($text, $czechResidence)
+        ) {
+            throw new \InvalidArgumentException($this->say(
+                $path,
+                'musí být u české adresy jen číslo o nejvýš čtyřech číslicích'
+                    . " (bez písmene a lomítka), teď je „{$text}“. Orientační"
+                    . ' číslo patří do vlastního pole.',
+            ));
+        }
+
+        return $text;
+    }
+
+    /**
      * PSČ v adrese datové věty. Mezery se odstraní (schéma je nepřipouští)
      * a tvar se ověří podle státu; chybné PSČ vrací větu, ne hlášku XSD.
      */
@@ -1887,7 +2183,7 @@ final readonly class PayrollRegistrationEventService
             throw new \InvalidArgumentException($this->say(
                 $path,
                 $country === 'CZ'
-                    ? "musí mít u české adresy pět číslic, například 11000 (mezery se při podání odstraní), teď je „{$text}“."
+                    ? "musí mít u české adresy pět číslic a nesmí začínat 0, 8 ani 9, například 11000 (mezery se při podání odstraní), teď je „{$text}“."
                     : "obsahuje znak, který datová věta ČSSZ nepřipouští (mezery se odstraní, povolená jsou písmena, číslice a - , . + ' /), teď je „{$text}“.",
             ));
         }
@@ -2053,10 +2349,11 @@ final readonly class PayrollRegistrationEventService
             'city', 'ruian_point',
         ], 'czech_residence_address.', 'v podání „' . $this->actionName(3) . '“');
         $result = [
-            'house_number' => $this->requiredText(
+            'house_number' => $this->houseNumber(
                 $raw['house_number'] ?? null,
+                'CZ',
                 'czech_residence_address.house_number',
-                12,
+                true,
             ),
             'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,
@@ -2077,6 +2374,18 @@ final readonly class PayrollRegistrationEventService
                     $max,
                 );
             }
+        }
+        if (isset($result['orientation_number'])
+            && !PayrollRegistrationHouseNumber::validCzechResidenceOrientation(
+                $result['orientation_number'],
+            )
+        ) {
+            throw new \InvalidArgumentException($this->say(
+                'czech_residence_address.orientation_number',
+                'smí mít u adresy pobytu v ČR nejvýš '
+                    . PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX
+                    . ' znaky, teď je „' . $result['orientation_number'] . '“.',
+            ));
         }
         ksort($result, SORT_STRING);
 
@@ -2221,10 +2530,10 @@ final readonly class PayrollRegistrationEventService
             'permanent_address.country_code',
         );
         $result = [
-            'house_number' => $this->requiredText(
+            'house_number' => $this->houseNumber(
                 $raw['house_number'] ?? null,
+                $country,
                 'permanent_address.house_number',
-                12,
             ),
             'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,
@@ -2321,10 +2630,10 @@ final readonly class PayrollRegistrationEventService
                 'contact_address.street',
                 50,
             ),
-            'house_number' => $this->requiredText(
+            'house_number' => $this->houseNumber(
                 $raw['house_number'] ?? null,
+                $country,
                 'contact_address.house_number',
-                12,
             ),
             'postal_code' => $this->postalCode(
                 $raw['postal_code'] ?? null,

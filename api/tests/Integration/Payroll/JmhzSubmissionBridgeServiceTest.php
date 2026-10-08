@@ -28,6 +28,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -58,6 +59,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement;
 use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionRetryConfirmationService;
@@ -168,6 +170,73 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         if (isset($this->db) && $this->db->pdo()->inTransaction()) {
             $this->db->pdo()->rollBack();
         }
+    }
+
+    /**
+     * REGZEC25-DEADLINE.A3.wait48-01: JMHZ odeslané dřív než 48 hodin po přijaté
+     * změně údajů zaměstnance (A3) ČSSZ může zamítnout (chyba 243), takže se
+     * hlášení nezmrazí a hláška řekne, od kdy to jde.
+     */
+    public function testRegistrationChangeAcceptedWithinFortyEightHoursBlocksFreezing(): void
+    {
+        $obligationId = $this->registerObligation();
+        $settlement = new class (new PayrollRegistrationSubmissionRepository($this->db)) extends PayrollRegistrationChangeSettlement {
+            public function pendingUntil(
+                int $supplierId,
+                string $environment,
+                array $employmentIds,
+                \DateTimeImmutable $now,
+            ): ?array {
+                return [
+                    'until' => new \DateTimeImmutable('2026-08-06 12:00:00 UTC'),
+                    'employment_ids' => [1, 2],
+                ];
+            }
+        };
+
+        try {
+            $this->bridge(registrationSettlement: $settlement)->bridge(
+                $this->supplierId,
+                self::PREPARATION_ID,
+                $obligationId,
+                self::ENVIRONMENT,
+                $this->userId,
+            );
+            self::fail('Hlášení nemělo jít zmrazit.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_registration_change_settling', $exception->validationCode);
+            self::assertStringContainsString('6. 8. 2026 14:00', $exception->getMessage());
+        }
+        $count = $this->row(
+            'SELECT COUNT(*) AS c FROM payroll_submissions WHERE supplier_id = ?',
+            [$this->supplierId],
+        );
+        self::assertSame(0, (int) $count['c']);
+    }
+
+    public function testFreezesWhenNoRegistrationChangeIsSettling(): void
+    {
+        $obligationId = $this->registerObligation();
+        $settlement = new class (new PayrollRegistrationSubmissionRepository($this->db)) extends PayrollRegistrationChangeSettlement {
+            public function pendingUntil(
+                int $supplierId,
+                string $environment,
+                array $employmentIds,
+                \DateTimeImmutable $now,
+            ): ?array {
+                return null;
+            }
+        };
+
+        $result = $this->bridge(registrationSettlement: $settlement)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+
+        self::assertSame('ready', $result['status']);
     }
 
     public function testFreezesReadySubmissionOnVrepChannel(): void
@@ -2198,6 +2267,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         ?JmhzScenario1Resolution $resolution = null,
         string $now = '2026-08-05 11:30:00 Europe/Prague',
         ?int $packageFormLimit = null,
+        ?PayrollRegistrationChangeSettlement $registrationSettlement = null,
     ): JmhzSubmissionBridgeService {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
         $documents->method('resolve')->willReturn(
@@ -2223,6 +2293,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->obligations,
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
             new JmhzDeferralRepository($this->db),
+            registrationSettlement: $registrationSettlement,
         );
     }
 

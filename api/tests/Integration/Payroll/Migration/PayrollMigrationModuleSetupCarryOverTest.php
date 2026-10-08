@@ -63,7 +63,7 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         $pdo->prepare(
             "UPDATE supplier
                 SET taxpayer_type = 'po', payroll_enabled = 0,
-                    cssz_vsdp = '0012345678', cssz_ossz_code = '301', health_insurance_number = '555666777'
+                    cssz_vsdp = '0012345678', cssz_ossz_code = '332', health_insurance_number = '555666777'
               WHERE id = ?"
         )->execute([$this->supplierId]);
     }
@@ -86,7 +86,7 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         }
 
         self::assertTrue($result['office_created']);
-        self::assertSame(['cssz_vsdp' => '0012345678', 'cssz_ossz_code' => '301'], $result['carried']);
+        self::assertSame(['cssz_vsdp' => '0012345678', 'cssz_ossz_code' => '332'], $result['carried']);
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT office.social_security_variable_symbol, settings.social_security_office_code
@@ -96,7 +96,7 @@ final class PayrollMigrationModuleSetupCarryOverTest extends TestCase
         );
         $stmt->execute([$this->supplierId]);
         self::assertSame(
-            ['social_security_variable_symbol' => '0012345678', 'social_security_office_code' => '301'],
+            ['social_security_variable_symbol' => '0012345678', 'social_security_office_code' => '332'],
             $stmt->fetch(\PDO::FETCH_ASSOC),
         );
 

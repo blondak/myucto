@@ -54,20 +54,58 @@ final class PayrollRegistrationBusinessMatrixTest extends TestCase
         }
     }
 
-    public function testA5ToA8RejectEveryNonOstVariant(): void
+    /**
+     * EDV 1.4.0.6 (Changelog 1.4.0.4): A8 smí zaměstnavatel podat u všech
+     * druhů činnosti, A6 a A7 navíc u druhu M; A5 jen u plné evidence.
+     * Datová věta A5 až A8 má jedinou variantu (OST), druh činnosti ji nemění.
+     *
+     * @return iterable<string,array{int,string,?string,bool}>
+     */
+    public static function followUpActionMatrix(): iterable
     {
-        foreach ([5, 6, 7, 8] as $actionCode) {
-            foreach ([['10', null], ['11', '1']] as [$activity, $detail]) {
-                $this->expectCode(
-                    'registration_regzec_action_variant_unsupported',
-                    static fn () => PayrollRegistrationBusinessMatrix::requireActionVariant(
-                        $actionCode,
-                        $activity,
-                        $detail,
-                    ),
-                );
+        foreach ([['10', null], ['11', '1'], ['14', '1'], ['M', '1'], ['1', '2']] as [$activity, $detail]) {
+            yield "A8 for {$activity}/{$detail}" => [8, $activity, $detail, true];
+        }
+        yield 'A6 for M' => [6, 'M', '1', true];
+        yield 'A7 for M' => [7, 'M', '1', true];
+        yield 'A5 for M' => [5, 'M', '1', false];
+        foreach ([5, 6, 7] as $actionCode) {
+            foreach ([['10', null], ['11', '1'], ['13', '1'], ['1', '2']] as [$activity, $detail]) {
+                yield "A{$actionCode} for {$activity}/{$detail}" => [$actionCode, $activity, $detail, false];
+            }
+            foreach ([['1', '1'], ['A', null], ['K', '1'], ['1', '3']] as [$activity, $detail]) {
+                yield "A{$actionCode} for ordinary {$activity}/{$detail}" => [$actionCode, $activity, $detail, true];
             }
         }
+    }
+
+    #[DataProvider('followUpActionMatrix')]
+    public function testFollowUpActionsAreAllowedPerActivityAndAlwaysUseTheOstVariant(
+        int $actionCode,
+        string $activity,
+        ?string $detail,
+        bool $allowed,
+    ): void {
+        if (!$allowed) {
+            $this->expectCode(
+                'registration_regzec_action_variant_unsupported',
+                static fn () => PayrollRegistrationBusinessMatrix::requireActionVariant(
+                    $actionCode,
+                    $activity,
+                    $detail,
+                ),
+            );
+
+            return;
+        }
+        self::assertSame(
+            'OST',
+            PayrollRegistrationBusinessMatrix::requireActionVariant(
+                $actionCode,
+                $activity,
+                $detail,
+            ),
+        );
     }
 
     public function testA1RequiresActivityAndCompleteVariantData(): void

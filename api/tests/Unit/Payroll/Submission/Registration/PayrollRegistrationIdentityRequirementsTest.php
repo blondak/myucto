@@ -66,9 +66,29 @@ final class PayrollRegistrationIdentityRequirementsTest extends TestCase
         self::assertSame('identifiers', $missing[0]['panel']);
     }
 
+    /** REGZEC25-client.bno-02: u českého občanství je rodné číslo nebo EČP povinné. */
+    public function testRegzecRequiresBirthNumberOrEcpForCzechCitizen(): void
+    {
+        $identity = self::completeIdentity();
+        $identity['citizenship_country_code'] = 'CZ';
+
+        $missing = Requirements::missing(Requirements::AGENDA_REGZEC, $identity, []);
+        self::assertSame(['identifier.value'], array_column($missing, 'field'));
+        self::assertStringContainsString('REGZEC A1', $missing[0]['message']);
+        self::assertSame(
+            [],
+            Requirements::missing(
+                Requirements::AGENDA_REGZEC,
+                $identity,
+                ['ecp' => '1234567890'],
+            ),
+        );
+    }
+
     public function testRegzecNeedsSexAndWithoutIdentifierTheForeignIdentity(): void
     {
         $identity = self::completeIdentity();
+        $identity['citizenship_country_code'] = 'SK';
         $identity['sex'] = 'unspecified';
         $identity['birth_date'] = null;
 

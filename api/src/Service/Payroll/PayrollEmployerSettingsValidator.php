@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingAccountPolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollCsszDistrictCodebook;
 
 final class PayrollEmployerSettingsValidator
 {
@@ -55,10 +56,15 @@ final class PayrollEmployerSettingsValidator
 
     public function __construct(private readonly ChartOfAccountsRepository $accounts) {}
 
-    /** Kód OSSZ po ořezání mezer; totéž pravidlo platí pro převzetí z Nastavení firmy. */
+    /**
+     * Kód OSSZ po ořezání mezer; totéž pravidlo platí pro převzetí z Nastavení
+     * firmy. Musí to být kód z číselníku okresů ČSSZ (C_COKR) - jiný kód
+     * ČSSZ v `employee/@dep` odmítne.
+     */
     public static function isValidSocialSecurityOfficeCode(string $code): bool
     {
-        return preg_match(self::SOCIAL_SECURITY_OFFICE_CODE_PATTERN, $code) === 1;
+        return preg_match(self::SOCIAL_SECURITY_OFFICE_CODE_PATTERN, $code) === 1
+            && PayrollCsszDistrictCodebook::contains($code);
     }
 
     /**
@@ -99,8 +105,8 @@ final class PayrollEmployerSettingsValidator
         if ($normalized['social_security_office_code'] !== null
             && !self::isValidSocialSecurityOfficeCode($normalized['social_security_office_code'])) {
             throw new \InvalidArgumentException(
-                'Kód správy sociálního zabezpečení musí být trojmístné číslo, '
-                . 'například 110 pro Prahu 10. Kód najdete na potvrzení o '
+                'Kód správy sociálního zabezpečení musí být trojmístné číslo z číselníku '
+                . 'okresních správ ČSSZ, například 110 pro Prahu 10. Kód najdete na potvrzení o '
                 . 'registraci zaměstnavatele u ČSSZ. Pole můžete nechat prázdné.',
             );
         }

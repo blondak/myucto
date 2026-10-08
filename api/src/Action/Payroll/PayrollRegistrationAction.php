@@ -213,6 +213,7 @@ final class PayrollRegistrationAction
                 $this->employmentId($args),
                 $this->eventId($request),
                 $this->fullRegistrationRequested($request),
+                $this->startNotKnownInAdvance($request),
             );
         });
     }
@@ -242,6 +243,7 @@ final class PayrollRegistrationAction
                 $this->userId($request),
                 $this->eventId($request),
                 $this->fullRegistrationRequested($request),
+                $this->startNotKnownInAdvance($request),
             );
         }, 201);
     }
@@ -578,6 +580,31 @@ final class PayrollRegistrationAction
         if ($value !== 'full') {
             throw new \InvalidArgumentException(
                 'registration_mode musí být auto, nebo full.',
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * `start_not_known_in_advance=true`: nástup zaměstnance nebyl předem znám
+     * (zaměstnanec začal pracovat bez ohlášení), takže lhůta přihlášení je
+     * osm dnů od vzniku povinnosti poskytovat plnění, resp. od prvního plnění
+     * (§ 19 odst. 1 písm. b) zákona č. 323/2025 Sb.).
+     */
+    private function startNotKnownInAdvance(Request $request): bool
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $value = $body['start_not_known_in_advance']
+            ?? ($request->getQueryParams()['start_not_known_in_advance'] ?? null);
+        if ($value === null || $value === '' || $value === false
+            || $value === 'false' || $value === '0' || $value === 0
+        ) {
+            return false;
+        }
+        if ($value !== true && $value !== 'true' && $value !== '1' && $value !== 1) {
+            throw new \InvalidArgumentException(
+                'start_not_known_in_advance musí být true, nebo false.',
             );
         }
 

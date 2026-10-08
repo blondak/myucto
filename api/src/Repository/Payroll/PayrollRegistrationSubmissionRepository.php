@@ -193,6 +193,139 @@ final class PayrollRegistrationSubmissionRepository
     }
 
     /**
+     * Archivovaný odeslaný soubor NEJSTARŠÍHO přijatého podání dané agendy
+     * (u PREZEC je to P1). Z něj se čte, co ČSSZ skutečně přijala:
+     * předpokládaný den nástupu a variabilní symbol, na které se navazuje
+     * ukončení předregistrace i plná registrace.
+     */
+    public function acceptedFilingArtifactId(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $agendaCode,
+    ): ?int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT artifact.id
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = part.supplier_id
+                AND artifact.environment = part.environment
+                AND artifact.submission_id = part.submission_id
+                AND artifact.part_id = part.id
+                AND artifact.artifact_kind = "outbound_xml"
+                AND artifact.direction = "outbound"
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.agenda_code = ?
+                AND part.subject_reference = ?
+                AND submission.status = "accepted"
+              ORDER BY submission.id ASC, artifact.id ASC
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            self::employmentReference($employmentId),
+        ]);
+        $id = $statement->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Pracovní vztahy, u kterých ČSSZ v daném okně přijala změnu údajů
+     * (REGZEC A3). Klíčem je id vztahu, hodnotou čas rozhodnutí v UTC.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string>
+     */
+    public function employmentsWithAcceptedChangeSince(
+        int $supplierId,
+        string $environment,
+        array $employmentIds,
+        string $decidedNotBeforeUtc,
+    ): array {
+        $employmentIds = array_values(array_unique(array_filter(
+            $employmentIds,
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $references = array_map(self::employmentReference(...), $employmentIds);
+        $placeholders = implode(', ', array_fill(0, count($references), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT event.employment_id, MAX(submission.decided_at) AS decided_at
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_registration_event_snapshots event
+                 ON event.supplier_id = part.supplier_id
+                AND event.environment = part.environment
+                AND CONCAT("payroll_registration_event:", event.id)
+                    = part.source_entity_reference
+                AND event.action_code = 3
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.agenda_code = "REGZEC25"
+                AND part.source_entity_type = "payroll_registration_event"
+                AND submission.status = "accepted"
+                AND submission.decided_at >= ?
+                AND part.subject_reference IN (' . $placeholders . ')
+              GROUP BY event.employment_id'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $decidedNotBeforeUtc,
+            ...$references,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['employment_id']] = (string) $row['decided_at'];
+        }
+
+        return $result;
+    }
+
+    /** Počet přijatých podání dané agendy u vztahu (P1 a P2 jsou dvě). */
+    public function acceptedFilingCount(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $agendaCode,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(DISTINCT submission.id)
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.agenda_code = ?
+                AND part.subject_reference = ?
+                AND submission.status = "accepted"'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            self::employmentReference($employmentId),
+        ]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
      * Nejnovější registrační podání pro vztah — podklad pro UI i pro rozhodnutí,
      * jestli se má vůbec něco zakládat.
      *

@@ -482,7 +482,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
     {
         $this->db->pdo()->prepare(
             "UPDATE supplier
-                SET taxpayer_type = 'po', cssz_vsdp = '0012345678', cssz_ossz_code = '301'
+                SET taxpayer_type = 'po', cssz_vsdp = '0012345678', cssz_ossz_code = '332'
               WHERE id = ?"
         )->execute([$this->supplierId]);
         $payload = $this->payload('VZOROV', 'Vzorová účtárna');
@@ -492,7 +492,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         $settings = $this->json($response)['settings'];
-        self::assertSame('301', $settings['social_security_office_code']);
+        self::assertSame('332', $settings['social_security_office_code']);
         self::assertSame('0012345678', $settings['offices'][0]['social_security_variable_symbol']);
         self::assertSame(2, $settings['row_version'], 'Odpověď nese verzi po převzetí, jinak by další uložení spadlo na konflikt.');
         $legacy = $this->db->pdo()->prepare('SELECT cssz_vsdp, cssz_ossz_code FROM supplier WHERE id = ?');

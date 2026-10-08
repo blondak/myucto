@@ -82,13 +82,13 @@ final class PayrollEmployerIdentifiersTest extends TestCase
 
         $resp = $this->save([
             'cssz_vsdp' => '87654321',
-            'cssz_ossz_code' => '301',
+            'cssz_ossz_code' => '332',
             'health_insurance_number' => '555666777',
         ]);
         self::assertSame(200, $resp->getStatusCode());
 
         self::assertSame(
-            ['87654321', '301', '555666777'],
+            ['87654321', '332', '555666777'],
             $this->storedIdentifiers(),
             'S vypnutými Mzdami je Nastavení firmy jediným zdrojem VS zaměstnavatele.',
         );
@@ -122,7 +122,7 @@ final class PayrollEmployerIdentifiersTest extends TestCase
         $accountId = $this->createHealthAccount();
         $this->db->pdo()->prepare(
             "UPDATE supplier
-                SET cssz_vsdp = '87654321', cssz_ossz_code = '301', health_insurance_number = '555666777'
+                SET cssz_vsdp = '87654321', cssz_ossz_code = '332', health_insurance_number = '555666777'
               WHERE id = ?"
         )->execute([$this->supplierId]);
 
@@ -134,7 +134,7 @@ final class PayrollEmployerIdentifiersTest extends TestCase
             $this->storedIdentifiers(),
             'Se zapnutými Mzdami zůstává kanonickým zdrojem mzdový záznam.',
         );
-        self::assertSame(['87654321', '301', '555666777'], $this->payrollIdentifiers($officeId, $accountId));
+        self::assertSame(['87654321', '332', '555666777'], $this->payrollIdentifiers($officeId, $accountId));
     }
 
     /**
@@ -190,12 +190,12 @@ final class PayrollEmployerIdentifiersTest extends TestCase
         $resp = $this->save([
             'payroll_enabled' => true,
             'cssz_vsdp' => '87654321',
-            'cssz_ossz_code' => '301',
+            'cssz_ossz_code' => '332',
             'health_insurance_number' => '555666777',
         ]);
         self::assertSame(200, $resp->getStatusCode());
 
-        self::assertSame(['87654321', '301', '555666777'], $this->storedIdentifiers());
+        self::assertSame(['87654321', '332', '555666777'], $this->storedIdentifiers());
     }
 
     public function testNaturalPersonKeepsPersonalIdentifiersRegardlessOfPayroll(): void

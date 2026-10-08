@@ -21,6 +21,9 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** Kód „povolení k zaměstnání" v číselníku CIS Druh pracovního oprávnění. */
     private const PERMIT_TYPE_EMPLOYMENT_PERMIT = '1';
 
+    /** Druhy činnosti dohody o provedení práce (T až ZC), kde `sme` být nesmí. */
+    private const DPP_ACTIVITY_CODES = ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'];
+
     /**
      * Sbírané vady; `null` znamená přísný režim, kde se místo sbírání hází.
      *
@@ -163,19 +166,11 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $employment['relationship_detail_code'],
             );
         // EDV 1.4.0.6, ID 10223: u druhu činnosti 10 až 16 a u výkonu trestu
-        // (10502 = 2) nesmí být nástup dřív než 1. 1. 2026.
-        if ($this->startsBeforeSpecialActivityEvidence($employment)) {
-            $this->invalid(
-                'registration_regzec_a1_start_before_2026',
-                'Datum nástupu ' . $employment['actual_start_on'] . ' je dřívější '
-                    . 'než 1. 1. 2026. U druhu činnosti „'
-                    . $employment['activity_code'] . '" (a u výkonu trestu) ČSSZ '
-                    . 'přijme přihlášku jen s nástupem od 1. 1. 2026 — tyto '
-                    . 'vztahy se dřív neevidovaly. Zkontrolujte datum nástupu '
-                    . 'na kartě pracovního vztahu.',
-                'employment.actual_start_on',
-            );
-        }
+        // (10502 = 2) nesmí být nástup dřív než 1. 1. 2026. Skutečné datum
+        // zůstává v evidenci i ve snímku, fiktivní 1. 1. 2026 (zásady REGZEC,
+        // specifický postup č. 3) se dosazuje až do věty, viz
+        // {@see PayrollRegistrationSpecialStartDate}.
+        $this->underageCheck($identity, $employment);
 
         // Státní občanství rozhoduje o tom, které údaje jsou povinné (cizinec)
         // a které zakázané (občan ČR) — EDV 1.4.0.6, ID 10071, 10248, 10526.
@@ -234,11 +229,20 @@ final class PayrollRegistrationA1SnapshotBuilder
             : null;
 
         $this->identityPresent($identity);
-        $proofIdentity = $this->optionalObject($input, 'proof_identity');
-        $foreignWorker = $this->optionalObject($input, 'foreign_worker');
+        // EDV 1.4.0.6: u A1-10 jsou elementy proofid a nocitizen zakázané, takže
+        // je varianta 10 nevyžaduje a nenese (hodnota ze zdroje se zahodí).
+        $foreignGroups = $variant !== PayrollRegistrationBusinessMatrix::VARIANT_10;
+        $proofIdentity = $foreignGroups
+            ? $this->optionalObject($input, 'proof_identity')
+            : null;
+        $foreignWorker = $foreignGroups
+            ? $this->optionalObject($input, 'foreign_worker')
+            : null;
         // Prázdné občanství je už nahlášené výš; brát ho jako cizinu by k tomu
         // přisypalo dvě vymyšlené vady o dokladech, které se nikoho netýkají.
-        if ($citizenship !== '' && $citizenship !== 'CZ') {
+        if (!$foreignGroups) {
+            // Zakázané skupiny varianty 10, není co kontrolovat.
+        } elseif ($citizenship !== '' && $citizenship !== 'CZ') {
             if ($proofIdentity === null || $foreignWorker === null) {
                 $this->invalid(
                     'registration_regzec_a1_foreign_data_missing',
@@ -272,11 +276,13 @@ final class PayrollRegistrationA1SnapshotBuilder
             );
         }
 
-        $czechResidence = $this->optionalAddress(
-            $input,
-            'czech_residence_address',
-            true,
-        );
+        // EDV 1.4.0.6, ID 10514 a další: pobyt v ČR (`fdr`) je zakázaný při
+        // trvalém pobytu v ČR i u varianty 10, hodnota se zahodí (a protože
+        // se nepošle, ani se nekontroluje).
+        $czechResidence = $permanentAddress['country_code'] === 'CZ'
+            || $variant === PayrollRegistrationBusinessMatrix::VARIANT_10
+                ? null
+                : $this->optionalAddress($input, 'czech_residence_address', true);
         if ($permanentAddress['country_code'] !== ''
             && $permanentAddress['country_code'] !== 'CZ'
             && !in_array($permanentAddress['country_code'], ['AT', 'DE', 'PL', 'SK'], true)
@@ -448,6 +454,20 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $this->missing("employment.{$field}");
             }
         }
+        // EDV 1.4.0.6, ID 10243: zaměstnání malého rozsahu (sme = A) se u dohod
+        // o provedení práce (T až ZC) nepoužívá.
+        if ($employment['small_scale'] === true
+            && in_array($employment['activity_code'], self::DPP_ACTIVITY_CODES, true)
+        ) {
+            $this->malformed(
+                'employment.small_scale',
+                'nesmí být u druhu činnosti „' . $employment['activity_code']
+                    . '" (dohoda o provedení práce) zapnuté — zaměstnání malého '
+                    . 'rozsahu se u dohod nepoužívá.',
+                'small_scale_dpp',
+                ['activity' => (string) $employment['activity_code']],
+            );
+        }
         $allowed = PayrollRegistrationEmploymentStatusCodebook::restrictedFor(
             $employment['activity_code'],
         );
@@ -473,22 +493,33 @@ final class PayrollRegistrationA1SnapshotBuilder
     }
 
     /**
-     * Druh činnosti 10 až 16 a výkon trestu (10502 = 2) se v registru vedou
-     * teprve od 1. 1. 2026 — EDV 1.4.0.6 u 10223: „Datum nástupu nemůže být
-     * v těchto případech dříve než 1.1.2026". Datum je pevná hranice
-     * z datové věty ČSSZ, ne podporovaný rok mzdového modulu.
+     * Kontrola „Datum narození x Datum nástupu" (EDV 1.4.0.6, ID 10056
+     * a 10223): zaměstnanci mladšímu 14 let k nástupu ČSSZ podání zamítne
+     * na vstupu, bez výjimky pro dohody.
      *
+     * @param array<string,mixed> $identity
      * @param array<string,mixed> $employment
      */
-    private function startsBeforeSpecialActivityEvidence(array $employment): bool
+    private function underageCheck(array $identity, array $employment): void
     {
-        return $employment['actual_start_on'] !== ''
-            && $employment['actual_start_on'] < '2026-01-01'
-            && (in_array(
-                $employment['activity_code'],
-                ['10', '11', '12', '13', '14', '15', '16'],
-                true,
-            ) || $employment['relationship_detail_code'] === '2');
+        $birthDate = $identity['birth_date'] ?? null;
+        $start = $employment['actual_start_on'];
+        if (!is_string($birthDate) || $birthDate === '' || $start === '') {
+            return;
+        }
+        if (PayrollRegistrationMinimumAge::isUnderage($birthDate, $start)) {
+            $this->invalid(
+                'registration_regzec_a1_underage',
+                'Zaměstnanci je k datu nástupu ' . $start . ' méně než '
+                    . PayrollRegistrationMinimumAge::YEARS . ' let (narozen '
+                    . $birthDate . ') a ČSSZ takové podání zamítne na vstupu. '
+                    . 'Zkontrolujte datum narození na kartě osoby a datum '
+                    . 'nástupu na kartě pracovního vztahu.',
+                'employment.actual_start_on',
+                'underage',
+                ['min_age' => PayrollRegistrationMinimumAge::YEARS],
+            );
+        }
     }
 
     /**
@@ -658,16 +689,8 @@ final class PayrollRegistrationA1SnapshotBuilder
             if ($result['country_code'] === null) {
                 $this->missing('country_code');
             }
-            $addressGiven = false;
-            foreach (['street', 'house_number', 'orientation_number', 'postal_code', 'city'] as $key) {
-                $addressGiven = $addressGiven || $result[$key] !== null;
-            }
-            if ($addressGiven) {
-                foreach (['house_number', 'postal_code', 'city'] as $key) {
-                    if ($result[$key] === null) {
-                        $this->missing($key);
-                    }
-                }
+            foreach (PayrollRegistrationForeignInsurerAddress::missing($result) as $key) {
+                $this->missing($key);
             }
             if ($result['sector'] !== null
                 && preg_match('/^0[1-8]$/D', $result['sector']) !== 1
@@ -744,22 +767,74 @@ final class PayrollRegistrationA1SnapshotBuilder
      */
     private function address(array $input, bool $czech = false): array
     {
+        // `fdr` (czAdrType) stát nemá a serializér ho nepíše; adresa pobytu
+        // v ČR je z definice česká, takže chybějící stát není vada.
+        $country = $czech && (
+            !is_string($input['country_code'] ?? null)
+            || trim($input['country_code']) === ''
+        )
+            ? 'CZ'
+            : $this->country($input, 'country_code');
+        // EDV 1.4.0.6: česká adresa (stát CZ a vždy pobyt v ČR) má číslo
+        // popisné jen číselné a PSČ s první číslicí 1 až 7.
+        $isCzech = $czech || $country === 'CZ';
+
         return [
             'street' => $this->optionalText($input, 'street', 255),
-            'house_number' => $this->text($input, 'house_number', 12),
-            'orientation_number' => $this->optionalText($input, 'orientation_number', 12),
+            'house_number' => $this->houseNumber($input, $isCzech, $czech),
+            'orientation_number' => $this->orientationNumber($input, $czech),
             'city' => $this->text($input, 'city', 255),
-            'postal_code' => $this->postalCode($input, 'postal_code', $czech),
-            // `fdr` (czAdrType) stát nemá a serializér ho nepíše; adresa pobytu
-            // v ČR je z definice česká, takže chybějící stát není vada.
-            'country_code' => $czech && (
-                !is_string($input['country_code'] ?? null)
-                || trim($input['country_code']) === ''
-            )
-                ? 'CZ'
-                : $this->country($input, 'country_code'),
+            'postal_code' => $this->postalCode($input, 'postal_code', $isCzech),
+            'country_code' => $country,
             'ruian_point' => $this->optionalText($input, 'ruian_point', 20),
         ];
+    }
+
+    /** @param array<string,mixed> $input */
+    private function houseNumber(array $input, bool $isCzech, bool $czechResidence): string
+    {
+        $value = $this->text($input, 'house_number', 12);
+        if ($value !== '' && $isCzech
+            && !PayrollRegistrationHouseNumber::validDescriptive($value, $czechResidence)
+        ) {
+            $this->malformed(
+                'house_number',
+                'musí být u české adresy jen číslo o nejvýš čtyřech číslicích '
+                    . '(bez písmene a lomítka), teď je „' . $value . '". '
+                    . 'Orientační číslo patří do vlastního pole.',
+                'house_number_cz',
+                ['value' => $value],
+            );
+
+            return '';
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $input */
+    private function orientationNumber(array $input, bool $czechResidence): ?string
+    {
+        $value = $this->optionalText($input, 'orientation_number', 12);
+        if ($value !== null && $czechResidence
+            && !PayrollRegistrationHouseNumber::validCzechResidenceOrientation($value)
+        ) {
+            $this->malformed(
+                'orientation_number',
+                'smí mít u adresy pobytu v ČR nejvýš '
+                    . PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX
+                    . ' znaky, teď je „' . $value . '".',
+                'orientation_number_cz_residence',
+                [
+                    'max' => PayrollRegistrationHouseNumber::CZECH_RESIDENCE_ORIENTATION_MAX,
+                    'value' => $value,
+                ],
+            );
+
+            return null;
+        }
+
+        return $value;
     }
 
     /**
@@ -769,7 +844,7 @@ final class PayrollRegistrationA1SnapshotBuilder
      * (`simpleA_NN_ZZType`, u `fdr` dokonce `\d{5}`), kdežto česká PSČ se píší
      * „602 00". Mezery se proto při sestavení snímku odstraní — za účetní, ne
      * hláškou — a profil se uloží už ve tvaru, který půjde na ČSSZ. Tvar PSČ
-     * pobytu v ČR (pět číslic) se hlídá zvlášť.
+     * české adresy (pět číslic, první 1 až 7) se hlídá zvlášť.
      *
      * @param array<string,mixed> $input
      */
@@ -781,12 +856,12 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
         $postalCode = $this->text($input, $key, 11);
         if ($postalCode !== '' && $czech
-            && preg_match('/^\d{5}$/D', $postalCode) !== 1
+            && PayrollRegistrationPostalCode::valid($postalCode, 'CZ') === null
         ) {
             $this->malformed(
                 $key,
-                'musí mít u adresy v ČR přesně pět číslic (například 60200), '
-                    . 'teď je „' . $postalCode . '".',
+                'musí mít u adresy v ČR pět číslic a nesmí začínat 0, 8 ani 9 '
+                    . '(například 60200), teď je „' . $postalCode . '".',
                 'postal_code_cz',
                 ['value' => $postalCode],
             );
@@ -822,12 +897,28 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
         $residence = $input['residence_address'] ?? null;
         $residenceAddress = null;
-        if ($residence !== null) {
+        // EDV 1.4.0.6, ID 10520 a další: u rezidence v ČR je adresa bydliště
+        // ve státě rezidence ZAKÁZANÁ, hodnota ze zdroje se zahodí.
+        if ($residence !== null && $country !== 'CZ') {
             $residenceInput = $this->object($input, 'residence_address');
             $residenceAddress = $this->within(
                 'residence_address',
                 fn (): array => $this->address($residenceInput),
             );
+            // Stát bydliště (rdr/@cnt, 10524) je shodný se státem rezidence
+            // (taxidrezid/@stat, 10068) a různý od CZ.
+            if ($country !== ''
+                && $residenceAddress['country_code'] !== ''
+                && $residenceAddress['country_code'] !== $country
+            ) {
+                $this->malformed(
+                    'residence_address.country_code',
+                    'musí být shodný se státem daňové rezidence („' . $country
+                        . '"), teď je „' . $residenceAddress['country_code'] . '".',
+                    'residence_country_mismatch',
+                    ['value' => $residenceAddress['country_code'], 'tax' => $country],
+                );
+            }
         }
 
         return [
@@ -971,7 +1062,9 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** @return list<array<string,mixed>> */
     private function attachments(mixed $value): array
     {
-        if (!is_array($value) || !array_is_list($value) || count($value) > 9) {
+        if (!is_array($value) || !array_is_list($value)
+            || count($value) > PayrollRegistrationAttachmentRules::MAX_COUNT
+        ) {
             $this->invalid(
                 'registration_regzec_a1_attachments_invalid',
                 'Přílohy registrace nejdou přijmout. Připojit jich lze nejvýše '
@@ -1002,6 +1095,15 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'description' => $this->optionalText($attachment, 'description', 255),
                 'data_base64' => $data,
             ];
+        }
+        foreach (PayrollRegistrationAttachmentRules::violations($result) as $violation) {
+            $this->invalid(
+                'registration_regzec_a1_attachments_invalid',
+                PayrollRegistrationAttachmentRules::message($violation),
+                'attachments',
+                'attachment_' . $violation['kind'],
+                ['name' => $violation['name']],
+            );
         }
 
         return $result;
@@ -1263,12 +1365,15 @@ final class PayrollRegistrationA1SnapshotBuilder
         );
     }
 
+    /** @param array<string,int|string> $params */
     private function invalid(
         string $code,
         string $message,
         ?string $field = null,
+        ?string $messageKey = null,
+        array $params = [],
     ): void {
-        $this->fail($code, $message, $field);
+        $this->fail($code, $message, $field, $messageKey, $params);
     }
 
     /**
