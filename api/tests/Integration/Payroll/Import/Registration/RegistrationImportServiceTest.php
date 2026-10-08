@@ -195,6 +195,38 @@ final class RegistrationImportServiceTest extends TestCase
     }
 
     /**
+     * DPČ přihlášená jako zaměstnání malého rozsahu (`sme="A"`, druh činnosti
+     * A až J) zůstává DPČ, ale příznak se přenese do profilu A1, odkud ho
+     * čte příští věta. Dřív se ztratil a návrh poslal `sme="N"`.
+     */
+    public function testAgreementToCompleteWorkKeepsSmallScaleFlagInRegistrationProfile(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1993-05-06', 'male', 4);
+        $files = [$this->file('dpc.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1993-05-06',
+            'sex' => 'M',
+            'first' => 'Pavel',
+            'last' => 'Zkušební',
+            'rel' => 'A',
+            'detail' => null,
+            'sme' => 'A',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        self::assertSame('create_person', $record['operation'], json_encode($record, JSON_UNESCAPED_UNICODE));
+        self::assertSame('dpc', $record['employment']['relation_type']);
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $employmentId = (int) $applied['results'][0]['employment_id'];
+        $profile = $this->container->get(PayrollRegistrationIdentityService::class)
+            ->a1ProfileView($this->supplierId, $employmentId)['profile'];
+        self::assertIsArray($profile);
+        self::assertTrue($profile['employment']['small_scale'], json_encode($profile['employment'], JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
      * Pobíraný důchod z přihlášky (`pens`) se propíše do zákonné evidence osoby,
      * odkud ho čte ELDP i JMHZ. Do vyplněné evidence import nesahá.
      */

@@ -119,6 +119,51 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
         }
     }
 
+    /**
+     * DPČ se sjednanou odměnou pod rozhodným příjmem je zaměstnáním malého
+     * rozsahu (matice REGZEC25 job.zmr-01, job.sme-05). ČSSZ přijala všechny
+     * tři takové A1 se `sme="A"`; návrh dřív dával u DPČ vždy „ne".
+     */
+    public function testDpcSmallScaleFollowsAgreedRewardAgainstDecisiveIncome(): void
+    {
+        $build = static function (?int $agreedMinor, ?int $thresholdMinor): array {
+            $sources = self::sources();
+            $sources['employment']['relation_type'] = 'dpc';
+            $sources['terms']['activity_code'] = 'A';
+            $sources['terms']['relationship_detail_code'] = null;
+            $sources['terms']['monthly_gross_minor'] = $agreedMinor;
+            $sources['terms']['small_scale_threshold_minor'] = $thresholdMinor;
+
+            return (new PayrollRegistrationA1DraftBuilder())->build(
+                $sources,
+                self::identity(),
+                null,
+                null,
+                '2026-08-14',
+                0,
+                null,
+            );
+        };
+
+        foreach ([
+            [300_000, 450_000, true],
+            [449_999, 450_000, true],
+            [450_000, 450_000, false],
+            [800_000, 450_000, false],
+        ] as [$agreed, $threshold, $expected]) {
+            $draft = $build($agreed, $threshold);
+            self::assertSame($expected, $draft['suggested']['employment']['small_scale'], (string) $agreed);
+            self::assertNotContains('employment.small_scale', self::missingFields($draft));
+            self::assertArrayHasKey('employment.small_scale', $draft['sources']);
+        }
+
+        foreach ([[null, 450_000], [300_000, null]] as [$agreed, $threshold]) {
+            $draft = $build($agreed, $threshold);
+            self::assertNull($draft['suggested']['employment']['small_scale']);
+            self::assertContains('employment.small_scale', self::missingFields($draft));
+        }
+    }
+
     public function testForeignerRequiresIdentityDocumentTheApplicationDoesNotTrack(): void
     {
         $draft = (new PayrollRegistrationA1DraftBuilder())->build(

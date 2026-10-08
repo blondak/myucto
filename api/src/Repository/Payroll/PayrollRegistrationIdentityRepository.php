@@ -733,7 +733,8 @@ final class PayrollRegistrationIdentityRepository
             'SELECT activity_code, jmhz_relationship_detail_code,
                     planned_start_on, actual_start_on, work_place,
                     jmhz_workplace_municipality_code, cz_isco_code,
-                    foreign_legislation_country_code, fixed_term_end_on
+                    foreign_legislation_country_code, fixed_term_end_on,
+                    monthly_gross_minor
                FROM payroll_employment_terms
               WHERE supplier_id = ?
                 AND employment_id = ?
@@ -768,6 +769,9 @@ final class PayrollRegistrationIdentityRepository
                 'foreign_legislation_country_code',
             ),
             'fixed_term_end_on' => $this->nullableString($row, 'fixed_term_end_on'),
+            'monthly_gross_minor' => $row['monthly_gross_minor'] === null
+                ? null
+                : (int) $row['monthly_gross_minor'],
         ];
     }
 

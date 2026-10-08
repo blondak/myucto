@@ -453,6 +453,7 @@ final class RegistrationXmlReader
             ]),
             'employment' => self::present([
                 'contract_start_on' => $this->date($this->attribute($job, 'contractfro')),
+                'small_scale' => $this->flag($job, 'sme'),
                 'employment_status_code' => $this->attribute($job, 'relat'),
                 'work_mode_code' => $this->attribute($job, 'workmode'),
                 'continuous_operation' => $this->flag($job, 'cont'),

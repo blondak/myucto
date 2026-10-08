@@ -59,6 +59,7 @@ final class PayrollJmhzIdentifierRevealServiceTest extends TestCase
         $this->identities = new PayrollRegistrationIdentityService(
             new PayrollRegistrationIdentityRepository($db),
             $sensitive,
+            \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(),
         );
         $this->service = new PayrollJmhzIdentifierRevealService(
             $this->identities,

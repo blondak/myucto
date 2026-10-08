@@ -158,6 +158,7 @@ final readonly class RegistrationRecord
             return $smallScale ? 'small_scale_employment' : 'employment';
         }
         if (preg_match('/^[A-J]$/D', $code) === 1) {
+            // DPČ zůstává DPČ i se `sme="A"`; příznak nese profil A1.
             return 'dpc';
         }
         if (in_array($code, self::DPP_ACTIVITY_CODES, true)) {

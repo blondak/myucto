@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Service\Payroll\PayrollEuFreeMovementCountries;
+use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 
 /**
  * Sbírací vrstva nad kmenovými daty osoby a pracovního vztahu: složí NÁVRH
@@ -504,7 +505,34 @@ final class PayrollRegistrationA1DraftBuilder
         $relationType = $employmentRow === null
             ? null
             : $this->text($employmentRow['relation_type'] ?? null);
-        if ($relationType !== null) {
+        if ($relationType === 'dpc') {
+            // DPČ se sjednanou odměnou pod rozhodným příjmem je zaměstnáním
+            // malého rozsahu (matice REGZEC25 job.zmr-01, job.sme-05); tutéž
+            // hranici používá výpočet účasti na pojištění.
+            $meets = PayrollExpectedParticipation::agreedIncomeMeetsThreshold(
+                $terms === null || !is_numeric($terms['monthly_gross_minor'] ?? null)
+                    ? null
+                    : (int) $terms['monthly_gross_minor'],
+                $terms === null || !is_numeric($terms['small_scale_threshold_minor'] ?? null)
+                    ? null
+                    : (int) $terms['small_scale_threshold_minor'],
+            );
+            if ($meets === null) {
+                $this->miss(
+                    'employment.small_scale',
+                    'U dohody o pracovní činnosti rozhoduje o zaměstnání malého '
+                    . 'rozsahu sjednaná měsíční odměna proti rozhodnému příjmu. '
+                    . 'Doplňte odměnu v sjednaných podmínkách pracovního vztahu, '
+                    . 'nebo příznak vyplňte ručně.',
+                );
+            } else {
+                $smallScale = !$meets;
+                $this->source(
+                    'employment.small_scale',
+                    'Sjednaná měsíční odměna DPČ proti rozhodnému příjmu.',
+                );
+            }
+        } elseif ($relationType !== null) {
             $smallScale = $relationType === 'small_scale_employment';
             $this->source(
                 'employment.small_scale',
