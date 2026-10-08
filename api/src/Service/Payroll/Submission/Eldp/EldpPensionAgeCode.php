@@ -15,9 +15,10 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * Číselník je pro ně společný, takže stejná osoba nemůže mít v listu a v hlášení
  * různý kód.
  *
- * Den, od kterého kód D platí, plyne z výslovně potvrzených důchodových údajů
- * zaměstnance (`pension_age_reached_on`, `early_pension_from`), aplikace
- * důchodový věk sama nezná. Bez nich se kód nemění a zůstává „++".
+ * Den, od kterého kód D platí, plyne z důchodových údajů zaměstnance
+ * (`pension_age_reached_on`, `early_pension_from`) v zákonné evidenci osoby
+ * ({@see \MyInvoice\Service\Payroll\Pension\PayrollPensionStatus}). Bez nich
+ * se kód nemění a zůstává „++".
  */
 final class EldpPensionAgeCode
 {

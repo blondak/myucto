@@ -2917,9 +2917,10 @@ final class JmhzScenario1XmlSerializer
      * Blok se pro něj nezapíše (element je v XSD nepovinný), místo aby se
      * doplnila nula, kterou zdroj netvrdí.
      *
-     * Odečítané doby (10375, 10462–10469) se nezapisují vůbec: týkají se dob
-     * po dosažení důchodového věku, který aplikace nezná, a builder je proto
-     * nechává neuvedené.
+     * Odečítané doby (10375, 10462–10469) se nezapisují vůbec: měsíc s kódem
+     * D a nenulovými odečtenými dobami ELDP řez zastaví
+     * (`jmhz_eldp_deducted_days_unsupported`), takže sem dojde jen sekce, která
+     * žádné nemá, a builder je nechává neuvedené.
      *
      * @param array<string,mixed> $section
      */
