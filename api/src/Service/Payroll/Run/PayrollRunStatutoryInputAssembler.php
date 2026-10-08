@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\AnnualTaxAccumulatorInput;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
@@ -44,6 +45,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapping;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
@@ -587,6 +589,12 @@ final class PayrollRunStatutoryInputAssembler
         }
         try {
             $mapping = $this->socialKinds->fromRelationType($relationType);
+            if (PayrollEmploymentJmhzActivityFamily::isOutsideStatutoryInsurance($term['activity_code'] ?? null)) {
+                $mapping = new SocialRelationshipKindMapping(
+                    $mapping->kind,
+                    SocialParticipationAggregationGroup::OutsideInsurance,
+                );
+            }
         } catch (\InvalidArgumentException) {
             $this->issue(
                 'social_insurance',
@@ -1409,6 +1417,9 @@ final class PayrollRunStatutoryInputAssembler
                 // Klíč nese jen vztah člena družstva nebo SVJ; starší revize
                 // a ostatní vztahy ho nemají a počítají se jako dřív.
                 associationMember: ($term['health_association_member'] ?? false) === true,
+                outsideInsurance: PayrollEmploymentJmhzActivityFamily::isOutsideStatutoryInsurance(
+                    $term['activity_code'] ?? null,
+                ),
             );
         } catch (\InvalidArgumentException) {
             $this->issue(

@@ -89,6 +89,10 @@ final class JmhzDerivedRegistrations
                     : 'Hlášení nenese druh činnosti ani ELDP, ale vztah nebyl účasten na pojištění (bez vyměřovacího '
                         . 'základu, bez stanovené týdenní doby) a měl příjem z nepojištěné činnosti nad rozhodným '
                         . 'příjmem malého rozsahu. Jde o dohodu o provedení práce (DPP).';
+            } elseif ($history->otherIncomeWithoutActivity((string) $key)) {
+                $notes[] = 'Vztah se hlásí formulářem jiného příjmu (druh činnosti 11, 13 nebo 14) a hlášení '
+                    . 'druh činnosti nenese, takže z něj nejde poznat, který z nich to je. Založte pracovní '
+                    . 'poměr ručně s druhem činnosti podle registrace u ČSSZ a formuláře hlášení k němu přiřaďte.';
             } elseif ($activity === null) {
                 $notes[] = 'Vztah v hlášení nemá ELDP ani druh činnosti — není účasten na pojištění, takže '
                     . 'z hlášení nejde poznat, jestli jde o dohodu, nebo zaměstnání malého rozsahu.';
@@ -107,6 +111,7 @@ final class JmhzDerivedRegistrations
                 employmentIdentifier: $identity['id_ppv'],
                 startOn: $start['on'],
                 activityCode: $activity,
+                relationshipDetailCode: $history->relationshipDetailCode((string) $key),
                 workplaceCity: $workplace !== null && $workplace['city'] !== '' ? $workplace['city'] : null,
                 workplaceMunicipalityCode: $workplace !== null && $workplace['municipality_code'] !== ''
                     ? $workplace['municipality_code']

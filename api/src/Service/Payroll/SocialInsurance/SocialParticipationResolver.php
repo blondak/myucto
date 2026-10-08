@@ -80,6 +80,21 @@ final class SocialParticipationResolver
             $relationship = $fact->relationship;
             $reasons = $fact->issues;
 
+            if (
+                $relationship->participationAggregationGroup ===
+                SocialParticipationAggregationGroup::OutsideInsurance
+            ) {
+                $decisions[$relationship->relationshipId] = new SocialParticipationDecision(
+                    $relationship->relationshipId,
+                    SocialParticipationStatus::DoesNotParticipate,
+                    $fact->participationIncomeMinorUnits,
+                    $fact->participationIncomeMinorUnits,
+                    null,
+                    ['activity_outside_insurance'],
+                );
+                continue;
+            }
+
             if (!$this->hasAttributableMonth($fact)) {
                 if (
                     !$relationship->activeInParticipationMonth

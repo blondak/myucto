@@ -22,6 +22,34 @@ final class PayrollEmploymentJmhzActivityFamily
         return in_array($activityCode, self::CORPORATE_BODY_ACTIVITY_CODES, true);
     }
 
+    /**
+     * Bližší určení pracovněprávního vztahu (10502) „výkon trestu odnětí
+     * svobody nebo zabezpečovací detence". U druhu činnosti 1 až 9 vede na
+     * formulář `vezen` (datový scénář 4, kontrola 343 bod 4). Odsouzený
+     * zařazený do práce je pro pojistné zaměstnanec (§ 5 odst. 1 písm. a)
+     * bod 11 ZPSZ), počítá se proto jako pracovní poměr.
+     */
+    public const PRISONER_RELATIONSHIP_DETAIL = '2';
+
+    /**
+     * Druhy činnosti 11 až 14: náhrada od pojišťovny za škodu při plnění
+     * pracovních úkolů (11), mezinárodní pronájem pracovní síly (12), jiný
+     * příjem ze závislé činnosti vyplácený plátcem, u kterého se činnost
+     * nevykonává (13), a neuvolněný člen zastupitelstva (14).
+     *
+     * Jde o příjmy ze závislé činnosti podle § 6 ZDP, které u plátce nezakládají
+     * účast na pojištění: datové scénáře 5 a 6 (formuláře `jinyPrijem`
+     * a `mezinarodniPronajemSily`) proto nemají žádný atribut pojištění, a
+     * pravidla podání JMHZ 1.4.5, kap. 13 bod 4 u neuvolněného zastupitele
+     * výslovně uvádějí, že pojistné se z odměny neodvádí.
+     */
+    public const OUTSIDE_INSURANCE_ACTIVITY_CODES = ['11', '12', '13', '14'];
+
+    public static function isOutsideStatutoryInsurance(mixed $activityCode): bool
+    {
+        return in_array($activityCode, self::OUTSIDE_INSURANCE_ACTIVITY_CODES, true);
+    }
+
     public static function appliesTo(string $relationType): bool
     {
         return in_array(
@@ -94,8 +122,11 @@ final class PayrollEmploymentJmhzActivityFamily
         ?string $relationshipDetailCode,
     ): bool {
         return match ($relationType) {
-            'employment', 'small_scale_employment' => preg_match('/^[1-9]$/D', $activityCode) === 1
-                && $relationshipDetailCode === '1',
+            'employment' => (preg_match('/^[1-9]$/D', $activityCode) === 1
+                    && in_array($relationshipDetailCode, ['1', self::PRISONER_RELATIONSHIP_DETAIL], true))
+                || (self::isOutsideStatutoryInsurance($activityCode) && $relationshipDetailCode === '1'),
+            'small_scale_employment' => preg_match('/^[1-9]$/D', $activityCode) === 1
+                && in_array($relationshipDetailCode, ['1', self::PRISONER_RELATIONSHIP_DETAIL], true),
             'dpc' => preg_match('/^[A-J]$/D', $activityCode) === 1
                 && $relationshipDetailCode === null,
             'dpp' => in_array($activityCode, self::DPP_ACTIVITY_CODES, true)

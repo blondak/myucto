@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Jmhz;
 
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+
 /**
  * Průběh pracovních vztahů napříč měsíci jedné dávky hlášení.
  *
@@ -269,12 +271,42 @@ final class JmhzEmploymentHistory
         if ($form->activityCode !== null) {
             return $form->activityCode;
         }
+        // Formulář mezinárodního pronájmu síly má podle kontroly 343 jediný
+        // druh činnosti (12) a ELDP nenese, takže ho určuje sám formulář.
+        if ($form->variant === 'mezinarodniPronajemSily') {
+            return '12';
+        }
         $code = $form->eldp['code'] ?? null;
         if (is_string($code) && preg_match('/^(Z[A-C]|[1-9A-JST-Z])\+/', $code, $match) === 1) {
             return $match[1];
         }
 
         return null;
+    }
+
+    /**
+     * Bližší určení pracovněprávního vztahu (10502), které formulář prozrazuje:
+     * formulář vězně se podává jen u druhu činnosti 1 až 9 s určením „výkon
+     * trestu" (kontrola 343 bod 4). U ostatních formulářů `null` - určení se
+     * ponechá výchozí podle druhu vztahu.
+     */
+    public function relationshipDetailCode(string $key): ?string
+    {
+        $latest = $this->latest($key);
+
+        return $latest !== null && $latest->form->variant === 'vezen'
+            ? PayrollEmploymentJmhzActivityFamily::PRISONER_RELATIONSHIP_DETAIL
+            : null;
+    }
+
+    /** Formulář jiného příjmu (druh činnosti 11, 13 nebo 14), z něhož druh činnosti nejde odlišit. */
+    public function otherIncomeWithoutActivity(string $key): bool
+    {
+        $latest = $this->latest($key);
+
+        return $latest !== null
+            && $latest->form->variant === 'jinyPrijem'
+            && $this->activityCode($key) === null;
     }
 
     /**

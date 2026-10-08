@@ -32,6 +32,11 @@ final readonly class HealthInsuranceRelationshipInput
          * č. 48/1997 Sb. ve znění zákona č. 289/2025 Sb.).
          */
         public bool $associationMember = false,
+        /**
+         * Příjem ze závislé činnosti, který u plátce nezakládá postavení
+         * zaměstnance pro zdravotní pojištění (druhy činnosti 11 až 14).
+         */
+        public bool $outsideInsurance = false,
     ) {
         if ($associationMember
             && ($kind === HealthEmploymentKind::Dpp || $kind === HealthEmploymentKind::Dpc)

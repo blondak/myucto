@@ -71,7 +71,9 @@ final class JmhzOrdinaryEvidenceApplicability
         $expectedScenarioKey = is_array($scenarioResolution)
             ? ($scenarioResolution['scenario_key'] ?? null)
             : null;
-        if (!in_array($expectedScenarioKey, ['scenario_1', 'scenario_3'], true)
+        if (!is_string($expectedScenarioKey)
+            || $expectedScenarioKey === 'scenario_8'
+            || !JmhzScenarioFormProfile::isOrdinaryDocumentScenario($expectedScenarioKey)
             || ($scope['scenario_key'] ?? null) !== $expectedScenarioKey
         ) {
             $this->invalid(
@@ -82,15 +84,11 @@ final class JmhzOrdinaryEvidenceApplicability
 
         $specification = $this->object($payload['specification'] ?? null, 'ordinary_evidence.specification');
         $catalog = $this->scenarioRequirements ??= JmhzScenarioRequirementSourceCatalog::load();
-        $requirementIds = $expectedScenarioKey === 'scenario_1' ? ['10116', '10546'] : ['10546'];
-        $requirements = [];
-        foreach ($catalog->requirementsForMatrix($expectedScenarioKey) as $requirement) {
-            if (in_array($requirement->attributeId, $requirementIds, true)) {
-                $requirements[$requirement->attributeId] = $requirement->rowHash;
-            }
-        }
+        $requirements = JmhzOrdinaryEvidenceCompatibility::requirementRowHashes(
+            $catalog,
+            $expectedScenarioKey,
+        );
         if (!JmhzOrdinaryEvidenceCompatibility::acceptsSpecification($specification)
-            || count($requirements) !== count($requirementIds)
             || CanonicalJson::encode($specification['attribute_requirement_row_sha256'] ?? null) !== CanonicalJson::encode($requirements)) {
             $this->invalid(
                 'jmhz_ordinary_evidence_specification_mismatch',

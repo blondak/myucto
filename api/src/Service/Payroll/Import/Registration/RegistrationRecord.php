@@ -164,6 +164,12 @@ final readonly class RegistrationRecord
         if (in_array($code, self::DPP_ACTIVITY_CODES, true)) {
             return 'dpp';
         }
+        // Náhrada od pojišťovny, mezinárodní pronájem síly, jiný příjem bez
+        // výkonu činnosti a neuvolněný zastupitel (11 až 14) vede evidence
+        // jako pracovní poměr mimo pojištění.
+        if (PayrollEmploymentJmhzActivityFamily::isOutsideStatutoryInsurance($code)) {
+            return 'employment';
+        }
 
         // K (dobrovolný pracovník pečovatelské služby) sice jde stejným
         // formulářem, ale členem orgánu není; druh vztahu import nehádá.

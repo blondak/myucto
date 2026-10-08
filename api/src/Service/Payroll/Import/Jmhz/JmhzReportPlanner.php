@@ -11,6 +11,8 @@ use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportLookup;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportPlanner;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioFormProfile;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioSelectorResolver;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
 /**
@@ -46,6 +48,8 @@ final class JmhzReportPlanner
 
     /** @var array<string,mixed>|null načtené údaje evidence během {@see batch()} */
     private ?array $memo = null;
+
+    private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
 
     public function __construct(
         private readonly RegistrationImportLookup $lookup,
@@ -571,18 +575,58 @@ final class JmhzReportPlanner
      */
     private function verifyActivity(int $supplierId, array &$plan, JmhzBatchItem $item, array $row): void
     {
+        $versions = $this->remember("terms:{$supplierId}:{$row['id']}", fn () => $this->jmhzLookup->termVersions($supplierId, (int) $row['id']));
+        $covering = JmhzEvidenceTimeline::covering($versions, $item->file->periodStart());
+        $this->verifyFormVariant($plan, $item, $row, $covering);
         $reported = self::text(JmhzEmploymentHistory::formActivityCode($item->form));
         if ($reported === null) {
             return;
         }
-        $versions = $this->remember("terms:{$supplierId}:{$row['id']}", fn () => $this->jmhzLookup->termVersions($supplierId, (int) $row['id']));
-        $covering = JmhzEvidenceTimeline::covering($versions, $item->file->periodStart());
         $current = $covering === null ? null : self::text($covering['activity_code'] ?? null);
         if ($current === null || strtoupper($current) === strtoupper($reported)) {
             return;
         }
         $plan['warnings'][] = "Druh činnosti ve vztahu {$row['code']} ({$current}) se liší od hlášení za "
             . "{$item->period()} ({$reported}). Import ho nemění, zkontrolujte, který je správný.";
+    }
+
+    /**
+     * Formulář součásti (bezPriznaku, vezen, jinyPrijem, …) určuje druh
+     * činnosti spolu s bližším určením vztahu (kontrola 343). Bližší určení
+     * měsíční hlášení nenese, takže rozdíl mezi formulářem a evidencí - třeba
+     * hlášení vězně u vztahu evidovaného bez určení „výkon trestu" - se jinak
+     * neprojeví až do prvního vlastního hlášení, které by šlo jiným
+     * formulářem. Import podmínky nemění, jen upozorní. Odložený příjem se
+     * podává u kteréhokoli druhu činnosti a neporovnává se.
+     *
+     * @param array<string,mixed> $plan
+     * @param array<string,mixed> $row
+     * @param array<string,mixed>|null $covering
+     */
+    private function verifyFormVariant(array &$plan, JmhzBatchItem $item, array $row, ?array $covering): void
+    {
+        $variant = $item->form->variant;
+        $activity = $covering === null ? null : self::text($covering['activity_code'] ?? null);
+        if ($variant === null || $variant === 'odlozenyPrijem' || $activity === null) {
+            return;
+        }
+        $selection = $this->scenarioSelector()->resolve(
+            $activity,
+            self::text($covering['jmhz_relationship_detail_code'] ?? null),
+        );
+        $scenarioKey = $selection['evidence']['scenario_key'] ?? null;
+        $expected = is_string($scenarioKey) ? (JmhzScenarioFormProfile::FORM_ELEMENTS[$scenarioKey] ?? null) : null;
+        if ($expected === null || $expected === $variant) {
+            return;
+        }
+        $plan['warnings'][] = "Hlášení za {$item->period()} vykazuje vztah {$row['code']} formulářem {$variant}, "
+            . "podmínky vztahu (druh činnosti a bližší určení) ale vedou na formulář {$expected}. Import je nemění, "
+            . 'zkontrolujte druh činnosti a bližší určení vztahu, jinak půjde další hlášení jiným formulářem.';
+    }
+
+    private function scenarioSelector(): JmhzScenarioSelectorResolver
+    {
+        return $this->scenarioSelector ??= JmhzScenarioSelectorResolver::load();
     }
 
     /**

@@ -41,6 +41,32 @@ final class JmhzOrdinaryEvidenceCompatibility
         'control_manifest_sha256' => '565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493',
     ];
 
+    /** Atributy, na kterých potvrzení běžné evidence stojí. */
+    public const ATTRIBUTE_IDS = ['10116', '10546'];
+
+    /**
+     * Řádky matice scénáře, které potvrzení běžné evidence pokrývá: jen ty
+     * z {@see self::ATTRIBUTE_IDS}, které matice scénáře vůbec vede. Scénář 1
+     * a vězeň (4) mají oba, statutár (3) jen 10546, jiný příjem a pronájem
+     * síly (5, 6) žádný - formulář srážky ani slevu na pojistném nenese.
+     *
+     * @return array<string,string> ID atributu → otisk řádku matice, podle ID
+     */
+    public static function requirementRowHashes(
+        JmhzScenarioRequirementSourceCatalog $catalog,
+        string $scenarioKey,
+    ): array {
+        $requirements = [];
+        foreach ($catalog->requirementsForMatrix($scenarioKey) as $requirement) {
+            if (in_array($requirement->attributeId, self::ATTRIBUTE_IDS, true)) {
+                $requirements[$requirement->attributeId] = $requirement->rowHash;
+            }
+        }
+        ksort($requirements, SORT_STRING);
+
+        return $requirements;
+    }
+
     public static function acceptsSpecification(array $spec): bool
     {
         $current = [

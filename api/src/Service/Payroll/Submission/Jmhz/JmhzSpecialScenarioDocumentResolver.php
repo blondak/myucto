@@ -5,17 +5,16 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 /**
- * P0 náhled scénářů 3–7: výhradně promítne zmrazené zařazení a důkaz
- * katalogu. Hodnoty formulářů se nedopočítávají ani nedoplňují odhadem.
+ * P0 náhled scénářů, které aplikace nesestaví (3 a 7): výhradně promítne
+ * zmrazené zařazení a důkaz katalogu. Hodnoty formulářů se nedopočítávají
+ * ani nedoplňují odhadem. Scénáře 4 až 6 nese běžný dokument
+ * ({@see JmhzScenarioFormProfile}), náhled je proto vynechává.
  */
 final class JmhzSpecialScenarioDocumentResolver
 {
     /** @var array<string,true> */
     private const SCENARIOS = [
         'scenario_3' => true,
-        'scenario_4' => true,
-        'scenario_5' => true,
-        'scenario_6' => true,
         'scenario_7' => true,
     ];
 

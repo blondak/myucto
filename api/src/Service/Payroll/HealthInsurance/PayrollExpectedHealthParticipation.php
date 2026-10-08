@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\HealthInsurance;
 
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
@@ -53,12 +54,18 @@ final class PayrollExpectedHealthParticipation
         ?int $dpcThresholdMinor,
         bool $participatedInRun = false,
         bool $associationMember = false,
+        ?string $activityCode = null,
     ): bool {
         $value = $participation ?? 'automatic';
         if ($value === 'included') {
             return true;
         }
         if ($value === 'excluded' || $value === 'foreign') {
+            return false;
+        }
+        // Druhy činnosti 11 až 14 zaměstnancem pro pojištění nečiní; výpočet
+        // je posuzuje stejně ({@see HealthParticipationResolver}).
+        if (PayrollEmploymentJmhzActivityFamily::isOutsideStatutoryInsurance($activityCode)) {
             return false;
         }
         $kind = self::kind($relationType);

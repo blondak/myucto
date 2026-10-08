@@ -1609,6 +1609,7 @@ final class PayrollRunSnapshotBuilder
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedHealthParticipation::dpcThreshold($this->rulesets, $periodEnd),
             associationMember: (int) ($row['health_association_member'] ?? 0) === 1,
+            activityCode: is_string($row['activity_code'] ?? null) ? $row['activity_code'] : null,
         );
     }
 

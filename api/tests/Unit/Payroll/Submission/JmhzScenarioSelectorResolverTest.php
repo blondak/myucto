@@ -32,11 +32,6 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
     {
         yield 'foster-carer' => ['M', '1', null, 'scenario_2', 'formPestoun.xsd'];
         yield 'specific-relationship' => ['1', '3', null, 'scenario_3', 'formCinnostKS.xsd'];
-        yield 'prison-service' => ['1', '2', null, 'scenario_4', 'formVezen.xsd'];
-        yield 'other-income-11' => ['11', '1', null, 'scenario_5', 'formJinyPrijem.xsd'];
-        yield 'other-income-13' => ['13', '1', null, 'scenario_5', 'formJinyPrijem.xsd'];
-        yield 'other-income-14' => ['14', '1', null, 'scenario_5', 'formJinyPrijem.xsd'];
-        yield 'international-hire' => ['12', '1', null, 'scenario_6', 'formMezinarodniPronajemSily.xsd'];
         yield 'disability-training' => ['10', null, null, 'scenario_7', 'formOzpTpp.xsd'];
         yield 'explicit-deferred-income' => ['A', null, 'scenario_8', 'scenario_8', 'formOdlozenyPrijem.xsd'];
     }
@@ -83,6 +78,40 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
             '/^[0-9a-f]{64}$/',
             (string) ($resolution['evidence']['matrix_sha256'] ?? null),
         );
+    }
+
+    /**
+     * Datové scénáře 4 až 6 (vězeň, jiný příjem, mezinárodní pronájem síly)
+     * aplikace sestaví: zařazení nese důkaz katalogu a žádný nález
+     * připravenosti.
+     *
+     * @return iterable<string,array{string,string,string,string}>
+     */
+    public static function preparedSpecialSelectors(): iterable
+    {
+        yield 'prison-service' => ['1', '2', 'scenario_4', 'formVezen.xsd'];
+        yield 'prison-service-9' => ['9', '2', 'scenario_4', 'formVezen.xsd'];
+        yield 'other-income-11' => ['11', '1', 'scenario_5', 'formJinyPrijem.xsd'];
+        yield 'other-income-13' => ['13', '1', 'scenario_5', 'formJinyPrijem.xsd'];
+        yield 'other-income-14' => ['14', '1', 'scenario_5', 'formJinyPrijem.xsd'];
+        yield 'international-hire' => ['12', '1', 'scenario_6', 'formMezinarodniPronajemSily.xsd'];
+    }
+
+    #[DataProvider('preparedSpecialSelectors')]
+    public function testPreparesPrisonerOtherIncomeAndInternationalHireScenarios(
+        string $activityCode,
+        string $detailCode,
+        string $scenarioKey,
+        string $entrypoint,
+    ): void {
+        $resolution = JmhzScenarioSelectorResolver::load()->resolve($activityCode, $detailCode);
+
+        self::assertTrue($resolution['supported']);
+        self::assertSame($scenarioKey, $resolution['evidence']['scenario_key'] ?? null);
+        self::assertSame($entrypoint, $resolution['evidence']['xsd_entrypoint'] ?? null);
+        self::assertTrue($resolution['preparation_supported']);
+        self::assertNull($resolution['readiness_issue_code']);
+        self::assertSame([], $resolution['readiness_attribute_ids']);
     }
 
     public function testDoesNotInferManualDeferredIncomeScenario(): void

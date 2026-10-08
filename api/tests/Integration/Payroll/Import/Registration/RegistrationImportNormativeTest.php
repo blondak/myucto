@@ -502,16 +502,50 @@ final class RegistrationImportNormativeTest extends TestCase
         self::assertSame('ended', $this->lookup->employment($this->supplierId, $employmentId)['status'] ?? null);
     }
 
-    /** IMP-10: bližší určení vztahu 2-9 evidence nevede, tichá změna na 1 se musí ohlásit. */
+    /**
+     * IMP-10: bližší určení vztahu 3 (specifická skupina) evidence u pracovního
+     * poměru nevede, tichá změna na 1 se musí ohlásit. Určení 2 (výkon trestu,
+     * formulář vězně) evidence vede a převezme ho beze změny.
+     */
     public function testRelationshipDetailOtherThanOneIsReported(): void
     {
         $birthNumber = RegistrationXmlFixtures::birthNumber('1990-01-15', 'female', 1);
         $a1 = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $birthNumber]))];
         $this->apply($a1, [$this->previewKey($a1)]);
 
-        $a3 = [$this->file('a3.xml', RegistrationXmlFixtures::regzecA3($birthNumber, '2026-09-01', ['relDetail' => '2', 'insurer' => null]))];
+        $a3 = [$this->file('a3.xml', RegistrationXmlFixtures::regzecA3($birthNumber, '2026-09-01', ['relDetail' => '3', 'insurer' => null]))];
         $record = $this->imports->preview($this->supplierId, 'test', $a3)['records'][0];
-        self::assertTrue($this->hasWarning($record, 'Bližší určení vztahu „2“'), json_encode($record['warnings'], JSON_UNESCAPED_UNICODE));
+        self::assertTrue($this->hasWarning($record, 'Bližší určení vztahu „3“'), json_encode($record['warnings'], JSON_UNESCAPED_UNICODE));
+
+        $prisoner = [$this->file('a3-vezen.xml', RegistrationXmlFixtures::regzecA3($birthNumber, '2026-09-01', ['relDetail' => '2', 'insurer' => null]))];
+        $kept = $this->imports->preview($this->supplierId, 'test', $prisoner)['records'][0];
+        self::assertFalse($this->hasWarning($kept, 'Bližší určení vztahu'), json_encode($kept['warnings'], JSON_UNESCAPED_UNICODE));
+        self::assertContains(
+            '2',
+            array_column($kept['changes'], 'imported'),
+            json_encode($kept['changes'], JSON_UNESCAPED_UNICODE),
+        );
+    }
+
+    /**
+     * Registrace s druhem činnosti 11 až 14 (jiný příjem, pronájem síly) se
+     * zapíše jako pracovní poměr; dřív ji import odmítl, protože druh vztahu
+     * k takovému kódu neuměl přiřadit.
+     */
+    public function testOtherIncomeActivityRegistrationCreatesEmployment(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1985-03-10', 'male', 3);
+        $a1 = [$this->file('a1-13.xml', RegistrationXmlFixtures::regzecA1(['bno' => $birthNumber, 'rel' => '13', 'sex' => 'M']))];
+        $record = $this->imports->preview($this->supplierId, 'test', $a1)['records'][0];
+        self::assertNull($record['blocker'], json_encode($record, JSON_UNESCAPED_UNICODE));
+        self::assertSame('employment', $record['employment']['relation_type']);
+
+        $result = $this->apply($a1, [$record['key']])['results'][0];
+        self::assertSame('applied', $result['status'], (string) $result['message']);
+        self::assertSame('13', $this->scalar(
+            'SELECT activity_code FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, (int) $result['employment_id']],
+        ));
     }
 
     /** IMP-11: osoba nalezená podle OIČ s jiným rodným číslem ve větě dostane varování. */

@@ -69,6 +69,9 @@ final class JmhzReportFixtures
             'agreed_fund' => 168_000,
             'unworked' => [],
             'deductions_recorded' => false,
+            // Zařazení scénáře součásti: formulář vězně, jiného příjmu nebo
+            // pronájmu síly místo `bezPriznaku`.
+            'selector' => ['scenario_key' => 'scenario_1', 'activity_code' => '1', 'relationship_detail_code' => '1'],
         ];
         $childCredit = null;
         if ($o['declaration'] && $o['children'] !== []) {
@@ -119,7 +122,7 @@ final class JmhzReportFixtures
                     'person_external_identifier' => $o['oic'],
                     'employment_external_identifier' => $o['id_ppv'],
                 ],
-                'selector' => ['scenario_key' => 'scenario_1', 'activity_code' => '1', 'relationship_detail_code' => '1'],
+                'selector' => $o['selector'],
                 'term' => [
                     'work_place' => $o['work_place'],
                     'jmhz_workplace_municipality_code' => $o['municipality'],

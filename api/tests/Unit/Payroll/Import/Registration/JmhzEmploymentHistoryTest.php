@@ -309,6 +309,65 @@ final class JmhzEmploymentHistoryTest extends TestCase
     }
 
     /**
+     * Cizí hlášení s formuláři scénářů 4 až 6 import přečte a z vztahu nic
+     * nezahodí: formulář vězně nese bližší určení „výkon trestu", pronájem
+     * síly jediný možný druh činnosti 12 a jiný příjem (11, 13, 14) se
+     * nevydává za neúčastnou dohodu.
+     */
+    public function testSpecialFormsKeepTheirScenarioOnImport(): void
+    {
+        $prisoner = $this->a(['selector' => [
+            'scenario_key' => 'scenario_4',
+            'activity_code' => '1',
+            'relationship_detail_code' => '2',
+        ]]);
+        $hire = $this->b([
+            'oic' => RegistrationXmlFixtures::oic(11),
+            'social_base' => 0,
+            'children' => [],
+            'selector' => ['scenario_key' => 'scenario_6', 'activity_code' => '12', 'relationship_detail_code' => '1'],
+        ]);
+        $other = JmhzReportFixtures::person([
+            'employment_id' => 103,
+            'id_ppv' => '200000000000000000103',
+            'oic' => RegistrationXmlFixtures::oic(13),
+            'social_base' => 0,
+            'children' => [],
+            'selector' => ['scenario_key' => 'scenario_5', 'activity_code' => '13', 'relationship_detail_code' => '1'],
+        ]);
+        $batch = $this->batchFromXml([$this->report(3, [$prisoner, $hire, $other])]);
+        $history = $batch->history();
+        $otherKey = 'ppv:200000000000000000103';
+
+        self::assertSame('vezen', $history->latest('ppv:' . self::PPV_A)?->form->variant);
+        self::assertSame('mezinarodniPronajemSily', $history->latest('ppv:' . self::PPV_B)?->form->variant);
+        self::assertSame('jinyPrijem', $history->latest($otherKey)?->form->variant);
+        self::assertSame('1', $history->activityCode('ppv:' . self::PPV_A));
+        self::assertSame('2', $history->relationshipDetailCode('ppv:' . self::PPV_A));
+        self::assertSame('12', $history->activityCode('ppv:' . self::PPV_B));
+        self::assertNull($history->relationshipDetailCode('ppv:' . self::PPV_B));
+        self::assertNull($history->activityCode($otherKey));
+        self::assertTrue($history->otherIncomeWithoutActivity($otherKey));
+        self::assertNull($history->uninsuredAgreement($otherKey), 'Jiný příjem není neúčastná dohoda.');
+
+        $derived = JmhzDerivedRegistrations::build($batch, $history, [])['records'];
+        $byPpv = array_column(
+            array_map(static fn ($r): array => ['ppv' => $r->employmentIdentifier, 'r' => $r], $derived),
+            'r',
+            'ppv',
+        );
+        self::assertSame('employment', $byPpv[self::PPV_A]->relationType());
+        self::assertSame('2', $byPpv[self::PPV_A]->relationshipDetailCode);
+        self::assertSame('employment', $byPpv[self::PPV_B]->relationType());
+        self::assertSame('12', $byPpv[self::PPV_B]->activityCode);
+        self::assertNull($byPpv['200000000000000000103']->relationType());
+        self::assertStringContainsString(
+            'formulářem jiného příjmu',
+            implode(' ', $byPpv['200000000000000000103']->notes),
+        );
+    }
+
+    /**
      * Účast na důchodovém pojištění = kód ELDP nebo vyměřovací základ, ne počet dnů.
      * Dřív byl měsíc celý v dávkách (kód, nula dnů) „bez účasti" a pracující
      * důchodce bez ELDP s pojistným konfliktem.

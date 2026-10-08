@@ -349,6 +349,36 @@ final class JmhzReportImportServiceTest extends TestCase
     }
 
     /**
+     * Hlášení vězně (formulář `vezen`, datový scénář 4) import převezme,
+     * neodmítne ani nezahodí. Vztah evidovaný bez bližšího určení „výkon
+     * trestu" by ale další hlášení podal formulářem bez příznaku, a na to
+     * import upozorní.
+     */
+    public function testPrisonerFormIsImportedAndDifferingRelationshipDetailWarns(): void
+    {
+        $this->registerEmployee(withIdentifiers: true);
+        $xml = JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'oic' => $this->oic,
+            'id_ppv' => $this->idPpv,
+            'selector' => ['scenario_key' => 'scenario_4', 'activity_code' => '1', 'relationship_detail_code' => '2'],
+        ])], 2026, 2);
+        self::assertStringContainsString('<form:vezen', $xml);
+
+        $record = $this->imports->preview($this->supplierId, 'test', [$this->file('vezen.xml', $xml)])['records'][0];
+
+        self::assertNull($record['blocker'], $this->dump($record));
+        self::assertStringContainsString('formulářem vezen', implode("\n", $record['warnings']), $this->dump($record));
+        self::assertStringContainsString('formulář bezPriznaku', implode("\n", $record['warnings']));
+
+        $ordinary = JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'oic' => $this->oic,
+            'id_ppv' => $this->idPpv,
+        ])], 2026, 2);
+        $same = $this->imports->preview($this->supplierId, 'test', [$this->file('same.xml', $ordinary)])['records'][0];
+        self::assertStringNotContainsString('formulářem', implode("\n", $same['warnings']));
+    }
+
+    /**
      * PRE-03 (W2): předchozí program vedl slevu zaměstnavatele (10372), ale
      * v evidenci není přijatý záměr OZUSPOJ. Převzetí na to upozorní; se
      * záměrem v evidenci mlčí.

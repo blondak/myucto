@@ -155,9 +155,11 @@ final class JmhzScenarioSelectorResolver
             }
         }
         sort($attributes, SORT_STRING);
-        $preparationSupported = $scenarioKey === 'scenario_3'
-            && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($activityCode)
-            && $relationshipDetailCode === '1';
+        $preparationSupported = JmhzScenarioFormProfile::preparable(
+            $scenarioKey,
+            $activityCode,
+            $relationshipDetailCode,
+        );
 
         return [
             'supported' => true,
@@ -197,9 +199,6 @@ final class JmhzScenarioSelectorResolver
         return match ($scenarioKey) {
             'scenario_2' => 'jmhz_scenario_2_preparation_unsupported',
             'scenario_3' => 'jmhz_scenario_3_preparation_unsupported',
-            'scenario_4' => 'jmhz_scenario_4_preparation_unsupported',
-            'scenario_5' => 'jmhz_scenario_5_preparation_unsupported',
-            'scenario_6' => 'jmhz_scenario_6_preparation_unsupported',
             'scenario_7' => 'jmhz_scenario_7_preparation_unsupported',
             'scenario_8' => 'deferred_income_evidence_missing',
             default => throw new \UnexpectedValueException(

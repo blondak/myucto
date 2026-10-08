@@ -221,7 +221,6 @@ final class JmhzPreparationSnapshotBuilder
                 if (!is_array($term) || array_is_list($term)) {
                     $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
                 } else {
-                    $defaultInterpretations = $this->inspectTerm($term, $employmentId, $issues);
                     /*
                      * Odložený příjem (scénář 8) se vybírá ručně: podle druhu
                      * činnosti by vztah spadl do běžného formuláře, jenže ten
@@ -236,6 +235,14 @@ final class JmhzPreparationSnapshotBuilder
                             ? $term['jmhz_relationship_detail_code']
                             : null,
                         $deferredType === null ? null : 'scenario_8',
+                    );
+                    $defaultInterpretations = $this->inspectTerm(
+                        $term,
+                        $employmentId,
+                        $issues,
+                        is_string($selection['evidence']['scenario_key'] ?? null)
+                            ? $selection['evidence']['scenario_key']
+                            : null,
                     );
                     if ($deferredType === '1' && $selection['supported']) {
                         $selection['preparation_supported'] = true;
@@ -1271,7 +1278,10 @@ final class JmhzPreparationSnapshotBuilder
         $sourceEvidence = $this->object($payload['source_evidence'] ?? null, 'eldp.source_evidence');
         $scenarioKey = $scope['scenario_key'];
         $scenarioResolution = $sourceEvidence['scenario_resolution'] ?? null;
-        if ($scenarioKey === 'scenario_3') {
+        // Mimo scénář 1 a odložený příjem nese řez zařazení scénáře, které
+        // se musí shodovat s rozsahem; jinak by ELDP zůstal z jiného formuláře.
+        $classifiedScenario = $scenarioKey !== 'scenario_1' && $scenarioKey !== 'scenario_8';
+        if ($classifiedScenario) {
             $scenarioResolution = $this->object(
                 $scenarioResolution,
                 'eldp.source_evidence.scenario_resolution',
@@ -1288,8 +1298,8 @@ final class JmhzPreparationSnapshotBuilder
             || ($scope['employee_id'] ?? null) !== $employeeId
             || ($scope['employment_id'] ?? null) !== $employmentId
             || ($scope['period_start'] ?? null) !== $periodStart
-            || !in_array($scenarioKey, ['scenario_1', 'scenario_3', 'scenario_8'], true)
-            || ($scenarioKey === 'scenario_3'
+            || !JmhzScenarioFormProfile::isOrdinaryDocumentScenario($scenarioKey)
+            || ($classifiedScenario
                 && ($scenarioResolution['scenario_key'] ?? null) !== $scenarioKey)
             || ($sourceRevision['input_snapshot_hash'] ?? null) !== ($revision['input_snapshot_hash'] ?? null)
             || ($sourceRevision['result_snapshot_hash'] ?? null) !== ($revision['result_snapshot_hash'] ?? null)
@@ -1469,14 +1479,21 @@ final class JmhzPreparationSnapshotBuilder
      * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
      * @return list<array{field:string,attribute_id:string,stored_value:string,applied_value:string,basis:string}>
      *         výklady výchozího stavu, které se zapíšou do zmrazeného snímku
+     *
+     * Vykonávanou pozici (místo výkonu práce 10229 až 10231, APZ, funkční
+     * požitky, dočasné přidělení) nesou jen formuláře, jejichž matice ji vede.
+     * Vězeň, jiný příjem a pronájem síly (scénáře 4 až 6) ji nemají, takže
+     * chybějící pracoviště jejich hlášení nezastaví. Bez zařazení scénáře
+     * (`null`) se kontroluje vše jako dřív.
      */
-    private function inspectTerm(array $term, int $employmentId, array &$issues): array
+    private function inspectTerm(array $term, int $employmentId, array &$issues, ?string $scenarioKey = null): array
     {
-        if (($term['jmhz_external_codebooks_verified_for_period'] ?? null) !== true) {
+        $carriesPosition = $scenarioKey === null || $this->scenarioRequiresAttribute($scenarioKey, '10229');
+        if ($carriesPosition && ($term['jmhz_external_codebooks_verified_for_period'] ?? null) !== true) {
             $issues[] = $this->issue('jmhz_workplace_codebooks_unverified', 'employment', $employmentId, ['10229', '10230', '10231']);
         }
         $defaultInterpretations = [];
-        foreach (self::DEFAULTED_TRISTATES as $field => $attributeId) {
+        foreach ($carriesPosition ? self::DEFAULTED_TRISTATES : [] as $field => $attributeId) {
             $value = $term[$field] ?? null;
             if ($value === 'unverified') {
                 // Nevyplněno = „ne". Neblokuje, ale v podání musí být poznat,

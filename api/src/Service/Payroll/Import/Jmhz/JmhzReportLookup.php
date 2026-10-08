@@ -27,7 +27,8 @@ final class JmhzReportLookup
                     jmhz_workplace_municipality_code, jmhz_workplace_country_code,
                     jmhz_apz_contribution_status, jmhz_apz_instrument_code,
                     jmhz_functional_benefits_status, jmhz_temporary_assignment_status,
-                    weekly_hours, workload_basis_points, activity_code
+                    weekly_hours, workload_basis_points, activity_code,
+                    jmhz_relationship_detail_code
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?
               ORDER BY effective_from DESC, id DESC'
