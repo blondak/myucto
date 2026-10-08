@@ -312,6 +312,12 @@ souboru nic nezaloží podruhé. Soubor XML smí mít nejvýše 20 MB (celá dá
 
 **Kontroly vět REGZEC a PREZEC.** Náhled u každé věty hlídá:
 
+- **Schéma ČSSZ.** Soubor se ověří proti schématu REGZEC25, resp. PREZEC26.
+  Neodpovídá-li jedna nebo několik vět (třeba stát adresy „Čes" místo „CZ"),
+  tyto věty se nepřevezmou a náhled je u souboru vypíše i s důvodem; ostatní
+  věty souboru jdou dál, stejně jako je ČSSZ zpracuje po větách. Soubor
+  s jedinou větou, se všemi větami vadnými nebo s vadou mimo věty se odmítne
+  celý.
 - **Zaměstnavatele.** Variabilní symbol věty (u změny VS starý i nový) se
   porovná s variabilními symboly vašich mzdových účtáren. Věta jiného
   zaměstnavatele je zablokovaná. Firma bez vyplněného variabilního symbolu

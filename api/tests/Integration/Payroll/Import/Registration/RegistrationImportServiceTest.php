@@ -426,6 +426,29 @@ final class RegistrationImportServiceTest extends TestCase
         self::assertSame($record['blocker'], $result['message']);
     }
 
+    /**
+     * Soubor s jednou větou mimo schéma: věta se zablokuje s důvodem
+     * u souboru, ostatní věty se převezmou (ČSSZ dávku zpracuje po větách).
+     */
+    public function testSentenceOutsideSchemaIsBlockedWhileTheRestOfTheFileIsImported(): void
+    {
+        $files = [$this->file('davka.xml', RegistrationXmlFixtures::twoA1Sentences(true, false))];
+
+        $preview = $this->imports->preview($this->supplierId, 'test', $files);
+        self::assertNull($preview['files'][0]['error']);
+        self::assertSame(1, $preview['files'][0]['record_count']);
+        self::assertCount(1, $preview['files'][0]['warnings']);
+        self::assertStringContainsString('Věta 1 (sqnr 1)', $preview['files'][0]['warnings'][0]);
+        self::assertStringContainsString('nepřebírá', $preview['files'][0]['warnings'][0]);
+        self::assertCount(1, $preview['records']);
+        $record = $preview['records'][0];
+        self::assertSame('create_person', $record['operation'], json_encode($record, JSON_UNESCAPED_UNICODE));
+
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        self::assertSame(1, $this->tableRows('payroll_employees'));
+    }
+
     public function testUnreadableFilesAreReportedWhileOthersAreProcessed(): void
     {
         $doctype = "<?xml version=\"1.0\"?>\n<!DOCTYPE x [<!ENTITY e \"x\">]>\n<REGZEC xmlns=\"http://schemas.cssz.cz/REGZEC/2025\"/>";

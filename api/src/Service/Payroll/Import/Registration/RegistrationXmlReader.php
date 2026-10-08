@@ -19,8 +19,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlExce
  * Soubor přichází od uživatele, proto se čte obranně: DOCTYPE a entity se
  * odmítají celé (XXE ani „billion laughs" tak nemají kudy projít), síť je
  * vypnutá a obsah se ověří proti připnutému schématu dřív, než se z něj
- * cokoli převezme. Soubor, který schématu neodpovídá, se nepřebírá ani
- * zčásti — napůl přečtená věta by do evidence zapsala napůl pravdu.
+ * cokoli převezme. Věta, která schématu neodpovídá, se nepřebírá ani
+ * zčásti — napůl přečtená věta by do evidence zapsala napůl pravdu. Ostatní
+ * věty téhož souboru se převezmou jen tehdy, když vadu jde přičíst
+ * konkrétním větám (ČSSZ dávku zpracovává po větách, {@see rejectedSentences()});
+ * jinak se odmítne celý soubor.
  *
  * Umí i „Export zaměstnanců" z ePortálu ČSSZ (kořen `ExportZamestnancu` bez
  * jmenného prostoru) v obou tvarech, pro které MPSV zveřejnilo XSD: dosavadním
@@ -49,13 +52,20 @@ final class RegistrationXmlReader
         'Prijmeni' => ['/^.{1,100}$/Dsu', 'příjmení'],
     ];
 
+    /** Nad touhle velikostí se soubor po větách neověřuje (každá věta = jedna validace). */
+    private const PARTIAL_VALIDATION_MAX_SENTENCES = 500;
+
     public function __construct(
         private readonly PayrollRegistrationSchemaCatalog $schemas,
         private readonly CsszEmployeeExportSchemaCatalog $exportSchemas = new CsszEmployeeExportSchemaCatalog(),
     ) {}
 
     /**
-     * @return array{document_type:string,records:list<RegistrationRecord>}
+     * @return array{
+     *   document_type:string,
+     *   records:list<RegistrationRecord>,
+     *   rejected:list<array{position:int,sequence:?string,reason:string}>
+     * }
      * @throws RegistrationImportFileException
      */
     public function read(string $content): array
@@ -88,7 +98,7 @@ final class RegistrationXmlReader
                 );
             }
             $documentType = $this->documentType($document);
-            $this->validate($document, $documentType);
+            $rejected = $this->validate($document, $documentType);
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
@@ -96,7 +106,8 @@ final class RegistrationXmlReader
 
         return [
             'document_type' => $documentType,
-            'records' => $this->records($document, $documentType),
+            'records' => $this->records($document, $documentType, $rejected),
+            'rejected' => array_values($rejected),
         ];
     }
 
@@ -123,12 +134,16 @@ final class RegistrationXmlReader
         return $type;
     }
 
-    private function validate(DOMDocument $document, string $documentType): void
+    /**
+     * @return array<int,array{position:int,sequence:?string,reason:string}> věty
+     *         mimo schéma podle pořadí v souboru; prázdné, když soubor projde celý
+     */
+    private function validate(DOMDocument $document, string $documentType): array
     {
         if ($documentType === RegistrationRecord::CSSZ_EXPORT) {
             $this->validateExport($document);
 
-            return;
+            return [];
         }
         try {
             $schema = $this->schemas->schemaFor($documentType);
@@ -136,12 +151,94 @@ final class RegistrationXmlReader
             throw new RegistrationImportFileException($e->getMessage(), 0, $e);
         }
         libxml_clear_errors();
-        if (!$document->schemaValidate($schema['path'])) {
-            throw new RegistrationImportFileException(
-                "Soubor neodpovídá schématu ČSSZ {$documentType}" . $this->libxmlDetail()
-                . '. Import převezme jen soubor, který by ČSSZ přijala.',
-            );
+        if ($document->schemaValidate($schema['path'])) {
+            return [];
         }
+        $failure = new RegistrationImportFileException(
+            "Soubor neodpovídá schématu ČSSZ {$documentType}" . $this->libxmlDetail()
+            . '. Import převezme jen soubor, který by ČSSZ přijala.',
+        );
+
+        return $this->rejectedSentences($document, $documentType, $schema['path'])
+            ?? throw $failure;
+    }
+
+    /**
+     * ČSSZ zpracovává dávku po větách (partialAccept): věta mimo schéma se
+     * odmítne, ostatní se přijmou. Import to zrcadlí, ale jen tam, kde je
+     * vada jednoznačně uvnitř jednotlivých vět: každá věta se ověří zvlášť
+     * ve stejné obálce souboru a zbylé věty pak ještě jednou společně
+     * (kontroly napříč větami, například jedinečnost pořadí). Když vadu
+     * nejde přičíst konkrétní větě (obálka, všechny věty, jediná věta),
+     * vrací `null` a soubor se odmítne celý jako dosud. Z vadné věty se
+     * nepřebírá nic.
+     *
+     * @return array<int,array{position:int,sequence:?string,reason:string}>|null
+     */
+    private function rejectedSentences(DOMDocument $document, string $documentType, string $schemaPath): ?array
+    {
+        $namespace = $documentType === 'REGZEC25' ? self::NAMESPACE_REGZEC : self::NAMESPACE_PREZEC;
+        $count = count($this->employees($document, $namespace));
+        if ($count < 2 || $count > self::PARTIAL_VALIDATION_MAX_SENTENCES) {
+            return null;
+        }
+        $rejected = [];
+        for ($position = 1; $position <= $count; $position++) {
+            $single = $this->withSentences($document, $namespace, [$position]);
+            libxml_clear_errors();
+            if (!$single->schemaValidate($schemaPath)) {
+                $sentence = $this->employees($document, $namespace)[$position - 1];
+                $sequence = $sentence->getAttribute('sqnr');
+                $rejected[$position] = [
+                    'position' => $position,
+                    'sequence' => $sequence === '' ? null : $sequence,
+                    'reason' => $this->libxmlMessages(),
+                ];
+            }
+        }
+        if ($rejected === [] || count($rejected) === $count) {
+            return null;
+        }
+        $remaining = array_values(array_diff(range(1, $count), array_keys($rejected)));
+        libxml_clear_errors();
+        if (!$this->withSentences($document, $namespace, $remaining)->schemaValidate($schemaPath)) {
+            return null;
+        }
+
+        return $rejected;
+    }
+
+    /** @return list<DOMElement> */
+    private function employees(DOMDocument $document, string $namespace): array
+    {
+        $xpath = new DOMXPath($document);
+        $xpath->registerNamespace('r', $namespace);
+        $result = [];
+        foreach ($xpath->query('/r:*/r:employees/r:employee') ?: [] as $employee) {
+            if ($employee instanceof DOMElement) {
+                $result[] = $employee;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Kopie souboru, ve které zůstanou jen věty s daným pořadím.
+     *
+     * @param list<int> $keep
+     */
+    private function withSentences(DOMDocument $document, string $namespace, array $keep): DOMDocument
+    {
+        $copy = $document->cloneNode(true);
+        assert($copy instanceof DOMDocument);
+        foreach ($this->employees($copy, $namespace) as $index => $employee) {
+            if (!in_array($index + 1, $keep, true)) {
+                $employee->parentNode?->removeChild($employee);
+            }
+        }
+
+        return $copy;
     }
 
     /**
@@ -305,8 +402,11 @@ final class RegistrationXmlReader
         return $value === '' ? null : $value;
     }
 
-    /** @return list<RegistrationRecord> */
-    private function records(DOMDocument $document, string $documentType): array
+    /**
+     * @param array<int,mixed> $rejected věty mimo schéma podle pořadí; přeskočí se
+     * @return list<RegistrationRecord>
+     */
+    private function records(DOMDocument $document, string $documentType, array $rejected = []): array
     {
         if ($documentType === RegistrationRecord::CSSZ_EXPORT) {
             return $this->exportRecords($document);
@@ -323,6 +423,9 @@ final class RegistrationXmlReader
                 continue;
             }
             $position++;
+            if (isset($rejected[$position])) {
+                continue;
+            }
             $records[] = $this->record($xpath, $employee, $documentType, $position);
         }
 
@@ -602,11 +705,18 @@ final class RegistrationXmlReader
 
     private function libxmlDetail(): string
     {
+        $messages = $this->libxmlMessages();
+
+        return $messages === '' ? '' : ' (' . $messages . ')';
+    }
+
+    private function libxmlMessages(): string
+    {
         $messages = [];
         foreach (array_slice(libxml_get_errors(), 0, 3) as $error) {
             $messages[] = 'řádek ' . $error->line . ': ' . trim($error->message);
         }
 
-        return $messages === [] ? '' : ' (' . implode('; ', $messages) . ')';
+        return implode('; ', $messages);
     }
 }
