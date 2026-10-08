@@ -151,17 +151,31 @@ a protokol to řekne; po zakoupení doplňku převod roku zopakujte a mzdy se do
 
 - **Zaměstnanci.** Každý pracovní vztah z PREMIERu se založí jako osoba
   a pracovní vztah s osobním číslem z PREMIERu: jméno, rodné číslo, datum
-  narození, trvalá a kontaktní adresa, kontakty, druh vztahu (pracovní
+  narození, stát narození, státní občanství, rodné příjmení, trvalá
+  a kontaktní adresa, kontakty, druh vztahu (pracovní
   poměr, DPP, DPČ, jednatel), nástup, skončení, týdenní pracovní doba
   a sjednaná mzda včetně jejích změn. V zákonné evidenci osoby doplní daňovou
   rezidenci, prohlášení poplatníka po měsících (podepsané je jen v měsících,
   kde ho PREMIER vede jako podepsané; měsíce zdaněné srážkou mají prohlášení
   nepodepsané), historii zdravotních
-  pojišťoven podle oznámení pojišťovnám, příslušnost k sociálnímu pojištění
+  pojišťoven (pro měsíc se zpracovanou mzdou platí pojišťovna té mzdy, pro
+  ostatní měsíce oznámení pojišťovnám), příslušnost k sociálnímu pojištění
   a slevu pracujícího důchodce. Doplňuje se jen to, co v MyÚčtu chybí. Vztah
   se stejným osobním číslem a jménem, který ve firmě už je, převod převezme
   místo založení nového. Učně (kategorie UCN) převod nezakládá, MyÚčto pro
   něj druh vztahu nemá; protokol ho vypíše.
+- **Registrace ČSSZ.** Přihlášky, dohlášení a odhlášky (REGZEC) a částečná
+  přihlášení (PREZEC), které PREMIER odeslal a ČSSZ přijala, převod zapíše
+  stejným importem registrací jako Mzdy → Importy, věty po jedné v pořadí
+  odeslání. Z nich se doplní profil přihlášky A1, OIČ a ID pracovněprávního
+  vztahu, rezidence, adresy po složkách, důchodové údaje a další pole, takže
+  je nemusíte zadávat ručně. Podání, které ČSSZ odmítla, a věty odmítnuté
+  uvnitř přijatého podání se nepřebírají. Věta, ke které převod nezná vztah
+  (PREMIER ho eviduje s jiným nástupem nebo druhem vztahu, než hlásil
+  ČSSZ), vztah nezaloží; protokol ji vypíše k ověření. Věta nese variabilní
+  symbol zaměstnavatele: pokud je ve mzdové účtárně firmy vyplněný jiný,
+  import větu zablokuje a protokol to řekne. Opakovaný převod už zapsané věty
+  nepřepisuje.
 - **Evidence JMHZ.** OIČ a ID pracovněprávního vztahu z posledního hlášení
   JMHZ, které ČSSZ přijala, pracoviště (obec a stát), kód CZ-ISCO a doklady
   k Zákonným termínům (přihlášky a odhlášky ČSSZ a zdravotní pojišťovně,
@@ -201,7 +215,7 @@ Zkontrolujte po převodu:
 - výplatní účty: převod je založí jako neověřené, ověřte je na kartě osoby,
 - položky, které protokol označil k ověření (OIČ bez přijatého hlášení,
   děti s příznakem jiné vyživující osoby, důchodci bez slevy, neschopnost
-  bez známého konce),
+  bez známého konce, věty registrací bez odpovídajícího vztahu),
 - exekuční případy a dohody o srážkách,
 - mzdové složky a pravidelné předpisy pro první měsíc vedený v MyÚčtu,
 - upozornění rekonciliace mezd proti deníku (§ 109.5).

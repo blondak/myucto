@@ -101,6 +101,7 @@ final class PayrollImporter
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollTakeoverDeductionsWriter $deductionsWriter,
         private readonly PayrollMigrationModuleSetup $moduleSetup,
+        private readonly PremierPayrollRegistrations $registrations,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -215,6 +216,9 @@ final class PayrollImporter
                 $byEmployee[$employeeId][(string) $period][] = $m;
             }
         }
+        if ($created !== []) {
+            $this->submittedRegistrations($ctx);
+        }
         if ($afterStart > 0) {
             $p->count(self::STEP, 'months_after_start', $afterStart);
             $this->info($p, 'months_after_start', "Mzdové měsíce od začátku vedení mezd v MyÚčtu ({$start}) se nepřevzaly (celkem {$afterStart}), počítá je MyÚčto.");
@@ -236,6 +240,46 @@ final class PayrollImporter
         $this->openingBalances($ctx, $byEmployee, $payroll);
         $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+    }
+
+    /**
+     * Registrace ČSSZ (REGZEC25, PREZEC26) odeslané z PREMIER a ČSSZ přijaté ({@see PremierPayrollSubmissions}),
+     * převzaté produktovým importem registrací ({@see PremierPayrollRegistrations}). Jdou po osobách a vztazích,
+     * protože přihláška, dohlášení a odhláška se páruje na vztah, který převod právě založil.
+     */
+    private function submittedRegistrations(PremierContext $ctx): void
+    {
+        $p = $ctx->protocol;
+        $result = $this->registrations->import($ctx);
+        $counts = $result['counts'];
+        foreach ($counts as $name => $count) {
+            if ($count > 0) {
+                $p->count(self::STEP, $name, $count);
+            }
+        }
+        foreach ($result['problems'] as $problem) {
+            $this->warn($p, $problem['code'], $problem['text'], $problem['context']);
+        }
+        if ($counts['registrations_files'] === 0) {
+            return;
+        }
+        $p->info(self::STEP, 'registrations_imported', sprintf(
+            'Registrace ČSSZ odeslané z PREMIER (MZ_VREP): přijatých vět %d, už dříve převzatých %d, zapsáno %d, beze změny %d, bez odpovídajícího vztahu %d, '
+            . 'nezapsáno %d (zablokováno %d, selhalo %d), pozdějších než převáděné období %d. ČSSZ odmítla %d podání a %d vět '
+            . 'v přijatých podáních, ty se nepřebírají%s.',
+            $counts['registrations_sentences'],
+            $counts['registrations_done'],
+            $counts['registrations_applied'],
+            $counts['registrations_unchanged'],
+            $counts['registrations_unmatched'],
+            $counts['registrations_blocked'] + $counts['registrations_failed'],
+            $counts['registrations_blocked'],
+            $counts['registrations_failed'],
+            $counts['registrations_later'],
+            $counts['registrations_files_rejected'],
+            $counts['registrations_sentences_rejected'],
+            $counts['registrations_files_unreadable'] > 0 ? sprintf(' (%d podání se nedalo přečíst)', $counts['registrations_files_unreadable']) : '',
+        ));
     }
 
     /**

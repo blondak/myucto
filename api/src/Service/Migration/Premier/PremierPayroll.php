@@ -191,7 +191,11 @@ final class PremierPayroll
                     'title_prefix' => self::limited($person['TITUL_PR'] ?? '', 64),
                     'title_suffix' => self::limited($person['TITUL_ZA'] ?? '', 64),
                     'birth_place' => self::limited($person['MISTO_N'] ?? '', 128),
-                    'citizenship_country_code' => self::country(self::text($person['STAT_N'] ?? '') ?: self::text($person['STOBC'] ?? '')),
+                    // `STAT_N` je stát narození (u osoby narozené na Slovensku `SK`, i když je občanem ČR),
+                    // státní občanství nese `STOBC`. Ověřeno proti přijatým větám REGZEC (`birth/@stat`,
+                    // `stat/@cnt`) i proti oznámením `MZ_PRISO` ("Ohlášení změny údajů: STAT_N").
+                    'birth_country_code' => self::country(self::text($person['STAT_N'] ?? '')),
+                    'citizenship_country_code' => self::country(self::text($person['STOBC'] ?? '')),
                 ],
                 'birth_surname' => self::limited($person['RODNE_P'] ?? '', 128),
                 'residence' => self::address($source),
@@ -257,10 +261,24 @@ final class PremierPayroll
                 }
             }
         }
+        // Pojišťovna zpracované mzdy (`MZDY.ZKR_POJ`) je ta, které se pojistné skutečně platilo, takže pro měsíc
+        // se mzdou má přednost před oznámeními pojišťovnám (evidenční zápis kódu bez odeslání ji nemění).
+        /** @var array<string,array<string,string>> $personMonthly klíč osoby => `YYYY-MM` => kód pojišťovny */
+        $personMonthly = [];
+        foreach ($relations as $relation) {
+            foreach ($relation['months'] as $period => $m) {
+                if ($m['insurer_code'] !== null) {
+                    $personMonthly[(string) $relation['person_key']][(string) $period] = (string) $m['insurer_code'];
+                }
+            }
+        }
         $accounts = self::payoutAccounts($relations);
         foreach ($relations as $i => $relation) {
             $personKey = (string) $relation['person_key'];
-            $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null);
+            $relations[$i]['insurer_history'] = self::insurerHistory($personEvents[$personKey] ?? [], $personStart[$personKey] ?? null, $personMonthly[$personKey] ?? []);
+            if ($relations[$i]['insurer_history'] !== []) {
+                $relations[$i]['insurer_code'] = end($relations[$i]['insurer_history'])['code'];
+            }
             $relations[$i]['person_last_period'] = $personLast[$personKey] ?? null;
             $signed = array_values(array_unique($personSigned[$personKey] ?? []));
             sort($signed);
@@ -585,13 +603,19 @@ final class PremierPayroll
      * dvě oznámení v jednom měsíci rozhoduje to pozdější. První úsek začíná nejpozději
      * měsícem prvního nástupu osoby.
      *
+     * Měsíc, za který PREMIER zpracoval mzdu, má pojišťovnu té mzdy (`$monthly`, `ZKR_POJ`):
+     * ta, které se pojistné skutečně platilo. Oznámení bez odeslání pojišťovně (evidenční
+     * zápis kódu, `PRIJATO` prázdné) jinak vyrobilo úsek, který platnou pojišťovnu měsíců
+     * se mzdou přebil. Měsíce bez mzdy platí z oznámení.
+     *
      * @param list<array{date:string,code:string,kind:string}> $events
+     * @param array<string,string> $monthly `YYYY-MM` => kód pojišťovny zpracované mzdy
      * @return list<array{code:string,from:string,to:?string,reference:string}>
      */
-    public static function insurerHistory(array $events, ?string $start): array
+    public static function insurerHistory(array $events, ?string $start, array $monthly = []): array
     {
         $events = array_values(array_filter($events, static fn (array $e): bool => in_array($e['kind'], ['P', 'Q', 'M'], true)));
-        if ($events === []) {
+        if ($events === [] && $monthly === []) {
             return [];
         }
         usort($events, static fn (array $a, array $b): int => [$a['date'], $a['kind'] === 'P' ? 0 : 1] <=> [$b['date'], $b['kind'] === 'P' ? 0 : 1]);
@@ -612,6 +636,12 @@ final class PremierPayroll
             }
             $runs[] = ['code' => $event['code'], 'from' => $month, 'to' => null, 'reference' => 'premier:mz_prizp:' . $event['kind'] . ':' . $event['date']];
         }
+        if ($monthly !== []) {
+            $runs = self::overrideWithPayrollMonths($runs, $monthly);
+        }
+        if ($runs === []) {
+            return [];
+        }
         if (is_string($start) && substr($start, 0, 7) . '-01' < $runs[0]['from']) {
             $runs[0]['from'] = substr($start, 0, 7) . '-01';
         }
@@ -621,6 +651,55 @@ final class PremierPayroll
             }
         }
         return $runs;
+    }
+
+    /**
+     * Úseky z oznámení pojišťovnám s měsíci se zpracovanou mzdou: pro měsíc se mzdou platí
+     * její pojišťovna, ostatní měsíce zůstávají na oznámeních. Úsek se láme na každém měsíci,
+     * ve kterém se zdroj mění, a na měsíci po posledním měsíci se mzdou (tam se vrací oznámení).
+     *
+     * @param list<array{code:string,from:string,to:?string,reference:string}> $runs
+     * @param array<string,string> $monthly
+     * @return list<array{code:string,from:string,to:?string,reference:string}>
+     */
+    private static function overrideWithPayrollMonths(array $runs, array $monthly): array
+    {
+        $points = [];
+        foreach ($runs as $run) {
+            $points[$run['from']] = true;
+        }
+        foreach (array_keys($monthly) as $period) {
+            $month = $period . '-01';
+            $points[$month] = true;
+            $points[(new \DateTimeImmutable($month))->modify('+1 month')->format('Y-m-d')] = true;
+        }
+        ksort($points);
+        $out = [];
+        foreach (array_keys($points) as $month) {
+            $period = substr($month, 0, 7);
+            if (isset($monthly[$period])) {
+                $code = $monthly[$period];
+                $reference = 'premier:mzdy:zkr_poj:' . $period;
+            } else {
+                $base = null;
+                foreach ($runs as $run) {
+                    if ($run['from'] <= $month) {
+                        $base = $run;
+                    }
+                }
+                if ($base === null) {
+                    continue;
+                }
+                $code = $base['code'];
+                $reference = $base['reference'];
+            }
+            $last = array_key_last($out);
+            if ($last !== null && $out[$last]['code'] === $code) {
+                continue;
+            }
+            $out[] = ['code' => $code, 'from' => $month, 'to' => null, 'reference' => $reference];
+        }
+        return $out;
     }
 
     /** @param array<string,mixed> $row */
