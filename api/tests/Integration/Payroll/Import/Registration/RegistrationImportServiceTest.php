@@ -227,6 +227,32 @@ final class RegistrationImportServiceTest extends TestCase
     }
 
     /**
+     * Obec bez ulic: věta nese jen `num` a `cit`. Profil A1 nesmí dostat
+     * ulici „Obec 424" z jednořádkové adresy, jinak by příští věta poslala
+     * číslo popisné dvakrát (zpětný převod Premier, 2 věty).
+     */
+    public function testAddressWithoutStreetDoesNotDuplicateHouseNumberInRegistrationProfile(): void
+    {
+        $birthNumber = RegistrationXmlFixtures::birthNumber('1988-02-03', 'female', 5);
+        $files = [$this->file('obec.xml', RegistrationXmlFixtures::regzecA1([
+            'bno' => $birthNumber,
+            'birth_date' => '1988-02-03',
+            'street' => null,
+            'num' => '424',
+            'city' => 'Testov',
+        ]))];
+
+        $record = $this->imports->preview($this->supplierId, 'test', $files)['records'][0];
+        $applied = $this->apply($files, [$record['key']]);
+        self::assertSame('applied', $applied['results'][0]['status'], (string) $applied['results'][0]['message']);
+        $profile = $this->container->get(PayrollRegistrationIdentityService::class)
+            ->a1ProfileView($this->supplierId, (int) $applied['results'][0]['employment_id'])['profile'];
+        self::assertIsArray($profile);
+        self::assertNull($profile['permanent_address']['street'] ?? null, json_encode($profile['permanent_address'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('424', $profile['permanent_address']['house_number']);
+    }
+
+    /**
      * Pobíraný důchod z přihlášky (`pens`) se propíše do zákonné evidence osoby,
      * odkud ho čte ELDP i JMHZ. Do vyplněné evidence import nesahá.
      */

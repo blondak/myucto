@@ -68,6 +68,28 @@ final class RegistrationXmlReaderTest extends TestCase
         self::assertSame('CZ', $profile['permanent_address']['country_code']);
     }
 
+    /**
+     * Adresa obce bez ulic (`adr` bez `str`) nese ulici výslovně prázdnou:
+     * profil A1 jinak ponechal jednořádkovou ulici z návrhu („Obec 424")
+     * a příští věta poslala číslo popisné dvakrát.
+     */
+    public function testAddressWithoutStreetCarriesExplicitlyEmptyStreet(): void
+    {
+        $read = $this->reader->read(RegistrationXmlFixtures::regzecA1([
+            'street' => null,
+            'num' => '424',
+            'city' => 'Testov',
+        ]));
+
+        $address = $read['records'][0]->a1Profile['permanent_address'];
+        self::assertArrayHasKey('street', $address);
+        self::assertNull($address['street']);
+        self::assertArrayHasKey('orientation_number', $address);
+        self::assertNull($address['orientation_number']);
+        self::assertSame('424', $address['house_number']);
+        self::assertSame('Testov', $address['city']);
+    }
+
     /** IMP-01, IMP-06, IMP-07: VS (starý i nový) zaměstnavatele, dřívější příjmení a VČP se čtou. */
     public function testEmployerSymbolsFormerSurnameAndVcpAreRead(): void
     {

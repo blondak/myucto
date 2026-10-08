@@ -500,7 +500,7 @@ final class RegistrationXmlReader
     /**
      * @param bool $czech `fdr` (czAdrType) je podle schématu vždy adresa pobytu
      *                    v ČR a atribut `cnt` nemá, takže se stát doplní zde
-     * @return array<string,string>|null
+     * @return array<string,?string>|null
      */
     private function profileAddress(?DOMElement $node, bool $czech = false): ?array
     {
@@ -516,11 +516,21 @@ final class RegistrationXmlReader
             'country_code' => $this->upper($this->attribute($node, 'cnt')),
             'ruian_point' => $this->attribute($node, 'ruianpoint'),
         ]);
-        if ($czech && $address !== []) {
+        if ($address === []) {
+            return null;
+        }
+        if ($czech) {
             $address['country_code'] = 'CZ';
         }
-
-        return $address === [] ? null : $address;
+        // Ulice a čísla z věty tvoří jeden údaj: věta bez `str` (obec bez
+        // ulic) nebo bez `onum` ho nese celý, takže nesmí zůstat ulice nebo
+        // orientační číslo z návrhu (jednořádková „Obec 424" by u ČSSZ
+        // zdvojila číslo popisné).
+        return $address + [
+            'street' => null,
+            'house_number' => null,
+            'orientation_number' => null,
+        ];
     }
 
     private function flag(?DOMElement $node, string $name): ?bool
