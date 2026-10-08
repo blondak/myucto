@@ -11790,6 +11790,7 @@
       "nempri_decisive_payroll_source_invalid": "Zmrazená mzdová revize neodpovídá svému otisku, takže z ní nejde sestavit rozhodné období. Kontaktujte podporu.",
       "nempri_payment_connection_partner_settlement": "Mzda se vyplácí přes partnera, takže MyÚčto nezná účet ani adresu pro výplatu dávky, které NEMPRI vyžaduje. Opravte způsob výplaty ve výplatním profilu osoby, nebo oznámení podejte mimo aplikaci.",
       "nempri_payment_address_invalid": "Adresa pro výplatu dávky musí mít obec, číslo popisné a PSČ. Opravte ji na kartě osoby.",
+      "nempri_bank_code_unknown": "Kód banky výplatního účtu není v aktuálním číselníku kódů bank ČNB, takže by ČSSZ oznámení NEMPRI odmítla. Opravte účet na kartě osoby.",
       "nempri_payment_connection_invalid": "Výplatní účet zaměstnance není platný český účet ani IBAN, takže ho nelze zapsat do NEMPRI. Opravte ho na kartě osoby.",
       "nempri_payment_connection_missing": "Zaměstnanec nemá ve výplatním profilu účet, na který se mu vyplácí mzda. Bez něj si ČSSZ způsob výplaty vyžádá výzvou a dávka se zdrží. Doplňte účet na kartě osoby.",
       "nempri_periods_invalid": "Dny péče musí být seznam období od–do.",

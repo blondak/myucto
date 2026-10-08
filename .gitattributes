@@ -18,6 +18,7 @@
 api/xsd/cssz/**/*.xsd -text -diff
 *.xlsx -text
 api/resources/payroll/jmhz/**/*.csv -text -diff
+api/resources/ciselniky/kody_bank_CR.csv -text
 api/resources/payroll/jmhz/**/*.ttl -text -diff
 api/resources/payroll/jmhz/**/*.pem -text -diff
 api/xsd/jmhz/SHA256SUMS text eol=lf

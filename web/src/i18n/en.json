@@ -11790,6 +11790,7 @@
       "nempri_decisive_payroll_source_invalid": "A frozen payroll revision does not match its fingerprint, so the decisive period cannot be built from it. Contact support.",
       "nempri_payment_connection_partner_settlement": "The wage is paid through a partner, so MyÚčto does not know the account or address for paying the benefit, which NEMPRI requires. Correct the payout method in the person's payout profile, or submit the notification outside the application.",
       "nempri_payment_address_invalid": "The address for paying the benefit needs a municipality, a house number and a postal code. Correct it on the person card.",
+      "nempri_bank_code_unknown": "The bank code of the payout account is not in the current Czech National Bank code list, so ČSSZ would reject the NEMPRI notice. Correct the account on the person card.",
       "nempri_payment_connection_invalid": "The employee's payout account is neither a valid Czech account nor an IBAN, so it cannot be written to NEMPRI. Correct it on the person card.",
       "nempri_payment_connection_missing": "The employee's payout profile has no account the wage is paid to. Without it ČSSZ will request the payment method and the benefit will be delayed. Add the account on the person card.",
       "nempri_periods_invalid": "Care days must be a list of from–to periods.",
