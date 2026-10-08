@@ -2848,6 +2848,39 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * Zkušební podání do TEST ČSSZ (8. 10. 2026): registrace odcházela pod
+     * ostrým VS firmy, přestože účtárna má pro test přidělený vlastní. Výběr
+     * podle prostředí je teď stejný jako u JMHZ ({@see \MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol}).
+     */
+    public function testTestEnvironmentRegistrationUsesTheOfficeTestVariableSymbol(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET test_social_security_variable_symbol = "8880001234"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $test = $this->registrationService->preview(
+            $this->supplierId,
+            'test',
+            $this->employmentId,
+        );
+        $production = $this->registrationService->preview(
+            $this->supplierId,
+            'production',
+            $this->employmentId,
+        );
+        $prepared = $this->json($this->post());
+
+        self::assertStringContainsString('vs="8880001234"', $test['xml']);
+        self::assertStringNotContainsString('vs="9990001234"', $test['xml']);
+        self::assertStringContainsString('vs="9990001234"', $production['xml']);
+        self::assertStringContainsString(
+            'vs="8880001234"',
+            $this->storedArtifactXml((int) $prepared['submission_id']),
+        );
+    }
+
     /** Bez data nástupu nelze určit lhůtu ani podat přihlášku. */
     public function testMissingStartDateBlocksWithAnActionableMessage(): void
     {

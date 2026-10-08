@@ -22,6 +22,10 @@ final class PayrollRegistrationSubmissionRepository
     /**
      * Kontext jednoho pracovního vztahu pro registraci.
      *
+     * `employer_variable_symbol` je symbol platný pro prostředí
+     * ({@see PayrollEmployerIdentifierSql::resolveVariableSymbol()}): do testu
+     * ČSSZ odchází testovací VS účtárny, ne ostrý.
+     *
      * @return array{
      *   employment_id:int,employee_id:int,office_id:?int,status:string,
      *   relation_type:string,start_date:?string,actual_start_date:?string,
@@ -33,6 +37,7 @@ final class PayrollRegistrationSubmissionRepository
     public function findEmploymentContext(
         int $supplierId,
         int $employmentId,
+        string $environment,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
             'SELECT employment.id,
@@ -57,6 +62,7 @@ final class PayrollRegistrationSubmissionRepository
         if (!is_array($row)) {
             return null;
         }
+        $row = PayrollEmployerIdentifierSql::resolveVariableSymbol($row, $environment);
 
         return [
             'employment_id' => (int) $row['id'],

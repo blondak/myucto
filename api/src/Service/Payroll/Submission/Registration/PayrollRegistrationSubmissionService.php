@@ -172,7 +172,7 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         int $employmentId,
     ): array {
-        $this->requireContext($supplierId, $employmentId);
+        $this->requireContext($supplierId, $employmentId, $environment);
 
         return $this->events->list($supplierId, $environment, $employmentId);
     }
@@ -184,7 +184,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         string $effectiveOn,
     ): array {
-        $this->requireContext($supplierId, $employmentId);
+        $this->requireContext($supplierId, $employmentId, $environment);
 
         return $this->events->a2EvidenceCandidates(
             $supplierId,
@@ -202,7 +202,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $input,
         int $approvedBy,
     ): array {
-        $this->requireContext($supplierId, $employmentId);
+        $this->requireContext($supplierId, $employmentId, $environment);
 
         return $this->events->approve(
             $supplierId,
@@ -238,7 +238,7 @@ final readonly class PayrollRegistrationSubmissionService
         // Povinnost a lhůta vznikají mimo transakci podání a nezávisle na tom,
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
         // neúspěšná příprava by po sobě nenechala ani stopu po termínu.
-        $context = $this->requireContext($supplierId, $employmentId);
+        $context = $this->requireContext($supplierId, $employmentId, $environment);
         $problems = [];
         if ($eventId === null) {
             $problem = $this->registerEmployerObligation(
@@ -539,7 +539,7 @@ final readonly class PayrollRegistrationSubmissionService
         bool $fullRegistrationRequested = false,
         bool $startNotKnownInAdvance = false,
     ): array {
-        $context = $this->requireContext($supplierId, $employmentId);
+        $context = $this->requireContext($supplierId, $employmentId, $environment);
         $event = $eventId === null
             ? null
             : $this->events->load(
@@ -1433,7 +1433,7 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         int $employmentId,
     ): ?array {
-        $this->requireContext($supplierId, $employmentId);
+        $this->requireContext($supplierId, $employmentId, $environment);
         $live = $this->registrations->liveBaseRegistration(
             $supplierId,
             $environment,
@@ -1563,8 +1563,11 @@ final readonly class PayrollRegistrationSubmissionService
      *   is_first_employment:bool
      * }
      */
-    private function requireContext(int $supplierId, int $employmentId): array
-    {
+    private function requireContext(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+    ): array {
         // Vnitřní pojistka, ne hláška pro účetní: obě id validuje akce
         // regulárním výrazem `^[1-9][0-9]*$`, přes API sem nula nedojde.
         if ($supplierId <= 0 || $employmentId <= 0) {
@@ -1575,6 +1578,7 @@ final readonly class PayrollRegistrationSubmissionService
         $context = $this->registrations->findEmploymentContext(
             $supplierId,
             $employmentId,
+            $environment,
         );
         if ($context === null) {
             // Výjimka zůstává: chybí entita, které se registrace týká,

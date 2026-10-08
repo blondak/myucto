@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
 use MyInvoice\Repository\Payroll\EldpStatementRepository;
+use MyInvoice\Repository\Payroll\PayrollEmployerIdentifierSql;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
@@ -368,10 +369,13 @@ final readonly class SicknessSubmissionService
         $employmentId = (int) $row['employment_id'];
         $incapacityFrom = (string) $row['incapacity_from'];
         $incapacityTo = $this->nullableText($row['incapacity_to'] ?? null);
-        $context = $this->caseService->requireContext(
-            $supplierId,
-            $employmentId,
-            $incapacityFrom,
+        $context = PayrollEmployerIdentifierSql::resolveVariableSymbol(
+            $this->caseService->requireContext(
+                $supplierId,
+                $employmentId,
+                $incapacityFrom,
+            ),
+            $environment,
         );
         $identity = $this->identities->sensitiveIdentityAt(
             $supplierId,

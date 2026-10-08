@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 
 final readonly class JmhzScenario1DocumentService
 {
@@ -70,7 +71,7 @@ final readonly class JmhzScenario1DocumentService
             $preparationId,
         );
         // Testovací prostředí ČSSZ má vlastní přidělený VS; produkce ho nikdy nedostane.
-        $testVariableSymbols = $environment === 'test'
+        $testVariableSymbols = CsszEmployerVariableSymbol::usesTestSymbols($environment)
             ? $this->employerSettings->testVariableSymbols($supplierId)
             : [];
         if (!in_array(

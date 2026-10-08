@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use PDO;
 use PDOException;
 
@@ -161,11 +162,17 @@ final class PayrollRegistrationEventRepository
         ));
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * `social_security_variable_symbol` je symbol platný pro prostředí
+     * ({@see CsszEmployerVariableSymbol}): do testu ČSSZ testovací VS účtárny.
+     *
+     * @return array<string,mixed>|null
+     */
     public function employmentSourceAt(
         int $supplierId,
         int $employmentId,
         string $effectiveOn,
+        string $environment,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
             'SELECT employment.id, employment.employee_id, employment.status,
@@ -174,6 +181,7 @@ final class PayrollRegistrationEventRepository
                     employment.relation_type,
                     supplier.company_name,
                     office.social_security_variable_symbol,
+                    office.test_social_security_variable_symbol,
                     settings.social_security_office_code,
                     terms.id AS terms_id, terms.row_version AS terms_row_version,
                     terms.activity_code,
@@ -198,8 +206,21 @@ final class PayrollRegistrationEventRepository
             $effectiveOn, $effectiveOn, $supplierId, $employmentId,
         ]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $row['social_security_variable_symbol'] = CsszEmployerVariableSymbol::forEnvironment(
+            $environment,
+            is_string($row['social_security_variable_symbol'] ?? null)
+                ? $row['social_security_variable_symbol']
+                : null,
+            is_string($row['test_social_security_variable_symbol'] ?? null)
+                ? $row['test_social_security_variable_symbol']
+                : null,
+        );
+        unset($row['test_social_security_variable_symbol']);
 
-        return is_array($row) ? $row : null;
+        return $row;
     }
 
     /** @return array<string,mixed>|null */

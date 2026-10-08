@@ -144,6 +144,7 @@ final readonly class PayrollRegistrationEventService
             $supplierId,
             $employmentId,
             $effectiveOn,
+            $environment,
         );
         /*
          * Dohlášení jde i za vztah, který už skončil (MPSV, aktualita
@@ -162,6 +163,7 @@ final readonly class PayrollRegistrationEventService
                 $supplierId,
                 $employmentId,
                 $sourceOn,
+                $environment,
             );
         }
         // Výjimka zůstává: chybějící vztah je chybějící entita v rozsahu
@@ -438,7 +440,7 @@ final readonly class PayrollRegistrationEventService
         string $effectiveOn,
     ): array {
         $effectiveOn = $this->date($effectiveOn, 'end_on');
-        $context = $this->events->employmentSourceAt($supplierId, $employmentId, $effectiveOn);
+        $context = $this->events->employmentSourceAt($supplierId, $employmentId, $effectiveOn, $environment);
         // Výjimka zůstává: chybějící vztah je chybějící entita v rozsahu firmy.
         if ($context === null) {
             throw new \OutOfBoundsException(
