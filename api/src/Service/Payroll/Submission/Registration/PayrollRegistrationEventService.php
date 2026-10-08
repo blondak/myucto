@@ -230,6 +230,7 @@ final readonly class PayrollRegistrationEventService
                 $completion,
                 $sourceOn,
             ) + $this->relationIdentity($context);
+        $this->assertEffectiveOnNotBeforeStart($definition[0], $effectiveOn, $context, $data);
         if ($interaction === 'termination' && is_array($identity['provenance'] ?? null)) {
             // Doklad, o co se odhláška opírá: protokol, přijaté A3, export
             // zaměstnanců ČSSZ, nebo výslovné potvrzení účetní u ONZ.
@@ -641,9 +642,155 @@ final readonly class PayrollRegistrationEventService
         }
         if ($interaction === 'change') {
             $this->assertStartDateAge($supplierId, $context, $effectiveOn, $data['delta']);
+            $this->assertCzechResidenceAllowed($supplierId, $employmentId, $effectiveOn, $data['delta']);
+        }
+        if ($interaction === 'change' || $interaction === 'correction') {
+            $actionCode = $interaction === 'change' ? 3 : 4;
+            $data += $this->clientBirthNumber(
+                $supplierId,
+                $context,
+                $effectiveOn,
+                $data['delta'],
+                $actionCode,
+            );
+            $data += $this->deltaForeignInsurance(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $context,
+                $relation,
+                $actionCode,
+            );
         }
 
         return $data + $relation;
+    }
+
+    /**
+     * EDV 1.4.0.6, ID 10057/10058 (podmínka P pro A1, A3 a A4): u českého
+     * státního občanství je rodné číslo / EČP v `client/@bno` povinné i ve
+     * změně a opravě, kde jinak osobu nese `client/@ikmpsv`. Mění-li se
+     * rodné číslo samo, nese ho delta; jinak se do události zmrazí to
+     * z karty osoby. U A1 totéž hlídá
+     * {@see PayrollRegistrationIdentityRequirements::missing()}.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $delta
+     * @return array{birth_number?:string}
+     */
+    private function clientBirthNumber(
+        int $supplierId,
+        array $context,
+        string $onDate,
+        array $delta,
+        int $actionCode,
+    ): array {
+        if (isset($delta['birth_number'])) {
+            return [];
+        }
+        $current = $this->identities->sensitiveIdentityAt(
+            $supplierId,
+            (int) ($context['employee_id'] ?? 0),
+            $onDate,
+        );
+        $citizenship = is_array($delta['identity'] ?? null)
+            && is_string($delta['identity']['citizenship_country_code'] ?? null)
+                ? $delta['identity']['citizenship_country_code']
+                : ($current['identity']['citizenship_country_code'] ?? null);
+        if ($citizenship !== 'CZ') {
+            return [];
+        }
+        $identifiers = is_array($current['identifiers'] ?? null) ? $current['identifiers'] : [];
+        $birthNumber = CzechBirthNumber::forSubmission(
+            is_string($identifiers['birth_number'] ?? null) ? $identifiers['birth_number'] : null,
+        ) ?? (is_string($identifiers['ecp'] ?? null) && trim($identifiers['ecp']) !== ''
+            ? trim($identifiers['ecp'])
+            : null);
+        if ($birthNumber === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_event_birth_number_missing',
+                $this->actionName($actionCode) . ' zaměstnance s českým státním'
+                    . ' občanstvím musí nést rodné číslo nebo EČP, jinak ho ČSSZ'
+                    . ' zamítne. Doplňte rodné číslo na kartě osoby (Identifikátory)'
+                    . ' a oznámení schvalte znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference('birth_number'),
+            );
+        }
+
+        return ['birth_number' => $birthNumber];
+    }
+
+    /**
+     * EDV 1.4.0.6, ID 10092 (podmínka P pro A1-OST, A3-OST a A4-OST): u druhu
+     * činnosti „N" je cizozemský nositel pojištění (`forin`) povinný i ve
+     * změně a opravě. Nositele vede profil registrace A1 (přihláška ho
+     * vyžaduje stejně, viz {@see PayrollRegistrationA1SnapshotBuilder}),
+     * odtud se do události zmrazí.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $relation
+     * @return array{foreign_insurance?:array<string,string>}
+     */
+    private function deltaForeignInsurance(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        array $context,
+        array $relation,
+        int $actionCode,
+    ): array {
+        if (($relation['activity_code'] ?? null) !== 'N') {
+            return [];
+        }
+        $startOn = $context['actual_start_date'] ?? $context['start_date'] ?? null;
+        $profile = null;
+        if (is_string($startOn) && $startOn !== '') {
+            try {
+                $source = $this->identities->sensitiveSnapshotSourceAt(
+                    $supplierId,
+                    (int) ($context['employee_id'] ?? 0),
+                    $employmentId,
+                    $environment,
+                    $startOn,
+                );
+                $profile = $source['regzec_a1'] ?? null;
+            } catch (PayrollRegistrationIdentitySnapshotException) {
+                $profile = null;
+            }
+        }
+        $raw = is_array($profile) && is_array($profile['foreign_insurance'] ?? null)
+            ? $profile['foreign_insurance']
+            : [];
+        $result = [];
+        foreach ([
+            'current', 'name', 'street', 'house_number', 'orientation_number',
+            'postal_code', 'city', 'country_code', 'identifier', 'sector',
+        ] as $key) {
+            $value = $raw[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $result[$key] = trim($value);
+            }
+        }
+        if (!in_array($result['current'] ?? null, ['P', 'S'], true)
+            || !isset($result['country_code'])
+            || PayrollRegistrationForeignInsurerAddress::missing($result) !== []
+            || (isset($result['sector'])
+                && !PayrollRegistrationForeignInsurerSector::isKnown($result['sector']))
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_event_foreign_insurance_missing',
+                $this->actionName($actionCode) . ' zaměstnance s druhem činnosti'
+                    . ' „N" (smluvní zaměstnanec) musí nést cizozemského nositele'
+                    . ' pojištění, bez něj ho ČSSZ nepřijme. V profilu registrace'
+                    . ' (A1) vyplňte oddíl Cizozemský nositel pojištění'
+                    . ' (specifikace P nebo S a stát), uložte ho a oznámení'
+                    . ' schvalte znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference('foreign_insurance'),
+            );
+        }
+        ksort($result, SORT_STRING);
+
+        return ['foreign_insurance' => $result];
     }
 
     /**
@@ -733,6 +880,103 @@ final readonly class PayrollRegistrationEventService
                 . ' - ČSSZ by takové podání zamítla. Odeberte '
                 . ($single ? 'ji' : 'je') . ' z oznámení.'
                 . $this->references('', $forbidden),
+        );
+    }
+
+    /**
+     * EDV 1.4.0.6, ID 10514 až 10517 (podmínka Z pro A1, A3 a A4): adresa
+     * pobytu v ČR (`fdr`) se při trvalém pobytu v ČR nesmí poslat, ČSSZ by
+     * podání zamítla. Stát trvalého pobytu je ten ze stejné změny, jinak
+     * z kmenových dat osoby k rozhodnému dni; u přihlášky A1 totéž hlídá
+     * {@see PayrollRegistrationA1SnapshotBuilder}.
+     *
+     * @param array<string,mixed> $delta
+     */
+    private function assertCzechResidenceAllowed(
+        int $supplierId,
+        int $employmentId,
+        string $effectiveOn,
+        array $delta,
+    ): void {
+        if (!is_array($delta['czech_residence_address'] ?? null)) {
+            return;
+        }
+        $country = is_array($delta['permanent_address'] ?? null)
+            ? ($delta['permanent_address']['country_code'] ?? null)
+            : null;
+        if (!is_string($country) || $country === '') {
+            $projection = $this->identities->a1MasterProjectionAt(
+                $supplierId,
+                $employmentId,
+                $effectiveOn,
+            );
+            $country = is_array($projection['permanent_address'] ?? null)
+                ? ($projection['permanent_address']['country_code'] ?? null)
+                : null;
+        }
+        if (!is_string($country) || trim($country) === '') {
+            throw new PayrollRegistrationXmlException(
+                'registration_event_czech_residence_unverifiable',
+                'Adresa pobytu v ČR se posílá jen zaměstnanci s trvalým pobytem'
+                    . ' mimo ČR, ale stát trvalého pobytu u osoby vyplněný není.'
+                    . ' Doplňte trvalou adresu se státem na kartě osoby, nebo ji'
+                    . ' ohlaste ve stejné změně.'
+                    . PayrollRegistrationFieldVocabulary::reference(
+                        'permanent_address.country_code',
+                    ),
+            );
+        }
+        if (strtoupper(trim($country)) !== 'CZ') {
+            return;
+        }
+        throw new PayrollRegistrationXmlException(
+            'registration_event_czech_residence_forbidden',
+            'Adresa pobytu v ČR se u zaměstnance s trvalým pobytem v ČR'
+                . ' neposílá, ČSSZ by takové oznámení zamítla. Odeberte ji'
+                . ' z oznámení; mění-li se trvalý pobyt do zahraničí, ohlaste'
+                . ' novou trvalou adresu ve stejné změně.'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'czech_residence_address',
+                ),
+        );
+    }
+
+    /**
+     * EDV 1.4.0.6, ID 10009 (kontrola pro A3, A5, A6 a A7, u A4 se
+     * nevyhodnocuje): datum nástupu (job/@fro, ID 10223) musí být menší nebo
+     * rovno datu, ke kterému se změna hlásí (employee/@fro). Nástupem je nový
+     * den nástupu z A3, jinak skutečný nástup vztahu, jak ho zná ČSSZ
+     * z přihlášky.
+     *
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $data
+     */
+    private function assertEffectiveOnNotBeforeStart(
+        int $actionCode,
+        string $effectiveOn,
+        array $context,
+        array $data,
+    ): void {
+        if (!in_array($actionCode, [3, 5, 6, 7], true)) {
+            return;
+        }
+        $shifted = is_array($data['delta']['employment'] ?? null)
+            ? ($data['delta']['employment']['actual_start_on'] ?? null)
+            : null;
+        $start = is_string($shifted) && $shifted !== ''
+            ? $shifted
+            : ($context['actual_start_date'] ?? $context['start_date'] ?? null);
+        if (!is_string($start) || $start === '' || $start <= $effectiveOn) {
+            return;
+        }
+        throw new PayrollRegistrationXmlException(
+            'registration_event_before_start',
+            $this->actionName($actionCode) . " se hlásí ke dni {$effectiveOn},"
+                . " ale zaměstnanec nastoupil až {$start}. ČSSZ přijme jen"
+                . ' změnu ke dni nástupu nebo pozdějšímu, jinak podání zamítne.'
+                . ' Opravte datum ve formuláři, nebo zkontrolujte den nástupu'
+                . ' na kartě pracovního vztahu.'
+                . PayrollRegistrationFieldVocabulary::reference('effective_on'),
         );
     }
 
@@ -1457,8 +1701,17 @@ final readonly class PayrollRegistrationEventService
             }
         }
         $endDate = $context['end_date'] ?? null;
+        // EDV 1.4.0.6, ID 10092: u druhu „N" nese dohlášení A3 i cizozemského
+        // nositele; profil A1 ho u tohoto druhu vyžaduje už při sestavení.
+        $foreignInsurance = $a1->foreignInsurance === null
+            || ($a1->employment['activity_code'] ?? null) !== 'N'
+            ? []
+            : ['foreign_insurance' => array_filter(
+                $a1->foreignInsurance,
+                static fn (mixed $value): bool => $value !== null,
+            )];
 
-        return [
+        return $foreignInsurance + [
             'completion' => $mode,
             'delta' => PayrollRegistrationProfileCompletion::delta(
                 $a1,

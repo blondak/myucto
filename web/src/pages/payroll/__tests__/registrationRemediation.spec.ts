@@ -5,13 +5,20 @@ import { registrationRemediation, registrationRemediationCodes } from '../regist
 
 describe('registrationRemediation', () => {
   it('posílá neplatný variabilní symbol do nastavení zaměstnavatele', () => {
-    expect(registrationRemediation('registration_employer_variable_symbol_invalid')).toBe('employer_settings')
-    expect(registrationRemediation('registration_cssz_workplace_code_invalid')).toBe('employer_settings')
+    expect(registrationRemediation('registration_employer_variable_symbol_invalid')).toEqual({ kind: 'employer_settings' })
+    expect(registrationRemediation('registration_cssz_workplace_code_invalid')).toEqual({ kind: 'employer_settings' })
   })
 
   it('posílá chybějícího cizozemského nositele do profilu A1', () => {
-    expect(registrationRemediation('registration_event_foreign_insurance_missing')).toBe('a1_profile')
-    expect(registrationRemediation('registration_regzec_a1_profile_missing')).toBe('a1_profile')
+    expect(registrationRemediation('registration_event_foreign_insurance_missing')).toEqual({ kind: 'a1_profile' })
+    expect(registrationRemediation('registration_regzec_a1_profile_missing')).toEqual({ kind: 'a1_profile' })
+  })
+
+  it('posílá chybějící rodné číslo a stát trvalého pobytu na kartu osoby', () => {
+    expect(registrationRemediation('registration_event_birth_number_missing'))
+      .toEqual({ kind: 'person', panel: 'identifiers', field: 'birth_number' })
+    expect(registrationRemediation('registration_event_czech_residence_unverifiable'))
+      .toEqual({ kind: 'person', panel: 'addresses', field: 'permanent_address' })
   })
 
   it('neznámý kód nápravu nemá', () => {

@@ -525,7 +525,11 @@ final class PayrollRegistrationXmlSerializer
         }
         $employee->appendChild($job);
 
-        if (in_array($action, [6, 7], true)) {
+        if (in_array($action, [6, 7], true)
+            || (in_array($action, [3, 4], true) && is_array($data['foreign_insurance'] ?? null))
+        ) {
+            // A3/A4 u druhu „N" nesou nositele zmrazeného z profilu A1
+            // (EDV 1.4.0.6, ID 10092).
             $this->appendForeignInsurance($document, $namespace, $employee, $data);
         }
         if ($action === 2 && is_array($data['unemployment'] ?? null)) {
@@ -605,6 +609,10 @@ final class PayrollRegistrationXmlSerializer
         $delta = $this->eventObject($data, 'delta');
         if (isset($delta['birth_number'])) {
             $client->setAttribute('bno', (string) $delta['birth_number']);
+        } elseif (isset($data['birth_number'])) {
+            // EDV 1.4.0.6, ID 10057: u českého občanství povinné i v A3/A4;
+            // událost ho zmrazí z karty osoby.
+            $client->setAttribute('bno', (string) $data['birth_number']);
         }
         $identity = is_array($delta['identity'] ?? null) ? $delta['identity'] : [];
         $nameAttributes = array_filter([

@@ -1671,6 +1671,13 @@ final class PayrollRegistrationActionTest extends TestCase
                             ['type_code' => '2', 'from' => '2026-03-20'],
                         ],
                     ],
+                    'permanent_address' => [
+                        'street' => 'Testovacia',
+                        'house_number' => '7',
+                        'postal_code' => '81101',
+                        'city' => 'Bratislava',
+                        'country_code' => 'SK',
+                    ],
                     'czech_residence_address' => [
                         'street' => 'Krátká',
                         'house_number' => '3',
@@ -1957,7 +1964,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 SET start_date = "2026-08-16", actual_start_date = ?,
                     status = "active"
               WHERE supplier_id = ? AND id = ?'
-        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        )->execute(['2026-08-16', $this->supplierId, $this->employmentId]);
         $this->seedRegistrationEventPrerequisites('10', null, '2026-08-16');
 
         $sourceEvent = $this->json(($this->action)->approveEvent(
@@ -2026,6 +2033,18 @@ final class PayrollRegistrationActionTest extends TestCase
         );
 
         self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+        // REGZEC25-client.bno-02: i oprava A4 nese u občana ČR rodné číslo.
+        $correction = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($accepted)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $xml = $this->storedArtifactXml((int) $correction['submission_id']);
+        self::assertStringContainsString(' act="4"', $xml);
+        self::assertStringContainsString(' bno="9152031234"', $xml);
     }
 
     public function testA4RelationshipCorrectionFailsClosedWithoutExplanationAttachment(): void
@@ -2035,7 +2054,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 SET start_date = "2026-08-16", actual_start_date = ?,
                     status = "active"
               WHERE supplier_id = ? AND id = ?'
-        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        )->execute(['2026-08-16', $this->supplierId, $this->employmentId]);
         $this->seedRegistrationEventPrerequisites('1', '1', '2026-08-16');
 
         $sourceEvent = $this->json(($this->action)->approveEvent(
@@ -4422,17 +4441,76 @@ final class PayrollRegistrationActionTest extends TestCase
             'postal_code' => '60200',
             'city' => 'Brno',
         ];
-        $bad = $this->approveA3(['czech_residence_address' => $address], 'synthetic-fdr-letter');
+        $abroad = [
+            'street' => 'Testovacia',
+            'house_number' => '7',
+            'postal_code' => '81101',
+            'city' => 'Bratislava',
+            'country_code' => 'SK',
+        ];
+        $bad = $this->approveA3(
+            ['czech_residence_address' => $address, 'permanent_address' => $abroad],
+            'synthetic-fdr-letter',
+        );
         self::assertSame(422, $bad->getStatusCode(), (string) $bad->getBody());
 
         $address['house_number'] = '12';
         $address['orientation_number'] = '12345';
-        $long = $this->approveA3(['czech_residence_address' => $address], 'synthetic-fdr-onum');
+        $long = $this->approveA3(
+            ['czech_residence_address' => $address, 'permanent_address' => $abroad],
+            'synthetic-fdr-onum',
+        );
         self::assertSame(422, $long->getStatusCode(), (string) $long->getBody());
 
         $address['orientation_number'] = '4';
-        $ok = $this->approveA3(['czech_residence_address' => $address], 'synthetic-fdr-ok');
+        $ok = $this->approveA3(
+            ['czech_residence_address' => $address, 'permanent_address' => $abroad],
+            'synthetic-fdr-ok',
+        );
         self::assertSame(201, $ok->getStatusCode(), (string) $ok->getBody());
+    }
+
+    /**
+     * REGZEC25-client.fdr.num-05, fdr.pnu-05 a fdr.cit-05: pobyt v ČR je
+     * v A3 při trvalém pobytu v ČR zakázaný (stát z téže změny i z karty osoby).
+     */
+    public function testA3CzechResidenceIsForbiddenForCzechPermanentResidence(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        $residence = [
+            'street' => 'Krátká',
+            'house_number' => '12',
+            'postal_code' => '60200',
+            'city' => 'Brno',
+        ];
+
+        $unknown = $this->approveA3(['czech_residence_address' => $residence], 'synthetic-fdr-unknown');
+        self::assertSame(422, $unknown->getStatusCode(), (string) $unknown->getBody());
+        self::assertSame('registration_event_czech_residence_unverifiable', $this->json($unknown)['error']['code']);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Dlouhá 12", "Praha", "11000", "CZ", "2026-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $card = $this->approveA3(['czech_residence_address' => $residence], 'synthetic-fdr-cz-card');
+        self::assertSame(422, $card->getStatusCode(), (string) $card->getBody());
+        self::assertSame('registration_event_czech_residence_forbidden', $this->json($card)['error']['code']);
+
+        $czech = $this->approveA3([
+            'czech_residence_address' => $residence,
+            'permanent_address' => [
+                'street' => 'Dlouhá',
+                'house_number' => '12',
+                'postal_code' => '11000',
+                'city' => 'Praha',
+                'country_code' => 'CZ',
+            ],
+        ], 'synthetic-fdr-cz-change');
+        self::assertSame(422, $czech->getStatusCode(), (string) $czech->getBody());
+        self::assertSame('registration_event_czech_residence_forbidden', $this->json($czech)['error']['code']);
     }
 
     /** REGZEC25-PROC.A3.scope-01: posun nástupu se hlásí A3 na 10223. */
@@ -4459,6 +4537,134 @@ final class PayrollRegistrationActionTest extends TestCase
             ' fro="2026-03-05"',
             $this->storedArtifactXml((int) $this->json($prepared)['submission_id']),
         );
+    }
+
+    /**
+     * REGZEC25-employee.fro-05: datum nástupu (10223) musí být menší nebo
+     * rovno dni, ke kterému se A3, A5, A6 a A7 hlásí (10009).
+     */
+    public function testEventIsRejectedWhenItPrecedesTheStartOfEmployment(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+
+        $shifted = $this->approveA3(
+            ['employment' => ['actual_start_on' => '2026-04-02']],
+            'synthetic-start-after-change',
+        );
+        self::assertSame(422, $shifted->getStatusCode(), (string) $shifted->getBody());
+        self::assertSame('registration_event_before_start', $this->json($shifted)['error']['code']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET actual_start_date = "2026-08-20"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $transfer = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'variable_symbol_transfer',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a5-before-start',
+                'new_variable_symbol' => '1110000005',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $transfer->getStatusCode(), (string) $transfer->getBody());
+        self::assertSame('registration_event_before_start', $this->json($transfer)['error']['code']);
+    }
+
+    /**
+     * REGZEC25-client.bno-02: u českého občanství nese i změna A3 rodné
+     * číslo v `client/@bno`; bez něj se oznámení neschválí.
+     */
+    public function testA3ForCzechCitizenCarriesTheBirthNumber(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+
+        $approved = $this->approveA3(['title_prefix' => 'Bc.'], 'synthetic-a3-bno');
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        self::assertMatchesRegularExpression(
+            '/<client [^>]*bno="9152031234"[^>]*ikmpsv="1000000001"|<client [^>]*ikmpsv="1000000001"[^>]*bno="9152031234"/',
+            $this->storedArtifactXml((int) $this->json($prepared)['submission_id']),
+        );
+
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_identifiers WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $missing = $this->approveA3(['title_prefix' => 'MUDr.'], 'synthetic-a3-no-bno');
+        self::assertSame(422, $missing->getStatusCode(), (string) $missing->getBody());
+        self::assertSame('registration_event_birth_number_missing', $this->json($missing)['error']['code']);
+    }
+
+    /**
+     * REGZEC25-forin.cur-03 a forin.cur-07: u druhu činnosti „N" nese i změna
+     * A3 cizozemského nositele (`forin/@cur`) z profilu A1.
+     */
+    public function testA3ForActivityNCarriesTheForeignInsurer(): void
+    {
+        $this->employmentActiveSince('2026-03-01');
+        $this->seedRegistrationEventPrerequisites('N', '1', '2026-03-01');
+
+        $withoutProfile = $this->approveA3(['title_prefix' => 'Bc.'], 'synthetic-a3-n-missing');
+        self::assertSame(422, $withoutProfile->getStatusCode(), (string) $withoutProfile->getBody());
+        self::assertSame(
+            'registration_event_foreign_insurance_missing',
+            $this->json($withoutProfile)['error']['code'],
+        );
+
+        $payload = $this->completeA1Payload();
+        $payload['effective_on'] = '2026-03-01';
+        $payload['employment']['actual_start_on'] = '2026-03-01';
+        $payload['employment']['contract_start_on'] = '2026-03-01';
+        $payload['employment']['activity_code'] = 'N';
+        $payload['employment']['relationship_detail_code'] = '1';
+        $payload['foreign_insurance'] = [
+            'current' => 'S',
+            'name' => 'Syntetická pojišťovna',
+            'street' => null,
+            'house_number' => null,
+            'orientation_number' => null,
+            'postal_code' => null,
+            'city' => null,
+            'country_code' => 'DE',
+            'identifier' => 'SYN-1',
+            'sector' => '06',
+        ];
+        $saved = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+
+        $approved = $this->approveA3(['title_prefix' => 'Bc.'], 'synthetic-a3-n-forin');
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($prepared)['submission_id']);
+        self::assertStringContainsString(
+            '<forin cur="S" nam="Syntetická pojišťovna" cnt="DE" id="SYN-1" sec="06"/>',
+            $xml,
+        );
+        self::assertLessThan(strpos($xml, '<forin'), strpos($xml, '<job'));
     }
 
     /** REGZEC25-client.birth.dat-06 u nového nástupu v A3. */

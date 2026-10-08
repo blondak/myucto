@@ -1999,6 +1999,15 @@ function problemTarget(
   return { name: 'payroll-people', query }
 }
 
+/** Proklik k nápravě blokátoru podle kódu chyby, viz `registrationRemediation.ts`. */
+function remediationTarget(code: string) {
+  const remediation = registrationRemediation(code)
+  if (remediation === null || remediation.kind === 'a1_profile') return null
+  return remediation.kind === 'employer_settings'
+    ? problemTarget('employer_settings', null, 'employer_variable_symbol')
+    : problemTarget('person', remediation.panel, remediation.field)
+}
+
 /**
  * Do kterého prostředí ČSSZ se podává. Dokud nic neodešlo, musí to být vidět
  * rovnou u tlačítek — výchozí je produkce a zkouška z testovací instance by
@@ -4642,7 +4651,7 @@ async function copyXml(): Promise<void> {
         <p>{{ eventError }}</p>
         <div v-if="registrationRemediation(eventErrorCode) !== null" class="mt-2 flex flex-wrap gap-2">
           <button
-            v-if="registrationRemediation(eventErrorCode) === 'a1_profile'"
+            v-if="registrationRemediation(eventErrorCode)?.kind === 'a1_profile'"
             type="button"
             :class="btnFilled('success')"
             class="whitespace-nowrap"
@@ -4655,16 +4664,18 @@ async function copyXml(): Promise<void> {
             {{ t('payroll.people.registration.a1.show') }}
           </button>
           <RouterLink
-            v-else
-            :to="problemTarget('employer_settings', null, 'employer_variable_symbol')!"
+            v-else-if="remediationTarget(eventErrorCode) !== null"
+            :to="remediationTarget(eventErrorCode)!"
             :class="btnOutline('danger')"
             class="whitespace-nowrap"
-            data-test="registration-event-error-open-settings"
+            data-test="registration-event-error-open-remediation"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.edit" />
             </svg>
-            {{ t('payroll.people.registration.missing.open_settings') }}
+            {{ registrationRemediation(eventErrorCode)?.kind === 'employer_settings'
+              ? t('payroll.people.registration.missing.open_settings')
+              : t('payroll.people.registration.missing.open') }}
           </RouterLink>
         </div>
       </div>
@@ -4833,7 +4844,7 @@ async function copyXml(): Promise<void> {
     >
       <p>{{ error }}</p>
       <button
-        v-if="registrationRemediation(errorCode) === 'a1_profile'"
+        v-if="registrationRemediation(errorCode)?.kind === 'a1_profile'"
         type="button"
         :class="[btnFilled('success'), 'mt-2']"
         data-test="registration-error-open-a1"
@@ -4845,15 +4856,17 @@ async function copyXml(): Promise<void> {
         {{ t('payroll.people.registration.a1.show') }}
       </button>
       <RouterLink
-        v-else-if="registrationRemediation(errorCode) === 'employer_settings'"
-        :to="problemTarget('employer_settings', null, 'employer_variable_symbol')!"
+        v-else-if="remediationTarget(errorCode) !== null"
+        :to="remediationTarget(errorCode)!"
         :class="[btnOutline('danger'), 'mt-2 whitespace-nowrap']"
-        data-test="registration-error-open-settings"
+        data-test="registration-error-open-remediation"
       >
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path :d="ICONS.edit" />
         </svg>
-        {{ t('payroll.people.registration.missing.open_settings') }}
+        {{ registrationRemediation(errorCode)?.kind === 'employer_settings'
+          ? t('payroll.people.registration.missing.open_settings')
+          : t('payroll.people.registration.missing.open') }}
       </RouterLink>
       <ul v-if="errorProblems.length > 0" class="mt-2 space-y-1.5" data-test="registration-missing-list">
         <li
