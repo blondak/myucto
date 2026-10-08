@@ -5468,6 +5468,8 @@
         "functional_benefits": "Functional benefits under Section 6(10) of the Income Tax Act",
         "temporary_assignment": "Temporary assignment to another employer",
         "relationship_detail": "Employment relationship detail",
+        "form_hint_outside_insurance": "Activity types 11 to 14 are employment income that does not establish insurance participation: neither social nor health insurance is calculated and the monthly report uses the other-income form (11, 13, 14) or the international hiring-out form (12).",
+        "form_hint_prisoner": "The prison sentence detail reports the employment on the prisoner form: without health insurance, position and wage breakdown, with the ELDP and worked hours.",
         "select_apz": "Select an instrument",
         "options_failed": "The pinned JMHZ codebooks could not be loaded. Saving validated evidence is blocked.",
         "search_municipality": "Start typing a municipality name or code",

@@ -5468,6 +5468,8 @@
         "functional_benefits": "Funkční požitky podle § 6 odst. 10 zákona o daních z příjmů",
         "temporary_assignment": "Dočasné přidělení k jinému zaměstnavateli",
         "relationship_detail": "Bližší určení pracovněprávního vztahu",
+        "form_hint_outside_insurance": "Druh činnosti 11 až 14 je příjem ze závislé činnosti, který nezakládá účast na pojištění: sociální ani zdravotní pojištění se nepočítá a měsíční hlášení jde formulářem jiného příjmu (11, 13, 14) nebo mezinárodního pronájmu pracovní síly (12).",
+        "form_hint_prisoner": "Bližší určení „výkon trestu“ hlásí vztah formulářem vězně: bez zdravotního pojištění, pozice a rozpadu mzdy, s ELDP a odpracovanými hodinami.",
         "select_apz": "Vyberte nástroj",
         "options_failed": "Připnuté číselníky JMHZ se nepodařilo načíst. Uložení ověřovaných údajů je zablokované.",
         "search_municipality": "Začněte psát název nebo kód obce",

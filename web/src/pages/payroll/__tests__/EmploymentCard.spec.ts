@@ -49,8 +49,12 @@ vi.mock('@/api/payroll', () => ({
         { code: '1', label: 'Pracovní poměr', relationship_detail_mode: 'select' },
         { code: 'A', label: 'Dohoda', relationship_detail_mode: 'forbidden' },
         { code: 'S', label: 'Společník nebo jednatel', relationship_detail_mode: 'fixed_none' },
+        { code: '13', label: 'Jiný příjem ze závislé činnosti', relationship_detail_mode: 'fixed_none' },
       ],
-      relationship_detail_codes: [{ code: '1', label: 'Žádné' }],
+      relationship_detail_codes: [
+        { code: '1', label: 'Žádné' },
+        { code: '2', label: 'Výkon trestu odnětí svobody' },
+      ],
       countries: [{ code: 'CZ', label: 'Česko' }],
       tax_identifier_types: [{ code: 'D', label: 'DIČ' }],
       education_levels: [{ code: 'A', label: 'Bez vzdělání' }],
@@ -693,6 +697,21 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
+  })
+
+  it('u druhu činnosti mimo pojištění a u vězně vysvětlí formulář hlášení', async () => {
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="jmhz-activity-code"]').setValue('1')
+    await wrapper.get('[data-test="jmhz-relationship-detail"]').setValue('1')
+    expect(wrapper.find('[data-test="jmhz-form-hint"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="jmhz-relationship-detail"]').setValue('2')
+    expect(wrapper.get('[data-test="jmhz-form-hint"]').text()).toBe('payroll.people.jmhz_evidence.form_hint_prisoner')
+
+    await wrapper.get('[data-test="jmhz-activity-code"]').setValue('13')
+    await wrapper.get('[data-test="jmhz-activity-code"]').trigger('change')
+    expect(wrapper.get('[data-test="jmhz-form-hint"]').text()).toBe('payroll.people.jmhz_evidence.form_hint_outside_insurance')
   })
 
   it('běžný vztah nemá JMHZ výjimku a změnu uloží jen jednou do účinných podmínek', async () => {

@@ -547,6 +547,22 @@ const selectedRelationshipDetailMode = computed(() => {
     ?.relationship_detail_mode ?? 'forbidden'
 })
 
+/**
+ * Formulář měsíčního hlášení, který se od běžného liší i výpočtem: druhy
+ * činnosti 11 až 14 jsou mimo pojištění, bližší určení 2 je formulář vězně.
+ */
+const jmhzFormHint = computed(() => {
+  const activityCode = termsForm.value?.activity_code ?? null
+  if (activityCode !== null && ['11', '12', '13', '14'].includes(activityCode)) {
+    return t('payroll.people.jmhz_evidence.form_hint_outside_insurance')
+  }
+  if (activityCode !== null && /^[1-9]$/.test(activityCode)
+    && termsForm.value?.jmhz_relationship_detail_code === '2') {
+    return t('payroll.people.jmhz_evidence.form_hint_prisoner')
+  }
+  return null
+})
+
 const selectedMunicipality = computed(() => {
   const code = termsForm.value?.jmhz_workplace_municipality_code
   const label = termsForm.value?.work_place
@@ -1496,6 +1512,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <option :value="null">—</option>
               <option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option>
             </select>
+            <span v-if="jmhzFormHint" :class="HINT" data-test="jmhz-form-hint">{{ jmhzFormHint }}</span>
           </label>
 
           <label :class="FIELD">
