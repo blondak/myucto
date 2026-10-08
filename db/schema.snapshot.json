@@ -956,7 +956,8 @@
         "1972_payroll_health_coverage_employee_notice.sql",
         "1973_payroll_eldp_deducted_days.sql",
         "1974_payroll_person_pension_evidence.sql",
-        "1975_import_jobs_report.sql"
+        "1975_import_jobs_report.sql",
+        "1976_payroll_submission_manual_acceptances.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -16479,6 +16480,47 @@
                 "chk_payroll_submission_issues_version": "`row_version` > 0"
             }
         },
+        "payroll_submission_manual_acceptances": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "attachment_artifact_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "authority_accepted_on": "date NULL DEFAULT NULL",
+                "environment": "enum('production','test') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "idempotency_key_hash": "binary(32) NOT NULL",
+                "note": "varchar(1000) NOT NULL",
+                "obligation_id": "bigint(20) unsigned NOT NULL",
+                "recorded_at": "datetime NOT NULL",
+                "recorded_by": "bigint(20) unsigned NOT NULL",
+                "request_fingerprint": "char(64) NOT NULL COLLATE ascii_bin",
+                "status_before": "enum('submitted','processing','waiting_for_identity','partially_accepted','rejected','correction_required') NOT NULL",
+                "submission_id": "bigint(20) unsigned NOT NULL",
+                "submission_row_version_before": "int(10) unsigned NOT NULL",
+                "superseded_predecessor": "tinyint(1) NOT NULL DEFAULT 0",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "variant": "enum('unchanged','changed_by_authority') NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_submission_manual_acceptance_user": "BTREE (recorded_by)",
+                "idx_payroll_submission_manual_acceptances_attachment": "BTREE (supplier_id, environment, submission_id, attachment_artifact_id)",
+                "idx_payroll_submission_manual_acceptances_obligation": "BTREE (supplier_id, environment, obligation_id)",
+                "idx_payroll_submission_manual_acceptances_submission": "BTREE (supplier_id, environment, submission_id, id)",
+                "uq_payroll_submission_manual_acceptance_idempotency": "UNIQUE BTREE (supplier_id, environment, idempotency_key_hash)",
+                "uq_payroll_submission_manual_acceptances_supplier_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_submission_manual_acceptance_attachment": "(supplier_id, environment, submission_id, attachment_artifact_id) -> payroll_submission_artifacts (supplier_id, environment, submission_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_submission_manual_acceptance_obligation": "(supplier_id, environment, obligation_id) -> payroll_obligations (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_submission_manual_acceptance_submission": "(supplier_id, environment, submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_submission_manual_acceptance_user": "(recorded_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_submission_manual_acceptance_shape": "`submission_row_version_before` > 0 and `superseded_predecessor` in (0,1) and char_length(trim(`note`)) between 10 and 1000 and `request_fingerprint` regexp '^[0-9a-f]{64}$'"
+            }
+        },
         "payroll_submission_parts": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -23477,6 +23519,8 @@
         "trg_payroll_submission_correlation_update": "BEFORE UPDATE ON payroll_submissions #64784a582bc6061a73b0df2eae450ec2e71cb280",
         "trg_payroll_submission_deadline_delete": "BEFORE DELETE ON payroll_submission_deadlines #a1e6b4e2251f623b1fe8daf5e532f2ba70f959dc",
         "trg_payroll_submission_deadline_update": "BEFORE UPDATE ON payroll_submission_deadlines #a1e6b4e2251f623b1fe8daf5e532f2ba70f959dc",
+        "trg_payroll_submission_manual_acceptance_immutable_delete": "BEFORE DELETE ON payroll_submission_manual_acceptances #c963353af7d321b21dc3baf787ee53001fe417a4",
+        "trg_payroll_submission_manual_acceptance_immutable_update": "BEFORE UPDATE ON payroll_submission_manual_acceptances #c963353af7d321b21dc3baf787ee53001fe417a4",
         "trg_payroll_submission_receipt_delete": "BEFORE DELETE ON payroll_submission_receipts #f99923036d7e7db5836dbc43651059c391d64f19",
         "trg_payroll_submission_receipt_update": "BEFORE UPDATE ON payroll_submission_receipts #f99923036d7e7db5836dbc43651059c391d64f19",
         "trg_payroll_surcharge_materialization_immutable_delete": "BEFORE DELETE ON payroll_surcharge_input_materializations #b1859f3ac1a51f21f361a33532d550675f3ae8a4",

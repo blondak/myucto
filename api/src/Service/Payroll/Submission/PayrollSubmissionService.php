@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
+use MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
@@ -55,6 +56,13 @@ final class PayrollSubmissionService
         'waiting_for_identity',
         'correction_required',
     ];
+    /** Výroky ověřeného protokolu, které ruční přijetí vyvracejí. */
+    private const MANUAL_ACCEPTANCE_CONTRADICTIONS = [
+        'partially_accepted',
+        'rejected',
+        'waiting_for_identity',
+        'correction_required',
+    ];
     private const ISSUE_SEVERITIES = [
         'blocker',
         'error',
@@ -84,6 +92,12 @@ final class PayrollSubmissionService
          * kontejner.
          */
         private readonly ?JmhzReceiptIdentityService $jmhzReceiptIdentities = null,
+        /**
+         * Ruční potvrzení přijetí. Bez něj se rozpor s pozdějším ověřeným
+         * protokolem nehledá — platí jen pro testy platformy, které ruční
+         * potvrzení nepoužívají.
+         */
+        private readonly ?PayrollSubmissionManualAcceptanceRepository $manualAcceptances = null,
     ) {}
 
     /**
@@ -964,23 +978,9 @@ final class PayrollSubmissionService
                 $submission['status'],
                 $targetStatus,
             );
-            $predecessor = null;
-            $predecessorObligation = null;
-            if ($targetStatus === 'accepted'
-                && $submission['corrects_submission_id'] !== null
-            ) {
-                $predecessor = $this->repository->lockSubmission(
-                    $supplierId,
-                    $submission['corrects_submission_id'],
-                );
-                $predecessorObligation = $predecessor === null
-                    ? null
-                    : $this->repository->lockObligation(
-                        $supplierId,
-                        $predecessor['obligation_id'],
-                        $predecessor['environment'],
-                    );
-            }
+            [$predecessor, $predecessorObligation] = $targetStatus === 'accepted'
+                ? $this->lockAcceptancePredecessor($supplierId, $submission)
+                : [null, null];
             $obligation = $this->repository->lockObligation(
                 $supplierId,
                 $submission['obligation_id'],
@@ -1054,69 +1054,15 @@ final class PayrollSubmissionService
                     $obligationStatus,
                 );
             }
-            if ($targetStatus === 'accepted'
-                && $submission['corrects_submission_id'] !== null
-            ) {
-                if ($predecessor === null
-                    || $predecessor['environment']
-                        !== $submission['environment']
-                    || $predecessorObligation === null
-                    || !$this->sameObligationScope(
-                        $obligation,
-                        $predecessorObligation,
-                    )
-                    || !in_array(
-                        $predecessor['status'],
-                        PayrollAgendaCorrectionPolicy::correctableStatuses(
-                            (string) $obligation['agenda_code'],
-                        ),
-                        true,
-                    )
-                ) {
-                    throw new \DomainException(
-                        'Předchůdce přijaté opravy už není způsobilý k nahrazení.',
-                    );
-                }
-                if (PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
-                    (string) $obligation['agenda_code'],
-                    (string) $submission['submission_kind'],
-                )) {
-                    $supersedesCorrectionChain = PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
-                            (string) $obligation['agenda_code'],
-                            (string) $submission['submission_kind'],
-                        );
-                    $correctionChain = $supersedesCorrectionChain
-                        ? $this->repository->resolvedCorrectionsForRoot(
-                            $supplierId,
-                            $submission['environment'],
-                            $predecessor['id'],
-                        )
-                        : [];
-                    $this->repository->updateSubmissionStatus(
-                        $supplierId,
-                        $predecessor['id'],
-                        $predecessor['row_version'],
-                        'superseded',
-                        null,
-                        null,
-                        $now,
-                    );
-                    foreach ($correctionChain as $correction) {
-                        $this->stateMachine->assertTransition(
-                            $correction['status'],
-                            'superseded',
-                        );
-                        $this->repository->updateSubmissionStatus(
-                            $supplierId,
-                            $correction['id'],
-                            $correction['row_version'],
-                            'superseded',
-                            null,
-                            null,
-                            $now,
-                        );
-                    }
-                }
+            if ($targetStatus === 'accepted') {
+                $this->applyAcceptedCorrectionEffects(
+                    $supplierId,
+                    $submission,
+                    $obligation,
+                    $predecessor,
+                    $predecessorObligation,
+                    $now,
+                );
             }
 
             return [
@@ -1125,6 +1071,319 @@ final class PayrollSubmissionService
                 'row_version' => $rowVersion,
             ];
         });
+    }
+
+    /**
+     * Přijetí podle RUČNÍHO potvrzení účetní, že úřad podání přijal.
+     *
+     * Volá ho výhradně {@see PayrollSubmissionManualAcceptanceService}, která
+     * k němu ve stejné transakci zapíše neměnný záznam: kdo, kdy, proč a z jakého
+     * stavu. Automat hranu do `accepted` z většiny těchhle stavů nezná schválně
+     * — bez protokolu ji smí projít jen tahle doložená cesta, ne obecné
+     * {@see self::transition()}.
+     *
+     * Následky jsou TYTÉŽ jako u ověřeného přijetí: povinnost se splní a přijatá
+     * oprava nahradí předchůdce. Na rozdíl od protokolu ale nic nepřebírá
+     * z jeho obsahu (identity formulářů, variabilní symbol), protože žádný
+     * obsah nemá.
+     *
+     * @return array{
+     *   id:int,status:string,previous_status:string,row_version:int,
+     *   obligation_id:int,environment:string,channel:string,
+     *   superseded_predecessor:bool
+     * }
+     */
+    public function acceptManually(
+        int $supplierId,
+        int $submissionId,
+        int $expectedRowVersion,
+    ): array {
+        $this->assertPositive($supplierId, 'Firma podání');
+        $this->assertPositive($submissionId, 'Podání');
+        $this->assertPositive($expectedRowVersion, 'Verze podání');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $submissionId,
+            $expectedRowVersion,
+        ): array {
+            $submission = $this->lockedExpectedSubmission(
+                $supplierId,
+                $submissionId,
+                $expectedRowVersion,
+            );
+            $previousStatus = $submission['status'];
+            if (!in_array(
+                $previousStatus,
+                PayrollSubmissionStateMachine::MANUALLY_ACCEPTABLE_STATUSES,
+                true,
+            )) {
+                throw new \DomainException(sprintf(
+                    'Podání ve stavu „%s" nelze ručně označit za přijaté.',
+                    $previousStatus,
+                ));
+            }
+            [$predecessor, $predecessorObligation] = $this->lockAcceptancePredecessor(
+                $supplierId,
+                $submission,
+            );
+            $obligation = $this->repository->lockObligation(
+                $supplierId,
+                $submission['obligation_id'],
+                $submission['environment'],
+            );
+            if ($obligation === null) {
+                throw new \DomainException(
+                    'Povinnost podání nebyla nalezena ve stejné firmě.',
+                );
+            }
+            if ($obligation['status'] === 'cancelled') {
+                throw new \DomainException(
+                    'Povinnost podání je zrušená, přijetí k ní nelze zapsat.',
+                );
+            }
+            $now = $this->now();
+            $rowVersion = $this->repository->updateSubmissionStatus(
+                $supplierId,
+                $submissionId,
+                $expectedRowVersion,
+                'accepted',
+                null,
+                null,
+                $now,
+            );
+            $this->repository->updateObligationStatus(
+                $supplierId,
+                $submission['environment'],
+                $submission['obligation_id'],
+                $obligation['row_version'],
+                'fulfilled',
+            );
+            $superseded = $this->applyAcceptedCorrectionEffects(
+                $supplierId,
+                $submission,
+                $obligation,
+                $predecessor,
+                $predecessorObligation,
+                $now,
+            );
+
+            return [
+                'id' => $submissionId,
+                'status' => 'accepted',
+                'previous_status' => $previousStatus,
+                'row_version' => $rowVersion,
+                'obligation_id' => $submission['obligation_id'],
+                'environment' => $submission['environment'],
+                'channel' => $submission['channel'],
+                'superseded_predecessor' => $superseded,
+            ];
+        });
+    }
+
+    /**
+     * Ověřený protokol dorazil k podání, které účetní ručně označila za přijaté,
+     * a říká něco jiného.
+     *
+     * Protokol má přednost, ale rozpor se nesmí ztratit: zapíše se jako problém
+     * podání (odkaz na ruční potvrzení i protokol) a povinnost se vrátí ke
+     * kontrole. Stav podání se vrátí na výrok protokolu, jen když to jde bez
+     * vedlejších škod — tedy když ruční přijetí nenahradilo předchůdce
+     * a protokol vyslovuje rozhodnutí (`waiting_for_identity` rozhodnutím není
+     * a datum rozhodnutí by se z řádku smazat nedalo). Jinak zůstává `accepted`
+     * a o dalším rozhodne účetní podle nálezu.
+     *
+     * @return array{status:string,row_version:int,year_close_reopen_required:bool}
+     */
+    private function reconcileManualAcceptance(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $obligationId,
+        int $currentVersion,
+        string $remoteStatus,
+        int $receiptId,
+        ?int $importedBy,
+    ): array {
+        $unchanged = [
+            'status' => 'accepted',
+            'row_version' => $currentVersion,
+            'year_close_reopen_required' => false,
+        ];
+        if ($this->manualAcceptances === null
+            || !in_array($remoteStatus, self::MANUAL_ACCEPTANCE_CONTRADICTIONS, true)
+        ) {
+            return $unchanged;
+        }
+        $manual = $this->manualAcceptances->latest($supplierId, $environment, $submissionId);
+        if ($manual === null) {
+            return $unchanged;
+        }
+        $this->repository->insertIssue(
+            $supplierId,
+            $environment,
+            $submissionId,
+            null,
+            'error',
+            'remote',
+            PayrollSubmissionManualAcceptanceRepository::CONTRADICTION_ISSUE_CODE,
+            PayrollSubmissionManualAcceptanceRepository::CONTRADICTION_ENTITY_TYPE,
+            $manual['id'] . ':' . $receiptId,
+            null,
+            null,
+            $importedBy,
+        );
+        $currentVersion = $this->repository->bumpSubmissionVersion(
+            $supplierId,
+            $submissionId,
+            $currentVersion,
+        );
+        $status = 'accepted';
+        $yearCloseReopenRequired = false;
+        if (!$manual['superseded_predecessor']
+            && in_array($remoteStatus, ['partially_accepted', 'rejected', 'correction_required'], true)
+        ) {
+            try {
+                $currentVersion = $this->repository->updateSubmissionStatus(
+                    $supplierId,
+                    $submissionId,
+                    $currentVersion,
+                    $remoteStatus,
+                    null,
+                    null,
+                    $this->now(),
+                );
+                $status = $remoteStatus;
+            } catch (PayrollYearClosedException) {
+                $yearCloseReopenRequired = true;
+            }
+        }
+        $obligation = $this->repository->lockObligation($supplierId, $obligationId, $environment);
+        if ($obligation !== null && $obligation['status'] !== 'manual_review') {
+            $this->repository->updateObligationStatus(
+                $supplierId,
+                $environment,
+                $obligationId,
+                $obligation['row_version'],
+                'manual_review',
+            );
+        }
+
+        return [
+            'status' => $status,
+            'row_version' => $currentVersion,
+            'year_close_reopen_required' => $yearCloseReopenRequired,
+        ];
+    }
+
+    /**
+     * @param array{corrects_submission_id:?int} $submission
+     * @return array{0:?array<string,mixed>,1:?array<string,mixed>}
+     */
+    private function lockAcceptancePredecessor(int $supplierId, array $submission): array
+    {
+        if ($submission['corrects_submission_id'] === null) {
+            return [null, null];
+        }
+        $predecessor = $this->repository->lockSubmission(
+            $supplierId,
+            $submission['corrects_submission_id'],
+        );
+        $predecessorObligation = $predecessor === null
+            ? null
+            : $this->repository->lockObligation(
+                $supplierId,
+                $predecessor['obligation_id'],
+                $predecessor['environment'],
+            );
+
+        return [$predecessor, $predecessorObligation];
+    }
+
+    /**
+     * Co přijetí opravy udělá s předchůdcem — jediné místo pro ověřené
+     * i ruční přijetí, aby se obě cesty nerozešly.
+     *
+     * @param array<string,mixed> $submission
+     * @param array<string,mixed> $obligation
+     * @param array<string,mixed>|null $predecessor
+     * @param array<string,mixed>|null $predecessorObligation
+     * @return bool zda se předchůdce nahradil
+     */
+    private function applyAcceptedCorrectionEffects(
+        int $supplierId,
+        array $submission,
+        array $obligation,
+        ?array $predecessor,
+        ?array $predecessorObligation,
+        string $now,
+    ): bool {
+        if ($submission['corrects_submission_id'] === null) {
+            return false;
+        }
+        if ($predecessor === null
+            || $predecessor['environment']
+                !== $submission['environment']
+            || $predecessorObligation === null
+            || !$this->sameObligationScope(
+                $obligation,
+                $predecessorObligation,
+            )
+            || !in_array(
+                $predecessor['status'],
+                PayrollAgendaCorrectionPolicy::correctableStatuses(
+                    (string) $obligation['agenda_code'],
+                ),
+                true,
+            )
+        ) {
+            throw new \DomainException(
+                'Předchůdce přijaté opravy už není způsobilý k nahrazení.',
+            );
+        }
+        if (!PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+            (string) $obligation['agenda_code'],
+            (string) $submission['submission_kind'],
+        )) {
+            return false;
+        }
+        $supersedesCorrectionChain = PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+            (string) $obligation['agenda_code'],
+            (string) $submission['submission_kind'],
+        );
+        $correctionChain = $supersedesCorrectionChain
+            ? $this->repository->resolvedCorrectionsForRoot(
+                $supplierId,
+                $submission['environment'],
+                $predecessor['id'],
+            )
+            : [];
+        $this->repository->updateSubmissionStatus(
+            $supplierId,
+            $predecessor['id'],
+            $predecessor['row_version'],
+            'superseded',
+            null,
+            null,
+            $now,
+        );
+        foreach ($correctionChain as $correction) {
+            $this->stateMachine->assertTransition(
+                $correction['status'],
+                'superseded',
+            );
+            $this->repository->updateSubmissionStatus(
+                $supplierId,
+                $correction['id'],
+                $correction['row_version'],
+                'superseded',
+                null,
+                null,
+                $now,
+            );
+        }
+
+        return true;
     }
 
     /**
@@ -1476,6 +1735,22 @@ final class PayrollSubmissionService
                 $this->now(),
                 $importedBy,
             );
+            if ($trusted && $remoteStatus !== null && $currentStatus === 'accepted') {
+                $reconciled = $this->reconcileManualAcceptance(
+                    $supplierId,
+                    $submission['environment'],
+                    $submissionId,
+                    $submission['obligation_id'],
+                    $currentVersion,
+                    $remoteStatus,
+                    $receiptId,
+                    $importedBy,
+                );
+                $currentVersion = $reconciled['row_version'];
+                $currentStatus = $reconciled['status'];
+                $yearCloseReopenRequired = $yearCloseReopenRequired
+                    || $reconciled['year_close_reopen_required'];
+            }
             if ($verified !== null && $verified->formOutcomes !== []) {
                 if (!in_array(
                     $protocolCode,

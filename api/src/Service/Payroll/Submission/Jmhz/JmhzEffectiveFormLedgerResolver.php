@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 
 /** Načte immutable XML + podepsané protokoly a předá je čistému resolveru. */
@@ -13,6 +14,12 @@ final readonly class JmhzEffectiveFormLedgerResolver
         private PayrollSubmissionRepository $repository,
         private JmhzFrozenPayloadReader $frozen,
         private JmhzEffectiveFormStateResolver $resolver = new JmhzEffectiveFormStateResolver(),
+        /**
+         * Ruční potvrzení „přijato beze změny" doplní výsledek podání, ke
+         * kterému žádný ověřený verdikt ČSSZ nedorazil
+         * ({@see self::withManualAcceptance()}).
+         */
+        private ?PayrollSubmissionManualAcceptanceRepository $manualAcceptances = null,
     ) {}
 
     /** @param list<string> $currentEmploymentExternalIdentifiers */
@@ -47,7 +54,11 @@ final readonly class JmhzEffectiveFormLedgerResolver
                 $environment,
                 $row['id'],
             );
-            $chain[] = $this->submissionEvidence($row['id'], $description, $evidence);
+            $chain[] = $this->withManualAcceptance(
+                $supplierId,
+                $environment,
+                $this->submissionEvidence($row['id'], $description, $evidence),
+            );
         }
 
         return $this->resolver->resolve($chain, $currentEmploymentExternalIdentifiers);
@@ -86,6 +97,53 @@ final readonly class JmhzEffectiveFormLedgerResolver
         }
 
         return $rank[$candidate] > $rank[$current] ? $candidate : $current;
+    }
+
+    /**
+     * Podání, které účetní ručně potvrdila jako přijaté BEZE ZMĚNY a ke kterému
+     * nedorazil žádný ověřený verdikt ČSSZ, platí jako přijaté celé.
+     *
+     * Bez toho by ruční přijetí nemělo stejné následky jako ověřené: opravné
+     * ani stornovací hlášení by k němu nešlo sestavit. Ověřený verdikt má
+     * vždy přednost (i pozdější). Varianta „ČSSZ podání upravila" se tu
+     * záměrně nepoužije — upravená data u ČSSZ neodpovídají zmrazenému XML,
+     * takže z něj stav formulářů odvodit nejde.
+     *
+     * @param array<string,mixed> $evidence
+     * @return array<string,mixed>
+     */
+    private function withManualAcceptance(int $supplierId, string $environment, array $evidence): array
+    {
+        if ($this->manualAcceptances === null || $evidence['remote_status'] !== null) {
+            return $evidence;
+        }
+        $manual = $this->manualAcceptances->latest(
+            $supplierId,
+            $environment,
+            (int) $evidence['submission_id'],
+        );
+        if ($manual === null || $manual['variant'] !== 'unchanged') {
+            return $evidence;
+        }
+        $forms = $evidence['forms'];
+        if ($forms === [] && $evidence['submission_type'] !== 'S') {
+            $forms = $this->frozen->describe(
+                $supplierId,
+                $environment,
+                (int) $evidence['submission_id'],
+            )['forms'];
+        }
+        foreach ($forms as &$form) {
+            $form['remote_status'] = 'accepted';
+        }
+        unset($form);
+
+        return [
+            ...$evidence,
+            'trusted' => true,
+            'remote_status' => 'accepted',
+            'forms' => array_values($forms),
+        ];
     }
 
     /**

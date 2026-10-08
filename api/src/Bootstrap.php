@@ -435,6 +435,16 @@ final class Bootstrap
                     $c->get(ClockInterface::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository::class),
+                ),
+            // Ruční potvrzení přijetí je u resolveru volitelné (testy ho staví
+            // bez něj); autowiring by volitelný parametr nevyplnil spolehlivě.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormStateResolver(),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository::class),
                 ),
             // Hodiny jsou v builderu volitelné (čisté sestavení v unit testech), PHP-DI
             // je ale autowiringem nevyplní. Bez nich by logický test ELDP12 č. 54

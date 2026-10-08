@@ -1732,6 +1732,17 @@ final class Routes
                 '/submissions/{submissionId:[0-9]+}/filed-externally',
                 [PayrollSubmissionSettlementAction::class, 'fileExternally'],
             );
+            // Ruční potvrzení přijetí podle aplikace úřadu (JMHZ). Podání
+            // přejde na přijaté, ale výrok člověka se drží zvlášť od protokolů
+            // a pozdější ověřený protokol má přednost.
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/manual-acceptance',
+                [\MyInvoice\Action\Payroll\PayrollSubmissionManualAcceptanceAction::class, 'show'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/manual-acceptance',
+                [\MyInvoice\Action\Payroll\PayrollSubmissionManualAcceptanceAction::class, 'accept'],
+            );
             // Fronta odchozích podání: jedno místo pro všechno připravené
             // a neodeslané napříč agendami. Odesílá přes TYTÉŽ služby jako
             // původní tlačítka u jednotlivých agend — je to druhá cesta

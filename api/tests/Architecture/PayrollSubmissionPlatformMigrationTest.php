@@ -23,21 +23,45 @@ final class PayrollSubmissionPlatformMigrationTest extends TestCase
         self::assertNotFalse($methodStart);
         self::assertNotFalse($methodEnd);
         $method = substr($source, $methodStart, $methodEnd - $methodStart);
-        $predecessorLock = strpos(
-            $method,
+
+        // Zámek předchůdce žije v jediném pomocníkovi, kterého volá ověřené
+        // i ruční přijetí. Hlídá se, že pomocník opravdu zamyká předchůdce
+        // a že ho OBĚ cesty volají dřív, než zamknou aktuální povinnost.
+        $helper = self::methodBody($method, 'private function lockAcceptancePredecessor(');
+        self::assertStringContainsString(
             '$predecessor = $this->repository->lockSubmission(',
+            $helper,
         );
-        $currentObligationLock = strpos(
-            $method,
-            '$obligation = $this->repository->lockObligation(',
-        );
-        self::assertNotFalse($predecessorLock);
-        self::assertNotFalse($currentObligationLock);
-        self::assertLessThan(
-            $currentObligationLock,
-            $predecessorLock,
-            'Korekce nesmí při čekání na předchůdce držet aktuální povinnost.',
-        );
+        foreach (['private function transitionWithEvidence(', 'public function acceptManually('] as $entry) {
+            $body = self::methodBody($method, $entry);
+            $predecessorLock = strpos($body, '$this->lockAcceptancePredecessor(');
+            $currentObligationLock = strpos(
+                $body,
+                '$obligation = $this->repository->lockObligation(',
+            );
+            self::assertNotFalse($predecessorLock, $entry);
+            self::assertNotFalse($currentObligationLock, $entry);
+            self::assertLessThan(
+                $currentObligationLock,
+                $predecessorLock,
+                'Korekce nesmí při čekání na předchůdce držet aktuální povinnost: ' . $entry,
+            );
+        }
+    }
+
+    private static function methodBody(string $source, string $signature): string
+    {
+        $start = strpos($source, $signature);
+        self::assertNotFalse($start, $signature);
+        $next = preg_match(
+            '/\n    (?:public|private|protected) (?:static )?function /',
+            $source,
+            $match,
+            PREG_OFFSET_CAPTURE,
+            $start + strlen($signature),
+        ) === 1 ? $match[0][1] : strlen($source);
+
+        return substr($source, $start, $next - $start);
     }
 
     public function testSubmissionPlatformIsTenantScopedIdempotentAndEvidenceReady(): void

@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -22,6 +23,9 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptancePolicy;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
@@ -769,6 +773,80 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             self::ENVIRONMENT,
             $original['id'],
             ['987654321'],
+        );
+    }
+
+    /**
+     * Ruční potvrzení „ČSSZ přijala beze změny" zastoupí chybějící podepsaný
+     * verdikt: bez toho by k ručně přijatému hlášení nešlo sestavit opravu ani
+     * storno a ruční přijetí by nemělo stejné následky jako ověřené. Varianta
+     * „ČSSZ podání upravila" zastoupit nesmí — data u ČSSZ už neodpovídají
+     * zmrazenému XML.
+     */
+    public function testManualUnchangedAcceptanceStandsInForMissingSignedVerdict(): void
+    {
+        $submitted = $this->regularSubmissionInStatus('submitted');
+        $this->acceptManually($submitted, 'unchanged');
+
+        $set = $this->manualAwareResolver()->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submitted['id'],
+            ['987654321', '987654322'],
+        );
+        self::assertSame('accepted', $set->forEmployment('987654321')->state);
+        self::assertSame(self::FORM_GUID, $set->forEmployment('987654321')->formGuid);
+        self::assertSame('accepted', $set->forEmployment('987654322')->state);
+    }
+
+    public function testManualAcceptanceChangedByAuthorityDoesNotStandInForSignedVerdict(): void
+    {
+        $submitted = $this->regularSubmissionInStatus('submitted');
+        $this->acceptManually($submitted, 'changed_by_authority');
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('podepsaným protokolem');
+        $this->manualAwareResolver()->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submitted['id'],
+            ['987654321'],
+        );
+    }
+
+    /** @param array{id:int,row_version:int} $submission */
+    private function acceptManually(array $submission, string $variant): void
+    {
+        $userId = (int) $this->db->pdo()->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $acceptances = new PayrollSubmissionManualAcceptanceRepository($this->db);
+        (new PayrollSubmissionManualAcceptanceService(
+            $acceptances,
+            $this->repository,
+            $this->submissions,
+            new PayrollSubmissionManualAcceptancePolicy(),
+            new PayrollSubmissionManualAcceptanceReader($acceptances),
+            $this->clock,
+        ))->accept(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submission['id'],
+            $submission['row_version'],
+            $variant,
+            'Stav podání ověřen v aplikaci ČSSZ.',
+            null,
+            null,
+            'manual-effective-' . $variant,
+            $userId,
+        );
+    }
+
+    private function manualAwareResolver(): JmhzEffectiveFormLedgerResolver
+    {
+        return new JmhzEffectiveFormLedgerResolver(
+            $this->repository,
+            new JmhzFrozenPayloadReader($this->repository, $this->submissions),
+            new JmhzEffectiveFormStateResolver(),
+            new PayrollSubmissionManualAcceptanceRepository($this->db),
         );
     }
 

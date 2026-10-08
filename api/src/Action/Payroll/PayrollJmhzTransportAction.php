@@ -16,6 +16,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAttemptDeletionService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
@@ -61,6 +62,7 @@ final class PayrollJmhzTransportAction
         // po hlášení podaném přímo na portálu ČSSZ, takže bez něj by rok
         // v nabídce chyběl a protokol by se nedal najít.
         private readonly PayrollImportedJmhzProtocolRepository $protocols,
+        private readonly PayrollSubmissionManualAcceptanceReader $manualAcceptances,
     ) {}
 
     /** @param array{submissionId:string} $args */
@@ -189,11 +191,22 @@ final class PayrollJmhzTransportAction
             $page['items'],
         );
 
+        // Ruční potvrzení přijetí ke každému zobrazenému podání — štítek karty
+        // ho musí odlišit od přijetí podle protokolu.
+        $submissionIds = array_values(array_unique(array_merge(
+            array_map(static fn (array $row): int => (int) $row['submission_id'], $attempts),
+            array_map(static fn (array $row): int => (int) $row['submission_id'], $dispatchedSubmissions),
+        )));
+        $manualAcceptances = array_values(
+            $this->manualAcceptances->summaries($supplierId, $environment, $submissionIds),
+        );
+
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
             'attempts' => $attempts,
             'ready_submissions' => $readySubmissions,
             'dispatched_submissions' => $dispatchedSubmissions,
+            'manual_acceptances' => $manualAcceptances,
             'total' => $page['total'],
             'years' => $this->availableYears($supplierId, $environment),
             'limit' => $limit,

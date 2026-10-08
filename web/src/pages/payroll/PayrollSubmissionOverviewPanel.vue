@@ -24,6 +24,8 @@ import {
 } from '@/api/payroll'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollSubmissionSubject from '@/components/payroll/PayrollSubmissionSubject.vue'
+import PayrollSubmissionManualAcceptance from '@/components/payroll/PayrollSubmissionManualAcceptance.vue'
+import { useAuthStore } from '@/stores/auth'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -93,6 +95,8 @@ const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
+const auth = useAuthStore()
+const canWriteSubmissions = computed(() => auth.canWrite('payroll.submissions'))
 // Server filtruje podle `agenda_group`, takže `items` je rovnou to, co panel
 // ukazuje — žádné doufiltrovávání na klientovi.
 const items = ref<PayrollSubmissionOverviewItem[]>([])
@@ -397,6 +401,12 @@ async function openDetail(item: PayrollSubmissionOverviewItem) {
   } finally {
     detailLoadingId.value = null
   }
+}
+
+/** Detail podání po ručním přijetí: přenačte se seznam i otevřený detail. */
+async function afterManualAcceptance(item: PayrollSubmissionOverviewItem | undefined) {
+  await load()
+  if (item) await openDetail(item)
 }
 
 function closeDetail() {
@@ -1124,6 +1134,15 @@ onMounted(load)
                     <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                       {{ submissionStatusLabel(item.status) }}
                     </span>
+                    <div v-if="item.manual_acceptance && item.latest_submission" class="mt-2">
+                      <PayrollSubmissionManualAcceptance
+                        :environment="environment"
+                        :submission-id="item.latest_submission.id"
+                        :submission-status="item.latest_submission.status"
+                        :agenda-code="item.agenda_code"
+                        :summary="item.manual_acceptance"
+                      />
+                    </div>
                   </td>
                   <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
                     <div class="flex flex-wrap items-center justify-end gap-2">
@@ -1208,9 +1227,19 @@ onMounted(load)
                   <PayrollSubmissionSubject :label="item.subject_label" :employee-id="item.subject_employee_id" />
                 </p>
               </div>
-              <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                {{ submissionStatusLabel(item.status) }}
-              </span>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
+                  {{ submissionStatusLabel(item.status) }}
+                </span>
+                <PayrollSubmissionManualAcceptance
+                  v-if="item.manual_acceptance && item.latest_submission"
+                  :environment="environment"
+                  :submission-id="item.latest_submission.id"
+                  :submission-status="item.latest_submission.status"
+                  :agenda-code="item.agenda_code"
+                  :summary="item.manual_acceptance"
+                />
+              </div>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
               <div>
@@ -1346,6 +1375,18 @@ onMounted(load)
               </template>
               {{ formatDate(detail.submission.period_start) }} – {{ formatDate(detail.submission.period_end) }}
             </p>
+            <div class="mt-2" data-test="submission-detail-manual-acceptance">
+              <PayrollSubmissionManualAcceptance
+                :environment="environment"
+                :submission-id="detail.submission.id"
+                :submission-status="detail.submission.status"
+                :agenda-code="detail.submission.agenda_code"
+                :summary="items.find(row => row.id === expandedId)?.manual_acceptance ?? null"
+                :can-write="canWriteSubmissions"
+                detailed
+                @accepted="afterManualAcceptance(items.find(row => row.id === expandedId))"
+              />
+            </div>
           </div>
           <button type="button" :class="btnOutline('neutral')" @click="closeDetail">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
