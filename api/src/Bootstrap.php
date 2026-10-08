@@ -547,6 +547,7 @@ final class Bootstrap
                 // §29/2 DŘ — zastoupení daňovým poradcem posouvá lhůtu DPPO na 1. 7.
                 // (§136/2 DŘ, viz CrmAggregationService::dppoDeadlineFromInput()).
                 $c->get(\MyInvoice\Service\Tax\Return\TaxRepresentationService::class),
+                $c->get(\MyInvoice\Service\Invoice\OverduePolicy::class),
             ),
             // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
             // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.

@@ -6,10 +6,12 @@ namespace MyInvoice\Service\Crm;
 
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\License\LicenseService;
@@ -55,6 +57,7 @@ final class CrmAggregationService
         // §29/2 DŘ — zastoupení daňovým poradcem posouvá lhůtu DPPO na 1. 7. (§136/2 DŘ),
         // viz dppoDeadlineFromInput(). Volitelná ze stejného důvodu jako ostatní.
         private readonly ?TaxRepresentationService $representation = null,
+        private readonly OverduePolicy $overduePolicy = new OverduePolicy(new Config([])),
     ) {
         $this->cache = $cache ?? EntityCache::disabled();
     }
@@ -1151,6 +1154,8 @@ final class CrmAggregationService
         // Load dismissals once
         $dismissals = $this->loadDismissals($supplierId, $userId);
 
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
+
         // 1. Overdue vystavené faktury — pošli upomínku.
         // Stejná pohledávková sémantika jako cílový seznam /invoices?overdue=1
         // (InvoiceRepository): vč. nezaplacených NESPÁROVANÝCH proforem, vyřazení
@@ -1159,13 +1164,13 @@ final class CrmAggregationService
             "SELECT i.id FROM invoices i
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued', 'sent', 'reminded')
-                AND i.due_date <= ?
+                AND i.due_date {$overdueOperator} CURDATE()
                 AND (i.invoice_type != 'proforma'
                      OR NOT EXISTS (SELECT 1 FROM invoices ch
                                      WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
                 AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
         );
-        $stmt->execute([$supplierId, $today]);
+        $stmt->execute([$supplierId]);
         $overdueIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
         $overdueIds = $this->filterByDismissal($overdueIds, $dismissals, 'overdue_invoices');
         $overdueCount = count($overdueIds);
@@ -2924,19 +2929,20 @@ final class CrmAggregationService
         $today = (new \DateTimeImmutable())->format('Y-m-d');
         switch ($itemType) {
             case 'overdue_invoices':
+                $overdueOperator = $this->overduePolicy->comparisonOperator();
                 // Musí přesně zrcadlit dotaz v actionItems() (vč. nespárovaných proforem),
                 // jinak by se po „historická" dismiss vynořily proformy jako „nové".
                 $stmt = $pdo->prepare(
                     "SELECT i.id FROM invoices i
                       WHERE i.supplier_id = ?
                         AND i.status IN ('issued','sent','reminded')
-                        AND i.due_date <= ?
+                        AND i.due_date {$overdueOperator} CURDATE()
                         AND (i.invoice_type != 'proforma'
                              OR NOT EXISTS (SELECT 1 FROM invoices ch
                                              WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
                         AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
                 );
-                $stmt->execute([$supplierId, $today]);
+                $stmt->execute([$supplierId]);
                 break;
             case 'bank_unmatched':
                 $stmt = $pdo->prepare(
