@@ -262,6 +262,12 @@ export interface EpoSigningCredential {
   enabled_for_supplier: boolean
   linked_profiles_count: number
   linked_supplier_profiles_count: number
+  /** Přístupy k datové schránce, které se certifikátem přihlašují (blokují smazání). */
+  linked_data_box_count?: number
+  /** Registrace odesílací brány ISDS s tímto certifikátem (blokují smazání). */
+  linked_isds_gateway_count?: number
+  /** Volby certifikátu pro mzdová podání; smazání certifikátu je zruší. */
+  linked_payroll_selections_count?: number
 }
 
 export interface EpoTestResult {

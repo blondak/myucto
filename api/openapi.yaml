@@ -7116,6 +7116,9 @@ paths:
     delete:
       tags: [Reports]
       summary: Vyřadí vlastní certifikát z aktivního EPO trezoru
+      description: |
+        Smí jen vlastník certifikátu. Volby certifikátu pro mzdová podání se
+        zruší v téže transakci a odpověď je vypíše v `payroll_selections_removed`.
       requestBody:
         required: true
         content:
@@ -7127,11 +7130,27 @@ paths:
                 password: { type: string, format: password }
                 totp_code: { type: string, pattern: '^[0-9]{6}$' }
       responses:
-        '200': { description: Šifrovaný certifikát byl fyzicky odstraněn; historické pokusy drží pouze jeho otisk }
+        '200':
+          description: Šifrovaný certifikát byl fyzicky odstraněn; historické pokusy drží pouze jeho otisk
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, payroll_selections_removed]
+                properties:
+                  deleted: { type: boolean }
+                  payroll_selections_removed:
+                    type: array
+                    items:
+                      type: object
+                      required: [supplier_id, environment]
+                      properties:
+                        supplier_id: { type: integer }
+                        environment: { type: string, enum: [production, test] }
         '401': { description: Step-up autentizace selhala }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Certifikát používá alespoň jeden aktivní podpisový profil }
+        '409': { description: 'Certifikát používá podpisový profil, přístup k datové schránce nebo odesílací brána ISDS (počty v error.linked_*_count)' }
 
   /api/v1/reports/submissions/{id}:
     get:
@@ -36993,6 +37012,9 @@ components:
         enabled_for_supplier: { type: boolean }
         linked_profiles_count: { type: integer, minimum: 0, description: Počet aktivních podpisových profilů používajících certifikát napříč firmami vlastníka. }
         linked_supplier_profiles_count: { type: integer, minimum: 0, description: Počet aktivních podpisových profilů používajících certifikát v aktuální firmě. }
+        linked_data_box_count: { type: integer, minimum: 0, description: Počet přístupů k datové schránce, které se certifikátem přihlašují. Blokuje smazání. }
+        linked_isds_gateway_count: { type: integer, minimum: 0, description: Počet registrací odesílací brány ISDS s tímto certifikátem. Blokuje smazání. }
+        linked_payroll_selections_count: { type: integer, minimum: 0, description: Počet voleb certifikátu pro mzdová podání (firma a prostředí). Smazání certifikátu je zruší. }
         created_at: { type: string, format: date-time }
     EpoDirectTestResult:
       type: object

@@ -174,32 +174,22 @@ final class EpoDirectSubmissionAction
         try {
             $this->stepUp->verify($request, $userId, $body, 'credential_delete');
             $credentialId = (int) ($args['credentialId'] ?? 0);
-            $linkedProfiles = $this->credentials->linkedProfileCount($credentialId, $userId);
-            if ($linkedProfiles > 0) {
-                throw new EpoSubmissionException(
-                    'credential_in_use',
-                    'Certifikát používá podpisový profil. Nejdříve jej od profilu odpojte.',
-                    409,
-                    ['linked_profiles_count' => $linkedProfiles],
-                );
-            }
-            if (!$this->credentials->deleteOwned($credentialId, $userId)) {
-                throw new EpoSubmissionException(
-                    'credential_not_found',
-                    'Certifikát nebyl nalezen.',
-                    404,
-                );
-            }
+            $deleted = $this->credentialService->deleteOwned($credentialId, $userId);
             $this->audit(
                 $request,
                 'report.epo_credential_deleted',
                 $userId,
                 $supplierId,
                 $credentialId,
-                [],
+                $deleted['payroll_selections_removed'] === []
+                    ? []
+                    : ['payroll_selections_removed' => $deleted['payroll_selections_removed']],
                 'epo_signing_credential',
             );
-            return Json::ok($response, ['deleted' => true]);
+            return Json::ok($response, [
+                'deleted' => true,
+                'payroll_selections_removed' => $deleted['payroll_selections_removed'],
+            ]);
         } catch (EpoSubmissionException $e) {
             return $this->error($response, $e);
         }

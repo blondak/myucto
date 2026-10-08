@@ -162,6 +162,51 @@ final class CertificateVaultAction
         return Json::ok($response, ['supplier_sharing' => $results]);
     }
 
+    /**
+     * Smaže certifikát z osobního trezoru. Pravidla (jen vlastník, co mazání
+     * blokuje, co se zruší s ním) drží {@see EpoSigningCredentialService::deleteOwned()},
+     * stejně jako pro EPO endpoint.
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $userId = $this->userId($request);
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $credentialId = (int) ($args['credentialId'] ?? 0);
+        try {
+            $this->stepUp->verify($request, $userId, $body, 'credential_delete');
+            $deleted = $this->credentials->deleteOwned($credentialId, $userId);
+        } catch (EpoSubmissionException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                $exception->httpStatus,
+                $exception->details,
+            );
+        }
+        $this->logger->log(
+            'certificate_vault_delete',
+            $userId,
+            'certificate',
+            $credentialId,
+            $deleted['payroll_selections_removed'] === []
+                ? null
+                : ['payroll_selections_removed' => $deleted['payroll_selections_removed']],
+            $this->clientIp($request),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, [
+            'deleted' => true,
+            'payroll_selections_removed' => $deleted['payroll_selections_removed'],
+        ]);
+    }
+
     /** @param array<string,mixed> $body */
     private function flag(array $body, string $key): bool
     {

@@ -49,10 +49,144 @@ final class EpoSigningCredentialRepository
               ORDER BY c.valid_to DESC, c.id DESC'
         );
         $stmt->execute([$supplierId, $supplierId, $ownerUserId]);
-        return array_map(
+        $rows = array_map(
             fn (array $row): array => $this->normalizePublic($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
         );
+        foreach ($rows as &$row) {
+            $usage = $this->usage((int) $row['id']);
+            $row['linked_data_box_count'] = $usage['data_box_channels'];
+            $row['linked_isds_gateway_count'] = $usage['isds_gateways'];
+            $row['linked_payroll_selections_count'] = $usage['payroll_selections'];
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Všechna místa, která na certifikát odkazují.
+     *
+     * Podpisové profily, přístup k datové schránce a odesílací brána ISDS
+     * certifikát skutečně používají k podpisu nebo přihlášení, takže smazání
+     * blokují. Volba certifikátu pro mzdová podání je jen VÝBĚR (migrace 1373
+     * ji při smazání certifikátu záměrně ruší cizím klíčem), proto se jen
+     * počítá a odstraní spolu s certifikátem.
+     *
+     * @return array{signing_profiles:int,data_box_channels:int,isds_gateways:int,payroll_selections:int}
+     */
+    public function usage(int $credentialId): array
+    {
+        $pdo = $this->db->pdo();
+        $count = static function (string $sql) use ($pdo, $credentialId): int {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$credentialId]);
+
+            return (int) $stmt->fetchColumn();
+        };
+
+        return [
+            'signing_profiles' => $count(
+                'SELECT COUNT(*)
+                   FROM signing_credentials sc
+                   JOIN signing_profiles sp ON sp.id = sc.profile_id
+                  WHERE sc.vault_credential_id = ?
+                    AND sc.deleted_at IS NULL AND sp.deleted_at IS NULL'
+            ),
+            'data_box_channels' => $this->db->hasTable('submission_channel_credentials')
+                ? $count('SELECT COUNT(*) FROM submission_channel_credentials WHERE credential_id = ?')
+                : 0,
+            'isds_gateways' => $this->db->hasTable('isds_gateway_registrations')
+                ? $count('SELECT COUNT(*) FROM isds_gateway_registrations WHERE credential_id = ?')
+                : 0,
+            'payroll_selections' => $this->db->hasTable('payroll_submission_signing_profiles')
+                ? $count('SELECT COUNT(*) FROM payroll_submission_signing_profiles WHERE credential_id = ?')
+                : 0,
+        ];
+    }
+
+    /**
+     * Smaže certifikát vlastníka, pokud ho nic nepoužívá, a v téže transakci
+     * zruší volby certifikátu pro mzdová podání.
+     *
+     * @return array{
+     *   status:'deleted'|'not_found'|'in_use',
+     *   usage?:array{signing_profiles:int,data_box_channels:int,isds_gateways:int,payroll_selections:int},
+     *   payroll_selections_removed?:list<array{supplier_id:int,environment:string}>
+     * }
+     */
+    public function deleteOwnedUnlessInUse(int $credentialId, int $ownerUserId): array
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $lock = $pdo->prepare(
+                'SELECT id FROM epo_signing_credentials
+                  WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL
+                  FOR UPDATE'
+            );
+            $lock->execute([$credentialId, $ownerUserId]);
+            if ($lock->fetchColumn() === false) {
+                $this->finishTransaction($ownsTransaction, false);
+
+                return ['status' => 'not_found'];
+            }
+            $usage = $this->usage($credentialId);
+            if ($usage['signing_profiles'] > 0
+                || $usage['data_box_channels'] > 0
+                || $usage['isds_gateways'] > 0
+            ) {
+                $this->finishTransaction($ownsTransaction, false);
+
+                return ['status' => 'in_use', 'usage' => $usage];
+            }
+            $removed = [];
+            if ($usage['payroll_selections'] > 0) {
+                $selections = $pdo->prepare(
+                    'SELECT supplier_id, environment
+                       FROM payroll_submission_signing_profiles
+                      WHERE credential_id = ?
+                      ORDER BY supplier_id, environment
+                      FOR UPDATE'
+                );
+                $selections->execute([$credentialId]);
+                foreach ($selections->fetchAll(PDO::FETCH_ASSOC) ?: [] as $selection) {
+                    $removed[] = [
+                        'supplier_id' => (int) $selection['supplier_id'],
+                        'environment' => (string) $selection['environment'],
+                    ];
+                }
+                $pdo->prepare('DELETE FROM payroll_submission_signing_profiles WHERE credential_id = ?')
+                    ->execute([$credentialId]);
+            }
+            if (!$this->deleteOwned($credentialId, $ownerUserId)) {
+                throw new \RuntimeException('Certificate delete raced with a new profile link.');
+            }
+            $this->finishTransaction($ownsTransaction, true);
+
+            return [
+                'status' => 'deleted',
+                'usage' => $usage,
+                'payroll_selections_removed' => $removed,
+            ];
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function finishTransaction(bool $ownsTransaction, bool $commit): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$ownsTransaction || !$pdo->inTransaction()) {
+            return;
+        }
+        $commit ? $pdo->commit() : $pdo->rollBack();
     }
 
     /**

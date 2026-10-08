@@ -878,6 +878,12 @@ export type CertificateVaultUploadResult = CertificateVaultItem & {
   supplier_sharing?: CertificateVaultSharingResult[]
 }
 
+export interface CertificateVaultDeleteResult {
+  deleted: boolean
+  /** Volby certifikátu pro mzdová podání, které se se smazáním zrušily. */
+  payroll_selections_removed: { supplier_id: number; environment: 'production' | 'test' }[]
+}
+
 export type SigningCredentialPassphrasePolicy = 'encrypted_store' | 'passphrase_file' | 'prompt_on_use'
 
 export interface SigningProfileCredentialMeta {
@@ -1177,6 +1183,10 @@ export const settingsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
+  deleteCertificate: (id: number, proof: EpoStepUpProof) =>
+    api.delete<CertificateVaultDeleteResult>(`/settings/certificates/${id}`, {
+      data: stepUpProofBody(proof),
+    }).then(r => r.data),
   shareCertificateWithOtherSuppliers: (id: number, onlyWithoutValid: boolean, proof: EpoStepUpProof) =>
     api.post<{ supplier_sharing: CertificateVaultSharingResult[] }>(`/settings/certificates/${id}/share`, {
       share_only_without_valid: onlyWithoutValid,
@@ -1229,14 +1239,13 @@ export const settingsApi = {
   linkPersonalSigningCertificate: (
     profileId: number,
     credentialId: number,
-    password: string,
-    totpCode: string,
+    /** Stejný step-up jako u trezoru: passkey proof, nebo heslo (+ TOTP). */
+    proof: EpoStepUpProof,
   ) => api.put<SigningProfileCredentialMeta>(
     `/settings/signing/profiles/${profileId}/credentials/personal-vault`,
     {
       credential_id: credentialId,
-      password,
-      totp_code: totpCode || undefined,
+      ...stepUpProofBody(proof),
     },
   ).then(r => r.data),
   getPdfSigningSettings: () =>

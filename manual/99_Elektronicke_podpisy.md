@@ -109,9 +109,11 @@ U vlastního profilu jsou dostupné dva zdroje:
 2. Založ nebo uprav profil s vlastníkem **Můj profil**.
 3. V části **Certifikát profilu** zvol **Použít osobní certifikát EPO** a vyber
    certifikát z trezoru.
-4. Potvrď se — buď **Ověřit přístupovým klíčem**, nebo aktuálním heslem do
-   MyÚčta a při zapnutém 2FA také TOTP. Tím vědomě povolíš použití soukromého
-   klíče v podpisovém profilu.
+4. Potvrď se stejně jako u trezoru certifikátů: buď tlačítkem **Ověřit
+   passkey** (po ověření se zobrazí **Passkey ověřeno** a pole pro heslo
+   zmizí), nebo aktuálním heslem do MyÚčta a při zapnutém 2FA také TOTP.
+   Ověření platí jen pro toto jedno uložení. Tím vědomě povolíš použití
+   soukromého klíče v podpisovém profilu.
 5. Ulož profil.
 
 Profil ukládá jen vazbu a veřejná metadata certifikátu. PFX a jeho heslo
@@ -197,6 +199,34 @@ dotčené firmy jako `certificate_vault_supplier_enabled`.
 Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané firmě
 skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí
 v příslušném nastavení té firmy.
+
+### 99.4.4 Smazání certifikátu z trezoru
+
+Certifikát, který už nepotřebujete (například po obnově), smažete takto:
+
+1. Otevřete **Systém → E-maily a certifikáty**, záložku **Elektronické podpisy**.
+2. V sekci **Certifikáty** se ověřte stejně jako při nahrání: **Ověřit
+   passkey**, nebo **Heslo do MyÚčta** a případně **Kód z autentikátoru**.
+3. U certifikátu klikněte na **Smazat** a smazání potvrďte v dialogu
+   s názvem certifikátu.
+
+Smazat lze jen vlastní certifikát. Soukromý klíč se z trezoru odstraní
+nevratně a pro všechny firmy; historické pokusy o podání a otisk certifikátu
+zůstávají zachované.
+
+Certifikát, který se ještě používá, smazat nejde a tlačítko **Smazat** je
+neaktivní. Pod tlačítkem uvidíte, kde ho nejdřív odpojit:
+
+| Kde se certifikát používá | Kde ho odpojit |
+|---|---|
+| Podpisový profil (PDF, S/MIME) | Sekce **Podpisové profily** na téže stránce: v profilu certifikát odeberte nebo nahraďte jiným. |
+| Přístup k datové schránce | **Systém → Datová schránka**: přístup smažte nebo vyberte jiný certifikát. |
+| Odesílací brána ISDS | **Nastavení odesílací brány**: registraci změňte na jiný certifikát. |
+
+Volba certifikátu pro mzdová podání smazání nebrání. Dialog na ni upozorní
+a se smazáním certifikátu se zruší; před dalším mzdovým podáním pak vyberte
+jiný certifikát v **Mzdy → Podání**. Smazání se zapíše do auditního logu jako
+`certificate_vault_delete`, u EPO jako `report.epo_credential_deleted`.
 
 ## 99.5 Politika hesla k certifikátu
 

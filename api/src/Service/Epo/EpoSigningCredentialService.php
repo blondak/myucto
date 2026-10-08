@@ -204,6 +204,55 @@ final class EpoSigningCredentialService
     }
 
     /**
+     * Jediná cesta, kudy se certifikát z trezoru maže (EPO i Elektronické podpisy).
+     *
+     * Smí jen vlastník; cizí certifikát se hlásí jako nenalezený, aby odpověď
+     * neprozradila, že existuje. Podpisový profil, přístup k datové schránce
+     * a odesílací brána ISDS smazání blokují: certifikát tam skutečně podepisuje
+     * nebo přihlašuje a tiché odpojení by se projevilo až selháním podání.
+     * Volba certifikátu pro mzdová podání se zruší v téže transakci.
+     *
+     * @return array{payroll_selections_removed:list<array{supplier_id:int,environment:string}>}
+     * @throws EpoSubmissionException
+     */
+    public function deleteOwned(int $credentialId, int $ownerUserId): array
+    {
+        $result = $this->credentials->deleteOwnedUnlessInUse($credentialId, $ownerUserId);
+        if ($result['status'] === 'not_found') {
+            throw new EpoSubmissionException(
+                'credential_not_found',
+                'Certifikát nebyl nalezen.',
+                404,
+            );
+        }
+        $usage = $result['usage'] ?? [];
+        if ($result['status'] === 'in_use') {
+            $places = [];
+            if (($usage['signing_profiles'] ?? 0) > 0) {
+                $places[] = 'podpisový profil (Systém → E-maily a certifikáty → Elektronické podpisy → Podpisové profily)';
+            }
+            if (($usage['data_box_channels'] ?? 0) > 0) {
+                $places[] = 'přístup k datové schránce (Datová schránka)';
+            }
+            if (($usage['isds_gateways'] ?? 0) > 0) {
+                $places[] = 'odesílací brána ISDS (Nastavení odesílací brány)';
+            }
+            throw new EpoSubmissionException(
+                'credential_in_use',
+                'Certifikát se ještě používá: ' . implode(', ', $places) . '. Nejdříve jej tam odpojte.',
+                409,
+                [
+                    'linked_profiles_count' => (int) ($usage['signing_profiles'] ?? 0),
+                    'linked_data_box_count' => (int) ($usage['data_box_channels'] ?? 0),
+                    'linked_isds_gateway_count' => (int) ($usage['isds_gateways'] ?? 0),
+                ],
+            );
+        }
+
+        return ['payroll_selections_removed' => $result['payroll_selections_removed'] ?? []];
+    }
+
+    /**
      * @return array{pfx:string,password:string,credential:array<string,mixed>}
      */
     public function unlockForSigning(int $credentialId, int $ownerUserId, int $supplierId): array
