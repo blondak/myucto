@@ -216,6 +216,8 @@ function emptyA1Address(): PayrollRegistrationA1Address {
 
 /** Číselník CIS Sektor (účel zahraničního pojištění). */
 const FOREIGN_INSURANCE_SECTORS = ['01', '02', '03', '04', '05', '06', '07', '08'] as const
+/** Lhůta A2/A8 zkrácená o oznámení úřadu práce u cizince s povolením nebo kartou (§ 88 ZoZ). */
+const FOREIGN_PERMIT_RULESET_ID = 'cz-regzec-foreign-permit-labour-office-2026-07.v1'
 
 function emptyA1ForeignInsurance(): PayrollRegistrationA1ForeignInsurance {
   return {
@@ -4704,6 +4706,13 @@ async function copyXml(): Promise<void> {
           from: formatDate(deadline.earliest_registration_on),
           to: formatDate(deadline.due_on),
         }) }}
+      </p>
+      <p
+        v-if="deadline.ruleset_id === FOREIGN_PERMIT_RULESET_ID"
+        class="mt-1 text-warning-700"
+        data-test="registration-deadline-foreign-permit"
+      >
+        {{ t('payroll.people.registration.registration_window.foreign_permit') }}
       </p>
       <p
         v-if="deadlineOverdue"

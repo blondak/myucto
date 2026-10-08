@@ -1216,23 +1216,38 @@ final readonly class PayrollRegistrationSubmissionService
         ?array $event = null,
         ?string $deadlineBasis = null,
     ): PayrollEmployeeRegistrationDeadlineWindow {
+        // Oprávnění cizince zmrazené k A2/A8: lhůta úřadu práce podle § 88
+        // odst. 1 zákona o zaměstnanosti může být kratší než osm dnů ČSSZ.
+        $permit = is_array($event['data']['foreign_permit'] ?? null)
+            ? $event['data']['foreign_permit']
+            : null;
         if ($interaction->documentType === self::AGENDA_REGZEC
             && $interaction->actionCode === 8
             && $effectiveOn !== null
         ) {
-            return $this->deadlines->forCancellation(
-                ($event['data']['not_started'] ?? true) !== false,
+            $notStarted = ($event['data']['not_started'] ?? true) !== false;
+
+            return $this->deadlines->withForeignPermit(
+                $this->deadlines->forCancellation($notStarted, $effectiveOn),
+                8,
+                $notStarted,
+                $permit,
                 $effectiveOn,
             );
         }
         if ($interaction->documentType === self::AGENDA_REGZEC
             && $interaction->actionCode >= 2
         ) {
-            return $this->deadlines->forFollowUp(
+            $triggerOn = $effectiveOn
+                ?? (string) ($context['end_date']
+                    ?? $this->effectiveDate($context));
+
+            return $this->deadlines->withForeignPermit(
+                $this->deadlines->forFollowUp($interaction->actionCode, $triggerOn),
                 $interaction->actionCode,
-                $effectiveOn
-                    ?? (string) ($context['end_date']
-                        ?? $this->effectiveDate($context)),
+                false,
+                $permit,
+                $triggerOn,
             );
         }
         $startOn = $this->effectiveDate($context);

@@ -1108,6 +1108,8 @@ final readonly class PayrollRegistrationEventService
             (string) ($context['relation_type'] ?? ''),
         );
 
+        $permit = $this->foreignPermit($supplierId, $employmentId);
+
         return [
             'end_on' => $effectiveOn,
             'activity_code' => $activityCode,
@@ -1116,7 +1118,7 @@ final readonly class PayrollRegistrationEventService
             'ended_by_death' => $endedByDeath,
             'unemployment' => $unemployment,
             'jmhz_correction_evidence' => $evidence->toArray(),
-        ];
+        ] + ($permit === null ? [] : ['foreign_permit' => $permit]);
     }
 
     /**
@@ -1234,18 +1236,39 @@ final readonly class PayrollRegistrationEventService
         int $employmentId,
         string $endOn,
     ): bool {
+        return PayrollEmployeeRegistrationDeadlinePolicy::endsBeforePermitExpiry(
+            $this->foreignPermit($supplierId, $employmentId),
+            $endOn,
+        );
+    }
+
+    /**
+     * Pracovní oprávnění cizince z ověřeného profilu A1, pokud jde o povolení
+     * k zaměstnání, zaměstnaneckou nebo modrou kartu (druh 1, 2, 4). Na nich
+     * stojí důvod předčasného ukončení (ID 10534) i lhůty oznámení úřadu práce
+     * podle § 88 odst. 1 zákona o zaměstnanosti, proto se k A2 a A8 zmrazí.
+     *
+     * @return array{type_code:string,permit_from:?string,permit_to:?string}|null
+     */
+    private function foreignPermit(int $supplierId, int $employmentId): ?array
+    {
         $profile = $this->identities->a1Profile($supplierId, $employmentId);
         $worker = is_array($profile['foreign_worker'] ?? null)
             ? $profile['foreign_worker']
             : null;
-        if ($worker === null) {
-            return false;
+        $type = $worker['permit_type_code'] ?? null;
+        if (!is_string($type)
+            || !in_array($type, PayrollEmployeeRegistrationDeadlinePolicy::FOREIGN_PERMIT_TYPES, true)
+        ) {
+            return null;
         }
-        $permitTo = $worker['permit_to'] ?? null;
+        $date = static fn (mixed $value): ?string => is_string($value) && $value !== '' ? $value : null;
 
-        return in_array($worker['permit_type_code'] ?? null, ['1', '2', '4'], true)
-            && is_string($permitTo)
-            && $endOn < $permitTo;
+        return [
+            'type_code' => $type,
+            'permit_from' => $date($worker['permit_from'] ?? null),
+            'permit_to' => $date($worker['permit_to'] ?? null),
+        ];
     }
 
     /**
@@ -2094,10 +2117,12 @@ final readonly class PayrollRegistrationEventService
                     ),
             );
         }
+        $permit = $this->foreignPermit($supplierId, $employmentId);
+
         return [
             'not_started' => true,
             'source_submission_id' => $submissionId,
-        ];
+        ] + ($permit === null ? [] : ['foreign_permit' => $permit]);
     }
 
     /**

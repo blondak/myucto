@@ -5035,6 +5035,11 @@ final class PayrollRegistrationActionTest extends TestCase
             ' earlyterm="1"',
             $this->storedArtifactXml((int) $this->json($prepared)['submission_id']),
         );
+        // REGZEC25-DEADLINE.FOREIGN.nonappearance-01: lhůta zohlední oznámení
+        // úřadu práce (§ 88 ZoZ, 10 dnů); platí dřívější osmidenní lhůta ČSSZ.
+        $deadline = $this->json($prepared)['deadline'];
+        self::assertSame('cz-regzec-foreign-permit-labour-office-2026-07.v1', $deadline['ruleset_id']);
+        self::assertSame('2026-09-02', $deadline['due_on']);
     }
 
     public function testA2EarlyTerminationReasonIsForbiddenWithoutAnEarlyEndingPermit(): void

@@ -6607,7 +6607,8 @@
         "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
         "registration_window": {
           "not_derived": "The start date {start} precedes 1 July 2026, when the current registration duty took effect. File the registration without undue delay — the app does not derive a deadline under the former rules and treats the filing as late.",
-          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report."
+          "not_statutory": "This filing has no statutory deadline. Until {milestone} the monthly report can be cancelled together with it without manual processing; later, file a corrective report.",
+          "foreign_permit": "Foreigner with an employment permit, employee card or blue card: the filing also serves as the notice to the labour office (section 88 of the Employment Act) and the earlier of both deadlines applies. For a card it runs 45 days from the day the conditions for issuing it were met; check that day against the decision."
         },
         "completion": {
           "action": "Supplement data (A3)",

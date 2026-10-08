@@ -6607,7 +6607,8 @@
         "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
         "registration_window": {
           "not_derived": "Nástup {start} je dřívější než 1. 7. 2026, kdy začala platit dnešní registrační povinnost. Přihlášku podejte bez zbytečného odkladu — lhůtu podle tehdejších pravidel aplikace neodvozuje a podání vede jako po lhůtě.",
-          "not_statutory": "Toto podání nemá zákonnou lhůtu. Do {milestone} jde spolu s ním stornovat i měsíční hlášení bez referentského zpracování; později podejte opravné hlášení."
+          "not_statutory": "Toto podání nemá zákonnou lhůtu. Do {milestone} jde spolu s ním stornovat i měsíční hlášení bez referentského zpracování; později podejte opravné hlášení.",
+          "foreign_permit": "Cizinec s povolením k zaměstnání, zaměstnaneckou nebo modrou kartou: podání plní i oznámení úřadu práce (§ 88 zákona o zaměstnanosti) a platí dřívější z obou lhůt. U karty běží 45 dnů ode dne splnění podmínek pro její vydání, ten den ověřte podle rozhodnutí."
         },
         "completion": {
           "action": "Dohlásit údaje (A3)",

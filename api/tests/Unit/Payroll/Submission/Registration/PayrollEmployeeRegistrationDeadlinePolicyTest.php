@@ -232,6 +232,56 @@ final class PayrollEmployeeRegistrationDeadlinePolicyTest extends TestCase
         self::assertStringContainsString('nemá zákonnou lhůtu', (string) $window->notice);
     }
 
+    /**
+     * REGZEC25-DEADLINE.FOREIGN.nonappearance-01: u cizince s povolením
+     * k zaměstnání nebo kartou se lhůta A8/A2 porovná s oznámením úřadu práce
+     * (§ 88 odst. 1 zákona o zaměstnanosti) a platí dřívější.
+     */
+    public function testForeignPermitNoticeKeepsTheEarlierOfBothDeadlines(): void
+    {
+        $noShow = $this->policy->forCancellation(true, '2026-09-10');
+        $permit = ['type_code' => '1', 'permit_from' => '2026-08-01', 'permit_to' => '2027-07-31'];
+        $employmentPermit = $this->policy->withForeignPermit($noShow, 8, true, $permit, '2026-09-10');
+        self::assertSame('2026-09-18', $employmentPermit->dueOn, 'Osm dnů ČSSZ je dřív než deset dnů ÚP.');
+        self::assertSame('cz-regzec-foreign-permit-labour-office-2026-07.v1', $employmentPermit->rulesetId);
+        self::assertStringContainsString('10 dnů', (string) $employmentPermit->notice);
+
+        $card = ['type_code' => '2', 'permit_from' => '2026-07-01', 'permit_to' => '2028-06-30'];
+        $cardWindow = $this->policy->withForeignPermit($noShow, 8, true, $card, '2026-09-10');
+        self::assertSame('2026-08-15', $cardWindow->dueOn, '45 dnů od začátku platnosti karty je dřív.');
+        self::assertStringContainsString('45 dnů', (string) $cardWindow->notice);
+
+        $cardWithoutStart = $this->policy->withForeignPermit(
+            $noShow,
+            8,
+            true,
+            ['type_code' => '4', 'permit_from' => null, 'permit_to' => null],
+            '2026-09-10',
+        );
+        self::assertSame('2026-09-18', $cardWithoutStart->dueOn);
+        self::assertStringContainsString('Ověřte', (string) $cardWithoutStart->notice);
+
+        $termination = $this->policy->forFollowUp(2, '2026-09-10');
+        $early = $this->policy->withForeignPermit($termination, 2, false, $card, '2026-09-10');
+        self::assertSame('2026-09-18', $early->dueOn);
+        self::assertSame('cz-regzec-foreign-permit-labour-office-2026-07.v1', $early->rulesetId);
+        self::assertNotSame($termination->rulesetHash, $early->rulesetHash);
+
+        $afterExpiry = $this->policy->withForeignPermit(
+            $termination,
+            2,
+            false,
+            ['type_code' => '2', 'permit_from' => '2026-01-01', 'permit_to' => '2026-09-01'],
+            '2026-09-10',
+        );
+        self::assertSame($termination, $afterExpiry, 'Bez předčasného ukončení zůstává lhůta beze změny.');
+        self::assertSame($noShow, $this->policy->withForeignPermit($noShow, 8, true, null, '2026-09-10'));
+        self::assertSame(
+            $noShow,
+            $this->policy->withForeignPermit($noShow, 8, true, ['type_code' => '3'], '2026-09-10'),
+        );
+    }
+
     public function testMalformedStartDateIsRefusedDeterministically(): void
     {
         foreach (['2026-13-01', '15.9.2026', '', '2026-09-31'] as $value) {
