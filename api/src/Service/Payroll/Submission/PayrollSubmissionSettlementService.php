@@ -136,7 +136,7 @@ final readonly class PayrollSubmissionSettlementService
                 'Uveďte den podání ve tvaru RRRR-MM-DD.',
             );
         }
-        if ($date > new \DateTimeImmutable('today')) {
+        if ($filedOn > PayrollSubmissionCalendar::today()) {
             throw new \InvalidArgumentException(
                 'Den podání nemůže být v budoucnu — potvrzuje se něco, co už se stalo.',
             );

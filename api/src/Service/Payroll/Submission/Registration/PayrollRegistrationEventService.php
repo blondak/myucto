@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
 use MyInvoice\Service\Payroll\Termination\PayrollTerminationReason;
@@ -237,10 +238,7 @@ final readonly class PayrollRegistrationEventService
             $context,
             $input,
         );
-        if ($notificationTriggerOn > $this->clock->now()
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d')
-        ) {
+        if ($notificationTriggerOn > PayrollSubmissionCalendar::today($this->clock->now())) {
             throw new PayrollRegistrationXmlException(
                 'registration_event_in_future',
                 $this->actionName($definition[0])

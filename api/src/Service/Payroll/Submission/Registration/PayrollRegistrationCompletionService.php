@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationCompletionRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -164,8 +165,6 @@ final readonly class PayrollRegistrationCompletionService
 
     private function today(): string
     {
-        return $this->clock->now()
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 }

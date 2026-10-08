@@ -992,10 +992,7 @@ final class PayrollSubmissionService
                 );
             }
             if ($targetStatus === 'submitted') {
-                $today = \DateTimeImmutable::createFromInterface(
-                    $this->clock->now(),
-                )->setTimezone(new \DateTimeZone('Europe/Prague'))
-                    ->format('Y-m-d');
+                $today = PayrollSubmissionCalendar::today($this->clock->now());
                 if ($today < $obligation['earliest_submission_on']) {
                     throw new \DomainException(
                         'Podání ještě není v zákonném časovém okně.',

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Repository\Payroll\PayrollHealthInsurerNoticeRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Pdf\PayrollHealthInsurerNoticePdfRenderer;
 use Psr\Clock\ClockInterface;
 
@@ -155,8 +156,6 @@ final readonly class PayrollHealthInsurerNoticeService
 
     private function today(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 }

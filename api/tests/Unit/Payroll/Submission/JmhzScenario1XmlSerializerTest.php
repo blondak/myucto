@@ -1502,6 +1502,36 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    /**
+     * 10476 je celý vykázaný příjem (DV 1.4.5: "Vykázaný příjem včetně
+     * nepojištěné činnosti"), 10477 je příjem zastropovaný maximálním
+     * vyměřovacím základem. U pojištěného zaměstnance nad stropem se proto
+     * obě hodnoty liší a 10476 se nesmí srazit na strop.
+     */
+    public function testInsuredEmploymentAboveCapReportsFullIncomeIn10476(): void
+    {
+        $payload = $this->payload();
+        $insurance = &$payload['people'][0]['employments'][0]['insurance'];
+        $insurance['participation']['participation_income_minor_units'] = 5_000_000;
+        $insurance['assessment_base_minor_units'] = 5_000_000;
+        $insurance['capped_assessment_base_minor_units'] = 4_000_000;
+        unset($insurance);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:castkaOdvodPojistneho>40000</form:castkaOdvodPojistneho>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<form:prijemNepojistenaCinnost>50000</form:prijemNepojistenaCinnost>',
+            $result['xml'],
+        );
+    }
+
     public function testSubthresholdDppSerializesIncomeAndCodeLessZeroDayEldp(): void
     {
         $payload = $this->payload();

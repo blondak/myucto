@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+
 /**
  * Zadání stornujícího podání. Ověřuje se při vzniku, ne až při serializaci —
  * storno je nevratné a časově uzavřené, takže neplatné zadání se nemá dostat
@@ -52,7 +54,7 @@ final readonly class JmhzCancellationRequest
         // odeslané storno by u ČSSZ zrušilo víc, než uživatel čeká.
         // Lhůta je kalendářní a čte se českým kalendářem — `gmdate()` by v poslední
         // den lhůty do 02:00 SELČ hlásil ještě předchozí den a naopak.
-        $evaluatedOn = $today ?? date('Y-m-d');
+        $evaluatedOn = $today ?? PayrollSubmissionCalendar::today();
         if (strcmp($evaluatedOn, $window->dueOn) > 0) {
             throw new JmhzXmlException(
                 'jmhz_cancellation_window_closed',

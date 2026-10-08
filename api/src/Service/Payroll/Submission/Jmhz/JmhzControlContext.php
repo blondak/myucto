@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+
 /**
  * Okolnosti, které kontroly potřebují a v samotném podání nejsou:
  * den vyhodnocení (kontrola 90 porovnává období s aktuálním kalendářem)
@@ -40,8 +42,6 @@ final readonly class JmhzControlContext
         ?string $govTalkVariableSymbol = null,
         bool $schemaValidated = false,
     ): self {
-        $now = new \DateTimeImmutable('now', new \DateTimeZone('Europe/Prague'));
-
-        return new self($now->format('Y-m-d'), $govTalkVariableSymbol, $schemaValidated);
+        return new self(PayrollSubmissionCalendar::today(), $govTalkVariableSymbol, $schemaValidated);
     }
 }

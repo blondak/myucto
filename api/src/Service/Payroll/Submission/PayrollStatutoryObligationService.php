@@ -134,7 +134,7 @@ final class PayrollStatutoryObligationService
             128,
         );
         $completedOn = self::date($input['completed_on'] ?? null, 'Datum splnění');
-        if ($completedOn > (new \DateTimeImmutable('today'))->format('Y-m-d')) {
+        if ($completedOn > PayrollSubmissionCalendar::today()) {
             throw new \InvalidArgumentException('Datum splnění nesmí být v budoucnosti.');
         }
         [$periodStart, $periodEnd] = self::periodBounds($period);

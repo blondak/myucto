@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -565,8 +566,6 @@ final readonly class JmhzDeferralService
 
     private function today(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 }

@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistrationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
@@ -949,8 +950,6 @@ final readonly class PayrollRegistrationChangeDetectionService implements
 
     private function today(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 }

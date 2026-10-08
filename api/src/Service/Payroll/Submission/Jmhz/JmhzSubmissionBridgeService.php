@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement;
 use MyInvoice\Service\Report\EpoEnvelope;
@@ -884,16 +885,12 @@ final readonly class JmhzSubmissionBridgeService
 
     private function filledAt(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('UTC'))
-            ->format('Y-m-d\TH:i:s\Z');
+        return PayrollSubmissionCalendar::filledAt($this->clock->now());
     }
 
     private function localDate(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 
     private static function snapshotHash(

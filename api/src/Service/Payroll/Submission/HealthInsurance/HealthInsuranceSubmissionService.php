@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
 
@@ -2467,9 +2468,7 @@ final readonly class HealthInsuranceSubmissionService
 
     private function today(): string
     {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
+        return PayrollSubmissionCalendar::today($this->clock->now());
     }
 
     private function isSchemaValidatedStatus(string $status): bool
