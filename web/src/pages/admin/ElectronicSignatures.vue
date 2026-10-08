@@ -56,6 +56,8 @@ const signingProfileCredentialSource = ref<'personal_vault' | 'uploaded_file'>('
 const signingProfileVaultCredentialId = ref<number | null>(null)
 const signingProfileVaultPassword = ref('')
 const signingProfileVaultTotp = ref('')
+const signingProfileVaultPasskeyToken = ref('')
+const signingProfileVaultPasskeyBusy = ref(false)
 const showSigningProfileForm = ref(false)
 const editingSigningProfile = ref<number | null>(null)
 const signingProfileTsaEnabled = ref(false)
@@ -365,6 +367,7 @@ function resetSigningProfileDraft() {
   signingProfileVaultCredentialId.value = null
   signingProfileVaultPassword.value = ''
   signingProfileVaultTotp.value = ''
+  signingProfileVaultPasskeyToken.value = ''
   if (signingProfileCertFileInput.value) signingProfileCertFileInput.value.value = ''
   Object.assign(signingProfileDraft, {
     owner_user_id: null,
@@ -437,21 +440,37 @@ async function loadCertificates(silent = true) {
  * heslo (+ TOTP, má-li ho účet zapnutý). Proof je jednorázový, po odeslání
  * se zahazuje.
  */
+async function requestCertificatePasskeyProof(): Promise<string> {
+  const flow = await authApi.passkeyStepUpOptions('epo.certificate')
+  const credential = await getCredential(flow.public_key)
+  return authApi.passkeyStepUpVerify(flow.flow_token, 'epo.certificate', credential)
+}
+
 async function verifyCertificatePasskey() {
   if (!passkeySupported) return
   certificatePasskeyBusy.value = true
   try {
-    const flow = await authApi.passkeyStepUpOptions('epo.certificate')
-    const credential = await getCredential(flow.public_key)
-    certificateStepPasskeyToken.value = await authApi.passkeyStepUpVerify(
-      flow.flow_token,
-      'epo.certificate',
-      credential,
-    )
+    certificateStepPasskeyToken.value = await requestCertificatePasskeyProof()
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('settings.certificate_vault_passkey_failed')))
   } finally {
     certificatePasskeyBusy.value = false
+  }
+}
+
+/**
+ * Výběr certifikátu z trezoru do podpisového profilu: stejný step-up jako
+ * sekce Certifikáty (backend ověřuje tutéž operaci `epo.certificate`).
+ */
+async function verifySigningProfileVaultPasskey() {
+  if (!passkeySupported) return
+  signingProfileVaultPasskeyBusy.value = true
+  try {
+    signingProfileVaultPasskeyToken.value = await requestCertificatePasskeyProof()
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('settings.certificate_vault_passkey_failed')))
+  } finally {
+    signingProfileVaultPasskeyBusy.value = false
   }
 }
 
@@ -532,6 +551,74 @@ async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultI
     toast.error(apiErrorMessage(e, t('common.error')))
   } finally {
     certificateSharingId.value = null
+  }
+}
+
+const certificateDeletingId = ref<number | null>(null)
+
+interface CertificateUsageCounts {
+  linked_profiles_count?: number
+  linked_data_box_count?: number
+  linked_isds_gateway_count?: number
+}
+
+/** Kde certifikát brání smazání, srozumitelně a s cestou, kde ho odpojit. */
+function certificateUsagePlaces(usage: CertificateUsageCounts): string[] {
+  const places: string[] = []
+  if ((usage.linked_profiles_count ?? 0) > 0) {
+    places.push(t('settings.certificate_vault_usage_profiles', { count: usage.linked_profiles_count ?? 0 }))
+  }
+  if ((usage.linked_data_box_count ?? 0) > 0) {
+    places.push(t('settings.certificate_vault_usage_data_box', { count: usage.linked_data_box_count ?? 0 }))
+  }
+  if ((usage.linked_isds_gateway_count ?? 0) > 0) {
+    places.push(t('settings.certificate_vault_usage_isds_gateway'))
+  }
+  return places
+}
+
+function certificateInUseMessage(usage: CertificateUsageCounts): string {
+  return t('settings.certificate_vault_delete_in_use', { places: certificateUsagePlaces(usage).join('; ') })
+}
+
+function certificateDeleteBlocked(certificate: CertificateVaultItem): boolean {
+  return certificateUsagePlaces(certificate).length > 0
+}
+
+async function deleteCertificate(certificate: CertificateVaultItem) {
+  if (certificateDeletingId.value !== null || certificateBusy.value) return
+  if (certificateDeleteBlocked(certificate)) {
+    toast.error(certificateInUseMessage(certificate))
+    return
+  }
+  if (certificateStepUpMissing.value !== '') {
+    toast.error(certificateStepUpMissing.value)
+    return
+  }
+  const payrollSelections = certificate.linked_payroll_selections_count ?? 0
+  let question = t('settings.certificate_vault_delete_confirm', { name: certificate.label })
+  if (payrollSelections > 0) {
+    question += '\n\n' + t('settings.certificate_vault_delete_confirm_payroll', { count: payrollSelections })
+  }
+  if (!window.confirm(question)) return
+  certificateDeletingId.value = certificate.id
+  try {
+    const result = await settingsApi.deleteCertificate(certificate.id, certificateStepUpProof())
+    resetCertificateStepUp()
+    await Promise.all([loadCertificates(), loadPersonalCertificates()])
+    const removed = result.payroll_selections_removed?.length ?? 0
+    toast.success(removed > 0
+      ? t('settings.certificate_vault_deleted_payroll', { count: removed })
+      : t('settings.certificate_vault_deleted'))
+  } catch (e: any) {
+    // Passkey proof je jednorázový a server ho spotřeboval i při odmítnutí.
+    certificateStepPasskeyToken.value = ''
+    const error = e?.response?.data?.error
+    toast.error(error?.code === 'credential_in_use'
+      ? certificateInUseMessage(error)
+      : apiErrorMessage(e, t('common.error')))
+  } finally {
+    certificateDeletingId.value = null
   }
 }
 
@@ -651,6 +738,8 @@ async function saveSigningProfile() {
     cancelSigningProfileEdit()
     toast.success(t(credentialSaved ? 'settings.signing_profile_saved_with_cert' : 'settings.signing_profile_saved'))
   } catch (e: any) {
+    // Passkey proof je jednorázový; po odmítnutí ho server už nepřijme.
+    signingProfileVaultPasskeyToken.value = ''
     if (editingSigningProfile.value !== null) {
       await loadSigningProfiles(true)
     }
@@ -719,6 +808,10 @@ function validateSigningProfileCredentialSave(): boolean {
       toast.error(t('settings.signing_vault_certificate_required'))
       return false
     }
+    // Passkey proof nahradí heslo i TOTP naráz, stejně jako u sekce Certifikáty.
+    if (signingProfileVaultPasskeyToken.value) {
+      return true
+    }
     if (!signingProfileVaultPassword.value) {
       toast.error(t('settings.signing_vault_password_required'))
       return false
@@ -760,11 +853,15 @@ async function saveSigningProfileCertFor(profileId: number) {
     signingProfileCredential.value = await settingsApi.linkPersonalSigningCertificate(
       profileId,
       signingProfileVaultCredentialId.value as number,
-      signingProfileVaultPassword.value,
-      signingProfileVaultTotp.value,
+      {
+        password: signingProfileVaultPassword.value || undefined,
+        totp_code: signingProfileVaultTotp.value.trim() || undefined,
+        step_up_token: signingProfileVaultPasskeyToken.value || undefined,
+      },
     )
     signingProfileVaultPassword.value = ''
     signingProfileVaultTotp.value = ''
+    signingProfileVaultPasskeyToken.value = ''
     return
   }
   const passphraseProfileId = signingProfileCertPolicy.value === 'passphrase_file'
@@ -1078,6 +1175,17 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
                   {{ certificateSharingId === certificate.id ? t('common.saving') : t('settings.certificate_vault_share_existing') }}
                 </button>
+                <button type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']"
+                  :data-testid="`certificate-delete-${certificate.id}`"
+                  :disabled="certificateDeletingId !== null || certificateBusy || certificateDeleteBlocked(certificate)"
+                  :title="certificateDeleteBlocked(certificate) ? certificateInUseMessage(certificate) : undefined"
+                  @click="deleteCertificate(certificate)">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                  {{ certificateDeletingId === certificate.id ? t('common.loading') : t('settings.certificate_vault_delete') }}
+                </button>
+                <p v-if="certificateDeleteBlocked(certificate)" class="max-w-xs text-right text-[11px] text-neutral-500">
+                  {{ certificateInUseMessage(certificate) }}
+                </p>
               </div>
             </div>
           </div>
@@ -1381,7 +1489,11 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                       </option>
                     </select>
                   </label>
-                  <div class="grid grid-cols-2 gap-2">
+                  <div v-if="signingProfileVaultPasskeyToken" class="flex items-end text-sm font-medium text-success-600"
+                    data-testid="signing-vault-passkey-verified">
+                    ✓ {{ t('settings.certificate_vault_passkey_verified') }}
+                  </div>
+                  <div v-else class="grid grid-cols-2 gap-2">
                     <label class="text-xs text-neutral-700">
                       {{ t('reports.submissions.current_password') }}
                       <input v-model="signingProfileVaultPassword" type="password" autocomplete="current-password"
@@ -1394,6 +1506,16 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                         class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
                     </label>
                   </div>
+                </div>
+                <div v-if="hasPasskey && !signingProfileVaultPasskeyToken" class="mt-3 flex flex-wrap items-center gap-3">
+                  <button v-if="passkeySupported" type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']"
+                    data-testid="signing-vault-passkey"
+                    :disabled="signingProfileVaultPasskeyBusy || signingProfileSaving" @click="verifySigningProfileVaultPasskey">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+                    {{ signingProfileVaultPasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
+                  </button>
+                  <span v-if="passkeySupported" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+                  <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
                 <p v-if="usablePersonalCertificates.length === 0" class="mt-2 text-xs text-warning-700">
                   {{ t('settings.signing_vault_empty_hint') }}
