@@ -12,6 +12,7 @@ declare(strict_types=1);
  *
  *   - s `--pfx` založí dočasný podpisový profil a konfiguraci výstupu
  *     „Vydaná faktura" v transakci, kterou na konci vrátí;
+ *   - s `--profile=ID` použije existující podpisový profil (např. s certifikátem z trezoru)
  *   - bez `--pfx` použije konfiguraci podpisů, kterou dodavatel už má;
  *   - uložené PDF faktury v úložišti (cache) i `pdf_path` vrátí do původního stavu.
  *
@@ -41,6 +42,7 @@ use MyInvoice\Service\Signing\Xml\XmlDsigEnvelopedSigner;
 
 $invoiceId = 0;
 $pfxPath = null;
+$profileOption = null;
 $xpathFilter = true;
 $outDir = PHP_OS_FAMILY === 'Windows' ? 'C:\\tmp\\isdoc-test' : sys_get_temp_dir() . '/isdoc-test';
 foreach (array_slice($argv, 1) as $arg) {
@@ -48,6 +50,8 @@ foreach (array_slice($argv, 1) as $arg) {
         $invoiceId = (int) substr($arg, 10);
     } elseif (str_starts_with($arg, '--pfx=')) {
         $pfxPath = substr($arg, 6);
+    } elseif (str_starts_with($arg, '--profile=')) {
+        $profileOption = (int) substr($arg, 10);
     } elseif ($arg === '--no-xpath') {
         $xpathFilter = false;
     } elseif (str_starts_with($arg, '--out=')) {
@@ -109,6 +113,13 @@ try {
             'enabled' => true,
             'selection_source' => 'admin_profile_settings',
             'default_profile_id' => $profileId,
+            'failure_policy' => 'fail_closed',
+        ]);
+    } elseif ($profileOption !== null) {
+        $c->get(SigningProfileRepository::class)->upsertOutputSetting($supplierId, 'invoice', [
+            'enabled' => true,
+            'selection_source' => 'admin_profile_settings',
+            'default_profile_id' => $profileOption,
             'failure_policy' => 'fail_closed',
         ]);
     }
